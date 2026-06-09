@@ -1,8 +1,17 @@
 # Spawn Wizard Reference
 
-The Spawn Wizard is a 5-step guided flow for configuring and launching a llama-server instance. It handles hardware detection, VRAM-aware parameter selection, model acquisition (local, HuggingFace, third-party), and binary management.
+The Spawn Wizard is a 6-step guided flow for configuring and launching a llama-server instance. It handles hardware detection, VRAM-aware parameter selection, model acquisition (local, HuggingFace, third-party), and binary management.
 
-Entry points: the **New Server Wizard** card on the welcome screen, the **+ New Session** button in the top nav, and the **Spawn Local Server** link on the logs empty state.
+## Welcome Screen
+
+The first screen a user sees when launching Llama Monitor. It has two main panes:
+
+- **Connect to Endpoint** (left): Connect to an existing llama-server instance by entering the URL and optional API key.
+- **Local Server** (right): Configure and launch a local server using a preset or the New Server Wizard.
+
+![Welcome screen](../screenshots/welcome-welcome.png)
+
+Entry points to the Spawn Wizard: the **+ New Configuration** button on the Local Server pane, the **+ New Session** button in the top nav, and the **Spawn Local Server** link on the logs empty state.
 
 ![Spawn Wizard Flow](../screenshots/spawn-wizard-flow.gif)
 

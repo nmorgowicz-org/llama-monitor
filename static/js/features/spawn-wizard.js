@@ -160,7 +160,7 @@ function formatSpeed(bps) {
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-const STEP_LABELS = ['Profile', 'Model', 'Hardware', 'Summary', 'Parameters', 'Spawn'];
+const STEP_LABELS = ['Profile', 'Model', 'Hardware', 'Parameters', 'Summary', 'Spawn'];
 
 // Exposed for testing/screenshot scripts; internal state is mutable.
 export const wizardState = {
@@ -1498,6 +1498,14 @@ function hfSearchForWizard({ query, author, sort, limit }) {
     discoverPillsContainerId: 'hf-discover-pills',
     onOpenCardPanel: (repoId) => openCardPanel(repoId),
     onSelectModel: (m) => {
+      // Clear stale data from previous model selection
+      wizardState.model.paramB = 0;
+      wizardState.model.modelBytes = 0;
+      wizardState.model.quantFiles = [];
+      wizardState.model.originRepo = '';
+      wizardState.model.originFile = '';
+      wizardState.model.path = '';
+      wizardState.model.hfFile = '';
       wizardState.model.hfRepo = m.id;
       if (dom.hfRepoInput) dom.hfRepoInput.value = m.id;
       if (m.param_b > 0) wizardState.model.paramB = m.param_b;
