@@ -703,6 +703,17 @@
                                 <div class="hw-metric-viz" id="sys-clock-viz"></div>
                                 <div class="hw-metric-value" id="sys-clock-value">&mdash;</div>
                             </div>
+                            <div class="hw-metric-block" id="sys-power-block" style="display:none;">
+                                <div class="hw-metric-label">SoC Power</div>
+                                <div class="hw-metric-viz" id="sys-power-viz"></div>
+                                <svg class="hw-metric-sparkline" id="sys-power-spark" viewBox="0 0 120 28" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
+                                <div class="hw-metric-value" id="sys-power-value">&mdash;</div>
+                            </div>
+                            <div class="hw-metric-block" id="sys-clusters-block" style="display:none;">
+                                <div class="hw-metric-label">Clusters</div>
+                                <div class="hw-metric-viz" id="sys-clusters-viz"></div>
+                                <div class="hw-metric-value" id="sys-clusters-value">&mdash;</div>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -777,6 +788,14 @@
                             <button class="viz-option active" data-style="ring" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
                             <button class="viz-option" data-style="chip" title="Chip"><span class="viz-thumb viz-thumb-chips"></span>Chip</button>
                             <button class="viz-option" data-style="numeric" title="Numeric"><span class="viz-thumb viz-thumb-numeric"></span>Num</button>
+                        </div>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">SoC Power</div>
+                        <div class="viz-switcher-options" data-card="system" data-metric="power">
+                            <button class="viz-option active" data-style="bar" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
                         </div>
                     </div>
                 </div>

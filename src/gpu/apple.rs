@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
+use super::mactop_cache::{self, MactopCacheEntry};
 use super::{GpuBackend, GpuMetrics};
 
 #[derive(Deserialize)]
@@ -18,6 +19,10 @@ struct SocMetrics {
     #[serde(default)]
     gpu_power: f64,
     #[serde(default)]
+    cpu_power: f64,
+    #[serde(default)]
+    total_power: f64,
+    #[serde(default)]
     gpu_freq_mhz: f64,
     #[serde(default)]
     gpu_temp: f64,
@@ -29,6 +34,24 @@ struct SocMetrics {
     dram_read_bw_gbs: f64,
     #[serde(default)]
     dram_write_bw_gbs: f64,
+    /// Current P-cluster frequency (MHz)
+    #[serde(default)]
+    p_cluster_freq_mhz: f64,
+    /// Current S-cluster frequency (MHz)
+    #[serde(default)]
+    s_cluster_freq_mhz: f64,
+    /// Current E-cluster frequency (MHz)
+    #[serde(default)]
+    e_cluster_freq_mhz: f64,
+    /// P-cluster utilization (%)
+    #[serde(default)]
+    p_cluster_active: f64,
+    /// S-cluster utilization (%)
+    #[serde(default)]
+    s_cluster_active: f64,
+    /// E-cluster utilization (%)
+    #[serde(default)]
+    e_cluster_active: f64,
 }
 
 #[derive(Deserialize)]
@@ -82,25 +105,37 @@ impl GpuBackend for AppleBackend {
             *t = mactop_output.soc_metrics.cpu_temp as f32;
         }
 
+        // Populate shared mactop cache for system.rs to read cluster freq / power / load
+        let soc = &mactop_output.soc_metrics;
+        mactop_cache::set_cache(MactopCacheEntry {
+            power_total_w: soc.total_power as f32,
+            power_cpu_w: soc.cpu_power as f32,
+            power_gpu_w: soc.gpu_power as f32,
+            p_cluster_freq_mhz: soc.p_cluster_freq_mhz as u32,
+            s_cluster_freq_mhz: soc.s_cluster_freq_mhz as u32,
+            e_cluster_freq_mhz: soc.e_cluster_freq_mhz as u32,
+            p_cluster_active: soc.p_cluster_active as f32,
+            s_cluster_active: soc.s_cluster_active as f32,
+            e_cluster_active: soc.e_cluster_active as f32,
+        });
+
         // Convert bytes to MB
         let vram_total_mb = mactop_output.memory.total / (1024 * 1024);
         let vram_used_mb = mactop_output.memory.used / (1024 * 1024);
 
         // Estimate memory clock from DRAM bandwidth
         // Approximate: MCLK = (dram_bw_gbs * 1000) / 8 / 2 (DDR)
-        let mclk_mhz = (mactop_output.soc_metrics.dram_read_bw_gbs
-            + mactop_output.soc_metrics.dram_write_bw_gbs)
-            * 1000.0
-            / 16.0;
+        let mclk_mhz = (soc.dram_read_bw_gbs + soc.dram_write_bw_gbs) * 1000.0 / 16.0;
 
         let metrics = GpuMetrics {
-            temp: mactop_output.soc_metrics.gpu_temp as f32,
-            load: mactop_output.soc_metrics.gpu_active as u32,
-            power_consumption: mactop_output.soc_metrics.gpu_power as f32,
+            temp: soc.gpu_temp as f32,
+            load: soc.gpu_active as u32,
+            // Use total SoC power — on Apple Silicon there's no separate GPU power
+            power_consumption: soc.total_power as f32,
             power_limit: 0, // Not available from mactop
             vram_used: vram_used_mb as u64,
             vram_total: vram_total_mb as u64,
-            sclk_mhz: mactop_output.soc_metrics.gpu_freq_mhz as u32,
+            sclk_mhz: soc.gpu_freq_mhz as u32,
             mclk_mhz: mclk_mhz as u32,
             metal_gpu_limit_mb: Some(read_iogpu_wired_limit_mb()),
         };

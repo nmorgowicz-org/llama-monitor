@@ -5,6 +5,7 @@ import { chat, lastLlamaMetrics, metricSeries, wsData } from '../core/app-state.
 import { chatScroll } from './chat-render.js';
 import { showSessionPanel, hideSessionPanel } from './chat-sessions-sidebar.js';
 import { isFocusModeActive, exitFocusMode } from './chat-focus-mode.js';
+import { renderCapabilityPopover } from './dashboard-render.js';
 
 export function switchTab(name) {
     if (name !== 'chat' && isFocusModeActive()) exitFocusMode();
@@ -85,7 +86,10 @@ function initEndpointStatus() {
         event.stopPropagation();
         const open = endpointStatusWrap.classList.toggle('open');
         endpointStatus.setAttribute('aria-expanded', open ? 'true' : 'false');
-        if (open) positionPopover();
+        if (open) {
+            renderCapabilityPopover();
+            positionPopover();
+        }
     });
 
     document.addEventListener('click', event => {

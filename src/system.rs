@@ -40,6 +40,9 @@ pub struct SystemMetrics {
     /// S-cluster current frequency (MHz). Populated on macOS via mactop.
     #[serde(default)]
     pub s_cluster_freq_mhz: u32,
+    /// E-cluster current frequency (MHz). Populated on macOS via mactop.
+    #[serde(default)]
+    pub e_cluster_freq_mhz: u32,
     // Default: all new fields are 0/false for non-macOS builds
 }
 
@@ -61,6 +64,7 @@ impl Default for SystemMetrics {
             power_gpu_w: 0.0,
             p_cluster_freq_mhz: 0,
             s_cluster_freq_mhz: 0,
+            e_cluster_freq_mhz: 0,
         }
     }
 }
@@ -82,6 +86,7 @@ pub fn get_system_metrics() -> SystemMetrics {
         power_gpu_w,
         p_cluster_freq_mhz,
         s_cluster_freq_mhz,
+        e_cluster_freq_mhz,
     ) = {
         #[cfg(target_os = "macos")]
         {
@@ -105,23 +110,33 @@ pub fn get_system_metrics() -> SystemMetrics {
                         cache.power_gpu_w,
                         cache.p_cluster_freq_mhz,
                         cache.s_cluster_freq_mhz,
+                        cache.e_cluster_freq_mhz,
                     )
                 } else {
                     // Fallback if core counts are unknown
                     let cpu_load = get_cpu_load(&sys);
                     let cpu_clock_mhz = get_cpu_clock(&sys);
-                    (cpu_load, cpu_clock_mhz, 0.0, 0.0, 0.0, 0, 0)
+                    (cpu_load, cpu_clock_mhz, 0.0, 0.0, 0.0, 0, 0, 0)
                 }
             } else {
                 // Cache not yet populated — fallback to sysinfo
                 let cpu_load = get_cpu_load(&sys);
                 let cpu_clock_mhz = get_cpu_clock(&sys);
-                (cpu_load, cpu_clock_mhz, 0.0, 0.0, 0.0, 0, 0)
+                (cpu_load, cpu_clock_mhz, 0.0, 0.0, 0.0, 0, 0, 0)
             }
         }
         #[cfg(not(target_os = "macos"))]
         {
-            (get_cpu_load(&sys), get_cpu_clock(&sys), 0.0, 0.0, 0.0, 0, 0)
+            (
+                get_cpu_load(&sys),
+                get_cpu_clock(&sys),
+                0.0,
+                0.0,
+                0.0,
+                0,
+                0,
+                0,
+            )
         }
     };
 
@@ -145,6 +160,7 @@ pub fn get_system_metrics() -> SystemMetrics {
         power_gpu_w,
         p_cluster_freq_mhz,
         s_cluster_freq_mhz,
+        e_cluster_freq_mhz,
     }
 }
 

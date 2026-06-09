@@ -595,29 +595,42 @@ function chatDerivedContextAvailable() {
 function renderCapabilityPopover(d, l, generationAvailable, contextLiveAvailable) {
     const popover = document.getElementById('capability-popover');
     if (!popover) return;
-    const hasInference = !!d.capabilities?.inference;
-    const slotsAvailable = !!l && ((l.slots_processing || 0) + (l.slots_idle || 0) > 0);
-    const metricsAvailable = !!l && (
-        (l.prompt_tokens_total || 0) > 0 ||
-        (l.generation_tokens_total || 0) > 0 ||
-        (l.context_high_water_tokens || 0) > 0 ||
-        (l.last_generation_throughput_unix_ms || 0) > 0 ||
-        (l.last_prompt_throughput_unix_ms || 0) > 0
+
+    // Fallback to global app-state if arguments are missing (e.g. on first click)
+    const data = d || wsData || {};
+    const lama = l || (wsData ? wsData.llama : null);
+    const genAvail = generationAvailable !== undefined ? generationAvailable : (lama ? !!lama.slots_processing : false);
+    const ctxLive = contextLiveAvailable !== undefined ? contextLiveAvailable : (lama ? !!lama.context_live_tokens_available : false);
+
+    const hasInference = !!data.capabilities?.inference;
+    const slotsAvailable = !!lama && ((lama.slots_processing || 0) + (lama.slots_idle || 0) > 0);
+    const metricsAvailable = !!lama && (
+        (lama.prompt_tokens_total || 0) > 0 ||
+        (lama.generation_tokens_total || 0) > 0 ||
+        (lama.context_high_water_tokens || 0) > 0 ||
+        (lama.last_generation_throughput_unix_ms || 0) > 0 ||
+        (lama.last_prompt_throughput_unix_ms || 0) > 0
     );
     const rows = [
         ['Inference', hasInference ? 'live' : 'unavailable', hasInference],
         ['Slots', slotsAvailable ? 'live' : 'waiting', slotsAvailable],
         ['Metrics', metricsAvailable ? 'live' : 'waiting', metricsAvailable],
-        ['Generation progress', generationAvailable ? 'live' : 'not exposed', generationAvailable],
+        ['Generation progress', genAvail ? 'live' : 'not exposed', genAvail],
         ['Throughput', metricsAvailable ? 'retained avg + live estimate' : 'waiting', metricsAvailable],
-        ['Context capacity', (l?.context_capacity_tokens || 0) > 0 ? 'live' : 'waiting', (l?.context_capacity_tokens || 0) > 0],
-        ['Context usage', contextLiveAvailable ? 'live' : chatDerivedContextAvailable() ? 'derived from chat' : 'not exposed', contextLiveAvailable || chatDerivedContextAvailable()],
-        ['Host metrics', d.host_metrics_available ? 'live' : 'unavailable', !!d.host_metrics_available],
-        ['Remote agent', d.remote_agent_connected ? 'connected' : 'disconnected', !!d.remote_agent_connected]
+        ['Context capacity', (lama?.context_capacity_tokens || 0) > 0 ? 'live' : 'waiting', (lama?.context_capacity_tokens || 0) > 0],
+        ['Context usage', ctxLive ? 'live' : chatDerivedContextAvailable() ? 'derived from chat' : 'not exposed', ctxLive || chatDerivedContextAvailable()],
+        ['Host metrics', data.host_metrics_available ? 'live' : 'unavailable', !!data.host_metrics_available],
+        ['Remote agent', data.remote_agent_connected ? 'connected' : 'disconnected', !!data.remote_agent_connected]
     ];
+
+    if (!data.active_session_id && !hasInference && !slotsAvailable) {
+        popover.innerHTML = '<div class="capability-empty">No endpoint attached</div>';
+        return;
+    }
+
     // eslint-disable-next-line no-unsanitized/property -- label and value are all hardcoded string literals from the rows array above; ok is boolean
     popover.innerHTML = rows.map(([label, value, ok]) => {
-        return '<span class="capability-row"><span class="capability-led ' + (ok ? 'ok' : 'muted') + '"></span><span>' + label + '</span><strong>' + value + '</strong></span>';
+        return '<span class="capability-row"><span class="capability-led ' + (ok ? 'ok' : 'muted') + '"></span><span>' + label + '</span><strong class="capability-val">' + value + '</strong></span>';
     }).join('');
 }
 
@@ -965,7 +978,7 @@ function pushGpuHistory(key, value) {
     if (gpuHistory[key].length > limit) gpuHistory[key].shift();
 }
 
-var sysHistory = { cpuLoad: [], ramPct: [], cpuClock: [] };
+var sysHistory = { cpuLoad: [], ramPct: [], cpuClock: [], power: [] };
 function pushSysHistory(key, value) {
     if (!Number.isFinite(value)) return;
     sysHistory[key].push(value);
@@ -975,7 +988,7 @@ function pushSysHistory(key, value) {
 
 var vizPrefs = {
     gpu: { load: 'bar', power: 'bar', vram: 'bar', clocks: 'ring' },
-    system: { load: 'bar', ram: 'bar', clock: 'ring' }
+    system: { load: 'bar', ram: 'bar', clock: 'ring', power: 'bar' }
 };
 
 
@@ -1102,7 +1115,7 @@ function renderGpuCard(gpuMap, visible, grade) {
     var _loop = entries[0];
     // POWER OPT: skip full rebuild when GPU values AND viz prefs haven't changed
     var gpuKey = _loop[0];
-    var gpuSnap = JSON.stringify([gpuKey, _loop[1].load, _loop[1].power_consumption, _loop[1].vram_used, _loop[1].temp, _loop[1].sclk_mhz, _loop[1].mclk_mhz, vizPrefs.gpu.load, vizPrefs.gpu.power, vizPrefs.gpu.vram, vizPrefs.gpu.clocks]);
+    var gpuSnap = JSON.stringify([gpuKey, _loop[1].load, _loop[1].power_consumption, _loop[1].vram_used, _loop[1].temp, _loop[1].sclk_mhz, _loop[1].mclk_mhz, _loop[1].metal_gpu_limit_mb, vizPrefs.gpu.load, vizPrefs.gpu.power, vizPrefs.gpu.vram, vizPrefs.gpu.clocks]);
     if (gpuSnap === lastGpuSnapshot) return;
     lastGpuSnapshot = gpuSnap;
     var name = _loop[0];
@@ -1154,7 +1167,9 @@ function renderGpuCard(gpuMap, visible, grade) {
     var powerViz = document.getElementById('gpu-power-viz');
     var powerVal = document.getElementById('gpu-power-value');
     var powerBlock = document.getElementById('gpu-power-block');
-    var powerPct = m.power_limit > 0 ? (m.power_consumption / m.power_limit) * 100 : 0;
+    var powerLabelEl = powerBlock ? powerBlock.querySelector('.hw-metric-label') : null;
+    var isAppleUnified = Number(m.metal_gpu_limit_mb || 0) > 0 || m.power_limit === 0;
+    var powerPct = m.power_limit > 0 ? (m.power_consumption / m.power_limit) * 100 : Math.min(100, (m.power_consumption / 150) * 100);
     var isCapped = m.power_consumption >= m.power_limit && m.power_limit > 0;
     var powerStyle = vizPrefs.gpu.power;
     var powerTone = getMetricTone('power');
@@ -1164,11 +1179,21 @@ function renderGpuCard(gpuMap, visible, grade) {
     else if (powerStyle === 'sparkline') renderHwSparkline(powerViz, gpuHistory.power);
     else renderHwBar(powerViz, powerPct, isCapped ? { start: '#fb7185', end: '#f43f5e' } : powerTone, isCapped);
     renderHwMetricSparkline('gpu-power-spark', gpuHistory.power, powerColor, powerStyle !== 'sparkline');
-    if (powerVal) powerVal.textContent = m.power_consumption.toFixed(1) + 'W' + (isCapped ? '!' : '') + ' / ' + m.power_limit + 'W';
+    if (powerVal) {
+        if (isAppleUnified) {
+            powerVal.textContent = m.power_consumption.toFixed(1) + 'W';
+            if (powerLabelEl) powerLabelEl.textContent = 'SoC Power';
+        } else {
+            powerVal.textContent = m.power_consumption.toFixed(1) + 'W' + (isCapped ? '!' : '') + ' / ' + m.power_limit + 'W';
+            if (powerLabelEl) powerLabelEl.textContent = 'Power';
+        }
+    }
 
-    // VRAM
+    // VRAM / Memory
     var vramViz = document.getElementById('gpu-vram-viz');
     var vramVal = document.getElementById('gpu-vram-value');
+    var vramBlock = document.getElementById('gpu-vram-block');
+    var vramLabelEl = vramBlock ? vramBlock.querySelector('.hw-metric-label') : null;
     var vramStyle = vizPrefs.gpu.vram;
     var vramGb = effectiveVramTotalMb > 0 ? (m.vram_used / 1024).toFixed(1) : '0';
     var vramTotalGb = effectiveVramTotalMb > 0 ? (effectiveVramTotalMb / 1024).toFixed(0) : '0';
@@ -1180,12 +1205,17 @@ function renderGpuCard(gpuMap, visible, grade) {
     else renderHwBar(vramViz, vramPct, vramTone, false);
     renderHwMetricSparkline('gpu-vram-spark', gpuHistory.vramPct, vramColor, vramStyle !== 'sparkline');
     if (vramVal) {
-        vramVal.textContent = hasMetalCap
-            ? vramGb + ' / ' + vramTotalGb + ' GB cap'
-            : vramGb + ' / ' + vramTotalGb + ' GB';
-        vramVal.title = hasMetalCap
-            ? 'Metal GPU memory cap ' + vramTotalGb + ' GB (of ' + totalUnifiedGb + ' GB unified memory total)'
-            : '';
+        if (isAppleUnified) {
+            vramVal.textContent = vramGb + ' / ' + totalUnifiedGb + ' GB';
+            vramVal.title = hasMetalCap
+                ? 'Metal GPU memory cap ' + vramTotalGb + ' GB (of ' + totalUnifiedGb + ' GB unified memory total)'
+                : '';
+            if (vramLabelEl) vramLabelEl.textContent = 'Memory';
+        } else {
+            vramVal.textContent = vramGb + ' / ' + vramTotalGb + ' GB';
+            vramVal.title = '';
+            if (vramLabelEl) vramLabelEl.textContent = 'VRAM';
+        }
     }
 
     // Clocks
@@ -1318,6 +1348,48 @@ function renderSystemCard(sys, visible, grade) {
     } else {
         if (clockViz) clockViz.innerHTML = '';
         if (clockVal) clockVal.textContent = clockMhz > 0 ? clockMhz + ' MHz' : '\u2014';
+    }
+
+    // Power (Apple Silicon only)
+    var powerBlock = document.getElementById('sys-power-block');
+    var powerTotal = sys.power_total_w || 0;
+    if (powerBlock && powerTotal > 0) {
+        powerBlock.style.display = '';
+        var powerVizEl = document.getElementById('sys-power-viz');
+        var powerValEl = document.getElementById('sys-power-value');
+        var powerPctSys = Math.min(100, (powerTotal / 150) * 100);
+        pushSysHistory('power', powerTotal);
+        var powerStyle = vizPrefs.system.power || 'bar';
+        var powerTone = getMetricTone('power');
+        if (powerStyle === 'ring') renderHwRing(powerVizEl, powerPctSys, powerTone, false);
+        else if (powerStyle === 'sparkline') renderHwSparkline(powerVizEl, sysHistory.power);
+        else renderHwBar(powerVizEl, powerPctSys, powerTone, false);
+        renderHwMetricSparkline('sys-power-spark', sysHistory.power, powerTone.line, powerStyle !== 'sparkline');
+        if (powerValEl) powerValEl.textContent = powerTotal.toFixed(1) + 'W';
+    } else if (powerBlock) {
+        powerBlock.style.display = 'none';
+    }
+
+    // Cluster frequencies (Apple Silicon only)
+    var clustersBlock = document.getElementById('sys-clusters-block');
+    var hasClusters = sys.p_cluster_freq_mhz > 0 || sys.s_cluster_freq_mhz > 0;
+    if (clustersBlock && hasClusters) {
+        clustersBlock.style.display = '';
+        var clustersVizEl = document.getElementById('sys-clusters-viz');
+        var clustersValEl = document.getElementById('sys-clusters-value');
+        var pF = sys.p_cluster_freq_mhz || 0;
+        var sF = sys.s_cluster_freq_mhz || 0;
+        var eF = sys.e_cluster_freq_mhz || 0;
+        var labels = [];
+        if (pF > 0) labels.push('P ' + pF + 'MHz');
+        if (sF > 0) labels.push('S ' + sF + 'MHz');
+        if (eF > 0) labels.push('E ' + eF + 'MHz');
+        if (labels.length > 0) {
+            renderHwChips(clustersVizEl, labels);
+        }
+        if (clustersValEl) clustersValEl.textContent = '';
+    } else if (clustersBlock) {
+        clustersBlock.style.display = 'none';
     }
 }
 

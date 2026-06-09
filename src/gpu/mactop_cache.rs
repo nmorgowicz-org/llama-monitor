@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 
 static MACTOP_CACHE: OnceLock<std::sync::RwLock<Option<MactopCacheEntry>>> = OnceLock::new();
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct MactopCacheEntry {
     pub power_total_w: f32,
