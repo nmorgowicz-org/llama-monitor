@@ -1759,7 +1759,9 @@ async function scenarioDashboard(ctx, options) {
 }
 
 // Validation pass for sparkline layouts and clipped section captures.
-async function scenarioSparkline(ctx) {
+// The individual SVG clip captures are only useful for debugging sparkline rendering;
+// require --close-up to generate them.
+async function scenarioSparkline(ctx, options) {
     const { page, baseUrl } = ctx;
     await gotoApp(page, baseUrl);
     await attachToServer(page);
@@ -1768,7 +1770,9 @@ async function scenarioSparkline(ctx) {
     await captureShot(page, 'sparkline-sparkline-validate-full.png', { fullPage: true });
     await captureElementScreenshot(page, '#gpu-section', 'sparkline-sparkline-validate-gpu-section.png', { padding: 24 });
     await captureElementScreenshot(page, '#system-section', 'sparkline-sparkline-validate-system-section.png', { padding: 24 });
-    await captureSparklineClips(page, 'svg.metric-sparkline, svg.hw-sparkline, svg.hw-metric-sparkline, svg.hw-clock-footer-spark');
+    if (options.closeUp) {
+        await captureSparklineClips(page, 'svg.metric-sparkline, svg.hw-sparkline, svg.hw-metric-sparkline, svg.hw-clock-footer-spark');
+    }
 }
 
 // Animated capture flow for inference and hardware metric GIFs.

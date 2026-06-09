@@ -53,11 +53,12 @@ A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and direct
 
 ### TLS, ACME & mTLS
 
-Built-in TLS with ACME (Let’s Encrypt) and mTLS for remote agents. Choose No HTTPS, Self-Signed, Bring Your Own Key, or fully automated ACME with DNS-01 and renewal.
+Built-in TLS with ACME (Let's Encrypt) and mTLS for remote agents. Choose No HTTPS, Self-Signed, Bring Your Own Key, or fully automated ACME with DNS-01 and renewal.
 
 See [TLS Architecture](docs/reference/tls-architecture.md) for full details.
 
 ![Security & Certificates](docs/screenshots/tls-certificates-tab.png)
+![ACME Configuration](docs/screenshots/tls-mode-acme-full.png)
 
 ### Spawn Local Server
 
@@ -74,6 +75,10 @@ An integrated wizard for discovering, downloading, configuring, and launching a 
 A version pill in the navbar shows the current llama.cpp version and opens release notes for managed builds.
 
 ![Llama Updater](docs/screenshots/llama-updater-pill.png)
+
+![Model Discovery](docs/screenshots/spawn-wizard-model-discovery.png)
+
+![VRAM Estimator](docs/screenshots/spawn-wizard-vram.png)
 
 ![Spawn Wizard Flow](docs/screenshots/spawn-wizard-flow.gif)
 

@@ -404,6 +404,13 @@ Returns the effective models directory.
 
 - `configured`: true if the user has overridden the default in Settings
 
+#### Download UI
+
+When the download starts, the model card displays an indeterminate progress bar and download status. On completion, the card shows the final download rate and a green check mark.
+
+![HuggingFace Download Idle](../screenshots/spawn-wizard-hf-download-idle.png)
+![HuggingFace Download Progress](../screenshots/spawn-wizard-hf-download-progress.png)
+
 ### Model Card
 
 #### GET /api/hf/card?repo=owner/model
