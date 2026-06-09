@@ -865,7 +865,37 @@ impl ModelMetadata {
                 param_b
             };
 
-        let heuristic = ModelArch::from_name_and_params(heuristic_name, param_b_for_heuristic);
+        // Use original model name (with size/MoE hints like "35B-A3B") as the
+        // primary heuristic source so MoE/scale is recognized even for renamed GGUF.
+        let heuristic = ModelArch::from_name_and_params(model_name, param_b);
+
+        // If that heuristic didn't pick a strong family (no experts, no hybrid,
+        // no special attention), and we have a known GGUF architecture string,
+        // fall back to deriving from the sanitized heuristic name (e.g. qwen3.6-model)
+        // so we get the correct family shape.
+        let mut heuristic = if heuristic.n_experts == 0
+            && !heuristic.is_hybrid_attn()
+            && !heuristic.has_local_attn()
+            && !heuristic.is_moe()
+            && self.gguf_arch.is_some()
+        {
+            ModelArch::from_name_and_params(heuristic_name, param_b_for_heuristic)
+        } else {
+            heuristic
+        };
+
+        // Patch in concrete GGUF metadata where present so MoE, KV, and MTP
+        // are accurate even if we couldn't guess from the name.
+        if let Some(experts) = self.n_experts {
+            heuristic.n_experts = experts;
+        }
+        if let Some(used) = self.n_experts_used {
+            heuristic.n_experts_used = used;
+        }
+        // If MoE fields are known but expert_fraction is unset, provide a safe default.
+        if heuristic.n_experts > 0 && heuristic.expert_fraction == 0.0 {
+            heuristic.expert_fraction = 0.65;
+        }
 
         // For Gemma4 with sliding window, the GGUF n_kv_heads encodes the local
         // sliding-window layers' KV heads; the correct global-layer KV heads are

@@ -922,7 +922,6 @@ export function initViewState() {
 
 // ── New Configuration button (header) ──────────────────────────────────
 
-document.addEventListener('DOMContentLoaded', () => {
     const btn = document.getElementById('setup-new-config-btn');
     if (btn) {
         btn.addEventListener('click', async () => {
@@ -934,7 +933,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-});
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

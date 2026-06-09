@@ -2496,13 +2496,26 @@ fn build_arch_from_body(
     model_name: &str,
     param_b: f64,
 ) -> crate::llama::vram_estimator::ModelArch {
-    // Prefer GGUF architecture string over filename for the heuristic.
+    // Use the original model name (with size/MoE hints like "35B-A3B") as the
+    // primary heuristic source so MoE and scale are recognized.
+    let mut heuristic =
+        crate::llama::vram_estimator::ModelArch::from_name_and_params(model_name, param_b);
+
+    // If that yielded a weak/default-looking arch (no MoE, no hybrid, no sliding window),
+    // and we have a known GGUF architecture string, fall back to deriving from that.
     let heuristic_name = body["gguf_arch"]
         .as_str()
         .map(gguf_arch_to_heuristic_name)
         .unwrap_or_else(|| model_name.to_string());
-    let heuristic =
-        crate::llama::vram_estimator::ModelArch::from_name_and_params(&heuristic_name, param_b);
+
+    if heuristic.n_experts == 0
+        && !heuristic.is_hybrid_attn()
+        && !heuristic.has_local_attn()
+        && !heuristic.is_moe()
+    {
+        heuristic =
+            crate::llama::vram_estimator::ModelArch::from_name_and_params(&heuristic_name, param_b);
+    }
 
     let n_layers = body["n_layers"]
         .as_u64()
