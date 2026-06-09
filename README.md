@@ -47,9 +47,7 @@ A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and direct
 - Director mode: type one directive and get four distinct continuation options.
 - Surprise mode: arm a beat that triggers at a later reply.
 
-![Suggestions Results](docs/screenshots/guided-gen-suggestions-results.png)
 ![Director Options](docs/screenshots/guided-gen-director-options.png)
-![Prompt Debug Inspector](docs/screenshots/panels-prompt-debug.png)
 
 ### TLS, ACME & mTLS
 
@@ -58,7 +56,6 @@ Built-in TLS with ACME (Let's Encrypt) and mTLS for remote agents. Choose No HTT
 See [TLS Architecture](docs/reference/tls-architecture.md) for full details.
 
 ![Security & Certificates](docs/screenshots/tls-certificates-tab.png)
-![ACME Configuration](docs/screenshots/tls-mode-acme-full.png)
 
 ### Spawn Local Server
 
@@ -71,14 +68,6 @@ An integrated wizard for discovering, downloading, configuring, and launching a 
   - Local GGUF files with VRAM estimates
 - **VRAM-aware tuning**: live breakdown bar with auto-size and quant-compare
 - **llama.cpp binary management**: auto-download, install, and update the llama.cpp runtime
-
-A version pill in the navbar shows the current llama.cpp version and opens release notes for managed builds.
-
-![Llama Updater](docs/screenshots/llama-updater-pill.png)
-
-![Model Discovery](docs/screenshots/models-discovery-overview.png)
-
-![VRAM Estimator](docs/screenshots/spawn-wizard-step3-vram.png)
 
 ![Spawn Wizard Flow](docs/screenshots/spawn-wizard-flow.gif)
 
