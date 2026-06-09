@@ -426,6 +426,65 @@
                     </div>
                 </div>
 
+                <!-- ── Benchmark Dropdown Panel ─────────────────────────────── -->
+                <div class="benchmark-dropdown-wrap" id="benchmark-dropdown-wrap">
+                  <div class="benchmark-dropdown" id="benchmark-dropdown" role="dialog" aria-label="Performance benchmark">
+
+                    <!-- Idle -->
+                    <div class="tune-idle" id="tune-idle">
+                      <div class="tune-idle-left">
+                        <svg class="tune-idle-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <div class="tune-idle-text">
+                          <span class="tune-idle-label">Performance</span>
+                          <span class="tune-idle-desc">Benchmark your config and get one-click optimizations</span>
+                        </div>
+                      </div>
+                      <button class="tune-run-btn" id="tune-run-btn" type="button">Run Benchmark</button>
+                    </div>
+
+                    <!-- Running -->
+                    <div class="tune-running" id="tune-running" style="display:none;">
+                      <div class="tune-running-header">
+                        <span class="tune-running-pulse" aria-hidden="true"></span>
+                        <span class="tune-running-label">Benchmarking</span>
+                        <span class="tune-running-hint">Sending a test prompt and measuring throughput…</span>
+                      </div>
+                      <div class="tune-progress-track" role="progressbar" aria-label="Benchmark in progress">
+                        <div class="tune-progress-fill" id="tune-progress-fill"></div>
+                      </div>
+                    </div>
+
+                    <!-- Results -->
+                    <div class="tune-results" id="tune-results" style="display:none;">
+                      <div class="tune-scorecard">
+                        <div class="tune-grade-wrap">
+                          <div class="tune-grade-ring" id="tune-grade" aria-label="Performance grade">A</div>
+                          <div class="tune-grade-label" id="tune-grade-label">Good</div>
+                        </div>
+                        <div class="tune-metrics-row">
+                          <div class="tune-metric">
+                            <div class="tune-metric-val" id="tune-gen-tps">—</div>
+                            <div class="tune-metric-lbl">gen t/s</div>
+                          </div>
+                          <div class="tune-metric-sep" aria-hidden="true"></div>
+                          <div class="tune-metric">
+                            <div class="tune-metric-val" id="tune-prompt-tps">—</div>
+                            <div class="tune-metric-lbl">prompt t/s</div>
+                          </div>
+                          <div class="tune-metric-sep" aria-hidden="true"></div>
+                          <div class="tune-metric">
+                            <div class="tune-metric-val" id="tune-ttft">—</div>
+                            <div class="tune-metric-lbl">ms first token</div>
+                          </div>
+                        </div>
+                        <button class="tune-rerun-btn" id="tune-rerun-btn" type="button">Re-run</button>
+                      </div>
+                      <div class="tune-suggestions" id="tune-suggestions"></div>
+                    </div>
+
+                  </div>
+                </div>
+
                 <section class="metric-section" id="inference-section">
                     <h2 class="dashboard-section-title">
                         Inference Metrics
@@ -434,6 +493,7 @@
                             <span class="metric-badge inference-log-tail-btn" id="inference-log-tail-badge" title="Show a small live tail of llama-server logs">Live log tail</span>
                             <span class="inference-log-tail-btn-small" id="inference-log-tail-minus" title="Show fewer log lines">−</span>
                             <span class="inference-log-tail-btn-small" id="inference-log-tail-plus" title="Show more log lines">+</span>
+                            <span class="metric-badge inference-log-tail-btn benchmark-pill" id="benchmark-pill" title="Benchmark performance and get optimization suggestions">Benchmark</span>
                         </span>
                     </h2>
                     <div class="inference-log-tail" id="inference-log-tail" style="display:none;"></div>
@@ -2826,9 +2886,9 @@
                 <span class="wizard-step-sep" aria-hidden="true"></span>
                 <span class="step-badge" data-step="2" title="Step 3: Hardware"><span class="step-num">3</span></span>
                 <span class="wizard-step-sep" aria-hidden="true"></span>
-                <span class="step-badge" data-step="3" title="Step 4: Summary"><span class="step-num">4</span></span>
+                <span class="step-badge" data-step="3" title="Step 4: Parameters"><span class="step-num">4</span></span>
                 <span class="wizard-step-sep" aria-hidden="true"></span>
-                <span class="step-badge" data-step="4" title="Step 5: Parameters"><span class="step-num">5</span></span>
+                <span class="step-badge" data-step="4" title="Step 5: Summary"><span class="step-num">5</span></span>
                 <span class="wizard-step-sep" aria-hidden="true"></span>
                 <span class="step-badge" data-step="5" title="Step 6: Spawn"><span class="step-num">6</span></span>
             </div>

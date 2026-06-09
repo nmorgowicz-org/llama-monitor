@@ -148,7 +148,7 @@ Scenarios:
     spawn-wizard-hf-download  HF download panel: idle options and simulated progress
 
   Performance & Updates
-    tune-panel       Performance benchmark panel on server tab
+    tune-panel       Performance benchmark dropdown (pill + panel) on server tab
     llama-updater    Llama-server binary update pill, version modal with release notes, and app release notes
 
   Validation
@@ -2547,18 +2547,24 @@ async function scenarioTunePanel(ctx, options) {
     await switchTab(page, 'server');
     await sleep(3000);
 
-    // The tune panel appears after attach; try to capture it in idle state.
-    const tunePanelVisible = await page.evaluate(() => {
-        const panel = document.getElementById('tune-panel');
-        if (!panel) return false;
-        return getComputedStyle(panel).display !== 'none';
+    // The benchmark pill appears after attach; click to open dropdown.
+    const pillVisible = await page.evaluate(() => {
+        const pill = document.getElementById('benchmark-pill');
+        if (!pill) return false;
+        return getComputedStyle(pill).display !== 'none';
     });
 
-    if (tunePanelVisible) {
+    if (pillVisible) {
+        // Click the Benchmark pill to open the dropdown
+        await page.evaluate(() => {
+            const pill = document.getElementById('benchmark-pill');
+            if (pill) pill.click();
+        });
+        await sleep(800);
         await captureShot(page, 'tune-panel-open.png', { fullPage: true });
-        await captureCloseUp(page, '#tune-panel', 'tune-panel-open.png', options);
+        await captureCloseUp(page, '#benchmark-dropdown-wrap', 'tune-panel-open.png', options);
     } else {
-        console.log('[CAPTURE] Tune panel not visible; may require a spawned session. Capturing server tab anyway.');
+        console.log('[CAPTURE] Benchmark pill not visible; may require a spawned session. Capturing server tab anyway.');
         await captureShot(page, 'tune-panel-server-tab.png', { fullPage: true });
     }
 }
@@ -2935,17 +2941,22 @@ async function scenarioSpawnWizard(ctx, options) {
     }
 
     // ── Step 2: Hardware / VRAM ───────────────────────────────────────────────
-    // Inject a visually impressive model so the VRAM bar fills meaningfully.
-    // Llama-3.1-8B Q4_K_M: ~4.9 GB weights on 64 GB → bar is well-proportioned.
+    // Inject missing model metadata so the VRAM bar renders correctly.
+    // Only fill in values that may not have been set by the UI interaction.
     await page.evaluate(async () => {
         const { wizardState } = await import('/js/features/spawn-wizard.js');
-        wizardState.model.source   = 'hf';
-        wizardState.model.delivery = 'stream_hf';
-        wizardState.model.hfRepo   = 'bartowski/Meta-Llama-3.1-8B-Instruct-GGUF';
-        wizardState.model.hfFile   = 'Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf';
-        wizardState.model.paramB   = 8;
-        wizardState.model.modelBytes = 4_920_000_000;
-        wizardState.vram.available = 64 * 1024 * 1024 * 1024; // fallback if API absent
+        // Set VRAM fallback if API call failed
+        if (!wizardState.vram.available || wizardState.vram.available === 0) {
+            wizardState.vram.available = 64 * 1024 * 1024 * 1024;
+        }
+        // Set paramB from filename if inference failed
+        if (!wizardState.model.paramB || wizardState.model.paramB === 0) {
+            wizardState.model.paramB = 8; // default for 8B models
+        }
+        // Set modelBytes if not already set
+        if (!wizardState.model.modelBytes || wizardState.model.modelBytes === 0) {
+            wizardState.model.modelBytes = 4_920_000_000;
+        }
     });
 
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
@@ -2974,7 +2985,7 @@ async function scenarioSpawnWizard(ctx, options) {
     await sleep(500);
     await captureShot(page, 'spawn-wizard-step3-vram.png', { fullPage: true });
 
-    // ── Step 3: Summary ───────────────────────────────────────────────────────
+    // ── Step 4: Parameters ────────────────────────────────────────────────────
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
     await page.waitForFunction(
         () => document.getElementById('wizard-step-3')?.classList.contains('active'),
@@ -3028,9 +3039,11 @@ async function scenarioSpawnWizardHfDownload(ctx, options) {
     await page.waitForFunction(
         () => document.getElementById('wizard-step-1')?.classList.contains('active'),
         { timeout: 6000 }
-    ).catch(() => {});
+    ).catch(() => {
+        console.log('[CAPTURE] Step 1 (Model) wait timed out; continuing.');
+    });
 
-    // Inject model so VRAM bar and HF download panel behave.
+    // Inject model BEFORE clicking Next so validation passes.
     await page.evaluate(async () => {
         const { wizardState } = await import('/js/features/spawn-wizard.js');
         wizardState.model.source   = 'hf';
@@ -3042,15 +3055,30 @@ async function scenarioSpawnWizardHfDownload(ctx, options) {
         wizardState.vram.available = 64 * 1024 * 1024 * 1024;
     });
 
-    // Move to step 2 (VRAM).
-    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    // Move to Hardware step — advance step state + trigger render.
+    await page.evaluate(async () => {
+        const mod = await import('/js/features/spawn-wizard.js');
+        mod.wizardState.currentStep = 2;
+        // Manually update step visibility
+        document.querySelectorAll('.wizard-step').forEach(s => s.classList.remove('active'));
+        document.getElementById('wizard-step-2')?.classList.add('active');
+        document.querySelectorAll('.step-badge').forEach(b => {
+            const s = Number(b.dataset.step);
+            b.classList.remove('active', 'completed');
+            if (s === 2) b.classList.add('active');
+            else if (s < 2) b.classList.add('completed');
+        });
+        document.getElementById('wizard-step-label').textContent = 'Hardware';
+        // Trigger VRAM update
+        mod.scheduleVramUpdate && mod.scheduleVramUpdate();
+    });
     await page.waitForFunction(
         () => document.getElementById('wizard-step-2')?.classList.contains('active'),
-        { timeout: 6000 }
+        { timeout: 8000 }
     ).catch(() => {
         console.log('[CAPTURE] Step 2 (Hardware) wait timed out; continuing.');
     });
-    await sleep(400);
+    await sleep(600);
 
     // Ensure the HF download panel is visible in "idle" state.
     await page.evaluate(() => {

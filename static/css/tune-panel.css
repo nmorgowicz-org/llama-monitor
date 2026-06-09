@@ -1,36 +1,83 @@
-/* ── Tune / Benchmark Panel ──────────────────────────────────────────────────
- * Sits between the control bar and inference metrics on the monitor view.
- * Three states managed by JS: idle → running → results.
+/* ── Benchmark Dropdown + Tune Panel ──────────────────────────────────────────
+ * Dropdown panel sits above the "Inference Metrics" section header.
+ * Triggered by the "Benchmark" pill in the section title bar.
+ * Three states: idle → running → results.
  */
 
-.tune-panel {
-  position: relative;
-  margin: 0 0 18px;
-  border-radius: var(--radius-base);
-  border: 1px solid var(--border-subtle);
-  background: linear-gradient(180deg, rgba(99,102,241,0.06) 0%, rgba(255,255,255,0.02) 100%);
-  overflow: hidden;
-  transition: border-color 0.2s;
+/* ── Dropdown wrapper ─────────────────────────────────────────────────────── */
+
+.benchmark-dropdown-wrap {
+  display: none;
+  position: fixed;
+  z-index: 500;
+  width: min(440px, 92vw);
+  max-height: min(520px, calc(100vh - 120px));
+  overflow-y: auto;
+  background:
+    radial-gradient(circle at 18% 18%, var(--surface-card-ambient-a), transparent 28%),
+    radial-gradient(circle at 82% 12%, var(--surface-card-ambient-b), transparent 24%),
+    linear-gradient(180deg, var(--surface-card-elevated), var(--surface-card-base));
+  border: 1px solid var(--surface-card-overlay-strong);
+  border-radius: var(--radius-card);
+  box-shadow:
+    0 20px 48px rgba(0, 0, 0, 0.36),
+    0 6px 18px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition: opacity 180ms ease, transform 180ms ease;
+  backdrop-filter: blur(18px) saturate(160%);
 }
 
-/* Left-edge accent line */
-.tune-panel::before {
+.benchmark-dropdown-wrap::before {
   content: '';
   position: absolute;
-  inset: 0 auto 0 0;
-  width: 2px;
-  background: linear-gradient(180deg, #6366f1 0%, #7c3aed 60%, transparent 100%);
-  border-radius: 2px 0 0 2px;
+  inset: 0;
+  pointer-events: none;
+  border-radius: var(--radius-card);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent 40%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 70%);
 }
 
-/* ── Idle ────────────────────────────────────────────────────────────────── */
+.benchmark-dropdown-wrap.open {
+  display: block;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+/* Hide pill when not connected */
+.benchmark-pill {
+  display: none;
+}
+
+.benchmark-pill.show {
+  display: inline-block;
+}
+
+/* Override the blue is-active with teal (matching live indicators) */
+.benchmark-pill.is-active {
+  background: rgba(45, 212, 191, 0.24);
+  color: #8fbcbb;
+  border-color: rgba(45, 212, 191, 0.36);
+}
+
+/* ── Panel body ─────────────────────────────────────────────────────────────── */
+
+.benchmark-dropdown {
+  position: relative;
+  padding: 16px 18px 14px;
+}
+
+/* ── Idle ─────────────────────────────────────────────────────────────────── */
 
 .tune-idle {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 13px 16px 13px 20px;
 }
 
 .tune-idle-left {
@@ -49,13 +96,13 @@
 .tune-idle-text {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
   min-width: 0;
 }
 
 .tune-idle-label {
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-text-primary);
   line-height: 1.2;
 }
@@ -63,31 +110,30 @@
 .tune-idle-desc {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.4;
 }
 
 .tune-run-btn {
   flex-shrink: 0;
-  padding: 6px 16px;
-  border-radius: 8px;
-  border: none;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-soft-border);
+  background: var(--accent-soft-bg);
   cursor: pointer;
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: 650;
   font-family: var(--font-body);
-  color: #fff;
-  background: linear-gradient(135deg, #6366f1 0%, #7c3aed 100%);
-  box-shadow: 0 2px 8px rgba(99,102,241,0.35);
-  transition: filter 0.15s, transform 0.1s, box-shadow 0.15s;
+  color: var(--color-primary-light);
+  transition: filter 0.15s, transform 0.1s, background 0.15s;
   letter-spacing: 0.01em;
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.15);
 }
 
 .tune-run-btn:hover {
-  filter: brightness(1.12);
+  filter: brightness(1.1);
   transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(99,102,241,0.45);
+  background: var(--accent-soft-bg-strong);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
 }
 
 .tune-run-btn:active {
@@ -96,15 +142,15 @@
 }
 
 .tune-run-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
   transform: none;
 }
 
-/* ── Running ─────────────────────────────────────────────────────────────── */
+/* ── Running ──────────────────────────────────────────────────────────────── */
 
 .tune-running {
-  padding: 14px 20px 16px;
+  padding: 4px 0 2px;
 }
 
 .tune-running-header {
@@ -114,24 +160,20 @@
   margin-bottom: 10px;
 }
 
-@keyframes tune-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%       { opacity: 0.4; transform: scale(0.7); }
-}
-
 .tune-running-pulse {
   display: inline-block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--color-primary-light);
-  animation: tune-pulse 1.2s ease-in-out infinite;
+  box-shadow: 0 0 10px var(--color-primary-light);
+  animation: dot-pulse 1.6s ease-in-out infinite;
   flex-shrink: 0;
 }
 
 .tune-running-label {
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 650;
   color: var(--color-text-primary);
 }
 
@@ -141,94 +183,118 @@
 }
 
 .tune-progress-track {
-  height: 4px;
-  border-radius: 4px;
-  background: rgba(255,255,255,0.07);
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
   overflow: hidden;
   position: relative;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
-/* POWER OPT: replaced layout-triggering left+width with transform-only animation */
+.tune-progress-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -40%;
+  width: 40%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent 0%, #6366f1 40%, #818cf8 70%, transparent 100%);
+  animation: tune-sweep 2s ease-in-out infinite;
+}
+
 @keyframes tune-sweep {
   0%   { transform: translateX(0); }
   50%  { transform: translateX(70%); }
   100% { transform: translateX(150%); }
 }
 
-.tune-progress-fill {
-  position: absolute;
-  top: 0; bottom: 0;
-  left: -40%;
-  width: 40%;
-  border-radius: 4px;
-  background: linear-gradient(90deg, transparent 0%, #6366f1 40%, #818cf8 70%, transparent 100%);
-  animation: tune-sweep 2s ease-in-out infinite;
-}
-
 /* ── Results ─────────────────────────────────────────────────────────────── */
 
 .tune-results {
-  padding: 14px 16px 14px 20px;
+  padding: 4px 0 2px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
-/* Scorecard row: grade chip + metrics + re-run */
+/* Scorecard row: grade ring + metrics + re-run */
 .tune-scorecard {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
   flex-wrap: wrap;
 }
 
-/* Grade wrap: chip + label stacked */
+/* Grade wrap: ring + label stacked */
 .tune-grade-wrap {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   flex-shrink: 0;
 }
 
 .tune-grade-label {
   font-size: var(--text-2xs);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   white-space: nowrap;
 }
 
-/* Grade chip — large letter in a rounded square */
-.tune-grade-chip {
-  width: 52px;
-  height: 52px;
-  border-radius: 12px;
+/* Grade ring — conic-gradient circle matching temp gauge style */
+.tune-grade-ring {
+  --grade-pct: 72%;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(12, 15, 24, 0.98) 0 58%, transparent 61%),
+    conic-gradient(from -90deg, var(--grade-color, #8fbcbb) calc(var(--grade-pct) * 1%), rgba(255, 255, 255, 0.06) 0);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 16px rgba(143, 188, 187, 0.12);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.75rem;
+  font-size: 1.3rem;
   font-weight: 800;
   font-family: var(--font-body);
-  color: #fff;
+  color: var(--color-text-primary);
   flex-shrink: 0;
-  text-shadow: 0 1px 4px rgba(0,0,0,0.3);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
+  transition: background 300ms ease;
 }
 
-.tune-grade-s { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
-.tune-grade-a { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); }
-.tune-grade-b { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
-.tune-grade-c { background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); }
-.tune-grade-d { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
+.tune-grade-ring.tune-grade-s { --grade-pct: 100%; --grade-color: #10b981; }
+.tune-grade-ring.tune-grade-a { --grade-pct: 78%;  --grade-color: #3b82f6; }
+.tune-grade-ring.tune-grade-b { --grade-pct: 55%;  --grade-color: #f59e0b; }
+.tune-grade-ring.tune-grade-c { --grade-pct: 35%;  --grade-color: #f97316; }
+.tune-grade-ring.tune-grade-d { --grade-pct: 18%;  --grade-color: #ef4444; }
+
+.tune-grade-ring.tune-grade-s,
+.tune-grade-ring.tune-grade-a {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 20px color-mix(in srgb, var(--grade-color) 30%, transparent);
+}
+
+.tune-grade-ring.tune-grade-c,
+.tune-grade-ring.tune-grade-d {
+  animation: gauge-breathe-warn 2.5s ease-in-out infinite;
+}
+
+@keyframes gauge-breathe-warn {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 12px color-mix(in srgb, var(--grade-color) 20%, transparent); }
+  50% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 0 24px color-mix(in srgb, var(--grade-color) 36%, transparent); }
+}
 
 /* Metrics row */
 .tune-metrics-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex: 1;
   min-width: 0;
 }
@@ -238,12 +304,13 @@
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  min-width: 52px;
+  min-width: 48px;
 }
 
 .tune-metric-val {
+  font-family: var(--font-mono);
   font-size: var(--text-lg);
-  font-weight: 700;
+  font-weight: 800;
   color: var(--color-text-primary);
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
@@ -253,13 +320,14 @@
   font-size: var(--text-2xs);
   color: var(--color-text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   white-space: nowrap;
+  font-weight: 700;
 }
 
 .tune-metric-sep {
   width: 1px;
-  height: 28px;
+  height: 32px;
   background: var(--border-subtle);
   flex-shrink: 0;
 }
@@ -267,12 +335,12 @@
 .tune-rerun-btn {
   margin-left: auto;
   padding: 5px 13px;
-  border-radius: 8px;
-  border: 1px solid var(--border-emphasis);
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
   background: transparent;
   color: var(--color-text-muted);
   font-size: var(--text-xs);
-  font-weight: 500;
+  font-weight: 600;
   font-family: var(--font-body);
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -281,9 +349,9 @@
 }
 
 .tune-rerun-btn:hover {
-  background: rgba(99,102,241,0.12);
+  background: rgba(99, 102, 241, 0.1);
   color: var(--color-primary-light);
-  border-color: rgba(99,102,241,0.35);
+  border-color: var(--accent-soft-border);
 }
 
 .tune-rerun-btn:disabled {
@@ -291,7 +359,7 @@
   cursor: not-allowed;
 }
 
-/* ── Suggestion cards ────────────────────────────────────────────────────── */
+/* ── Suggestion cards ─────────────────────────────────────────────────────── */
 
 .tune-suggestions {
   display: flex;
@@ -304,16 +372,24 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 9px 12px;
-  border-radius: 9px;
+  padding: 10px 14px;
+  border-radius: 16px;
   border: 1px solid var(--border-subtle);
-  background: rgba(255,255,255,0.02);
-  transition: border-color 0.15s, background 0.15s;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.012));
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .tune-suggestion-card:hover {
-  border-color: rgba(99,102,241,0.25);
-  background: rgba(99,102,241,0.04);
+  border-color: var(--surface-card-line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.018));
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .tune-suggestion-body {
@@ -325,7 +401,7 @@
 
 .tune-suggestion-label {
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: 650;
   color: var(--color-text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -338,26 +414,28 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.4;
 }
 
 .tune-suggestion-apply {
   flex-shrink: 0;
   padding: 5px 13px;
-  border-radius: 7px;
-  border: 1px solid rgba(99,102,241,0.4);
-  background: rgba(99,102,241,0.1);
+  border-radius: 999px;
+  border: 1px solid var(--accent-soft-border);
+  background: var(--accent-soft-bg);
   color: var(--color-primary-light);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: 700;
   font-family: var(--font-body);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, transform 0.1s;
   white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.12);
 }
 
 .tune-suggestion-apply:hover {
-  background: rgba(99,102,241,0.22);
-  border-color: rgba(99,102,241,0.65);
+  background: var(--accent-soft-bg-strong);
+  border-color: rgba(99, 102, 241, 0.5);
   transform: translateX(1px);
 }
 
@@ -371,55 +449,62 @@
   transform: none;
 }
 
-/* ── Light theme: tune panel (full pass) ─────────────────────────────── */
-
-[data-theme="light"] .tune-panel {
-  background:
-    linear-gradient(180deg, rgba(99, 102, 241, 0.04) 0%, rgba(15, 23, 42, 0.02) 100%);
-  border-color: var(--border-subtle);
-}
-
-/* Suggestion cards */
-[data-theme="light"] .tune-suggestion-card {
-  background: rgba(15, 23, 42, 0.02);
-  border-color: var(--border-subtle);
-}
-
-[data-theme="light"] .tune-suggestion-card:hover {
-  border-color: rgba(99, 102, 241, 0.25);
-  background: rgba(99, 102, 241, 0.04);
-}
-
-/* Restarting overlay */
-[data-theme="light"] .tune-restarting-overlay {
-  background: rgba(15, 23, 42, 0.75);
-}
-
 /* "Already well-tuned" / no suggestions message */
 .tune-no-suggestions {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   text-align: center;
-  padding: 4px 0 2px;
+  padding: 6px 0 2px;
   font-style: italic;
 }
 
-/* ── Spawn Wizard / Preset Editor performance advisor ─────────────────────── */
+/* ── Informational suggestion (no Apply button) ───────────────────────────── */
+
+.tune-suggestion-info {
+  border-style: dashed;
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.tune-suggestion-info:hover {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(245, 158, 11, 0.09);
+}
+
+/* ── Restarting overlay inside tune-results ──────────────────────────────── */
+
+.tune-restarting-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(10, 12, 20, 0.8);
+  backdrop-filter: blur(6px);
+  border-radius: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+/* ── Spawn Wizard / Preset Editor performance advisor ─────────────────────────── */
 
 .wizard-advisor {
   margin-top: 12px;
   padding: 10px 12px;
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
-  background: rgba(99, 102, 241, 0.03);
+  background:
+    linear-gradient(180deg, rgba(99, 102, 241, 0.04), rgba(15, 23, 42, 0.02));
 }
 
 .wizard-advisor-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: var(--text-2xs, 10px);
-  font-weight: 600;
+  font-size: var(--text-2xs);
+  font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--color-text-secondary);
@@ -432,16 +517,6 @@
 .wizard-advisor .tune-suggestion-card { align-items: flex-start; }
 .wizard-advisor .tune-suggestion-label { white-space: normal; }
 .wizard-advisor .tune-suggestion-desc { white-space: normal; overflow: visible; }
-
-/* Informational-only card (no Apply action) — amber, dashed. */
-.tune-suggestion-info {
-  border-style: dashed;
-  background: rgba(245, 158, 11, 0.05);
-}
-.tune-suggestion-info:hover {
-  border-color: rgba(245, 158, 11, 0.35);
-  background: rgba(245, 158, 11, 0.07);
-}
 
 /* ── MoE offload auto-tuner ────────────────────────────────────────────────── */
 
@@ -457,34 +532,41 @@
 
 .moe-autotune-btn,
 .moe-autotune-verify {
-  font-size: var(--text-xs, 12px);
-  font-weight: 600;
+  font-size: var(--text-xs);
+  font-weight: 650;
   padding: 5px 10px;
-  border-radius: var(--radius-btn, 8px);
+  border-radius: 999px;
   border: 1px solid var(--border-subtle);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
 }
 
 .moe-autotune-btn {
-  background: var(--color-primary, #6366f1);
-  color: #fff;
+  background: var(--accent-soft-bg);
+  color: var(--color-primary-light);
   border-color: transparent;
 }
-.moe-autotune-btn:hover { filter: brightness(1.08); }
-.moe-autotune-btn:active { transform: translateY(1px); }
+
+.moe-autotune-btn:hover {
+  background: var(--accent-soft-bg-strong);
+}
+
+.moe-autotune-btn:active {
+  transform: translateY(1px);
+}
 
 .moe-autotune-verify {
   background: transparent;
   color: var(--color-text-secondary);
 }
+
 .moe-autotune-verify:hover {
-  border-color: var(--color-primary, #6366f1);
+  border-color: var(--accent-soft-border);
   color: var(--color-text-primary);
 }
 
 .moe-autotune-status {
-  font-size: var(--text-2xs, 11px);
+  font-size: var(--text-2xs);
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   display: inline-block;
@@ -506,11 +588,12 @@
 
 .depth-sweep-summary {
   cursor: pointer;
-  font-size: var(--text-xs, 12px);
-  font-weight: 600;
+  font-size: var(--text-xs);
+  font-weight: 650;
   color: var(--color-text-secondary);
   user-select: none;
 }
+
 .depth-sweep-hint {
   font-weight: 400;
   color: var(--color-text-muted);
@@ -526,64 +609,54 @@
 
 .depth-sweep-btn {
   align-self: flex-start;
-  font-size: var(--text-xs, 12px);
-  font-weight: 600;
+  font-size: var(--text-xs);
+  font-weight: 650;
   padding: 5px 10px;
-  border-radius: var(--radius-btn, 8px);
-  border: 1px solid var(--color-primary, #6366f1);
+  border-radius: 999px;
+  border: 1px solid var(--accent-soft-border);
   background: transparent;
   color: var(--color-text-primary);
   cursor: pointer;
 }
-.depth-sweep-btn:hover { background: rgba(99, 102, 241, 0.08); }
+
+.depth-sweep-btn:hover {
+  background: rgba(99, 102, 241, 0.08);
+}
 
 .depth-sweep-status {
-  font-size: var(--text-2xs, 11px);
+  font-size: var(--text-2xs);
   color: var(--color-text-muted);
 }
 
 .depth-sweep-spark {
   width: 100%;
   height: 40px;
-  color: var(--color-primary, #6366f1);
+  color: var(--color-primary-light);
   display: block;
 }
 
 .depth-sweep-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--text-2xs, 11px);
+  font-size: var(--text-2xs);
   font-family: var(--font-mono);
 }
+
 .depth-sweep-table th,
 .depth-sweep-table td {
   text-align: right;
   padding: 3px 8px;
   border-bottom: 1px solid var(--border-subtle);
 }
+
 .depth-sweep-table th:first-child,
-.depth-sweep-table td:first-child { text-align: left; }
-.depth-sweep-table th {
-  color: var(--color-text-muted);
-  font-weight: 600;
+.depth-sweep-table td:first-child {
+  text-align: left;
 }
 
-/* ── Restarting overlay inside tune-results ──────────────────────────────── */
-
-.tune-restarting-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: rgba(15,17,21,0.75);
-  backdrop-filter: blur(4px);
-  border-radius: inherit;
-  font-size: var(--text-sm);
-  font-weight: 500;
+.depth-sweep-table th {
   color: var(--color-text-muted);
-  pointer-events: none;
+  font-weight: 700;
 }
 
 /* ── Responsive ──────────────────────────────────────────────────────────── */
@@ -606,6 +679,8 @@
   }
 }
 
+/* ── Reduced motion ───────────────────────────────────────────────────────── */
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -614,4 +689,60 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ── Light theme ─────────────────────────────────────────────────────────── */
+
+[data-theme="light"] .benchmark-dropdown-wrap {
+  background:
+    radial-gradient(circle at 18% 18%, var(--surface-card-ambient-a), transparent 28%),
+    radial-gradient(circle at 82% 12%, var(--surface-card-ambient-b), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 248, 255, 0.96));
+  border-color: var(--border-subtle);
+  box-shadow:
+    0 20px 48px rgba(15, 23, 42, 0.2),
+    0 6px 18px rgba(15, 23, 42, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="light"] .tune-suggestion-card {
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.03), rgba(15, 23, 42, 0.015));
+  border-color: var(--border-subtle);
+  box-shadow:
+    0 4px 12px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+[data-theme="light"] .tune-suggestion-card:hover {
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.05), rgba(15, 23, 42, 0.025));
+  box-shadow:
+    0 6px 16px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="light"] .tune-restarting-overlay {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+[data-theme="light"] .tune-rerun-btn {
+  background: transparent;
+  color: var(--color-text-muted);
+  border-color: var(--border-subtle);
+}
+
+[data-theme="light"] .tune-run-btn {
+  background: var(--accent-soft-bg);
+  color: #6366f1;
+  border-color: var(--accent-soft-border);
+}
+
+[data-theme="light"] .wizard-advisor {
+  background:
+    linear-gradient(180deg, rgba(99, 102, 241, 0.04), rgba(255, 255, 255, 0.02));
+}
+
+[data-theme="light"] .depth-sweep {
+  background: rgba(255, 255, 255, 0.5);
 }

@@ -1,5 +1,6 @@
 // ── Tune / Benchmark Panel ────────────────────────────────────────────────────
-// Drives the Performance panel on the monitor view.
+// Drives the Performance dropdown on the monitor view.
+// Triggered by "Benchmark" pill in the Inference Metrics section header.
 // Flow: idle → runBenchmark() → running → renderResults() → results
 //       results → applyAndRetune() → running → results (updated)
 
@@ -16,22 +17,67 @@ export function setTuneConfig(config) {
   _tuneConfig = config ? { ...config } : null;
 }
 
-/** Show the panel (called when server becomes connected). */
+/** Show the Benchmark pill (called when server becomes connected). */
 export function showTunePanel() {
-  const panel = document.getElementById('tune-panel');
-  if (panel) panel.style.display = '';
+  const pill = document.getElementById('benchmark-pill');
+  if (pill) pill.classList.add('show');
+  const group = document.getElementById('inference-log-tail-group');
+  if (group) group.style.display = '';
 }
 
-/** Hide and reset the panel (called when server disconnects). */
+/** Hide the Benchmark pill and close dropdown (called when server disconnects). */
 export function hideTunePanel() {
-  const panel = document.getElementById('tune-panel');
-  if (panel) panel.style.display = 'none';
+  const pill = document.getElementById('benchmark-pill');
+  if (pill) pill.classList.remove('show');
+  _closeDropdown();
   _resetToIdle();
 }
 
 export function initTunePanel() {
   document.getElementById('tune-run-btn')?.addEventListener('click', runBenchmark);
   document.getElementById('tune-rerun-btn')?.addEventListener('click', runBenchmark);
+
+  // Pill toggle: open/close dropdown
+  const pill = document.getElementById('benchmark-pill');
+  const wrap = document.getElementById('benchmark-dropdown-wrap');
+  if (pill && wrap) {
+    pill.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = wrap.classList.toggle('open');
+      pill.classList.toggle('is-active', isOpen);
+      if (isOpen) _positionDropdown(pill, wrap);
+    });
+
+    // Close when clicking outside
+    document.addEventListener('click', (e) => {
+      if (wrap.classList.contains('open') &&
+          !wrap.contains(e.target) &&
+          !pill.contains(e.target)) {
+        _closeDropdown();
+      }
+    });
+  }
+}
+
+function _positionDropdown(trigger, dropdown) {
+  const rect = trigger.getBoundingClientRect();
+  dropdown.style.top = (rect.bottom + 8) + 'px';
+  dropdown.style.left = Math.min(rect.left, window.innerWidth - 450) + 'px';
+  // Reposition on scroll/resize
+  const ro = new ResizeObserver(() => _positionDropdown(trigger, dropdown));
+  ro.observe(trigger);
+  window.addEventListener('scroll', () => _positionDropdown(trigger, dropdown), { passive: true });
+}
+
+function _closeDropdown() {
+  const wrap = document.getElementById('benchmark-dropdown-wrap');
+  const pill = document.getElementById('benchmark-pill');
+  if (wrap) {
+    wrap.classList.remove('open');
+    wrap.style.top = '';
+    wrap.style.left = '';
+  }
+  if (pill) pill.classList.remove('is-active');
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -112,7 +158,7 @@ function _renderResults(data) {
   const gradeEl = document.getElementById('tune-grade');
   if (gradeEl) {
     gradeEl.textContent = grade.letter.toUpperCase();
-    gradeEl.className   = `tune-grade-chip tune-grade-${grade.letter}`;
+    gradeEl.className   = `tune-grade-ring tune-grade-${grade.letter}`;
   }
   const gradeLabelEl = document.getElementById('tune-grade-label');
   if (gradeLabelEl) gradeLabelEl.textContent = grade.label;
