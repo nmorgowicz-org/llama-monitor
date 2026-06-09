@@ -1394,11 +1394,16 @@ pub async fn hf_resolve_origin(filename: &str, size_bytes: u64) -> Result<HfReso
     let stem = resolve_model_stem(filename);
     let mut errors = Vec::new();
 
-    // Build query with the stem
+    // Build queries with stem variants. For models whose names include "-MTP"
+    // (e.g. Carnice-Qwen3.6-MoE-35B-A3B-APEX-MTP-GGUF), the stem has "-MTP"
+    // stripped, so we also try a query that re-adds it.
+    let stem_with_mtp = format!("{stem}-MTP");
     let queries: Vec<String> = [
         stem.clone(),
         format!("{stem} GGUF"),
         stem.replace("Instruct", ""), // broader variant
+        stem_with_mtp.clone(),
+        format!("{stem_with_mtp} GGUF"),
     ]
     .iter()
     .filter(|q| q.len() >= 4)

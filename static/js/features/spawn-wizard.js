@@ -1176,7 +1176,16 @@ function getStepGuardState(step = wizardState.currentStep) {
     const specType = dom.specTypeSelect?.value || '';
     const showDraftInput = specType === 'draft-model' || specType.includes('draft-mtp');
     if (showDraftInput && !dom.draftModelInput?.value.trim()) {
-      return error('Enter a draft model path for speculative decoding.', dom.draftModelInput);
+      // If the model has built-in MTP heads and no external assistant is selected,
+      // no draft model path is needed.
+      const mtpModelPath = wizardState.model.hfFile || wizardState.model.path || '';
+      const hasBuiltInMtp = wizardState.arch.mtpDepth > 0 || detectMtpFromName(mtpModelPath);
+      const hasAssistantSelected = (wizardState.model.selectedDraftPath || '').trim().length > 0;
+      if (hasBuiltInMtp && !hasAssistantSelected) {
+        // OK — using built-in MTP, no external draft needed
+      } else {
+        return error('Enter a draft model path for speculative decoding.', dom.draftModelInput);
+      }
     }
     return info('Review the VRAM estimate and adjust context, KV cache, or auto-size before continuing.');
   }
