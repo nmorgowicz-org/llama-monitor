@@ -359,6 +359,63 @@ List GGUF files in a repo.
 - `mmproj_recommendation`: user-facing reason for that family preference, otherwise empty
 - `repo_id`: repository that owns the file; companion mmproj files can come from a linked static-quant repository
 
+### Quant Types
+
+Every GGUF file listed by `/api/hf/files` includes a `quant_type` field indicating how the quantization was produced:
+
+| `quant_type` | Label | Meaning |
+|---|---|---|
+| `standard` | Standard | Standard llama.cpp quantization (Q4_K_M, Q5_K_M, Q8_0, etc.). No calibration data required. |
+| `imatrix` | imatrix | Importance-matrix calibrated (typically mradermacher's `i1-*` naming). Generally better quality at the same bits-per-weight. |
+| `unsloth_dynamic` | UD (Unsloth) | Unsloth Dynamic quants (UD-*) use a mixed bits-per-weight approach per layer. Excellent quality/size tradeoff. |
+| `bnb` | BnB | bitsandbytes quantization (rare in GGUF land). |
+| `unknown` | Unknown | Could not be classified from filename. |
+
+Detection is done from filename patterns: `i1-` prefixes for imatrix, `-ud-` or `UD-` for Unsloth Dynamic, everything else defaults to standard.
+
+![Quantizer types — bartowski standard quants](../screenshots/spawn-wizard-step2-quantizer-bartowski.png)
+
+### Community Picks / Quick Picks
+
+The wizard discover panel includes quantizer quick-pick buttons to filter by known GGUF producers:
+
+| Quantizer | Style | Description |
+|---|---|---|
+| bartowski | standard | Standard GGUF quants, most popular, extremely reliable |
+| mradermacher | imatrix | imatrix specialist; `i1-*` files use importance calibration |
+| Unsloth | ud | UD dynamic quants, mixed bpw per layer, excellent quality/size |
+
+The community picks list is loaded from `GET /api/hf/community-picks` (curated, no auth required for reads; updating requires `api-token`).
+
+The quantizer author list is loaded from `GET /api/hf/quantizers` and can be customized via `PUT /api/hf/quantizers` (requires `api-token`). Send an empty array to reset to defaults.
+
+```json
+// PUT /api/hf/quantizers — update quantizer list
+{ "quantizers": [ { "username": "bartowski", "display_name": "bartowski", "description": "...", "quant_style": "standard" } ] }
+```
+
+```json
+// GET /api/hf/quantizers — response
+{ "ok": true, "quantizers": [ { "username": "bartowski", "display_name": "bartowski", "description": "...", "quant_style": "standard" } ], "is_custom": false }
+```
+
+- `is_custom`: true when the list was overridden by the user via `PUT`, false when using built-in defaults.
+
+![Community picks — MoE models](../screenshots/spawn-wizard-step2-community-picks-moe.png)
+
+### Sort/Filter Controls
+
+The HuggingFace search supports the following sort options (passed as `sort` in the `/api/hf/search` request):
+
+| Sort Value | Behavior |
+|---|---|
+| `downloads` | Most downloaded (default; best signal for quality community quants) |
+| `likes` | Most liked |
+| `trendingScore` | HuggingFace trending score |
+| `createdAt` | Newest first |
+
+The search and browse UI includes param size filter controls for narrowing results by model parameter count range. The discover panel surfaces "Trending" and model-specific category views (e.g., Qwen3, MoE).
+
 ### Download
 
 #### POST /api/hf/download
@@ -481,10 +538,42 @@ Scan local model directories from Ollama, LM Studio, Jan, GPT4All, and the Huggi
 
 ---
 
-## Model Introspection
+## Model Introspection (GGUF Metadata Reader)
+
+#### POST /api/models/gguf-meta
+Read the KV metadata header of a GGUF file directly without invoking an external binary. Works on GGUF v1, v2, and v3 files. Calling this on a 70B model is effectively instant because tensor weights are never touched.
+
+```json
+// Request
+{ "model_path": "/path/to/model.gguf" }
+
+// Response
+{
+  "ok": true,
+  "architecture": "qwen3_6",
+  "param_count": 27000000000,
+  "block_count": 64,
+  "head_count": 24,
+  "head_count_kv": 4,
+  "key_length": 256,
+  "context_length": 262144,
+  "embedding_length": 5120,
+  "feed_forward_length": null,
+  "expert_count": null,
+  "expert_used_count": null,
+  "mtp_depth": 0,
+  "n_attn_layers": 16
+}
+```
+
+- Requires: `api-token`
+- Replaces the old `llama-server --print-model-metadata` invocation for architecture detection
+- For hybrid DeltaNet models (Qwen3.5, Qwen3.6), `n_attn_layers` is computed via heuristics from the detected architecture and block count — only a subset of layers use traditional KV cache
+- For MoE models, `expert_count` and `expert_used_count` are populated from the file's `expert_count` and `expert_used_count` keys
+- The `architecture` field is the canonical key (`general.architecture`) used by llama.cpp to select its model loader, present in every well-formed GGUF regardless of filename
 
 #### POST /api/model/introspect
-Run `llama-server --print-model-metadata` on a local GGUF file and return parsed architecture fields.
+Legacy endpoint. Runs `llama-server --print-model-metadata` on a local GGUF file and returns parsed architecture fields. Results are cached in `~/.config/llama-monitor/model-cache/<sha256>.json`.
 
 ```json
 // Request
@@ -504,9 +593,43 @@ Run `llama-server --print-model-metadata` on a local GGUF file and return parsed
 ```
 
 - Requires: `api-token`
-- Results cached in `~/.config/llama-monitor/model-cache/<sha256>.json`; cache hit returns `"cached": true`
+- Cache hit returns `"cached": true`
 - Timeout: 30 seconds
 - Used to override `ModelArch` heuristics with ground-truth values from the file
+
+### HF Resolve Origin
+
+#### POST /api/hf/resolve-origin
+Identify the HuggingFace source of a local GGUF file from its filename. Searches HF for matching repos, scores candidates by filename match, file existence, and size, and returns a ranked list.
+
+```json
+// Request
+{ "filename": "Qwen3-30B-A3B-Q4_K_M.gguf", "size_bytes": 18700000000 }
+
+// Response
+{
+  "ok": true,
+  "confident": true,
+  "model_stem": "Qwen3-30B-A3B",
+  "candidates": [
+    {
+      "repo_id": "bartowski/Qwen3-30B-A3B-GGUF",
+      "confidence": 0.95,
+      "reason": "Filename and size match",
+      "preview_tags": ["gguf", "text-generation"],
+      "card_url": "https://huggingface.co/bartowski/Qwen3-30B-A3B-GGUF",
+      "family": "qwen3.6"
+    }
+  ],
+  "errors": []
+}
+```
+
+- Requires: `api-token`
+- `confident`: true when the top candidate's confidence score is >= 0.8
+- `model_stem`: the filename-derived stem used for search (quant suffixes, version tags, and MTP markers stripped)
+- `errors`: any errors encountered during resolution (e.g., network failures); may be non-empty even when candidates are returned
+- Candidate scoring considers filename similarity, file existence in the repo, size match, download count, and GGUF tag presence
 
 ---
 
@@ -553,6 +676,58 @@ Download and install a llama.cpp release binary.
 - Copies the full release archive (not just `llama-server`) to `~/.config/llama-monitor/bin/` — CUDA/Vulkan/SYCL builds require their shared libraries to be co-located
 - All extracted files get `chmod 755` on Unix
 - Default install path: `~/.config/llama-monitor/bin/llama-server` (configurable in Settings)
+
+---
+
+## Benchmark
+
+#### POST /api/benchmark
+Run a quick performance test against the running llama-server. Sends a fixed prompt, measures prompt processing throughput, generation throughput, and time-to-first-token, then classifies the result.
+
+```json
+// Request
+{}
+
+// Response (successful run)
+{
+  "prompt_tokens_per_second": 1245.32,
+  "gen_tokens_per_second": 12.8,
+  "time_to_first_token_ms": 890.0,
+  "verdict": "moderate",
+  "hints": ["Slow first-token response; try enabling flash attention."],
+  "suggestions": [
+    { "label": "Enable flash attention", "description": "Cuts time-to-first-token and reduces VRAM pressure at large context.", "param": "flash_attn", "value": "on" }
+  ]
+}
+```
+
+- Requires: `api-token`
+- 15-second cooldown between runs to prevent repeated heavy loads on the server
+- Returns `429 Too Many Requests` with `"seconds_remaining"` if called during cooldown
+- Returns an error if no llama-server is running
+
+### Verdicts
+
+The verdict is determined by generation throughput and time-to-first-token:
+
+| Verdict | Condition |
+|---|---|
+| `good` | gen >= 15 t/s AND TTFT <= 1500 ms |
+| `moderate` | gen >= 4 t/s AND TTFT <= 3000 ms |
+| `poor` | below moderate thresholds |
+
+### Hints and Suggestions
+
+Hints are plain-text diagnostics. Suggestions are structured one-click fixes:
+
+| Suggestion | Trigger Condition |
+|---|---|
+| Enable flash attention | TTFT > 1500 ms |
+| Reduce context window | gen < 5 t/s |
+| Increase batch size | prompt < 300 t/s |
+| Increase n_cpu_moe | MoE model detected |
+
+For MoE models, suggestions include a specific `n_cpu_moe` value computed from the model size and available VRAM.
 
 ---
 
@@ -645,6 +820,8 @@ Compute optimal settings for a model + hardware combination.
 
 - `use_case`: `"general"` | `"agentic"` | `"roleplay"`
 
+**MTP Depth:** For models with Multi-Token Prediction capability (`mtp_depth > 0`), the VRAM estimator includes the MTP prediction-head overhead in the `mtp_bytes` field of the breakdown. The overhead is estimated as 1.5% of the model size per MTP depth level. This is visible in the VRAM Breakdown Bar as a purple segment labeled "MTP".
+
 #### POST /api/vram/quant-compare
 Pre-download quant comparison table for a model. Shown in the wizard as the **Quant Advisor** panel.
 
@@ -710,6 +887,7 @@ Returns model-family sampling recommendations for the Step 4 wizard review form 
 - `target_path` for downloads is canonicalized and verified to remain within `models_dir`.
 - Download rate-limited: 10-second cooldown between starts, max 5 concurrent.
 - Model introspection runs `llama-server` as a subprocess with a 30-second timeout; never passes unsanitized user input as shell arguments.
+- Benchmark is rate-limited with a 15-second cooldown to prevent repeated heavy loads on the running llama-server.
 
 ---
 
@@ -720,7 +898,8 @@ Returns model-family sampling recommendations for the Step 4 wizard review form 
 | `src/llama/vram_estimator.rs` | All VRAM estimation logic and `ModelArch` |
 | `src/llama/spawn_wizard.rs` | `auto_size` wrapper called by the wizard API |
 | `src/model_download.rs` | Streaming download manager with resume support |
-| `src/hf/mod.rs` | HuggingFace API client, file listing, token management |
+| `src/llama/gguf_meta.rs` | GGUF metadata reader (binary header parsing) |
+| `src/hf/mod.rs` | HuggingFace API client, file listing, token management, resolve origin, quantizers |
 | `src/web/api.rs` | All wizard-related route handlers |
 | `static/js/features/spawn-wizard.js` | Wizard frontend (all 5 steps) |
 | `static/css/spawn-wizard.css` | Wizard styles |

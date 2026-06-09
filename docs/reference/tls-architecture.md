@@ -27,6 +27,42 @@ llama-monitor supports four TLS modes, configured via:
 Config is persisted to:
 - ~/.config/llama-monitor/tls-config.json
 
+### tls-config.json Schema
+
+```json
+{
+  "mode": "none",
+  "acme": {
+    "enabled": false,
+    "fqdn": "",
+    "environment": "staging",
+    "dnsProvider": "cloudflare",
+    "dnsConfig": {},
+    "validationDelay": 300,
+    "lastRenewal": null,
+    "certPath": "",
+    "keyPath": ""
+  },
+  "customCertPath": "",
+  "customKeyPath": ""
+}
+```
+
+| Field | Type | Values |
+|-------|------|--------|
+| `mode` | string | `"none"`, `"self-signed"`, `"custom"`, `"acme"` |
+| `acme.enabled` | boolean | Whether ACME is active |
+| `acme.fqdn` | string | Fully-qualified domain name |
+| `acme.environment` | string | `"staging"` or `"production"` |
+| `acme.dnsProvider` | string | DNS provider name (e.g., `"cloudflare"`) |
+| `acme.dnsConfig` | object | Provider-specific credentials |
+| `acme.validationDelay` | integer | Delay in seconds before DNS validation |
+| `acme.lastRenewal` | string or null | ISO timestamp of last renewal |
+| `acme.certPath` | string | Path to ACME-managed cert |
+| `acme.keyPath` | string | Path to ACME-managed key |
+| `customCertPath` | string | Path to custom certificate |
+| `customKeyPath` | string | Path to custom private key |
+
 Modes:
 
 1) No HTTPS (HTTP only)

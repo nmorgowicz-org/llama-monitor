@@ -364,6 +364,143 @@ Returns model-family sampling recommendations used by the spawn wizard and prese
 Auth: api-token.
 Creates a preset from a full `ModelPreset` payload. If `id` is omitted, serde supplies one.
 
+Request body (full `ModelPreset` shape, all fields optional with defaults):
+
+```json
+{
+  "id": "default-1",
+  "name": "Example: Small Model 128K context",
+  "model_path": "",
+  "context_size": 128000,
+  "ctk": "f16",
+  "ctv": "f16",
+  "tensor_split": "",
+  "batch_size": 2048,
+  "ubatch_size": 2048,
+  "no_mmap": true,
+  "ngram_spec": true,
+  "parallel_slots": 1,
+  "temperature": null,
+  "top_p": null,
+  "top_k": null,
+  "min_p": null,
+  "repeat_penalty": null,
+  "presence_penalty": null,
+  "n_cpu_moe": null,
+  "gpu_layers": null,
+  "mlock": false,
+  "flash_attn": "",
+  "split_mode": "",
+  "main_gpu": null,
+  "threads": null,
+  "threads_batch": null,
+  "prio": null,
+  "prio_batch": null,
+  "rope_scaling": "",
+  "rope_freq_base": null,
+  "rope_freq_scale": null,
+  "draft_model": "",
+  "draft_min": null,
+  "draft_max": null,
+  "spec_ngram_size": null,
+  "spec_type": null,
+  "spec_default": false,
+  "seed": null,
+  "enable_thinking": null,
+  "preserve_thinking": null,
+  "reasoning": null,
+  "reasoning_budget": null,
+  "reasoning_budget_message": null,
+  "system_prompt_file": "",
+  "extra_args": "",
+  "bind_host": null,
+  "port": null,
+  "hf_repo": null,
+  "chat_template_file": null,
+  "mmproj": null,
+  "grammar": null,
+  "json_schema": null,
+  "cache_type_k": null,
+  "cache_type_v": null,
+  "max_tokens": null,
+  "api_key": null,
+  "alias": null,
+  "benchmark_mode": false,
+  "fit_enabled": null,
+  "fit_ctx": null,
+  "fit_target": null,
+  "fit_print": null,
+  "kv_unified": null,
+  "cache_idle_slots": null,
+  "cache_ram_mib": null,
+  "ignore_eos": false
+}
+```
+
+All fields use `#[serde(default)]` for backward compatibility.
+
+**Spawn V2 extended fields** (added after initial preset schema):
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `hf_repo` | Option<String> | null | HF repo identifier for model download |
+| `chat_template_file` | Option<String> | null | Path to chat template file |
+| `mmproj` | Option<String> | null | Multimodal projector path |
+| `grammar` | Option<String> | null | Grammar constraint file |
+| `json_schema` | Option<String> | null | JSON schema constraint |
+| `cache_type_k` | Option<String> | null | KV cache type for keys |
+| `cache_type_v` | Option<String> | null | KV cache type for values |
+| `max_tokens` | Option<u64> | null | Max tokens limit |
+| `enable_thinking` | Option<bool> | null | Enable thinking mode |
+| `preserve_thinking` | Option<bool> | null | Preserve thinking content |
+| `reasoning` | Option<String> | null | Reasoning mode |
+| `reasoning_budget` | Option<i32> | null | Reasoning token budget |
+| `reasoning_budget_message` | Option<String> | null | Budget limit message |
+| `api_key` | Option<String> | null | API key for hosted endpoint |
+| `alias` | Option<String> | null | Display alias for the preset |
+| `benchmark_mode` | bool | false | Run in benchmark mode |
+| `fit_enabled` | Option<bool> | null | Auto-fit context to available VRAM |
+| `fit_ctx` | Option<u32> | null | Target context size for fit mode |
+| `fit_target` | Option<String> | null | Fit target identifier |
+| `fit_print` | Option<bool> | null | Print fit diagnostics |
+| `kv_unified` | Option<bool> | null | Unified KV cache |
+| `cache_idle_slots` | Option<bool> | null | Cache idle slots |
+| `cache_ram_mib` | Option<i32> | null | Max RAM for cache (MiB) |
+| `ignore_eos` | bool | false | Ignore end-of-sequence token |
+| `prio` | Option<i32> | null | Process priority |
+| `prio_batch` | Option<i32> | null | Batch process priority |
+| `bind_host` | Option<String> | null | Bind address override |
+| `port` | Option<u16> | null | Port override |
+
+Speculative decoding V2 fields:
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `spec_type` | Option<String> | null | Speculative decoding type |
+| `spec_default` | bool | false | Use default spec settings |
+| `spec_draft_n_max` | Option<u32> | null | Max draft tokens |
+| `spec_draft_n_min` | Option<u32> | null | Min draft tokens |
+| `spec_draft_p_split` | Option<f32> | null | Draft split threshold |
+| `spec_draft_p_min` | Option<f32> | null | Draft min probability |
+| `spec_draft_ngl` | Option<i32> | null | Draft NGL layers |
+| `spec_draft_device` | Option<String> | null | Draft device |
+| `spec_draft_cpu_moe` | bool | false | CPU MoE for draft |
+| `spec_draft_n_cpu_moe` | Option<i32> | null | CPU MoE count for draft |
+| `spec_draft_type_k` | Option<String> | null | Draft key type |
+| `spec_draft_type_v` | Option<String> | null | Draft value type |
+| `spec_ngram_mod_n_min` | Option<u32> | null | Ngram mod min |
+| `spec_ngram_mod_n_max` | Option<u32> | null | Ngram mod max |
+| `spec_ngram_mod_n_match` | Option<u32> | null | Ngram mod match |
+| `spec_ngram_simple_size_n` | Option<u32> | null | Ngram simple size N |
+| `spec_ngram_simple_size_m` | Option<u32> | null | Ngram simple size M |
+| `spec_ngram_simple_min_hits` | Option<u32> | null | Ngram simple min hits |
+| `spec_ngram_map_k_size_n` | Option<u32> | null | Ngram map-k size N |
+| `spec_ngram_map_k_size_m` | Option<u32> | null | Ngram map-k size M |
+| `spec_ngram_map_k_min_hits` | Option<u32> | null | Ngram map-k min hits |
+| `spec_ngram_map_k4v_size_n` | Option<u32> | null | Ngram map-k4v size N |
+| `spec_ngram_map_k4v_size_m` | Option<u32> | null | Ngram map-k4v size M |
+| `spec_ngram_map_k4v_min_hits` | Option<u32> | null | Ngram map-k4v min hits |
+
 Response:
 
 ```json
@@ -372,7 +509,7 @@ Response:
 
 ### `PUT /api/presets/{id}`
 Auth: api-token.
-Updates the preset matched by the path `id`.
+Updates the preset matched by the path `id`. Accepts the same `ModelPreset` shape as POST.
 
 ### `DELETE /api/presets/{id}`
 Auth: api-token.
@@ -484,6 +621,7 @@ Example:
   "llama_server_path": "",
   "llama_server_cwd": "",
   "models_dir": "",
+  "extra_models_dirs": [],
   "server_endpoint": "",
   "llama_poll_interval": 1,
   "remote_agent_url": "",
@@ -511,6 +649,14 @@ Example:
 }
 ```
 
+New field:
+
+| Field | Type | Default |
+|-------|------|---------|
+| `extra_models_dirs` | array of strings | `[]` |
+
+`extra_models_dirs` is an array of additional directories to scan for models beyond the primary `models_dir`. Useful for models distributed across multiple drives or folders.
+
 ### `GET /api/settings/full`
 Returns the same `UiSettings` object, but with the real `remote_agent_token` value instead of a masked placeholder.
 
@@ -528,6 +674,7 @@ Example:
   "llama_server_path": "",
   "llama_server_cwd": "",
   "models_dir": "",
+  "extra_models_dirs": [],
   "server_endpoint": "",
   "llama_poll_interval": 1,
   "remote_agent_url": "",
@@ -1765,29 +1912,133 @@ Start a streaming HF model download.
   - Path traversal protection (reject `..`, leading `/`, leading `\`).
   - `local_path` validated inside `models_dir`.
 
+Request:
+
+```json
+{
+  "repo_id": "unsloth/Qwen3.5-27B-Q4_K_M-GGUF",
+  "filename": "qwen3.5-27b-q4_k_m.gguf",
+  "local_path": "models/Qwen3.5-27B-Q4_K_M.gguf"
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "job_id": "abc123"
+}
+```
+
 ### `GET /api/models/download/:id/status`
 Poll download progress.
 
+- Auth: `api-token`.
+- Query: path parameter `:id` is the job ID returned by the download start endpoint.
+
+Response (downloading):
+
+```json
+{
+  "job_id": "abc123",
+  "status": "downloading",
+  "progress": 0.45,
+  "bytes_downloaded": 1234567890,
+  "bytes_total": 2765432100,
+  "speed_bytes_per_sec": 5000000
+}
+```
+
+Response (complete):
+
+```json
+{
+  "job_id": "abc123",
+  "status": "complete",
+  "progress": 1.0,
+  "path": "/models/Qwen3.5-27B-Q4_K_M.gguf"
+}
+```
+
+Response (failed):
+
+```json
+{
+  "job_id": "abc123",
+  "status": "failed",
+  "error": "Connection timeout"
+}
+```
+
 ### `POST /api/models/download/:id/cancel`
 Cancel an active download.
+
+- Auth: `api-token`.
+- Path parameter `:id` is the job ID.
+
+Response:
+
+```json
+{ "ok": true }
+```
 
 ### `GET /api/hf/card`
 Fetch raw model card markdown by `repo` param.
 
 - Auth: no auth (public).
+- Query params: `repo` (e.g., `unsloth/Qwen3.5-27B-Q4_K_M-GGUF`).
 - Used for in-app model card display.
 
 ### `GET /api/hf/token`
 Check if HF token is set (masked).
 
+- Auth: `api-token`.
+
+Response:
+
+```json
+{ "has_token": true }
+```
+
 ### `PUT /api/hf/token`
 Set/update HF token (written to `hf-token` with mode 600).
+
+- Auth: `api-token`.
+
+Request:
+
+```json
+{ "token": "hf_..." }
+```
+
+Response:
+
+```json
+{ "ok": true }
+```
 
 ### `DELETE /api/hf/token`
 Remove stored HF token.
 
+- Auth: `api-token`.
+
+Response:
+
+```json
+{ "ok": true }
+```
+
 ### `GET /api/hf/download-dir`
 Return effective models download directory.
+
+- Auth: `api-token`.
+
+Response:
+
+```json
+{ "dir": "/Users/nick/.config/llama-monitor/models" }
+```
 
 ## System and Hardware
 
