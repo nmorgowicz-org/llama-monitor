@@ -596,7 +596,8 @@ function renderCapabilityPopover(d, l, generationAvailable, contextLiveAvailable
     const popover = document.getElementById('capability-popover');
     if (!popover) return;
 
-    // Fallback to global app-state if arguments are missing (e.g. on first click)
+    // No-op when called with no explicit data and no live wsData — preserves existing content
+    if (d === undefined && l === undefined && !wsData) return;
     const data = d || wsData || {};
     const lama = l || (wsData ? wsData.llama : null);
     const genAvail = generationAvailable !== undefined ? generationAvailable : (lama ? !!lama.slots_processing : false);

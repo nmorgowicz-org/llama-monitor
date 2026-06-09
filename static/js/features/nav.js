@@ -87,7 +87,7 @@ function initEndpointStatus() {
         const open = endpointStatusWrap.classList.toggle('open');
         endpointStatus.setAttribute('aria-expanded', open ? 'true' : 'false');
         if (open) {
-            renderCapabilityPopover();
+            renderCapabilityPopover(wsData, wsData?.llama);
             positionPopover();
         }
     });

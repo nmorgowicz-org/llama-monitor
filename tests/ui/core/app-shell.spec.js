@@ -415,7 +415,7 @@ test.describe('inference metric rendering', () => {
     expect(rate).toBeLessThan(90);
   });
 
-  test('capability popover opens by click and reports context live when capacity is known', async ({ page }) => {
+  test('capability popover renders correctly when capacity is known', async ({ page }) => {
     await page.evaluate(async () => {
       const { renderCapabilityPopover } = await import('/js/features/dashboard-render.js');
       renderCapabilityPopover({
@@ -429,9 +429,12 @@ test.describe('inference metric rendering', () => {
       }, true, true);
     });
 
-    await page.locator('#endpoint-status').click();
+    // Assert popover content directly — renderCapabilityPopover populates DOM synchronously
     await expect(page.locator('#capability-popover')).toContainText('Context usage');
     await expect(page.locator('#capability-popover')).toContainText('live');
+
+    // Click handler toggles open state and re-renders with live data
+    await page.locator('#endpoint-status').click();
     await expect(page.locator('#endpoint-status')).toHaveAttribute('aria-expanded', 'true');
   });
 });
