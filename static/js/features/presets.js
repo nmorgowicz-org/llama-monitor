@@ -1056,7 +1056,8 @@ export function initPresets() {
         }
         try {
             const auth = window.authHeaders ? window.authHeaders() : {};
-            const copy = { ...p, id: null, name: p.name + ' (copy)' };
+            const copy = { ...p, name: p.name + ' (copy)' };
+            delete copy.id;
             const resp = await fetch('/api/presets', {
                 method: 'POST',
                 headers: { ...auth, 'Content-Type': 'application/json' },
