@@ -441,18 +441,7 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     }
 
     let system_metrics: Arc<Mutex<system::SystemMetrics>> =
-        Arc::new(Mutex::new(system::SystemMetrics {
-            cpu_name: String::new(),
-            cpu_temp: 0.0,
-            cpu_temp_available: false,
-            cpu_load: 0,
-            cpu_clock_mhz: 0,
-            ram_total_gb: 0.0,
-            ram_used_gb: 0.0,
-            motherboard: String::new(),
-            p_cores: 0,
-            e_cores: 0,
-        }));
+        Arc::new(Mutex::new(system::SystemMetrics::default()));
 
     {
         let system_metrics = Arc::clone(&system_metrics);
