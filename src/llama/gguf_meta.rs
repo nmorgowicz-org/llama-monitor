@@ -661,4 +661,61 @@ mod tests {
             gguf.block_count.unwrap()
         );
     }
+
+    #[ignore]
+    #[test]
+    fn gemma4_31b_real_gguf_architecture() {
+        let home = std::env::var("HOME").ok();
+        let path = home
+            .as_ref()
+            .map(|h| {
+                Path::new(h).join(".config/llama-monitor/models/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf")
+            })
+            .and_then(|p| if p.exists() { Some(p) } else { None });
+        let Some(path) = path else {
+            return;
+        };
+        let gguf = read_gguf_metadata(&path).expect("read gemma4-31b gguf");
+        assert_eq!(
+            gguf.architecture.as_deref(),
+            Some("gemma4"),
+            "Gemma4-31B GGUF should report gemma4 architecture"
+        );
+        assert_eq!(
+            gguf.block_count,
+            Some(60),
+            "Gemma4-31B should have 60 layers"
+        );
+        assert!(
+            gguf.head_count_kv.is_none(),
+            "Gemma4 GGUF does not expose head_count_kv (uses separate global/local KV heads)"
+        );
+    }
+
+    #[ignore]
+    #[test]
+    fn qwen3_coder_next_real_gguf_architecture() {
+        let home = std::env::var("HOME").ok();
+        let path = home.as_ref().map(|h| {
+            Path::new(h).join(".config/llama-monitor/models/Qwen3-Coder-Next-Huihui-Opus-4.6-Reasoning-Distilled-abliterated-IQ4_XS.gguf")
+        }).and_then(|p| if p.exists() { Some(p) } else { None });
+        let Some(path) = path else {
+            return;
+        };
+        let gguf = read_gguf_metadata(&path).expect("read qwen3 coder next gguf");
+        assert_eq!(
+            gguf.architecture.as_deref(),
+            Some("qwen3next"),
+            "Qwen3-Coder-Next GGUF should report qwen3next architecture"
+        );
+        assert_eq!(
+            gguf.block_count,
+            Some(48),
+            "Qwen3-Coder-Next should have 48 layers"
+        );
+        assert!(
+            gguf.expert_count.is_some(),
+            "Qwen3-Coder-Next is MoE (should have expert_count)"
+        );
+    }
 }

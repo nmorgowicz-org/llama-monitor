@@ -2880,11 +2880,11 @@ body.setup-active .sidebar-nav {
 }
 
 .launch-card-vram-seg--kv {
-  background: rgba(20, 184, 166, 0.7);
+  background: rgba(217, 119, 6, 0.8);
 }
 
 .launch-card-vram-seg--extras {
-  background: rgba(245, 158, 11, 0.6);
+  background: rgba(156, 163, 175, 0.5);
 }
 
 .launch-card-vram-total {

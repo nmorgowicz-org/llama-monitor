@@ -1353,12 +1353,32 @@ fn resolve_model_stem(filename: &str) -> String {
         .unwrap_or(filename)
         .to_string();
 
-    // Strip quant suffix: last token after '-' that starts with Q, I, B, or U (e.g. Q4_K_XL, UD-…)
-    if let Some(pos) = stem.rfind('-') {
-        let suffix = &stem[pos + 1..];
-        if matches!(suffix.chars().next(), Some('Q' | 'I' | 'B' | 'U')) && suffix.len() > 2 {
-            stem = stem[..pos].to_string();
+    // Strip quant suffix: handle two-token patterns like "-I-Quality", "-Q8-MTP"
+    // where a single-char quant indicator (I/Q/B/F) precedes a descriptor token.
+    // Also handles single-token suffixes like "-Q4_K_M".
+    let parts: Vec<&str> = stem.split('-').collect();
+    if parts.len() >= 3 {
+        let second_last = parts[parts.len() - 2];
+        let last = parts[parts.len() - 1];
+        let is_quant_indicator = matches!(second_last.chars().next(), Some('I' | 'Q' | 'B' | 'F'));
+        if is_quant_indicator
+            && second_last.len() == 1
+            && matches!(
+                last.chars().next(),
+                Some('Q' | 'I' | 'B' | 'U' | 'M' | 'F' | 'S')
+            )
+            && last.len() > 2
+        {
+            // Strip the two-token quant suffix (e.g. "-I-Quality", "-Q8-MTP")
+            let cutoff = stem.len() - second_last.len() - 1 - last.len();
+            stem = stem[..cutoff].to_string();
         }
+    }
+    if stem.rfind('-').is_some_and(|pos| {
+        let suffix = &stem[pos + 1..];
+        matches!(suffix.chars().next(), Some('Q' | 'I' | 'B' | 'U')) && suffix.len() > 2
+    }) {
+        stem = stem[..stem.rfind('-').unwrap()].to_string();
     }
 
     // Strip Unsloth-distilled marker "-UD" or "-ud" if present

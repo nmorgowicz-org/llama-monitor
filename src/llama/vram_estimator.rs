@@ -2538,4 +2538,111 @@ mod tests {
             "vision encoder mmproj ≈ 2.58 GB"
         );
     }
+
+    #[ignore]
+    #[test]
+    fn test_qwen3_coder_next_vram_estimate_integration() {
+        // Integration test: verify hybrid DeltaNet model shows correct KV cache
+        let home = std::env::var("HOME").ok();
+        let path = home.as_ref().map(|h| {
+            std::path::Path::new(h).join(".config/llama-monitor/models/Qwen3-Coder-Next-Huihui-Opus-4.6-Reasoning-Distilled-abliterated-IQ4_XS.gguf")
+        }).and_then(|p| if p.exists() { Some(p) } else { None });
+        let Some(path) = path else {
+            return;
+        };
+
+        let gguf = crate::llama::gguf_meta::read_gguf_metadata(&path).expect("read gguf");
+        let meta = gguf.to_model_metadata();
+        let param_b = gguf.param_b().unwrap_or(0.0);
+        let arch = meta.to_arch(path.to_str().unwrap(), param_b);
+
+        assert!(
+            arch.is_hybrid_attn(),
+            "Qwen3-Coder-Next should be hybrid DeltaNet"
+        );
+        assert_eq!(
+            arch.n_attn_layers, 12,
+            "Only 12 of 48 layers should use KV cache"
+        );
+        assert!(
+            arch.n_attn_layers < arch.n_layers,
+            "Hybrid model: n_attn_layers ({}) < n_layers ({})",
+            arch.n_attn_layers,
+            arch.n_layers
+        );
+
+        // Compute KV cache at 131K context
+        let kv = kv_cache_bytes(&arch, 131_072, 1, "q8_0", "q8_0");
+        let kv_gb = kv as f64 / 1e9;
+
+        // Should be significant (> 1 GB) but not use all 48 layers (which would be ~4× too large)
+        assert!(
+            kv_gb > 1.0,
+            "Qwen3-Coder-Next KV cache at 131K should be > 1 GB (got {:.2} GB)",
+            kv_gb
+        );
+        // Max ~2 GB expected: 12 layers × 2 KV heads × 256 head_dim × 131072 ctx × 2 (K+V) × 1 byte (q8_0)
+        assert!(
+            kv_gb < 4.0,
+            "Qwen3-Coder-Next KV cache should be < 4 GB (got {:.2} GB; likely using wrong layer count)",
+            kv_gb
+        );
+    }
+
+    #[test]
+    fn qwen36_27b_kv_at_131k_and_255k() {
+        // Qwen3.6-27B dense: 64 layers, 16 attn, 4 KV heads, head_dim 256
+        let arch = ModelArch::from_name_and_params("Qwen3.6-27B-Q4_K_M.gguf", 27.0);
+        assert!(arch.is_hybrid_attn(), "Qwen3.6-27B is hybrid DeltaNet");
+        assert_eq!(arch.n_attn_layers, 16, "16 of 64 layers use KV cache");
+        assert_eq!(arch.n_kv_heads, 4);
+        assert_eq!(arch.head_dim, 256);
+
+        // Expected KV at 131K, q8_0: 16 × 2 × 4 × 256 × 131072 × 1 = 4,294,967,296 bytes ≈ 4.29 GB
+        let kv_131k = kv_cache_bytes(&arch, 131_072, 1, "q8_0", "q8_0");
+        let kv_131k_gb = kv_131k as f64 / 1e9;
+        assert!(
+            (kv_131k_gb - 4.29).abs() < 0.02,
+            "Qwen3.6-27B KV at 131K: expected ~4.29 GB, got {:.2}",
+            kv_131k_gb
+        );
+
+        // Expected KV at 255K, q8_0: 16 × 2 × 4 × 256 × 255000 × 1 ≈ 8.32 GB
+        let kv_255k = kv_cache_bytes(&arch, 255_000, 1, "q8_0", "q8_0");
+        let kv_255k_gb = kv_255k as f64 / 1e9;
+        assert!(
+            (kv_255k_gb - 8.32).abs() < 0.05,
+            "Qwen3.6-27B KV at 255K: expected ~8.32 GB, got {:.2}",
+            kv_255k_gb
+        );
+    }
+
+    #[test]
+    fn qwen36_35b_a3b_kv_at_131k_and_255k() {
+        // Qwen3.6-35B-A3B MoE: 40 layers, 10 attn, 2 KV heads, head_dim 256
+        let arch = ModelArch::from_name_and_params("Qwen3.6-35B-A3B-Q4_K_M.gguf", 35.0);
+        assert!(arch.is_hybrid_attn(), "Qwen3.6-35B-A3B is hybrid DeltaNet");
+        assert!(arch.is_moe(), "Qwen3.6-35B-A3B is MoE");
+        assert_eq!(arch.n_attn_layers, 10, "10 of 40 layers use KV cache");
+        assert_eq!(arch.n_kv_heads, 2);
+        assert_eq!(arch.head_dim, 256);
+
+        // Expected KV at 131K, q8_0: 10 × 2 × 2 × 256 × 131072 × 1 = 1,342,177,280 bytes ≈ 1.34 GB
+        let kv_131k = kv_cache_bytes(&arch, 131_072, 1, "q8_0", "q8_0");
+        let kv_131k_gb = kv_131k as f64 / 1e9;
+        assert!(
+            (kv_131k_gb - 1.34).abs() < 0.02,
+            "Qwen3.6-35B-A3B KV at 131K: expected ~1.34 GB, got {:.2}",
+            kv_131k_gb
+        );
+
+        // Expected KV at 255K, q8_0: 10 × 2 × 2 × 256 × 255000 × 1 ≈ 2.61 GB
+        let kv_255k = kv_cache_bytes(&arch, 255_000, 1, "q8_0", "q8_0");
+        let kv_255k_gb = kv_255k as f64 / 1e9;
+        assert!(
+            (kv_255k_gb - 2.61).abs() < 0.03,
+            "Qwen3.6-35B-A3B KV at 255K: expected ~2.61 GB, got {:.2}",
+            kv_255k_gb
+        );
+    }
 }
