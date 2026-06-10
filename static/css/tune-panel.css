@@ -577,6 +577,22 @@
   word-break: break-word;
 }
 
+.moe-autotune-status .moe-autotune-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--color-text-muted);
+  border-top-color: var(--color-info);
+  border-radius: 50%;
+  animation: moe-autotune-spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+@keyframes moe-autotune-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ── Depth sweep ───────────────────────────────────────────────────────────── */
 
 .depth-sweep {

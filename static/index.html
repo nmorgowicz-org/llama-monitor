@@ -253,8 +253,8 @@
                             <span class="setup-section-title">Manual</span>
                         </div>
                         <div class="setup-card-form">
-                            <input type="text" class="setup-input" id="setup-endpoint-url" placeholder="http://192.168.x.x:8080" autocomplete="off">
-                            <input type="password" class="setup-input" id="setup-endpoint-api-key" placeholder="API key (optional)">
+                            <input type="url" class="setup-input" id="setup-endpoint-url" placeholder="http://192.168.x.x:8080" autocomplete="off" required aria-label="Server URL">
+                            <input type="password" class="setup-input" id="setup-endpoint-api-key" placeholder="API key (optional)" aria-label="API key (optional)">
                             <button class="setup-btn setup-btn-primary setup-btn-connect" id="setup-attach-btn">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
                                 Connect
@@ -355,8 +355,7 @@
                     </div>
                     <button type="button" id="setup-spawn-wizard-btn">Wizard</button>
                     <a id="setup-manage-presets-link"></a>
-                    <!-- Removed: setup-attach-remote-btn (no longer a toggle) -->
-                    <div id="setup-attach-drawer"></div>
+                    <!-- Removed: setup-attach-remote-btn and setup-attach-drawer (no longer a toggle) -->
                 </div>
             </div>
 
@@ -2219,7 +2218,7 @@
                     <label class="modal-field" title="Display name for this session">
                         Session Name
                         <input type="text" id="modal-session-name" required>
-                        <span class="field-error-msg">Session name is required</span>
+                        <span class="field-error-msg" role="alert">Session name is required</span>
                     </label>
                     <label class="modal-field" title="Session mode">
                         Session Mode
@@ -2270,7 +2269,7 @@
 </div>
 
 <!-- Preset Modal -->
-<div class="modal-overlay" id="preset-modal">
+<div class="modal-overlay" id="preset-modal" role="dialog" aria-modal="true" aria-label="Preset editor">
     <div class="preset-editor-shell">
         <!-- Header -->
         <div class="preset-editor-header">
@@ -2292,47 +2291,47 @@
 
                 <!-- Left nav -->
                 <nav class="preset-editor-nav">
-                    <button type="button" class="preset-nav-item active" data-section="model">
+                    <button type="button" class="preset-nav-item active" role="tab" aria-pressed="true" data-section="model">
                         <svg class="pni-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
                         <span class="pni-dot" style="--dot-color: rgba(99,102,241,0.8)"></span>
                         <span class="pni-label">Model</span>
                     </button>
-                    <button type="button" class="preset-nav-item" data-section="context">
+                    <button type="button" class="preset-nav-item" role="tab" aria-pressed="false" data-section="context">
                         <svg class="pni-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
                         <span class="pni-dot" style="--dot-color: rgba(6,182,212,0.8)"></span>
                         <span class="pni-label">Context</span>
                     </button>
-                    <button type="button" class="preset-nav-item" data-section="batching">
+                    <button type="button" class="preset-nav-item" role="tab" aria-pressed="false" data-section="batching">
                         <svg class="pni-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
                         <span class="pni-dot" style="--dot-color: rgba(16,185,129,0.8)"></span>
                         <span class="pni-label">Batching</span>
                     </button>
-                    <button type="button" class="preset-nav-item" data-section="generation">
+                    <button type="button" class="preset-nav-item" role="tab" aria-pressed="false" data-section="generation">
                         <svg class="pni-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
                         <span class="pni-dot" style="--dot-color: rgba(139,92,246,0.8)"></span>
                         <span class="pni-label">Generation</span>
                     </button>
-                    <button type="button" class="preset-nav-item" data-section="gpu">
+                    <button type="button" class="preset-nav-item" role="tab" aria-pressed="false" data-section="gpu">
                         <svg class="pni-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="8" rx="2"/><rect x="9" y="9" width="8" height="4" rx="1"/><line x1="9" y1="16" x2="9" y2="21"/><line x1="15" y1="16" x2="15" y2="21"/><line x1="9" y1="21" x2="15" y2="21"/></svg>
                         <span class="pni-dot" style="--dot-color: rgba(245,158,11,0.8)"></span>
                         <span class="pni-label">GPU</span>
                     </button>
-                    <button type="button" class="preset-nav-item" data-section="threading">
+                    <button type="button" class="preset-nav-item" role="tab" aria-pressed="false" data-section="threading">
                         <svg class="pni-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>
                         <span class="pni-dot" style="--dot-color: rgba(244,63,94,0.8)"></span>
                         <span class="pni-label">Threading</span>
                     </button>
-                    <button type="button" class="preset-nav-item" data-section="rope">
+                    <button type="button" class="preset-nav-item" role="tab" aria-pressed="false" data-section="rope">
                         <svg class="pni-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                         <span class="pni-dot" style="--dot-color: rgba(14,165,233,0.8)"></span>
                         <span class="pni-label">RoPE</span>
                     </button>
-                    <button type="button" class="preset-nav-item" data-section="speculative">
+                    <button type="button" class="preset-nav-item" role="tab" aria-pressed="false" data-section="speculative">
                         <svg class="pni-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                         <span class="pni-dot" style="--dot-color: rgba(217,70,239,0.8)"></span>
                         <span class="pni-label">Speculative</span>
                     </button>
-                    <button type="button" class="preset-nav-item" data-section="advanced">
+                    <button type="button" class="preset-nav-item" role="tab" aria-pressed="false" data-section="advanced">
                         <svg class="pni-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 0 0 6.99 3.34L5 5"/><path d="M5 5l2 2"/><path d="M19.07 4.93l-2 2"/><path d="M3 12c0 2.76 1.12 5.26 2.93 7.07L8 21"/><path d="M8 21l-2-2"/><path d="M3 12H1"/></svg>
                         <span class="pni-dot" style="--dot-color: rgba(249,115,22,0.8)"></span>
                         <span class="pni-label">Advanced</span>
@@ -2355,7 +2354,7 @@
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-name" title="Display name for this preset">Name <span class="pe-required">*</span></label>
                                 <input type="text" class="pe-input" id="modal-name" required>
-                                <span class="field-error-msg">Name is required</span>
+                                <span class="field-error-msg" role="alert">Name is required</span>
                             </div>
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-model-path" title="Absolute path to the .gguf model file on disk">Model Path <span class="pe-required">*</span></label>
@@ -2363,7 +2362,7 @@
                                     <input type="text" class="pe-input" id="modal-model-path" required>
                                     <button type="button" class="btn-sm btn-preset" id="preset-browse-model-btn" title="Browse filesystem for .gguf files">Browse</button>
                                 </div>
-                                <span class="field-error-msg">Model path is required</span>
+                                <span class="field-error-msg" role="alert">Model path is required</span>
                             </div>
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-alias" title="Model alias reported in /v1/models and shown in API clients (--alias). Defaults to the model filename if left empty.">Server Alias (--alias)</label>
@@ -4184,7 +4183,7 @@
                                 or the file will go to the app default folder.
                             </div>
                             <div class="hf-dlp-actions">
-                                <button type="button" class="btn-wizard-primary" id="mm-hf-dlp-download-btn">
+                                <button type="button" class="btn-wizard-primary" id="mm-hf-dlp-download-btn" disabled>
                                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:5px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                                     Download to models folder
                                 </button>

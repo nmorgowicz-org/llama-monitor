@@ -244,7 +244,7 @@ async function autoTunePreset() {
         flash_attn: (document.getElementById('modal-flash-attn')?.value || 'on') !== 'off',
         verify: true,
     };
-    if (statusEl) statusEl.textContent = 'Running sweep… this can take a few minutes';
+    if (statusEl) statusEl.innerHTML = '<span class="moe-autotune-spinner"></span>Running sweep… this can take a few minutes';
     try {
         const data = await requestNcpuMoeTune(body);
         if (data.error) { if (statusEl) statusEl.textContent = data.error; return; }
@@ -393,6 +393,21 @@ export function openPresetModal(mode) {
 
     // Config-time performance advisor
     updatePresetAdvisor();
+
+    // Focus first interactive element in the modal
+    const firstFocusable = modal.querySelector('.preset-nav-item, button, input, select, textarea');
+    if (firstFocusable) firstFocusable.focus();
+
+    // Escape key handler to close modal
+    function setupEscapeHandler() {
+        window.addEventListener('keydown', function escHandler(e) {
+            if (e.key === 'Escape') {
+                window.removeEventListener('keydown', escHandler);
+                closePresetModal();
+            }
+        });
+    }
+    setupEscapeHandler();
 }
 
 export function closePresetModal() {
@@ -743,8 +758,23 @@ export async function savePreset(event) {
         document.getElementById('modal-model-path').classList.add('field-error');
         valid = false;
     }
+    const gpuLayers = parseInt(document.getElementById('modal-gpu-layers').value, 10);
+    if (!isNaN(gpuLayers) && gpuLayers < 0) {
+        document.getElementById('modal-gpu-layers').classList.add('field-error');
+        valid = false;
+    }
+    const ctxSize = parseInt(document.getElementById('modal-context-size').value, 10);
+    if (!isNaN(ctxSize) && ctxSize <= 0) {
+        document.getElementById('modal-context-size').classList.add('field-error');
+        valid = false;
+    }
+    const threads = parseInt(document.getElementById('modal-threads').value, 10);
+    if (!isNaN(threads) && threads <= 0) {
+        document.getElementById('modal-threads').classList.add('field-error');
+        valid = false;
+    }
     if (!valid) {
-        showToast('Please fill in all required fields', 'error');
+        showToast('Please fix all validation errors', 'error');
         return;
     }
 
@@ -838,7 +868,16 @@ export async function copyPreset() {
 
     const copy = Object.assign({}, p);
     delete copy.id;
-    copy.name = p.name + ' (copy)';
+
+    // Deduplicate copy names: "Foo (copy)", "Foo (copy 2)", "Foo (copy 3)", …
+    let baseName = p.name;
+    let copyName = baseName + ' (copy)';
+    let suffixNum = 2;
+    while (sessionState.presets.some(pr => pr.name === copyName)) {
+        copyName = baseName + ' (copy ' + suffixNum + ')';
+        suffixNum++;
+    }
+    copy.name = copyName;
 
     try {
         const resp = await fetch('/api/presets', {
@@ -865,7 +904,9 @@ export async function deletePreset() {
     const id = document.getElementById('preset-select').value;
     const p = sessionState.presets.find(pr => pr.id === id);
     if (!p) { showToast('No preset selected', 'warn'); return; }
-    if (!confirm('Delete preset "' + p.name + '"?')) return;
+
+    const confirmed = await _showConfirm('Delete preset', 'Delete preset "' + escapeHtml(p.name) + '"? This cannot be undone.');
+    if (!confirmed) return;
 
     try {
         const resp = await fetch('/api/presets/' + encodeURIComponent(id), {
@@ -1223,5 +1264,82 @@ async function _fetchSystemInfoAndRefreshPresetHints() {
       setLastSystemMetrics({ p_cores: data.p_cores, e_cores: data.e_cores, cpu_name: data.cpu_name });
       _refreshPresetThreadsHints();
     }
-  } catch { /* non-fatal */ }
+  } catch (err) { console.warn('Failed to fetch system info for preset hints:', err); }
+}
+
+async function _showConfirm(title, message) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '2000';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'modal';
+    dialog.style.width = '420px';
+    dialog.style.padding = '14px 16px';
+
+    const titleEl = document.createElement('div');
+    titleEl.style.fontSize = '15px';
+    titleEl.style.fontWeight = '600';
+    titleEl.style.marginBottom = '8px';
+    titleEl.textContent = title;
+
+    const msg = document.createElement('div');
+    msg.style.fontSize = '13px';
+    msg.style.color = 'var(--color-text-muted)';
+    msg.style.marginBottom = '12px';
+    msg.textContent = message;
+
+    const actions = document.createElement('div');
+    actions.style.display = 'flex';
+    actions.style.justifyContent = 'flex-end';
+    actions.style.gap = '8px';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn btn-modal-cancel';
+    cancelBtn.textContent = 'Cancel';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'btn btn-modal-save';
+    confirmBtn.textContent = 'Confirm';
+
+    return new Promise(resolve => {
+        let decided = false;
+
+        function cleanup() {
+            if (overlay.parentElement) overlay.remove();
+        }
+
+        cancelBtn.addEventListener('click', () => {
+            if (decided) return;
+            decided = true;
+            cleanup();
+            resolve(false);
+        });
+
+        confirmBtn.addEventListener('click', () => {
+            if (decided) return;
+            decided = true;
+            cleanup();
+            resolve(true);
+        });
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay && !decided) {
+                decided = true;
+                cleanup();
+                resolve(false);
+            }
+        });
+
+        actions.appendChild(cancelBtn);
+        actions.appendChild(confirmBtn);
+        dialog.appendChild(titleEl);
+        dialog.appendChild(msg);
+        dialog.appendChild(actions);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        cancelBtn.focus();
+    });
 }
