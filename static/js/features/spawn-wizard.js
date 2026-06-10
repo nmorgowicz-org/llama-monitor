@@ -787,6 +787,10 @@ function bindEvents() {
     }
     wizardState.model.quantFiles = [];
     wizardState.model._quantSwapRepo = '';
+    wizardState.model.originRepo = '';
+    wizardState.model.originFile = '';
+    wizardState.model.family = '';
+    wizardState.model.cardUrl = '';
     _lastQuantSearchFile = '';
     _tagsRowOrigin = '';
     _originResolverPromise = null; // reset in-flight resolver
@@ -805,6 +809,10 @@ function bindEvents() {
     wizardState.model.source = 'import';
     wizardState.model.delivery = 'imported_local';
     wizardState.model.localMeta = null;
+    wizardState.model.originRepo = '';
+    wizardState.model.originFile = '';
+    wizardState.model.family = '';
+    wizardState.model.cardUrl = '';
     _originResolverPromise = null; // reset in-flight resolver
     onModelPathChanged();
     renderLocalModelHint();
