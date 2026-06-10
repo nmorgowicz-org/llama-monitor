@@ -1393,43 +1393,50 @@ function _inferFamilyFromName(name) {
 function _showInlineOriginHint(candidates, modelPath) {
   _removeInlineOriginHint();
   const repoEl = document.getElementById('hw-model-repo');
-  if (!repoEl) return;
-
-  const hint = document.createElement('span');
-  hint.id = 'hw-inline-origin-hint';
-  hint.style.cssText =
-    'font-size:8px;color:var(--color-text-muted);margin-left:6px;white-space:nowrap;';
+  const hintRow = document.getElementById('hw-inline-origin-hint-row');
+  if (!repoEl || !hintRow) return;
 
   const label = document.createElement('span');
   label.textContent = 'Suggested HF origin: ';
-  hint.appendChild(label);
+  label.style.cssText = 'color:var(--color-text-muted);font-size:9px;';
+
+  const select = document.createElement('select');
+  select.style.cssText =
+    'font-size:9px;padding:2px 4px;cursor:pointer;border-radius:3px;' +
+    'border:1px solid rgba(148,163,253,0.25);' +
+    'background:rgba(80,120,200,0.15);color:var(--color-text-primary);' +
+    'max-width:160px;';
+
+  const defaultOpt = document.createElement('option');
+  defaultOpt.value = '';
+  defaultOpt.textContent = '…';
+  select.appendChild(defaultOpt);
 
   candidates.slice(0, 2).forEach((c) => {
-    const pill = document.createElement('button');
-    pill.type = 'button';
-    pill.className = 'btn-wizard-tertiary';
-    pill.style.cssText =
-      'font-size:8px;min-height:16px;padding:0 4px;cursor:pointer;border-radius:2px;' +
-      'border:1px solid rgba(148,163,253,0.25);' +
-      'background:rgba(80,120,200,0.15);color:var(--color-text-primary);white-space:nowrap;';
-    pill.textContent = (c.repoId || '').split('/').slice(-1)[0];
-    pill.title = `${c.repoId}\n${c.reason || ''}\n${c.family ? 'Family: ' + c.family : ''}${c.cardUrl ? '\n' + c.cardUrl : ''}`;
-
-    pill.addEventListener('click', () => {
-      // Open pencil editor with this candidate as currentRepo
-      const current = wizardState.model.originRepo || c.repoId || '';
-      _openHwRepoEditor(repoEl, current || c.repoId);
-    });
-
-    hint.appendChild(document.createTextNode(' '));
-    hint.appendChild(pill);
+    const opt = document.createElement('option');
+    opt.value = c.repoId || '';
+    opt.textContent = (c.repoId || '').split('/').slice(-1)[0];
+    opt.title = `${c.repoId}\n${c.reason || ''}\n${c.family ? 'Family: ' + c.family : ''}${c.cardUrl ? '\n' + c.cardUrl : ''}`;
+    select.appendChild(opt);
   });
 
-  repoEl.appendChild(hint);
+  select.addEventListener('change', () => {
+    if (select.value) {
+      _openHwRepoEditor(repoEl, select.value);
+    }
+  });
+
+  hintRow.appendChild(label);
+  hintRow.appendChild(select);
+  hintRow.style.display = 'inline-flex';
 }
 
 function _removeInlineOriginHint() {
-  document.getElementById('hw-inline-origin-hint')?.remove();
+  const hintRow = document.getElementById('hw-inline-origin-hint-row');
+  if (hintRow) {
+    hintRow.innerHTML = '';
+    hintRow.style.display = 'none';
+  }
 }
 
 // Called by hfStartDownload onComplete when download finishes.
