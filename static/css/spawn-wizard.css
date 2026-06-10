@@ -1047,48 +1047,52 @@
 /* Button hierarchy */
 
 .btn-wizard-primary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 38px;
-  padding: 8px 16px;
-  border: 1px solid rgba(45, 212, 191, 0.55);
-  border-radius: var(--radius-sm);
-  background: linear-gradient(160deg, rgba(45, 212, 191, 0.9), rgba(45, 212, 191, 0.95));
-  color: #fff;
-  font-weight: 700;
-  font-size: var(--text-xs);
-  cursor: pointer;
-  box-shadow:
-    0 8px 18px rgba(0, 0, 0, 0.22),
-    0 0 24px rgba(45, 212, 191, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.15);
-  transition: all 180ms ease;
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+   gap: 6px;
+   min-height: 40px;
+   padding: 9px 20px;
+   border: 1px solid rgba(45, 212, 191, 0.35);
+   border-radius: var(--radius-sm);
+   background:
+     radial-gradient(circle at 25% 20%, rgba(255, 255, 255, 0.12), transparent 24%),
+     linear-gradient(180deg, rgba(45, 212, 191, 0.26), rgba(8, 145, 178, 0.18));
+   color: white;
+   font-weight: 700;
+   font-size: 12px;
+   letter-spacing: 0.01em;
+   cursor: pointer;
+   box-shadow:
+     0 12px 26px rgba(8, 145, 178, 0.16),
+     inset 0 1px 0 rgba(255, 255, 255, 0.12);
+   transition: all 180ms ease;
 }
 
 .btn-wizard-primary:hover {
-  transform: translateY(-1px);
-  box-shadow:
-    0 10px 24px rgba(0, 0, 0, 0.28),
-    0 0 32px rgba(45, 212, 191, 0.26),
-    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+   border-color: rgba(45, 212, 191, 0.55);
+   background:
+     radial-gradient(circle at 25% 20%, rgba(255, 255, 255, 0.16), transparent 24%),
+     linear-gradient(180deg, rgba(45, 212, 191, 0.36), rgba(8, 145, 178, 0.28));
+   box-shadow:
+     0 14px 32px rgba(8, 145, 178, 0.24),
+     0 0 20px rgba(45, 212, 191, 0.14),
+     inset 0 1px 0 rgba(255, 255, 255, 0.18);
+   transform: translateY(-1px);
 }
 
 .btn-wizard-primary:active {
-  transform: translateY(1px);
-  box-shadow:
-    0 4px 10px rgba(0, 0, 0, 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+   transform: translateY(1px);
+   box-shadow:
+     0 4px 10px rgba(0, 0, 0, 0.24),
+     inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .btn-wizard-primary:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow:
-    0 4px 10px rgba(0, 0, 0, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+   opacity: 0.55;
+   cursor: not-allowed;
+   transform: none;
+   box-shadow: none;
 }
 
 /* Split Browse button */
@@ -1262,31 +1266,36 @@
   75% { transform: translateX(4px); }
 }
 
-/* .btn-wizard-secondary kept for other uses outside split button */
 .btn-wizard-secondary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 34px;
-  padding: 7px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  min-height: 40px;
+  padding: 9px 14px;
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025));
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.022));
   color: var(--color-text-secondary);
   font-weight: 700;
-  font-size: var(--text-xs);
+  font-size: 12px;
   cursor: pointer;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
   transition: all 160ms ease;
 }
 
 .btn-wizard-secondary:hover {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.04));
-  border-color: rgba(255, 255, 255, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.032));
+  border-color: var(--surface-card-line);
+  color: var(--color-text-primary);
   transform: translateY(-1px);
-  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.16);
+  box-shadow:
+    0 12px 24px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .btn-wizard-tertiary {
@@ -1310,6 +1319,27 @@
   color: #88c0d1;
   background: rgba(136, 192, 209, 0.07);
   border-color: rgba(136, 192, 209, 0.18);
+}
+
+.btn-wizard-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 9px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.btn-wizard-close:hover {
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 /* ==========================================================================

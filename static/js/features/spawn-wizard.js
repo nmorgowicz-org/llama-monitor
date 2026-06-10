@@ -505,8 +505,9 @@ function cacheDom() {
   dom.stepLabel  = document.getElementById('wizard-step-label');
   dom.stepBadges = dom.overlay?.querySelectorAll('.step-badge[data-step]');
   dom.steps      = dom.overlay?.querySelectorAll('.wizard-step[id^="wizard-step-"]');
-  dom.backBtn  = document.getElementById('wizard-back-btn');
-  dom.nextBtn  = document.getElementById('wizard-next-btn');
+ dom.backBtn    = document.getElementById('wizard-back-btn');
+   dom.nextBtn    = document.getElementById('wizard-next-btn');
+   dom.closeWizardBtn = document.getElementById('wizard-close-btn');
   dom.footerHint = document.getElementById('wizard-footer-hint');
 
   // Step 1
@@ -708,6 +709,7 @@ function bindEvents() {
       showStep(next);
     }
   });
+  dom.closeWizardBtn?.addEventListener('click', closeSpawnWizard);
 
   // Profile cards (segmented control)
   dom.profileCards?.forEach(card => {
