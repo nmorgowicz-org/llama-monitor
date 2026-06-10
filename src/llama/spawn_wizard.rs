@@ -290,7 +290,7 @@ pub fn predict_perf_hints(
                     .to_string(),
             param: "spec_type".to_string(),
             value: serde_json::json!("draft-mtp"),
-            patch: Some(serde_json::json!({ "spec_type": "draft-mtp", "spec_draft_n_max": 3 })),
+            patch: Some(serde_json::json!({ "spec_type": "draft-mtp", "spec_draft_n_max": 4 })),
         });
     }
 

@@ -214,7 +214,7 @@ export const wizardState = {
     threadsBatch: null,
     // MTP
     mtpEnabled: true,
-    mtpDraftNMax: 2,
+    mtpDraftNMax: null,   // null = let spawn compute family default (4 for external draft, 2 for built-in)
     mtpDraftNMin: null,
     mtpDraftPMin: null,
     // Sampling (null = use llama-server default)
@@ -453,7 +453,7 @@ function resetWizardState() {
   wizardState.hardware.maxTokens = null;
   wizardState.hardware.seed = null;
   wizardState.hardware.mtpEnabled = false;
-  wizardState.hardware.mtpDraftNMax = 2;
+  wizardState.hardware.mtpDraftNMax = null;
   wizardState.hardware.enableThinking = null;
   wizardState.hardware.preserveThinking = null;
   wizardState.hardware.reasoningMode = null;
@@ -6335,9 +6335,10 @@ function renderMtpSection() {
            wizardState.hardware.mtpEnabled = true;
          }
 
-         // When assistant is selected, recommend higher n-max.
-         if (selected) {
-           wizardState.hardware.mtpDraftNMax = wizardState.hardware.mtpDraftNMax || 4;
+         // Reset n-max to null when assistant changes so renderMtpSection shows
+         // the correct family default (4 for external draft, 2 for built-in).
+         if (!_mtpUserConfigured) {
+           wizardState.hardware.mtpDraftNMax = null;
          }
 
          // Refresh MTP section to expose tuning controls and update visibility.
@@ -6396,7 +6397,9 @@ function renderMtpSection() {
         }
       });
     }
-    draftNMaxInput.value = wizardState.hardware.mtpDraftNMax;
+    // Show family-appropriate default: 4 for external assistant draft, 2 for built-in MTP.
+    const draftNMaxDisplay = wizardState.hardware.mtpDraftNMax ?? (hasAssistantSelected ? 4 : 2);
+    draftNMaxInput.value = draftNMaxDisplay;
   }
 
   // Derive whether MTP tuning controls should be visible:
@@ -7108,9 +7111,11 @@ function renderSummary() {
   if (hw.nCpuMoe > 0 && arch.nExperts > 0) rows.push({ label: 'MoE CPU offload', value: `${hw.nCpuMoe} of ${arch.nLayers} layers` });
   if (hw.tensorSplit) rows.push({ label: 'Tensor split', value: hw.tensorSplit });
   if (arch.mmprojBytes > 0) rows.push({ label: 'mmproj', value: formatGB(arch.mmprojBytes) });
-  if (arch.mtpDepth > 0) {
-    const mtpActive = hw.mtpEnabled;
-    rows.push({ label: 'MTP', value: mtpActive ? `enabled · draft ${hw.mtpDraftNMax || 2} tokens/step · --parallel 1` : 'disabled' });
+  const hasExternalDraft = !!(m.selectedDraftPath || '').trim();
+  if (arch.mtpDepth > 0 || hasExternalDraft) {
+    const mtpActive = hw.mtpEnabled || hasExternalDraft;
+    const nMaxDisplay = hw.mtpDraftNMax ?? (hasExternalDraft ? 4 : 2);
+    rows.push({ label: 'MTP', value: mtpActive ? `enabled · draft ${nMaxDisplay} tokens/step · --parallel 1` : 'disabled' });
   }
   if ((m.delivery === 'stream_hf' || m.delivery === 'downloaded_hf' || m.originRepo) && m.hfTokenSet != null) {
     rows.push({ label: 'HF token', value: m.hfTokenSet ? 'Saved in app settings' : 'Not saved' });
