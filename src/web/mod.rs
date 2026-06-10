@@ -19,12 +19,12 @@ use crate::state::AppState;
 use api::ApiError;
 use auth::AuthManager;
 
-/// Global rate limiter: 200 req/s with 500 burst (generous for local-first use).
+/// Global rate limiter: essentially unlimited for local-first use.
 fn global_rate_limit() -> impl Filter<Extract = ((),), Error = warp::Rejection> + Clone {
     static WINDOW_START: AtomicU64 = AtomicU64::new(0);
     static REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
 
-    let limit = 200u64 + 500u64; // max_per_second + burst_allowance
+    let limit = u64::MAX; // effectively unlimited
 
     warp::any().and_then(move || async move {
         let now = SystemTime::now()

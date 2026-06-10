@@ -1356,10 +1356,13 @@ async function _autoResolveHfOrigin() {
        await _attachOriginTags(path, top.repoId, top.family);
        _tagsRowOrigin = '';
        _refreshHwTagsRow();
-       _removeInlineOriginHint();
      } else if (data.candidates && data.candidates.length > 0) {
-       // Show a compact "Suggested HF origin" hint next to the repo line
-       _showInlineOriginHint(data.candidates.slice(0, 2), path);
+       // Glow the "Find on HuggingFace" button to nudge the user
+       const btn = document.getElementById('hw-quant-local-btn');
+       if (btn) {
+         btn.classList.add('hw-hf-origin-glow');
+         btn.addEventListener('click', () => btn.classList.remove('hw-hf-origin-glow'), { once: true });
+       }
      }
   } catch { /* non-fatal — resolution is a nice-to-have */ }
 }
@@ -1388,56 +1391,6 @@ function _inferFamilyFromName(name) {
   return '';
 }
 
-// Show a compact "Suggested HF origin:" hint inline next to the repo line.
-// Used only when origin is not confident; hidden once user picks an origin.
-function _showInlineOriginHint(candidates, modelPath) {
-  _removeInlineOriginHint();
-  const repoEl = document.getElementById('hw-model-repo');
-  const hintRow = document.getElementById('hw-inline-origin-hint-row');
-  if (!repoEl || !hintRow) return;
-
-  const label = document.createElement('span');
-  label.textContent = 'Suggested HF origin: ';
-  label.style.cssText = 'color:var(--color-text-muted);font-size:9px;';
-
-  const select = document.createElement('select');
-  select.style.cssText =
-    'font-size:9px;padding:2px 4px;cursor:pointer;border-radius:3px;' +
-    'border:1px solid rgba(148,163,253,0.25);' +
-    'background:rgba(80,120,200,0.15);color:var(--color-text-primary);' +
-    'max-width:160px;';
-
-  const defaultOpt = document.createElement('option');
-  defaultOpt.value = '';
-  defaultOpt.textContent = '…';
-  select.appendChild(defaultOpt);
-
-  candidates.slice(0, 2).forEach((c) => {
-    const opt = document.createElement('option');
-    opt.value = c.repoId || '';
-    opt.textContent = (c.repoId || '').split('/').slice(-1)[0];
-    opt.title = `${c.repoId}\n${c.reason || ''}\n${c.family ? 'Family: ' + c.family : ''}${c.cardUrl ? '\n' + c.cardUrl : ''}`;
-    select.appendChild(opt);
-  });
-
-  select.addEventListener('change', () => {
-    if (select.value) {
-      _openHwRepoEditor(repoEl, select.value);
-    }
-  });
-
-  hintRow.appendChild(label);
-  hintRow.appendChild(select);
-  hintRow.style.display = 'inline-flex';
-}
-
-function _removeInlineOriginHint() {
-  const hintRow = document.getElementById('hw-inline-origin-hint-row');
-  if (hintRow) {
-    hintRow.innerHTML = '';
-    hintRow.style.display = 'none';
-  }
-}
 
 // Called by hfStartDownload onComplete when download finishes.
 function onHfDownloadComplete(downloadId, localPath) {
@@ -3430,12 +3383,16 @@ function getEffectiveArch() {
     // but local layers use a smaller dim (e.g., 256). Trust the heuristic head_dim
     // in that case to avoid inflating KV cache.
     const hasLocalAttn = heuristicArch.localAttnWindow > 0;
+    // For hybrid DeltaNet models (e.g. Qwen3-Coder-Next, Qwen3.6), llama-server
+    // introspection prints a different n_kv_heads than the raw GGUF binary stores.
+    // The heuristic value matches the GGUF binary; trust it for these families.
+    const isHybridDeltaNet = heuristicArch.nAttnLayers > 0 && heuristicArch.nAttnLayers < heuristicArch.nLayers;
     return {
       // Base from heuristic (includes sliding-window fields, MoE, MTP hints)
       ...heuristicArch,
       // Override with introspection-only fields
       nLayers: a.nLayers || heuristicArch.nLayers,
-      nKvHeads: a.nKvHeads || heuristicArch.nKvHeads,
+      nKvHeads: isHybridDeltaNet ? heuristicArch.nKvHeads : (a.nKvHeads || heuristicArch.nKvHeads),
       // head_dim: heuristic for sliding-window models; introspection otherwise
       headDim: hasLocalAttn
         ? heuristicArch.headDim
@@ -4938,7 +4895,6 @@ let _tagsRowOrigin = ''; // track which repo is currently loaded in the row
          }));
 
           _tagsRowOrigin = '';
-         _removeInlineOriginHint();
          showToast('Repo updated', 'success', `${rawFiles.length} quants loaded`);
          renderHardwareModelHeader();
        } catch {

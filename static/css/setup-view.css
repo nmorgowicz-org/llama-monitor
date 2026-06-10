@@ -2534,20 +2534,14 @@ body.setup-active .sidebar-nav {
 /* ── Launch grid ──────────────────────────────────────────────────────────── */
 
 .launch-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 10px;
   position: relative;
   z-index: 2;
   width: 100%;
   box-sizing: border-box;
   flex: 0 0 auto;
-}
-
-@media (max-width: 480px) {
-  .launch-card {
-    flex: 1 1 calc(50% - 5px);
-  }
 }
 
 /* ── Preset launch card ───────────────────────────────────────────────────── */

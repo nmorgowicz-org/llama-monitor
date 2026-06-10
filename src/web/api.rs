@@ -6713,11 +6713,6 @@ fn api_browse(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    static LAST_BROWSE: AtomicU64 = AtomicU64::new(0);
-
     warp::path!("api" / "browse")
         .and(warp::get())
         .and(warp::header::optional::<String>("authorization"))
@@ -6730,24 +6725,6 @@ fn api_browse(
                     if !check_api_token(&auth, &cfg) {
                         return Ok(unauthorized_api_token());
                     }
-                    // Cooldown: 1 second
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
-                    let last = LAST_BROWSE.load(Ordering::Acquire);
-                    if now - last < 1 {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::with_status(
-                                warp::reply::json(&serde_json::json!({
-                                    "error": "too soon; please wait",
-                                    "seconds_remaining": 1
-                                })),
-                                warp::http::StatusCode::TOO_MANY_REQUESTS,
-                            ),
-                        ));
-                    }
-                    LAST_BROWSE.store(now, Ordering::Release);
 
                     // Build allowed roots:
                     // - Home directory (primary root).
