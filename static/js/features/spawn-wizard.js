@@ -796,6 +796,7 @@ function bindEvents() {
     _lastQuantSearchFile = '';
     _tagsRowOrigin = '';
     _originResolverPromise = null; // reset in-flight resolver
+    _hfOriginWidgetData = null;
     onModelPathChanged();
     renderLocalModelHint();
     // Start origin resolver immediately so autoInstallChatTemplate can await it.
@@ -816,6 +817,7 @@ function bindEvents() {
     wizardState.model.family = '';
     wizardState.model.cardUrl = '';
     _originResolverPromise = null; // reset in-flight resolver
+    _hfOriginWidgetData = null;
     onModelPathChanged();
     renderLocalModelHint();
     // Start origin resolver immediately so autoInstallChatTemplate can await it.
@@ -1154,6 +1156,7 @@ function renderLocalModelHint() {
     if (meta.vram_est_gb != null) parts.push(`~${Number(meta.vram_est_gb).toFixed(0)} GB weights`);
     dom.localModelHintMeta.textContent = parts.join(' · ') || 'Opened from your local model library.';
   }
+  _refreshHfOriginSection();
 }
 
 function getStepGuardState(step = wizardState.currentStep) {
@@ -1286,6 +1289,7 @@ let _dlCurrentId = null;
 let _mmprojCompanionId = null;
 let _mmprojCompanionLocalPath = null;
 let _originResolverPromise = null; // in-flight origin resolver to prevent double-fire
+let _hfOriginWidgetData = null;    // last resolve-origin response, cached for widget reuse
 
 function getAuthHeaders() {
   return window.authHeaders ? window.authHeaders() : {};
@@ -1324,47 +1328,349 @@ async function _attachOriginTags(localPath, repoId, family) {
 }
 
 // Auto-resolve the HF origin of a local model from its filename.
-// Fires silently; if confident, sets originRepo and family, persists tags,
-// and refreshes the UI.  If ambiguous, shows a suggestion row.
-// Returns a promise so callers can await the resolution instead of polling.
-// The module-level _originResolverPromise prevents double-fire.
+// Drives the #hf-origin-section widget with live detecting/confirmed/ambiguous/notfound states.
+// Returns a promise so callers can await the resolution.
 async function _autoResolveHfOrigin() {
   const { source, path, modelBytes } = wizardState.model;
   if (source !== 'local' && source !== 'import') return;
-  if (wizardState.model.originRepo) return; // already known
+  if (wizardState.model.originRepo) { _refreshHfOriginSection(); return; }
   const filename = (path || '').split(/[\\/]/).pop() || '';
   if (!filename || filename.length < 8) return;
 
+  _refreshHfOriginSection(); // show detecting state immediately
+
   try {
-    const headers = window.authHeaders
-      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
-      : { 'Content-Type': 'application/json' };
+    const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
     const res = await fetch('/api/hf/resolve-origin', {
       method: 'POST',
       headers,
       body: JSON.stringify({ filename, size_bytes: modelBytes || 0 }),
     });
-    if (!res.ok) return;
-    const data = await res.json();
-    if (!data.ok || !data.candidates || !data.candidates.length) return;
+    _hfOriginWidgetData = res.ok ? await res.json() : { ok: false, candidates: [] };
+    const data = _hfOriginWidgetData;
 
-    if (data.confident) {
-       const top = data.candidates[0];
-       wizardState.model.originRepo = top.repoId;
-       wizardState.model.family = top.family || '';
-       wizardState.model.cardUrl = top.cardUrl || `https://huggingface.co/${top.repoId}`;
-       await _attachOriginTags(path, top.repoId, top.family);
-       _tagsRowOrigin = '';
-       _refreshHwTagsRow();
-     } else if (data.candidates && data.candidates.length > 0) {
-       // Glow the "Find on HuggingFace" button to nudge the user
-       const btn = document.getElementById('hw-quant-local-btn');
-       if (btn) {
-         btn.classList.add('hw-hf-origin-glow');
-         btn.addEventListener('click', () => btn.classList.remove('hw-hf-origin-glow'), { once: true });
-       }
-     }
-  } catch { /* non-fatal — resolution is a nice-to-have */ }
+    if (data.ok && data.confident && data.candidates?.length) {
+      await _confirmHfOrigin(data.candidates[0].repoId, data.candidates[0].family || '',
+        data.candidates[0].cardUrl || '', path);
+    }
+    _refreshHfOriginSection();
+  } catch {
+    _hfOriginWidgetData = { ok: false, candidates: [] };
+    _refreshHfOriginSection();
+  }
+}
+
+// Decide which state to render for the HF origin widget and call _renderHfOriginWidget.
+function _refreshHfOriginSection() {
+  const el = document.getElementById('hf-origin-section');
+  if (!el) return;
+  const { source, path, originRepo, cardUrl } = wizardState.model;
+  const isLocal = source === 'local' || source === 'import';
+  if (!isLocal || !path) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  if (originRepo) {
+    _renderHfOriginWidget(el, 'confirmed', { repoId: originRepo, cardUrl });
+    return;
+  }
+  if (!_hfOriginWidgetData) { _renderHfOriginWidget(el, 'detecting'); return; }
+  if (_hfOriginWidgetData.candidates?.length) {
+    _renderHfOriginWidget(el, 'ambiguous', _hfOriginWidgetData);
+  } else {
+    _renderHfOriginWidget(el, 'notfound');
+  }
+}
+
+// Render the HF origin widget into `el` for the given state.
+function _renderHfOriginWidget(el, state, data = {}) {
+  el.innerHTML = '';
+  const widget = document.createElement('div');
+  widget.className = 'hf-origin-widget';
+
+  const label = document.createElement('span');
+  label.className = 'hf-origin-label';
+  label.textContent = 'HF Source';
+  widget.appendChild(label);
+
+  if (state === 'detecting') {
+    const status = document.createElement('span');
+    status.className = 'hf-origin-status';
+    status.textContent = 'Detecting…';
+    widget.appendChild(status);
+    el.appendChild(widget);
+    return;
+  }
+
+  if (state === 'confirmed') {
+    const { repoId, cardUrl } = data;
+    const slashIdx = (repoId || '').indexOf('/');
+    const repo = document.createElement('span');
+    repo.className = 'hf-origin-repo';
+    if (slashIdx > 0) {
+      const au = document.createElement('span');
+      au.className = 'hf-origin-author';
+      au.textContent = repoId.slice(0, slashIdx + 1);
+      const nm = document.createElement('strong');
+      nm.textContent = repoId.slice(slashIdx + 1);
+      repo.appendChild(au);
+      repo.appendChild(nm);
+    } else {
+      repo.textContent = repoId || '';
+    }
+    widget.appendChild(repo);
+
+    const link = document.createElement('a');
+    link.className = 'hf-origin-card-link';
+    link.href = cardUrl || `https://huggingface.co/${repoId}`;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = '↗ Card';
+    widget.appendChild(link);
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'hf-origin-edit-btn';
+    editBtn.title = 'Search for a different HuggingFace repo';
+    editBtn.textContent = '✎';
+    editBtn.addEventListener('click', () => _renderHfOriginWidget(el, 'search', { prefill: repoId }));
+    widget.appendChild(editBtn);
+
+    const quantDiv = document.createElement('div');
+    quantDiv.id = 'hf-origin-quants-container';
+    quantDiv.className = 'hf-origin-quants-container';
+    widget.appendChild(quantDiv);
+    el.appendChild(widget);
+    // Fetch quant files async so the widget appears immediately
+    _fetchAndShowQuantOptions(repoId);
+    return;
+  }
+
+  if (state === 'ambiguous') {
+    const { candidates } = data;
+    const hint = document.createElement('span');
+    hint.className = 'hf-origin-hint';
+    hint.textContent = 'Multiple matches found — select the right repo:';
+    widget.appendChild(hint);
+
+    const row = document.createElement('div');
+    row.className = 'hf-origin-search-row';
+
+    const select = document.createElement('select');
+    select.className = 'hf-origin-select';
+    (candidates || []).forEach((c, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      const pct = c.confidence ? ` (${Math.round(c.confidence * 100)}%)` : '';
+      opt.textContent = `${c.repoId}${pct}`;
+      select.appendChild(opt);
+    });
+    const manualOpt = document.createElement('option');
+    manualOpt.value = '__search';
+    manualOpt.textContent = 'Not listed — search or enter manually…';
+    select.appendChild(manualOpt);
+    row.appendChild(select);
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'btn-wizard-secondary';
+    confirmBtn.style.cssText = 'font-size:11px;padding:3px 10px;flex-shrink:0;';
+    confirmBtn.textContent = 'Confirm';
+    confirmBtn.addEventListener('click', async () => {
+      const val = select.value;
+      if (val === '__search') { _renderHfOriginWidget(el, 'search', {}); return; }
+      const c = (candidates || [])[parseInt(val, 10)];
+      if (!c) return;
+      await _confirmHfOrigin(c.repoId, c.family || '', c.cardUrl || '', wizardState.model.path);
+      _renderHfOriginWidget(el, 'confirmed', { repoId: c.repoId, cardUrl: c.cardUrl });
+    });
+    row.appendChild(confirmBtn);
+    widget.appendChild(row);
+
+    // Instantly switch to search if user selects the manual option
+    select.addEventListener('change', () => {
+      if (select.value === '__search') _renderHfOriginWidget(el, 'search', {});
+    });
+
+    const quantDiv = document.createElement('div');
+    quantDiv.id = 'hf-origin-quants-container';
+    quantDiv.className = 'hf-origin-quants-container';
+    widget.appendChild(quantDiv);
+    el.appendChild(widget);
+    return;
+  }
+
+  // notfound or search — show inline search input
+  const hint = document.createElement('span');
+  hint.className = 'hf-origin-hint';
+  hint.textContent = state === 'notfound'
+    ? 'Not found automatically — enter owner/repo or search by name:'
+    : 'Search for a different repo:';
+  widget.appendChild(hint);
+
+  const searchRow = document.createElement('div');
+  searchRow.className = 'hf-origin-search-row';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'hf-origin-search-input';
+  input.placeholder = 'owner/repo or search terms';
+  if (data.prefill) input.value = data.prefill;
+  searchRow.appendChild(input);
+
+  const searchBtn = document.createElement('button');
+  searchBtn.type = 'button';
+  searchBtn.className = 'btn-wizard-secondary';
+  searchBtn.style.cssText = 'font-size:11px;padding:3px 10px;flex-shrink:0;';
+  searchBtn.textContent = 'Search';
+  searchRow.appendChild(searchBtn);
+  widget.appendChild(searchRow);
+
+  const resultsDiv = document.createElement('div');
+  resultsDiv.className = 'hf-origin-search-results';
+  widget.appendChild(resultsDiv);
+
+  const quantDiv = document.createElement('div');
+  quantDiv.id = 'hf-origin-quants-container';
+  quantDiv.className = 'hf-origin-quants-container';
+  widget.appendChild(quantDiv);
+
+  const doSearch = async () => {
+    const q = input.value.trim();
+    if (!q) return;
+    // Direct owner/repo format — confirm immediately without searching
+    if (/^[^/\s]+\/[^/\s]+$/.test(q)) {
+      resultsDiv.innerHTML = '';
+      await _confirmHfOrigin(q, '', '', wizardState.model.path);
+      _renderHfOriginWidget(el, 'confirmed', { repoId: q, cardUrl: `https://huggingface.co/${q}` });
+      return;
+    }
+    resultsDiv.innerHTML = '';
+    const spinner = document.createElement('span');
+    spinner.className = 'hf-origin-status';
+    spinner.style.padding = '4px 0';
+    spinner.textContent = 'Searching…';
+    resultsDiv.appendChild(spinner);
+    try {
+      const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
+      const res = await fetch('/api/hf/resolve-origin', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ filename: q.endsWith('.gguf') ? q : `${q}.gguf`, size_bytes: 0 }),
+      });
+      const d = await res.json();
+      resultsDiv.innerHTML = '';
+      if (!d.ok || !d.candidates?.length) {
+        const msg = document.createElement('span');
+        msg.className = 'hf-origin-status';
+        msg.style.padding = '4px 0';
+        msg.textContent = 'No results — try different terms or type owner/repo directly.';
+        resultsDiv.appendChild(msg);
+        return;
+      }
+      d.candidates.slice(0, 8).forEach(c => {
+        const resultRow = document.createElement('div');
+        resultRow.className = 'hf-origin-result-row';
+        const name = document.createElement('span');
+        name.className = 'hf-origin-result-name';
+        name.textContent = c.repoId;
+        const pct = document.createElement('span');
+        pct.className = 'hf-origin-result-pct';
+        if (c.confidence) pct.textContent = `${Math.round(c.confidence * 100)}%`;
+        resultRow.appendChild(name);
+        resultRow.appendChild(pct);
+        resultRow.addEventListener('click', async () => {
+          await _confirmHfOrigin(c.repoId, c.family || '', c.cardUrl || '', wizardState.model.path);
+          _renderHfOriginWidget(el, 'confirmed', { repoId: c.repoId, cardUrl: c.cardUrl });
+        });
+        resultsDiv.appendChild(resultRow);
+      });
+    } catch {
+      resultsDiv.innerHTML = '';
+      const msg = document.createElement('span');
+      msg.className = 'hf-origin-status';
+      msg.style.padding = '4px 0';
+      msg.textContent = 'Search failed — check your connection.';
+      resultsDiv.appendChild(msg);
+    }
+  };
+
+  searchBtn.addEventListener('click', doSearch);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
+  el.appendChild(widget);
+}
+
+// Persist HF origin to wizardState + tags, then refresh downstream UI.
+async function _confirmHfOrigin(repoId, family, cardUrl, path) {
+  wizardState.model.originRepo = repoId;
+  wizardState.model.family = family || '';
+  wizardState.model.cardUrl = cardUrl || `https://huggingface.co/${repoId}`;
+  await _attachOriginTags(path, repoId, family);
+  _tagsRowOrigin = '';
+  _refreshHwTagsRow();
+  if (wizardState.currentStep === 2) renderHardwareModelHeader();
+}
+
+// Fetch quant file list from HF for the confirmed repo and show an expandable list.
+// Also populates wizardState.model.quantFiles so step 2 shows the dropdown directly.
+async function _fetchAndShowQuantOptions(repoId) {
+  const container = document.getElementById('hf-origin-quants-container');
+  if (!container || !repoId) return;
+  const data = await _hfFilesPost(repoId);
+  if (!data?.ok) return;
+
+  const currentFilename = (wizardState.model.path || '').split(/[\\/]/).pop().toLowerCase();
+  const ggufFiles = (data.files || []).filter(f =>
+    !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf')
+  );
+  if (!ggufFiles.length) return;
+
+  // Populate quantFiles so step 2 shows the select dropdown without re-searching
+  wizardState.model.quantFiles = ggufFiles.map(f => ({
+    path: f.rfilename || f.path || '',
+    name: f.rfilename || f.path || '',
+    size: f.size || 0,
+    label: _extractQuantLabel(f.rfilename || f.path || ''),
+  }));
+  wizardState.model._quantSwapRepo = repoId;
+
+  const others = ggufFiles.filter(f =>
+    (f.rfilename || f.path || '').split('/').pop().toLowerCase() !== currentFilename
+  );
+
+  if (!others.length) {
+    const msg = document.createElement('span');
+    msg.className = 'hf-origin-quants-toggle';
+    msg.style.cursor = 'default';
+    msg.textContent = 'Only this quantization available in this repo';
+    container.appendChild(msg);
+    return;
+  }
+
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.className = 'hf-origin-quants-toggle';
+  toggleBtn.textContent = `▸ ${others.length} other quant${others.length !== 1 ? 's' : ''} available`;
+
+  const list = document.createElement('div');
+  list.className = 'hf-origin-quants-list';
+
+  others.forEach(f => {
+    const fname = (f.rfilename || f.path || '').split('/').pop();
+    const quantLabel = _extractQuantLabel(fname);
+    const sizeGb = f.size ? ` · ${(f.size / 1073741824).toFixed(1)} GB` : '';
+    const item = document.createElement('div');
+    item.className = 'hf-origin-quant-item';
+    item.textContent = `${quantLabel}${sizeGb}`;
+    list.appendChild(item);
+  });
+
+  toggleBtn.addEventListener('click', () => {
+    const open = list.style.display !== 'none';
+    list.style.display = open ? 'none' : 'flex';
+    toggleBtn.textContent = `${open ? '▸' : '▾'} ${others.length} other quant${others.length !== 1 ? 's' : ''} available`;
+  });
+
+  container.appendChild(toggleBtn);
+  container.appendChild(list);
 }
 
 // Infer model family slug from a name string (mirrors backend heuristics).
@@ -1941,6 +2247,19 @@ async function doIntrospect(path) {
       wizardState.model.nCtxTrain = m.n_ctx_train;
       updateCtxTrainWarning();
       updateCtxModelMaxHint();
+    }
+
+    // Populate localMeta for the hint card — local browse never pre-populates it
+    if (wizardState.model.source === 'local' && !wizardState.model.localMeta) {
+      const fname = path.split(/[\\/]/).pop() || path;
+      wizardState.model.localMeta = {
+        path,
+        filename: fname,
+        size_display: wizardState.model.modelBytes ? formatBytes(wizardState.model.modelBytes) : '',
+        quant_type: guessQuantFromName(fname),
+        param_b: wizardState.model.paramB || null,
+      };
+      renderLocalModelHint(); // also calls _refreshHfOriginSection via its tail
     }
 
     scheduleVramUpdate();
@@ -3226,8 +3545,14 @@ function selectImportedModel(m) {
     if (el.dataset.path === m.path) el.classList.add('selected');
   });
   // Trigger arch inference + introspection using the model name for heuristics.
+  _hfOriginWidgetData = null;
+  _originResolverPromise = null;
   onModelPathChanged();
-  renderLocalModelHint();
+  renderLocalModelHint(); // also calls _refreshHfOriginSection (shows detecting)
+  // Start origin resolution immediately so the widget updates without waiting for doIntrospect
+  if (!wizardState.model.originRepo) {
+    _originResolverPromise = _autoResolveHfOrigin();
+  }
   refreshStepGuardrails();
 }
 
@@ -3375,10 +3700,25 @@ function bindHardwareToggleSwitch(labelEl, inputEl) {
 
 function getEffectiveArch() {
   const a = wizardState.arch;
-  // Always apply heuristics to ensure sliding window and hybrid-attention fields
-  // are populated for models that support them (Gemma4, Gemma3, Qwen3.6, etc.).
-  if (wizardState.model.paramB > 0) {
-    const heuristicArch = buildHeuristicArch(wizardState.model.path || wizardState.model.hfRepo, wizardState.model.paramB);
+  // Apply heuristics when we have a model name, regardless of paramB.
+  // Named-family heuristics (coder-next, qwen3.6, gemma4, etc.) identify architecture
+  // solely from the filename — they don't need a known parameter count.
+  // Gating on paramB > 0 would skip DeltaNet nAttnLayers reduction for models whose
+  // GGUF lacks general.parameter_count and whose filename has no "NB" suffix.
+  const modelName = wizardState.model.path || wizardState.model.hfRepo;
+  if (modelName) {
+    const heuristicArch = buildHeuristicArch(modelName, wizardState.model.paramB);
+    // Named families (DeltaNet, sliding-window, etc.) set fields beyond the generic
+    // nLayers/nKvHeads/headDim — those are keyed on the filename, not paramB.
+    // The generic tier fallback relies on paramB: skip it when paramB = 0 to avoid
+    // replacing correct GGUF introspection values with a wrong size-tier guess.
+    const isNamedFamily =
+      heuristicArch.nAttnLayers > 0 ||
+      heuristicArch.localAttnWindow > 0 ||
+      heuristicArch.nGlobalAttnLayers > 0 ||
+      heuristicArch.linearAttnStateBytes > 0;
+    if (!isNamedFamily && wizardState.model.paramB <= 0) return a;
+
     // For sliding-window models, GGUF head_dim is the global head_dim (e.g., 512),
     // but local layers use a smaller dim (e.g., 256). Trust the heuristic head_dim
     // in that case to avoid inflating KV cache.
@@ -4177,11 +4517,11 @@ function _refreshThreadsHint() {
   if (pCores > 0 && metricsReady) {
     if (hintEl) {
       hintEl.textContent =
-        `Apple Silicon detected: ${pCores} P-cores. Apple recommends 1 for -t on Metal, or at most ${pCores}. Blank = server default.`;
+        `Apple Silicon (${pCores} P-cores): Metal handles inference — set -t to 1. More threads don't speed up GPU inference and add CPU/GPU contention.`;
     }
     if (batchHintEl) {
       batchHintEl.textContent =
-        `Prompt processing can use more CPU. Recommended: ${pCores} for -tb, or leave blank to inherit -t.`;
+        `Prompt processing (prefill) runs on CPU. Set -tb to ${pCores} to use all P-cores for faster context ingestion.`;
     }
     if (dom.threadsInput && !dom.threadsInput.value) {
       dom.threadsInput.placeholder = '1 recommended';
@@ -5336,6 +5676,14 @@ async function _autoDiscoverLocalModelQuants() {
 
   const filename = (path || '').split(/[\\/]/).pop() || '';
   if (!filename || filename === _lastQuantSearchFile) return;
+
+  // Step 1 already fetched quant files — skip re-searching, just refresh the header
+  if (wizardState.model.quantFiles?.length > 0) {
+    _lastQuantSearchFile = filename;
+    renderHardwareModelHeader();
+    return;
+  }
+
   _lastQuantSearchFile = filename;
   _quantSwapSearching = true;
 

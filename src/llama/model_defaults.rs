@@ -294,6 +294,82 @@ pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -
         ];
     }
 
+    // Generic Qwen3 reasoning/distilled models (coder-next, reasoning-distilled, etc.)
+    // that don't match the qwen3.5 or qwen3.6 families above. These are thinking-capable
+    // models so they should expose thinking/non-thinking presets like Qwen3.5.
+    let is_qwen3_reasoning = lower.contains("qwen3")
+        && !is_qwen35
+        && !is_qwen36
+        && (lower.contains("reasoning")
+            || lower.contains("thinking")
+            || lower.contains("distill")
+            || lower.contains("coder-next"));
+    if is_qwen3_reasoning {
+        let thinking_general = ModelDefaults {
+            temperature: 1.0,
+            top_p: 0.95,
+            top_k: 20,
+            min_p: 0.0,
+            repeat_penalty: 1.0,
+            presence_penalty: 1.5,
+            max_tokens: 32768,
+            enable_thinking: Some(true),
+            preserve_thinking: None,
+            reasoning_budget: None,
+            reasoning: true,
+            reasoning_budget_message: None,
+        };
+        let thinking_coding = ModelDefaults {
+            temperature: 0.6,
+            top_p: 0.95,
+            top_k: 20,
+            min_p: 0.0,
+            repeat_penalty: 1.0,
+            presence_penalty: 0.0,
+            max_tokens: 32768,
+            enable_thinking: Some(true),
+            preserve_thinking: None,
+            reasoning_budget: None,
+            reasoning: true,
+            reasoning_budget_message: None,
+        };
+        let not_thinking = ModelDefaults {
+            temperature: 0.7,
+            top_p: 0.8,
+            top_k: 20,
+            min_p: 0.0,
+            repeat_penalty: 1.0,
+            presence_penalty: 1.5,
+            max_tokens: 32768,
+            enable_thinking: Some(false),
+            preserve_thinking: Some(false),
+            reasoning_budget: None,
+            reasoning: false,
+            reasoning_budget_message: None,
+        };
+        return vec![
+            ModelPreset {
+                name: "Thinking (General)".into(),
+                description: Some(
+                    "Recommended default for general chat and reasoning tasks.".into(),
+                ),
+                defaults: thinking_general,
+            },
+            ModelPreset {
+                name: "Thinking (Coding)".into(),
+                description: Some(
+                    "Lower temperature for deterministic coding and debugging.".into(),
+                ),
+                defaults: thinking_coding,
+            },
+            ModelPreset {
+                name: "Non-thinking".into(),
+                description: Some("Balanced chat mode with thinking explicitly disabled.".into()),
+                defaults: not_thinking,
+            },
+        ];
+    }
+
     // EXAONE 4.5: general-purpose vs OCR/document
     if lower.contains("exaone-4.5") || lower.contains("exaone4.5") {
         let general = ModelDefaults {
@@ -494,6 +570,26 @@ pub fn get_model_defaults(name_or_repo: &str, _size_bytes: u64, tags: &[String])
         d.reasoning_budget = Some(16384);
         d.reasoning = true;
         d.reasoning_budget_message = Some("\nFinal Answer:".into());
+        return d;
+    }
+    // Generic Qwen3 reasoning/distilled: thinking enabled by default.
+    let is_qwen3_reasoning = lower.contains("qwen3")
+        && !(lower.contains("qwen3.5") || lower.contains("qwen35"))
+        && !is_qwen36
+        && (lower.contains("reasoning")
+            || lower.contains("thinking")
+            || lower.contains("distill")
+            || lower.contains("coder-next"));
+    if is_qwen3_reasoning {
+        d.temperature = 1.0;
+        d.top_p = 0.95;
+        d.top_k = 20;
+        d.min_p = 0.0;
+        d.repeat_penalty = 1.0;
+        d.presence_penalty = 1.5;
+        d.max_tokens = 32768;
+        d.enable_thinking = Some(true);
+        d.reasoning = true;
         return d;
     }
     // Gemma 4 family: Unsloth deployment guide defaults.

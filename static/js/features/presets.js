@@ -156,6 +156,10 @@ let _presetAdvisorTimer = null;
 let _presetAdvisorSeq = 0;
 let _presetIsUnified = null; // cached platform check
 
+// ── VRAM live estimate ────────────────────────────────────────────────────────
+let _presetVramTimer = null;
+let _presetVramSeq = 0;
+
 async function _ensureUnifiedFlag() {
     if (_presetIsUnified !== null) return _presetIsUnified;
     try {
@@ -223,6 +227,83 @@ export function updatePresetAdvisor() {
             box.style.display = cards.childElementCount ? '' : 'none';
         } catch { box.style.display = 'none'; }
     }, 250);
+}
+
+// ── VRAM live estimate for preset editor ─────────────────────────────────────
+
+export function updatePresetVram() {
+    const box = document.getElementById('preset-vram-display');
+    if (!box) return;
+    const modelVal = document.getElementById('modal-model-path')?.value.trim() || '';
+    if (!modelVal) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    box.innerHTML = '<div class="preset-vram-loading">Estimating VRAM…</div>';
+    clearTimeout(_presetVramTimer);
+    _presetVramTimer = setTimeout(async () => {
+        const isUnified = await _ensureUnifiedFlag();
+        const nCtx = parseInt(document.getElementById('modal-context-size')?.value) || 131072;
+        const ctk = document.getElementById('modal-ctk')?.value || 'q8_0';
+        const ctv = document.getElementById('modal-ctv')?.value || 'f16';
+        const parallelSlots = parseInt(document.getElementById('modal-parallel-slots')?.value) || 1;
+        const ubatch = parseInt(document.getElementById('modal-ubatch-size')?.value) || 512;
+        const nCpuMoe = parseInt(document.getElementById('modal-n-cpu-moe')?.value) || 0;
+        const body = {
+            model_path: modelVal,
+            n_ctx: nCtx,
+            ctk, ctv,
+            parallel_slots: parallelSlots,
+            ubatch_size: ubatch,
+            n_cpu_moe: nCpuMoe,
+            available_vram_bytes: 0,
+            is_unified_memory: !!isUnified,
+        };
+        const seq = ++_presetVramSeq;
+        try {
+            const headers = window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' };
+            const r = await fetch('/api/vram-estimate', { method: 'POST', headers, body: JSON.stringify(body) });
+            if (seq !== _presetVramSeq) return;
+            if (!r.ok) { box.style.display = 'none'; return; }
+            const data = await r.json();
+            if (data.error) { box.style.display = 'none'; return; }
+            _renderPresetVram(box, data);
+        } catch { if (seq === _presetVramSeq) box.style.display = 'none'; }
+    }, 350);
+}
+
+function _renderPresetVram(el, data) {
+    const fmt = b => {
+        const gb = b / 1e9;
+        return gb >= 1 ? gb.toFixed(1) + ' GB' : (b / 1e6).toFixed(0) + ' MB';
+    };
+    const total = data.total_bytes || 0;
+    const weights = data.weights_bytes || 0;
+    const kv = data.kv_cache_bytes || 0;
+    const mmproj = data.mmproj_bytes || 0;
+    const overhead = data.overhead_bytes || 0;
+    const extras = mmproj + overhead + (data.mtp_bytes || 0) + (data.linear_attn_state_bytes || 0);
+    const pct = v => total > 0 ? Math.max(0, Math.min(100, (v / total) * 100)).toFixed(1) + '%' : '0%';
+    const rec = data.recommendation || 'fit';
+    const dotClass = rec === 'fit' ? 'fit' : rec === 'tight' ? 'tight' : 'risk';
+    const parts = [];
+    if (weights > 0) parts.push(`Weights ${fmt(weights)}`);
+    if (kv > 0) parts.push(`KV ${fmt(kv)}`);
+    if (mmproj > 0) parts.push(`mmproj ${fmt(mmproj)}`);
+    if (overhead > 0) parts.push(`overhead ${fmt(overhead)}`);
+    el.innerHTML = `
+        <div class="preset-vram-row">
+            <div class="launch-card-vram-bar">
+                <div class="launch-card-vram-seg launch-card-vram-seg--weights" style="width:${pct(weights)}"></div>
+                <div class="launch-card-vram-seg launch-card-vram-seg--kv" style="width:${pct(kv)}"></div>
+                <div class="launch-card-vram-seg launch-card-vram-seg--extras" style="width:${pct(extras)}"></div>
+            </div>
+            <span class="launch-card-vram-total">~${fmt(total)}</span>
+            <span class="launch-card-vram-dot launch-card-vram-dot--${dotClass}" title="${rec}"></span>
+        </div>
+        ${parts.length ? `<div class="preset-vram-breakdown">${parts.join(' · ')}</div>` : ''}
+    `;
+    el.style.display = '';
 }
 
 // Empirically auto-tune n_cpu_moe for the preset's model via llama-bench.
@@ -367,7 +448,9 @@ export function openPresetModal(mode) {
     }
 
     const presetModel = document.getElementById('modal-model-path')?.value.trim();
-    if (mode !== 'edit' && presetModel) _suggestGenerationDefaults(presetModel);
+    // New preset: fill empty sampling fields + show preset pills.
+    // Edit preset: only show preset pills (don't overwrite the user's saved values).
+    if (presetModel) _suggestGenerationDefaults(presetModel, mode !== 'edit');
     else _renderGenerationPresetPills([]);
 
     // Reset change-summary state
@@ -391,8 +474,9 @@ export function openPresetModal(mode) {
     _refreshPresetThreadsHints();
     if (!lastSystemMetrics) _fetchSystemInfoAndRefreshPresetHints();
 
-    // Config-time performance advisor
+    // Config-time performance advisor and VRAM estimate
     updatePresetAdvisor();
+    updatePresetVram();
 
     // Focus first interactive element in the modal
     const firstFocusable = modal.querySelector('.preset-nav-item, button, input, select, textarea');
@@ -966,7 +1050,9 @@ function initPresetEditorNav() {
 
 // ── Model-family generation defaults ─────────────────────────────────────────
 
-async function _suggestGenerationDefaults(modelPath) {
+// fillEmpty=true: fill blank sampling fields with model defaults (for new presets).
+// fillEmpty=false: only render the preset pill switchers, don't overwrite existing values.
+async function _suggestGenerationDefaults(modelPath, fillEmpty = true) {
     const modelName = modelPath.split(/[/\\]/).pop() || modelPath;
     try {
         const headers = window.authHeaders
@@ -982,25 +1068,27 @@ async function _suggestGenerationDefaults(modelPath) {
         if (d.error) return;
         const defaults = d.defaults || d;
 
-        // Only fill fields the user hasn't already set
-        const fill = (id, val) => {
-            const el = document.getElementById(id);
-            if (el && el.value === '') numOrEmpty(id, val);
-        };
-        fill('modal-temperature', defaults.temperature ?? null);
-        fill('modal-top-p', defaults.top_p ?? null);
-        fill('modal-top-k', defaults.top_k ?? null);
-        fill('modal-min-p', defaults.min_p ?? null);
-        fill('modal-repeat-penalty', defaults.repeat_penalty ?? null);
-        fill('modal-presence-penalty', defaults.presence_penalty ?? null);
-        fill('modal-max-tokens', defaults.max_tokens ?? null);
-        _fillSelectIfEmpty('modal-enable-thinking', defaults.enable_thinking);
-        _fillSelectIfEmpty('modal-preserve-thinking', defaults.preserve_thinking);
-        _fillSelectIfEmpty('modal-reasoning', defaults.reasoning ? 'on' : 'off');
-        fill('modal-reasoning-budget', defaults.reasoning_budget ?? null);
-        const msgEl = document.getElementById('modal-reasoning-budget-message');
-        if (msgEl && msgEl.value === '' && defaults.reasoning_budget_message != null) {
-            msgEl.value = defaults.reasoning_budget_message.replace(/\n/g, '\\n');
+        if (fillEmpty) {
+            // Only fill fields the user hasn't already set
+            const fill = (id, val) => {
+                const el = document.getElementById(id);
+                if (el && el.value === '') numOrEmpty(id, val);
+            };
+            fill('modal-temperature', defaults.temperature ?? null);
+            fill('modal-top-p', defaults.top_p ?? null);
+            fill('modal-top-k', defaults.top_k ?? null);
+            fill('modal-min-p', defaults.min_p ?? null);
+            fill('modal-repeat-penalty', defaults.repeat_penalty ?? null);
+            fill('modal-presence-penalty', defaults.presence_penalty ?? null);
+            fill('modal-max-tokens', defaults.max_tokens ?? null);
+            _fillSelectIfEmpty('modal-enable-thinking', defaults.enable_thinking);
+            _fillSelectIfEmpty('modal-preserve-thinking', defaults.preserve_thinking);
+            _fillSelectIfEmpty('modal-reasoning', defaults.reasoning ? 'on' : 'off');
+            fill('modal-reasoning-budget', defaults.reasoning_budget ?? null);
+            const msgEl = document.getElementById('modal-reasoning-budget-message');
+            if (msgEl && msgEl.value === '' && defaults.reasoning_budget_message != null) {
+                msgEl.value = defaults.reasoning_budget_message.replace(/\n/g, '\\n');
+            }
         }
         _renderGenerationPresetPills(d.presets || []);
     } catch (_) {
@@ -1075,8 +1163,8 @@ export function initPresets() {
     // Refresh the performance advisor as the preset form changes
     const presetForm = document.getElementById('preset-form');
     if (presetForm) {
-        presetForm.addEventListener('input', () => updatePresetAdvisor());
-        presetForm.addEventListener('change', () => updatePresetAdvisor());
+        presetForm.addEventListener('input', () => { updatePresetAdvisor(); updatePresetVram(); });
+        presetForm.addEventListener('change', () => { updatePresetAdvisor(); updatePresetVram(); });
     }
 
     // MoE offload auto-tuner (empirical sweep)

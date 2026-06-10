@@ -5124,3 +5124,162 @@
 [data-theme="light"] .hw-hf-origin-glow {
   box-shadow: 0 0 12px 2px rgba(99, 102, 241, 0.25) !important;
 }
+
+/* ── HF Origin detection widget (Step 1, local/import model) ─────────────────── */
+.hf-origin-widget {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--color-bg-alt);
+  border: 1px solid var(--color-border);
+  font-size: 11px;
+}
+.hf-origin-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding: 2px 5px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+}
+.hf-origin-status {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+.hf-origin-hint {
+  color: var(--color-text-muted);
+  flex-basis: 100%;
+  margin-bottom: 2px;
+}
+.hf-origin-repo {
+  font-weight: 600;
+}
+.hf-origin-author {
+  opacity: 0.55;
+}
+.hf-origin-card-link {
+  color: var(--color-text-muted);
+  text-decoration: none;
+  font-size: 10px;
+}
+.hf-origin-card-link:hover {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
+.hf-origin-edit-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  padding: 0 3px;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.7;
+}
+.hf-origin-edit-btn:hover { opacity: 1; color: var(--color-primary); }
+.hf-origin-search-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.hf-origin-select {
+  flex: 1;
+  min-width: 180px;
+  max-width: 400px;
+  font-size: 11px;
+  padding: 3px 6px;
+  background: var(--color-input-bg, var(--color-bg));
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text);
+}
+.hf-origin-search-input {
+  flex: 1;
+  min-width: 160px;
+  font-size: 11px;
+  padding: 3px 8px;
+  background: var(--color-input-bg, var(--color-bg));
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text);
+}
+.hf-origin-search-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.hf-origin-quants-container {
+  flex-basis: 100%;
+  margin-top: 2px;
+}
+.hf-origin-quants-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  padding: 2px 0;
+  text-align: left;
+}
+.hf-origin-quants-toggle:hover { color: var(--color-primary); }
+.hf-origin-quants-list {
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 150px;
+  overflow-y: auto;
+  margin-top: 4px;
+  padding: 4px 0;
+}
+.hf-origin-quant-item {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+.hf-origin-search-results {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+.hf-origin-result-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  transition: background 0.1s, border-color 0.1s;
+}
+.hf-origin-result-row:hover {
+  background: var(--color-bg-alt);
+  border-color: var(--color-primary);
+}
+.hf-origin-result-name {
+  flex: 1;
+  font-size: 11px;
+}
+.hf-origin-result-pct {
+  font-size: 10px;
+  opacity: 0.5;
+  flex-shrink: 0;
+}

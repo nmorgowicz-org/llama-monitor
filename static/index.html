@@ -2416,6 +2416,8 @@
                             </div>
                         </div>
                         <div class="pe-section-body">
+                            <!-- Live VRAM estimate — updates as context/quant changes -->
+                            <div id="preset-vram-display" class="preset-vram-display" style="display:none;"></div>
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-context-size" title="Maximum context length in tokens. Larger values use more VRAM. Auto-enables YaRN scaling above 262144.">Context Size (-c)</label>
                                 <input type="number" class="pe-input" id="modal-context-size" value="128000">
@@ -3181,6 +3183,9 @@
                         </div>
                     </div>
 
+                    <!-- HF origin detection widget — driven by JS for local/import sources -->
+                    <div id="hf-origin-section" style="display:none;"></div>
+
                     <!-- Chat template status (auto-populated based on model family) -->
                     <div class="chat-template-section" id="chat-template-section" style="display:none;">
                         <div class="ct-header">
@@ -3251,7 +3256,7 @@
                         <!-- Local-model quant discovery: shown when no quantFiles are loaded yet -->
                         <div class="hw-quant-row" id="hw-quant-local-row" style="display:none;">
                             <span class="hw-quant-label">Swap quant</span>
-                            <button type="button" id="hw-quant-local-btn" class="btn-wizard-tertiary" style="font-size:10px;min-height:22px;padding:3px 10px;" title="Find other quantizations for this model on HuggingFace">Find on HuggingFace…</button>
+                            <button type="button" id="hw-quant-local-btn" class="btn-wizard-tertiary" style="font-size:10px;min-height:22px;padding:3px 10px;" title="Find other quantizations for this model on HuggingFace">Find other quantizations…</button>
                             <span id="hw-quant-local-status" style="font-size:10px;color:var(--color-text-muted);flex:1;margin-left:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
                         </div>
                         <!-- Download / stream actions shown after picking a new quant for a local model -->
