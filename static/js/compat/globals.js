@@ -13,7 +13,7 @@
 import { escapeHtml, formatMetricNumber } from '../core/format.js';
 import { loadTemplates } from '../features/chat-templates.js';
 import { openSettingsModal } from '../features/settings.js';
-import { openModelsModal, openModelsModalForSwitch } from '../features/models.js';
+import { openModelsModal } from '../features/models.js';
 import { openSessionModal } from '../features/sessions.js';
 
 // Attach to window — this is the ONLY place window assignments should happen
@@ -22,7 +22,6 @@ window.formatMetricNumber = formatMetricNumber;
 window.loadTemplates = loadTemplates;
 window.openSettingsModal = openSettingsModal;
 window.openModelsModal = openModelsModal;
-window.openModelsModalForSwitch = openModelsModalForSwitch;
 window.openSessionModal = openSessionModal;
 
 // ── Functions to be migrated as features are extracted ─────────────────────────

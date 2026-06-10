@@ -5,6 +5,7 @@ import { setupViewState, chat, sessionState } from '../core/app-state.js';
 import { doAttachFromSetup } from './attach-detach.js';
 import { escapeHtml } from '../core/format.js';
 import { quickStartSession } from './sessions.js';
+import { showToast } from './toast.js';
 // ── Memory bar ────────────────────────────────────────────────────────────────
 // Same Metal cap logic as effectiveAvailBytes() in spawn-wizard.js.
 
@@ -256,10 +257,6 @@ function animateSetupCardsEnter() {
     // no-op: launch cards use CSS animation-delay via inline style
 }
 
-// ── Attach drawer toggle ──────────────────────────────────────────────────────
-
-let _attachDrawerOpen = false;
-
 // Map of preset_id → last_connected_at (ms), populated by renderRecentEndpoints
 const _spawnLastLaunched = new Map();
 
@@ -280,17 +277,7 @@ function _applyLastLaunchedToCards() {
     });
 }
 
-export function toggleAttachDrawer(forceOpen) {
-    const drawer = document.getElementById('setup-attach-drawer');
-    if (!drawer) return;
-    _attachDrawerOpen = forceOpen !== undefined ? forceOpen : !_attachDrawerOpen;
-    drawer.classList.toggle('open', _attachDrawerOpen);
-    const btn = document.getElementById('setup-attach-remote-btn');
-    if (btn) {
-        btn.style.background = _attachDrawerOpen ? 'var(--neutral-soft-bg-strong)' : '';
-        btn.style.borderColor = _attachDrawerOpen ? 'var(--neutral-soft-border)' : '';
-    }
-}
+
 
 // ── Launch Grid — Preset Cards ────────────────────────────────────────────────
 
@@ -436,7 +423,7 @@ function _buildLaunchCard(preset, activePresetId) {
 
         card.querySelector('.launch-card-btn-trash').addEventListener('click', async (e) => {
             e.stopPropagation();
-            if (!confirm(`Delete preset "${preset.name}"? This cannot be undone.`)) return;
+            if (!confirm(`Delete preset "${escapeHtml(preset.name)}"? This cannot be undone.`)) return;
             try {
                 const headers = window.authHeaders ? window.authHeaders() : {};
                 const resp = await fetch(`/api/presets/${preset.id}`, { method: 'DELETE', headers });
@@ -446,6 +433,7 @@ function _buildLaunchCard(preset, activePresetId) {
                 }
             } catch (err) {
                 console.error('Delete preset failed:', err);
+                showToast('Failed to delete preset', 'error', err.message || String(err));
             }
         });
 

@@ -297,11 +297,21 @@
   text-decoration-style: dotted;
 }
 
+[data-theme="light"] #models-modal .models-settings-link {
+  color: #0284c7;
+}
+
 #models-modal .models-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 12px;
   padding-bottom: 4px;
+}
+
+@media (max-width: 480px) {
+  #models-modal .models-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 #models-modal .models-loading,
@@ -375,10 +385,22 @@
   color: #f9a8d4;
 }
 
-.model-card-quant.quant-style-ud {
+  .model-card-quant.quant-style-ud {
   background: rgba(234, 179, 8, 0.12);
   border: 1px solid rgba(234, 179, 8, 0.3);
   color: #fde68a;
+}
+
+[data-theme="light"] .model-card-quant.quant-style-standard {
+  color: #6366f1;
+}
+
+[data-theme="light"] .model-card-quant.quant-style-imatrix {
+  color: #db2777;
+}
+
+[data-theme="light"] .model-card-quant.quant-style-ud {
+  color: #d97706;
 }
 
 .model-card-meta {
@@ -919,6 +941,15 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
+
   #models-modal::before,
   #analytics-modal::before,
   #user-preferences-modal::before,
@@ -930,7 +961,26 @@
   #models-modal .modal::after,
   #analytics-modal .modal::after,
   #user-preferences-modal .modal::after,
-  .shortcuts-modal::after {
+  .shortcuts-modal::after,
+  .speed-bar::after,
+  .token-flow span,
+  .slot-tile.busy::after,
+  .widget-generation.is-live .generation-ring,
+  .hw-temp-gauge,
+  .hw-ring-viz,
+  .hw-bar-fill,
+  .hw-stacked-fill,
+  .metric-live-chip.live::before,
+  .status-dot.running,
+  .status-dot.ok,
+  .setup-orb-1,
+  .setup-orb-2,
+  .setup-orb-3,
+  .widget-card.entrance.active,
+  .launch-card--running,
+  .launch-card--new-primary,
+  .launch-card-running-badge,
+  .launch-card-skeleton {
     animation: none !important;
   }
 
@@ -939,7 +989,8 @@
   .personalization-section:hover,
   .shortcut-item:hover,
   .analytics-metric:hover,
-  .analytics-stat-item:hover {
+  .analytics-stat-item:hover,
+  .widget-card:hover {
     transform: none;
   }
 }
@@ -1007,35 +1058,6 @@
   .viz-switcher-label {
     min-width: auto;
   }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: 0.001ms !important;
-  }
-
-  .widget-card:hover {
-    transform: none;
-  }
-
-  .speed-bar::after,
-   .token-flow span,
-   .slot-tile.busy::after,
-   .widget-generation.is-live .generation-ring,
-   .hw-temp-gauge,
-   .hw-ring-viz,
-   .hw-bar-fill,
-   .hw-stacked-fill,
-   .metric-live-chip.live::before,
-   .status-dot.running,
-   .status-dot.ok {
-     animation: none !important;
-   }
 }
 
 /* ===== SETUP VIEW ===== */
@@ -2328,6 +2350,7 @@ body.setup-active .sidebar-nav {
 
 .setup-body {
   display: flex;
+  flex-wrap: wrap;
   flex: 1;
   min-height: 0;
   gap: 0;
@@ -2511,14 +2534,20 @@ body.setup-active .sidebar-nav {
 /* ── Launch grid ──────────────────────────────────────────────────────────── */
 
 .launch-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   position: relative;
   z-index: 2;
   width: 100%;
   box-sizing: border-box;
   flex: 0 0 auto;
+}
+
+@media (max-width: 480px) {
+  .launch-card {
+    flex: 1 1 calc(50% - 5px);
+  }
 }
 
 /* ── Preset launch card ───────────────────────────────────────────────────── */
@@ -2534,6 +2563,8 @@ body.setup-active .sidebar-nav {
   padding: 20px;
   display: flex;
   flex-direction: column;
+  flex: 1 1 200px;
+  min-width: 0;
   gap: 10px;
   cursor: default;
   transition: border-color 240ms ease, box-shadow 240ms ease, transform 240ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -2766,8 +2797,10 @@ body.setup-active .sidebar-nav {
   letter-spacing: -0.01em;
   flex: 1 1 auto;
   min-width: 0;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .launch-card-running-badge {
@@ -2875,9 +2908,9 @@ body.setup-active .sidebar-nav {
   transition: background 0.3s ease;
 }
 
-.launch-card-vram-dot--fit    { background: #22c55e; box-shadow: 0 0 4px rgba(34, 197, 94, 0.4); }
-.launch-card-vram-dot--tight  { background: #f59e0b; box-shadow: 0 0 4px rgba(245, 158, 11, 0.4); }
-.launch-card-vram-dot--risk   { background: #ef4444; box-shadow: 0 0 4px rgba(239, 68, 68, 0.4); }
+.launch-card-vram-dot--fit    { background: var(--color-success); box-shadow: 0 0 4px color-mix(in srgb, var(--color-success) 40%, transparent); }
+.launch-card-vram-dot--tight  { background: var(--color-warning); box-shadow: 0 0 4px color-mix(in srgb, var(--color-warning) 40%, transparent); }
+.launch-card-vram-dot--risk   { background: var(--color-error); box-shadow: 0 0 4px color-mix(in srgb, var(--color-error) 40%, transparent); }
 
 /* ── Memory bar ─────────────────────────────────────────────────────────────── */
 
@@ -3435,8 +3468,8 @@ body.setup-active .sidebar-nav {
     padding: 0 12px 16px;
   }
 
-  .launch-grid {
-    grid-template-columns: 1fr;
+  .launch-card {
+    flex: 1 1 100%;
   }
 
   .setup-brand-sub {
@@ -3454,16 +3487,6 @@ body.setup-active .sidebar-nav {
     padding: 8px;
     gap: 0;
   }
-}
-
-  @media (prefers-reduced-motion: reduce) {
-   *,
-   *::before,
-   *::after {
-     animation-duration: 0.01ms !important;
-     animation-iteration-count: 1 !important;
-     transition-duration: 0.01ms !important;
-   }
 }
 
 /* Local Server: spawn error diagnostics bar */
@@ -3651,4 +3674,16 @@ body.setup-active .sidebar-nav {
   border-color: rgba(45, 212, 191, 0.35);
   box-shadow: 0 6px 20px rgba(45, 212, 191, 0.12);
   transform: translateY(-1px);
+}
+
+[data-theme="light"] .setup-ql-divider-label {
+  color: rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="light"] .setup-manage-link {
+  color: rgba(0, 0, 0, 0.3) !important;
+}
+
+[data-theme="light"] .setup-manage-link:hover {
+  color: rgba(0, 0, 0, 0.6) !important;
 }

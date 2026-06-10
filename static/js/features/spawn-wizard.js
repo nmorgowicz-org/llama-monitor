@@ -391,6 +391,17 @@ export function openSpawnWizard(opts = {}) {
     renderLocalModelHint();
     showStep(0);
   }
+
+  setupWizardEscape();
+}
+
+function setupWizardEscape() {
+  window.addEventListener('keydown', function wizardEsc(e) {
+    if (e.key === 'Escape') {
+      window.removeEventListener('keydown', wizardEsc);
+      dom.overlay?.classList.remove('open');
+    }
+  });
 }
 
 // Clear all wizard state for a fresh start
@@ -1593,6 +1604,15 @@ function showStep(index) {
   if (index === 5) {
     _renderSpawnConfigCard();
   }
+
+  // Focus management: make step container focusable and announce to screen readers
+  const targetStep = document.getElementById('wizard-step-' + index);
+  if (targetStep) {
+    targetStep.setAttribute('tabindex', '-1');
+    targetStep.setAttribute('aria-label', STEP_LABELS[index] || 'Wizard step');
+    targetStep.focus();
+  }
+
   refreshStepGuardrails();
 }
 
@@ -2714,13 +2734,20 @@ let communityPicksActiveCat = 0;
 async function loadCommunityPicks() {
   try {
     const headers = window.authHeaders ? window.authHeaders() : {};
+    const panel = document.getElementById('hf-community-picks');
+    if (panel) {
+      panel.style.display = '';
+      const list = document.getElementById('hf-cp-list');
+      if (list) {
+        list.innerHTML = '<div class="hf-cp-skeleton"><span class="hf-cp-skeleton-item"></span><span class="hf-cp-skeleton-item"></span><span class="hf-cp-skeleton-item"></span></div>';
+      }
+    }
     const resp = await fetch('/api/hf/community-picks', { headers });
     if (!resp.ok) return;
     const json = await resp.json();
     if (!json.ok || !json.data) return;
 
     communityPicksData = json.data;
-    const panel = document.getElementById('hf-community-picks');
     if (!panel) return;
 
     const cats = communityPicksData.categories || [];
@@ -3310,7 +3337,7 @@ function readHardwareState() {
 
 export function scheduleVramUpdate() {
   if (vramDebounce) clearTimeout(vramDebounce);
-  vramDebounce = setTimeout(updateVramDisplay, 250);
+  vramDebounce = setTimeout(updateVramDisplay, 150);
 }
 
 function maybeResetHardwareStepScroll() {

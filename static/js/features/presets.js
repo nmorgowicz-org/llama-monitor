@@ -1267,7 +1267,7 @@ async function _fetchSystemInfoAndRefreshPresetHints() {
   } catch (err) { console.warn('Failed to fetch system info for preset hints:', err); }
 }
 
-async function _showConfirm(title, message) {
+export async function _showConfirm(title, message) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.style.zIndex = '2000';

@@ -445,16 +445,30 @@ export async function doDetach() {
 
 // ── Setup page helpers ─────────────────────────────────────────────────────────
 
-export function doAttachFromSetup() {
+export async function doAttachFromSetup() {
     const input = document.getElementById('setup-endpoint-url');
     const url = input ? input.value.trim() : '';
-    if (url) {
-        const serverEndpoint = document.getElementById('server-endpoint');
-        if (serverEndpoint) serverEndpoint.value = url;
-        localStorage.setItem('llama-monitor-last-endpoint', url);
+    if (!url) {
+        input?.focus();
+        return;
     }
+    const serverEndpoint = document.getElementById('server-endpoint');
+    if (serverEndpoint) serverEndpoint.value = url;
+    localStorage.setItem('llama-monitor-last-endpoint', url);
+
+    const btn = document.getElementById('setup-attach-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Connecting...';
+    }
+
     showConnectingState();
-    doAttach();
+    await doAttach();
+
+    if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Connect';
+    }
 }
 
 export function doStartFromSetup() {
@@ -546,7 +560,7 @@ export function initAttachDetach() {
     // Bind Switch Model button
     const btnSwitchModel = document.getElementById('btn-switch-model');
     if (btnSwitchModel) btnSwitchModel.addEventListener('click', () => {
-        import('./models.js').then(({ openModelsModalForSwitch }) => openModelsModalForSwitch());
+        import('./models.js').then(({ openModelsModal }) => openModelsModal());
     });
 
     // Bind control bar spawn button — opens wizard from monitor view

@@ -4,6 +4,7 @@
 import { sessionState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast } from './toast.js';
+import { _showConfirm } from './presets.js';
 import {
     hfSearch,
     hfListFiles,
@@ -31,7 +32,7 @@ let initialized = false;
 let hfState = {
     selectedRepoId: null,
     selectedFile: null,
-    currentDownloadId: null,
+    currentDownloadIds: new Set(),
     initialized: false,
     // Wizard-like state
     paramB: 0,
@@ -88,10 +89,6 @@ function savePrefs() {
 export function openModelsModal() {
     document.getElementById('models-modal')?.classList.add('open');
     loadModels();
-}
-
-export function openModelsModalForSwitch() {
-    openModelsModal();
 }
 
 function closeModelsModal() {
@@ -469,7 +466,8 @@ function buildModelCard(m) {
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
     deleteBtn.className = 'mm-action-btn mm-action-delete';
-    deleteBtn.title = 'Delete model file';
+    deleteBtn.title = 'Delete this model from library';
+    deleteBtn.setAttribute('aria-label', 'Delete this model from library');
     deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
     deleteBtn.addEventListener('click', () => deleteModel(m.path, m.filename || name));
     actions.appendChild(deleteBtn);
@@ -478,6 +476,7 @@ function buildModelCard(m) {
     tagBtn.type = 'button';
     tagBtn.className = 'mm-action-btn mm-action-tags';
     tagBtn.title = 'Add tag';
+    tagBtn.setAttribute('aria-label', 'Add tag');
     tagBtn.textContent = '+';
     tagBtn.addEventListener('click', () => {
         openTagPicker(m.path, tags);
@@ -523,9 +522,11 @@ async function deleteModel(path, filename) {
     const extra = presets.length
         ? `\nThis will break presets that use this model:\n- ${presets.map(p => p.name || 'Unnamed preset').join('\n- ')}\n`
         : '';
-    if (!confirm(
-        `Delete this model file?\n\n${filename}\nPath: ${path}\n\nThis will permanently remove the file from disk.${extra}\nThis action cannot be undone.`
-    )) return;
+    const confirmed = await _showConfirm(
+        'Delete model file',
+        `"${escapeHtml(filename)}"\nPath: ${escapeHtml(path)}\n\nThis will permanently remove the file from disk.${extra}\nThis action cannot be undone.`
+    );
+    if (!confirmed) return;
 
     try {
         const resp = await fetch('/api/models/file', {
@@ -666,6 +667,7 @@ function buildLibraryToolbar(models) {
     input.placeholder = 'Search models...';
     input.value = prefs.search || '';
     input.setAttribute('autocomplete', 'off');
+    input.setAttribute('aria-label', 'Search models');
 
     wrap.appendChild(searchIcon);
     wrap.appendChild(input);
@@ -1171,12 +1173,12 @@ async function onHfFileSelected(file, repoId, downloadPanel) {
     await detectMmprojCompanion(repoId);
 
     // Wire download button
-    const downloadBtn = document.getElementById('mm-hf-dlp-download-btn');
-    if (downloadBtn) {
-        downloadBtn.replaceWith(downloadBtn.cloneNode(true));
-    }
     const newBtn = document.getElementById('mm-hf-dlp-download-btn');
     if (newBtn) {
+        newBtn.onclick = null;
+    }
+    if (newBtn) {
+        newBtn.disabled = false;
         newBtn.onclick = async () => {
             const modelFilePath = file.path || file.name;
             const started = await hfStartDownload({
@@ -1184,7 +1186,7 @@ async function onHfFileSelected(file, repoId, downloadPanel) {
                 filePath: modelFilePath,
                 panelEl: downloadPanel,
                 onComplete: (downloadId, localPath) => {
-                    hfState.currentDownloadId = downloadId;
+                    hfState.currentDownloadIds.add(downloadId);
                     showToast('Model downloaded', 'success');
                     // Refresh library tab
                     loadModels();
@@ -1207,19 +1209,19 @@ async function onHfFileSelected(file, repoId, downloadPanel) {
     }
 
     // Wire cancel button
-    const cancelBtn = document.getElementById('mm-hf-dlp-cancel-btn');
-    if (cancelBtn) {
-        cancelBtn.replaceWith(cancelBtn.cloneNode(true));
-    }
     const newCancel = document.getElementById('mm-hf-dlp-cancel-btn');
     if (newCancel) {
+        newCancel.onclick = null;
+    }
+    if (newCancel) {
         newCancel.onclick = () => {
-            if (hfState.currentDownloadId) {
+            if (hfState.currentDownloadIds.size > 0) {
+                const downloadId = [...hfState.currentDownloadIds][0];
                 hfCancelDownload({
-                    downloadId: hfState.currentDownloadId,
+                    downloadId,
                     panelEl: downloadPanel,
                 });
-                hfState.currentDownloadId = null;
+                hfState.currentDownloadIds.delete(downloadId);
             }
         };
     }
@@ -1249,7 +1251,7 @@ let quantAdvisorDebounce = null;
 
 function triggerQuantAdvisor() {
     if (quantAdvisorDebounce) clearTimeout(quantAdvisorDebounce);
-    quantAdvisorDebounce = setTimeout(loadQuantAdvisor, 600);
+    quantAdvisorDebounce = setTimeout(loadQuantAdvisor, 200);
 }
 
 function hideQuantAdvisor() {
@@ -1334,7 +1336,7 @@ function renderQuantAdvisor(quants, availVram) {
         }
         if (q.is_imatrix) {
             const im = document.createElement('span');
-            im.style.cssText = 'margin-left:4px; font-size:10px; color:#94a3b8;';
+            im.style.cssText = 'margin-left:4px; font-size:10px; color:var(--color-text-muted);';
             im.textContent = 'imatrix';
             nameTd.appendChild(im);
         }
@@ -1658,7 +1660,7 @@ async function detectMmprojCompanion(repoId) {
 
         // Hint
         const hint = document.createElement('div');
-        hint.style.cssText = 'font-size:11px; color:var(--color-text-muted,#94a3b8); margin-left:22px; line-height:1.5;';
+        hint.className = 'mm-hint';
         const sizeFile = recommendedMmproj || mmprojFiles[0];
         const recommendation = recommendedMmproj?.mmproj_recommendation
             ? recommendedMmproj.mmproj_recommendation + '. '
@@ -1682,9 +1684,9 @@ function formatBytes(bytes) {
     if (!bytes) return '';
     const b = Number(bytes);
     if (!isFinite(b)) return '';
-    if (b >= 1e9) return (b / 1e9).toFixed(1) + ' GB';
-    if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB';
-    if (b >= 1e3) return (b / 1e3).toFixed(0) + ' KB';
+    if (b >= 1024 ** 3) return (b / (1024 ** 3)).toFixed(1) + ' GiB';
+    if (b >= 1024 ** 2) return (b / (1024 ** 2)).toFixed(1) + ' MiB';
+    if (b >= 1024) return (b / 1024).toFixed(0) + ' KiB';
     return b + ' B';
 }
 

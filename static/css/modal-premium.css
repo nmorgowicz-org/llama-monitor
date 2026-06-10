@@ -512,6 +512,7 @@
     background:
         radial-gradient(ellipse at center, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.78) 100%);
     backdrop-filter: blur(16px);
+    z-index: 10000;
 }
 
 #file-browser-modal .modal {
@@ -1835,10 +1836,41 @@
 @media (prefers-reduced-motion: reduce) {
   #preset-modal .modal,
   #preset-modal .modal::after,
-  #preset-modal details.modal-section {
+  #preset-modal details.modal-section,
+  #preset-modal .preset-editor-shell,
+  #preset-modal .preset-editor-shell::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 768px) {
+  #preset-modal .preset-editor-shell {
+    width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  .preset-editor-layout {
+    flex-direction: column;
+  }
+
+  .preset-editor-nav {
+    width: 100%;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    padding: 8px;
+    gap: 4px;
+  }
+
+  .preset-nav-item {
+    flex: 0 0 auto;
+    padding: 6px 10px;
+    white-space: nowrap;
   }
 }
 
@@ -1941,6 +1973,10 @@
   font-size: 0.72rem;
   color: rgba(148, 163, 184, 0.7);
   line-height: 1;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .preset-editor-close {
@@ -2308,6 +2344,13 @@
   z-index: 3;
 }
 
+/* ── Save button disabled state ── */
+#preset-modal .btn-modal-save.saving {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* ── Change summary ── */
 .preset-change-summary {
   padding: 12px 20px 8px;
@@ -2355,6 +2398,11 @@
   color: rgba(251, 113, 133, 0.85);
   font-family: var(--font-mono, monospace);
   font-size: 11px;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
 }
 
 .preset-change-arrow {
@@ -2366,6 +2414,11 @@
   color: rgba(110, 231, 183, 0.9);
   font-family: var(--font-mono, monospace);
   font-size: 11px;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
 }
 
 /* ── Light theme overrides ── */

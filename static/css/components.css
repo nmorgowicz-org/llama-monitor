@@ -1211,6 +1211,13 @@ button:disabled {
   align-content: start;
 }
 
+@media (max-width: 480px) {
+  .mm-model-grid {
+    grid-template-columns: 1fr;
+    padding: 10px;
+  }
+}
+
 .mm-loading,
 .mm-empty {
   grid-column: 1 / -1;
@@ -1218,6 +1225,13 @@ button:disabled {
   text-align: center;
   color: rgba(148, 163, 184, 0.55);
   font-size: 0.84rem;
+}
+
+.mm-hint {
+  font-size: 11px;
+  color: var(--color-text-muted, #94a3b8);
+  margin-left: 22px;
+  line-height: 1.5;
 }
 
 /* ── Model card ── */

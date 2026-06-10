@@ -44,9 +44,9 @@ function formatBytes(bytes) {
   if (!bytes) return '';
   const b = Number(bytes);
   if (!isFinite(b)) return '';
-  if (b >= 1e9) return (b / 1e9).toFixed(1) + ' GB';
-  if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB';
-  if (b >= 1e3) return (b / 1e3).toFixed(0) + ' KB';
+  if (b >= 1024 ** 3) return (b / (1024 ** 3)).toFixed(1) + ' GiB';
+  if (b >= 1024 ** 2) return (b / (1024 ** 2)).toFixed(1) + ' MiB';
+  if (b >= 1024) return (b / 1024).toFixed(0) + ' KiB';
   return b + ' B';
 }
 
