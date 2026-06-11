@@ -94,7 +94,7 @@ pub fn detect_backend(force: &str) -> Arc<dyn GpuBackend> {
     }
 }
 
-  #[cfg(target_os = "macos")]
+#[cfg(target_os = "macos")]
 fn is_apple_silicon() -> bool {
     // Check for Apple Silicon by looking at the CPU brand string
     let output = std::process::Command::new("sysctl")
