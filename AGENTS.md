@@ -96,6 +96,7 @@ Examples:
 6. **feat and fix bump versions** - Only these types trigger semantic version increments
 7. **PR titles must reflect the most significant change** - If a PR contains any `fix:` or `feat:` commits, the PR title MUST also be `fix:` or `feat:`. release-please only inspects PR titles, not individual commits. Never use `refactor:`, `chore:`, or `docs:` as a PR title if the PR includes bug fixes or features.
 8. **When one PR contains multiple releasable user-facing changes, provide release-please overrides** - If a PR includes more than one distinct `feat`, `fix`, or `perf` item that should appear separately in release notes, the agent MUST add a `BEGIN_COMMIT_OVERRIDE` / `END_COMMIT_OVERRIDE` block to the PR body before merge. Inside that block, include one conventional-commit line per release note entry, for example:
+9. **NEVER put override blocks in git commit messages** - `BEGIN_COMMIT_OVERRIDE` / `END_COMMIT_OVERRIDE` belongs ONLY in PR bodies for squash-merge release notes. Every `git commit -m` must be a single conventional commit line: `fix(gpu): use -ngl all instead of hardcoded 99`.
 
 ```text
 BEGIN_COMMIT_OVERRIDE
