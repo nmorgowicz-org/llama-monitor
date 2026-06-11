@@ -1,0 +1,805 @@
+use super::*;
+
+// Calibration: RTX 5090 32GB, Qwen3.6-27B Q4_K_M, 8 KV heads, 32 layers,
+// head_dim=128, mmproj=0.8GB, MTP depth 1, fit=1024 → ~212K context @ q8_0 KV
+fn qwen3_27b_arch() -> ModelArch {
+    ModelArch {
+        n_layers: 32,
+        n_kv_heads: 8,
+        head_dim: 128,
+        mmproj_bytes: 800 * 1024 * 1024,
+        mtp_depth: 1,
+        expert_fraction: 0.65,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn kv_calibration_qwen3_27b() {
+    let arch = qwen3_27b_arch();
+    let model_bytes = estimate_model_size_bytes(27.0, "q4_k_m");
+    // Using RTX 5090 32GB
+    let ctx = max_context(
+        model_bytes,
+        &arch,
+        "q8_0",
+        "q8_0",
+        1,
+        1024,
+        0,
+        32 * 1024 * 1024 * 1024,
+        1024,
+        0.05,
+        None,
+    );
+    // Should be in the 180K–240K range
+    assert!(
+        ctx >= 180_000 && ctx <= 260_000,
+        "Expected ~212K context, got {ctx}"
+    );
+}
+
+#[test]
+fn gemma3_local_attn_substantially_smaller_kv() {
+    let dense = ModelArch {
+        n_layers: 62,
+        n_kv_heads: 16,
+        head_dim: 256,
+        ..Default::default()
+    };
+    let gemma = ModelArch::gemma3_heuristic(27.0);
+
+    let ctx = 128_000u64;
+    let kv_dense = kv_cache_bytes(&dense, ctx, 1, "f16", "f16");
+    let kv_gemma = kv_cache_bytes(&gemma, ctx, 1, "f16", "f16");
+    // Gemma alternating attention should use substantially less KV
+    assert!(
+        kv_gemma < kv_dense / 3,
+        "Gemma KV ({kv_gemma}) should be < 1/3 of naive dense ({kv_dense})"
+    );
+}
+
+#[test]
+fn moe_weight_split_proportional() {
+    let arch = ModelArch {
+        n_layers: 8, // Mixtral-8x7B has 32 layers; use 8 here so n_cpu_moe=4 = half
+        n_experts: 8,
+        expert_fraction: 0.65,
+        ..Default::default()
+    };
+    let model = 46_000_000_000u64; // Mixtral-8x7B ~46GB
+    let (vram0, ram0) = moe_weight_split(model, &arch, 0);
+    assert_eq!(vram0, model);
+    assert_eq!(ram0, 0);
+
+    let (vram4, ram4) = moe_weight_split(model, &arch, 4); // 4 of 8 layers = half on CPU
+    assert!(ram4 > 0 && vram4 < model);
+    assert_eq!(vram4 + ram4, model);
+    // ~32.5% of model should be on CPU (0.65 expert frac × 0.5 cpu ratio)
+    let expected_ram = (model as f64 * 0.65 * 0.5) as u64;
+    let delta = (ram4 as i64 - expected_ram as i64).unsigned_abs();
+    assert!(delta < model / 100, "RAM bytes off by more than 1%");
+}
+
+#[test]
+fn quant_table_has_expected_entries() {
+    assert!(find_quant("q4_k_m").is_some());
+    assert!(find_quant("iq2_xxs").is_some());
+    assert!(find_quant("f16").is_some());
+    assert!(find_quant("nonexistent").is_none());
+}
+
+#[test]
+fn auto_size_returns_reasonable_context() {
+    let arch = qwen3_27b_arch();
+    let model_bytes = estimate_model_size_bytes(27.0, "q4_k_m");
+    let result = auto_size(
+        model_bytes,
+        &arch,
+        32 * 1024 * 1024 * 1024,
+        UseCase::General,
+        1,
+        1024,
+        false, // not unified memory in this test
+        None,  // no training context cap in test
+    );
+    assert!(
+        result.context_size >= 100_000,
+        "Expected ≥ 100K context on 32GB for 27B Q4_K_M"
+    );
+    assert_eq!(result.kv_quant_k, "q8_0");
+    assert!(!result.scenarios.is_empty());
+}
+
+#[test]
+fn quant_comparison_table_marks_one_recommended() {
+    let arch = ModelArch {
+        n_layers: 32,
+        n_kv_heads: 8,
+        head_dim: 128,
+        ..Default::default()
+    };
+    let opts = quant_comparison_table(
+        27.0,
+        &arch,
+        "Qwen3.6-27B-Q4_K_M.gguf",
+        32 * 1024 * 1024 * 1024,
+        UseCase::General,
+        1,
+        false,
+    );
+    let rec: Vec<_> = opts.iter().filter(|o| o.recommended).collect();
+    assert_eq!(rec.len(), 1, "Expected exactly one recommended quant");
+}
+
+// ── Ground-truth architecture lookup tests ────────────────────────────────
+// Validated against actual HuggingFace model cards (unsloth/, meta-llama/, etc.)
+
+#[test]
+fn qwen3_30b_a3b_is_standard_moe_not_deltanet() {
+    // Qwen3-30B-A3B: standard transformer + MoE. NOT hybrid DeltaNet.
+    // Source: unsloth/Qwen3-30B-A3B-GGUF model card.
+    // 48 layers, 32 Q / 4 KV heads, 128 experts total, 8 active.
+    let arch = ModelArch::from_name_and_params("Qwen3-30B-A3B-Instruct-GGUF", 30.0);
+    // Should be MoE
+    assert!(arch.is_moe(), "Qwen3-30B-A3B must be flagged MoE");
+    // Should NOT be hybrid (no n_attn_layers < n_layers)
+    assert!(
+        !arch.is_hybrid_attn(),
+        "Qwen3-30B-A3B is standard transformer, not hybrid DeltaNet"
+    );
+    assert_eq!(
+        arch.linear_attn_state_bytes, 0,
+        "No DeltaNet state for Qwen3-30B-A3B"
+    );
+}
+
+#[test]
+fn qwen3_235b_a22b_is_standard_moe() {
+    // Qwen3-235B-A22B: standard transformer + MoE.
+    // Source: unsloth/Qwen3-235B-A22B-GGUF model card.
+    // 94 layers, 64 Q / 4 KV heads, 128 experts total, 8 active.
+    let arch = ModelArch::from_name_and_params("Qwen3-235B-A22B-GGUF", 235.0);
+    assert!(arch.is_moe(), "Qwen3-235B-A22B must be MoE");
+    assert!(
+        !arch.is_hybrid_attn(),
+        "Qwen3-235B-A22B is standard transformer"
+    );
+}
+
+#[test]
+fn qwen36_27b_is_hybrid_deltanet() {
+    // Qwen3.6-27B: hybrid DeltaNet + dense FFN.
+    // Source: davidau 40B model card citing base arch.
+    // 64 total layers, 16 standard attention (1/4), 48 DeltaNet (3/4).
+    // 4 KV heads, head_dim 256.
+    let arch = ModelArch::from_name_and_params("Qwen3.6-27B-Instruct-GGUF", 27.0);
+    assert!(arch.is_hybrid_attn(), "Qwen3.6-27B must be hybrid DeltaNet");
+    assert_eq!(
+        arch.n_attn_layers, 16,
+        "Qwen3.6-27B has 16 standard attn layers"
+    );
+    assert_eq!(arch.n_layers, 64, "Qwen3.6-27B has 64 total layers");
+    assert_eq!(arch.n_kv_heads, 4, "Qwen3.6-27B has 4 KV heads");
+    assert_eq!(arch.head_dim, 256, "Qwen3.6-27B head_dim is 256");
+    assert!(!arch.is_moe(), "Base Qwen3.6-27B is dense");
+}
+
+#[test]
+fn qwen36_27b_kv_cache_uses_only_attn_layers() {
+    // The critical correctness check: KV cache is for 16 layers, NOT 64.
+    let arch = ModelArch::from_name_and_params("Qwen3.6-27B-Instruct-GGUF", 27.0);
+    let kv_128k = kv_cache_bytes(&arch, 128_000, 1, "f16", "f16");
+    // Expected: 16 attn layers × 2 × 4 KV heads × 256 head_dim × 2 bytes × 128K tokens
+    // = 16 × 2 × 4 × 256 × 2 × 128,000 = 3,355,443,200 bytes ≈ 3.1 GB
+    let expected = 16u64 * 2 * 4 * 256 * 2 * 128_000;
+    assert_eq!(
+        kv_128k, expected,
+        "Qwen3.6-27B KV at 128K should use only 16 attn layers, not 64"
+    );
+    // Naive (wrong) calculation would give 4× more: 64 layers × same = 12.6 GB
+    let naive_wrong = 64u64 * 2 * 4 * 256 * 2 * 128_000;
+    assert!(
+        kv_128k < naive_wrong / 3,
+        "Correct KV ({kv_128k}) should be < 1/3 of naive calculation ({naive_wrong})"
+    );
+}
+
+#[test]
+fn davidau_40b_expansion_gets_96_layers() {
+    // DavidAU's 40B expansion of Qwen3.6-27B: 96 layers (64 × 1.5).
+    // Source: DavidAU model card.
+    let arch = ModelArch::from_name_and_params(
+        "Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX",
+        40.0,
+    );
+    assert!(
+        arch.is_hybrid_attn(),
+        "40B expansion should be hybrid DeltaNet"
+    );
+    assert_eq!(arch.n_layers, 96, "40B expansion has 96 layers");
+    assert_eq!(
+        arch.n_attn_layers, 24,
+        "40B expansion has 24 standard attn layers"
+    );
+    assert_eq!(arch.n_kv_heads, 4, "Same KV head config as base");
+}
+
+#[test]
+fn qwen3_coder_next_has_512_experts_and_12_attn_layers() {
+    // Qwen3-Coder-Next: 80B/3B, 48 layers (12 attn + 36 DeltaNet), 512 experts.
+    // Source: unsloth/Qwen3-Coder-Next-GGUF model card.
+    let arch = ModelArch::from_name_and_params("Qwen3-Coder-Next-GGUF", 80.0);
+    assert!(arch.is_hybrid_attn(), "Coder-Next must be hybrid DeltaNet");
+    assert_eq!(arch.n_layers, 48);
+    assert_eq!(arch.n_attn_layers, 12);
+    assert_eq!(arch.n_experts, 512);
+    assert_eq!(arch.n_experts_used, 11);
+}
+
+#[test]
+fn qwen3_moe_not_confused_with_qwen36() {
+    // "Qwen3" without ".6" should NOT get the DeltaNet treatment.
+    // Qwen3-30B-A3B is standard transformer + MoE.
+    let arch30 = ModelArch::from_name_and_params("bartowski/Qwen3-30B-A3B-GGUF", 30.0);
+    assert!(
+        !arch30.is_hybrid_attn(),
+        "Standard Qwen3 MoE is not hybrid DeltaNet"
+    );
+
+    // Qwen3.6 SHOULD get it.
+    let arch27 = ModelArch::from_name_and_params("unsloth/Qwen3.6-27B-Instruct-GGUF", 27.0);
+    assert!(arch27.is_hybrid_attn(), "Qwen3.6 is hybrid DeltaNet");
+}
+
+#[test]
+fn llama_70b_is_standard_transformer() {
+    // Llama-3.3-70B: standard transformer, 80 layers, 8 KV heads, 128 head_dim.
+    // Source: meta-llama/Llama-3.3-70B-Instruct model card.
+    let arch = ModelArch::from_name_and_params("Llama-3.3-70B-Instruct-GGUF", 70.0);
+    assert!(!arch.is_hybrid_attn(), "Llama-70B is standard transformer");
+    assert!(!arch.is_moe(), "Llama-70B is dense");
+    assert_eq!(arch.linear_attn_state_bytes, 0, "No DeltaNet state");
+    // Standard heuristic for 70B: 80 layers, 8 KV heads, 128 head_dim
+    assert_eq!(arch.n_layers, 80);
+    assert_eq!(arch.n_kv_heads, 8);
+    assert_eq!(arch.head_dim, 128);
+}
+
+#[test]
+fn vram_assertions_work() {
+    let est = estimate_vram(
+        4u64 << 30,
+        4096,
+        "q8_0",
+        512,
+        512,
+        false,
+        0,
+        None,
+        8u64 << 30,
+    );
+    assert!(matches!(est.recommendation, VramRecommendation::Fit));
+
+    let est2 = estimate_vram(
+        40u64 << 30,
+        4096,
+        "q8_0",
+        512,
+        512,
+        false,
+        0,
+        None,
+        16u64 << 30,
+    );
+    assert!(matches!(est2.recommendation, VramRecommendation::WontFit));
+}
+
+// ── Specific model filename parsing tests ─────────────────────────────────
+
+#[test]
+fn gemma4_31b_dense_gets_alternating_attention() {
+    // Source: https://kaitchup.substack.com/p/gemma-4-31b-and-26b-a4b-architecture
+    // 60 layers (10 global + 50 local), 1024-token sliding window.
+    // Global layers: 4 KV heads, 512 head_dim. Local layers: 16 KV heads, 256 head_dim.
+    let arch = ModelArch::from_name_and_params(
+        "Gemma-4-Gembrain-31B-it-uncensored-heretic.i1-Q4_K_S.gguf",
+        31.0,
+    );
+    assert!(arch.has_local_attn(), "Gemma-4 should use local attention");
+    assert_eq!(arch.head_dim, 256, "Gemma4 local layers use 256 head_dim");
+    assert_eq!(
+        arch.global_head_dim, 512,
+        "Gemma4 global layers use 512 head_dim"
+    );
+    assert_eq!(
+        arch.local_attn_window, 1024,
+        "Gemma4 uses 1024-token sliding window"
+    );
+    assert_eq!(arch.n_layers, 60, "Gemma4-31B has 60 layers");
+    assert_eq!(
+        arch.n_global_attn_layers, 10,
+        "Gemma4-31B has 10 global attention layers"
+    );
+    assert_eq!(
+        arch.n_kv_heads, 4,
+        "Gemma4-31B global layers have 4 KV heads"
+    );
+    assert_eq!(
+        arch.local_kv_heads, 16,
+        "Gemma4-31B local layers have 16 KV heads"
+    );
+    assert_eq!(arch.mtp_depth, 0, "31B dense Gemma has no MTP in name");
+    assert!(!arch.is_moe(), "31B dense Gemma is not MoE");
+}
+
+#[test]
+fn gemma4_26b_a4b_gets_moe_and_alternating_attention() {
+    // Source: same reference. 30 layers, 128 total experts, 8 active.
+    // "A4B" = 4B active PARAMETERS — not 4 active experts.
+    let arch = ModelArch::from_name_and_params("gemma-4-26B-A4B-it-heretic-ara.Q5_K_XL.gguf", 26.0);
+    assert!(
+        arch.has_local_attn(),
+        "Gemma-4 MoE should use local attention"
+    );
+    assert!(arch.is_moe(), "26B-A4B should be MoE");
+    assert_eq!(arch.n_experts, 128, "Gemma4-26B-A4B has 128 total experts");
+    assert_eq!(
+        arch.n_experts_used, 8,
+        "Gemma4-26B-A4B has 8 active experts"
+    );
+    assert_eq!(
+        arch.local_attn_window, 1024,
+        "Gemma4 uses 1024-token sliding window"
+    );
+    assert_eq!(arch.n_layers, 30, "Gemma4-26B-A4B has 30 layers");
+    assert_eq!(
+        arch.n_global_attn_layers, 5,
+        "Gemma4-26B-A4B has 5 global layers"
+    );
+    assert_eq!(
+        arch.n_kv_heads, 2,
+        "Gemma4-26B-A4B global layers have 2 KV heads"
+    );
+    assert_eq!(
+        arch.local_kv_heads, 8,
+        "Gemma4-26B-A4B local layers have 8 KV heads"
+    );
+}
+
+#[test]
+fn gemma4_26b_a4b_kv_256k_q8_approx() {
+    // Gemma4-26B-A4B (confirmed from config):
+    //  - 30 layers: 5 global (full ctx) + 25 local sliding-window
+    //  - global: 2 KV heads, head_dim=512
+    //  - local: 8 KV heads, head_dim=256, window=1024
+    //  - Local layers only keep up to 1024 tokens in KV cache.
+    // At 256k context, q8_0 KV, 1 slot:
+    //   Global: 5 × 2 × 512 × 262144 × 2 × 1 = 2,684,354,560
+    //   Local:  25 × 8 × 256 × 1024  × 2 × 1 =   104,857,600
+    //   Total ≈ 2,789,212,160 ≈ 2.60 GiB
+    let arch = ModelArch::from_name_and_params("gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf", 26.0);
+    let kv = kv_cache_bytes(&arch, 262_144, 1, "q8_0", "q8_0");
+    let gi = kv as f64 / (1_073_741_824.0);
+
+    assert!(
+        (2.5..=2.8).contains(&gi),
+        "KV for gemma-4-26B-A4B@256k q8 should be ~2.6 GiB, got {:.2} GiB ({})",
+        gi,
+        kv
+    );
+}
+
+#[test]
+fn gemma4_a4b_tightened_ignores_random_a4b_tag() {
+    // The "a4b" pattern in gemma4_heuristic is now tightened:
+    // it must include "26b-a4b" / "26b_a4b", not a bare "a4b".
+    // A fine-tune named "Gemma-4-26B-ablated-a4b-v2" should NOT be
+    // forced into the 26B-A4B MoE profile.
+    let _arch = ModelArch::from_name_and_params("Gemma-4-26B-ablated-a4b-v2-Q4_K_M.gguf", 26.0);
+    // Any ~26B Gemma4 is inherently A4B MoE (just like all 35B Qwen3.5/3.6 are A3B).
+    // The tightened name pattern prevents bare "a4b" from matching, but the param_b
+    // fallback (< 30B) still classifies it correctly as MoE.
+    // We validate the tightening by checking a 31B model whose name contains "a4b"
+    // but should be dense.
+
+    // A 31B Gemma4 whose name has a meaningless "a4b" tag:
+    let arch2 = ModelArch::from_name_and_params("Gemma-4-31B-uncensored-a4b-test-Q8_0.gguf", 31.0);
+    // This should get 31B dense arch (60 layers), not 26B-A4B MoE (30 layers)
+    assert_eq!(
+        arch2.n_layers, 60,
+        "31B dense should not be confused with 26B-A4B MoE"
+    );
+    assert!(
+        !arch2.is_moe(),
+        "31B should be dense, not MoE, despite 'a4b' tag"
+    );
+}
+
+#[test]
+fn moe_suffix_ignores_small_model_false_positives() {
+    // "llama-3-a4b" → total 3 < 7 → should NOT match as MoE.
+    let arch = ModelArch::from_name_and_params("meta-llama/llama-3-a4b-test-GGUF", 8.0);
+    assert!(
+        !arch.is_moe(),
+        "llama-3-a4b should not be parsed as MoE (total_b < 7)"
+    );
+}
+
+#[test]
+fn gemma4_12b_is_dense_unified_architecture() {
+    let arch = ModelArch::from_name_and_params("gemma-4-12B-it-qat-Q4_0.gguf", 11.95);
+    assert!(!arch.is_moe(), "Gemma4-12B is dense, not the 26B MoE");
+    assert_eq!(arch.n_layers, 48);
+    assert_eq!(arch.n_global_attn_layers, 8);
+    assert_eq!(arch.n_kv_heads, 1);
+    assert_eq!(arch.local_kv_heads, 8);
+    assert_eq!(arch.head_dim, 256);
+    assert_eq!(arch.global_head_dim, 512);
+    assert_eq!(arch.local_attn_window, 1024);
+}
+
+#[test]
+fn gemma4_qat_q4_0_is_recommended_as_near_reference_quality() {
+    let arch = ModelArch::from_name_and_params("gemma-4-12B-it-qat-Q4_0.gguf", 11.95);
+    let opts = quant_comparison_table(
+        11.95,
+        &arch,
+        "gemma-4-12B-it-qat-Q4_0.gguf",
+        16 * 1024 * 1024 * 1024,
+        UseCase::General,
+        1,
+        false,
+    );
+    let q4 = opts.iter().find(|o| o.quant == "q4_0").unwrap();
+    assert_eq!(q4.quality, QuantQuality::Excellent);
+    assert!(q4.recommended);
+    assert!(q4.notes.iter().any(|n| n.contains("QAT target")));
+}
+
+#[test]
+fn gemma4_31b_kv_cache_uses_global_head_dim() {
+    // Gemma4-31B (confirmed from config and architecture analysis):
+    //  - 60 layers: 10 global (full ctx) + 50 local sliding-window
+    //  - global: 4 KV heads, head_dim=512
+    //  - local: 16 KV heads, head_dim=256, window=1024
+    //  - Local layers only keep up to 1024 tokens in KV cache.
+    // At 128K context, f16 KV, 1 slot:
+    //   Global: 10 × 4 × 512 × 128_000 × 2 (K+V) × 2 bytes
+    //   Local:  50 × 16 × 256 × 1_024  × 2 × 2 bytes (limited by window)
+    let arch = ModelArch::from_name_and_params("Gemma-4-31B-it-GGUF", 31.0);
+    let kv = kv_cache_bytes(&arch, 128_000, 1, "f16", "f16");
+    let global = 10u64 * 4 * 512 * 128_000 * 2 * 2;
+    let local = 50u64 * 16 * 256 * 1_024 * 2 * 2;
+    assert_eq!(
+        kv,
+        global + local,
+        "Gemma4-31B KV must use global_head_dim=512 and sliding-window for local layers"
+    );
+}
+
+#[test]
+fn qwen3_27b_mtp_gets_mtp_depth() {
+    let arch = ModelArch::from_name_and_params(
+        "Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-Q4_K_S.gguf",
+        27.0,
+    );
+    assert_eq!(arch.mtp_depth, 1, "MTP in filename should set mtp_depth=1");
+    assert!(!arch.is_moe(), "27B dense should not be MoE");
+}
+
+#[test]
+fn qwen3_35b_a3b_gets_moe() {
+    // Source: Qwen/Qwen3.6-35B-A3B HF model card.
+    // 40 layers (10 attn + 30 DeltaNet), 2 KV heads, 256 experts, 9 active.
+    // "A3B" = 3B active PARAMETERS — not 3 active experts.
+    let arch =
+        ModelArch::from_name_and_params("Qwen3.6-35B-A3B-uncensored-heretic-Q4_K_M.gguf", 35.0);
+    assert!(arch.is_moe(), "35B-A3B should be MoE");
+    assert!(arch.is_hybrid_attn(), "35B-A3B is hybrid DeltaNet");
+    assert_eq!(arch.n_layers, 40, "35B-A3B has 40 total layers");
+    assert_eq!(
+        arch.n_attn_layers, 10,
+        "35B-A3B has 10 standard attention layers"
+    );
+    assert_eq!(arch.n_kv_heads, 2, "35B-A3B has 2 KV heads");
+    assert_eq!(arch.n_experts, 256, "35B-A3B has 256 total experts");
+    assert_eq!(
+        arch.n_experts_used, 9,
+        "35B-A3B has 9 active experts (8 routed + 1 shared)"
+    );
+}
+
+#[test]
+fn qwen35_122b_a10b_is_hybrid_deltanet() {
+    // Source: unsloth/Qwen3.5-122B-A10B-MTP-GGUF model card.
+    // 48 layers (12 attn + 36 DeltaNet), 2 KV heads, 256 experts, 9 active.
+    // "A10B" = 10B active PARAMETERS — not 10 active experts.
+    let arch = ModelArch::from_name_and_params("Qwen3.5-122B-A10B-MTP-GGUF", 122.0);
+    assert!(
+        arch.is_hybrid_attn(),
+        "Qwen3.5-122B must be hybrid DeltaNet"
+    );
+    assert!(arch.is_moe(), "122B-A10B must be MoE");
+    assert_eq!(arch.n_layers, 48, "122B has 48 total layers");
+    assert_eq!(
+        arch.n_attn_layers, 12,
+        "122B has 12 standard attention layers"
+    );
+    assert_eq!(arch.n_kv_heads, 2, "122B has 2 KV heads");
+    assert_eq!(arch.n_experts, 256, "122B has 256 total experts");
+    assert_eq!(
+        arch.n_experts_used, 9,
+        "122B has 9 active experts (8 routed + 1 shared)"
+    );
+    assert_eq!(arch.mtp_depth, 1, "MTP in name sets mtp_depth=1");
+}
+
+#[test]
+fn qwopus_122b_a10b_large_moe_iq3s() {
+    let arch = ModelArch::from_name_and_params(
+        "Qwopus3.5-122B-A10B-Kimi-K2.6-distill-abliterated.i1-IQ3_S.gguf",
+        122.0,
+    );
+    assert!(arch.is_moe(), "122B-A10B should be MoE");
+    // Should have many experts (128 for 122B+ MoE)
+    assert!(
+        arch.n_experts >= 64,
+        "Large MoE should have ≥64 experts in heuristic"
+    );
+
+    // On 32GB VRAM, IQ3_S at 122B needs heavy CPU offload
+    let model_bytes = estimate_model_size_bytes(122.0, "iq3_s");
+    let vram_32gb = 32u64 * 1024 * 1024 * 1024;
+
+    // Verify that with n_cpu_moe auto-sizing, it fits on 32GB
+    let result = auto_size(
+        model_bytes,
+        &arch,
+        vram_32gb,
+        UseCase::General,
+        1,
+        1024,
+        false,
+        None,
+    );
+    // Should recommend substantial CPU offload
+    assert!(
+        result.n_cpu_moe.unwrap_or(0) > 0,
+        "Large 122B MoE should need CPU offload on 32GB"
+    );
+}
+
+#[test]
+fn gemma_alternating_attention_kv_much_less_than_dense() {
+    // Verify the Gemma alternating attention design is more memory-efficient than a
+    // naive dense transformer with many KV heads and full context.
+    // With our corrected formula (full KV allocation for local layers too),
+    // KV is larger than with window-only optimization but still significantly
+    // better than a dense baseline with more heads and layers.
+    let arch_gemma = ModelArch::gemma3_heuristic(27.0);
+    let arch_dense = ModelArch {
+        n_layers: 62,
+        n_kv_heads: 16,
+        head_dim: 256,
+        ..Default::default()
+    };
+    let ctx = 128_000u64;
+    let kv_gemma = kv_cache_bytes(&arch_gemma, ctx, 1, "f16", "f16");
+    let kv_dense = kv_cache_bytes(&arch_dense, ctx, 1, "f16", "f16");
+
+    // The dense baseline must be meaningfully larger.
+    // We rely on that relative gap instead of a hard absolute cap that was
+    // tied to the earlier sliding-window-only approximation.
+    assert!(
+        kv_dense > kv_gemma * 2,
+        "Dense naive calculation should be > 2× Gemma's alternating attention KV"
+    );
+}
+
+#[test]
+fn exaone45_33b_has_correct_arch() {
+    // Source: https://huggingface.co/LGAI-EXAONE/EXAONE-4.5-33B
+    // 64 layers, 16 × (3 SWA + 1 global), 8 KV heads uniform,
+    // head_dim 128, 4096-token sliding window, 1 MTP head.
+    let arch = ModelArch::from_name_and_params("EXAONE-4.5-33B-Q4_K_M.gguf", 33.0);
+    assert!(!arch.is_moe(), "EXAONE 4.5-33B is dense");
+    assert!(!arch.is_hybrid_attn(), "EXAONE 4.5 is SWA not DeltaNet");
+    assert!(
+        arch.has_local_attn(),
+        "EXAONE 4.5 has sliding-window attention"
+    );
+    assert_eq!(arch.n_layers, 64);
+    assert_eq!(arch.n_kv_heads, 8);
+    assert_eq!(arch.head_dim, 128);
+    assert_eq!(arch.n_global_attn_layers, 16, "16 full-context layers");
+    assert_eq!(arch.local_attn_window, 4096, "4096-token sliding window");
+    assert_eq!(arch.local_kv_heads, 8, "same KV heads for local layers");
+    assert_eq!(arch.mtp_depth, 1, "1 MTP head");
+    assert!(
+        arch.mmproj_bytes > 2_000_000_000,
+        "vision encoder mmproj ≈ 2.58 GB"
+    );
+}
+
+#[ignore]
+#[test]
+fn test_qwen3_coder_next_vram_estimate_integration() {
+    // Integration test: verify hybrid DeltaNet model shows correct KV cache
+    let home = std::env::var("HOME").ok();
+    let path = home.as_ref().map(|h| {
+        std::path::Path::new(h).join(".config/llama-monitor/models/Qwen3-Coder-Next-Huihui-Opus-4.6-Reasoning-Distilled-abliterated-IQ4_XS.gguf")
+    }).and_then(|p| if p.exists() { Some(p) } else { None });
+    let Some(path) = path else {
+        return;
+    };
+
+    let gguf = crate::llama::gguf_meta::read_gguf_metadata(&path).expect("read gguf");
+    let meta = gguf.to_model_metadata();
+    let param_b = gguf.param_b().unwrap_or(0.0);
+    let arch = meta.to_arch(path.to_str().unwrap(), param_b);
+
+    assert!(
+        arch.is_hybrid_attn(),
+        "Qwen3-Coder-Next should be hybrid DeltaNet"
+    );
+    assert_eq!(
+        arch.n_attn_layers, 12,
+        "Only 12 of 48 layers should use KV cache"
+    );
+    assert!(
+        arch.n_attn_layers < arch.n_layers,
+        "Hybrid model: n_attn_layers ({}) < n_layers ({})",
+        arch.n_attn_layers,
+        arch.n_layers
+    );
+
+    // Compute KV cache at 131K context
+    let kv = kv_cache_bytes(&arch, 131_072, 1, "q8_0", "q8_0");
+    let kv_gb = kv as f64 / 1e9;
+
+    // Should be significant (> 1 GB) but not use all 48 layers (which would be ~4× too large)
+    assert!(
+        kv_gb > 1.0,
+        "Qwen3-Coder-Next KV cache at 131K should be > 1 GB (got {:.2} GB)",
+        kv_gb
+    );
+    // Max ~2 GB expected: 12 layers × 2 KV heads × 256 head_dim × 131072 ctx × 2 (K+V) × 1 byte (q8_0)
+    assert!(
+        kv_gb < 4.0,
+        "Qwen3-Coder-Next KV cache should be < 4 GB (got {:.2} GB; likely using wrong layer count)",
+        kv_gb
+    );
+}
+
+#[test]
+fn qwen36_27b_kv_at_131k_and_255k() {
+    // Qwen3.6-27B dense: 64 layers, 16 attn, 4 KV heads, head_dim 256
+    let arch = ModelArch::from_name_and_params("Qwen3.6-27B-Q4_K_M.gguf", 27.0);
+    assert!(arch.is_hybrid_attn(), "Qwen3.6-27B is hybrid DeltaNet");
+    assert_eq!(arch.n_attn_layers, 16, "16 of 64 layers use KV cache");
+    assert_eq!(arch.n_kv_heads, 4);
+    assert_eq!(arch.head_dim, 256);
+
+    // Expected KV at 131K, q8_0: 16 × 2 × 4 × 256 × 131072 × 1 = 4,294,967,296 bytes ≈ 4.29 GB
+    let kv_131k = kv_cache_bytes(&arch, 131_072, 1, "q8_0", "q8_0");
+    let kv_131k_gb = kv_131k as f64 / 1e9;
+    assert!(
+        (kv_131k_gb - 4.29).abs() < 0.02,
+        "Qwen3.6-27B KV at 131K: expected ~4.29 GB, got {:.2}",
+        kv_131k_gb
+    );
+
+    // Expected KV at 255K, q8_0: 16 × 2 × 4 × 256 × 255000 × 1 ≈ 8.32 GB
+    let kv_255k = kv_cache_bytes(&arch, 255_000, 1, "q8_0", "q8_0");
+    let kv_255k_gb = kv_255k as f64 / 1e9;
+    assert!(
+        (kv_255k_gb - 8.32).abs() < 0.05,
+        "Qwen3.6-27B KV at 255K: expected ~8.32 GB, got {:.2}",
+        kv_255k_gb
+    );
+}
+
+#[test]
+fn qwen36_35b_a3b_kv_at_131k_and_255k() {
+    // Qwen3.6-35B-A3B MoE: 40 layers, 10 attn, 2 KV heads, head_dim 256
+    let arch = ModelArch::from_name_and_params("Qwen3.6-35B-A3B-Q4_K_M.gguf", 35.0);
+    assert!(arch.is_hybrid_attn(), "Qwen3.6-35B-A3B is hybrid DeltaNet");
+    assert!(arch.is_moe(), "Qwen3.6-35B-A3B is MoE");
+    assert_eq!(arch.n_attn_layers, 10, "10 of 40 layers use KV cache");
+    assert_eq!(arch.n_kv_heads, 2);
+    assert_eq!(arch.head_dim, 256);
+
+    // Expected KV at 131K, q8_0: 10 × 2 × 2 × 256 × 131072 × 1 = 1,342,177,280 bytes ≈ 1.34 GB
+    let kv_131k = kv_cache_bytes(&arch, 131_072, 1, "q8_0", "q8_0");
+    let kv_131k_gb = kv_131k as f64 / 1e9;
+    assert!(
+        (kv_131k_gb - 1.34).abs() < 0.02,
+        "Qwen3.6-35B-A3B KV at 131K: expected ~1.34 GB, got {:.2}",
+        kv_131k_gb
+    );
+
+    // Expected KV at 255K, q8_0: 10 × 2 × 2 × 256 × 255000 × 1 ≈ 2.61 GB
+    let kv_255k = kv_cache_bytes(&arch, 255_000, 1, "q8_0", "q8_0");
+    let kv_255k_gb = kv_255k as f64 / 1e9;
+    assert!(
+        (kv_255k_gb - 2.61).abs() < 0.03,
+        "Qwen3.6-35B-A3B KV at 255K: expected ~2.61 GB, got {:.2}",
+        kv_255k_gb
+    );
+}
+
+// ===== Quant table completeness tests =====
+
+#[test]
+fn quant_table_all_entries_have_valid_multipliers() {
+    for quant in all_quants() {
+        assert!(
+            quant.bpw > 0.0 && quant.bpw <= 32.0,
+            "Quant {} has invalid bpw {}",
+            quant.name,
+            quant.bpw
+        );
+        assert!(!quant.name.is_empty(), "Quant name must not be empty");
+    }
+}
+
+#[test]
+fn quant_table_has_sufficient_coverage() {
+    assert!(
+        all_quants().len() >= 30,
+        "Expected 30+ quant levels, got {}",
+        all_quants().len()
+    );
+}
+
+#[test]
+fn find_quant_unknown_returns_none() {
+    assert!(find_quant("nonexistent_quant_xyz").is_none());
+    assert!(find_quant("").is_none());
+}
+
+// ===== VRAM estimation edge cases =====
+
+#[test]
+fn estimate_vram_zero_context() {
+    let arch = ModelArch::default();
+    let breakdown = full_estimate(
+        4_000_000_000,
+        &arch,
+        0, // zero context
+        "q8_0",
+        "q8_0",
+        1,
+        1024,
+        0,
+        16 * 1024 * 1024 * 1024,
+        false,
+    );
+    // Should still succeed, just no KV overhead
+    assert!(matches!(
+        breakdown.recommendation,
+        VramRecommendation::Fit | VramRecommendation::Tight
+    ));
+}
+
+#[test]
+fn estimate_vram_too_large_for_vram() {
+    let arch = ModelArch::default();
+    let breakdown = full_estimate(
+        60_000_000_000, // 60GB model
+        &arch,
+        128_000,
+        "q4_k_m",
+        "q8_0",
+        1,
+        1024,
+        0,
+        16 * 1024 * 1024 * 1024, // 16GB available
+        false,
+    );
+    assert!(matches!(
+        breakdown.recommendation,
+        VramRecommendation::Risk | VramRecommendation::WontFit
+    ));
+}

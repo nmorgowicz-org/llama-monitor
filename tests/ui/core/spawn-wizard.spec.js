@@ -320,6 +320,8 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
             wizardState.model.path = '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf';
             wizardState.model.paramB = 27;
             wizardState.model.modelBytes = 16 * 1024 * 1024 * 1024;
+            // Inject VRAM so renderScenarioCards doesn't short-circuit in CI (no GPU endpoint)
+            wizardState.vram.available = 48 * 1024 * 1024 * 1024; // 48 GB
         });
 
         await page.locator('.profile-card[data-profile="advanced"]').click();
@@ -364,6 +366,8 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
             wizardState.model.path = '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf';
             wizardState.model.paramB = 27;
             wizardState.model.modelBytes = 16 * 1024 * 1024 * 1024;
+            // Inject VRAM so renderScenarioCards doesn't short-circuit in CI (no GPU endpoint)
+            wizardState.vram.available = 48 * 1024 * 1024 * 1024; // 48 GB
         });
 
         await page.locator('.profile-card[data-profile="advanced"]').click();
