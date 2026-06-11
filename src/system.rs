@@ -1,3 +1,4 @@
+#[cfg(target_os = "macos")]
 use crate::gpu::mactop_cache;
 use sysinfo::System;
 

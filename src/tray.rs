@@ -181,6 +181,7 @@ impl ApplicationHandler for TrayApp {
 
     fn resumed(&mut self, _event_loop: &dyn ActiveEventLoop) {}
 
+    #[allow(unused_variables)]
     fn window_event(
         &mut self,
         _event_loop: &dyn ActiveEventLoop,
