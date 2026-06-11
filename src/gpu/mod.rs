@@ -1,6 +1,7 @@
 pub mod apple;
 pub mod dummy;
 pub mod env;
+#[cfg(target_os = "macos")]
 pub mod mactop_cache;
 pub mod nvidia;
 pub mod rocm;
