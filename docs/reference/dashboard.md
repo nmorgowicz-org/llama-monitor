@@ -82,7 +82,7 @@ The Tuning panel provides access to server tuning settings, including sampling p
 - Adjust sampling (temperature, top_p, etc.), memory tuning, and speculative decoding settings where available.
 - Changes apply to the running llama-server when supported.
 
-![Tuning Panel](../screenshots/tune-panel-server-tab.png)
+![Tuning Panel](../screenshots/tune-panel-open.png)
 
 ## Llama Updater
 
