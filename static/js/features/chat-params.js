@@ -2106,7 +2106,7 @@ function populatePayloadJson(data) {
     pre.textContent = JSON.stringify(data.requestPayload || {}, null, 2);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function initDebugHandlers() {
     const btn = document.getElementById('btn-debug-prompt');
     const closeBtn = document.getElementById('debug-modal-close');
     const overlay = document.getElementById('debug-prompt-modal');
@@ -2241,4 +2241,10 @@ document.addEventListener('DOMContentLoaded', () => {
     hidePayloadBtn?.addEventListener('click', () => {
         document.getElementById('debug-payload-section')?.classList.add('hidden');
     });
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDebugHandlers);
+} else {
+    initDebugHandlers();
+}
