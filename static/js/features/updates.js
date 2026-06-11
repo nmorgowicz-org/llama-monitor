@@ -60,9 +60,9 @@ function showUpdatePill(release) {
 
 // ── Release Notes ─────────────────────────────────────────────────────────────
 
-export function openReleaseNotes() {
-    const release = _pendingRelease;
-    if (!release?.tag_name) return;
+export function openReleaseNotes(release) {
+    const r = release || _pendingRelease;
+    if (!r?.tag_name) return;
 
     const panel    = document.getElementById('release-notes-panel');
     const overlay  = document.getElementById('release-notes-overlay');
@@ -72,16 +72,16 @@ export function openReleaseNotes() {
     const link     = document.getElementById('release-notes-link');
     const updateBtn = document.getElementById('release-notes-update-btn');
 
-    title.textContent = release.tag_name;
+    title.textContent = r.tag_name;
     if (fromEl && typeof APP_VERSION !== 'undefined') {
         fromEl.textContent = `from v${APP_VERSION}`;
     }
 
-    link.href = release.html_url || '#';
+    link.href = r.html_url || '#';
 
     // eslint-disable-next-line no-unsanitized/property -- release notes rendered via marked.js (same path as LLM chat output); fallback is hardcoded
-    body.innerHTML = release.body
-        ? renderMd(release.body)
+    body.innerHTML = r.body
+        ? renderMd(r.body)
         : '<p>No release notes available.</p>';
 
     _resetUpdateBtn(updateBtn);
