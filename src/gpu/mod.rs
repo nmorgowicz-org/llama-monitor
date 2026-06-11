@@ -1,3 +1,4 @@
+#[cfg(target_os = "macos")]
 pub mod apple;
 pub mod dummy;
 pub mod env;
@@ -50,6 +51,7 @@ pub trait GpuBackend: Send + Sync + 'static {
 
 pub fn detect_backend(force: &str) -> Arc<dyn GpuBackend> {
     match force {
+        #[cfg(target_os = "macos")]
         "apple" => Arc::new(apple::AppleBackend::new()),
         "rocm" => Arc::new(rocm::RocmBackend),
         "nvidia" => Arc::new(nvidia::NvidiaBackend),
@@ -58,9 +60,13 @@ pub fn detect_backend(force: &str) -> Arc<dyn GpuBackend> {
         "wmi" => Arc::new(wmi_gpu::WmiGpuBackend),
         _ => {
             // Auto-detect: check which GPU tool is available
-            if is_apple_silicon() {
-                Arc::new(apple::AppleBackend::new())
-            } else if command_exists("rocm-smi") {
+            #[cfg(target_os = "macos")]
+            {
+                if is_apple_silicon() {
+                    return Arc::new(apple::AppleBackend::new());
+                }
+            }
+            if command_exists("rocm-smi") {
                 Arc::new(rocm::RocmBackend)
             } else if command_exists("nvidia-smi") {
                 Arc::new(nvidia::NvidiaBackend)
@@ -88,6 +94,7 @@ pub fn detect_backend(force: &str) -> Arc<dyn GpuBackend> {
     }
 }
 
+  #[cfg(target_os = "macos")]
 fn is_apple_silicon() -> bool {
     // Check for Apple Silicon by looking at the CPU brand string
     let output = std::process::Command::new("sysctl")
