@@ -625,7 +625,10 @@ function cacheDom() {
   dom.specTypeSelect     = document.getElementById('spawn-spec-type');
    dom.mtpAssistantSection = document.getElementById('hw-mtp-assistant-section');
    dom.mtpAssistantSelect  = document.getElementById('hw-mtp-assistant-select');
-  dom.draftModelWrap     = document.getElementById('spawn-draft-model-wrap');
+   dom.mtpDownloadSection  = document.getElementById('hw-mtp-download-section');
+   dom.mtpDownloadInfo     = document.getElementById('hw-mtp-download-info');
+   dom.mtpDownloadBtn      = document.getElementById('hw-mtp-download-btn');
+   dom.draftModelWrap     = document.getElementById('spawn-draft-model-wrap');
   dom.draftModelInput    = document.getElementById('spawn-draft-model');
   dom.specNgramWrap      = document.getElementById('spawn-spec-ngram-wrap');
   dom.specNgramSizeInput = document.getElementById('spawn-spec-ngram-size');
@@ -2241,7 +2244,10 @@ async function doIntrospect(path) {
               || n.includes('draft-model')
               || n.includes('mtp_small')
               || n.includes('mtp-heads')
-              || n.startsWith('mtp-');
+              || n.startsWith('mtp-')
+              // Unsloth's `-MTP.gguf` naming convention
+              || n.includes('-mtp')
+              || n.includes('/mtp/');
           });
           if (assistants.length) {
             wizardState.model.draftCandidates = assistants.map(e => ({
@@ -2262,6 +2268,9 @@ async function doIntrospect(path) {
         }
       } catch { /* non-fatal */ }
     }
+
+    // Check for MTP draft availability on Gemma4 models with no local draft
+    await _checkGemma4MtpDraft(path);
 
     // Update MoE slider max — n_cpu_moe counts layers, so the max is the layer count
     if (wizardState.arch.nExperts > 0 && dom.moeOffloadSlider) {
@@ -4838,6 +4847,109 @@ function _bestDraftForModel(modelFilename, candidates) {
    if (best) return best;
    if (candidates.length === 1) return candidates[0];
    return null;
+}
+
+// ── Gemma4 MTP draft check ───────────────────────────────────────────────────
+
+async function _checkGemma4MtpDraft(modelPath) {
+  if (!dom.mtpDownloadSection) return;
+
+  const modelFilename = (modelPath || '').split(/[\\/]/).pop() || '';
+  const lower = modelFilename.toLowerCase();
+  const isGemma4 = lower.includes('gemma-4') || lower.includes('gemma4');
+
+  if (!isGemma4) {
+    dom.mtpDownloadSection.style.display = 'none';
+    return;
+  }
+
+  // Only show download offer if no local draft candidates were found
+  const candidates = wizardState.model.draftCandidates || [];
+  if (candidates.length > 0) {
+    dom.mtpDownloadSection.style.display = 'none';
+    return;
+  }
+
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const quantLabel = guessQuantFromName(modelFilename) || 'Q8_0';
+    const repoId = (wizardState.model.repoId || '').trim();
+
+    const resp = await fetch('/api/spawn-wizard/mtp-draft-check', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model_name: modelFilename,
+        repo_id: repoId,
+        quant_label: quantLabel,
+      }),
+    });
+
+    if (!resp.ok) return;
+
+    const data = await resp.json();
+    if (!data.ok) return;
+
+    if (data.draft_available && data.draft_path) {
+      // Local draft found — add to candidates and auto-select
+      wizardState.model.draftCandidates = wizardState.model.draftCandidates || [];
+      wizardState.model.draftCandidates.push({
+        path: data.draft_path,
+        name: data.draft_path.split(/[\\/]/).pop(),
+        size: 0,
+        is_draft: true,
+      });
+      wizardState.model.selectedDraftPath = data.draft_path;
+      dom.mtpDownloadSection.style.display = 'none';
+
+      // Re-render MTP section to show assistant selector
+      if (wizardState.currentStep === 2) renderMtpSection();
+      return;
+    }
+
+    // No local draft — show download button if HF URL available
+    if (data.hf_download_url) {
+      dom.mtpDownloadInfo.textContent = `Available: ${data.tier} · ${quantLabel} · ~42 MB estimated`;
+      dom.mtpDownloadSection.style.display = '';
+
+      // Wire the download button (only bind once)
+      if (!dom.mtpDownloadBtn.dataset.bound) {
+        dom.mtpDownloadBtn.dataset.bound = '1';
+        dom.mtpDownloadBtn.addEventListener('click', async () => {
+          dom.mtpDownloadBtn.disabled = true;
+          dom.mtpDownloadBtn.textContent = 'Downloading…';
+
+          try {
+            // Use the existing HF download endpoint
+            const downloadResp = await fetch('/api/hf/download', {
+              method: 'POST',
+              headers: { ...headers, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                repo_id: data.hf_repo_id,
+                filename: data.hf_filename,
+                local_filename: data.local_filename || data.hf_filename,
+                path: 'MTP',
+              }),
+            });
+
+            const downloadData = await downloadResp.json();
+            if (downloadData.ok) {
+              showToast('MTP Draft', 'success', 'MTP draft model download started. Check status in the sidebar.');
+            } else {
+              showToast('MTP Draft', 'warning', downloadData.error || 'Download failed');
+            }
+          } catch {
+            showToast('MTP Draft', 'warning', 'Download request failed');
+          } finally {
+            dom.mtpDownloadBtn.disabled = false;
+            dom.mtpDownloadBtn.textContent = 'Download MTP Draft Model';
+          }
+        });
+      }
+    }
+  } catch {
+    // Non-fatal — silently fail
+  }
 }
 
 // ── Draft candidate pill buttons ─────────────────────────────────────────────
@@ -8244,10 +8356,10 @@ async function _checkBinaryPrereq() {
       _selectedBackend = _platformInfo.auto_backend;
     }
 
-    // MTP performance is backend-dependent. Metal can regress even with high
-    // draft acceptance, so require an explicit opt-in on Apple Silicon.
+    // MTP is now enabled by default on all platforms including Metal.
+    // Users can disable if quality issues arise on their hardware.
     if (!_mtpUserConfigured) {
-      wizardState.hardware.mtpEnabled = _platformInfo?.auto_backend !== 'metal';
+      wizardState.hardware.mtpEnabled = true;
       const mtpCheck = document.getElementById('hw-use-mtp');
       const mtpDepthRow = document.getElementById('hw-mtp-depth-row');
       if (mtpCheck) mtpCheck.checked = wizardState.hardware.mtpEnabled;

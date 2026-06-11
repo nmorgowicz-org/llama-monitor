@@ -1460,7 +1460,84 @@ fn api_analyze_context_notes(
 // Phase 0: Spawn Llama-Server v2 endpoints
 // ========================
 
-// 1) POST /api/spawn-wizard/import-launch-file
+// 1) POST /api/spawn-wizard/mtp-draft-check
+fn api_spawn_wizard_mtp_draft_check(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "spawn-wizard" / "mtp-draft-check")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let model_name = body["model_name"].as_str().unwrap_or("").to_string();
+                let repo_id = body["repo_id"].as_str().unwrap_or("").to_string();
+                let quant_label = body["quant_label"].as_str().unwrap_or("Q8_0").to_string();
+
+                if model_name.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Missing 'model_name' field in request body"
+                        })),
+                    ));
+                }
+
+                // Determine the Gemma4 tier
+                let tier = crate::hf::resolve_gemma4_tier(&model_name.to_ascii_lowercase());
+                if tier.is_none() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Model does not appear to be a Gemma4 model (no recognized tier)"
+                        })),
+                    ));
+                }
+                let tier = tier.unwrap();
+
+                // Check for local draft model
+                let models_dir = cfg.models_dir.as_deref();
+                let local_draft = models_dir
+                    .and_then(|p| crate::hf::find_compatible_gemma4_mtp_draft(p, &model_name));
+
+                // Resolve Unsloth HF download info
+                let hf_info = (!repo_id.is_empty())
+                    .then(|| crate::hf::resolve_gemma4_mtp_draft(&repo_id, &quant_label))
+                    .flatten();
+
+                let draft_available = local_draft.is_some();
+
+                // Construct HF download URL
+                let hf_download_url = hf_info.as_ref().map(|(repo, filename, _)| {
+                    format!(
+                        "https://huggingface.co/{}/resolve/main/MTP/{}",
+                        repo, filename
+                    )
+                });
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                    warp::reply::json(&serde_json::json!({
+                        "ok": true,
+                        "draft_available": draft_available,
+                        "draft_path": local_draft.map(|p| p.to_string_lossy().to_string()),
+                        "tier": tier,
+                        "hf_download_url": hf_download_url,
+                        "hf_repo_id": hf_info.as_ref().map(|(r, _, _)| r.clone()),
+                        "hf_filename": hf_info.as_ref().map(|(_, f, _)| f.clone()),
+                        "local_filename": hf_info.as_ref().map(|(_, _, l)| l.clone())
+                    })),
+                ))
+            }
+        })
+}
+
+// 2) POST /api/spawn-wizard/import-launch-file
 fn api_spawn_wizard_import_launch_file(
     _state: AppState,
     app_config: Arc<AppConfig>,
@@ -4734,7 +4811,11 @@ pub fn api_routes(
         .or(tls_acme_renew);
 
     // Phase 0/2/3: Spawn Llama-Server v2 route group
+    // Gemma4 MTP draft check endpoint
+    let mtp_draft_check = api_spawn_wizard_mtp_draft_check(state.clone(), app_config.clone());
+
     let phase0_routes = spawn_wizard_import
+        .or(mtp_draft_check)
         .or(chat_template_fetch)
         .or(chat_template_upload)
         .or(chat_template_dir)

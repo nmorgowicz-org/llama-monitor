@@ -865,10 +865,15 @@ fn sort_gguf_files(result: &mut [HfGgufFile]) {
 /// Conservative heuristic for HF file classification as MTP assistant / draft model.
 fn is_draft_assistant_hf(name_lower: &str, size_bytes: u64) -> bool {
     // Unambiguous MTP keywords: safe to match even when size is unknown (0).
+    // Includes Unsloth's `-MTP.gguf` naming convention (e.g. "gemma-4-31B-it-Q8_0-MTP.gguf")
+    // and path segments like `/MTP/` in Unsloth repo trees.
     let is_unambiguous = name_lower.contains("mtp-draft")
         || name_lower.contains("mtp_small")
         || name_lower.contains("mtp-heads")
-        || name_lower.starts_with("mtp-");
+        || name_lower.starts_with("mtp-")
+        || name_lower.ends_with("-mtp.gguf")
+        || name_lower.ends_with("-mtp")
+        || name_lower.contains("/mtp/");
 
     if is_unambiguous {
         // Still reject if we know the file is a large main model.
@@ -2035,6 +2040,136 @@ fn infer_family_from_name(name: &str) -> String {
     }
 
     String::new()
+}
+
+// ── Gemma4 MTP Draft Resolution ──────────────────────────────────────────────
+
+/// Resolve the Unsloth MTP draft model repo and filename for a Gemma4 model.
+///
+/// Given the main model's repo_id (e.g. `unsloth/gemma-4-31B-it-qat-GGUF`) and
+/// quant label (e.g. `Q8_0`), constructs the HF path to the matching MTP draft
+/// model and a **local** filename that avoids QAT/non-QAT collisions.
+///
+/// Returns `(hf_repo_id, hf_filename, local_filename)`.
+///
+/// Example:
+/// ```text
+/// Input:  unsloth/gemma-4-31B-it-qat-GGUF, Q8_0
+/// HF:     unsloth/gemma-4-31B-it-qat-GGUF/MTP/gemma-4-31B-it-Q8_0-MTP.gguf
+/// Local:  gemma-4-31B-it-qat-Q8_0-MTP.gguf  (note: `-qat` inserted)
+/// ```
+pub fn resolve_gemma4_mtp_draft(
+    repo_id: &str,
+    quant_label: &str,
+) -> Option<(String, String, String)> {
+    let lower = repo_id.to_ascii_lowercase();
+
+    // Determine if this is a QAT repo
+    let is_qat = lower.contains("-qat");
+
+    // Extract the Gemma4 tier from the repo id
+    let tier = resolve_gemma4_tier(&lower);
+    let tier = tier.as_deref()?; // Returns None if not a recognized Gemma4 tier
+
+    // Construct the HF filename: gemma-4-{tier}-it-{quant}-MTP.gguf
+    let hf_filename = format!("gemma-4-{}-it-{}-MTP.gguf", tier, quant_label);
+
+    // Construct the local filename: insert -qat if needed to avoid collision
+    let local_filename = if is_qat {
+        format!("gemma-4-{}-it-qat-{}-MTP.gguf", tier, quant_label)
+    } else {
+        format!("gemma-4-{}-it-{}-MTP.gguf", tier, quant_label)
+    };
+
+    // The HF repo for MTP files is the same as the main repo, just /MTP/ subfolder
+    Some((repo_id.to_string(), hf_filename, local_filename))
+}
+
+/// Extract the Gemma4 tier slug from a repo id or model name.
+/// Returns lowercase tier: "e2b", "e4b", "12b", "26b-a4b", "31b", or "2b"
+pub fn resolve_gemma4_tier(name_lower: &str) -> Option<String> {
+    // Order matters: check more specific patterns first (26b-a4b before 26b)
+    if name_lower.contains("26b") || name_lower.contains("a4b") {
+        Some("26b-a4b".to_string())
+    } else if name_lower.contains("31b") {
+        Some("31b".to_string())
+    } else if name_lower.contains("12b") {
+        Some("12b".to_string())
+    } else if name_lower.contains("e4b") {
+        Some("e4b".to_string())
+    } else if name_lower.contains("e2b") {
+        Some("e2b".to_string())
+    } else if name_lower.contains("2b") {
+        Some("2b".to_string())
+    } else {
+        None
+    }
+}
+
+/// Check if a local draft model is compatible with the given Gemma4 main model tier.
+/// Returns true if the draft model's tier matches the main model's tier.
+fn is_draft_compatible_with_tier(draft_name_lower: &str, tier: &str) -> bool {
+    // Both the draft and main model should reference the same tier
+    match tier {
+        "26b-a4b" => draft_name_lower.contains("26b") || draft_name_lower.contains("a4b"),
+        "31b" => draft_name_lower.contains("31b"),
+        "12b" => draft_name_lower.contains("12b") && !draft_name_lower.contains("e12"),
+        "e4b" => draft_name_lower.contains("e4b"),
+        "e2b" => draft_name_lower.contains("e2b"),
+        "2b" => draft_name_lower.contains("2b") && !draft_name_lower.contains("e2b"),
+        _ => false,
+    }
+}
+
+/// Find a compatible local MTP draft model for a Gemma4 main model.
+///
+/// Scans the models directory for a `-MTP.gguf` file matching the same tier.
+/// Returns the full path of the best match, or None.
+pub fn find_compatible_gemma4_mtp_draft(
+    models_dir: &std::path::Path,
+    main_model_name: &str,
+) -> Option<std::path::PathBuf> {
+    let tier = resolve_gemma4_tier(&main_model_name.to_ascii_lowercase())?;
+
+    // Walk models dir for draft candidates
+    let entries = std::fs::read_dir(models_dir).ok()?;
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if is_draft_assistant_hf(&name, 0) && is_draft_compatible_with_tier(&name, &tier) {
+            candidates.push(entry.path());
+        }
+    }
+
+    // Prefer exact quant match (if main model is Q8_0, prefer Q8_0 draft)
+    let main_lower = main_model_name.to_ascii_lowercase();
+    let best = candidates.iter().find(|p| {
+        let name = p
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_lowercase();
+        // Check if the quant level in the draft name matches the main model
+        if main_lower.contains("q8_0") && name.contains("q8_0") {
+            return true;
+        }
+        if main_lower.contains("q4_k_m") && name.contains("q4_k_m") {
+            return true;
+        }
+        if main_lower.contains("q4_0") && name.contains("q4_0") {
+            return true;
+        }
+        if main_lower.contains("bf16") && name.contains("bf16") {
+            return true;
+        }
+        if main_lower.contains("f16") && name.contains("f16") {
+            return true;
+        }
+        false
+    });
+
+    best.cloned().or_else(|| candidates.into_iter().next())
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

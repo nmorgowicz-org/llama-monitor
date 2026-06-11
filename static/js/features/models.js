@@ -187,14 +187,16 @@ function isMmproj(m) {
 
 function isDraftAssistant(m) {
     const f = (m.filename || '').toLowerCase();
-    // Explicit assistant keywords
+    // Explicit assistant keywords — includes Unsloth's `-MTP.gguf` naming convention
     const hasKeyword =
         f.includes('assistant') ||
         f.includes('mtp-draft') ||
         f.includes('draft-model') ||
         f.includes('mtp_small') ||
         f.includes('mtp-heads') ||
-        f.startsWith('mtp-');
+        f.startsWith('mtp-') ||
+        f.endsWith('-mtp.gguf') ||
+        f.includes('/mtp/');
     // Exclude huge files that are likely main models
     const size = m.size_bytes || 0;
     return hasKeyword && size <= 3_000_000_000;

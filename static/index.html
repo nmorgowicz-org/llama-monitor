@@ -3342,13 +3342,13 @@
 
                     <!-- MTP section (shown for models with MTP heads) -->
                     <div class="hw-mtp-section" id="hw-mtp-section" style="display:none;">
-                        <div class="hw-section-divider">Multi-Token Prediction (MTP) <span class="info-tip" title="MTP heads predict several tokens ahead in one forward pass, then verify them together. This can give 1.4–2× faster generation with no quality loss — but Metal builds of llama.cpp can be slower. Always benchmark before enabling.">i</span></div>
+                        <div class="hw-section-divider">Multi-Token Prediction (MTP) <span class="info-tip" title="MTP heads predict several tokens ahead in one forward pass, then verify them together. This can give 1.4–2× faster generation with no quality loss. Enabled by default. Benchmark enabled versus disabled on your hardware; some backends can run slower.">i</span></div>
                         <div class="hw-section-subdesc">Speculative decoding: the model drafts multiple tokens per step and verifies them in one pass. Faster output, no accuracy trade-off.</div>
                         <div class="hw-mtp-content">
                             <div class="field-hint" id="hw-mtp-info-note" style="display:none;margin-bottom:6px;font-size:11px;color:var(--color-text-muted);">
-                                This model has MTP prediction heads built-in. Enabling draft-mtp can give ~1.4–2× faster generation with no quality change. Benchmark enabled versus disabled on your hardware; some backends (notably Metal) can run slower.
-                            </div>
-                            <label class="hw-toggle-label" title="Uses the model's built-in Multi-Token Prediction heads to guess ahead, then verifies in one pass. No extra model needed. Disabled by default on Apple Metal because current llama.cpp builds can lose throughput there.">
+                                 This model has MTP prediction heads built-in. Enabling draft-mtp can give ~1.4–2× faster generation with no quality change. Enabled by default — disable if you experience regressions on your hardware.
+                             </div>
+                             <label class="hw-toggle-label" title="Uses the model's built-in Multi-Token Prediction heads to guess ahead, then verifies in one pass. No extra model needed. Enabled by default — benchmark to verify gains on your hardware.">
                                  <input type="checkbox" id="hw-use-mtp">
                                  Enable MTP (experimental)
                              </label>
@@ -3364,9 +3364,19 @@
                                     <select id="hw-mtp-assistant-select" class="hw-quant-select">
                                     </select>
                                 </div>
-                                <div class="field-hint">This file is passed as <code>--model-draft</code> and enables MTP for models that require an external assistant (Gemma4-style). Recommended draft tokens/step with assistant: 4.</div>
-                            </div>
-                            <div class="hw-mtp-depth-row" id="hw-mtp-depth-row">
+                              <div class="field-hint">This file is passed as <code>--model-draft</code> and enables MTP for models that require an external assistant (Gemma4-style). Recommended draft tokens/step with assistant: 4.</div>
+                             </div>
+                             <!-- MTP draft download offer (shown when no local draft found for Gemma4) -->
+                             <div class="hw-mtp-depth-row" id="hw-mtp-download-section" style="display:none;">
+                                 <div class="field-hint" style="margin-bottom:6px;font-size:11px;color:var(--color-text-muted);">
+                                     No compatible MTP draft model found locally. Download one from HuggingFace to enable faster inference with speculative decoding.
+                                 </div>
+                                 <div class="hw-mtp-download-info" id="hw-mtp-download-info" style="font-size:11px;color:var(--color-text-muted);margin-bottom:6px;"></div>
+                                 <button type="button" id="hw-mtp-download-btn" class="wizard-btn-secondary" title="Download the recommended MTP draft model from HuggingFace.">
+                                     Download MTP Draft Model
+                                 </button>
+                             </div>
+                             <div class="hw-mtp-depth-row" id="hw-mtp-depth-row">
                                 <div class="hw-mtp-depth-inline">
                                     <label for="hw-mtp-depth" class="hw-mtp-depth-label" title="How many tokens the MTP heads predict ahead simultaneously per step. 2 is the recommended default. Higher = slightly faster but costs more VRAM.">Draft tokens/step (n-max)</label>
                                      <input type="number" id="hw-mtp-depth" min="1" max="8" value="2" class="hw-mtp-depth-input" title="How many tokens ahead to predict each step. 2 is the recommended default.">
@@ -3379,7 +3389,7 @@
                                     <label for="spawn-spec-draft-p-min" class="hw-mtp-depth-label" title="Minimum token probability to attempt speculative verification. If the model is very uncertain, skip drafting. Range 0–1. Default: 0.9 for MTP.">Min accept prob (p-min)</label>
                                     <input type="number" id="spawn-spec-draft-p-min" min="0" max="1" step="0.05" placeholder="0.9" class="hw-mtp-depth-input" title="Minimum token probability threshold for draft acceptance. 0.9 recommended for MTP.">
                                 </div>
-                                <div class="field-hint">Uses <code>--spec-type draft-mtp,ngram-mod</code>, sets <code>--spec-draft-n-max</code>, and forces <code>--parallel 1</code>. Gains vary by model and backend; current Metal builds can be slower with MTP even at high acceptance. Benchmark enabled versus disabled. Adds about 1.5% model memory per head.</div>
+                                <div class="field-hint">Uses <code>--spec-type draft-mtp,ngram-mod</code>, sets <code>--spec-draft-n-max</code>, and forces <code>--parallel 1</code>. Gains vary by model and backend. Benchmark enabled versus disabled to verify performance. Adds about 1.5% model memory per head.</div>
                             </div>
                         </div>
                     </div>
