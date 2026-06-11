@@ -609,11 +609,14 @@ function updateAttachDetach(d) {
         historicBadge.style.display = isAttach ? 'none' : 'inline-block';
     }
 
-    // Live log tail pill group: only allowed when spawn mode and logs exist.
-    const allowed = isSpawn && d.logs && d.logs.length > 0;
-    logTailAllowed = allowed;
+  // Live log tail pill group: show benchmark pill when server connected.
+    // Log tail badge only allowed when spawn mode and logs exist.
+    const serverRunning = d.server_running ?? false;
+    const hasLogs = isSpawn && d.logs && d.logs.length > 0;
+    logTailAllowed = hasLogs;
 
-    if (!allowed) {
+    if (!serverRunning) {
+        // Server not running: hide entire group
         logTailActive = false;
         if (ce.logTailGroup) ce.logTailGroup.style.display = 'none';
         if (ce.logTailBadge) ce.logTailBadge.classList.remove('is-active');
@@ -622,7 +625,7 @@ function updateAttachDetach(d) {
             ce.logTailEl.innerHTML = '';
         }
     } else if (ce.logTailGroup) {
-        // First time allowed or newly allowed: apply persisted visibility
+        // Server running: show group (benchmark pill visible in all modes)
         _syncLogTailVisibility();
     }
 }

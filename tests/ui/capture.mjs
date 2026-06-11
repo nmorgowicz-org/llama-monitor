@@ -143,13 +143,13 @@ Scenarios:
     dashboard        Server tab, GPU section
 
   Spawn Wizard
-    spawn-wizard           Wizard step 1 profiles, step 2 HF discover/community picks/quant advisor, step 3 VRAM
-    spawn-wizard-gif       Animated GIF walking through all spawn wizard steps (1→2→3→4→5→6)
-    spawn-wizard-hf-download  HF download panel: idle options and simulated progress
+     spawn-wizard           Steps 1–6: profiles, model, VRAM, parameters, summary, spawn/close
+     spawn-wizard-gif       Animated GIF walking through all spawn wizard steps (1→2→3→4→5→6)
+     spawn-wizard-hf-download  HF download panel: idle options and simulated progress
 
   Performance & Updates
     tune-panel       Performance benchmark dropdown (pill + panel) on server tab
-    llama-updater    Llama-server binary update pill, version modal with release notes, and app release notes
+    llama-updater    Llama-server binary update pill and version modal with release notes
 
   Validation
     sparkline        Sparkline validation screenshots
@@ -1490,20 +1490,6 @@ async function scenarioSettings(ctx, options) {
         }
     }
 
-    // Models modal
-    try {
-        await page.evaluate(() => { window.openModelsModal?.(); });
-        await page.waitForSelector('#models-modal.open', { timeout: 5000 });
-        await sleep(700);
-        await captureShot(page, 'panels-models-modal.png', { fullPage: true });
-        await captureCloseUp(page, '#models-modal', 'panels-models-modal.png', options);
-        await page.click('#models-modal-close');
-        await page.waitForSelector('#models-modal.open', { hidden: true, timeout: 5000 });
-        await sleep(300);
-    } catch (e) {
-        console.log('[CAPTURE] Models modal failed, skipping...');
-    }
-
     // Keyboard shortcuts via Ctrl+/
     try {
         await page.keyboard.down('Control');
@@ -1556,33 +1542,37 @@ async function scenarioModelsV2(ctx, options) {
     await sleep(1500);
     await captureShot(page, 'models-discovery-overview.png', { fullPage: true });
 
-    // 2. Show third-party scan section if present (expand for richer context).
+    // 2. Switch to Download tab and simulate a download in progress.
     await page.evaluate(() => {
-        const section = document.querySelector('#models-modal .third-party-section');
-        if (section) {
-            section.setAttribute('open', '');
-            section.style.maxHeight = 'none';
-        }
+        const downloadTab = document.querySelector('.mm-tab[data-tab="download"]');
+        if (downloadTab) downloadTab.click();
     });
-    await sleep(500);
-    await captureShot(page, 'models-third-party-scan.png', { fullPage: true });
+    await sleep(800);
 
-    // 3. Simulate HF file selection and show HF download panel inside models modal.
+    // Simulate a download in progress
     await page.evaluate(() => {
         const panel = document.getElementById('mm-hf-download-panel');
-        if (!panel) return;
         const idle = document.getElementById('mm-hf-dlp-idle');
+        const progress = document.getElementById('mm-hf-dlp-progress');
         const fileName = document.getElementById('mm-hf-dlp-file-name');
         const destPath = document.getElementById('mm-hf-dlp-dest-path');
+        const progressFile = document.getElementById('mm-hf-dlp-progress-file');
+        const progressBar = document.getElementById('mm-hf-dlp-bar');
+        const progressPct = document.getElementById('mm-hf-dlp-progress-pct');
+        const stats = document.getElementById('mm-hf-dlp-stats');
 
-        if (idle && panel) {
-            panel.style.display = 'block';
-            panel.style.maxHeight = 'none';
-            if (fileName) fileName.textContent = 'llama-3.1-8b-instruct-Q4_K_M.gguf';
-            if (destPath) destPath.textContent = '~/.config/llama-monitor/models/';
-        }
+        if (panel) panel.style.display = 'block';
+        if (panel) panel.style.maxHeight = 'none';
+        if (idle) idle.style.display = 'none';
+        if (progress) progress.style.display = 'block';
+        if (fileName) fileName.textContent = 'llama-3.1-8b-instruct-Q4_K_M.gguf';
+        if (destPath) destPath.textContent = '~/.config/llama-monitor/models/';
+        if (progressFile) progressFile.textContent = 'llama-3.1-8b-instruct-Q4_K_M.gguf';
+        if (progressBar) progressBar.style.width = '65%';
+        if (progressPct) progressPct.textContent = '65%';
+        if (stats) stats.textContent = '24.7 MB / 37.9 MB · 2.4 MB/s';
     });
-    await sleep(500);
+    await sleep(800);
     await captureShot(page, 'models-hf-download-panel.png', { fullPage: true });
 }
 
@@ -2545,32 +2535,30 @@ async function scenarioTunePanel(ctx, options) {
     await attachToServer(page);
 
     await switchTab(page, 'server');
-    await sleep(3000);
+    await sleep(2000);
 
-    // The benchmark pill appears after attach; click to open dropdown.
-    const pillVisible = await page.evaluate(() => {
+    // Force show the benchmark pill and its parent group (workaround for display:none override).
+    await page.evaluate(() => {
         const pill = document.getElementById('benchmark-pill');
-        if (!pill) return false;
-        return getComputedStyle(pill).display !== 'none';
+        const group = document.getElementById('inference-log-tail-group');
+        if (pill) pill.classList.add('show');
+        if (group) group.style.display = 'inline-flex';
     });
+    await sleep(500);
 
-    if (pillVisible) {
-        // Click the Benchmark pill to open the dropdown
-        await page.evaluate(() => {
-            const pill = document.getElementById('benchmark-pill');
-            if (pill) pill.click();
-        });
-        await sleep(800);
-        await captureShot(page, 'tune-panel-open.png', { fullPage: true });
-        await captureCloseUp(page, '#benchmark-dropdown-wrap', 'tune-panel-open.png', options);
-    } else {
-        console.log('[CAPTURE] Benchmark pill not visible; may require a spawned session. Capturing server tab anyway.');
-        await captureShot(page, 'tune-panel-server-tab.png', { fullPage: true });
-    }
+    // Click the pill to open the dropdown
+    await page.evaluate(() => {
+        const pill = document.getElementById('benchmark-pill');
+        if (pill) pill.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await sleep(800);
+
+    await captureShot(page, 'tune-panel-open.png', { fullPage: true });
+    await captureCloseUp(page, '#benchmark-dropdown-wrap', 'tune-panel-open.png', options);
 }
 
 // ── Llama Updater ─────────────────────────────────────────────────────────────
-// Llama-server binary update pill and release notes panel.
+// Llama-server binary update pill and version modal.
 
 async function scenarioLlamaUpdater(ctx, options) {
     const { page, baseUrl } = ctx;
@@ -2591,31 +2579,6 @@ async function scenarioLlamaUpdater(ctx, options) {
     });
     await sleep(600);
     await captureShot(page, 'llama-updater-pill.png', { fullPage: true });
-
-    // Also simulate an app update pill and open release notes
-    await page.evaluate(() => {
-        const pill = document.getElementById('update-pill');
-        const text = document.getElementById('update-pill-text');
-        if (pill && text) {
-            text.textContent = 'v0.3.0 available';
-            pill.style.display = 'flex';
-        }
-    });
-    await sleep(400);
-
-    // Open the release notes panel via JS
-    await page.evaluate(async () => {
-        const { openReleaseNotes } = await import('/js/features/updates.js');
-        window._pendingRelease = {
-            tag_name: 'v0.3.0',
-            body: '## New Features\n- Spawn wizard with guided setup\n- VRAM estimator improvements\n\n## Fixes\n- Fixed several race conditions in chat storage',
-            html_url: 'https://github.com/example/llama-monitor/releases/tag/v0.3.0',
-        };
-        openReleaseNotes();
-    });
-    await page.waitForSelector('#release-notes-panel.open', { timeout: 5000 }).catch(() => {});
-    await sleep(800);
-    await captureShot(page, 'llama-updater-release-notes.png', { fullPage: true });
 
     // Open the llama.cpp version modal — shows release list + notes panel
     await page.evaluate(async () => {
@@ -2990,15 +2953,39 @@ async function scenarioSpawnWizard(ctx, options) {
     await page.waitForFunction(
         () => document.getElementById('wizard-step-3')?.classList.contains('active'),
         { timeout: 5000 }
-    ).catch(() => console.log('[CAPTURE] Step 3 (Summary) wait timed out; continuing.'));
+    ).catch(() => console.log('[CAPTURE] Step 4 (Parameters) wait timed out; continuing.'));
     await sleep(800);
-    // Scroll to the config list — the most informative part of the summary step.
+    // Scroll to the config list — the most informative part of the parameters step.
     await page.evaluate(() => {
         const list = document.getElementById('spawn-summary-list');
         if (list) list.scrollIntoView({ behavior: 'instant', block: 'start' });
     });
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-step4-summary.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-step4-parameters.png', { fullPage: true });
+
+    // ── Step 5: Summary ───────────────────────────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-4')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 5 (Summary) wait timed out; continuing.'));
+    await sleep(600);
+    // Scroll to the Save Preset row at the bottom of the summary step.
+    await page.evaluate(() => {
+        const row = document.getElementById('spawn-save-preset-row');
+        if (row) row.scrollIntoView({ behavior: 'instant', block: 'center' });
+    });
+    await sleep(300);
+    await captureShot(page, 'spawn-wizard-step5-summary.png', { fullPage: true });
+
+    // ── Step 6: Spawn ──────────────────────────────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-5')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 6 (Spawn) wait timed out; continuing.'));
+    await sleep(600);
+    await captureShot(page, 'spawn-wizard-step6-spawn.png', { fullPage: true });
 
     // Close wizard.
     await page.keyboard.press('Escape');
@@ -3447,7 +3434,7 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
         const extraArgs = [];
 
         // For the models scenario: seed fake .gguf files and pass --models-dir.
-        if (scenarioName === 'models') {
+        if (scenarioName === 'models' || scenarioName === 'models-v2' || scenarioName === 'panels') {
             const modelsDir = join(TEMP_APP_CONFIG_DIR, 'models');
             fs.mkdirSync(modelsDir, { recursive: true });
             const fakeFiles = [

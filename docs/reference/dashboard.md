@@ -102,8 +102,6 @@ Clicking any row displays that release's notes in a side pane. The **Install** b
 
 ![Llama Updater Version Modal](../screenshots/llama-updater-version-modal.png)
 
-![Llama Updater Release Notes](../screenshots/llama-updater-release-notes.png)
-
 ### Background version checks
 
 On startup the frontend checks for a new version after a short delay to avoid competing with first-paint work. Thereafter a background poll fires every 30 minutes while the tab is visible. Polling stops while the tab is hidden (minimized or inactive) and resumes on visibility change.

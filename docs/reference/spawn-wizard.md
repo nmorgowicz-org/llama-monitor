@@ -176,9 +176,9 @@ Shown automatically when the model has `mtp_depth > 0` (detected from GGUF metad
 
 ---
 
-### Step 4 — Summary
+### Step 4 — Parameters
 
-![Step 4 — Summary and launch config](../screenshots/spawn-wizard-step4-summary.png)
+![Step 4 — Parameters](../screenshots/spawn-wizard-step4-parameters.png)
 
 Shows a human-readable review of all selected parameters. Health checks:
 - VRAM fit status
@@ -196,13 +196,26 @@ This step also includes:
 - Network controls for `Port`, `Bind host`, and optional `Server API key`
 - Inline edit shortcuts back to Model and Hardware so the user can make one last adjustment without restarting the flow
 
-The user can save the configuration as a named preset from this step.
+---
+
+### Step 5 — Summary
+
+![Step 5 — Summary](../screenshots/spawn-wizard-step5-summary.png)
+
+Displays every flag that will be saved with the preset in a table format. The user can save the configuration as a named preset from this step before proceeding.
+
+- **Save as Preset** — stores all parameters for quick reuse from the setup screen
+- Presets can be saved for different models or configurations
+- Saving is optional — click Next to go straight to launch
 
 ---
 
-### Step 5 — Spawn
+### Step 6 — Spawn
 
 One-click launch. Shows live status (starting → waiting for endpoint → running / error). On success the wizard closes and the new session appears in the session list.
+
+![Step 6 — Spawn](../screenshots/spawn-wizard-step6-spawn.png)
+
 
 - The spawned `llama-server` process is started with `--no-warmup`.
 - Readiness is confirmed by a backend probe against the active session, so launches with a server API key still report status correctly.
