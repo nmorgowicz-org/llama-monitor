@@ -2824,6 +2824,8 @@ body.setup-active .sidebar-nav {
   overflow: hidden;
   text-overflow: ellipsis;
   opacity: 0.85;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .launch-card-model--empty {
@@ -2905,6 +2907,34 @@ body.setup-active .sidebar-nav {
 .launch-card-vram-dot--fit    { background: var(--color-success); box-shadow: 0 0 4px color-mix(in srgb, var(--color-success) 40%, transparent); }
 .launch-card-vram-dot--tight  { background: var(--color-warning); box-shadow: 0 0 4px color-mix(in srgb, var(--color-warning) 40%, transparent); }
 .launch-card-vram-dot--risk   { background: var(--color-error); box-shadow: 0 0 4px color-mix(in srgb, var(--color-error) 40%, transparent); }
+
+/* ── VRAM fit legend ────────────────────────────────────────────────────────── */
+
+.vram-fit-legend {
+  display: flex;
+  gap: 14px;
+  padding: 10px 0 4px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  flex-wrap: wrap;
+}
+
+.vram-fit-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.vram-fit-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.vram-fit-legend-dot--fit   { background: var(--color-success); }
+.vram-fit-legend-dot--tight { background: var(--color-warning); }
+.vram-fit-legend-dot--risk  { background: var(--color-error); }
 
 /* ── Memory bar ─────────────────────────────────────────────────────────────── */
 

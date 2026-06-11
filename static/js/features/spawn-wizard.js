@@ -368,6 +368,26 @@ export function openSpawnWizard(opts = {}) {
   // Check binary prereq every time wizard opens
   _checkBinaryPrereq();
 
+  if (opts.templatePreset) {
+    // "Use as template": pre-populate hardware/params from the example preset so
+    // the user only needs to pick a model. Settings are applied but not locked.
+    const t = opts.templatePreset;
+    if (t.context_size)      wizardState.hardware.contextSize    = t.context_size;
+    if (t.ctk)               wizardState.hardware.cacheTypeK     = t.ctk;
+    if (t.ctv)               wizardState.hardware.cacheTypeV     = t.ctv;
+    if (t.batch_size)        wizardState.hardware.batchSize      = t.batch_size;
+    if (t.ubatch_size)       wizardState.hardware.ubatchSize     = t.ubatch_size;
+    if (t.parallel_slots)    wizardState.hardware.parallelSlots  = t.parallel_slots;
+    if (t.gpu_layers != null) wizardState.hardware.gpuLayers     = String(t.gpu_layers);
+    if (t.threads != null)   wizardState.hardware.threads        = t.threads;
+    if (t.threads_batch != null) wizardState.hardware.threadsBatch = t.threads_batch;
+    if (t.temperature != null)   wizardState.hardware.temperature   = t.temperature;
+    if (t.top_p != null)         wizardState.hardware.topP          = t.top_p;
+    if (t.top_k != null)         wizardState.hardware.topK          = t.top_k;
+    if (t.repeat_penalty != null) wizardState.hardware.repeatPenalty = t.repeat_penalty;
+    if (t.max_tokens != null)    wizardState.hardware.maxTokens     = t.max_tokens;
+  }
+
   if (opts.localPath) {
     // Pre-load a local model path and jump straight to step 2 (model).
     wizardState.model.source = 'local';
@@ -1744,6 +1764,12 @@ function onHfDownloadComplete(downloadId, localPath) {
   updateSelectedModelDisplay();
   renderLocalModelHint();
   refreshStepGuardrails();
+
+  // Toast notification + auto-advance to next step
+  const filename = effectivePath.split(/[\\/]/).pop() || 'Model';
+  showToast('Download complete', 'success', filename);
+  const next = Math.min(wizardState.currentStep + 1, STEP_LABELS.length - 1);
+  if (next > wizardState.currentStep) showStep(next);
 }
 
 async function _startCompanionMmprojDownload(repo, mmprojHfPath, modelHfPath) {
@@ -4302,6 +4328,18 @@ function updateVramDisplay() {
 
   maybeResetHardwareStepScroll();
   maybeRestoreHardwareStepScroll();
+
+  // Inline VRAM exceeded warning (red feedback under context input)
+  const ctxVramEl = document.getElementById('ctx-vram-warning');
+  if (ctxVramEl) {
+    if (free < 0) {
+      ctxVramEl.textContent = `VRAM exceeded by ${formatGB(Math.abs(free))}. Reduce context size or use KV quantization.`;
+      ctxVramEl.className = 'ctx-fit-warning ctx-fit-error';
+      ctxVramEl.style.display = '';
+    } else {
+      ctxVramEl.style.display = 'none';
+    }
+  }
 }
 
 function setSegWidth(el, frac) {

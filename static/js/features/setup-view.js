@@ -366,31 +366,32 @@ function _buildLaunchCard(preset, activePresetId) {
         // eslint-disable-next-line no-unsanitized/property -- content sanitized via escapeHtml
         card.innerHTML = `
             <div class="launch-card-top">
-                <div class="launch-card-name">${escapeHtml(preset.name)}</div>
+                <div class="launch-card-name" title="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}</div>
                 <span class="launch-card-example-badge">Example</span>
             </div>
-            <div class="launch-card-model launch-card-model--empty">Configure a model to use this</div>
+            <div class="launch-card-model launch-card-model--empty">Add a model to use these settings</div>
             <div class="launch-card-chips">
                 <span class="launch-chip">${ctxDisplay}</span>
                 <span class="launch-chip">${ctkDisplay}</span>
             </div>
             <div class="launch-card-actions">
-                <button class="launch-card-btn-start launch-card-btn-start--configure" type="button">
-                    + New Configuration
+                <button class="launch-card-btn-start launch-card-btn-start--configure" type="button"
+                    title="Open the spawn wizard with this preset's settings pre-loaded as a starting point">
+                    Use as template →
                 </button>
             </div>
         `;
         card.querySelector('.launch-card-btn-start').addEventListener('click', () => {
-            import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+            import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard({ templatePreset: preset }));
         });
     } else {
         // eslint-disable-next-line no-unsanitized/property -- content sanitized via escapeHtml
         card.innerHTML = `
             <div class="launch-card-top">
-                <div class="launch-card-name">${escapeHtml(preset.name)}</div>
+                <div class="launch-card-name" title="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}</div>
                 ${isRunning ? '<span class="launch-card-running-badge">● Running</span>' : ''}
             </div>
-            <div class="launch-card-model ${hasModel ? '' : 'launch-card-model--empty'}">${escapeHtml(modelFile || 'No model configured')}</div>
+            <div class="launch-card-model ${hasModel ? '' : 'launch-card-model--empty'}" title="${escapeHtml(modelFile || '')}">${escapeHtml(modelFile || 'No model configured')}</div>
             <div class="launch-card-chips">
                 <span class="launch-chip">${ctxDisplay}</span>
                 <span class="launch-chip">${ctkDisplay}</span>
@@ -399,8 +400,9 @@ function _buildLaunchCard(preset, activePresetId) {
             ${hasModel ? '<div class="launch-card-vram launch-card-vram--loading"><span class="launch-card-vram-total">…</span></div>' : ''}
             <div class="launch-card-actions">
                 <button class="launch-card-btn-edit" type="button">Edit</button>
-                <button class="launch-card-btn-start ${hasModel ? '' : 'launch-card-btn-start--configure'}" type="button">
-                    ${hasModel ? '▶ Start' : '⚙ Configure'}
+                <button class="launch-card-btn-start ${hasModel ? '' : 'launch-card-btn-start--configure'}" type="button"
+                    title="${hasModel ? 'Start the llama-server with this preset' : 'Open the spawn wizard to set up a model for this preset'}">
+                    ${hasModel ? '▶ Start' : 'Set up model →'}
                 </button>
                 <button class="launch-card-btn-trash" type="button" title="Delete preset">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -419,6 +421,19 @@ function _buildLaunchCard(preset, activePresetId) {
             const mainSel = document.getElementById('preset-select');
             if (mainSel) mainSel.value = preset.id;
             import('./presets.js').then(({ openPresetModal }) => openPresetModal('edit'));
+        });
+
+        // Quick-edit: click context or KV chip to open preset modal focused on context section
+        card.querySelectorAll('.launch-chip').forEach(chip => {
+            chip.style.cursor = 'pointer';
+            chip.title = 'Click to quickly edit context or KV cache settings';
+            chip.addEventListener('click', () => {
+                const mainSel = document.getElementById('preset-select');
+                if (mainSel) mainSel.value = preset.id;
+                import('./presets.js').then(({ openPresetModal }) => {
+                    openPresetModal('edit', 'context');
+                });
+            });
         });
 
         card.querySelector('.launch-card-btn-trash').addEventListener('click', async (e) => {
@@ -527,8 +542,8 @@ function _renderCardVram(el, data, availBytes) {
             <div class="launch-card-vram-seg launch-card-vram-seg--kv" style="width:${toWidth(data.kv_cache_bytes)}"></div>
             <div class="launch-card-vram-seg launch-card-vram-seg--extras" style="width:${toWidth(extrasBytes)}"></div>
         </div>
-        <span class="launch-card-vram-total">~${totalGb.toFixed(1)} GB</span>
-        <span class="launch-card-vram-dot launch-card-vram-dot--${dotClass}"></span>
+        <span class="launch-card-vram-total" title="Approximate total VRAM: ${parts.join(' · ')}">approx. ${totalGb.toFixed(1)} GB</span>
+        <span class="launch-card-vram-dot launch-card-vram-dot--${dotClass}" title="${dotClass === 'fit' ? 'Fits comfortably in VRAM' : dotClass === 'tight' ? 'Tight fit — may work but leaves little headroom' : 'May exceed available VRAM — consider reducing context or KV quant'}"></span>
     `;
 }
 
@@ -584,8 +599,10 @@ export function renderRecentEndpoints(sessions, activeId) {
     if (!list || !container) return;
 
     const allSessions = Array.isArray(sessions) ? sessions : [];
+    // Only attach sessions appear in the recent list — spawn sessions can't be
+    // "resumed" (you'd need to re-spawn), so they are only used to stamp last-launch
+    // timestamps on preset cards.
     const attachSessions = allSessions.filter(session => !!session.mode?.Attach);
-    const spawnSessions = allSessions.filter(session => !!session.mode?.Spawn);
 
     if (!allSessions.length) {
         container.style.display = 'none';
@@ -594,12 +611,11 @@ export function renderRecentEndpoints(sessions, activeId) {
     }
 
     container.style.display = attachSessions.length ? '' : 'none';
-    // Don't clobber the Connect button label — it's fixed in the two-pane layout
     list.innerHTML = '';
 
-    // Build last-launched map and stamp preset cards
+    // Stamp preset cards with the last time they were spawned (for "last launched" display).
     _spawnLastLaunched.clear();
-    for (const session of spawnSessions) {
+    for (const session of allSessions.filter(s => !!s.mode?.Spawn)) {
         if (!session.preset_id || !session.last_connected_at) continue;
         const ts = session.last_connected_at * 1000;
         if (ts > (_spawnLastLaunched.get(session.preset_id) || 0)) {
@@ -608,25 +624,17 @@ export function renderRecentEndpoints(sessions, activeId) {
     }
     _applyLastLaunchedToCards();
 
+    // buildCard is only called for Attach sessions — Spawn sessions cannot be
+    // "resumed" from here (you'd need to re-spawn via a preset card).
     const buildCard = (session) => {
-        const isAttach = session.mode && session.mode.Attach;
-        const isSpawn = session.mode && session.mode.Spawn;
-
         const card = document.createElement('div');
         card.className = 'setup-endpoint-card';
         if (activeId && session.id === activeId) {
             card.classList.add('is-active-session');
         }
 
-        let endpoint = '';
-        let apiKey = '';
-        if (isAttach) {
-            endpoint = session.mode.Attach.endpoint;
-            apiKey = session.mode.Attach.api_key || '';
-        } else if (isSpawn) {
-            endpoint = 'http://127.0.0.1:' + session.mode.Spawn.port;
-            apiKey = session.mode.Spawn.api_key || '';
-        }
+        const endpoint = session.mode?.Attach?.endpoint || '';
+        const apiKey = session.mode?.Attach?.api_key || '';
 
         const statusClass = session.status === 'Running' ? 'status-running' :
                             session.status === 'Error' ? 'status-error' : 'status-disconnected';
@@ -661,11 +669,6 @@ export function renderRecentEndpoints(sessions, activeId) {
         }
         if (lastConnected !== 'Never') metaParts.push(lastConnected);
         if (connectCount > 0) metaParts.push(connectCount + 'x');
-        if (isSpawn) {
-            metaParts.unshift('Local spawn session');
-            if (session.mode.Spawn.bind_host === '0.0.0.0') metaParts.push('LAN visible');
-            if (session.mode.Spawn.api_key) metaParts.push('API key saved');
-        }
         let meta = metaParts.join(' · ');
         if (!meta) meta = 'Saved endpoint';
         metaEl.textContent = meta;
@@ -678,37 +681,16 @@ export function renderRecentEndpoints(sessions, activeId) {
         connectBtn.className = 'setup-endpoint-connect';
 
         const doConnect = () => {
-            if (isSpawn) {
-                // Use spawn-session flow (Resume / Start) instead of Attach
-                if (session.preset_id) {
-                    quickStartSession(session.id);
-                } else {
-                    // Fallback: attach via URL if no preset_id (edge case)
-                    console.warn('[setup-view] Spawn session missing preset_id; falling back to attach', session.id);
-                    const urlInput = document.getElementById('setup-endpoint-url');
-                    if (urlInput) urlInput.value = endpoint;
-                    const apiKeyInput = document.getElementById('setup-endpoint-api-key');
-                    if (apiKeyInput) apiKeyInput.value = apiKey;
-                    doAttachFromSetup();
-                }
-            } else {
-                // Attach session: populate left-side form and attach
-                const urlInput = document.getElementById('setup-endpoint-url');
-                if (urlInput) urlInput.value = endpoint;
-                const apiKeyInput = document.getElementById('setup-endpoint-api-key');
-                if (apiKeyInput) apiKeyInput.value = apiKey;
-                doAttachFromSetup();
-            }
+            const urlInput = document.getElementById('setup-endpoint-url');
+            if (urlInput) urlInput.value = endpoint;
+            const apiKeyInput = document.getElementById('setup-endpoint-api-key');
+            if (apiKeyInput) apiKeyInput.value = apiKey;
+            doAttachFromSetup();
         };
 
-        if (isSpawn) {
-            // Spawn sessions: always show "Resume" (they are local, not remote)
-            connectBtn.textContent = 'Resume';
-        } else {
-            connectBtn.textContent = activeId && session.id === activeId
-                ? 'Resume'
-                : (session.last_connected_at ? 'Reconnect' : 'Connect');
-        }
+        connectBtn.textContent = activeId && session.id === activeId
+            ? 'Resume'
+            : (session.last_connected_at ? 'Reconnect' : 'Connect');
 
         card.appendChild(statusDot);
         card.appendChild(infoWrap);

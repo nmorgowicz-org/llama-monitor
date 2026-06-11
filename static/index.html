@@ -305,6 +305,13 @@
                             <div class="launch-card-skeleton"></div>
                         </div>
 
+                        <!-- VRAM fit legend for launch card dots -->
+                        <div class="vram-fit-legend">
+                            <span class="vram-fit-legend-item"><span class="vram-fit-legend-dot vram-fit-legend-dot--fit"></span>Fits in VRAM</span>
+                            <span class="vram-fit-legend-item"><span class="vram-fit-legend-dot vram-fit-legend-dot--tight"></span>Tight fit</span>
+                            <span class="vram-fit-legend-item"><span class="vram-fit-legend-dot vram-fit-legend-dot--risk"></span>May exceed VRAM</span>
+                        </div>
+
                         <!-- Spawn error diagnostics bar (shown when launch fails) -->
                         <div class="local-server-error-bar" id="local-server-error-bar" style="display:none;">
                             <div class="local-server-error-bar-left">
@@ -2951,14 +2958,17 @@
                         <div class="profile-card" data-profile="quick">
                             <div class="profile-card-radio">⚡</div>
                             <div class="profile-card-name">Quick</div>
+                            <div class="profile-card-desc">Auto-tune everything. Context, GPU layers, and batch are set for you — no knobs to turn.</div>
                         </div>
                         <div class="profile-card selected" data-profile="balanced">
                             <div class="profile-card-radio">⚖️</div>
                             <div class="profile-card-name">Balanced</div>
+                            <div class="profile-card-desc">Recommended defaults with room to adjust context, KV cache type, and threads.</div>
                         </div>
                         <div class="profile-card" data-profile="advanced">
                             <div class="profile-card-radio">🛠️</div>
                             <div class="profile-card-name">Advanced</div>
+                            <div class="profile-card-desc">Full control: MoE CPU offload, tensor split, speculative decoding, batch tuning, and more.</div>
                         </div>
                     </div>
                     <div class="profile-seg-hint" id="profile-seg-hint">Guided tuning with sensible defaults. Recommended for most setups.</div>
@@ -3121,7 +3131,8 @@
                                 <option value="trending">Trending</option>
                                 <option value="likes">Most liked</option>
                             </select>
-                            <select id="spawn-hf-min-size" class="hf-sort-select" title="Minimum model size">
+                            <label for="spawn-hf-min-size" class="hw-quant-label" style="font-size:10px;">Min params</label>
+                            <select id="spawn-hf-min-size" class="hf-sort-select" title="Filter by minimum parameter count (billions). e.g. '7' hides everything under 7B.">
                                 <option value="0">Any size</option>
                                 <option value="7">≥7B</option>
                                 <option value="14">≥14B</option>
@@ -3250,7 +3261,7 @@
                             <span class="hw-model-file" id="hw-model-file"></span>
                         </div>
                         <div class="hw-quant-row" id="hw-quant-row" style="display:none;">
-                            <label for="hw-quant-select" class="hw-quant-label">Quantization</label>
+                            <label for="hw-quant-select" class="hw-quant-label">Change quant</label>
                             <select id="hw-quant-select" class="hw-quant-select" title="Swap quantization to compare VRAM impact"></select>
                         </div>
                         <!-- Local-model quant discovery: shown when no quantFiles are loaded yet -->
@@ -3276,7 +3287,7 @@
 
                     <div class="hardware-grid">
                         <div class="hardware-field">
-                            <label for="spawn-gpu-layers">GPU layers</label>
+                            <label for="spawn-gpu-layers" title="Auto: computes the maximum layers that fit in VRAM based on model size and context. Manual: enter an exact count (0 = CPU-only, all = max offload).">GPU layers</label>
                             <select id="spawn-gpu-layers">
                                 <option value="auto">Auto (recommended)</option>
                                 <option value="all">All layers on GPU</option>
@@ -3332,7 +3343,8 @@
 
                     <!-- MTP section (shown for models with MTP heads) -->
                     <div class="hw-mtp-section" id="hw-mtp-section" style="display:none;">
-                        <div class="hw-section-divider">Multi-Token Prediction (MTP) <span class="info-tip" title="Built-in prediction heads guess multiple tokens ahead. Throughput depends on the model, backend, context, and draft acceptance; benchmark before relying on it.">i</span></div>
+                        <div class="hw-section-divider">Multi-Token Prediction (MTP) <span class="info-tip" title="MTP heads predict several tokens ahead in one forward pass, then verify them together. This can give 1.4–2× faster generation with no quality loss — but Metal builds of llama.cpp can be slower. Always benchmark before enabling.">i</span></div>
+                        <div class="hw-section-subdesc">Speculative decoding: the model drafts multiple tokens per step and verifies them in one pass. Faster output, no accuracy trade-off.</div>
                         <div class="hw-mtp-content">
                             <div class="field-hint" id="hw-mtp-info-note" style="display:none;margin-bottom:6px;font-size:11px;color:var(--color-text-muted);">
                                 This model has MTP prediction heads built-in. Enabling draft-mtp can give ~1.4–2× faster generation with no quality change. Benchmark enabled versus disabled on your hardware; some backends (notably Metal) can run slower.
@@ -3376,13 +3388,15 @@
                     <!-- Minimum-context warning (shown after auto-size when result < target) -->
                     <div class="ctx-fit-warning" id="ctx-fit-warning" style="display:none;"></div>
                     <div class="ctx-fit-warning" id="ctx-train-warning" style="display:none;"></div>
+                    <!-- VRAM exceeded warning (red inline feedback when context > available VRAM) -->
+                    <div class="ctx-fit-warning" id="ctx-vram-warning" style="display:none;"></div>
 
                     <!-- Advanced-only fields -->
                     <div class="advanced-only" id="spawn-advanced-fields">
                         <div class="wizard-section-title">Advanced options <span class="info-tip" title="Fine-tune performance and memory. Most users can leave these at defaults.">i</span></div>
                         <div class="hardware-grid">
                             <div class="hardware-field">
-                                <label for="spawn-batch-size">Batch size</label>
+                                <label for="spawn-batch-size" title="Total tokens processed per batch during prompt evaluation (-b). Higher = faster fills, more VRAM. 2048 is a safe default.">Batch size (-b)</label>
                                 <input type="number" id="spawn-batch-size" min="1" value="2048">
                                 <div class="field-hint">Prompt batch size. 2048 is a good default.</div>
                             </div>
@@ -3391,8 +3405,8 @@
                                  <input type="number" id="spawn-parallel-slots" min="1" value="1">
                              </div>
                             <div class="hardware-field">
-                                <label for="spawn-ubatch-size">Ubatch size</label>
-                                <input type="number" id="spawn-ubatch-size" min="64" max="4096" step="64" value="2048" title="Micro-batch size for prompt processing">
+                                <label for="spawn-ubatch-size" title="GPU micro-batch size for prompt processing (-ub). Usually same as batch size or smaller. Reducing saves a small amount of VRAM.">Ubatch size (-ub)</label>
+                                <input type="number" id="spawn-ubatch-size" min="64" max="4096" step="64" value="2048" title="GPU micro-batch size. Usually same as batch size.">
                                 <div class="field-hint">2048 recommended for Apple Silicon (faster prompt processing).</div>
                             </div>
                             <div class="hardware-field">
@@ -3678,14 +3692,15 @@
                             <!-- populated by JS -->
                         </div>
 
-                        <!-- MoE expert offload slider (hidden unless MoE model) -->
-                        <div class="moe-offload-panel" id="moe-offload-panel" style="display:none;">
-                            <div class="moe-offload-header">
-                                <span class="moe-offload-title">Expert offload</span>
-                                <span class="moe-offload-subtitle" id="moe-offload-subtitle">0 of N experts on CPU</span>
-                            </div>
-                            <input type="range" id="moe-offload-slider" class="moe-slider"
-                                   min="0" max="128" value="0" step="1">
+                       <!-- MoE expert offload slider (hidden unless MoE model) -->
+                         <div class="moe-offload-panel" id="moe-offload-panel" style="display:none;">
+                             <div class="moe-offload-header">
+                                 <span class="moe-offload-title" title="Move MoE (Mixture-of-Experts) layers to CPU to reduce VRAM usage. Sliding right offloads more experts to CPU, allowing larger context but slower generation.">Expert offload <span class="info-tip" title="MoE models use multiple expert layers. Offloading experts to CPU frees VRAM for larger context windows but slows generation speed.">i</span></span>
+                                 <span class="moe-offload-subtitle" id="moe-offload-subtitle">0 of N experts on CPU</span>
+                             </div>
+                             <input type="range" id="moe-offload-slider" class="moe-slider"
+                                    min="0" max="128" value="0" step="1"
+                                    title="Drag to adjust how many expert layers run on CPU vs GPU. Left = all on GPU (fastest). Right = more on CPU (less VRAM, larger context).">
                             <div class="moe-offload-labels">
                                 <span>All on GPU (faster)</span>
                                 <span>All on CPU (more context)</span>

@@ -291,6 +291,7 @@ function _renderPresetVram(el, data) {
     if (kv > 0) parts.push(`KV ${fmt(kv)}`);
     if (mmproj > 0) parts.push(`mmproj ${fmt(mmproj)}`);
     if (overhead > 0) parts.push(`overhead ${fmt(overhead)}`);
+    // eslint-disable-next-line no-unsanitized/property -- all values are numeric; no user strings
     el.innerHTML = `
         <div class="preset-vram-row">
             <div class="launch-card-vram-bar">
@@ -338,7 +339,7 @@ async function autoTunePreset() {
     }
 }
 
-export function openPresetModal(mode) {
+export function openPresetModal(mode, section) {
     const modal = document.getElementById('preset-modal');
     const title = document.getElementById('modal-title');
     const subtitle = document.getElementById('preset-editor-subtitle');
@@ -465,8 +466,9 @@ export function openPresetModal(mode) {
     }
 
     modal.classList.add('open');
-    // Reset nav to first section
-    document.querySelector('.preset-nav-item[data-section="model"]')?.click();
+    // Navigate to specified section, or reset to first section
+    const targetSection = section || 'model';
+    document.querySelector(`.preset-nav-item[data-section="${targetSection}"]`)?.click();
     const body = modal.querySelector('.modal-body');
     if (body) body.scrollTop = 0;
 
