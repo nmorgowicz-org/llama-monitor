@@ -51,7 +51,7 @@ jobs:
 
   check:
     needs: paths-filter
-    timeout-minutes: 90
+    timeout-minutes: 60
     if: >-
       always() &&
       github.event.pull_request.draft == false &&
@@ -233,7 +233,7 @@ jobs:
 
   release-smoke:
     needs: [paths-filter, check]
-    timeout-minutes: 60
+    timeout-minutes: 90
     if: >-
       always() &&
       needs.check.result != 'failure' &&
