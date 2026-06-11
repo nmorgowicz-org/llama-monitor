@@ -2645,4 +2645,79 @@ mod tests {
             kv_255k_gb
         );
     }
+
+    // ===== Quant table completeness tests =====
+
+    #[test]
+    fn quant_table_all_entries_have_valid_multipliers() {
+        for quant in all_quants() {
+            assert!(
+                quant.bpw > 0.0 && quant.bpw <= 32.0,
+                "Quant {} has invalid bpw {}",
+                quant.name,
+                quant.bpw
+            );
+            assert!(!quant.name.is_empty(), "Quant name must not be empty");
+        }
+    }
+
+    #[test]
+    fn quant_table_has_sufficient_coverage() {
+        assert!(
+            all_quants().len() >= 30,
+            "Expected 30+ quant levels, got {}",
+            all_quants().len()
+        );
+    }
+
+    #[test]
+    fn find_quant_unknown_returns_none() {
+        assert!(find_quant("nonexistent_quant_xyz").is_none());
+        assert!(find_quant("").is_none());
+    }
+
+    // ===== VRAM estimation edge cases =====
+
+    #[test]
+    fn estimate_vram_zero_context() {
+        let arch = ModelArch::default();
+        let breakdown = full_estimate(
+            4_000_000_000,
+            &arch,
+            0, // zero context
+            "q8_0",
+            "q8_0",
+            1,
+            1024,
+            0,
+            16 * 1024 * 1024 * 1024,
+            false,
+        );
+        // Should still succeed, just no KV overhead
+        assert!(matches!(
+            breakdown.recommendation,
+            VramRecommendation::Fit | VramRecommendation::Tight
+        ));
+    }
+
+    #[test]
+    fn estimate_vram_too_large_for_vram() {
+        let arch = ModelArch::default();
+        let breakdown = full_estimate(
+            60_000_000_000, // 60GB model
+            &arch,
+            128_000,
+            "q4_k_m",
+            "q8_0",
+            1,
+            1024,
+            0,
+            16 * 1024 * 1024 * 1024, // 16GB available
+            false,
+        );
+        assert!(matches!(
+            breakdown.recommendation,
+            VramRecommendation::Risk | VramRecommendation::WontFit
+        ));
+    }
 }

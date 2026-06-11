@@ -23,8 +23,23 @@ pub struct ModelTags {
 impl ModelTags {
     pub fn load(path: &Path) -> Self {
         match std::fs::read_to_string(path) {
-            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-            Err(_) => Self::default(),
+            Ok(content) => match serde_json::from_str::<BTreeMap<String, Vec<String>>>(&content) {
+                Ok(tags) => ModelTags { tags },
+                Err(e) => {
+                    eprintln!(
+                        "[warn] ModelTags: corrupted JSON in {:?}, loading empty tags (error: {})",
+                        path, e
+                    );
+                    Self::default()
+                }
+            },
+            Err(e) => {
+                eprintln!(
+                    "[info] ModelTags: could not read {:?}, loading empty tags (error: {})",
+                    path, e
+                );
+                Self::default()
+            }
         }
     }
 
@@ -618,18 +633,25 @@ impl AppState {
         // - Internal monitor messages ([monitor])
         // - Lines indicating an error/failure/health issue
         // All lines are still stored for the UI and Logs tab.
-        let line_lower = line.to_lowercase();
-        let is_important = line.starts_with("[monitor]")
-            || line_lower.contains("error")
-            || line_lower.contains("oom")
-            || line_lower.contains("out of memory")
-            || line_lower.contains("killed")
-            || line_lower.contains("health check")
-            || line_lower.contains("failed")
-            || line_lower.contains("cannot update")
-            || line_lower.contains("not responding")
-            || line_lower.contains("corrupt")
-            || line_lower.contains("incompatible");
+        // Use ascii_lowercase (cheaper than unicode case-folding) and any()
+        // to short-circuit — all our patterns are pure ASCII.
+        let is_important = line.starts_with("[monitor]") || {
+            let lower = line.to_ascii_lowercase();
+            [
+                "error",
+                "oom",
+                "out of memory",
+                "killed",
+                "health check",
+                "failed",
+                "cannot update",
+                "not responding",
+                "corrupt",
+                "incompatible",
+            ]
+            .iter()
+            .any(|p| lower.contains(p))
+        };
 
         if is_important {
             eprintln!("[llama-monitor] {line}");
@@ -1080,6 +1102,15 @@ impl AppState {
     }
 }
 
+/// Returns `true` if the given log line is known llama.cpp poll noise.
+///
+/// These patterns are safe to suppress in the push_log echo loop because
+/// they represent routine server status updates that add no value to terminal output
+/// but fire frequently on every poll cycle.
+///
+/// Patterns filtered:
+/// - `update_slots` + `all slots are idle` — idle-slot poll noise on every tick
+/// - `stop: cancel task` + `id_task` — task cancellation on every idle tick
 fn is_noise_log(line: &str) -> bool {
     (line.contains("update_slots") && line.contains("all slots are idle"))
         || (line.contains("stop: cancel task") && line.contains("id_task"))

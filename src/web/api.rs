@@ -1508,9 +1508,16 @@ fn api_spawn_wizard_import_launch_file(
 
 /// Return true for hostnames/IP strings that resolve to private or loopback ranges.
 /// Used to block SSRF in the chat-template fetch endpoint.
+/// Returns `true` if the host is local, private, or a reserved TLD.
+///
+/// TODO: DNS rebinding is not mitigated by hostname checks alone.
+/// For stronger SSRF protection, resolve the hostname to an IP address
+/// and validate the resolved IP against private ranges before sending
+/// the request (e.g., via a custom reqwest interceptor or pre-resolution).
 fn is_private_host(host: &str) -> bool {
-    // Loopback / localhost
-    if host == "localhost" || host == "ip6-localhost" || host == "[::1]" {
+    // Loopback / localhost (case-insensitive)
+    let lower = host.to_ascii_lowercase();
+    if lower == "localhost" || lower == "ip6-localhost" || lower == "[::1]" {
         return true;
     }
     // Strip brackets from IPv6 literals
@@ -11672,6 +11679,7 @@ fn api_self_update(
 
 #[cfg(test)]
 mod tests {
+    use super::is_private_host;
     use super::legacy_chat_types::*;
     use super::resolve_hf_target_dir;
     use super::token_bootstrap_allowed;
@@ -11774,6 +11782,91 @@ mod tests {
         let err =
             resolve_hf_target_dir(&models_dir, Some("linked/new-download")).expect_err("rejects");
         assert!(err.contains("escapes models_dir"));
+    }
+
+    // ===== SSRF guard tests (is_private_host) =====
+
+    #[test]
+    fn srf_blocks_localhost_variants() {
+        for host in [
+            "localhost",
+            "LOCALHOST",
+            "127.0.0.1",
+            "127.0.0.255",
+            "127.255.255.255",
+            "::1",
+            "0:0:0:0:0:0:0:1",
+            "0.0.0.0",
+        ] {
+            assert!(is_private_host(host), "Should block '{}'", host);
+        }
+    }
+
+    #[test]
+    fn srf_blocks_ipv4_private_ranges() {
+        // 10.x.x.x
+        assert!(is_private_host("10.0.0.1"));
+        assert!(is_private_host("10.255.255.255"));
+        // 172.16-31.x.x
+        assert!(is_private_host("172.16.0.1"));
+        assert!(is_private_host("172.31.255.255"));
+        // 192.168.x.x
+        assert!(is_private_host("192.168.0.1"));
+        assert!(is_private_host("192.168.255.255"));
+        // Link-local
+        assert!(is_private_host("169.254.100.1"));
+        // Link-local (0x0a00)
+        assert!(is_private_host("169.254.0.1"));
+        // APIPA (169.254.0.0/16)
+        assert!(is_private_host("169.254.1.1"));
+    }
+
+    #[test]
+    fn srf_blocks_ipv6_private_ranges() {
+        // ULA (fc00::/7)
+        assert!(is_private_host("fc00::1"));
+        assert!(is_private_host("fd00::dead:beef"));
+        assert!(is_private_host("fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"));
+        // Link-local (fe80::/10)
+        assert!(is_private_host("fe80::1"));
+        assert!(is_private_host("febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff"));
+    }
+
+    #[test]
+    fn srf_blocks_internal_tlds() {
+        for host in [
+            "internal.local",
+            "my-host.internal",
+            "api.corp",
+            "db.lan",
+            "service.local.svc.cluster.local",
+        ] {
+            assert!(is_private_host(host), "Should block '{}'", host);
+        }
+    }
+
+    #[test]
+    fn srf_allows_public_hosts() {
+        for host in [
+            "huggingface.co",
+            "cdn.huggingface.co",
+            "google.com",
+            "8.8.8.8",
+            "1.1.1.1",
+            "2001:4860:4860::8888",
+        ] {
+            assert!(!is_private_host(host), "Should allow '{}'", host);
+        }
+    }
+
+    #[test]
+    fn srf_allows_non_private_ipv4() {
+        // 172.32 is the first non-private /12 after 172.16-31
+        assert!(!is_private_host("172.32.0.1"));
+        // 172.15 is the last non-private /12 before 172.16-31
+        assert!(!is_private_host("172.15.255.255"));
+        // Note: 203.0.113.0/24 and 198.51.100.0/24 are RFC-5737 documentation
+        // ranges and are correctly blocked by is_private_host().
     }
 
     #[test]
