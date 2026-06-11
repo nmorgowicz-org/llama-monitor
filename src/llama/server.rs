@@ -356,8 +356,13 @@ pub async fn start_server(
         cmd.arg("-m").arg(&config.model_path);
     }
 
-    cmd.arg("-ngl")
-        .arg(config.gpu_layers.unwrap_or(99).to_string());
+    // Use "all" to push every layer to GPU (more robust than hardcoding 99).
+    // Spawn wizard sends -1 for "all" when user selects the "All" option.
+    let ngl_str = match config.gpu_layers {
+        Some(-1) | None => "all".to_string(),
+        Some(n) => n.to_string(),
+    };
+    cmd.arg("-ngl").arg(&ngl_str);
     cmd.arg("-ctk").arg(&config.ctk);
     cmd.arg("-ctv").arg(&config.ctv);
     cmd.arg("--host")
@@ -387,10 +392,13 @@ pub async fn start_server(
         cmd.arg("--mlock");
     }
 
-    // Flash attention
-    if !config.flash_attn.is_empty() {
-        cmd.arg("-fa").arg(&config.flash_attn);
-    }
+    // Flash attention — always enabled by default; explicit "off" still works.
+    let fa_value = if config.flash_attn == "off" {
+        "off"
+    } else {
+        "on"
+    };
+    cmd.arg("-fa").arg(fa_value);
 
     // GPU distribution
     if !config.tensor_split.is_empty() {

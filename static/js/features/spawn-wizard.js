@@ -4022,7 +4022,7 @@ async function autoTuneWizard(verify) {
   if (verify) {
     if (!m.path) { showToast('Verify needs a local model file', 'warn'); return; }
     body.model_path = m.path;
-    body.ngl = 99;
+    body.ngl = -1; // -1 → -ngl all
     body.ctk = hw.cacheTypeK;
     body.ctv = hw.cacheTypeV;
     body.flash_attn = hw.flashAttn === 'on';

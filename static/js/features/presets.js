@@ -320,10 +320,10 @@ async function autoTunePreset() {
         name: modelVal.split(/[/\\]/).pop() || '',
         param_b: _parseParamB(modelVal),
         model_path: modelVal,
-        ngl: 99,
+        ngl: -1, // -1 → -ngl all
         ctk: document.getElementById('modal-ctk')?.value || 'q8_0',
         ctv: document.getElementById('modal-ctv')?.value || 'q8_0',
-        flash_attn: (document.getElementById('modal-flash-attn')?.value || 'on') !== 'off',
+        flash_attn: true,
         verify: true,
     };
     if (statusEl) statusEl.innerHTML = '<span class="moe-autotune-spinner"></span>Running sweep… this can take a few minutes';

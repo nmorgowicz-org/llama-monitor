@@ -2394,8 +2394,8 @@
                             </div>
                             <div class="pe-row">
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-gpu-layers" title="Number of layers to offload to GPU. 99 = all layers. Lower values keep some layers on CPU to save VRAM.">GPU Layers (-ngl)</label>
-                                    <input type="number" class="pe-input" id="modal-gpu-layers" placeholder="99">
+                                    <label class="pe-label" for="modal-gpu-layers" title="Number of layers to offload to GPU. Leave empty for all layers. Lower values keep some layers on CPU to save VRAM.">GPU Layers (-ngl)</label>
+                                    <input type="number" class="pe-input" id="modal-gpu-layers" placeholder="all (leave empty)">
                                 </div>
                             </div>
                             <div class="pe-toggles">
@@ -2469,9 +2469,8 @@
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-flash-attn" title="Flash Attention mode: auto (default), on, off. Speeds up inference when supported by model architecture.">Flash Attn (-fa)</label>
                                     <select class="pe-select" id="modal-flash-attn">
-                                        <option value="">(default)</option>
+                                        <option value="on" selected>on</option>
                                         <option value="auto">auto</option>
-                                        <option value="on">on</option>
                                         <option value="off">off</option>
                                     </select>
                                 </div>

@@ -661,9 +661,9 @@ impl ModelArch {
         let named_e2b = name.contains("e2b");
         let named_e4b = name.contains("e4b");
         let named_12b = name.contains("12b");
-        // Only match explicit "26B-A4B" — a bare "a4b" can appear in unrelated
-        // fine-tune tags (e.g. "ablated-a4b-v2"). The param_b fallback at line 654
-        // covers unnamed ~26B Gemma4 models.
+        // Match "26B-A4B" / "26B_A4B" in name. A bare "a4b" tag alone is insufficient
+        // (e.g. "31B-uncensored-a4b-test" is dense), but the param_b fallback
+        // correctly classifies unnamed ~26B Gemma4 models as MoE.
         let named_26b_a4b = name.contains("26b-a4b") || name.contains("26b_a4b");
         let named_31b = name.contains("31b");
         let has_named_size = named_e2b || named_e4b || named_12b || named_26b_a4b || named_31b;
@@ -2312,12 +2312,12 @@ mod tests {
         // it must include "26b-a4b" / "26b_a4b", not a bare "a4b".
         // A fine-tune named "Gemma-4-26B-ablated-a4b-v2" should NOT be
         // forced into the 26B-A4B MoE profile.
-        let arch = ModelArch::from_name_and_params("Gemma-4-26B-ablated-a4b-v2-Q4_K_M.gguf", 26.0);
-        // Without explicit "26b-a4b", it falls back to param_b logic
-        // (param_b < 30 and no named size → treated as 26B MoE fallback),
-        // but the bare "a4b" is not enough on its own.
-        // We can validate that the pattern is tightened by checking
-        // a model whose name is clearly not the 26B-A4B but contains "a4b".
+        let _arch = ModelArch::from_name_and_params("Gemma-4-26B-ablated-a4b-v2-Q4_K_M.gguf", 26.0);
+        // Any ~26B Gemma4 is inherently A4B MoE (just like all 35B Qwen3.5/3.6 are A3B).
+        // The tightened name pattern prevents bare "a4b" from matching, but the param_b
+        // fallback (< 30B) still classifies it correctly as MoE.
+        // We validate the tightening by checking a 31B model whose name contains "a4b"
+        // but should be dense.
 
         // A 31B Gemma4 whose name has a meaningless "a4b" tag:
         let arch2 =
