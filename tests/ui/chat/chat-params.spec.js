@@ -45,7 +45,7 @@ test.describe('model params panel', () => {
 });
 
 test.describe('max_tokens default', () => {
-  test('new tabs default max_tokens to 4096', async ({ page }) => {
+  test('new tabs default max_tokens to 32768', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
@@ -57,6 +57,6 @@ test.describe('max_tokens default', () => {
       return tab?.model_params?.max_tokens ?? null;
     });
 
-    expect(value).toBe(4096);
+    expect(value).toBe(32768);
   });
 });

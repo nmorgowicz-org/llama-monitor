@@ -62,7 +62,7 @@ export function newChatTab(name = 'New Chat') {
             top_k: 40,
             min_p: 0.01,
             repeat_penalty: 1.0,
-            max_tokens: 4096,
+            max_tokens: 32768,
             stream_timeout: 120,
         },
         context_notes: [],
