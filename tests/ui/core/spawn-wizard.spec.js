@@ -437,16 +437,9 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         expect(moeLayout.fieldBottom).toBeGreaterThanOrEqual(moeLayout.actionsBottom);
     });
 
-    test('MTP requires explicit opt-in on Apple Metal', async ({ page }) => {
+    test('MTP enabled by default on all platforms including Metal', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');
-
-        const autoBackend = await page.evaluate(async () => {
-            const headers = window.authHeaders ? window.authHeaders() : {};
-            const resp = await fetch('/api/llama-binary/platform-info', { headers });
-            const data = await resp.json();
-            return data.auto_backend;
-        });
 
         await page.evaluate(async () => {
             const { openSpawnWizard, wizardState } = await import('/js/features/spawn-wizard.js');
@@ -463,7 +456,7 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         await page.locator('#wizard-next-btn').click();
 
         await expect(page.locator('#hw-mtp-section')).toBeVisible();
-        await expect(page.locator('#hw-use-mtp')).toBeChecked({ checked: autoBackend !== 'metal' });
+        await expect(page.locator('#hw-use-mtp')).toBeChecked({ checked: true });
     });
 
     test('review step exposes structured output and full sampling defaults', async ({ page }) => {
