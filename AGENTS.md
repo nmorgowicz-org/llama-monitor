@@ -465,7 +465,82 @@ Playwright UI tests are separate from the Puppeteer screenshot harness. They:
 - Validate behavior and flows, not pixel-perfect visuals.
 - Are typically run near the end of a feature branch before marking a PR ready.
 
-### Live Instance Protection (MANDATORY)
+### Core concepts (IMPORTANT)
+
+- Two ways Playwright starts the app:
+  - Isolated (default, recommended):
+    - If neither `LLAMA_MONITOR_UI_URL` nor `LLAMA_MONITOR_TEST_PORT` is set:
+      - Playwright uses `webServer.command: node run-server.mjs`
+      - `run-server.mjs` starts a fresh `llama-monitor` on 7778 with a new temp config dir
+      - No user data (chat history, settings, presets) is used — this is the correct way for agents.
+  - Attached (advanced, not default):
+    - If `LLAMA_MONITOR_UI_URL` is set, Playwright attaches to that instance.
+    - Uses its config, its chat tabs, etc. (not isolated).
+
+- CI-equivalent run:
+  - Sequential (workers: 1), retries: 2, forbidOnly: true
+  - Isolated: fresh config dir via `run-server.mjs`
+  - Uses either cargo or the prebuilt release binary (see commands below)
+
+### Default (CI-equivalent, isolated) — USE THIS
+
+This is the canonical way to run e2e tests. Use this whenever asked to "run the e2e tests."
+
+From repo root, after a release build:
+
+```bash
+cd tests/ui
+CI=1 LLAMA_MONITOR_USE_RELEASE=1 npm test
+```
+
+Explanation:
+- CI=1:
+  - Tells Playwright:
+    - workers: 1 (sequential)
+    - retries: 2
+    - forbidOnly: true
+- No LLAMA_MONITOR_UI_URL or LLAMA_MONITOR_TEST_PORT:
+  - So Playwright uses webServer (run-server.mjs), not an existing instance.
+- LLAMA_MONITOR_USE_RELEASE=1:
+  - run-server.mjs will use `target/release/llama-monitor` instead of `cargo run`.
+  - Saves time; matches CI’s “use a built release binary” pattern.
+
+If you haven’t built a release yet:
+- Either rebuild first:
+  - `cargo build --release`
+- Or let run-server.mjs use cargo (slower, but fine for a single check):
+  - `cd tests/ui && CI=1 npm test`
+
+### Using a separate port when 7778 is occupied
+
+If port 7778 is already in use (e.g., a live llama-monitor or another process),
+use `LLAMA_MONITOR_TEST_PORT` so tests don't interfere:
+
+```bash
+cd tests/ui
+CI=1 LLAMA_MONITOR_TEST_PORT=17778 npm test
+```
+
+Notes:
+- Still isolated via run-server.mjs.
+- Still matches CI-equivalent behavior with `CI=1`.
+
+### Attaching to a live instance (advanced, not default)
+
+Only use this if you specifically want to validate against an existing running instance
+and know its state (its settings, chat tabs, etc.).
+
+- Example:
+  - Start: `cargo run --release -- --headless --port 17778` (or use target/release/llama-monitor)
+  - Then:
+    - `cd tests/ui && LLAMA_MONITOR_UI_URL=http://127.0.0.1:17778 npm test`
+
+Important:
+- This is NOT isolated:
+  - Tests will use that instance's real config and data.
+  - Avoid when running the suite for PR validation or regression checks.
+
+### Live Instance Protection
 
 When running Playwright tests while a live llama-monitor instance is in use (e.g., for
 coding assistance, running a model, or as the AI’s active environment), the test run MUST
@@ -479,63 +554,37 @@ This is dangerous: an AI coding session may be running on that instance via a sp
 model. Killing it silently terminates that model and may corrupt ongoing work.
 
 HARD RULE:
-- NEVER run Playwright tests on the same port as the live/active llama-monitor.
-- NEVER run bare `npm test` or `npx playwright test` when port 7778 is in use for
-  anything other than the test run itself.
-
-CORRECT: use a separate port:
-- Fastest / preferred:
-  - From repo root:
-    - `cd tests/ui && LLAMA_MONITOR_TEST_PORT=17778 npx playwright test --workers=1 --retries=2`
-- Or via LLAMA_MONITOR_UI_URL (tests attach to that instance, do not auto-manage):
-  - Start a dedicated test instance:
-    - `cargo run --release -- --headless --port 17778` (or use target/release/llama-monitor)
-  - Then:
-    - `cd tests/ui && LLAMA_MONITOR_UI_URL=http://127.0.0.1:17778 npx playwright test --workers=1 --retries=2`
+- If port 7778 is in use for something important, do NOT run:
+  - `npm test` / `npx playwright test`
+  - without specifying a test port.
+- Instead, use LLAMA_MONITOR_TEST_PORT or attach via LLAMA_MONITOR_UI_URL
+  to a deliberately chosen instance.
 
 If you are unsure whether port 7778 is in use:
 - Assume it is.
-- Always use LLAMA_MONITOR_TEST_PORT.
+- Use:
+  - `cd tests/ui && CI=1 LLAMA_MONITOR_TEST_PORT=17778 npm test`
 
-### Running Locally
+### Running Locally (Useful Variants)
 
-From the repository root:
+From repo root:
 
-```bash
-cd tests/ui
-npm install
-npx playwright install chromium
-
-# MANDATORY: use a non-7778 port when a live llama-monitor is running:
-LLAMA_MONITOR_TEST_PORT=17778 npm test
-```
-
-**IMPORTANT: Always run with CI-equivalent flags to catch real failures and match CI behavior exactly:**
-
-```bash
-# CI-equivalent run (sequential, 2 retries) — use this before marking a PR ready
-LLAMA_MONITOR_TEST_PORT=17778 npx playwright test --workers=1 --retries=2
-```
-
-Running without `--workers=1` uses multiple workers in parallel, which can cause false
-failures from timing races. A test that passes with `--workers=1` but fails with many
-workers in parallel is a timing issue, not a functional bug. A test that fails with
-`--workers=1 --retries=2` is a real failure — fix it before pushing.
-
-Useful variants:
-
-- `LLAMA_MONITOR_TEST_PORT=17778 npm test` — run all tests headless (default workers, no retries)
-- `LLAMA_MONITOR_TEST_PORT=17778 npx playwright test --workers=1 --retries=2` — CI-equivalent sequential run (**preferred**)
-- `LLAMA_MONITOR_TEST_PORT=17778 npm run test:headed` — run with browser visible
-- `LLAMA_MONITOR_TEST_PORT=17778 npm run test:debug` — run in Playwright inspector
-- `npm run test:ssh` — run SSH integration tests (requires LLAMA_MONITOR_SSH_TARGET)
-- `LLAMA_MONITOR_HAS_AI=1 npm run test:ai` — include AI-dependent tests
+- CI-equivalent, isolated (default / required for PRs):
+  - `cd tests/ui && CI=1 LLAMA_MONITOR_USE_RELEASE=1 npm test`
+- CI-equivalent on a different port:
+  - `cd tests/ui && CI=1 LLAMA_MONITOR_TEST_PORT=17778 npm test`
+- Debug/interactive:
+  - `cd tests/ui && LLAMA_MONITOR_TEST_PORT=17778 npm run test:headed`
+  - `cd tests/ui && LLAMA_MONITOR_TEST_PORT=17778 npm run test:debug`
+- SSH integration tests:
+  - `cd tests/ui && npm run test:ssh` (requires LLAMA_MONITOR_SSH_TARGET)
+- AI-dependent tests:
+  - `cd tests/ui && LLAMA_MONITOR_HAS_AI=1 npm run test:ai`
 
 Notes:
 
-- Tests use a fresh temporary config dir via `run-server.mjs`; they do not depend on your local `~/.config/llama-monitor/`.
-- The UI URL defaults to `http://127.0.0.1:7778` only when no test port override is set.
-- You MUST override with `LLAMA_MONITOR_TEST_PORT` (e.g., 17778) or `LLAMA_MONITOR_UI_URL` when the live instance is using 7778.
+- Tests use a fresh temporary config dir via `run-server.mjs`; they do not depend on your local `~/.config/llama-monitor/` when run in the default (isolated) mode.
+- When using `LLAMA_MONITOR_UI_URL`, you are attaching to an existing instance (not isolated).
 
 ### When to Run
 
@@ -576,10 +625,10 @@ Some tests exhibit timing issues when run with multiple workers in parallel. CI 
 - `retries: 2` — failed tests retry up to 2 times
 
 **Debugging flaky failures:**
-1. Run with CI-equivalent flags first: `LLAMA_MONITOR_TEST_PORT=17778 npx playwright test --workers=1 --retries=2`
+1. Run with CI-equivalent flags first: `cd tests/ui && CI=1 LLAMA_MONITOR_TEST_PORT=17778 npm test`
 2. If that passes, the local failure was a parallel timing race — not a real bug
-3. Run the test in isolation to confirm: `LLAMA_MONITOR_TEST_PORT=17778 npx playwright test --workers=1 --grep "test name"`
-4. Do not mark PR as ready-to-test if `--workers=1 --retries=2` fails — that is a real bug
+3. Run the test in isolation to confirm: `cd tests/ui && LLAMA_MONITOR_TEST_PORT=17778 npx playwright test --workers=1 --grep "test name"`
+4. Do not mark PR as ready-to-test if a CI-equivalent run fails — that is a real bug
 
 **Cargo test flakiness from concurrent processes:**
 Rust unit tests that write to shared temp paths (e.g., `std::env::temp_dir()`) can fail
