@@ -1,19 +1,19 @@
-# Spawn Wizard Reference
+# Setup Wizard Reference
 
-The Spawn Wizard is a 6-step guided flow for configuring and launching a llama-server instance. It handles hardware detection, VRAM-aware parameter selection, model acquisition (local, HuggingFace, third-party), and binary management.
+The Setup wizard is a 6-step guided flow for configuring and launching a llama-server instance. It handles hardware detection, VRAM-aware parameter selection, model acquisition (local, HuggingFace, third-party), and binary management.
 
 ## Welcome Screen
 
 The first screen a user sees when launching Llama Monitor. It has two main panes:
 
-- **Connect to Endpoint** (left): Connect to an existing llama-server instance by entering the URL and optional API key.
+- **Connect to running model** (left): Connect to an existing llama-server instance by entering the URL and optional API key.
 - **Local Server** (right): Configure and launch a local server using a preset or the New Server Wizard.
 
 ![Welcome screen](../screenshots/welcome-welcome.png)
 
-Entry points to the Spawn Wizard: the **+ New Configuration** button on the Local Server pane, the **+ New Session** button in the top nav, and the **Spawn Local Server** link on the logs empty state.
+Entry points to the setup wizard: the **+ New model profile** button on the Local Server pane, the **+ New model profile** button in the top nav, and the **Start server** link on the logs empty state.
 
-![Spawn Wizard Flow](../screenshots/spawn-wizard-flow.gif)
+![Setup wizard flow](../screenshots/spawn-wizard-flow.gif)
 
 ---
 
@@ -72,7 +72,7 @@ When selected, the wizard immediately scans known tool directories and renders d
 
 ---
 
-### Step 3 — Hardware
+### Step 3 — Hardware & memory
 
 ![Step 3 — VRAM breakdown and hardware tuning](../screenshots/spawn-wizard-step3-vram.png)
 
@@ -176,7 +176,7 @@ Shown automatically when the model has `mtp_depth > 0` (detected from GGUF metad
 
 ---
 
-### Step 4 — Parameters
+### Step 4 — Settings
 
 ![Step 4 — Parameters](../screenshots/spawn-wizard-step4-parameters.png)
 
@@ -198,7 +198,7 @@ This step also includes:
 
 ---
 
-### Step 5 — Summary
+### Step 5 — Review settings
 
 ![Step 5 — Summary](../screenshots/spawn-wizard-step5-summary.png)
 
@@ -210,9 +210,9 @@ Displays every flag that will be saved with the preset in a table format. The us
 
 ---
 
-### Step 6 — Spawn
+### Step 6 — Start server
 
-One-click launch. Shows live status (starting → waiting for endpoint → running / error). On success the wizard closes and the new session appears in the session list.
+One-click launch. Shows live status (starting → waiting for endpoint → running / error). On success the wizard closes and the new model profile appears in the list.
 
 ![Step 6 — Spawn](../screenshots/spawn-wizard-step6-spawn.png)
 
@@ -224,7 +224,7 @@ One-click launch. Shows live status (starting → waiting for endpoint → runni
 
 ## Structured Output (Grammar / JSON Schema)
 
-Available in Step 4 (Summary) of the spawn wizard and the preset editor.
+Available in Review settings of the setup wizard and the preset editor.
 
 Structured output forces the model to produce output matching a specific format instead of free-form text. The model cannot generate tokens that violate the rules — it's mechanically enforced at inference time, not just instructed via the prompt. This is useful for agent pipelines, data extraction, or any app that needs a guaranteed response shape.
 
@@ -398,6 +398,8 @@ Detection is done from filename patterns: `i1-` prefixes for imatrix, `-ud-` or 
 ![Quantizer types — bartowski standard quants](../screenshots/spawn-wizard-step2-quantizer-bartowski.png)
 
 ### Community Picks / Quick Picks
+
+Note: The VRAM estimator runs before the wizard asks you to choose a context size. If you suspect its model-architecture assumptions are off (wrong expert count, wrong layers), see [VRAM Estimator Reference](vram-estimator.md) for how to verify and correct them.
 
 The wizard discover panel includes quantizer quick-pick buttons to filter by known GGUF producers:
 
