@@ -234,7 +234,7 @@ Each assistant message footer shows:
 - `↓N` — prompt tokens used for that request
 - `↑N` — tokens generated in that reply
 - `RN` — running total of all tokens in the conversation
-- `N% ctx` — estimated context-usage percentage at that point
+- `N%` — estimated context-usage percentage at that point
 - Model name (if known)
 
 These values are derived from the live llama.cpp metrics and the token counts reported per message.
@@ -517,7 +517,7 @@ Explicit mode is a three-level content filter layered on top of the active perso
 | Format | Behavior |
 |--------|----------|
 | **Markdown** | Appends parsed user/assistant blocks to the active tab with fresh import timestamps |
-| **JSON** | Creates a new tab from the first array element in the file |
+| **JSON** | Creates a new conversation from the first array element in the file |
 
 ### Reasoning / Thinking Content
 

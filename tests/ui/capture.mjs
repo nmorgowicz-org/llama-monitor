@@ -123,7 +123,7 @@ function printUsage() {
 
 Scenarios:
   Core
-    welcome          Welcome screen, auth shell, and spawn wizard button (no attach required)
+    welcome          Welcome screen, auth shell, and setup wizard button (no attach required)
     chat             Chat, telemetry, logs
 
   Chat Features
@@ -142,9 +142,9 @@ Scenarios:
     panels           Chat config panels (behavior, model, style, debug)
     dashboard        Server tab, GPU section
 
-  Spawn Wizard
-     spawn-wizard           Steps 1–6: profiles, model, VRAM, parameters, summary, spawn/close
-     spawn-wizard-gif       Animated GIF walking through all spawn wizard steps (1→2→3→4→5→6)
+  Setup wizard
+     spawn-wizard           Steps 1–6: profiles, model, VRAM, parameters, summary, start/close
+     spawn-wizard-gif       Animated GIF walking through all setup wizard steps (1→2→3→4→5→6)
      spawn-wizard-hf-download  HF download panel: idle options and simulated progress
 
   Performance & Updates
@@ -369,7 +369,7 @@ async function attachToServer(page, remoteServer = REMOTE_SERVER) {
         endpoint => document.getElementById('endpoint-url')?.textContent?.includes(endpoint),
         { timeout: 5000 }
     ).catch(() => {
-        console.log('[CAPTURE] Endpoint URL not confirmed in display (non-fatal)');
+        console.log('[CAPTURE] Server URL not confirmed in display (non-fatal)');
     });
 
     await sleep(1500);
@@ -912,7 +912,7 @@ async function scenarioWelcome(ctx, options) {
     // Shot 1: the arrival screen with both cards visible.
     await captureShot(page, 'welcome-welcome.png', { fullPage: true });
 
-    // Shot 2: click "New Server Wizard" and capture step 0 of the wizard so the
+    // Shot 2: Open setup wizard and capture step 0 so the
     // two screenshots tell a clear before→after story.
     const spawnBtn = await page.$('#setup-spawn-wizard-btn');
     if (spawnBtn) {
@@ -922,7 +922,7 @@ async function scenarioWelcome(ctx, options) {
             // Fallback click via DOM when Puppeteer thinks it’s not clickable.
             await page.evaluate(() => {
                 (document.getElementById('setup-spawn-wizard-btn')
-                    || document.querySelector('#view-setup button:has-text("New Server Wizard")'))
+                    || document.querySelector('#view-setup button:has-text("Setup wizard")'))
                     ?.click();
             });
         }
@@ -1717,7 +1717,7 @@ async function scenarioDashboard(ctx, options) {
         if (pg) pg.scrollTop = 0;
     });
     await sleep(300);
-    await captureShot(page, 'dashboard-inference-section.png');
+    await captureShot(page, 'dashboard-performance-section.png');
     await captureShot(page, 'settings-server-tab.png', { fullPage: true });
 
     // Wait up to 6s for hardware data to arrive (remote agent dependent).
@@ -1782,7 +1782,7 @@ async function scenarioGifs(ctx, options) {
         await sleep(1500);
         await captureFrames(page, 'inference', totalFrames, fps);
         await generationPromise;
-        framesToGif('inference', join(ARTIFACTS_DIR, 'inference-metrics.gif'), fps);
+        framesToGif('inference', join(ARTIFACTS_DIR, 'performance-metrics.gif'), fps);
         cleanupFrames();
     }
 
@@ -2730,7 +2730,7 @@ async function scenarioSmoke({ page, baseUrl }, options) {
     console.log('[SMOKE] PASS: no critical console errors on startup.');
 }
 
-// ── Spawn Wizard ────────────────────────────────────────────────────────────────
+// ── Setup wizard ────────────────────────────────────────────────────────────────
 // Step 1 profile selection, step 2 HF source with discover pills / community
 // picks / quant advisor, step 3 VRAM panel. Does not require a remote attach.
 
@@ -2738,7 +2738,7 @@ async function scenarioSpawnWizard(ctx, options) {
     const { page, baseUrl } = ctx;
     await gotoApp(page, baseUrl);
 
-    // Open spawn wizard. Attach is not required; wizard works from the welcome screen.
+    // Open setup wizard. Attach is not required; wizard works from the welcome screen.
     await page.evaluate(async () => {
         const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
         openSpawnWizard();
@@ -2992,7 +2992,7 @@ async function scenarioSpawnWizard(ctx, options) {
     await sleep(400);
 }
 
-// Spawn wizard HF download panel: idle options + simulated progress.
+// Setup wizard HF download panel: idle options + simulated progress.
 async function scenarioSpawnWizardHfDownload(ctx, options) {
     const { page, baseUrl } = ctx;
 
@@ -3108,7 +3108,7 @@ async function scenarioSpawnWizardHfDownload(ctx, options) {
     await sleep(400);
 }
 
-// Animated GIF walking through the spawn wizard: welcome → profile → model → VRAM → summary.
+// Animated GIF walking through the setup wizard: welcome → profile → model → VRAM → summary.
 //
 // Design: fully sequential — each wizard state is fully reached before frames are captured.
 // This guarantees every frame reflects real UI state, with no race between capture and interaction.
@@ -3388,7 +3388,7 @@ const SCENARIOS = {
     panels: scenarioPanels,
     models: scenarioModels,
     dashboard: scenarioDashboard,
-    // Spawn wizard
+    // Setup wizard
     'spawn-wizard': scenarioSpawnWizard,
     'spawn-wizard-gif': scenarioSpawnWizardGif,
     'spawn-wizard-hf-download': scenarioSpawnWizardHfDownload,

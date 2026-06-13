@@ -10,6 +10,13 @@ memory)** and **discrete NVIDIA GPUs (5080 / 5090)**, dense vs MoE, and the
 > runtime (llama.cpp vs MLX) barely matters at 27B+; the model *architecture*
 > does. See [The two regimes](#the-two-regimes) and [Apple Silicon profiles](#apple-silicon-unified-memory).
 
+When configuring models, use the Setup wizard or Preset Editor to stay within VRAM-safe recommendations.
+These tools tie directly into the VRAM estimator, so you get a configuration that
+respects your hardware limits instead of guessing from model size alone.
+
+The VRAM estimator is hardware-aware: it uses your detected memory and backend
+to suggest context size, KV cache types, and MoE settings that fit.
+
 ---
 
 ## The two regimes
@@ -438,4 +445,4 @@ Gemma 4 QAT:
 - [Gemma 4 model and QAT deployment overview (Google AI)](https://ai.google.dev/gemma/docs/core)
 - [Gemma 4 QAT guide (Unsloth)](https://unsloth.ai/docs/models/gemma-4/qat)
 
-Related internal docs: [vram-estimator.md](vram-estimator.md) · [cli-flags.md](cli-flags.md) · [spawn-wizard.md](spawn-wizard.md)
+Related internal docs: [vram-estimator.md](vram-estimator.md) · [cli-flags.md](cli-flags.md) · [setup-wizard.md](setup-wizard.md)

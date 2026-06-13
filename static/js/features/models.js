@@ -429,7 +429,7 @@ function buildModelCard(m) {
 
                 // Multiple presets: ask which one to edit
                 const lines = presets.map((p, i) =>
-                    `${i + 1}. ${p.name || 'Unnamed preset'} (${(p.context_size || 0) ? Math.round(p.context_size / 1024) + 'k ctx' : 'default'})`
+                    `${i + 1}. ${p.name || 'Unnamed preset'} (${(p.context_size || 0) ? Math.round(p.context_size / 1024) + 'k context' : 'default'})`
                 ).join('\n');
                 const choice = prompt(
                     `This model is used by multiple presets.\nSelect the preset to edit (enter number):\n\n${lines}`
@@ -497,7 +497,7 @@ function findPresetsForModel(model) {
 
 function formatPresetSummaryLine(preset) {
     const parts = [preset.name || 'Unnamed preset'];
-    if (preset.context_size) parts.push(`${Math.round(preset.context_size / 1024)}k ctx`);
+    if (preset.context_size) parts.push(`${Math.round(preset.context_size / 1024)}k context`);
     const ctk = preset.ctk || '';
     const ctv = preset.ctv || '';
     if (ctk || ctv) parts.push(`KV ${ctk || 'default'}/${ctv || 'default'}`);

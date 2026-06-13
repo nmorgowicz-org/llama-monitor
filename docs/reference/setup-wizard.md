@@ -7,7 +7,7 @@ The Setup wizard is a 6-step guided flow for configuring and launching a llama-s
 The first screen a user sees when launching Llama Monitor. It has two main panes:
 
 - **Connect to running model** (left): Connect to an existing llama-server instance by entering the URL and optional API key.
-- **Local Server** (right): Configure and launch a local server using a preset or the New Server Wizard.
+- **Local Server** (right): Configure and launch a local server using a preset or the Setup wizard.
 
 ![Welcome screen](../screenshots/welcome-welcome.png)
 
@@ -77,6 +77,8 @@ When selected, the wizard immediately scans known tool directories and renders d
 ![Step 3 — VRAM breakdown and hardware tuning](../screenshots/spawn-wizard-step3-vram.png)
 
 The core tuning step. Populated using `POST /api/vram/auto-size` after model selection.
+
+The VRAM estimator is a hardware-aware configuration guide: it combines your detected memory capacity, backend (e.g., Metal vs CUDA), and the chosen model’s architecture (layers, experts, MoE depth) to propose settings that fit your machine. It is not a guarantee; extremely large or unusual models can exceed its estimates. For details on how it works and how to correct its assumptions, see [VRAM Estimator Reference](vram-estimator.md).
 
 #### Model Header
 Shows the selected repo (`owner/model-name`) and selected quant. If multiple GGUF files exist in the repo, a **Quantization** dropdown lets the user swap without leaving the step. A **Vision (mmproj)** dropdown appears when projector files are detected. For imatrix repositories whose model card links to a separate static-quant repository, the wizard follows that link and lists its projector files automatically. If a Qwen 3.5 variant's linked static repo has no projector, the wizard checks verified same-architecture repositories from mradermacher and then Unsloth.
@@ -217,7 +219,7 @@ One-click launch. Shows live status (starting → waiting for endpoint → runni
 ![Step 6 — Spawn](../screenshots/spawn-wizard-step6-spawn.png)
 
 
-- The spawned `llama-server` process is started with `--no-warmup`.
+- The launched `llama-server` process is started with `--no-warmup`.
 - Readiness is confirmed by a backend probe against the active session, so launches with a server API key still report status correctly.
 
 ---
@@ -271,7 +273,7 @@ Structured output adds a small per-token validation overhead. For simple schemas
 
 ### API Payload
 
-When a grammar or JSON schema is configured, the spawn payload includes:
+When a grammar or JSON schema is configured, the launch payload includes:
 - `grammar`: the GBNF grammar string (passed as `--grammar`)
 - `json_schema`: the JSON schema object (passed as `--json-schema`)
 
@@ -511,7 +513,7 @@ Remove the stored token. Requires `api-token`.
 ### Wizard-to-Settings Flow
 
 - The Hugging Face helper in Step 2 can open **Settings → Models** without closing the wizard.
-- The binary prerequisite banner can open **Settings → Session** without discarding wizard progress.
+- The binary prerequisite banner can open **Settings → Model profile** without discarding wizard progress.
 - After saving settings, the wizard refreshes its token/binary state in place.
 
 ---

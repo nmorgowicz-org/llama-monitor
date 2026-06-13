@@ -24,7 +24,7 @@ Hovering the endpoint status chip in the top nav opens a popover listing per-sub
 
 | Row | Meaning |
 |-----|---------|
-| **Inference** | Whether llama.cpp inference metrics are live |
+| **Inference** | Whether llama.cpp performance metrics are live |
 | **Slots** | Whether slot data is available |
 | **Metrics** | Whether throughput / context metrics are being reported |
 | **Generation progress** | Whether the server exposes live generation budget |
@@ -47,8 +47,8 @@ The Server tab is the main monitoring dashboard. It combines llama.cpp inference
 | **Throughput** | Prompt and generation speeds, peak tracking, throughput ratio bar, metric age, and delta indicators |
 | **Generation** | Output tokens, remaining budget, generation ring progress, stage indicators (Prompt/Output), live output estimation sparkline |
 | **Context Window** | Gauge or fleet view of context pressure across chat tabs |
-| **Slot Activity** | Per-slot state, output tokens, context usage, slot utilization bar, and batch efficiency |
-| **Request Activity** | Activity rail (recent request timeline), request count, and average duration |
+| **Active sessions** | Per-slot state, output tokens, context usage, slot utilization bar, and batch efficiency |
+| **Connection details** | Activity rail (recent request timeline), request count, and average duration |
 | **Model & Decoding** | Active model name, quantization, sampler config inline, speculative decoding chip and config grid |
 
 ![Server Tab](../screenshots/settings-server-tab.png)
@@ -294,7 +294,7 @@ Response on cooldown:
 
 ## Tuning Cards
 
-The tuning cards system is a shared card renderer used by the Tune Panel, Spawn Wizard performance advisor, and Preset Editor advisor. A single rendering function displays tuning advice consistently across all surfaces.
+The tuning cards system is a shared card renderer used by the Tune Panel, Setup wizard performance advisor, and Preset Editor advisor. A single rendering function displays tuning advice consistently across all surfaces.
 
 ### Card contract
 
@@ -325,7 +325,7 @@ Cards are marked as pending if the current config does not yet have the suggesti
 ### Informational vs actionable
 
 - **Informational cards**: `param` is an empty string. These provide context (e.g., "Dense model is bandwidth-bound on this Mac") but have no Apply button.
-- **Actionable cards**: `param` is a non-empty string. These have an **Apply** button that triggers the caller's `onApply` handler. Clicking Apply modifies the config, restarts the server, and re-runs the benchmark (in the Tune Panel) or validates the new settings (in the Spawn Wizard and Preset Editor).
+- **Actionable cards**: `param` is a non-empty string. These have an **Apply** button that triggers the caller's `onApply` handler. Clicking Apply modifies the config, restarts the server, and re-runs the benchmark (in the Tune Panel) or validates the new settings (in the Setup wizard and Preset Editor).
 
 ### n_cpu_moe tuning
 
@@ -380,7 +380,7 @@ Host metrics are available in two ways:
 
 - **Local session**: the dashboard reads GPU/system data directly from the same machine.
 - **Remote session with agent**: the remote agent reports GPU/system/process telemetry back to the dashboard.
-- **Remote session without agent**: you still get inference metrics, but GPU/system cards stay limited.
+- **Remote session without agent**: you still get performance metrics, but GPU/system cards stay limited.
 
 ### GPU metrics
 
@@ -430,9 +430,9 @@ The UI exposes telemetry availability directly:
 
 | State | Meaning |
 |-------|---------|
-| **Full telemetry** | Inference metrics plus host GPU/system data |
-| **Inference only** | Connected to llama.cpp, but no host telemetry source is available |
-| **Limited** | Partial host telemetry is available but some sensors are missing |
+| **Full telemetry** | Performance metrics plus host GPU/system data |
+| **Basic** | Connected to llama.cpp, but no host telemetry source is available |
+| **Partial** | Partial host telemetry is available but some sensors are missing |
 | **Error** | The dashboard cannot reach the required endpoint |
 
 This matters most for remote endpoints: attaching to a remote llama.cpp server alone does not grant GPU or system metrics.
@@ -526,7 +526,7 @@ Ownership summary for the visible Settings surfaces:
 |---------|-------|-------------|
 | **Settings → Chat** guided-generation toggles, sidebar width, prompt templates | Shared workspace settings | `GET/PUT /api/settings` |
 | **Settings → Performance** refresh interval | Shared workspace settings | `GET/PUT /api/settings` |
-| **Settings → Session / GPU / Models / Appearance** explanatory cards | Runtime/configuration handoff only | No direct save path in Settings |
+| **Settings → Model profile / GPU / Models / Appearance** explanatory cards | Runtime/configuration handoff only | No direct save path in Settings |
 | **Settings → Advanced → Open Runtime Configuration** | Runtime configuration modal | `GET/PUT /api/settings` for config-backed fields |
 | **User → Preferences** theme, spacing, chat style, font scale | Device-local preference | browser `localStorage` |
 | **User → Preferences** enter-to-send | Shared workflow preference | `GET/PUT /api/settings` |

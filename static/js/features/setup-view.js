@@ -304,7 +304,7 @@ export function renderLaunchGrid() {
         const hint = document.createElement('div');
         hint.className = 'launch-grid-hint';
         hint.style.gridColumn = '1 / -1';
-        hint.textContent = 'First time? Use the wizard to pick a model and configure your server.';
+        hint.textContent = 'New here? Open the setup wizard to pick a model and start your first local AI in a few steps.';
         grid.appendChild(hint);
 
         // No user presets: New Config goes first so it's the obvious CTA
@@ -358,7 +358,7 @@ function _buildLaunchCard(preset, activePresetId) {
     const hasModel = !!modelFile;
 
     const ctxK = preset.context_size ? Math.round(preset.context_size / 1024) : 128;
-    const ctxDisplay = ctxK >= 1000 ? `${(ctxK / 1024).toFixed(1)}M ctx` : `${ctxK}k ctx`;
+    const ctxDisplay = ctxK >= 1000 ? `${(ctxK / 1024).toFixed(1)}M context` : `${ctxK}k context`;
     const ctkDisplay = (preset.ctk || 'q8_0') + '/' + (preset.ctv || 'f16');
 
     if (isExample) {
@@ -376,7 +376,7 @@ function _buildLaunchCard(preset, activePresetId) {
             </div>
             <div class="launch-card-actions">
                 <button class="launch-card-btn-start launch-card-btn-start--configure" type="button"
-                    title="Open the spawn wizard with this preset's settings pre-loaded as a starting point">
+                    title="Open the setup wizard with this preset's settings pre-loaded as a starting point">
                     Use as template →
                 </button>
             </div>
@@ -401,7 +401,7 @@ function _buildLaunchCard(preset, activePresetId) {
             <div class="launch-card-actions">
                 <button class="launch-card-btn-edit" type="button">Edit</button>
                 <button class="launch-card-btn-start ${hasModel ? '' : 'launch-card-btn-start--configure'}" type="button"
-                    title="${hasModel ? 'Start the llama-server with this preset' : 'Open the spawn wizard to set up a model for this preset'}">
+                    title="${hasModel ? 'Start the llama-server with this preset' : 'Open the setup wizard to set up a model for this preset'}">
                     ${hasModel ? '▶ Start' : 'Set up model →'}
                 </button>
                 <button class="launch-card-btn-trash" type="button" title="Delete preset">
@@ -555,7 +555,7 @@ function _buildNewConfigCard(isPrimary = false) {
         <div class="launch-card-new-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </div>
-        <div class="launch-card-new-label">New Configuration</div>
+        <div class="launch-card-new-label">New model</div>
         ${isPrimary ? '<div class="launch-card-new-hint">Set up your first local model</div>' : ''}
     `;
     card.addEventListener('click', () => {

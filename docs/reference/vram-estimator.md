@@ -368,4 +368,4 @@ When a new architecture is released:
 | `src/llama/spawn_wizard.rs` | `auto_size` orchestration wrapper |
 | `src/llama/gguf_meta.rs` | GGUF metadata reader (feeds ground-truth arch values) |
 | `src/web/api.rs` | `/api/vram/*` route handlers |
-| `docs/reference/spawn-wizard.md` | Wizard UI and API reference; links here for estimation details |
+| `docs/reference/setup-wizard.md` | Wizard UI and API reference; links here for estimation details |

@@ -160,7 +160,7 @@ function formatSpeed(bps) {
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-const STEP_LABELS = ['Profile', 'Model', 'Hardware', 'Parameters', 'Summary', 'Spawn'];
+const STEP_LABELS = ['How it works', 'Choose model', 'Hardware & memory', 'Settings', 'Review settings', 'Start server'];
 
 // Exposed for testing/screenshot scripts; internal state is mutable.
 export const wizardState = {
@@ -1249,7 +1249,7 @@ function getStepGuardState(step = wizardState.currentStep) {
   }
 
   if (step === 5) {
-    return info('Spawn starts the server with the configuration shown above.');
+    return info('This starts the server with the configuration shown above.');
   }
 
   return info('');
@@ -4581,7 +4581,7 @@ function _refreshThreadsHint() {
 
   if (!metricsReady) {
     if (hintEl) {
-      hintEl.textContent = 'Blank = server default (-t). Apple Silicon guidance loads automatically.';
+      hintEl.textContent = 'Blank = server default (-t). Hardware-specific guidance loads automatically.';
     }
     if (batchHintEl) {
       batchHintEl.textContent = 'Prompt processing threads. Blank = inherit from -t.';
@@ -7692,7 +7692,7 @@ async function saveAsPreset() {
 function buildPresetPayload() {
   const spawnPayload = buildSpawnPayload();
   return {
-    name: 'Spawn Wizard Preset',
+    name: 'Setup wizard preset',
     ...spawnPayload,
   };
 }
@@ -7847,7 +7847,7 @@ function _renderPresetParamsStep() {
     }
 
   if (h.extraArgs) {
-    sections.push({ label: 'Extra', rows: [{ label: 'Extra args', value: h.extraArgs }] });
+    sections.push({ label: 'Extra', rows: [{ label: 'Extra command-line arguments', value: h.extraArgs }] });
   }
 
   container.innerHTML = '';

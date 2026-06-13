@@ -58,7 +58,7 @@ All `Session` fields now use `#[serde(default)]` for backward compatibility. New
 | `last_error` | string or null | `null` |
 
 `mode` is serde's enum shape:
-- spawn session: `{ "Spawn": { "port": 8001 } }`
+- launched session: `{ "Spawn": { "port": 8001 } }`
 - attached session: `{ "Attach": { "endpoint": "http://192.168.1.50:8001" } }`
 
 `status` is one of:
@@ -163,7 +163,7 @@ Response:
 
 ### `POST /api/sessions/spawn`
 Auth: db-admin-token.
-Creates a spawn session, starts `llama-server` from a saved preset, and makes it active.
+Creates a launch session, starts `llama-server` from a saved preset, and makes it active.
 
 This endpoint enforces a 15-second cooldown between calls. If called too soon, it returns 429 with:
 
@@ -226,7 +226,7 @@ Before attaching, the server checks that the endpoint is reachable by sending a 
 }
 ```
 
-If the server is reachable but `/health` is unavailable, attach still succeeds and `warning` explains that inference metrics will be missing.
+If the server is reachable but `/health` is unavailable, attach still succeeds and `warning` explains that Performance & metrics will be missing.
 
 ### `POST /api/detach`
 Auth: api-token.
@@ -334,7 +334,7 @@ Auth: api-token.
 ### `POST /api/model-defaults`
 Auth: api-token.
 
-Returns model-family sampling recommendations used by the spawn wizard and preset editor.
+Returns model-family sampling recommendations used by the setup wizard and preset editor.
 
 ```json
 {
@@ -1807,9 +1807,9 @@ Without a valid token, endpoints return 401 with `{ "ok": false, "error": "unaut
 
 For full details on the remote agent flow, see [Remote Agent](remote-agent.md).
 
-## Spawn Wizard (V2)
+## Setup Wizard (V2)
 
-Endpoints supporting the spawn wizard, VRAM estimation, and model discovery.
+Endpoints supporting the setup wizard, VRAM estimation, and model discovery.
 
 All require `api-token` unless noted.
 
@@ -1826,7 +1826,7 @@ Compute an optimal configuration (context, KV quant, MoE tuning) for the given h
 Pre-download quant comparison table (Quant Advisor).
 
 ### `POST /api/model-defaults`
-Model-family sampling presets used by the spawn wizard and preset editor.
+Model-family sampling presets used by the setup wizard and preset editor.
 
 ### `POST /api/moe-tune`
 Suggest MoE CPU expert offload settings for a model.

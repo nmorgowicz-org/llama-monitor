@@ -435,7 +435,7 @@ export function openPresetModal(mode, section) {
         setVal('modal-extra-args', p.extra_args);
     } else {
         title.textContent = 'New Preset';
-        if (subtitle) subtitle.textContent = 'New configuration';
+        if (subtitle) subtitle.textContent = 'New model profile';
         setVal('modal-preset-id', '');
         setVal('modal-context-size', 128000);
         setVal('modal-ctk', 'q8_0');
@@ -532,7 +532,7 @@ function _renderPresetsPanel() {
     if (!presets.length) {
         const empty = document.createElement('div');
         empty.className = 'presets-panel-empty';
-        empty.textContent = 'No presets saved yet. Use the Spawn Wizard to create one.';
+        empty.textContent = 'No presets yet. Use the Setup wizard to create one.';
         body.appendChild(empty);
         return;
     }
@@ -558,15 +558,17 @@ function _renderPresetsPanel() {
         if (preset.model_path) metaParts.push(preset.model_path.split(/[/\\]/).pop() || preset.model_path);
         else if (preset.hf_repo) metaParts.push(preset.hf_repo);
         if (preset.bind_host === '0.0.0.0') metaParts.push('LAN');
-        if (preset.context_size) metaParts.push(`${Math.round(preset.context_size / 1024)}k ctx`);
+        if (preset.context_size) metaParts.push(`${Math.round(preset.context_size / 1024)}k context`);
         const ctk = preset.ctk || 'q8_0';
         const ctv = preset.ctv || 'q8_0';
-        if (ctk || ctv) metaParts.push(`KV: ${ctk}/${ctv}`);
+        const kvText = `KV cache: ${ctk}/${ctv}`;
+        if (ctk || ctv) metaParts.push(kvText);
 
         const meta = document.createElement('div');
         meta.className = 'preset-panel-card-meta';
         meta.textContent = metaParts.join(' · ') || 'No details';
-        meta.title = metaParts.join(' · ');
+        meta.title = metaParts.join(' · ') +
+          (ctk || ctv ? ' · KV cache precision (how accurately the model stores past tokens). q8_0 is recommended for most users.' : '');
         info.appendChild(meta);
         card.appendChild(info);
 

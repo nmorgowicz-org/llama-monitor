@@ -25,7 +25,7 @@ test.describe('app shell', () => {
     await expect(page.locator('.sidebar-nav')).toBeVisible();
     await expect(page.locator('#view-setup')).toBeVisible();
     // setup-pane-label elements are divs, not headings
-    await expect(page.locator('.setup-pane-label').getByText('Connect to Endpoint')).toBeVisible();
+    await expect(page.locator('.setup-pane-label').getByText('Connect to a running model')).toBeVisible();
     await expect(page.locator('.setup-pane-label').getByText('Local Server')).toBeVisible();
   });
 
