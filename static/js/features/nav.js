@@ -156,9 +156,16 @@ export function refreshTopCockpit() {
     const genDisplayRate = genRate > 0 ? genRate : (l?.last_generation_tokens_per_sec || 0);
     const generationActive = !!l?.slot_generation_active || (l?.slots_processing || 0) > 0 || genRate > 0;
 
+    // T-057: cockpit pill modes: Active / Low Power / Auto
+    const isSleeping = wsData?.sleep_mode === true;
     let label = 'idle';
     let stateClass = 'idle';
-    if (!hasActiveEndpoint) {
+
+    if (isSleeping) {
+        // Sleep/low-power: show it, but don't override "generating" if busy.
+        label = 'low power';
+        stateClass = 'sleep';
+    } else if (!hasActiveEndpoint) {
         label = 'attach';
     } else if (promptRate > 0 && genRate <= 0) {
         label = 'prompting';
@@ -173,7 +180,8 @@ export function refreshTopCockpit() {
         stateEl.className = 'metric-live-chip nav-cockpit-state ' + stateClass;
     }
     cockpit.classList.toggle('is-live', stateClass === 'live');
-    cockpit.classList.toggle('is-idle', stateClass !== 'live');
+    cockpit.classList.toggle('is-idle', stateClass !== 'live' && stateClass !== 'sleep');
+    cockpit.classList.toggle('is-low-power', stateClass === 'sleep');
 
     if (throughputEl) {
         throughputEl.textContent = 'P ' + (promptDisplayRate > 0 ? promptDisplayRate.toFixed(0) : '—') + ' · G ' + (genDisplayRate > 0 ? genDisplayRate.toFixed(0) : '—');
@@ -298,7 +306,17 @@ export function initNav() {
 
     const cockpit = document.getElementById('nav-cockpit');
     if (cockpit) {
-        cockpit.addEventListener('click', () => switchTab('server'));
+        cockpit.addEventListener('click', () => {
+            // T-057: toggle sleep/active when in low-power mode; otherwise navigate to server tab
+            if (wsData?.sleep_mode === true) {
+                fetch('/api/sleep-mode/toggle', {
+                    method: 'POST',
+                    headers: { Authorization: window.__API_TOKEN ? `Bearer ${window.__API_TOKEN}` : '' },
+                }).catch(() => {});
+            } else {
+                switchTab('server');
+            }
+        });
     }
 
     restoreSidebarState();

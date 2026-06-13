@@ -13,6 +13,7 @@ use crate::llama::server::ServerConfig;
 use crate::models::DiscoveredModel;
 use crate::presets;
 use crate::presets::ModelPreset;
+use std::sync::atomic::AtomicU64;
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ModelTags {
@@ -20,19 +21,36 @@ pub struct ModelTags {
     pub tags: BTreeMap<String, Vec<String>>,
 }
 
+// Legacy format when model-tags.json was a simple array/object with a "tags" field.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct LegacyModelTags {
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
 impl ModelTags {
     pub fn load(path: &Path) -> Self {
         match std::fs::read_to_string(path) {
-            Ok(content) => match serde_json::from_str::<BTreeMap<String, Vec<String>>>(&content) {
-                Ok(tags) => ModelTags { tags },
-                Err(e) => {
-                    eprintln!(
-                        "[warn] ModelTags: corrupted JSON in {:?}, loading empty tags (error: {})",
-                        path, e
-                    );
-                    Self::default()
+            Ok(content) => {
+                // Try current map format: { "model-id": ["tag1", "tag2"] }
+                if let Ok(tags) = serde_json::from_str::<BTreeMap<String, Vec<String>>>(&content) {
+                    return Self { tags };
                 }
-            },
+
+                // Try legacy shape: { "tags": [...] }
+                if let Ok(legacy) = serde_json::from_str::<LegacyModelTags>(&content) {
+                    if !legacy.tags.is_empty() {
+                        eprintln!("[info] ModelTags: migrating legacy format in {:?}", path);
+                    }
+                    return Self::default();
+                }
+
+                eprintln!(
+                    "[warn] ModelTags: corrupted JSON in {:?}, loading empty tags",
+                    path
+                );
+                Self::default()
+            }
             Err(e) => {
                 eprintln!(
                     "[info] ModelTags: could not read {:?}, loading empty tags (error: {})",
@@ -196,6 +214,73 @@ pub struct UiSettings {
     /// Shared custom suggestion categories used by the suggestions workspace.
     #[serde(default)]
     pub custom_suggestion_categories: HashMap<String, CustomSuggestionCategory>,
+    /// Sleep/low-power mode settings persisted in ui-settings.json (T-044).
+    #[serde(default)]
+    pub sleep_mode: SleepModeConfig,
+}
+
+/// Sleep/low-power mode configuration (T-043).
+///
+/// Controls automatic transitions and intervals while asleep.
+/// Loaded from ui-settings.json or defaults (T-044).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SleepModeConfig {
+    /// If true, automatically enter sleep when all browser tabs are hidden.
+    #[serde(default = "default_auto_sleep_when_all_hidden")]
+    pub auto_sleep_when_all_hidden: bool,
+    /// If set, automatically enter sleep after this many seconds of inactivity
+    /// with no connections and no generating activity.
+    #[serde(default)]
+    pub auto_sleep_idle_secs: Option<u64>,
+    /// GPU poller interval (seconds) while asleep.
+    #[serde(default = "default_sleep_gpu_interval_secs")]
+    pub sleep_gpu_interval_secs: u64,
+    /// System metrics poller interval (seconds) while asleep.
+    #[serde(default = "default_sleep_sys_interval_secs")]
+    pub sleep_sys_interval_secs: u64,
+    /// Llama metrics poller interval (seconds) while asleep.
+    #[serde(default = "default_sleep_llama_interval_secs")]
+    pub sleep_llama_interval_secs: u64,
+    /// WebSocket broadcast interval (milliseconds) while asleep.
+    #[serde(default = "default_sleep_ws_interval_ms")]
+    pub sleep_ws_interval_ms: u64,
+}
+
+impl Default for SleepModeConfig {
+    fn default() -> Self {
+        Self {
+            auto_sleep_when_all_hidden: default_auto_sleep_when_all_hidden(),
+            auto_sleep_idle_secs: default_auto_sleep_idle_secs(),
+            sleep_gpu_interval_secs: default_sleep_gpu_interval_secs(),
+            sleep_sys_interval_secs: default_sleep_sys_interval_secs(),
+            sleep_llama_interval_secs: default_sleep_llama_interval_secs(),
+            sleep_ws_interval_ms: default_sleep_ws_interval_ms(),
+        }
+    }
+}
+
+fn default_auto_sleep_when_all_hidden() -> bool {
+    true
+}
+
+fn default_auto_sleep_idle_secs() -> Option<u64> {
+    Some(600)
+}
+
+fn default_sleep_gpu_interval_secs() -> u64 {
+    15
+}
+
+fn default_sleep_sys_interval_secs() -> u64 {
+    15
+}
+
+fn default_sleep_llama_interval_secs() -> u64 {
+    15
+}
+
+fn default_sleep_ws_interval_ms() -> u64 {
+    10_000
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
@@ -399,6 +484,7 @@ impl Default for UiSettings {
             context_notes_intro_hidden: false,
             persist_thinking_content: false,
             custom_suggestion_categories: HashMap::new(),
+            sleep_mode: SleepModeConfig::default(),
         }
     }
 }
@@ -527,6 +613,12 @@ pub struct AppState {
     pub tls_config: Arc<Mutex<TLSConfig>>,
     pub monitor_inference_gate: Arc<tokio::sync::Semaphore>,
     pub last_spawn_cmd: Arc<Mutex<String>>,
+
+    // Sleep/low-power mode (T-042/T-043)
+    pub sleep_mode: Arc<tokio::sync::watch::Sender<bool>>,
+    pub sleep_mode_config: Arc<Mutex<SleepModeConfig>>,
+    pub sleep_notify: Arc<tokio::sync::Notify>,
+    pub last_activity_at: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl AppState {
@@ -567,6 +659,16 @@ impl AppState {
             tray: true,
             sensor_bridge_setup_available: false,
         };
+
+        // T-042/T-043/T-044: sleep_mode and config initialization
+        let sleep_cfg = ui_settings.sleep_mode.clone();
+
+        let (sleep_mode_tx, _) = tokio::sync::watch::channel(false);
+
+        let last_activity_ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
 
         let state = Self {
             gpu_metrics: Arc::new(Mutex::new(BTreeMap::new())),
@@ -610,6 +712,10 @@ impl AppState {
             tls_config: Arc::new(Mutex::new(tls_config)),
             monitor_inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
             last_spawn_cmd: Arc::new(Mutex::new(String::new())),
+            sleep_mode: Arc::new(sleep_mode_tx),
+            sleep_mode_config: Arc::new(Mutex::new(sleep_cfg)),
+            sleep_notify: Arc::new(tokio::sync::Notify::new()),
+            last_activity_at: Arc::new(AtomicU64::new(last_activity_ts)),
         };
 
         // Prune old inactive sessions on startup (older than 7 days)

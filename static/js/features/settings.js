@@ -78,6 +78,18 @@ export function collectSettings() {
         }
     }
 
+    // T-058: read sleep_mode settings
+    const sleepModeEl = document.getElementById('settings-sleep-mode-enabled');
+    const sleepWhenHiddenEl = document.getElementById('settings-sleep-mode-when-hidden');
+    const sleepIdleEl = document.getElementById('settings-sleep-mode-idle');
+
+    const sleepModeEnabled = sleepModeEl ? (sleepModeEl.checked === true) : undefined;
+    const sleepWhenHidden = sleepWhenHiddenEl ? (sleepWhenHiddenEl.checked === true) : undefined;
+    const sleepIdleRaw = sleepIdleEl ? (sleepIdleEl.value || '1800') : '1800';
+    const sleepIdleSecs = sleepIdleRaw === '0'
+        ? null
+        : (parseInt(sleepIdleRaw, 10) || 1800);
+
     return {
         preset_id: document.getElementById('preset-select').value,
         port: port,
@@ -107,6 +119,11 @@ export function collectSettings() {
         context_notes_intro_hidden: !!settingsState.context_notes_intro_hidden,
         persist_thinking_content: !!document.getElementById('settings-persist-thinking-content')?.checked,
         custom_suggestion_categories: settingsState.custom_suggestion_categories || {},
+        // T-058: sleep_mode settings (sent to server via PUT /api/settings)
+        sleep_mode: {
+            auto_sleep_when_all_hidden: sleepWhenHidden !== undefined ? sleepWhenHidden : true,
+            auto_sleep_idle_secs: sleepModeEnabled ? sleepIdleSecs : null,
+        },
         suggestion_prompts: {
             general: document.getElementById('settings-prompt-general')?.value || '',
             'plot-twist': document.getElementById('settings-prompt-plot-twist')?.value || '',

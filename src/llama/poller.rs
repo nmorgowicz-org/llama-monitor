@@ -275,6 +275,17 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             }
         }
 
-        tokio::time::sleep(Duration::from_secs(poll_interval)).await;
+        // T-047: slow poll interval when asleep (session is active here)
+        let asleep = *state.sleep_mode.borrow();
+        let interval_secs = if asleep {
+            if let Ok(cfg) = state.sleep_mode_config.lock() {
+                cfg.sleep_llama_interval_secs.max(1)
+            } else {
+                poll_interval
+            }
+        } else {
+            poll_interval
+        };
+        tokio::time::sleep(Duration::from_secs(interval_secs)).await;
     }
 }

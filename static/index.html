@@ -217,7 +217,7 @@
                             </svg>
                         </div>
                         <div class="setup-brand-text">
-                            <p class="setup-brand-sub">Local inference, fully observed</p>
+                            <p class="setup-brand-sub">Run and monitor local AI models on your machine.</p>
                         </div>
                     </div>
                     <div class="setup-toolbar">
@@ -235,13 +235,13 @@
                     <div class="setup-pane setup-pane-connect">
                         <div class="setup-pane-label">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 7h3a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-3m-6 0H6a5 5 0 0 1-5-5 5 5 0 0 1 5-5h3"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-                            Connect to Endpoint
+                            Connect to a running model
                         </div>
 
-                        <!-- Recent endpoints (populated by renderRecentEndpoints) -->
+                        <!-- Recent servers (populated by renderRecentEndpoints) -->
                         <div id="setup-recent-endpoints" style="display:none;">
                             <div class="setup-section-header">
-                                <span class="setup-section-title">Recent</span>
+                                <span class="setup-section-title">Recent servers</span>
                                 <a id="setup-browse-sessions-link" class="setup-link">Manage →</a>
                             </div>
                             <div class="setup-endpoint-list" id="setup-endpoint-list"></div>
@@ -274,7 +274,7 @@
                             </div>
                             <button class="setup-new-config-btn" id="setup-new-config-btn" type="button" title="Create a new preset">
                                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                <span>New Configuration</span>
+                                <span>New model</span>
                             </button>
                         </div>
 
@@ -307,9 +307,9 @@
 
                         <!-- VRAM fit legend for launch card dots -->
                         <div class="vram-fit-legend">
-                            <span class="vram-fit-legend-item"><span class="vram-fit-legend-dot vram-fit-legend-dot--fit"></span>Fits in VRAM</span>
+                            <span class="vram-fit-legend-item"><span class="vram-fit-legend-dot vram-fit-legend-dot--fit"></span>Fits in memory</span>
                             <span class="vram-fit-legend-item"><span class="vram-fit-legend-dot vram-fit-legend-dot--tight"></span>Tight fit</span>
-                            <span class="vram-fit-legend-item"><span class="vram-fit-legend-dot vram-fit-legend-dot--risk"></span>May exceed VRAM</span>
+                            <span class="vram-fit-legend-item"><span class="vram-fit-legend-dot vram-fit-legend-dot--risk"></span>May exceed memory</span>
                         </div>
 
                         <!-- Spawn error diagnostics bar (shown when launch fails) -->
@@ -386,8 +386,8 @@
                 <div class="control-bar" id="controls">
                     <!-- Zone 1: Spawn new server (primary) -->
                     <div class="control-bar-zone control-bar-spawn-zone">
-                        <button class="btn btn-spawn-wizard" id="btn-control-spawn" title="Open the wizard to spawn or re-create a local llama-server">
-                            Spawn Server
+                        <button class="btn btn-spawn-wizard" id="btn-control-spawn" title="Open the setup wizard to configure and start a local llama-server">
+                            Open setup wizard
                         </button>
                     </div>
                     <div class="control-bar-divider" aria-hidden="true"></div>
@@ -493,7 +493,7 @@
 
                 <section class="metric-section" id="inference-section">
                     <h2 class="dashboard-section-title">
-                        Inference Metrics
+                        Performance & metrics
                         <span class="metric-badge" id="inference-historic-badge" style="display:none;">Historic</span>
                         <span class="inference-log-tail-group" id="inference-log-tail-group" style="display:none;">
                             <span class="metric-badge inference-log-tail-btn" id="inference-log-tail-badge" title="Show a small live tail of llama-server logs">Live log tail</span>
@@ -503,11 +503,14 @@
                         </span>
                     </h2>
                     <div class="inference-log-tail" id="inference-log-tail" style="display:none;"></div>
+                    <div class="field-hint" style="max-width:440px;margin-top:4px;">
+                        Typical targets on a capable GPU: 10–15+ tokens/sec with low memory spikes and no red warnings.
+                    </div>
                     <div class="inference-grid" id="inference">
                         <!-- Throughput Card -->
                         <div class="widget-card widget-metric widget-speed">
                             <div class="metric-card-topline">
-                                <div class="widget-metric-label">THROUGHPUT</div>
+                                <div class="widget-metric-label">Speed (throughput)</div>
                                 <div class="metric-live-chip" id="m-throughput-state">idle</div>
                             </div>
                             <div class="inference-empty-state visible" id="m-throughput-empty">Attach an endpoint to begin telemetry</div>
@@ -554,7 +557,7 @@
                         <!-- Generation Card -->
                         <div class="widget-card widget-metric widget-generation">
                             <div class="metric-card-topline">
-                                <div class="widget-metric-label">GENERATION</div>
+                                <div class="widget-metric-label">Generation details</div>
                                 <div class="metric-live-chip" id="m-generation-state">idle</div>
                             </div>
                             <div class="inference-empty-state visible" id="m-generation-empty">Waiting for the next completion</div>
@@ -588,7 +591,7 @@
                         <div class="widget-card widget-metric widget-context">
                             <div class="metric-card-topline">
                                 <div class="context-topline-main">
-                                    <div class="widget-metric-label">CONTEXT WINDOW</div>
+                                    <div class="widget-metric-label">Context & memory</div>
                                     <div class="metric-live-chip" id="m-context-state">idle</div>
                                 </div>
                                 <div class="context-view-toggle" role="tablist" aria-label="Context card view">
@@ -635,7 +638,8 @@
                     <div class="inference-detail-grid">
                         <div class="widget-card inference-mini-panel">
                             <div class="metric-card-topline">
-                                <div class="widget-metric-label">SLOT ACTIVITY</div>
+                                <div class="widget-metric-label">Active sessions</div>
+                                <div class="widget-metric-subtitle">Slots are parallel conversation sessions.</div>
                                 <div class="metric-live-chip" id="m-slots-state">idle</div>
                             </div>
                             <div class="slot-grid" id="m-slot-grid"></div>
@@ -657,7 +661,7 @@
                         </div>
                         <div class="widget-card inference-mini-panel">
                             <div class="metric-card-topline">
-                                <div class="widget-metric-label">REQUEST ACTIVITY</div>
+                                <div class="widget-metric-label">Requests</div>
                                 <div class="metric-live-chip" id="m-activity-state">idle</div>
                             </div>
                             <div class="request-stats">
@@ -674,11 +678,11 @@
                         </div>
                         <div class="widget-card inference-mini-panel inference-config-panel">
                             <div class="metric-card-topline">
-                                <div class="widget-metric-label">MODEL & DECODING</div>
+                                <div class="widget-metric-label">Model info</div>
                                 <div class="metric-live-chip" id="m-decoding-state">config</div>
                             </div>
                             <div class="model-info-row" id="model-info-row"></div>
-                            <div class="speculative-chip" id="m-speculative-chip">Speculative decoding unavailable</div>
+                            <div class="speculative-chip" id="m-speculative-chip">Speculative decoding: not in use</div>
                             <div class="config-kv-grid" id="m-speculative-config"></div>
                             <div class="sampler-params-inline" id="m-sampler-params-inline"></div>
                         </div>
@@ -686,10 +690,10 @@
                 </section>
 
                 <section class="metric-section" id="gpu-section" style="display:none;">
-                    <h2 class="dashboard-section-title">GPUs</h2>
+                    <h2 class="dashboard-section-title" title="Graphics/memory usage for model acceleration.">GPUs</h2>
                     <div class="widget-card widget-hardware widget-gpu" id="gpu-card">
                         <div class="metric-card-topline">
-                            <div class="widget-metric-label">GPU</div>
+                            <div class="widget-metric-label" title="Graphics/memory usage for model acceleration.">GPU</div>
                             <span class="hw-device-name" id="gpu-device-name"></span>
                             <div class="hw-topline-right">
                                 <div class="hw-temp-gauge" id="gpu-temp-gauge" style="--pct:0;--gauge-color:#8fbcbb;">
@@ -1674,18 +1678,18 @@
                         </div>
                     </div>
                     <h3>Console logs stay on the host that launched `llama-server`</h3>
-                    <p>Remote endpoints still stream inference metrics into the dashboard, but stdout and stderr are only available when this app owns the local process. Spawn locally to watch the live console here.</p>
+                    <p>Remote servers still stream inference metrics into the dashboard, but stdout and stderr are only available when this app owns the local process. Start a local server to watch the live console here.</p>
                     <div class="logs-empty-capabilities">
                         <div class="logs-capability-chip">Inference metrics: live</div>
                         <div class="logs-capability-chip">GPU/System: remote agent dependent</div>
-                        <div class="logs-capability-chip">Console: local spawn only</div>
+                        <div class="logs-capability-chip">Console: local servers only</div>
                     </div>
                     <div class="logs-empty-actions">
                         <button class="btn btn-secondary" id="btn-spawn-server">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polygon points="5 3 19 12 5 21 5 3"/>
                             </svg>
-                            Spawn Local Server
+                            Start local server
                         </button>
                     </div>
                 </div>
@@ -1710,7 +1714,7 @@
                     The llama-monitor instance you were connected to has been restarted. A fresh instance does not auto-connect to previous sessions.
                 </p>
                 <p class="connection-lost-text">
-                    You can either go back to the welcome screen to attach to a remote endpoint or spawn a new server, or dismiss this and stay on the current page.
+                    You can either go back to the welcome screen to attach to a remote server or start a new server, or dismiss this and stay on the current page.
                 </p>
                 <div class="connection-lost-actions">
                     <button class="btn btn-primary" id="connection-lost-go-welcome-btn">
@@ -1827,7 +1831,7 @@
                         <input type="text" id="gpu-env-devices" placeholder="all">
                     </label>
                 </div>
-                <label class="modal-field" title="Path to local ROCm installation directory. Ignored on Apple Silicon and NVIDIA-only systems.">Local ROCm Path
+                <label class="modal-field" title="Path to local ROCm installation directory. Used only for AMD ROCm GPUs; ignored for Metal and NVIDIA systems.">Local ROCm Path
                     <input type="text" id="gpu-env-rocm-path" value="/opt/rocm">
                 </label>
                 <div id="gpu-detected-info" style="font-size:0.72rem;color:#6a7585;margin-top:2px;"></div>
@@ -2284,7 +2288,7 @@
                 <svg class="pe-header-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                 <div>
                     <h2 id="modal-title">New Preset</h2>
-                    <p class="preset-editor-subtitle" id="preset-editor-subtitle">New configuration</p>
+                    <p class="preset-editor-subtitle" id="preset-editor-subtitle">New model profile</p>
                 </div>
             </div>
             <button type="button" class="preset-editor-close" id="preset-modal-close" aria-label="Close">
@@ -2476,7 +2480,7 @@
                                 </div>
                             </div>
                             <div class="pe-toggles">
-                                <label class="pe-toggle-item" title="Use a single unified KV cache pool shared across all slots. Required for Apple Silicon unified memory.">
+                                <label class="pe-toggle-item" title="Use a single unified KV cache pool shared across all slots. Required on unified memory systems (e.g., Apple Silicon, DGX Spark).">
                                     <input type="checkbox" id="modal-kv-unified">
                                     <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
                                     <span class="pe-toggle-label">KV unified</span>
@@ -2883,21 +2887,21 @@
         <!-- Header -->
         <div class="wizard-header">
             <div class="wizard-header-left">
-                <span class="wizard-header-title">Spawn Llama-Server</span>
-                <span class="wizard-header-subtitle" id="wizard-step-label">Profile</span>
+                <span class="wizard-header-title">Start a local model</span>
+                <span class="wizard-header-subtitle" id="wizard-step-label">How it works</span>
             </div>
             <div class="wizard-steps">
-                <span class="step-badge active" data-step="0" title="Step 1: Profile"><span class="step-num">1</span></span>
+                <span class="step-badge active" data-step="0" title="Step 1: How it works"><span class="step-num">1</span></span>
                 <span class="wizard-step-sep" aria-hidden="true"></span>
-                <span class="step-badge" data-step="1" title="Step 2: Model"><span class="step-num">2</span></span>
+                <span class="step-badge" data-step="1" title="Step 2: Choose model"><span class="step-num">2</span></span>
                 <span class="wizard-step-sep" aria-hidden="true"></span>
-                <span class="step-badge" data-step="2" title="Step 3: Hardware"><span class="step-num">3</span></span>
+                <span class="step-badge" data-step="2" title="Step 3: Hardware & memory"><span class="step-num">3</span></span>
                 <span class="wizard-step-sep" aria-hidden="true"></span>
-                <span class="step-badge" data-step="3" title="Step 4: Parameters"><span class="step-num">4</span></span>
+                <span class="step-badge" data-step="3" title="Step 4: Settings"><span class="step-num">4</span></span>
                 <span class="wizard-step-sep" aria-hidden="true"></span>
-                <span class="step-badge" data-step="4" title="Step 5: Summary"><span class="step-num">5</span></span>
+                <span class="step-badge" data-step="4" title="Step 5: Review settings"><span class="step-num">5</span></span>
                 <span class="wizard-step-sep" aria-hidden="true"></span>
-                <span class="step-badge" data-step="5" title="Step 6: Spawn"><span class="step-num">6</span></span>
+                <span class="step-badge" data-step="5" title="Step 6: Start server"><span class="step-num">6</span></span>
             </div>
             <button type="button" class="wizard-close" id="spawn-wizard-close" aria-label="Close">&times;</button>
         </div>
@@ -3217,7 +3221,7 @@
                             <!-- populated by JS -->
                         </div>
                         <div class="quant-advisor-legend">
-                            <span class="legend-item"><span class="legend-dot legend-fit"></span>Fits in VRAM</span>
+                            <span class="legend-item"><span class="legend-dot legend-fit"></span>Fits in memory</span>
                             <span class="legend-item"><span class="legend-dot legend-nofit"></span>Requires CPU offload</span>
                             <span class="legend-item"><span class="legend-dot legend-rec"></span>Recommended</span>
                         </div>
@@ -3286,7 +3290,7 @@
 
                     <div class="hardware-grid">
                         <div class="hardware-field">
-                            <label for="spawn-gpu-layers" title="Auto: computes the maximum layers that fit in VRAM based on model size and context. Manual: enter an exact count (0 = CPU-only, all = max offload).">GPU layers</label>
+                            <label for="spawn-gpu-layers" title="Layers running on GPU. Higher = faster, but uses more memory. Auto is recommended.">GPU layers</label>
                             <select id="spawn-gpu-layers">
                                 <option value="auto">Auto (recommended)</option>
                                 <option value="all">All layers on GPU</option>
@@ -3318,16 +3322,16 @@
                     <!-- KV cache precision -->
                     <div class="kv-inline-row">
                         <div class="kv-inline-field">
-                            <label for="spawn-cache-type-k" class="kv-inline-label">K cache <span class="kv-inline-hint">quant</span></label>
-                            <select id="spawn-cache-type-k" title="KV key quantization (q8_0 recommended for quality; q4_0 saves ~2× VRAM on cache)">
+                            <label for="spawn-cache-type-k" class="kv-inline-label">K cache quant (KV precision)</label>
+                            <select id="spawn-cache-type-k" title="Controls how accurately the model stores past tokens. q8_0 is recommended for most users. Lower precision saves memory but can affect quality.">
                                 <option value="f16">f16 — lossless</option>
                                 <option value="q8_0" selected>q8_0 — recommended</option>
                                 <option value="q4_0">q4_0 — saves VRAM</option>
                             </select>
                         </div>
                         <div class="kv-inline-field">
-                            <label for="spawn-cache-type-v" class="kv-inline-label">V cache <span class="kv-inline-hint">quant</span></label>
-                            <select id="spawn-cache-type-v" title="KV value quantization (can set lower than K to save VRAM with minimal quality impact)">
+                            <label for="spawn-cache-type-v" class="kv-inline-label">V cache quant (KV precision)</label>
+                            <select id="spawn-cache-type-v" title="Controls how accurately the model stores past tokens. q8_0 is recommended for most users. Lower precision saves memory but can affect quality.">
                                 <option value="f16">f16 — lossless</option>
                                 <option value="q8_0" selected>q8_0 — recommended</option>
                                 <option value="q4_0">q4_0 — saves VRAM</option>
@@ -3343,7 +3347,7 @@
                     <!-- MTP section (shown for models with MTP heads) -->
                     <div class="hw-mtp-section" id="hw-mtp-section" style="display:none;">
                         <div class="hw-section-divider">Multi-Token Prediction (MTP) <span class="info-tip" title="MTP heads predict several tokens ahead in one forward pass, then verify them together. This can give 1.4–2× faster generation with no quality loss. Enabled by default. Benchmark enabled versus disabled on your hardware; some backends can run slower.">i</span></div>
-                        <div class="hw-section-subdesc">Speculative decoding: the model drafts multiple tokens per step and verifies them in one pass. Faster output, no accuracy trade-off.</div>
+                        <div class="hw-section-subdesc">Try to speed up replies by guessing next tokens before the model computes them.</div>
                         <div class="hw-mtp-content">
                             <div class="field-hint" id="hw-mtp-info-note" style="display:none;margin-bottom:6px;font-size:11px;color:var(--color-text-muted);">
                                  This model has MTP prediction heads built-in. Enabling draft-mtp can give ~1.4–2× faster generation with no quality change. Enabled by default — disable if you experience regressions on your hardware.
@@ -3405,7 +3409,7 @@
                         <div class="wizard-section-title">Advanced options <span class="info-tip" title="Fine-tune performance and memory. Most users can leave these at defaults.">i</span></div>
                         <div class="hardware-grid">
                             <div class="hardware-field">
-                                <label for="spawn-batch-size" title="Total tokens processed per batch during prompt evaluation (-b). Higher = faster fills, more VRAM. 2048 is a safe default.">Batch size (-b)</label>
+                                <label for="spawn-batch-size" title="Advanced — affects how fast prompts are processed. Internal flag: -b">Prompt batch size</label>
                                 <input type="number" id="spawn-batch-size" min="1" value="2048">
                                 <div class="field-hint">Prompt batch size. 2048 is a good default.</div>
                             </div>
@@ -3416,7 +3420,7 @@
                             <div class="hardware-field">
                                 <label for="spawn-ubatch-size" title="GPU micro-batch size for prompt processing (-ub). Usually same as batch size or smaller. Reducing saves a small amount of VRAM.">Ubatch size (-ub)</label>
                                 <input type="number" id="spawn-ubatch-size" min="64" max="4096" step="64" value="2048" title="GPU micro-batch size. Usually same as batch size.">
-                                <div class="field-hint">2048 recommended for Apple Silicon (faster prompt processing).</div>
+                                <div class="field-hint">2048 is a safe default for most systems.</div>
                             </div>
                             <div class="hardware-field">
                                 <label for="spawn-flash-attn" title="Flash Attention reduces memory per token and speeds up prefill. Highly recommended — required for KV cache quantization.">Flash Attn (-fa)</label>
@@ -3426,7 +3430,7 @@
                                     <option value="on" selected>on — recommended</option>
                                     <option value="off">off</option>
                                 </select>
-                                <div class="field-hint">Required for KV cache quantization. Recommended on Apple Silicon.</div>
+                                <div class="field-hint">Required for KV cache quantization. Recommended on most systems, especially with Metal.</div>
                             </div>
                             <div class="hardware-field">
                                 <label for="spawn-prio" title="--prio: inference thread priority. 2 (High) is recommended for dedicated inference machines. 0 = Normal. Do not use 3 (Realtime) unless this is the only process running.">Thread Priority (--prio)</label>
@@ -3437,7 +3441,7 @@
                                     <option value="2">2 — High (recommended)</option>
                                     <option value="3">3 — Realtime (dedicated only)</option>
                                 </select>
-                                <div class="field-hint">Higher priority reduces inference interruptions. 2 recommended for Mac.</div>
+                                <div class="field-hint">Higher priority reduces inference interruptions. 2 is recommended for most systems.</div>
                             </div>
                             <div class="hardware-field">
                                 <label for="spawn-threads" title="-t: CPU thread count for inference. On Apple Silicon, Apple recommends 1 (Metal GPU handles compute). Never exceed your chip's P-core count. Leave blank for server default.">Threads (-t)</label>
@@ -3491,7 +3495,7 @@
                         </div>
                         <div class="kv-inline-row">
                             <div class="kv-inline-field" style="flex:1 1 auto;">
-                                <label class="kv-unified-toggle" title="Lock the model in RAM, preventing macOS from swapping it to disk. Improves performance. Skip if you're above ~70% unified memory usage.">
+                                <label class="kv-unified-toggle" title="Locks the model in RAM, helping avoid system swap pressure during long runs. Skip if you're already near 70-80% memory usage.">
                                     <input type="checkbox" id="spawn-mlock">
                                     <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
                                     <span class="kv-unified-text">mlock</span>
@@ -3503,67 +3507,72 @@
                         </div>
 
                         <!-- Performance (Spec + Fit) — kept in Advanced for non-MTP models -->
-                        <div class="wizard-section-title" style="margin-top:14px;">Speculative decoding <span class="info-tip" title="Speeds up generation by predicting tokens ahead and verifying in one pass. N-gram methods work on any model; MTP needs a model with prediction heads; draft-model needs a second small model file.">i</span></div>
-                        <div class="hardware-grid">
-                            <div class="hardware-field" style="grid-column: 1/-1;">
-                                 <label for="spawn-spec-type" title="How the model predicts tokens ahead. N-gram works on any model. MTP needs built-in prediction heads and can help or hurt depending on the backend. Draft model needs a second small GGUF file.">Mode</label>
-                                 <select id="spawn-spec-type">
-                                     <option value="">None — disabled</option>
-                                     <optgroup label="N-gram methods (no extra files required)">
-                                         <option value="ngram-mod">ngram-mod — shared hash pool, best for server use (~10–30% speedup)</option>
-                                         <option value="ngram-simple">ngram-simple — minimal overhead, looks up last n-gram in history</option>
-                                         <option value="ngram-map-k">ngram-map-k — hash-map patterns, good for repetitive/code content</option>
-                                         <option value="ngram-map-k4v">ngram-map-k4v — experimental: 4 values/key, complex repetition patterns</option>
-                                     </optgroup>
-                                     <optgroup label="MTP — Multi-Token Prediction">
-                                          <option value="draft-mtp,ngram-mod">draft-mtp + ngram-mod — MTP with n-gram fallback</option>
-                                          <option value="draft-mtp">draft-mtp — pure MTP, no n-gram fallback</option>
-                                      </optgroup>
-                                  </select>
-                                 <div class="field-hint" id="spawn-spec-hint">
-                                     <span data-spec="">Pick a mode to see a description.</span>
-                                     <span data-spec="ngram-mod" style="display:none;">Shared hash pool n-gram: efficient for server use, good for general and roleplay. ~10–30% speedup, no extra files.</span>
-                                     <span data-spec="ngram-simple" style="display:none;">Minimal-overhead n-gram: looks up last n-gram in history. Lightweight and safe for most models.</span>
-                                     <span data-spec="ngram-map-k" style="display:none;">Hash-map patterns: strong for repetitive or code-heavy content where longer sequences recur.</span>
-                                     <span data-spec="ngram-map-k4v" style="display:none;">Experimental: 4 values per key for complex repetition patterns. Best for very repetitive or structured outputs.</span>
-                                     <span data-spec="draft-mtp,ngram-mod" style="display:none;">MTP plus n-gram fallback for models with built-in prediction heads. Requires <code>--parallel 1</code>. Benchmark against MTP disabled; current Metal builds can be slower.</span>
-                                     <span data-spec="draft-mtp" style="display:none;">Pure MTP with built-in prediction heads only. Requires <code>--parallel 1</code>. Benchmark against MTP disabled; current Metal builds can be slower.</span>
+                        <details class="wizard-advanced-collapse" style="margin-top:14px;">
+                            <summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--accent-blue);padding:4px 0;">Advanced modes</summary>
+                            <div style="padding-top:6px;">
+                                <div class="field-hint" style="margin-bottom:8px;">For most users, default is enough. These modes are for advanced tuning.</div>
+                                <div class="hardware-grid">
+                                    <div class="hardware-field" style="grid-column: 1/-1;">
+                                         <label for="spawn-spec-type" title="How the model predicts tokens ahead. N-gram works on any model. MTP needs built-in prediction heads and can help or hurt depending on the backend. Draft model needs a second small GGUF file.">Mode</label>
+                                         <select id="spawn-spec-type">
+                                             <option value="">None (disabled)</option>
+                                             <optgroup label="N-gram methods (no extra files required)">
+                                                 <option value="ngram-mod">ngram-mod — shared hash pool, best for server use (~10–30% speedup)</option>
+                                                 <option value="ngram-simple">ngram-simple — minimal overhead, looks up last n-gram in history</option>
+                                                 <option value="ngram-map-k">ngram-map-k — hash-map patterns, good for repetitive/code content</option>
+                                                 <option value="ngram-map-k4v">ngram-map-k4v — experimental: 4 values/key, complex repetition patterns</option>
+                                             </optgroup>
+                                             <optgroup label="MTP — Multi-Token Prediction">
+                                                  <option value="draft-mtp,ngram-mod">draft-mtp + ngram-mod — MTP with n-gram fallback</option>
+                                                  <option value="draft-mtp">draft-mtp — pure MTP, no n-gram fallback</option>
+                                              </optgroup>
+                                          </select>
+                                         <div class="field-hint" id="spawn-spec-hint">
+                                             <span data-spec="">Pick a mode to see a description.</span>
+                                             <span data-spec="ngram-mod" style="display:none;">Shared hash pool n-gram: efficient for server use, good for general and roleplay. ~10–30% speedup, no extra files.</span>
+                                             <span data-spec="ngram-simple" style="display:none;">Minimal-overhead n-gram: looks up last n-gram in history. Lightweight and safe for most models.</span>
+                                             <span data-spec="ngram-map-k" style="display:none;">Hash-map patterns: strong for repetitive or code-heavy content where longer sequences recur.</span>
+                                             <span data-spec="ngram-map-k4v" style="display:none;">Experimental: 4 values per key for complex repetition patterns. Best for very repetitive or structured outputs.</span>
+                                             <span data-spec="draft-mtp,ngram-mod" style="display:none;">MTP plus n-gram fallback for models with built-in prediction heads. Requires <code>--parallel 1</code>. Benchmark against MTP disabled; current Metal builds can be slower.</span>
+                                             <span data-spec="draft-mtp" style="display:none;">Pure MTP with built-in prediction heads only. Requires <code>--parallel 1</code>. Benchmark against MTP disabled; current Metal builds can be slower.</span>
+                                         </div>
+                                    </div>
+                                    <div class="hardware-field" id="spawn-draft-model-wrap" style="display:none;">
+                                         <label for="spawn-draft-model">Draft model path</label>
+                                         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                                             <input type="text" id="spawn-draft-model" placeholder="/path/to/draft-model.gguf" style="flex:1;min-width:200px;">
+                                             <button type="button" id="spawn-draft-browse-btn" class="btn-wizard-tertiary" title="Browse for a draft model GGUF file">Browse…</button>
+                                             <div id="spawn-draft-candidates" style="display:flex;gap:4px;"></div>
+                                         </div>
+                                     </div>
+
+                                    <!-- N-gram advanced knobs (shown for n-gram modes) -->
+                                  <div class="hardware-field" id="spawn-spec-ngram-wrap" style="display:none; grid-column: 1/-1;">
+                                         <div class="hw-section-divider">N-gram tuning <span class="info-tip" title="Adjust the speculative n-gram parameters. The defaults work well for most models — only change if you benchmark different values.">i</span></div>
+                                         <div class="hardware-grid">
+                                             <div class="hardware-field">
+                                                 <label for="spawn-spec-ngram-size">N-gram Size</label>
+                                                 <input type="number" id="spawn-spec-ngram-size" min="1" max="64" placeholder="24">
+                                                 <div class="field-hint">Window size for n-gram lookup. Default: 24. Larger = longer patterns, more memory.</div>
+                                             </div>
+                                             <div class="hardware-field">
+                                                 <label for="spawn-draft-min">Draft Min</label>
+                                                 <input type="number" id="spawn-draft-min" min="1" max="64" placeholder="8">
+                                                 <div class="field-hint">Minimum draft tokens to propose per step. Default: 8.</div>
+                                             </div>
+                                             <div class="hardware-field">
+                                                 <label for="spawn-draft-max">Draft Max</label>
+                                                 <input type="number" id="spawn-draft-max" min="1" max="128" placeholder="24">
+                                                 <div class="field-hint">Maximum draft tokens per step; higher = more aggressive. Default: 24.</div>
+                                             </div>
+                                         </div>
+                                     </div>
+                                     <div class="field-hint unified-cram-hint" id="unified-cram-hint" style="display:none; margin-top:6px;">
+                                         On unified memory systems (Mac, DGX Spark, etc.), the KV prefix cache RAM (-cram) is set to 0 by default to avoid wasting shared memory.
+                                     </div>
                                  </div>
                             </div>
-                            <div class="hardware-field" id="spawn-draft-model-wrap" style="display:none;">
-                                 <label for="spawn-draft-model">Draft model path</label>
-                                 <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-                                     <input type="text" id="spawn-draft-model" placeholder="/path/to/draft-model.gguf" style="flex:1;min-width:200px;">
-                                     <button type="button" id="spawn-draft-browse-btn" class="btn-wizard-tertiary" title="Browse for a draft model GGUF file">Browse…</button>
-                                     <div id="spawn-draft-candidates" style="display:flex;gap:4px;"></div>
-                                 </div>
-                             </div>
-
-                            <!-- N-gram advanced knobs (shown for n-gram modes) -->
-                          <div class="hardware-field" id="spawn-spec-ngram-wrap" style="display:none; grid-column: 1/-1;">
-                                 <div class="hw-section-divider">N-gram tuning <span class="info-tip" title="Adjust the speculative n-gram parameters. The defaults work well for most models — only change if you benchmark different values.">i</span></div>
-                                 <div class="hardware-grid">
-                                     <div class="hardware-field">
-                                         <label for="spawn-spec-ngram-size">N-gram Size</label>
-                                         <input type="number" id="spawn-spec-ngram-size" min="1" max="64" placeholder="24">
-                                         <div class="field-hint">Window size for n-gram lookup. Default: 24. Larger = longer patterns, more memory.</div>
-                                     </div>
-                                     <div class="hardware-field">
-                                         <label for="spawn-draft-min">Draft Min</label>
-                                         <input type="number" id="spawn-draft-min" min="1" max="64" placeholder="8">
-                                         <div class="field-hint">Minimum draft tokens to propose per step. Default: 8.</div>
-                                     </div>
-                                     <div class="hardware-field">
-                                         <label for="spawn-draft-max">Draft Max</label>
-                                         <input type="number" id="spawn-draft-max" min="1" max="128" placeholder="24">
-                                         <div class="field-hint">Maximum draft tokens per step; higher = more aggressive. Default: 24.</div>
-                                     </div>
-                                 </div>
-                             </div>
-                             <div class="field-hint unified-cram-hint" id="unified-cram-hint" style="display:none; margin-top:6px;">
-                                 On unified memory systems (Mac, DGX Spark, etc.), the KV prefix cache RAM (-cram) is set to 0 by default to avoid wasting shared memory.
-                             </div>
-                         </div>
+                        </details>
 
                     </div>
 
@@ -3898,7 +3907,7 @@
                     <div class="sampling-params-section" style="margin-top:14px;">
                         <div class="hw-section-divider">Extra arguments</div>
                         <div class="sampling-field" style="margin-top:8px;">
-                            <label for="spawn-extra-args" title="Additional llama-server CLI flags appended verbatim. Space-separated; values with spaces must use the flag=value form.">Extra args</label>
+                            <label for="spawn-extra-args" title="Advanced: additional llama-server CLI flags.">Extra command-line arguments</label>
                             <input type="text" id="spawn-extra-args" placeholder="e.g. --log-verbosity 2 --no-perf">
                         </div>
                         <div class="field-hint" style="margin-top:4px;">Passed directly to llama-server after all other flags. Use this for any option the wizard doesn't expose.</div>
@@ -3918,13 +3927,13 @@
                 </div>
             </div>
 
-            <!-- Step 5: Preset Parameters -->
+            <!-- Step 5: Preset settings -->
             <div class="wizard-step" id="wizard-step-4">
                 <div class="wizard-main">
                     <div>
-                        <div class="wizard-section-title">Preset Parameters</div>
+                        <div class="wizard-section-title">Preset settings</div>
                         <div class="wizard-section-desc">
-                            Every flag that will be saved with this preset. Save it for quick reuse, then click Next to launch.
+                            Review the settings that will be saved with this preset. Save it so you can reuse it later, then click Next to start your server.
                         </div>
                     </div>
                     <!-- Populated by _renderPresetParamsStep() -->
@@ -3951,13 +3960,13 @@
                     <div>
                         <div class="wizard-section-title">Ready to launch</div>
                         <div class="wizard-section-desc">
-                            Review what’s about to be started, then click Spawn.
+                            Review what’s about to be started, then click Start server.
                         </div>
                     </div>
                     <!-- Config preview card — populated by JS when entering this step -->
                     <div class="spawn-config-card" id="spawn-config-card" style="display:none;"></div>
                     <button type="button" class="btn-wizard-primary" id="spawn-server-btn">
-                        Spawn Server
+                        Start server
                     </button>
                     <div class="spawn-status-area" id="spawn-status-area">
                         <div class="spawn-status-text" id="spawn-status-text">Ready to spawn.</div>
@@ -4141,7 +4150,7 @@
                             <!-- populated by JS -->
                         </div>
                         <div class="quant-advisor-legend">
-                            <span class="legend-item"><span class="legend-dot legend-fit"></span>Fits in VRAM</span>
+                            <span class="legend-item"><span class="legend-dot legend-fit"></span>Fits in memory</span>
                             <span class="legend-item"><span class="legend-dot legend-nofit"></span>Requires CPU offload</span>
                             <span class="legend-item"><span class="legend-dot legend-rec"></span>Recommended</span>
                         </div>
@@ -4297,7 +4306,7 @@
                     <h3>Session Workspace</h3>
                     <div class="settings-card">
                         <p class="settings-help">
-                            Session resume is handled from the setup screen and recent-endpoints workspace. Runtime attach targets, remote-agent details, and local launch paths are not edited here.
+                            Session resume is handled from the setup screen and recent-servers workspace. Runtime attach targets, remote-agent details, and local launch paths are not edited here.
                         </p>
                         <p class="settings-help">
                             Use the separate Configuration modal for executable paths and remote host details.
@@ -4486,6 +4495,36 @@
                             <span class="network-status-icon" id="network-status-icon"></span>
                             <span class="network-status-text" id="network-status-text"></span>
                         </div>
+                    </div>
+
+                    <!-- T-058: Low Power / auto-sleep controls -->
+                    <div class="settings-card">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            Low Power Mode
+                        </div>
+                        <p class="settings-help">
+                            Reduce dashboard activity when you're not looking. The llama-server keeps running; only polling and UI updates slow down.
+                        </p>
+
+                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:6px 0;">
+                            <input type="checkbox" id="settings-sleep-mode-enabled">
+                            <span>Enable Low Power Mode (auto-sleep)</span>
+                        </label>
+
+                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:6px 0;">
+                            <input type="checkbox" id="settings-sleep-mode-when-hidden">
+                            <span>Auto-sleep when tab is hidden</span>
+                        </label>
+
+                        <label class="modal-field">
+                            Auto-sleep after:
+                            <select id="settings-sleep-mode-idle">
+                                <option value="300">5 min</option>
+                                <option value="900">15 min</option>
+                                <option value="1800" selected>30 min</option>
+                                <option value="0">Never</option>
+                            </select>
+                        </label>
                     </div>
                 </div>
                   <div class="settings-pane" id="settings-advanced">

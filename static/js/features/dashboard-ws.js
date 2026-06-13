@@ -65,7 +65,7 @@ import { refreshTopCockpit } from './nav.js';
 import { activeChatTab } from './chat-state.js';
 import { setRemoteAgentStatus } from './remote-agent.js';
 import { hideConnectingState, switchView } from './setup-view.js';
-import { showToast } from './toast.js';
+import { showToast, showToastWithActions } from './toast.js';
 
 // ── Cached DOM elements (populated at init time to avoid repeated queries) ──
 let cachedElements = null;
@@ -140,12 +140,24 @@ function ensureOverlayStateObserver() {
     scheduleSync();
 }
 
+function computeClientMode() {
+    // T-053: active / idle / sleep modes for backend sleep orchestration
+    if (!isTabVisible) return 'sleep';
+    if (hasBlockingOverlayOpen()) return 'idle';
+    const tab = currentMonitorTab();
+    if (tab === 'chat') return 'active';
+    if (isMonitorViewActive()) return 'active';
+    return 'idle';
+}
+
 function sendWsClientState() {
     if (!dashboardSocket || dashboardSocket.readyState !== WebSocket.OPEN) return;
     try {
+        const mode = computeClientMode();
         dashboardSocket.send(JSON.stringify({
             type: 'client-visibility',
             visible: isTabVisible,
+            mode: mode,
         }));
     } catch {
         // Ignore transient send failures; the next state change will retry.
@@ -307,8 +319,44 @@ ws.onmessage = e => {
     updateDashboard(d);
 };
 
+    // One-time restore-hint on first connect (T-061)
+    let _restoreHintDone = false;
     ws.onopen = () => {
         sendWsClientState();
+
+        if (_restoreHintDone) return;
+        _restoreHintDone = true;
+
+        fetch('/api/sessions/restore-hint')
+            .then(r => r.json())
+            .then(data => {
+                try {
+                    if (data.suggested_action === 'resume_active' && typeof switchView === 'function') {
+                        switchView('monitor');
+                    } else if (data.suggested_action === 'suggest_recent_attach') {
+                        // T-061: show a non-intrusive banner prompting reconnect to the running server
+                        showToastWithActions(
+                            'Running server detected',
+                            'info',
+                            'A server is running from your last session. Reconnect from "Recent servers".',
+                            [{
+                                id: 'reconnect',
+                                label: 'Reconnect',
+                                primary: true,
+                                handler: () => {
+                                    const recent = document.querySelector('.recent-endpoint-item');
+                                    if (recent) recent.click();
+                                },
+                            }]
+                        );
+                    }
+                } catch (_) {
+                    // best-effort; never block startup
+                }
+            })
+            .catch(() => {
+                // ignore — no restore hint available
+            });
     };
 
 // Poll context card after chat tabs load
@@ -373,7 +421,10 @@ function updateDashboard(d) {
     // Agent status
     updateAgentStatus(d);
 
-    // Inference metrics
+    // T-055: if asleep, skip heavy telemetry updates (GPU, system, logs, sparklines)
+    const isSleeping = d.sleep_mode === true;
+
+    // Inference metrics (lightweight; always update for basic status)
     updateInferenceMetrics(d);
     _updateLogTail(d);
     if (activeTab === 'chat') {
@@ -381,14 +432,14 @@ function updateDashboard(d) {
     }
     refreshTopCockpit();
 
-    // GPU card
-    if (activeTab === 'server') updateGpuCard(d);
+    // GPU card — freeze when asleep
+    if (activeTab === 'server' && !isSleeping) updateGpuCard(d);
 
-    // System card
-    if (activeTab === 'server') updateSystemCard(d);
+    // System card — freeze when asleep
+    if (activeTab === 'server' && !isSleeping) updateSystemCard(d);
 
-    // Logs
-    if (activeTab === 'logs') updateLogs(d);
+    // Logs — freeze when asleep
+    if (activeTab === 'logs' && !isSleeping) updateLogs(d);
 
     // Badges
     updateBadges(d);

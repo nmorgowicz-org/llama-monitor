@@ -204,7 +204,8 @@ fn main() -> Result<()> {
                 // POWER OPT: track the WS push interval so we don't poll GPU faster
                 // than we send data to the browser. Minimum 200ms to avoid hammering
                 // the GPU driver.
-                let poll_ms = {
+                // T-045: sleep guard: when asleep, slow GPU polling using config interval
+                let final_ms = {
                     let settings = match s.ui_settings.lock() {
                         Ok(g) => g,
                         Err(_) => {
@@ -212,9 +213,21 @@ fn main() -> Result<()> {
                             continue;
                         }
                     };
-                    (settings.ws_push_interval_ms.max(200) / 2).max(200)
+                    let base = (settings.ws_push_interval_ms.max(200) / 2).max(200);
+                    let asleep = *s.sleep_mode.borrow();
+                    if asleep {
+                        if let Ok(cfg) = s.sleep_mode_config.lock() {
+                            // T-045: use slow GPU interval while asleep
+                            let slow_ms = cfg.sleep_gpu_interval_secs.max(1) * 1000;
+                            slow_ms.max(base)
+                        } else {
+                            base
+                        }
+                    } else {
+                        base
+                    }
                 };
-                thread::sleep(Duration::from_millis(poll_ms));
+                thread::sleep(Duration::from_millis(final_ms));
             }
         });
     }
@@ -238,7 +251,19 @@ fn main() -> Result<()> {
                         eprintln!("[error] Failed to acquire system_metrics lock");
                     }
                 }
-                std::thread::sleep(SYSTEM_POLL_INTERVAL);
+                // T-046: when asleep, slow system-metrics polling using config interval
+                let asleep = *s.sleep_mode.borrow();
+                let interval = if asleep {
+                    if let Ok(cfg) = s.sleep_mode_config.lock() {
+                        let slow_secs = cfg.sleep_sys_interval_secs.max(1);
+                        Duration::from_secs(slow_secs)
+                    } else {
+                        SYSTEM_POLL_INTERVAL
+                    }
+                } else {
+                    SYSTEM_POLL_INTERVAL
+                };
+                std::thread::sleep(interval);
             }
         });
     }
@@ -340,6 +365,61 @@ fn main() -> Result<()> {
         let s = state.clone();
         let app_config = app_config.clone();
         runtime.spawn(agent::remote_agent_poller(s, app_config));
+    }
+
+    // T-052: Auto-sleep background task.
+    // Monitors last activity, WS connections, and streaming to auto-sleep when idle.
+    {
+        let s = state.clone();
+        runtime.spawn(async move {
+            loop {
+                // Check every 30 seconds
+                tokio::time::sleep(Duration::from_secs(30)).await;
+
+                // Skip if already asleep
+                if *s.sleep_mode.borrow() {
+                    continue;
+                }
+
+                // T-056: do not auto-sleep while streaming is active
+                let streaming_active = {
+                    let llama = s.llama_metrics.lock().unwrap();
+                    llama.generation_tokens_per_sec > 0.0
+                };
+                if streaming_active {
+                    continue;
+                }
+
+                let cfg = match s.sleep_mode_config.lock() {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+
+                // T-052: Check idle time
+                if let Some(idle_secs) = cfg.auto_sleep_idle_secs
+                    && idle_secs > 0
+                {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = s
+                        .last_activity_at
+                        .load(std::sync::atomic::Ordering::Relaxed);
+                    let elapsed = now.saturating_sub(last);
+
+                    if elapsed >= idle_secs {
+                        // Auto-sleep due to inactivity
+                        s.sleep_mode.send(true).ok();
+                        s.sleep_notify.notify_waiters();
+                        drop(cfg);
+                        continue;
+                    }
+                }
+
+                drop(cfg);
+            }
+        });
     }
 
     // Sessions persistence timer

@@ -1428,8 +1428,20 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
             enabled = false;
         }
 
+        // T-048: slow poll when asleep
+        let asleep = *state.sleep_mode.borrow();
+        let interval = if asleep {
+            if let Ok(cfg) = state.sleep_mode_config.lock() {
+                Duration::from_secs(cfg.sleep_llama_interval_secs.max(1))
+            } else {
+                REMOTE_AGENT_POLL_INTERVAL
+            }
+        } else {
+            REMOTE_AGENT_POLL_INTERVAL
+        };
+
         tokio::select! {
-            _ = tokio::time::sleep(REMOTE_AGENT_POLL_INTERVAL) => {}
+            _ = tokio::time::sleep(interval) => {}
             _ = state.agent_poll_notify.notified() => {}
         }
     }
