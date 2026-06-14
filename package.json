@@ -13,5 +13,7 @@
   "dependencies": {
     "dompurify": "^3.4.2"
   },
-  "allowScripts": {}
+  "allowScripts": {
+    "puppeteer@25.1.0": true
+  }
 }
