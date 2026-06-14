@@ -161,6 +161,67 @@ test.describe('modals and menus', () => {
     await expect(page.locator('#models-list')).toBeVisible();
   });
 
+  test('preset editor preserves default and explicit off fit states', async ({ page }) => {
+    let submittedPreset = null;
+    await page.route('**/api/presets', async route => {
+      if (route.request().method() !== 'POST') {
+        await route.continue();
+        return;
+      }
+      submittedPreset = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ id: 'test-fit-disabled' }),
+      });
+    });
+
+    await page.evaluate(async () => {
+      const { openPresetModal } = await import('/js/features/presets.js');
+      openPresetModal('new');
+    });
+    await page.fill('#modal-name', 'Fit disabled');
+    await page.fill('#modal-model-path', '/tmp/model.gguf');
+    await page.locator('#modal-fit-target').evaluate(input => { input.value = '2048'; });
+    await expect(page.locator('#modal-fit-enabled')).toHaveValue('');
+    await page.selectOption('#modal-fit-enabled', 'false');
+    await page.selectOption('#modal-kv-unified', 'false');
+    await page.locator('#preset-form').evaluate(form => form.requestSubmit());
+    await expect.poll(() => submittedPreset).not.toBeNull();
+
+    expect(submittedPreset.fit_enabled).toBe(false);
+    expect(submittedPreset.fit_target).toBeNull();
+    expect(submittedPreset.kv_unified).toBe(false);
+  });
+
+  test('preset editor installs the recommended Gemma 4 chat template', async ({ page }) => {
+    await page.route('**/api/chat-template/install-url', async route => {
+      expect(route.request().postDataJSON()).toEqual({
+        url: 'https://raw.githubusercontent.com/jscott3201/llm-tuning/main/gemma4/chat_templates/custom_pub_chat_template_gemma4.jinja',
+        name: 'gemma4-jscott3201-agentic',
+      });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          path: '/tmp/chat-templates/gemma4-jscott3201-agentic.jinja',
+          already_existed: false,
+        }),
+      });
+    });
+
+    await page.evaluate(async () => {
+      const { openPresetModal } = await import('/js/features/presets.js');
+      openPresetModal('new');
+    });
+    await page.fill('#modal-model-path', '/models/Gemma-4-31B-it-Q4_K_M.gguf');
+    await page.click('#preset-recommended-chat-template-btn');
+    await expect(page.locator('#modal-chat-template-file')).toHaveValue(
+      '/tmp/chat-templates/gemma4-jscott3201-agentic.jinja',
+    );
+  });
+
   test('profile menu opens and shows options', async ({ page }) => {
     await page.locator('#nav-user-btn').click();
     await page.waitForSelector('#nav-user-menu-items', { state: 'visible', timeout: 5000 });

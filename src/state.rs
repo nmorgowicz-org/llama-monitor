@@ -23,6 +23,7 @@ pub struct ModelTags {
 
 // Legacy format when model-tags.json was a simple array/object with a "tags" field.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct LegacyModelTags {
     #[serde(default)]
     tags: Vec<String>,
@@ -32,17 +33,30 @@ impl ModelTags {
     pub fn load(path: &Path) -> Self {
         match std::fs::read_to_string(path) {
             Ok(content) => {
-                // Try current map format: { "model-id": ["tag1", "tag2"] }
-                if let Ok(tags) = serde_json::from_str::<BTreeMap<String, Vec<String>>>(&content) {
-                    return Self { tags };
-                }
-
                 // Try legacy shape: { "tags": [...] }
                 if let Ok(legacy) = serde_json::from_str::<LegacyModelTags>(&content) {
                     if !legacy.tags.is_empty() {
                         eprintln!("[info] ModelTags: migrating legacy format in {:?}", path);
                     }
-                    return Self::default();
+                    let tags = Self::default();
+                    if let Err(e) = tags.save(path) {
+                        eprintln!("[warn] ModelTags: failed to migrate {:?}: {e}", path);
+                    }
+                    return tags;
+                }
+
+                // Older versions loaded a direct map without the "tags" wrapper.
+                if let Ok(tags) = serde_json::from_str::<BTreeMap<String, Vec<String>>>(&content) {
+                    let tags = Self { tags };
+                    if let Err(e) = tags.save(path) {
+                        eprintln!("[warn] ModelTags: failed to migrate {:?}: {e}", path);
+                    }
+                    return tags;
+                }
+
+                // Current format: { "tags": { "model-id": ["tag1", "tag2"] } }
+                if let Ok(tags) = serde_json::from_str::<Self>(&content) {
+                    return tags;
                 }
 
                 eprintln!(
@@ -51,9 +65,21 @@ impl ModelTags {
                 );
                 Self::default()
             }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let tags = Self::default();
+                if !path.as_os_str().is_empty()
+                    && let Err(e) = tags.save(path)
+                {
+                    eprintln!(
+                        "[warn] ModelTags: failed to initialize missing file {:?}: {e}",
+                        path
+                    );
+                }
+                tags
+            }
             Err(e) => {
                 eprintln!(
-                    "[info] ModelTags: could not read {:?}, loading empty tags (error: {})",
+                    "[warn] ModelTags: could not read {:?}, loading empty tags (error: {})",
                     path, e
                 );
                 Self::default()
@@ -61,10 +87,15 @@ impl ModelTags {
         }
     }
 
-    pub fn save(&self, path: &Path) {
-        if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = std::fs::write(path, json);
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
         }
+        let tmp = path.with_extension("json.tmp");
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(&tmp, json)?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
     }
 }
 use crate::system::SystemMetrics;
@@ -490,14 +521,34 @@ impl Default for UiSettings {
 }
 
 pub fn load_ui_settings(path: &Path) -> UiSettings {
-    if path.exists()
-        && let Ok(contents) = std::fs::read_to_string(path)
-        && let Ok(mut s) = serde_json::from_str::<UiSettings>(&contents)
-    {
-        s.remote_agent_token = decrypt_value(&s.remote_agent_token);
-        return s;
+    match std::fs::read_to_string(path) {
+        Ok(contents) => match serde_json::from_str::<UiSettings>(&contents) {
+            Ok(mut settings) => {
+                settings.remote_agent_token = decrypt_value(&settings.remote_agent_token);
+                settings
+            }
+            Err(e) => {
+                eprintln!("[warn] Invalid UI settings file {:?}: {e}", path);
+                UiSettings::default()
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let settings = UiSettings::default();
+            if !path.as_os_str().is_empty()
+                && let Err(e) = save_ui_settings(path, &settings)
+            {
+                eprintln!(
+                    "[warn] Failed to initialize missing UI settings file {:?}: {e}",
+                    path
+                );
+            }
+            settings
+        }
+        Err(e) => {
+            eprintln!("[warn] Failed to read UI settings file {:?}: {e}", path);
+            UiSettings::default()
+        }
     }
-    UiSettings::default()
 }
 
 pub fn save_ui_settings(path: &Path, settings: &UiSettings) -> anyhow::Result<()> {
@@ -517,13 +568,30 @@ pub fn save_ui_settings(path: &Path, settings: &UiSettings) -> anyhow::Result<()
 
 /// Load sessions from file
 pub fn load_sessions(path: &Path) -> Vec<Session> {
-    if path.exists()
-        && let Ok(contents) = std::fs::read_to_string(path)
-        && let Ok(sessions) = serde_json::from_str::<Vec<Session>>(&contents)
-    {
-        return sessions;
+    match std::fs::read_to_string(path) {
+        Ok(contents) => match serde_json::from_str::<Vec<Session>>(&contents) {
+            Ok(sessions) => return sessions,
+            Err(e) => eprintln!("[warn] Invalid sessions file {:?}: {e}", path),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let sessions = default_sessions();
+            if !path.as_os_str().is_empty()
+                && let Err(e) = save_sessions(path, &sessions)
+            {
+                eprintln!(
+                    "[warn] Failed to initialize missing sessions file {:?}: {e}",
+                    path
+                );
+            }
+            return sessions;
+        }
+        Err(e) => eprintln!("[warn] Failed to read sessions file {:?}: {e}", path),
     }
-    // Return default session if no file exists
+
+    default_sessions()
+}
+
+fn default_sessions() -> Vec<Session> {
     vec![Session::new_spawn(
         "default".to_string(),
         "Default Session".to_string(),
@@ -1305,6 +1373,7 @@ fn local_interface_ips() -> Vec<IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn test_paths(sessions_path: PathBuf) -> AppPaths {
         AppPaths {
@@ -1320,6 +1389,58 @@ mod tests {
 
     fn test_tls_config() -> TLSConfig {
         TLSConfig::default()
+    }
+
+    #[test]
+    fn model_tags_missing_file_is_recreated_and_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model-tags.json");
+
+        let mut tags = ModelTags::load(&path);
+        assert!(path.exists());
+        assert!(tags.tags.is_empty());
+
+        tags.tags
+            .insert("/models/example.gguf".into(), vec!["family:test".into()]);
+        tags.save(&path).unwrap();
+
+        assert_eq!(ModelTags::load(&path).tags, tags.tags);
+    }
+
+    #[test]
+    fn model_tags_migrates_direct_map_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model-tags.json");
+        fs::write(
+            &path,
+            r#"{"/models/example.gguf":["family:test","favorite"]}"#,
+        )
+        .unwrap();
+
+        let tags = ModelTags::load(&path);
+        assert_eq!(
+            tags.tags.get("/models/example.gguf"),
+            Some(&vec!["family:test".to_string(), "favorite".to_string()])
+        );
+
+        let migrated: ModelTags = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(migrated.tags, tags.tags);
+    }
+
+    #[test]
+    fn missing_ui_settings_and_sessions_files_are_recreated() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join("ui-settings.json");
+        let sessions_path = dir.path().join("sessions.json");
+
+        let settings = load_ui_settings(&settings_path);
+        let sessions = load_sessions(&sessions_path);
+
+        assert!(settings_path.exists());
+        assert!(sessions_path.exists());
+        assert_eq!(settings.ws_push_interval_ms, default_ws_push_interval_ms());
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "default");
     }
 
     #[test]

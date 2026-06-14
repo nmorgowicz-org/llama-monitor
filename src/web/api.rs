@@ -2017,7 +2017,182 @@ fn api_chat_template_install_hf(
         })
 }
 
-// 5) POST /api/vram-estimate (architecture-aware breakdown)
+// 6) POST /api/chat-template/install-url
+// Downloads a community template from raw.githubusercontent.com and saves it
+// with a stable name. The host allowlist keeps this separate from arbitrary
+// URL fetching and prevents redirects to untrusted hosts.
+fn api_chat_template_install_url(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "install-url")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let source = body["url"].as_str().unwrap_or("").to_string();
+                let name = body["name"].as_str().unwrap_or("").to_string();
+                let force = body["force"].as_bool().unwrap_or(false);
+
+                if source.is_empty() || name.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Missing required fields: url, name"
+                        })),
+                    ));
+                }
+                if !name
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+                {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "name must contain only alphanumeric characters, hyphens, or underscores"
+                        })),
+                    ));
+                }
+
+                let url = match reqwest::Url::parse(&source) {
+                    Ok(url)
+                        if url.scheme() == "https"
+                            && url.host_str() == Some("raw.githubusercontent.com") =>
+                    {
+                        url
+                    }
+                    _ => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Only https://raw.githubusercontent.com URLs are supported"
+                            })),
+                        ));
+                    }
+                };
+
+                let dest = match dirs::home_dir() {
+                    Some(home) => home
+                        .join(".config")
+                        .join("llama-monitor")
+                        .join("chat-templates")
+                        .join(format!("{name}.jinja")),
+                    None => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Could not determine home directory"
+                            })),
+                        ));
+                    }
+                };
+
+                if dest.exists() && !force {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": true,
+                            "path": dest.to_string_lossy(),
+                            "already_existed": true
+                        })),
+                    ));
+                }
+
+                let client = match reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .redirect(reqwest::redirect::Policy::none())
+                    .user_agent("llama-monitor/1.0")
+                    .build()
+                {
+                    Ok(client) => client,
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("HTTP client error: {e}")
+                            })),
+                        ));
+                    }
+                };
+
+                let content = match client.get(url).send().await {
+                    Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+                        Ok(bytes) if bytes.len() <= 1024 * 1024 => bytes,
+                        Ok(_) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Template exceeds the 1 MiB size limit"
+                                })),
+                            ));
+                        }
+                        Err(e) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": format!("Failed to read response: {e}")
+                                })),
+                            ));
+                        }
+                    },
+                    Ok(resp) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("HTTP {} from GitHub", resp.status().as_u16())
+                            })),
+                        ));
+                    }
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Network error: {e}")
+                            })),
+                        ));
+                    }
+                };
+
+                if let Some(parent) = dest.parent()
+                    && let Err(e) = std::fs::create_dir_all(parent)
+                {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Failed to create template directory: {e}")
+                        })),
+                    ));
+                }
+                let temp = dest.with_extension("jinja.tmp");
+                if let Err(e) =
+                    std::fs::write(&temp, &content).and_then(|_| std::fs::rename(&temp, &dest))
+                {
+                    let _ = std::fs::remove_file(&temp);
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Failed to save template: {e}")
+                        })),
+                    ));
+                }
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "path": dest.to_string_lossy(),
+                        "already_existed": false
+                    }),
+                )))
+            }
+        })
+}
+
+// 7) POST /api/vram-estimate (architecture-aware breakdown)
 fn api_vram_estimate_breakdown(
     _state: AppState,
     app_config: Arc<AppConfig>,
@@ -4864,6 +5039,8 @@ pub fn api_routes(
     let chat_template_upload = api_chat_template_upload(state.clone(), app_config.clone());
     let chat_template_dir = api_chat_template_dir(state.clone(), app_config.clone());
     let chat_template_install_hf = api_chat_template_install_hf(state.clone(), app_config.clone());
+    let chat_template_install_url =
+        api_chat_template_install_url(state.clone(), app_config.clone());
     let vram_estimate = api_vram_estimate(state.clone(), app_config.clone());
     let vram_estimate_breakdown = api_vram_estimate_breakdown(state.clone(), app_config.clone());
     let models_download_start = api_models_download_start(state.clone(), app_config.clone());
@@ -5003,6 +5180,7 @@ pub fn api_routes(
         .or(chat_template_upload)
         .or(chat_template_dir)
         .or(chat_template_install_hf)
+        .or(chat_template_install_url)
         .or(vram_estimate)
         .or(vram_estimate_breakdown)
         .or(models_download_start)
@@ -6635,7 +6813,14 @@ fn api_put_model_tags(
                 let mut tags = st.model_tags.lock().unwrap();
                 tags.tags.insert(model_path, new_tags);
                 let tags_path = st.model_tags_path.clone();
-                tags.save(&tags_path);
+                if let Err(e) = tags.save(&tags_path) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Failed to save model tags: {e}")
+                        })),
+                    ));
+                }
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                     warp::reply::json(&serde_json::json!({"ok": true})),
@@ -9964,7 +10149,6 @@ fn api_spawn_session_with_preset(
                     fit_ctx: preset.fit_ctx,
                     fit_target: preset.fit_target.clone(),
                     fit_print: preset.fit_print,
-                    ignore_eos: preset.ignore_eos,
                     seed: preset.seed,
                     system_prompt_file: preset.system_prompt_file.clone(),
                     extra_args: preset.extra_args.clone(),
@@ -12723,6 +12907,12 @@ mod tests {
                 "{\"repo\":\"froggeric/Qwen-Fixed-Chat-Templates\",\"file\":\"chat_template.jinja\",\"name\":\"test\"}"
             )
         ),
+        (
+            route_chat_template_install_url,
+            "POST",
+            "/api/chat-template/install-url",
+            Some("{}")
+        ),
         // VRAM estimation
         (
             route_vram_estimate,
@@ -12848,7 +13038,6 @@ mod tests {
         use crate::chat_storage::ChatStorage;
         use crate::config::{AppConfig, TlsMode};
         use crate::state::{AppPaths, AppState};
-        use crate::web::api::api_llama_restart;
         use crate::web::auth::AuthManager;
         use warp::Filter;
 

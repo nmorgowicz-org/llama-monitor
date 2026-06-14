@@ -290,7 +290,6 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
     let mut fit_ctx: Option<u32> = None;
     let mut fit_target: Option<String> = None;
     let mut fit_print: Option<bool> = None;
-    let mut ignore_eos = false;
     let mut prio: Option<i32> = None;
     let mut prio_batch: Option<i32> = None;
     let mut extra_args = String::new();
@@ -583,11 +582,6 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
                     continue;
                 }
             }
-            "--ignore-eos" => {
-                ignore_eos = true;
-                i += 1;
-                continue;
-            }
             "--prio" => {
                 if i + 1 < args.len() {
                     let _ = args[i + 1].parse::<i32>().map(|v| {
@@ -756,7 +750,6 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         fit_ctx,
         fit_target,
         fit_print,
-        ignore_eos,
         seed: None,
         system_prompt_file: String::new(),
         extra_args: extra_args.trim().to_string(),

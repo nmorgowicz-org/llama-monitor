@@ -7,6 +7,11 @@ import { openModelFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplat
 import { applySettings, saveSettings } from './settings.js';
 import { showToast } from './toast.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune } from './tuning-cards.js';
+import {
+    COMMUNITY_TEMPLATES,
+    buildCommunityTemplateInstallRequest,
+    detectCommunityTemplateFamily,
+} from './chat-template-registry.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -72,6 +77,44 @@ function normalizeModelSourceInput(value) {
         return { model_path: input, hf_repo: null };
     }
     return { model_path: '', hf_repo: input };
+}
+
+async function installRecommendedChatTemplateForPreset() {
+    const modelSource = strVal('modal-model-path');
+    const family = detectCommunityTemplateFamily(modelSource);
+    const template = family ? COMMUNITY_TEMPLATES[family] : null;
+    if (!template) {
+        showToast('No community template recommendation for this model', 'warn');
+        return;
+    }
+
+    const button = document.getElementById('preset-recommended-chat-template-btn');
+    if (button) button.disabled = true;
+    try {
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        const install = buildCommunityTemplateInstallRequest(template);
+        const resp = await fetch(install.endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(install.body),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok || !data.path) {
+            throw new Error(data.error || `HTTP ${resp.status}`);
+        }
+        setVal('modal-chat-template-file', data.path);
+        showToast(
+            data.already_existed ? 'Recommended template selected' : 'Recommended template installed',
+            'success',
+            template.display,
+        );
+    } catch (err) {
+        showToast('Template install failed: ' + (err.message || String(err)), 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
 }
 
 function clearFieldErrors() {
@@ -410,10 +453,12 @@ export function openPresetModal(mode, section) {
         numOrEmpty('modal-spec-draft-n-max', p.spec_draft_n_max);
         numOrEmpty('modal-spec-draft-n-min', p.spec_draft_n_min);
         numOrEmpty('modal-spec-draft-p-min', p.spec_draft_p_min);
+        setVal('modal-spec-draft-type-k', p.spec_draft_type_k || '');
+        setVal('modal-spec-draft-type-v', p.spec_draft_type_v || '');
         setVal('modal-draft-model', p.draft_model);
         _toggleSpecFields(specType);
         // Context extras
-        setChk('modal-kv-unified', p.kv_unified ?? false);
+        setOpt('modal-kv-unified', p.kv_unified == null ? '' : String(p.kv_unified));
         numOrEmpty('modal-cache-ram-mib', p.cache_ram_mib);
         // Model extras
         setVal('modal-mmproj', p.mmproj || '');
@@ -424,10 +469,9 @@ export function openPresetModal(mode, section) {
         setVal('modal-api-key', p.api_key || '');
         numOrEmpty('modal-max-tokens', p.max_tokens);
         numOrEmpty('modal-seed', p.seed);
-        setChk('modal-ignore-eos', p.ignore_eos ?? false);
-        setChk('modal-fit-enabled', p.fit_enabled ?? false);
+        setOpt('modal-fit-enabled', p.fit_enabled == null ? '' : String(p.fit_enabled));
         setVal('modal-fit-target', p.fit_target || '');
-        _toggleFitTarget(p.fit_enabled ?? false);
+        _toggleFitTarget(p.fit_enabled === true);
         setVal('modal-system-prompt-file', p.system_prompt_file);
         setStructuredOutputMode(p.json_schema ? 'json_schema' : p.grammar ? 'grammar' : '');
         setVal('modal-grammar', p.grammar || '');
@@ -713,6 +757,7 @@ function _hideSummary() {
 
 function _buildFormPreset(existing) {
     const modelSource = normalizeModelSourceInput(strVal('modal-model-path'));
+    const fitEnabled = nullableBoolOpt('modal-fit-enabled');
     return {
         // Spread ALL existing fields first — preserves wizard-set values not shown in the editor
         ...existing,
@@ -730,7 +775,7 @@ function _buildFormPreset(existing) {
         ctk: strVal('modal-ctk') || 'q8_0',
         ctv: strVal('modal-ctv') || 'f16',
         flash_attn: strVal('modal-flash-attn'),
-        kv_unified: document.getElementById('modal-kv-unified').checked || null,
+        kv_unified: nullableBoolOpt('modal-kv-unified'),
         cache_ram_mib: intOrNull('modal-cache-ram-mib'),
         batch_size: parseInt(document.getElementById('modal-batch-size').value) || 2048,
         ubatch_size: parseInt(document.getElementById('modal-ubatch-size').value) || 2048,
@@ -764,15 +809,16 @@ function _buildFormPreset(existing) {
         spec_draft_n_max: intOrNull('modal-spec-draft-n-max'),
         spec_draft_n_min: intOrNull('modal-spec-draft-n-min'),
         spec_draft_p_min: floatOrNull('modal-spec-draft-p-min'),
+        spec_draft_type_k: valOrNull('modal-spec-draft-type-k'),
+        spec_draft_type_v: valOrNull('modal-spec-draft-type-v'),
         draft_model: strVal('modal-draft-model'),
         bind_host: strVal('modal-bind-host') || null,
         port: intOrNull('modal-port'),
         api_key: strVal('modal-api-key') || null,
         max_tokens: intOrNull('modal-max-tokens'),
         seed: intOrNull('modal-seed'),
-        ignore_eos: document.getElementById('modal-ignore-eos').checked,
-        fit_enabled: document.getElementById('modal-fit-enabled').checked || null,
-        fit_target: strVal('modal-fit-target') || null,
+        fit_enabled: fitEnabled,
+        fit_target: fitEnabled === true ? (strVal('modal-fit-target') || null) : null,
         system_prompt_file: strVal('modal-system-prompt-file'),
         grammar: getStructuredOutputMode() === 'grammar' ? (document.getElementById('modal-grammar').value.trim() || null) : null,
         json_schema: getStructuredOutputMode() === 'json_schema' ? (document.getElementById('modal-json-schema').value.trim() || null) : null,
@@ -800,7 +846,7 @@ const CHANGE_LABELS = {
     draft_min: 'Draft Min', draft_max: 'Draft Max', spec_draft_n_max: 'MTP Depth',
     spec_draft_n_min: 'MTP Draft N Min', spec_draft_p_min: 'MTP Draft P Min', draft_model: 'Draft Model',
     bind_host: 'Bind Host', port: 'Port', api_key: 'API Key', max_tokens: 'Max Tokens',
-    seed: 'Seed', ignore_eos: 'Ignore EOS',
+    seed: 'Seed',
     system_prompt_file: 'System Prompt File', grammar: 'Grammar', json_schema: 'JSON Schema', extra_args: 'Extra Args',
 };
 
@@ -1243,6 +1289,10 @@ export function initPresets() {
             showToast('Template library unavailable: ' + (err.message || String(err)), 'error');
         }
     });
+    document.getElementById('preset-recommended-chat-template-btn')?.addEventListener(
+        'click',
+        installRecommendedChatTemplateForPreset,
+    );
     document.getElementById('preset-upload-chat-template-btn')?.addEventListener('click', async () => {
         try {
             const uploaded = await uploadChatTemplateFromBrowser();
@@ -1260,7 +1310,7 @@ export function initPresets() {
 
     // Fit-to-VRAM toggle shows/hides fit target
     document.getElementById('modal-fit-enabled')?.addEventListener('change', function() {
-        _toggleFitTarget(this.checked);
+        _toggleFitTarget(this.value === 'true');
     });
 
     // Spec type dropdown shows/hides relevant fields

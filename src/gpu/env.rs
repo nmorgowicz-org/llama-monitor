@@ -121,13 +121,31 @@ impl Default for GpuEnv {
 }
 
 pub fn load_gpu_env(path: &Path) -> GpuEnv {
-    if path.exists()
-        && let Ok(contents) = std::fs::read_to_string(path)
-        && let Ok(env) = serde_json::from_str::<GpuEnv>(&contents)
-    {
-        return env;
+    match std::fs::read_to_string(path) {
+        Ok(contents) => match serde_json::from_str::<GpuEnv>(&contents) {
+            Ok(env) => env,
+            Err(e) => {
+                eprintln!("[warn] Invalid GPU environment file {:?}: {e}", path);
+                GpuEnv::default()
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let env = GpuEnv::default();
+            if !path.as_os_str().is_empty()
+                && let Err(e) = save_gpu_env(path, &env)
+            {
+                eprintln!(
+                    "[warn] Failed to initialize missing GPU environment file {:?}: {e}",
+                    path
+                );
+            }
+            env
+        }
+        Err(e) => {
+            eprintln!("[warn] Failed to read GPU environment file {:?}: {e}", path);
+            GpuEnv::default()
+        }
     }
-    GpuEnv::default()
 }
 
 pub fn save_gpu_env(path: &Path, env: &GpuEnv) -> Result<()> {
@@ -495,5 +513,17 @@ Agent 4
         assert_eq!(loaded.devices, "0,1");
         assert_eq!(loaded.extra_env.len(), 1);
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn missing_gpu_env_file_is_recreated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gpu-env.json");
+
+        let env = load_gpu_env(&path);
+
+        assert!(path.exists());
+        assert_eq!(env.arch, "auto");
+        assert_eq!(load_gpu_env(&path).arch, "auto");
     }
 }

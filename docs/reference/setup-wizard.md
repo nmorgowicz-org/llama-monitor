@@ -27,6 +27,10 @@ The user selects a **hardware profile** and a **use case**.
 
 **Hardware profiles** set defaults for GPU layers, batch size, and fit granularity:
 
+Fit has three states in both the setup wizard and preset editor. **Default** passes no fit
+arguments, **On** passes `--fit on` with the selected target margin, and **Off** passes
+`--fit off`.
+
 | Profile | GPU Layers | Batch | Fit Granularity |
 |---------|-----------|-------|-----------------|
 | Quick / Low-end | 0 (CPU only) | 512 | 512 |
@@ -69,6 +73,23 @@ See [HuggingFace Integration](#huggingface-integration) below.
 See [Third-Party Model Import](#third-party-model-import) below.
 
 When selected, the wizard immediately scans known tool directories and renders discovered models as a grouped, clickable card list — no path typing required. A manual fallback text input and Browse button remain available for models outside the scanned locations.
+
+#### Community Chat Templates
+
+The model step detects families that benefit from maintained community templates.
+The recommended template is downloaded into the local chat-template library and
+passed to llama-server with `--chat-template-file`. **Use Embedded** leaves the
+override unset. The preset editor exposes the same lookup through its
+**Recommended** button next to the chat-template path.
+
+| Model family | Recommended template | Source |
+|---|---|---|
+| Qwen 3.5 / 3.6 | froggeric's Fixed Template | HuggingFace |
+| Gemma 4 | jscott3201's Gemma 4 Agentic Template | GitHub |
+
+The Gemma 4 recommendation improves thinking defaults, tool argument formatting,
+null handling, and multi-turn agentic histories. It is only offered when Gemma 4
+is detected; older Gemma families keep their embedded template.
 
 ---
 
@@ -121,7 +142,7 @@ Upstream references:
 | Context size | `spawn-context-size` | 8192 | Primary tuning control. Quick-pick buttons: 32k Chat, 65k RP, 131k Agent, 200k Large, Model max |
 | KV cache (K) | `spawn-cache-type-k` | q8_0 | f16 / q8_0 / q4_0 |
 | KV cache (V) | `spawn-cache-type-v` | q8_0 | f16 / q8_0 / q4_0 |
-| KV Unified | `spawn-kv-unified` | unchecked | `--kv-unified` flag |
+| KV Unified | `spawn-kv-unified` | Default | Default omits the flag; On passes `--kv-unified`; Off passes `--no-kv-unified` |
 
 #### Context Fit Modes
 The right rail leads with a **Current context** summary and model-max status, then shows outcome-oriented presets:

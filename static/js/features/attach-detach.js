@@ -67,7 +67,6 @@ export function getConfig() {
         chat_template_file: p.chat_template_file || null,
         alias: p.alias || null,
         max_tokens: p.max_tokens ?? null,
-        ignore_eos: !!p.ignore_eos,
         fit_enabled: p.fit_enabled ?? null,
         fit_target: p.fit_target || null,
         system_prompt_file: p.system_prompt_file || '',

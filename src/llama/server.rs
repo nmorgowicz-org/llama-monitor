@@ -156,9 +156,6 @@ pub struct ServerConfig {
     pub fit_target: Option<String>,
     #[serde(default)]
     pub fit_print: Option<bool>,
-    // Misc
-    #[serde(default)]
-    pub ignore_eos: bool,
     // Advanced
     #[serde(default)]
     pub seed: Option<i64>,
@@ -215,6 +212,46 @@ pub struct ServerConfig {
     pub image_min_tokens: Option<u32>,
     #[serde(default)]
     pub image_max_tokens: Option<u32>,
+}
+
+fn append_fit_args(cmd: &mut TokioCommand, config: &ServerConfig) {
+    match config.fit_enabled {
+        None => return,
+        Some(false) => {
+            cmd.arg("--fit").arg("off");
+            return;
+        }
+        Some(true) => {}
+    }
+
+    cmd.arg("--fit").arg("on");
+    if let Some(ref v) = config.fit_target {
+        cmd.arg("--fit-target").arg(v);
+    } else if let Some(v) = config.fit_ctx {
+        cmd.arg("--fit-ctx").arg(v.to_string());
+    }
+}
+
+fn append_kv_cache_args(cmd: &mut TokioCommand, config: &ServerConfig) {
+    if let Some(v) = config.kv_unified {
+        cmd.arg(if v { "--kv-unified" } else { "--no-kv-unified" });
+    }
+    if let Some(v) = config.cache_idle_slots {
+        if v {
+            let cache_enabled = config.cache_ram_mib.map(|mib| mib > 0).unwrap_or(true);
+            if cache_enabled {
+                if config.kv_unified.is_none() {
+                    cmd.arg("--kv-unified");
+                }
+                cmd.arg("--cache-idle-slots");
+            }
+        } else {
+            cmd.arg("--no-cache-idle-slots");
+        }
+    }
+    if let Some(v) = config.cache_ram_mib {
+        cmd.arg("--cache-ram").arg(v.to_string());
+    }
 }
 
 pub async fn start_server(
@@ -674,58 +711,8 @@ pub async fn start_server(
         cmd.arg("--alias").arg(al);
     }
 
-    // KV cache
-    if let Some(v) = config.kv_unified {
-        if v {
-            cmd.arg("--kv-unified");
-        } else {
-            cmd.arg("--no-kv-unified");
-        }
-    }
-    if let Some(v) = config.cache_idle_slots {
-        if v {
-            // --cache-idle-slots requires --cache-ram > 0; skip when cache disabled
-            let cache_enabled = config.cache_ram_mib.map(|mib| mib > 0).unwrap_or(true);
-            if cache_enabled {
-                if config.kv_unified.is_none() {
-                    cmd.arg("--kv-unified");
-                }
-                cmd.arg("--cache-idle-slots");
-            }
-        } else {
-            cmd.arg("--no-cache-idle-slots");
-        }
-    }
-    if let Some(v) = config.cache_ram_mib {
-        cmd.arg("--cache-ram").arg(v.to_string());
-    }
-
-    // Fit
-    if let Some(v) = config.fit_enabled {
-        if v {
-            cmd.arg("--fit").arg("on");
-        } else {
-            cmd.arg("--fit").arg("off");
-        }
-    }
-    if let Some(v) = config.fit_ctx {
-        cmd.arg("--fit-ctx").arg(v.to_string());
-    }
-    if let Some(ref v) = config.fit_target {
-        cmd.arg("--fit-target").arg(v);
-    }
-    if let Some(v) = config.fit_print {
-        if v {
-            cmd.arg("--fit-print").arg("on");
-        } else {
-            cmd.arg("--fit-print").arg("off");
-        }
-    }
-
-    // Misc
-    if config.ignore_eos {
-        cmd.arg("--ignore-eos");
-    }
+    append_kv_cache_args(&mut cmd, &config);
+    append_fit_args(&mut cmd, &config);
 
     // Extra args (arbitrary flags)
     for arg in config.extra_args.split_whitespace() {
@@ -1009,4 +996,96 @@ pub async fn stop_server(state: &AppState) -> Result<()> {
     // Clear the stopping flag so future spawns work cleanly.
     state.server_stopping.store(false, Ordering::Relaxed);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn command_args(config: &ServerConfig) -> Vec<String> {
+        let mut cmd = TokioCommand::new("llama-server");
+        append_fit_args(&mut cmd, config);
+        cmd.as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn kv_command_args(config: &ServerConfig) -> Vec<String> {
+        let mut cmd = TokioCommand::new("llama-server");
+        append_kv_cache_args(&mut cmd, config);
+        cmd.as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn kv_unified_supports_default_on_and_off() {
+        assert!(kv_command_args(&ServerConfig::default()).is_empty());
+        assert_eq!(
+            kv_command_args(&ServerConfig {
+                kv_unified: Some(true),
+                ..Default::default()
+            }),
+            ["--kv-unified"]
+        );
+        assert_eq!(
+            kv_command_args(&ServerConfig {
+                kv_unified: Some(false),
+                ..Default::default()
+            }),
+            ["--no-kv-unified"]
+        );
+    }
+
+    #[test]
+    fn default_fit_omits_all_fit_args() {
+        let config = ServerConfig {
+            fit_ctx: Some(4096),
+            fit_target: Some("2048".into()),
+            ..Default::default()
+        };
+
+        assert!(command_args(&config).is_empty());
+    }
+
+    #[test]
+    fn disabled_fit_emits_only_fit_off() {
+        let config = ServerConfig {
+            fit_enabled: Some(false),
+            fit_ctx: Some(4096),
+            fit_target: Some("2048".into()),
+            ..Default::default()
+        };
+
+        assert_eq!(command_args(&config), ["--fit", "off"]);
+    }
+
+    #[test]
+    fn fit_target_takes_precedence_when_fit_is_enabled() {
+        let config = ServerConfig {
+            fit_enabled: Some(true),
+            fit_ctx: Some(4096),
+            fit_target: Some("2048".into()),
+            fit_print: Some(true),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            command_args(&config),
+            ["--fit", "on", "--fit-target", "2048",]
+        );
+    }
+
+    #[test]
+    fn legacy_fit_ctx_is_used_when_no_target_exists() {
+        let config = ServerConfig {
+            fit_enabled: Some(true),
+            fit_ctx: Some(4096),
+            ..Default::default()
+        };
+
+        assert_eq!(command_args(&config), ["--fit", "on", "--fit-ctx", "4096"]);
+    }
 }

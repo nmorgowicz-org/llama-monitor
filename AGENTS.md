@@ -877,6 +877,7 @@ All user data persists to `~/.config/llama-monitor/`:
 | `ui-settings.json` | Persisted `UiSettings` values such as paths, ports, remote-agent settings, explicit policy, guided-generation defaults, and chat input height |
 | `auth-config.json` | Persisted dashboard auth mode (`basic`, `form`, or both), username, and hashed password for the Security tab |
 | `gpu-env.json` | GPU environment overrides (`arch`, `devices`, `rocm_path`, `extra_env`) |
+| `model-tags.json` | User-assigned tags for discovered model files |
 | `ssh-known-hosts.json` | Trusted SSH host keys for remote-agent workflows |
 | `lhm-disabled.json` | Persisted Windows LibreHardwareMonitor disabled/enabled state |
 | `hf-token` | HuggingFace API token (plaintext, 600 permissions); used for authenticated HF search and model downloads |
@@ -885,6 +886,7 @@ All user data persists to `~/.config/llama-monitor/`:
 | `model-cache/<sha256>.json` | Cached model introspection results keyed by file SHA-256; avoids re-running `--print-model-metadata` on every load |
 
 Data is persisted:
+- Missing `sessions.json`, `templates.json`, `ui-settings.json`, `gpu-env.json`, and `model-tags.json` files are recreated from defaults at startup. Invalid existing files are left untouched and reported as warnings.
 - Sessions: autosaved every 30 seconds
 - Presets: saved immediately by the preset CRUD API
 - Templates: saved immediately by the template CRUD API

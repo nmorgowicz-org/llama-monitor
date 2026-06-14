@@ -338,12 +338,8 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
 
         const nextBtn = page.locator('#wizard-next-btn');
 
-        // Enable fit-enable programmatically — should auto-populate '2048' and keep next enabled
-        await page.evaluate(() => {
-            const cb = document.getElementById('spawn-fit-enable');
-            cb.checked = true;
-            cb.dispatchEvent(new Event('change', { bubbles: true }));
-        });
+        // Enable fit — should auto-populate '2048' and keep next enabled
+        await page.selectOption('#spawn-fit-enable', 'true');
         await expect(nextBtn).toBeEnabled();
         await expect(page.locator('#spawn-fit-target')).toHaveValue('2048');
 
@@ -353,6 +349,48 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         // Hardware step must still be active and visible after the layout change
         await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
         await expect(page.locator('#wizard-step-2 .wizard-section-title').first()).toContainText('Configure hardware');
+    });
+
+    test('Spawn payload leaves fit parameters unset until the toggle is enabled', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        const payloads = await page.evaluate(async () => {
+            const { buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js?fit-payload-test=1');
+            wizardState.hardware.fitEnabled = null;
+            wizardState.hardware.fitTarget = '';
+            const defaults = buildSpawnPayload();
+            wizardState.hardware.fitEnabled = false;
+            const disabled = buildSpawnPayload();
+            wizardState.hardware.fitEnabled = true;
+            wizardState.hardware.fitTarget = '2048';
+            const enabled = buildSpawnPayload();
+            return { defaults, disabled, enabled };
+        });
+
+        expect(payloads.defaults.fit_enabled).toBeNull();
+        expect(payloads.defaults.fit_target).toBeNull();
+        expect(payloads.disabled.fit_enabled).toBe(false);
+        expect(payloads.disabled.fit_target).toBeNull();
+        expect(payloads.enabled.fit_enabled).toBe(true);
+        expect(payloads.enabled.fit_target).toBe('2048');
+    });
+
+    test('Community templates use the correct source for Qwen and Gemma 4', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        const templates = await page.evaluate(async () => {
+            const { COMMUNITY_TEMPLATES } = await import('/js/features/chat-template-registry.js?community-template-test=1');
+            return COMMUNITY_TEMPLATES;
+        });
+
+        expect(templates.qwen.installEndpoint).toBe('/api/chat-template/install-hf');
+        expect(templates.qwen.repo).toBe('froggeric/Qwen-Fixed-Chat-Templates');
+        expect(templates.gemma4.installEndpoint).toBe('/api/chat-template/install-url');
+        expect(templates.gemma4.url).toBe(
+            'https://raw.githubusercontent.com/jscott3201/llm-tuning/main/gemma4/chat_templates/custom_pub_chat_template_gemma4.jinja',
+        );
     });
 
     test('Hardware advanced toggles work: kv-unified flips state, fit-enable auto-populates target', async ({ page }) => {
@@ -382,32 +420,12 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         await expect(page.locator('#spawn-cache-type-k')).toHaveValue('q8_0');
         await expect(page.locator('#spawn-cache-type-v')).toHaveValue('q8_0');
 
-        // kv-unified toggle flips checkbox state (use programmatic dispatch to avoid
-        // Playwright scroll-into-view side effects on the scrollable wizard-main column)
-        const kvBefore = await page.evaluate(() =>
-            document.getElementById('spawn-kv-unified')?.checked ?? false
-        );
-        await page.evaluate(() => {
-            const cb = document.getElementById('spawn-kv-unified');
-            if (!cb) return;
-            cb.checked = !cb.checked;
-            cb.dispatchEvent(new Event('input', { bubbles: true }));
-            cb.dispatchEvent(new Event('change', { bubbles: true }));
-        });
-        await page.waitForTimeout(200);
-        const kvAfter = await page.evaluate(() =>
-            document.getElementById('spawn-kv-unified')?.checked ?? false
-        );
-        expect(kvAfter).toBe(!kvBefore);
+        await expect(page.locator('#spawn-kv-unified')).toHaveValue('');
+        await page.selectOption('#spawn-kv-unified', 'false');
+        await expect(page.locator('#spawn-kv-unified')).toHaveValue('false');
 
-        // fit-enable toggle shows target input and auto-populates '2048'
-        await page.evaluate(() => {
-            const cb = document.getElementById('spawn-fit-enable');
-            if (!cb) return;
-            cb.checked = true;
-            cb.dispatchEvent(new Event('input', { bubbles: true }));
-            cb.dispatchEvent(new Event('change', { bubbles: true }));
-        });
+        // fit On shows target input and auto-populates '2048'
+        await page.selectOption('#spawn-fit-enable', 'true');
         await page.waitForTimeout(400);
 
         const fitTargetValue = await page.evaluate(() =>

@@ -12,6 +12,11 @@
 
 import { openDeferredFileBrowser, openModelFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
 import { showToast } from './toast.js';
+import {
+  COMMUNITY_TEMPLATES,
+  buildCommunityTemplateInstallRequest,
+  detectCommunityTemplateFamily,
+} from './chat-template-registry.js';
 import { switchView } from './setup-view.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune, requestDepthSweep, renderDepthSweep } from './tuning-cards.js';
@@ -204,9 +209,10 @@ export const wizardState = {
     cacheTypeK: 'q8_0', cacheTypeV: 'q8_0',
     nCpuMoe: 0,
     tensorSplit: '',
+    fitEnabled: null,
     fitTarget: '',
     cacheRam: null,
-    kvUnified: true,
+    kvUnified: null,
     flashAttn: 'on',
     mlock: false,
     prio: null,
@@ -457,12 +463,13 @@ function resetWizardState() {
   wizardState.hardware.cacheTypeK = '';
   wizardState.hardware.cacheTypeV = '';
   wizardState.hardware.flashAttn = '';
-  wizardState.hardware.kvUnified = false;
+  wizardState.hardware.kvUnified = null;
   wizardState.hardware.mlock = false;
   wizardState.hardware.prio = null;
   wizardState.hardware.nCpuMoe = 0;
   wizardState.hardware.tensorSplit = '';
-  wizardState.hardware.fitTarget = null;
+  wizardState.hardware.fitEnabled = null;
+  wizardState.hardware.fitTarget = '';
   wizardState.hardware.cacheRam = null;
   wizardState.hardware.temperature = null;
   wizardState.hardware.topP = null;
@@ -479,6 +486,10 @@ function resetWizardState() {
   wizardState.hardware.reasoningMode = null;
   wizardState.hardware.reasoningBudget = null;
   wizardState.hardware.reasoningBudgetMessage = null;
+  if (dom.kvUnifiedSelect) dom.kvUnifiedSelect.value = '';
+  if (dom.fitEnableSelect) dom.fitEnableSelect.value = '';
+  if (dom.fitTargetWrap) dom.fitTargetWrap.style.display = 'none';
+  if (dom.fitTargetInput) dom.fitTargetInput.value = '';
   wizardState.hardware.specType = '';
   wizardState.hardware.draftModelPath = '';
   wizardState.hardware.grammar = '';
@@ -634,8 +645,7 @@ function cacheDom() {
   dom.specNgramSizeInput = document.getElementById('spawn-spec-ngram-size');
   dom.draftMinInput      = document.getElementById('spawn-draft-min');
   dom.draftMaxInput      = document.getElementById('spawn-draft-max');
-  dom.kvUnifiedCheck  = document.getElementById('spawn-kv-unified');
-  dom.kvUnifiedLabel  = dom.kvUnifiedCheck?.closest('label');
+  dom.kvUnifiedSelect = document.getElementById('spawn-kv-unified');
   dom.flashAttnSelect    = document.getElementById('spawn-flash-attn');
   dom.mlockCheck         = document.getElementById('spawn-mlock');
   dom.mlockLabel         = dom.mlockCheck?.closest('label');
@@ -644,8 +654,9 @@ function cacheDom() {
   dom.threadsBatchInput  = document.getElementById('spawn-threads-batch');
   dom.specDraftNMinInput = document.getElementById('spawn-spec-draft-n-min');
   dom.specDraftPMinInput = document.getElementById('spawn-spec-draft-p-min');
-  dom.fitEnableCheck  = document.getElementById('spawn-fit-enable');
-  dom.fitEnableLabel  = dom.fitEnableCheck?.closest('label');
+  dom.specDraftTypeKSelect = document.getElementById('spawn-spec-draft-type-k');
+  dom.specDraftTypeVSelect = document.getElementById('spawn-spec-draft-type-v');
+  dom.fitEnableSelect = document.getElementById('spawn-fit-enable');
   dom.fitTargetWrap   = document.getElementById('spawn-fit-target-wrap');
   dom.cacheRamInput   = document.getElementById('spawn-cache-ram');
 
@@ -871,9 +882,9 @@ function bindEvents() {
     dom.batchSizeInput, dom.ubatchSizeInput, dom.parallelSlotsInput,
     dom.cacheTypeKSelect, dom.cacheTypeVSelect, dom.nCpuMoeInput,
     dom.tensorSplitInput, dom.specTypeSelect, dom.draftModelInput,
-    dom.kvUnifiedCheck, dom.flashAttnSelect, dom.mlockCheck, dom.prioSelect,
+    dom.kvUnifiedSelect, dom.flashAttnSelect, dom.mlockCheck, dom.prioSelect,
     dom.threadsInput, dom.threadsBatchInput,
-    dom.fitEnableCheck, dom.fitTargetInput, dom.cacheRamInput,
+    dom.fitEnableSelect, dom.fitTargetInput, dom.cacheRamInput,
     dom.specDraftNMinInput, dom.specDraftPMinInput,
   ].forEach(el => {
     el?.addEventListener('input', onHardwareChange);
@@ -916,9 +927,7 @@ function bindEvents() {
     });
   }
 
-  bindHardwareToggleSwitch(dom.kvUnifiedLabel, dom.kvUnifiedCheck);
   bindHardwareToggleSwitch(dom.mlockLabel, dom.mlockCheck);
-  bindHardwareToggleSwitch(dom.fitEnableLabel, dom.fitEnableCheck);
 
   dom.gpuLayersSelect?.addEventListener('change', () => {
     wizardState.hardware.gpuLayers = dom.gpuLayersSelect.value;
@@ -1216,7 +1225,7 @@ function getStepGuardState(step = wizardState.currentStep) {
     if (wizardState.hardware.gpuLayers === 'manual' && wizardState.hardware.gpuLayersManual == null) {
       return error('Enter a GPU layer count or switch GPU layers back to Auto.', dom.gpuLayersManualInput);
     }
-    if (dom.fitEnableCheck?.checked && !dom.fitTargetInput?.value.trim()) {
+    if (dom.fitEnableSelect?.value === 'true' && !dom.fitTargetInput?.value.trim()) {
       return error('Enter a fit target in MB or turn Auto-fit context to memory off.', dom.fitTargetInput);
     }
     // Validate draft model input when shown (for draft-model or MTP modes with external assistant)
@@ -2617,17 +2626,7 @@ function renderQuantAdvisor(quants, availVram) {
 // Avoids re-downloading the same template for each model of the same family.
 const _installedTemplateCache = {};
 
-// Community template registry keyed by model family
-const COMMUNITY_TEMPLATES = {
-  qwen: {
-    name: 'qwen-froggeric-fixed',
-    display: "froggeric's Fixed Template",
-    repo: 'froggeric/Qwen-Fixed-Chat-Templates',
-    file: 'chat_template.jinja',
-    description: 'Fixes tool calling, KV cache invalidation & agentic loop bugs for Qwen 3.5 / 3.6',
-    hfUrl: 'https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates',
-  },
-};
+export { COMMUNITY_TEMPLATES };
 
 function _chatTemplateDisplayName(path) {
   if (!path) return 'Embedded (from model file)';
@@ -2647,9 +2646,9 @@ function _applyCustomChatTemplate(path) {
 
 function detectModelFamily(name) {
   const lower = (name || '').toLowerCase();
-  if (lower.includes('qwen') || lower.includes('qwopus')) return 'qwen';
+  const communityFamily = detectCommunityTemplateFamily(lower);
+  if (communityFamily) return communityFamily;
   if (lower.includes('llama-3') || lower.includes('llama3') || lower.match(/llama.?3/)) return 'llama3';
-  if (lower.includes('gemma')) return 'gemma';
   if (lower.includes('mistral') || lower.includes('mixtral')) return 'mistral';
   return null;
 }
@@ -2659,7 +2658,7 @@ function detectModelFamily(name) {
 function _ggufArchToFamily(arch) {
   const a = arch.toLowerCase();
   if (a.includes('qwen')) return 'qwen';
-  if (a.includes('gemma')) return 'gemma';
+  if (a.includes('gemma4') || a.includes('gemma_4')) return 'gemma4';
   if (a.includes('mistral') || a.includes('mixtral')) return 'mistral';
   if (a.includes('llama')) return 'llama3';
   return null;
@@ -2810,9 +2809,10 @@ async function autoInstallChatTemplate() {
     const headers = window.authHeaders
       ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
       : { 'Content-Type': 'application/json' };
-    const resp = await fetch('/api/chat-template/install-hf', {
+    const install = buildCommunityTemplateInstallRequest(tplForFamily);
+    const resp = await fetch(install.endpoint, {
       method: 'POST', headers,
-      body: JSON.stringify({ repo: tplForFamily.repo, file: tplForFamily.file, name: tplForFamily.name }),
+      body: JSON.stringify(install.body),
     });
     const data = resp.ok ? await resp.json() : { ok: false, error: `HTTP ${resp.status}` };
     if (data.ok && data.path) {
@@ -3004,7 +3004,7 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       const descEl = document.createElement('span');
       descEl.textContent = ` — ${tpl.description}`;
       const link = document.createElement('a');
-      link.href = tpl.hfUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      link.href = tpl.sourceUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
       link.textContent = ' ↗'; link.className = 'ct-hf-link';
       bodyEl.appendChild(nameEl);
       bodyEl.appendChild(descEl);
@@ -3601,8 +3601,7 @@ function onHardwareChange(e) {
   // layout, so the deferred restore's nested rAF can conflict with the
   // browser's own Tab/focus scroll, making content appear to disappear.
   const isToggle = e && (
-    e.target === dom.fitEnableCheck ||
-    e.target === dom.kvUnifiedCheck ||
+    e.target === dom.fitEnableSelect ||
     e.target === dom.mlockCheck
   );
 
@@ -3639,10 +3638,13 @@ function readHardwareState() {
   if (dom.parallelSlotsInput) { const v = Number(dom.parallelSlotsInput.value); h.parallelSlots = v > 0 ? v : 1; }
   if (dom.cacheTypeKSelect) h.cacheTypeK = dom.cacheTypeKSelect.value || 'q8_0';
   if (dom.cacheTypeVSelect) h.cacheTypeV = dom.cacheTypeVSelect.value || 'q8_0';
+  if (dom.specDraftTypeKSelect) h.specDraftTypeK = dom.specDraftTypeKSelect.value || '';
+  if (dom.specDraftTypeVSelect) h.specDraftTypeV = dom.specDraftTypeVSelect.value || '';
   if (dom.nCpuMoeInput) { const v = dom.nCpuMoeInput.value; h.nCpuMoe = v !== '' ? Number(v) : 0; }
   if (dom.tensorSplitInput) h.tensorSplit = dom.tensorSplitInput.value.trim() || '';
-  if (dom.fitEnableCheck) {
-    const enabled = dom.fitEnableCheck.checked;
+  if (dom.fitEnableSelect) {
+    const enabled = dom.fitEnableSelect.value === 'true';
+    h.fitEnabled = dom.fitEnableSelect.value === '' ? null : enabled;
     if (dom.fitTargetWrap) dom.fitTargetWrap.style.display = enabled ? '' : 'none';
     if (enabled && dom.fitTargetInput && !dom.fitTargetInput.value.trim()) {
       dom.fitTargetInput.value = '2048';
@@ -3651,7 +3653,11 @@ function readHardwareState() {
   } else if (dom.fitTargetInput) {
     h.fitTarget = dom.fitTargetInput.value.trim() || '';
   }
-  if (dom.kvUnifiedCheck) h.kvUnified = dom.kvUnifiedCheck.checked;
+  if (dom.kvUnifiedSelect) {
+    h.kvUnified = dom.kvUnifiedSelect.value === ''
+      ? null
+      : dom.kvUnifiedSelect.value === 'true';
+  }
   if (dom.flashAttnSelect) h.flashAttn = dom.flashAttnSelect.value || '';
   if (dom.mlockCheck) h.mlock = dom.mlockCheck.checked;
   if (dom.prioSelect) { const v = dom.prioSelect.value; h.prio = v !== '' ? Number(v) : null; }
@@ -3693,7 +3699,7 @@ function maybeRestoreHardwareStepScroll() {
     if (wizardState.currentStep !== 2) return;
 
     const focused = document.activeElement;
-    if (focused === dom.kvUnifiedCheck || focused === dom.fitEnableCheck) {
+    if (focused === dom.fitEnableSelect) {
       focused.blur?.();
     }
 
@@ -7255,7 +7261,8 @@ function renderSummary() {
     ...(hw.fitTarget ? [{ label: '--fit-target', value: String(hw.fitTarget) }] : []),
   ];
   if (hw.flashAttn && hw.flashAttn !== 'auto') rows.push({ label: 'Flash Attn', value: hw.flashAttn });
-  if (hw.kvUnified) rows.push({ label: 'KV unified', value: 'Yes' });
+  if (hw.kvUnified != null) rows.push({ label: 'KV unified', value: hw.kvUnified ? 'On' : 'Off' });
+  if (hw.fitEnabled != null) rows.push({ label: 'Fit', value: hw.fitEnabled ? 'On' : 'Off' });
   if (hw.mlock) rows.push({ label: 'mlock', value: 'Yes' });
   if (hw.prio != null) rows.push({ label: 'Priority', value: ['Normal', 'Medium', 'High', 'Realtime'][hw.prio] ?? String(hw.prio) });
   if (hw.nCpuMoe > 0 && arch.nExperts > 0) rows.push({ label: 'MoE CPU offload', value: `${hw.nCpuMoe} of ${arch.nLayers} layers` });
@@ -7773,7 +7780,8 @@ function _renderPresetParamsStep() {
         { label: 'KV cache K', value: kvK },
         { label: 'KV cache V', value: kvV },
         ...(h.flashAttn && h.flashAttn !== 'auto' ? [{ label: 'Flash Attn', value: h.flashAttn }] : []),
-        ...(h.kvUnified ? [{ label: 'KV unified', value: 'Yes' }] : []),
+        ...(h.kvUnified != null ? [{ label: 'KV unified', value: h.kvUnified ? 'On' : 'Off' }] : []),
+        ...(h.fitEnabled != null ? [{ label: 'Fit', value: h.fitEnabled ? 'On' : 'Off' }] : []),
         ...(h.mlock ? [{ label: 'mlock', value: 'Yes' }] : []),
         ...(h.prio != null ? [{ label: 'Priority', value: ['Normal', 'Medium', 'High', 'Realtime'][h.prio] ?? String(h.prio) }] : []),
         ...(h.nCpuMoe > 0 && arch.nExperts > 0 ? [{ label: 'MoE CPU offload', value: `${h.nCpuMoe} of ${arch.nLayers} layers` }] : []),
@@ -8115,7 +8123,7 @@ async function waitForSpawnReadiness(port, timeoutMs = 30000) {
   throw new Error(`llama-server started but did not become reachable on port ${port} in time.`);
 }
 
-function buildSpawnPayload() {
+export function buildSpawnPayload() {
   const h = wizardState.hardware, m = wizardState.model;
   const arch = getEffectiveArch();
   const gpuLayers = h.gpuLayers === 'manual' ? (h.gpuLayersManual ?? -1) : (h.gpuLayers === 'all' ? -1 : null);
@@ -8168,6 +8176,8 @@ function buildSpawnPayload() {
     parallel_slots: parallelSlots,
     ctk: h.cacheTypeK || '',
     ctv: h.cacheTypeV || '',
+    spec_draft_type_k: h.specDraftTypeK || '',
+    spec_draft_type_v: h.specDraftTypeV || '',
     n_cpu_moe: h.nCpuMoe || null,
     tensor_split: h.tensorSplit || '',
     no_mmap: true,
@@ -8177,14 +8187,14 @@ function buildSpawnPayload() {
     spec_draft_n_min: usesMtpSpec && h.mtpDraftNMin != null ? h.mtpDraftNMin : undefined,
     spec_draft_p_min: usesMtpSpec && h.mtpDraftPMin != null ? h.mtpDraftPMin : undefined,
     draft_model: assistantPath || '',
-    kv_unified: h.kvUnified || null,
+    kv_unified: h.kvUnified,
     flash_attn: h.flashAttn || '',
     mlock: h.mlock || false,
     prio: h.prio != null ? h.prio : null,
     threads: h.threads != null ? h.threads : null,
     threads_batch: h.threadsBatch != null ? h.threadsBatch : null,
-    fit_enabled: h.fitTarget ? true : null,
-    fit_target: h.fitTarget || null,
+    fit_enabled: h.fitEnabled,
+    fit_target: h.fitEnabled === true ? (h.fitTarget || null) : null,
     cache_ram_mib: (h.cacheRam !== null && h.cacheRam !== undefined) ? h.cacheRam : null,
     // Sampling defaults (null = use llama-server built-in defaults)
     temperature: h.temperature != null ? h.temperature : null,

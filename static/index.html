@@ -64,8 +64,40 @@
                 <div class="auth-shell-recovery" id="auth-shell-recovery"></div>
                 <div class="auth-shell-meta">Local-first dashboard access with optional extra protection.</div>
             </div>
-        </div>
-      </div>
+                            </div>
+                        </div>
+
+                        <!-- Draft-MTP KV cache precision -->
+                        <div class="kv-inline-row">
+                            <div class="kv-inline-field">
+                                <label for="spawn-spec-draft-type-k" class="kv-inline-label">Draft-MTP K quant</label>
+                                <select id="spawn-spec-draft-type-k" title="KV cache quantization for MTP draft tokens.">
+                                    <option value="f32">f32</option>
+                                    <option value="f16">f16</option>
+                                    <option value="bf16">bf16</option>
+                                    <option value="q8_0" selected>q8_0</option>
+                                    <option value="q4_0">q4_0</option>
+                                    <option value="q4_1">q4_1</option>
+                                    <option value="iq4_nl">iq4_nl</option>
+                                    <option value="q5_0">q5_0</option>
+                                    <option value="q5_1">q5_1</option>
+                                </select>
+                            </div>
+                            <div class="kv-inline-field">
+                                <label for="spawn-spec-draft-type-v" class="kv-inline-label">Draft-MTP V quant</label>
+                                <select id="spawn-spec-draft-type-v" title="KV cache quantization for MTP draft tokens.">
+                                    <option value="f32">f32</option>
+                                    <option value="f16">f16</option>
+                                    <option value="bf16">bf16</option>
+                                    <option value="q8_0" selected>q8_0</option>
+                                    <option value="q4_0">q4_0</option>
+                                    <option value="q4_1">q4_1</option>
+                                    <option value="iq4_nl">iq4_nl</option>
+                                    <option value="q5_0">q5_0</option>
+                                    <option value="q5_1">q5_1</option>
+                                </select>
+                            </div>
+                        </div>
       <!-- Shared SVG filters for sparkline visualizations -->
       <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
         <defs>
@@ -2390,11 +2422,12 @@
                                 <label class="pe-label" for="modal-chat-template-file" title="Path to a chat template file. Wizard-created presets can auto-install one for models that need a custom template.">Chat Template File (--chat-template-file)</label>
                                 <div class="pe-input-row">
                                     <input type="text" class="pe-input" id="modal-chat-template-file" placeholder="/path/to/chat_template.jinja">
+                                    <button type="button" class="btn-sm btn-preset" id="preset-recommended-chat-template-btn" title="Download the recommended community template for the selected Qwen or Gemma 4 model">Recommended</button>
                                     <button type="button" class="btn-sm btn-preset" id="preset-browse-chat-template-btn" title="Choose an existing template from the local template library">Library</button>
                                     <button type="button" class="btn-sm btn-preset" id="preset-upload-chat-template-btn" title="Upload a new Jinja template from your browser">Upload</button>
                                     <button type="button" class="btn-sm btn-preset" id="preset-clear-chat-template-btn" title="Clear chat template override and use the model default">Clear</button>
                                 </div>
-                                <div class="pe-field-hint">Leave blank to use the model's embedded template or the wizard's recommended community override.</div>
+                                <div class="pe-field-hint">Recommended detects Qwen or Gemma 4 from the model name. Leave blank to use the model's embedded template.</div>
                             </div>
                             <div class="pe-row">
                                 <div class="pe-field">
@@ -2479,17 +2512,23 @@
                                     </select>
                                 </div>
                             </div>
-                            <div class="pe-toggles">
-                                <label class="pe-toggle-item" title="Use a single unified KV cache pool shared across all slots. Required on unified memory systems (e.g., Apple Silicon, DGX Spark).">
-                                    <input type="checkbox" id="modal-kv-unified">
-                                    <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
-                                    <span class="pe-toggle-label">KV unified</span>
-                                </label>
-                                <label class="pe-toggle-item" title="Automatically scale context size and GPU layers to fit within available VRAM.">
-                                    <input type="checkbox" id="modal-fit-enabled">
-                                    <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
-                                    <span class="pe-toggle-label">fit to VRAM</span>
-                                </label>
+                            <div class="pe-row">
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-kv-unified" title="Default leaves KV buffer selection to llama-server.">KV Unified</label>
+                                    <select class="pe-select" id="modal-kv-unified">
+                                        <option value="">Default</option>
+                                        <option value="true">On (--kv-unified)</option>
+                                        <option value="false">Off (--no-kv-unified)</option>
+                                    </select>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-fit-enabled" title="Default leaves fit behavior to llama-server.">Fit to VRAM</label>
+                                    <select class="pe-select" id="modal-fit-enabled">
+                                        <option value="">Default</option>
+                                        <option value="true">On (--fit on)</option>
+                                        <option value="false">Off (--fit off)</option>
+                                    </select>
+                                </div>
                             </div>
                             <div class="pe-field" id="modal-fit-target-wrap" style="display:none;">
                                 <label class="pe-label" for="modal-fit-target" title="Passes --fit-target with a memory budget in MB, matching the spawn wizard hardware step.">Fit Target MB (--fit-target)</label>
@@ -2773,6 +2812,36 @@
                                         <input type="number" class="pe-input" id="modal-spec-draft-p-min" min="0" max="1" step="0.05" placeholder="0.9">
                                     </div>
                                 </div>
+                                <div class="pe-row pe-row-2">
+                                    <div class="pe-field">
+                                        <label class="pe-label" for="modal-spec-draft-type-k" title="KV cache quantization for MTP draft tokens (K).">Draft K Quant</label>
+                                        <select class="pe-input" id="modal-spec-draft-type-k">
+                                            <option value="f32">f32</option>
+                                            <option value="f16">f16</option>
+                                            <option value="bf16">bf16</option>
+                                            <option value="q8_0">q8_0</option>
+                                            <option value="q4_0">q4_0</option>
+                                            <option value="q4_1">q4_1</option>
+                                            <option value="iq4_nl">iq4_nl</option>
+                                            <option value="q5_0">q5_0</option>
+                                            <option value="q5_1">q5_1</option>
+                                        </select>
+                                    </div>
+                                    <div class="pe-field">
+                                        <label class="pe-label" for="modal-spec-draft-type-v" title="KV cache quantization for MTP draft tokens (V).">Draft V Quant</label>
+                                        <select class="pe-input" id="modal-spec-draft-type-v">
+                                            <option value="f32">f32</option>
+                                            <option value="f16">f16</option>
+                                            <option value="bf16">bf16</option>
+                                            <option value="q8_0">q8_0</option>
+                                            <option value="q4_0">q4_0</option>
+                                            <option value="q4_1">q4_1</option>
+                                            <option value="iq4_nl">iq4_nl</option>
+                                            <option value="q5_0">q5_0</option>
+                                            <option value="q5_1">q5_1</option>
+                                        </select>
+                                    </div>
+                                </div>
                             </div>
                             <!-- Draft model path: visible for draft-model -->
                             <div id="spec-draft-model-wrap" style="display:none;">
@@ -2824,13 +2893,6 @@
                                     <label class="pe-label" for="modal-seed" title="Random seed for reproducible generation. -1 = random.">Seed (-s)</label>
                                     <input type="number" class="pe-input" id="modal-seed" placeholder="random">
                                 </div>
-                            </div>
-                            <div class="pe-toggles">
-                                <label class="pe-toggle-item" title="Ignore end-of-sequence token — model will keep generating beyond EOS. Useful for some instruct formats.">
-                                    <input type="checkbox" id="modal-ignore-eos">
-                                    <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
-                                    <span class="pe-toggle-label">ignore EOS</span>
-                                </label>
                             </div>
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-system-prompt-file" title="Path to a text file containing the system prompt.">System Prompt File</label>
@@ -3337,12 +3399,35 @@
                                 <option value="q4_0">q4_0 — saves VRAM</option>
                             </select>
                         </div>
-                        <label class="kv-unified-toggle" title="Use a single unified KV cache buffer (--kv-unified). Can reduce memory fragmentation on some setups.">
-                            <input type="checkbox" id="spawn-kv-unified">
-                            <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
-                            <span class="kv-unified-text">Unified</span>
-                        </label>
-                    </div>
+                         <div class="kv-inline-field">
+                             <label for="spawn-kv-unified" class="kv-inline-label">KV unified</label>
+                             <select id="spawn-kv-unified" title="Default leaves unified KV selection to llama-server.">
+                                 <option value="">Default</option>
+                                 <option value="true">On</option>
+                                 <option value="false">Off</option>
+                             </select>
+                         </div>
+                     </div>
+
+                     <!-- Draft-MTP KV cache precision -->
+                     <div class="kv-inline-row">
+                         <div class="kv-inline-field">
+                             <label for="spawn-spec-draft-type-k" class="kv-inline-label">Draft-MTP K quant</label>
+                             <select id="spawn-spec-draft-type-k" title="KV cache quantization for MTP draft tokens.">
+                                 <option value="f16">f16</option>
+                                 <option value="q8_0" selected>q8_0</option>
+                                 <option value="q4_0">q4_0</option>
+                             </select>
+                         </div>
+                         <div class="kv-inline-field">
+                             <label for="spawn-spec-draft-type-v" class="kv-inline-label">Draft-MTP V quant</label>
+                             <select id="spawn-spec-draft-type-v" title="KV cache quantization for MTP draft tokens.">
+                                 <option value="f16">f16</option>
+                                 <option value="q8_0" selected>q8_0</option>
+                                 <option value="q4_0">q4_0</option>
+                             </select>
+                         </div>
+                     </div>
 
                     <!-- MTP section (shown for models with MTP heads) -->
                     <div class="hw-mtp-section" id="hw-mtp-section" style="display:none;">
@@ -3480,11 +3565,11 @@
                             <div class="hardware-field" style="grid-column: 1/-1;">
                                 <label>Auto-fit context to memory</label>
                                 <div class="fit-target-row">
-                                    <label class="fit-enable-toggle" title="Pass --fit on to llama-server, which automatically adjusts context size to fit within the target memory budget.">
-                                        <input type="checkbox" id="spawn-fit-enable">
-                                        <span class="fit-enable-track"><span class="fit-enable-thumb"></span></span>
-                                        <span class="fit-enable-text">Enable</span>
-                                    </label>
+                                    <select id="spawn-fit-enable" title="Default leaves fit behavior to llama-server.">
+                                        <option value="">Default</option>
+                                        <option value="true">On</option>
+                                        <option value="false">Off</option>
+                                    </select>
                                     <div class="fit-target-input-wrap" id="spawn-fit-target-wrap" style="display:none;">
                                         <input type="number" id="spawn-fit-target" min="512" step="256" placeholder="2048">
                                         <span class="fit-target-unit">MB</span>

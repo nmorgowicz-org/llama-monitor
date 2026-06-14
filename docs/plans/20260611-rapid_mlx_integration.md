@@ -68,6 +68,8 @@ selected during implementation.
 - Primary launch command: `rapid-mlx serve <model-or-path>`
 - `<model-or-path>` can be a Rapid-MLX alias, a Hugging Face repository ID, or a
   local model directory.
+- `vllm-mlx` is a deprecated CLI alias for `rapid-mlx`; do not hardcode it in command
+  construction or probes — detect and use whichever binary is on PATH.
 - Optional package extras include vision, DFlash, embeddings, guided generation,
   audio, chat, and an aggregate `all` extra.
 
@@ -85,7 +87,11 @@ telemetry are not llama.cpp-compatible.
 | `GET /v1/status` | API key when configured | Runtime, queue, throughput, memory, and request telemetry |
 | `GET /v1/cache/stats` | API key when configured | Optional cache telemetry; schema may vary |
 | `POST /v1/requests/{id}/cancel` | API key when configured | Request cancellation |
-| `DELETE /v1/requests/{id}/cancel` | API key when configured | Cancellation alias |
+| `DELETE /v1/requests/{id}` | API key when configured | Cancellation alias (no `/cancel` suffix) |
+
+Additional probe-only aliases that bypass authentication (intentional — auth would break
+Kubernetes liveness probes): `/healthz` (delegates to `/health`), `/readyz` (delegates to
+`/health/ready`), `/livez` (returns `{ status }`).
 
 `/health` includes:
 
@@ -95,12 +101,17 @@ telemetry are not llama.cpp-compatible.
 - `model_name`
 - `model_type`
 - `engine_type`
-- MCP state
+- `mcp`: `{ enabled, servers_connected, servers_total, tools_available }` — omitted or null when MCP is disabled
+
+**`model_loaded` vs `ready`**: `model_loaded` becomes true when the engine object is
+created, before warmup, prefix-cache loading, and MCP initialization complete. `ready`
+is the authoritative readiness signal. Do not use `model_loaded: true` as a readiness
+gate — always use `/health/ready` returning HTTP 200.
 
 `/v1/status` at the research baseline includes:
 
 - `status`: `generating`, `idle`, or `not_loaded`
-- `model`
+- `model`: served model name (note: `/health` calls this `model_name`; the names differ)
 - `uptime_s`
 - `steps_executed`
 - `num_running`
@@ -108,11 +119,27 @@ telemetry are not llama.cpp-compatible.
 - `total_requests_processed`
 - `total_prompt_tokens`
 - `total_completion_tokens`
-- `generation_tps`
-- `prompt_tps`
-- optional Metal memory values such as active, peak, and cache gigabytes
-- a variable cache object
-- a variable requests array
+- `generation_tps`: always a float; `0.0` when idle, never `null` or absent
+- `prompt_tps`: always a float; `0.0` when idle, never `null` or absent
+- `metal`: `{ active_memory_gb, peak_memory_gb, cache_memory_gb }` — all values in GB;
+  entire object may be absent when Metal telemetry is unavailable
+- `cache`: prefix/paged/memory-aware cache object, or `{"enabled": false}` when disabled
+- `requests`: array of active request details
+
+**TPS zero vs. absent**: Because `generation_tps` and `prompt_tps` are always present as
+`0.0` (never null), a dashboard receiving `generation_tps: 0.0` means the server is idle
+and reachable — it does not mean the metric is missing. The throughput card should render
+whenever `/v1/status` is reachable, and show zero as zero. The `None` in the normalized
+`InferenceMetricsSnapshot` indicates the field was absent from the JSON entirely (i.e.,
+polling failed), not that it was zero.
+
+`/v1/cache/stats` response schemas:
+
+- Vision/multimodal model: `{ multimodal_kv_cache, pixel_values_cache, pil_image_cache }`
+- Text-only model (graceful degradation when `mlx_vlm` is not loaded):
+  `{ message, model_type }` — this shape is a signal that vision cache is unavailable,
+  not an error. The cache capability probe must treat the text-only fallback shape as
+  "capability absent" and suppress the cache card accordingly.
 
 The integration must parse status payloads tolerantly. Unknown fields are ignored;
 missing optional fields remain absent. Do not fail an otherwise healthy session
@@ -812,6 +839,12 @@ InferenceMetricsSnapshot
   active_requests
   backend_details
 ```
+
+**Unit conversion**: Rapid-MLX `/v1/status` serves `metal.active_memory_gb`,
+`metal.peak_memory_gb`, and `metal.cache_memory_gb` in gigabytes (float). The normalized
+snapshot stores `active_memory_bytes`, `peak_memory_bytes`, and `cache_memory_bytes`; the
+mapper must multiply by `1_073_741_824` (1 GiB) when converting. Do not pass GB values
+through as bytes.
 
 Absence remains `None`; it is not converted to `0`.
 

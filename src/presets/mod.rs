@@ -142,9 +142,6 @@ pub struct ModelPreset {
     pub fit_target: Option<String>,
     #[serde(default)]
     pub fit_print: Option<bool>,
-    // Misc
-    #[serde(default)]
-    pub ignore_eos: bool,
     // Advanced
     #[serde(default)]
     pub seed: Option<i64>,
@@ -264,16 +261,31 @@ fn template_next_id() -> String {
 
 /// Load user templates from disk. Returns empty vec on any error (defaults are in the frontend).
 pub fn load_templates(path: &Path) -> Vec<SystemPromptTemplate> {
-    if path.exists() {
-        match std::fs::read_to_string(path) {
-            Ok(contents) => match serde_json::from_str::<Vec<SystemPromptTemplate>>(&contents) {
-                Ok(templates) => return templates,
-                Err(e) => eprintln!("[warn] Failed to parse templates file: {e}"),
-            },
-            Err(e) => eprintln!("[warn] Failed to read templates file: {e}"),
+    match std::fs::read_to_string(path) {
+        Ok(contents) => match serde_json::from_str::<Vec<SystemPromptTemplate>>(&contents) {
+            Ok(templates) => templates,
+            Err(e) => {
+                eprintln!("[warn] Failed to parse templates file {:?}: {e}", path);
+                vec![]
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let templates = vec![];
+            if !path.as_os_str().is_empty()
+                && let Err(e) = save_templates(path, &templates)
+            {
+                eprintln!(
+                    "[warn] Failed to initialize missing templates file {:?}: {e}",
+                    path
+                );
+            }
+            templates
+        }
+        Err(e) => {
+            eprintln!("[warn] Failed to read templates file {:?}: {e}", path);
+            vec![]
         }
     }
-    vec![]
 }
 
 /// Save user templates to disk atomically.
@@ -308,6 +320,18 @@ pub fn default_presets() -> Vec<ModelPreset> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn missing_templates_file_is_recreated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("templates.json");
+
+        let templates = load_templates(&path);
+
+        assert!(templates.is_empty());
+        assert!(path.exists());
+        assert_eq!(load_templates(&path).len(), 0);
+    }
 
     #[test]
     fn test_default_presets_not_empty() {

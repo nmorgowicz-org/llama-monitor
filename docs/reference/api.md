@@ -432,8 +432,7 @@ Request body (full `ModelPreset` shape, all fields optional with defaults):
   "fit_print": null,
   "kv_unified": null,
   "cache_idle_slots": null,
-  "cache_ram_mib": null,
-  "ignore_eos": false
+  "cache_ram_mib": null
 }
 ```
 
@@ -459,14 +458,13 @@ All fields use `#[serde(default)]` for backward compatibility.
 | `api_key` | Option<String> | null | API key for hosted endpoint |
 | `alias` | Option<String> | null | Display alias for the preset |
 | `benchmark_mode` | bool | false | Run in benchmark mode |
-| `fit_enabled` | Option<bool> | null | Auto-fit context to available VRAM |
-| `fit_ctx` | Option<u32> | null | Target context size for fit mode |
-| `fit_target` | Option<String> | null | Fit target identifier |
-| `fit_print` | Option<bool> | null | Print fit diagnostics |
-| `kv_unified` | Option<bool> | null | Unified KV cache |
+| `fit_enabled` | Option<bool> | null | `null` leaves the server default unchanged, `true` emits `--fit on`, and `false` emits `--fit off` |
+| `fit_ctx` | Option<u32> | null | Legacy minimum context option; emitted only when fit is enabled and `fit_target` is unset |
+| `fit_target` | Option<String> | null | Fit memory margin in MB; the preferred fit option when fit is enabled |
+| `fit_print` | Option<bool> | null | Legacy persisted field; not emitted for current llama-server builds |
+| `kv_unified` | Option<bool> | null | `null` leaves the server default unchanged, `true` emits `--kv-unified`, and `false` emits `--no-kv-unified` |
 | `cache_idle_slots` | Option<bool> | null | Cache idle slots |
 | `cache_ram_mib` | Option<i32> | null | Max RAM for cache (MiB) |
-| `ignore_eos` | bool | false | Ignore end-of-sequence token |
 | `prio` | Option<i32> | null | Process priority |
 | `prio_batch` | Option<i32> | null | Batch process priority |
 | `bind_host` | Option<String> | null | Bind address override |
@@ -1873,6 +1871,14 @@ Upload a local chat template file to be used by presets.
 Install a chat template from HF.
 
 - Requires: `api-token`.
+
+### `POST /api/chat-template/install-url`
+Install and cache a community chat template from an HTTPS
+`raw.githubusercontent.com` URL.
+
+- Requires: `api-token`.
+- Request fields: `url`, stable `name`, and optional `force`.
+- Redirects are rejected and template content is limited to 1 MiB.
 
 ## HuggingFace Integration
 

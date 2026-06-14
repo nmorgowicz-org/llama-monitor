@@ -52,6 +52,8 @@ pub const FEATURES_CHAT_SESSIONS_SIDEBAR_JS: &str =
 pub const FEATURES_CHAT_STATE_JS: &str = include_str!("../../static/js/features/chat-state.js");
 pub const FEATURES_CHAT_SUGGESTIONS_JS: &str =
     include_str!("../../static/js/features/chat-suggestions.js");
+pub const FEATURES_CHAT_TEMPLATE_REGISTRY_JS: &str =
+    include_str!("../../static/js/features/chat-template-registry.js");
 pub const FEATURES_CHAT_TEMPLATES_JS: &str =
     include_str!("../../static/js/features/chat-templates.js");
 pub const FEATURES_CHAT_TRANSPORT_JS: &str =

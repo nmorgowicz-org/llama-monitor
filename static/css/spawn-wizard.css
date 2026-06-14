@@ -4812,6 +4812,9 @@
   gap: 12px;
   margin-top: 6px;
 }
+.fit-target-row > select {
+  min-width: 120px;
+}
 .fit-enable-toggle {
   display: flex;
   align-items: center;
