@@ -3443,6 +3443,356 @@ fn api_bench_sweep(
         })
 }
 
+// ── Online MTP n-max sweep ────────────────────────────────────────────────────
+//
+// Probes each requested spec-draft-n-max value by stop → modify config →
+// start → wait for health → stream a chat completion → measure gen t/s.
+// Returns all probe results plus the recommended n_max.
+// Expected duration: 1–3 min per probe (model load + inference), so 4–12 min
+// total for a [1,2,3,4] sweep. The HTTP call is synchronous; the client should
+// display an elapsed timer while waiting.
+
+/// Send one streaming chat completion to `url` using `prompt_type` and return
+/// `(gen_tps, ttft_ms)`. Returns `None` if the server is unreachable or fails.
+async fn online_probe_gen_tps(url: &str, prompt_type: &str) -> Option<(f64, f64)> {
+    let prompt = match prompt_type {
+        "code" => concat!(
+            "Write a Rust function that reads a JSON file from disk, parses it into a ",
+            "serde_json::Value, iterates over every key in the top-level object, and ",
+            "prints each key-value pair. Include error handling with anyhow."
+        ),
+        _ => "Explain in one sentence what llama.cpp is used for.",
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(90))
+        .build()
+        .ok()?;
+
+    let payload = serde_json::json!({
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 512,
+        "temperature": 0.2,
+        "stream": true,
+        "chat_template_kwargs": {"enable_thinking": false},
+    });
+
+    let start = std::time::Instant::now();
+    let resp = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .json(&payload)
+        .send()
+        .await
+        .ok()?;
+
+    if !resp.status().is_success() {
+        return None;
+    }
+
+    let mut stream = resp.bytes_stream();
+    use futures_util::StreamExt;
+
+    let mut first_token_time: Option<f64> = None;
+    let mut generated_tokens = 0u64;
+
+    while let Some(Ok(chunk)) = stream.next().await {
+        let s = std::str::from_utf8(&chunk).unwrap_or("").to_string();
+        for line in s.lines() {
+            if let Some(data) = line.trim().strip_prefix("data: ") {
+                if data == "[DONE]" {
+                    break;
+                }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(c) = v["usage"]["completion_tokens"].as_u64() {
+                        generated_tokens = c;
+                    }
+                    if let Some(content) = v["choices"][0]["delta"]["content"].as_str() {
+                        if first_token_time.is_none() && !content.is_empty() {
+                            first_token_time = Some(start.elapsed().as_millis() as f64);
+                        }
+                        if v["usage"]["completion_tokens"].is_null() {
+                            generated_tokens = generated_tokens.saturating_add(1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let end_ms = start.elapsed().as_millis() as f64;
+    let ttft_ms = first_token_time.unwrap_or(end_ms);
+    let gen_dur_s = (end_ms - ttft_ms).max(1.0) / 1000.0;
+    if generated_tokens == 0 {
+        generated_tokens = 1;
+    }
+    let gen_tps = generated_tokens as f64 / gen_dur_s;
+
+    Some((gen_tps, ttft_ms))
+}
+
+/// Poll `http://127.0.0.1:{port}/health` until it returns 200 or timeout.
+async fn wait_for_server_health(port: u16, timeout_secs: u64) -> bool {
+    let url = format!("http://127.0.0.1:{port}/health");
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
+    loop {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        if let Ok(resp) = client.get(&url).send().await
+            && resp.status().is_success()
+        {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+fn api_bench_mtp_sweep(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "bench" / "mtp-sweep")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::hf_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let state = state.clone();
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                // Only works with a locally-spawned server
+                let local_running = state
+                    .local_server_running
+                    .lock()
+                    .map(|g| *g)
+                    .unwrap_or(false);
+                if !local_running {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "MTP sweep requires a locally-spawned server."
+                        })),
+                    ));
+                }
+
+                // Read the current server config before we touch anything
+                let base_config = {
+                    let guard = state.server_config.lock().unwrap();
+                    guard.clone()
+                };
+                let Some(base_config) = base_config else {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "No saved server configuration found."
+                        })),
+                    ));
+                };
+
+                // Validate that spec decoding is actually configured
+                let has_spec = base_config.spec.spec_type.is_some()
+                    || base_config.spec.spec_default
+                    || !base_config.spec.draft_model.is_empty();
+                if !has_spec {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "MTP sweep only applies to servers with speculative decoding enabled."
+                        })),
+                    ));
+                }
+
+                // Determine port from current session
+                let port = match state.get_active_session() {
+                    Some(s) => match &s.mode {
+                        crate::state::SessionMode::Spawn { port, .. } => *port,
+                        _ => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "MTP sweep only works with locally-spawned servers."
+                                })),
+                            ));
+                        }
+                    },
+                    None => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "No active session."
+                            })),
+                        ));
+                    }
+                };
+
+                // Parse request
+                let n_max_values: Vec<u32> = body["n_max_values"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_u64().map(|n| n as u32))
+                            .filter(|&n| (1..=16).contains(&n))
+                            .collect()
+                    })
+                    .unwrap_or_else(|| vec![1, 2, 3, 4]);
+
+                if n_max_values.is_empty() || n_max_values.len() > 8 {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "n_max_values must have 1–8 entries in range 1–16."
+                        })),
+                    ));
+                }
+
+                let prompt_type = body["prompt_type"]
+                    .as_str()
+                    .unwrap_or("code")
+                    .to_string();
+
+                let chat_url = format!("http://127.0.0.1:{port}/v1/chat/completions");
+
+                // Run probes
+                let mut probes: Vec<serde_json::Value> = Vec::new();
+
+                for &n_max in &n_max_values {
+                    state.push_log(format!(
+                        "[mtp-sweep] probing spec-draft-n-max={n_max}"
+                    ));
+
+                    // Clone config and set n_max for this probe
+                    let mut probe_config = base_config.clone();
+                    probe_config.spec.spec_draft_n_max = Some(n_max);
+
+                    // Stop the current server
+                    if let Err(e) =
+                        crate::llama::server::stop_server(&state).await
+                    {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Failed to stop server for n_max={n_max}: {e}")
+                            })),
+                        ));
+                    }
+
+                    // Let the process fully exit
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+
+                    // Start with modified config
+                    if let Err(e) =
+                        crate::llama::server::start_server(&state, probe_config, &cfg).await
+                    {
+                        state.push_log(format!(
+                            "[mtp-sweep] start_server failed for n_max={n_max}: {e}"
+                        ));
+                        probes.push(serde_json::json!({
+                            "n_max": n_max,
+                            "gen_tps": 0.0,
+                            "ttft_ms": 0.0,
+                            "error": format!("Server failed to start: {e}")
+                        }));
+                        continue;
+                    }
+
+                    // Wait up to 120s for the model to load
+                    if !wait_for_server_health(port, 120).await {
+                        state.push_log(format!(
+                            "[mtp-sweep] server did not become healthy for n_max={n_max}"
+                        ));
+                        probes.push(serde_json::json!({
+                            "n_max": n_max,
+                            "gen_tps": 0.0,
+                            "ttft_ms": 0.0,
+                            "error": "Server did not become healthy within 120 s"
+                        }));
+                        continue;
+                    }
+
+                    // Additional warmup: let KV cache and GPU buffers settle
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+
+                    // Benchmark
+                    match online_probe_gen_tps(&chat_url, &prompt_type).await {
+                        Some((gen_tps, ttft_ms)) => {
+                            state.push_log(format!(
+                                "[mtp-sweep] n_max={n_max} → {gen_tps:.1} t/s"
+                            ));
+                            probes.push(serde_json::json!({
+                                "n_max": n_max,
+                                "gen_tps": (gen_tps * 10.0).round() / 10.0,
+                                "ttft_ms": (ttft_ms * 10.0).round() / 10.0,
+                            }));
+                        }
+                        None => {
+                            state.push_log(format!(
+                                "[mtp-sweep] n_max={n_max} → probe failed"
+                            ));
+                            probes.push(serde_json::json!({
+                                "n_max": n_max,
+                                "gen_tps": 0.0,
+                                "ttft_ms": 0.0,
+                                "error": "Benchmark probe timed out"
+                            }));
+                        }
+                    }
+                }
+
+                // Pick the n_max with the highest gen_tps (ignore failed probes)
+                let recommended_n_max = probes
+                    .iter()
+                    .filter(|p| p["error"].is_null())
+                    .max_by(|a, b| {
+                        a["gen_tps"]
+                            .as_f64()
+                            .unwrap_or(0.0)
+                            .partial_cmp(&b["gen_tps"].as_f64().unwrap_or(0.0))
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .and_then(|p| p["n_max"].as_u64())
+                    .unwrap_or(2) as u32;
+
+                let last_probed_n_max = n_max_values.last().copied().unwrap_or(0);
+
+                // If the recommended n_max differs from the last probed value,
+                // restart the server with the recommended config so the user
+                // is left with the optimal setting.
+                if recommended_n_max != last_probed_n_max {
+                    state.push_log(format!(
+                        "[mtp-sweep] restarting with recommended n_max={recommended_n_max}"
+                    ));
+                    let mut final_config = base_config.clone();
+                    final_config.spec.spec_draft_n_max = Some(recommended_n_max);
+
+                    let _ = crate::llama::server::stop_server(&state).await;
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    let _ =
+                        crate::llama::server::start_server(&state, final_config, &cfg).await;
+                }
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                    warp::reply::json(&serde_json::json!({
+                        "ok": true,
+                        "probes": probes,
+                        "recommended_n_max": recommended_n_max,
+                        "applied_n_max": recommended_n_max,
+                    })),
+                ))
+            }
+        })
+}
+
 // ── Apple Silicon: set Metal GPU wired memory limit ───────────────────────────
 // Uses osascript to invoke `sysctl iogpu.wired_limit_mb=N` with administrator
 // privileges via the macOS native password dialog. No password touches the app.
@@ -5052,6 +5402,7 @@ pub fn api_routes(
     let advise_route = api_advise(app_config.clone());
     let tune_ncpumoe_route = api_tune_ncpumoe(state.clone(), app_config.clone());
     let bench_sweep_route = api_bench_sweep(state.clone(), app_config.clone());
+    let bench_mtp_sweep_route = api_bench_mtp_sweep(state.clone(), app_config.clone());
     let hf_search_route = api_hf_search(state.clone(), app_config.clone());
     let hf_files_route = api_hf_files(state.clone(), app_config.clone());
     let hf_download_route = api_hf_download(state.clone(), app_config.clone());
@@ -5192,6 +5543,7 @@ pub fn api_routes(
         .or(advise_route)
         .or(tune_ncpumoe_route)
         .or(bench_sweep_route)
+        .or(bench_mtp_sweep_route)
         .or(hf_search_route)
         .or(hf_files_route)
         .or(hf_download_route)

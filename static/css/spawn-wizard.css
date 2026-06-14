@@ -2861,12 +2861,11 @@
 .reduce-motion .vram-segment { transition: none; }
 
 .seg-weights  { background: linear-gradient(135deg, #4f46e5, #6366f1); }
-.seg-kv       { background: linear-gradient(135deg, #d97706, #f59e0b); }
+.seg-kv       { background: linear-gradient(135deg, #0369a1, #0ea5e9); }
 .seg-mmproj   { background: linear-gradient(135deg, #0891b2, #06b6d4); }
 .seg-mtp      { background: linear-gradient(135deg, #7c3aed, #8b5cf6); }
 .seg-overhead { background: linear-gradient(135deg, #374151, #4b5563); }
-.seg-free     { background: linear-gradient(135deg, #065f46, #047857); transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1); }
-.seg-free.over-budget { background: linear-gradient(135deg, #7f1d1d, #991b1b); }
+.seg-free     { background: transparent; transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1); }
 /* RAM bar segments */
 .seg-ram-used { background: linear-gradient(135deg, #374151, #4b5563); }
 .seg-ram-moe  { background: linear-gradient(135deg, #92400e, #d97706); }

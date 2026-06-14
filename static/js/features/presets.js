@@ -1,4 +1,5 @@
 // ── Presets ────────────────────────────────────────────────────────────────────
+/* global DOMPurify */
 // Preset CRUD: load, save, copy, delete, reset. Modal management.
 
 import { sessionState, lastSystemMetrics } from '../core/app-state.js';
@@ -30,6 +31,7 @@ function numOrEmpty(id, v) { document.getElementById(id).value = formatNumberFor
 function intOrNull(id) { const v = document.getElementById(id).value; return v !== '' ? parseInt(v) : null; }
 function floatOrNull(id) { const v = document.getElementById(id).value; return v !== '' ? parseFloat(v) : null; }
 function strVal(id) { return document.getElementById(id).value.trim(); }
+function valOrNull(id) { const v = strVal(id); return v === '' ? null : v; }
 function nullableBoolOpt(id) {
     const v = document.getElementById(id).value;
     if (v === 'true') return true;
@@ -203,6 +205,18 @@ let _presetIsUnified = null; // cached platform check
 let _presetVramTimer = null;
 let _presetVramSeq = 0;
 
+function _presetAvailBytes(isUnified) {
+    // Mirror effectiveAvailBytes() in spawn-wizard: metalCap(ram) − 512 MB OS reserve.
+    // Uses the heuristic cap (no sysctl fetch) — spawn-wizard shows the precise value.
+    const ramBytes = (lastSystemMetrics()?.ram_total_gb || 0) * 1024 ** 3;
+    if (isUnified && ramBytes > 0) {
+        const fraction = ramBytes <= 36 * 1024 ** 3 ? 2 / 3 : 3 / 4;
+        const cap = Math.floor(ramBytes * fraction);
+        return Math.max(0, Math.min(cap, ramBytes) - 512 * 1024 ** 2);
+    }
+    return 0;
+}
+
 async function _ensureUnifiedFlag() {
     if (_presetIsUnified !== null) return _presetIsUnified;
     try {
@@ -274,6 +288,64 @@ export function updatePresetAdvisor() {
 
 // ── VRAM live estimate for preset editor ─────────────────────────────────────
 
+async function autoSizePreset() {
+    const btn = document.getElementById('preset-vram-auto-size');
+    const modelVal = document.getElementById('modal-model-path')?.value.trim() || '';
+    if (!modelVal) {
+        showToast('Auto-size requires a model', 'warn');
+        return;
+    }
+    if (!btn) return;
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Sizing...';
+
+    try {
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        const body = {
+            model_path: modelVal,
+            n_ctx: parseInt(document.getElementById('modal-context-size')?.value) || 128000,
+            ctk: document.getElementById('modal-ctk')?.value || 'q8_0',
+            ctv: document.getElementById('modal-ctv')?.value || 'f16',
+            parallel_slots: parseInt(document.getElementById('modal-parallel-slots')?.value) || 1,
+            ubatch_size: parseInt(document.getElementById('modal-ubatch-size')?.value) || 512,
+            n_cpu_moe: parseInt(document.getElementById('modal-n-cpu-moe')?.value) || 0,
+            available_vram_bytes: _presetAvailBytes(await _ensureUnifiedFlag()),
+            is_unified_memory: !!await _ensureUnifiedFlag(),
+        };
+
+        const resp = await fetch('/api/vram/auto-size', { method: 'POST', headers, body: JSON.stringify(body) });
+        if (!resp.ok) {
+            showToast('Auto-size failed', 'error');
+            return;
+        }
+        const data = await resp.json();
+        if (!data.ok || !data.result) {
+            showToast('Auto-size: no result', 'warning');
+            return;
+        }
+
+        const r = data.result;
+        setVal('modal-context-size', r.context_size);
+        setVal('modal-ctk', r.kv_quant_k);
+        setVal('modal-ctv', r.kv_quant_v);
+        setVal('modal-ubatch-size', r.ubatch_size);
+
+        // Trigger UI updates
+        updatePresetVram();
+        updatePresetAdvisor();
+        showToast('Auto-sized', 'success', `Optimized to ${r.context_size} tokens`);
+
+    } catch (err) {
+        showToast('Auto-size error', 'error', err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = origText;
+    }
+}
+
 export function updatePresetVram() {
     const box = document.getElementById('preset-vram-display');
     if (!box) return;
@@ -290,6 +362,7 @@ export function updatePresetVram() {
         const parallelSlots = parseInt(document.getElementById('modal-parallel-slots')?.value) || 1;
         const ubatch = parseInt(document.getElementById('modal-ubatch-size')?.value) || 512;
         const nCpuMoe = parseInt(document.getElementById('modal-n-cpu-moe')?.value) || 0;
+        const available_vram_bytes = _presetAvailBytes(isUnified);
         const body = {
             model_path: modelVal,
             n_ctx: nCtx,
@@ -297,7 +370,7 @@ export function updatePresetVram() {
             parallel_slots: parallelSlots,
             ubatch_size: ubatch,
             n_cpu_moe: nCpuMoe,
-            available_vram_bytes: 0,
+            available_vram_bytes,
             is_unified_memory: !!isUnified,
         };
         const seq = ++_presetVramSeq;
@@ -320,33 +393,45 @@ function _renderPresetVram(el, data) {
         const gb = b / 1e9;
         return gb >= 1 ? gb.toFixed(1) + ' GB' : (b / 1e6).toFixed(0) + ' MB';
     };
-    const total = data.total_bytes || 0;
+    const avail   = data.available_bytes || 0;  // budget we sent
+    const used    = data.total_bytes || 0;       // total model + context size
     const weights = data.weights_bytes || 0;
-    const kv = data.kv_cache_bytes || 0;
-    const mmproj = data.mmproj_bytes || 0;
+    const kv      = data.kv_cache_bytes || 0;
+    const mmproj  = data.mmproj_bytes || 0;
+    const mtp     = data.mtp_bytes || 0;
     const overhead = data.overhead_bytes || 0;
-    const extras = mmproj + overhead + (data.mtp_bytes || 0) + (data.linear_attn_state_bytes || 0);
-    const pct = v => total > 0 ? Math.max(0, Math.min(100, (v / total) * 100)).toFixed(1) + '%' : '0%';
+
+    // Bar 100% = budget so free headroom is visible; fall back to used if no budget
+    const barTotal = avail > 0 ? avail : used;
+    const free = avail > 0 ? Math.max(0, avail - used) : 0;
+    const pct = v => barTotal > 0 ? Math.max(0, Math.min(100, (v / barTotal) * 100)).toFixed(1) + '%' : '0%';
+
     const rec = data.recommendation || 'fit';
     const dotClass = rec === 'fit' ? 'fit' : rec === 'tight' ? 'tight' : 'risk';
+
     const parts = [];
     if (weights > 0) parts.push(`Weights ${fmt(weights)}`);
     if (kv > 0) parts.push(`KV ${fmt(kv)}`);
     if (mmproj > 0) parts.push(`mmproj ${fmt(mmproj)}`);
+    if (mtp > 0) parts.push(`MTP ${fmt(mtp)}`);
     if (overhead > 0) parts.push(`overhead ${fmt(overhead)}`);
-    // eslint-disable-next-line no-unsanitized/property -- all values are numeric; no user strings
-    el.innerHTML = `
+
+    // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes the VRAM bar HTML
+    el.innerHTML = window.DOMPurify.sanitize(`
         <div class="preset-vram-row">
-            <div class="launch-card-vram-bar">
-                <div class="launch-card-vram-seg launch-card-vram-seg--weights" style="width:${pct(weights)}"></div>
-                <div class="launch-card-vram-seg launch-card-vram-seg--kv" style="width:${pct(kv)}"></div>
-                <div class="launch-card-vram-seg launch-card-vram-seg--extras" style="width:${pct(extras)}"></div>
+            <div class="vram-bar">
+                <div class="vram-segment seg-weights" style="width:${pct(weights)}" title="Weights"></div>
+                <div class="vram-segment seg-kv" style="width:${pct(kv)}" title="KV Cache"></div>
+                <div class="vram-segment seg-mmproj" style="width:${pct(mmproj)}" title="Vision Projector"></div>
+                <div class="vram-segment seg-mtp" style="width:${pct(mtp)}" title="MTP Heads"></div>
+                <div class="vram-segment seg-overhead" style="width:${pct(overhead)}" title="Overhead"></div>
+                <div class="vram-segment seg-free" style="width:${pct(free)}" title="Free Headroom"></div>
             </div>
-            <span class="launch-card-vram-total">~${fmt(total)}</span>
+            <span class="launch-card-vram-total">~${fmt(used)}</span>
             <span class="launch-card-vram-dot launch-card-vram-dot--${dotClass}" title="${rec}"></span>
         </div>
         ${parts.length ? `<div class="preset-vram-breakdown">${parts.join(' · ')}</div>` : ''}
-    `;
+    `);
     el.style.display = '';
 }
 
@@ -477,6 +562,9 @@ export function openPresetModal(mode, section) {
         setVal('modal-grammar', p.grammar || '');
         setVal('modal-json-schema', p.json_schema || '');
         setVal('modal-extra-args', p.extra_args);
+        numOrEmpty('modal-spec-draft-p-split', p.spec_draft_p_split);
+        numOrEmpty('modal-image-min-tokens', p.image_min_tokens);
+        numOrEmpty('modal-image-max-tokens', p.image_max_tokens);
     } else {
         title.textContent = 'New Preset';
         if (subtitle) subtitle.textContent = 'New model profile';
@@ -823,6 +911,9 @@ function _buildFormPreset(existing) {
         grammar: getStructuredOutputMode() === 'grammar' ? (document.getElementById('modal-grammar').value.trim() || null) : null,
         json_schema: getStructuredOutputMode() === 'json_schema' ? (document.getElementById('modal-json-schema').value.trim() || null) : null,
         extra_args: strVal('modal-extra-args'),
+        spec_draft_p_split: floatOrNull('modal-spec-draft-p-split'),
+        image_min_tokens: intOrNull('modal-image-min-tokens'),
+        image_max_tokens: intOrNull('modal-image-max-tokens'),
     };
 }
 
@@ -1224,6 +1315,7 @@ export function initPresets() {
     document.getElementById('preset-modal-close')?.addEventListener('click', closePresetModal);
     document.getElementById('preset-modal-cancel')?.addEventListener('click', closePresetModal);
     document.getElementById('preset-modal-back')?.addEventListener('click', _hideSummary);
+    document.getElementById('preset-vram-auto-size')?.addEventListener('click', autoSizePreset);
 
     // Duplicate preset from within the modal
     document.getElementById('preset-modal-duplicate')?.addEventListener('click', async () => {
@@ -1413,6 +1505,7 @@ export async function _showConfirm(title, message) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.style.zIndex = '2000';
+    overlay.style.display = 'grid';
 
     const dialog = document.createElement('div');
     dialog.className = 'modal';

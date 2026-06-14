@@ -5,16 +5,31 @@
 //       results → applyAndRetune() → running → results (updated)
 
 import { showToast } from './toast.js';
-import { renderSuggestionCards, suggestionPatch } from './tuning-cards.js';
+import { renderSuggestionCards, suggestionPatch, requestMtpNmaxSweep, renderMtpSweep } from './tuning-cards.js';
 
 // Last config used to spawn/start the server. Apply mutations build on this.
 let _tuneConfig = null;
+
+// MTP n-max sweep state
+let _mtpSweepRunning = false;
+let _mtpSweepTimer   = null;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /** Call after a successful spawn or start so Apply knows what to modify. */
 export function setTuneConfig(config) {
   _tuneConfig = config ? { ...config } : null;
+  _updateMtpSweepVisibility();
+}
+
+function _isMtpActive(cfg) {
+  if (!cfg) return false;
+  const s = cfg.spec || cfg;
+  return !!(
+    s.spec_type ||
+    s.spec_default ||
+    (s.draft_model && s.draft_model.length > 0)
+  );
 }
 
 /** Show the Benchmark pill (called when server becomes connected). */
@@ -36,6 +51,10 @@ export function hideTunePanel() {
 export function initTunePanel() {
   document.getElementById('tune-run-btn')?.addEventListener('click', runBenchmark);
   document.getElementById('tune-rerun-btn')?.addEventListener('click', runBenchmark);
+  document.getElementById('mtp-sweep-run-btn')?.addEventListener('click', runMtpSweep);
+  document.getElementById('mtp-sweep-rerun-btn')?.addEventListener('click', () => {
+    _mtpSweepSetState('idle');
+  });
 
   // Pill toggle: open/close dropdown
   const pill = document.getElementById('benchmark-pill');
@@ -260,5 +279,149 @@ async function _applyAndRetune(suggestion, cardEl) {
   } catch (err) {
     _resetToIdle();
     showToast('Apply failed', 'error', err.message || String(err));
+  }
+}
+
+// ── MTP n-max sweep ───────────────────────────────────────────────────────────
+
+function _updateMtpSweepVisibility() {
+  const card = document.getElementById('mtp-sweep-card');
+  if (!card) return;
+  card.style.display = _isMtpActive(_tuneConfig) ? '' : 'none';
+}
+
+function _mtpSweepSetState(state) {
+  const idle    = document.getElementById('mtp-sweep-idle');
+  const running = document.getElementById('mtp-sweep-running');
+  const results = document.getElementById('mtp-sweep-results');
+  if (idle)    idle.style.display    = state === 'idle'    ? '' : 'none';
+  if (running) running.style.display = state === 'running' ? '' : 'none';
+  if (results) results.style.display = state === 'results' ? '' : 'none';
+}
+
+function _startMtpTimer() {
+  const el = document.getElementById('mtp-sweep-elapsed');
+  const start = Date.now();
+  _mtpSweepTimer = setInterval(() => {
+    if (!el) return;
+    const s = Math.floor((Date.now() - start) / 1000);
+    const m = Math.floor(s / 60);
+    el.textContent = m > 0 ? `${m}m ${s % 60}s` : `${s}s`;
+  }, 1000);
+}
+
+function _stopMtpTimer() {
+  if (_mtpSweepTimer) {
+    clearInterval(_mtpSweepTimer);
+    _mtpSweepTimer = null;
+  }
+}
+
+async function runMtpSweep() {
+  if (_mtpSweepRunning) return;
+  _mtpSweepRunning = true;
+
+  const btn = document.getElementById('mtp-sweep-run-btn');
+  if (btn) btn.disabled = true;
+
+  _mtpSweepSetState('running');
+  _startMtpTimer();
+
+  const hint = document.getElementById('mtp-sweep-hint');
+  if (hint) hint.textContent = 'Restarting server for each n-max value — this takes 2–10 minutes…';
+
+  try {
+    const nMaxValues = _getSelectedNMaxValues();
+    const promptType = document.getElementById('mtp-sweep-prompt-type')?.value || 'code';
+
+    const data = await requestMtpNmaxSweep(nMaxValues, promptType);
+
+    if (!data.ok) throw new Error(data.error || 'Sweep failed');
+
+    _stopMtpTimer();
+    _renderMtpSweepResults(data);
+  } catch (err) {
+    _stopMtpTimer();
+    _mtpSweepSetState('idle');
+    showToast('MTP sweep failed', 'error', err.message || String(err));
+  } finally {
+    _mtpSweepRunning = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+function _getSelectedNMaxValues() {
+  const sel = document.getElementById('mtp-sweep-range');
+  if (!sel) return [1, 2, 3, 4];
+  const val = sel.value;
+  if (val === '1-2') return [1, 2];
+  if (val === '1-4') return [1, 2, 3, 4];
+  if (val === '2-4') return [2, 3, 4];
+  if (val === '1-3') return [1, 2, 3];
+  return [1, 2, 3, 4];
+}
+
+function _renderMtpSweepResults(data) {
+  const container = document.getElementById('mtp-sweep-chart');
+  renderMtpSweep(container, data.probes || [], data.recommended_n_max);
+
+  const rec = document.getElementById('mtp-sweep-rec-text');
+  if (rec) {
+    rec.textContent = `Recommended: spec-draft-n-max = ${data.recommended_n_max}`;
+  }
+
+  const applyBtn = document.getElementById('mtp-sweep-apply-btn');
+  if (applyBtn) {
+    applyBtn.textContent = `Apply n-max = ${data.recommended_n_max}`;
+    applyBtn.onclick = () => _applyMtpNmax(data.recommended_n_max);
+    applyBtn.style.display = '';
+  }
+
+  _mtpSweepSetState('results');
+}
+
+async function _applyMtpNmax(nMax) {
+  if (!_tuneConfig) {
+    showToast('No active config', 'error', 'Launch a server via Spawn first.');
+    return;
+  }
+  const applyBtn = document.getElementById('mtp-sweep-apply-btn');
+  if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = 'Applying…'; }
+
+  const newConfig = { ..._tuneConfig, spec_draft_n_max: nMax };
+  _tuneConfig = newConfig;
+
+  const hint = document.getElementById('mtp-sweep-hint');
+  if (hint) hint.textContent = 'Restarting server with selected n-max…';
+  _mtpSweepSetState('running');
+  _startMtpTimer();
+
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+
+    const startResp = await fetch('/api/start', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(newConfig),
+    });
+    const startData = await startResp.json();
+    if (!startResp.ok || !startData.ok) {
+      throw new Error(startData.error || `Start failed (HTTP ${startResp.status})`);
+    }
+
+    if (hint) hint.textContent = 'Waiting for server to become ready…';
+    await _waitForServerReady(120_000);
+
+    _stopMtpTimer();
+    _mtpSweepSetState('idle');
+    showToast('Applied', 'success', `Server restarted with spec-draft-n-max = ${nMax}.`);
+  } catch (err) {
+    _stopMtpTimer();
+    _mtpSweepSetState('idle');
+    showToast('Apply failed', 'error', err.message || String(err));
+  } finally {
+    if (applyBtn) { applyBtn.disabled = false; }
   }
 }

@@ -62,7 +62,8 @@ function loadPrefs() {
         showMmproj: true,
         showMain: true,
         showSplit: true,
-        showDraftAssistant: true,
+        showDraftModels: true,
+        sizeMaxGb: 0,
         quantFilters: {},
         tagFilter: '',
     };
@@ -185,9 +186,9 @@ function isMmproj(m) {
     return f.includes('mmproj') || f.includes('.mmproj.') || f.includes('-mmproj-');
 }
 
-function isDraftAssistant(m) {
+function isDraftModel(m) {
     const f = (m.filename || '').toLowerCase();
-    // Explicit assistant keywords — includes Unsloth's `-MTP.gguf` naming convention
+    // Explicit draft model keywords — includes Unsloth's `-MTP.gguf` naming convention
     const hasKeyword =
         f.includes('assistant') ||
         f.includes('mtp-draft') ||
@@ -209,12 +210,17 @@ function applyFilters(models) {
         if (mmproj && !prefs.showMmproj) return false;
         if (!mmproj && !prefs.showMain) return false;
 
-        // draft assistant vs main
-        const draft = isDraftAssistant(m);
-        if (draft && !prefs.showDraftAssistant) return false;
+        // draft model vs main
+        const draft = isDraftModel(m);
 
+        if (draft && !prefs.showDraftModels) return false;
         // split
         if (m.is_split && !prefs.showSplit) return false;
+
+        // size filter
+        if (prefs.sizeMaxGb > 0) {
+            if ((m.size_bytes || 0) > prefs.sizeMaxGb * 1024 ** 3) return false;
+        }
 
         // quant filter
         const qt = (m.quant_type || '').toUpperCase();
@@ -708,6 +714,7 @@ function buildLibraryToolbar(models) {
     filtersBtn.id = 'mm-lib-filters-toggle';
     filtersBtn.title = 'Filter models by type, quantization, or tag';
     const hasActiveFilters = !prefs.showMmproj || !prefs.showMain || !prefs.showSplit ||
+        !prefs.showDraftModels || prefs.sizeMaxGb > 0 ||
         Object.values(prefs.quantFilters).some(v => v === false) || !!prefs.tagFilter;
     if (hasActiveFilters) filtersBtn.classList.add('mm-lib-btn--active');
     // eslint-disable-next-line no-unsanitized/property -- static SVG, no user data
@@ -730,6 +737,7 @@ function buildLibraryToolbar(models) {
     const mmprojChip = createChip('mmproj', prefs.showMmproj);
     const mainChip = createChip('Main', prefs.showMain);
     const splitChip = createChip('Split', prefs.showSplit);
+    const draftChip = createChip('Draft / MTP', prefs.showDraftModels);
 
     mmprojChip.addEventListener('click', () => {
         prefs.showMmproj = !prefs.showMmproj;
@@ -749,12 +757,45 @@ function buildLibraryToolbar(models) {
         savePrefs();
         loadModels();
     });
+    draftChip.addEventListener('click', () => {
+        prefs.showDraftModels = !prefs.showDraftModels;
+        draftChip.classList.toggle('active', prefs.showDraftModels);
+        savePrefs();
+        loadModels();
+    });
 
     typeRow.appendChild(typeLabel);
     typeRow.appendChild(mmprojChip);
     typeRow.appendChild(mainChip);
     typeRow.appendChild(splitChip);
+    typeRow.appendChild(draftChip);
     filtersPanel.appendChild(typeRow);
+
+    // Size filter row
+    const sizeRow = document.createElement('div');
+    sizeRow.className = 'mm-lib-filter-row';
+    const sizeLabel = document.createElement('span');
+    sizeLabel.className = 'mm-lib-filter-label';
+    sizeLabel.textContent = 'Size';
+    const sizeAnyChip = createChip('Any', prefs.sizeMaxGb === 0);
+    const size3Chip   = createChip('< 3 GB', prefs.sizeMaxGb === 3);
+    const size8Chip   = createChip('< 8 GB', prefs.sizeMaxGb === 8);
+    const setSizeFilter = (gb) => {
+        prefs.sizeMaxGb = gb;
+        sizeAnyChip.classList.toggle('active', gb === 0);
+        size3Chip.classList.toggle('active', gb === 3);
+        size8Chip.classList.toggle('active', gb === 8);
+        savePrefs();
+        loadModels();
+    };
+    sizeAnyChip.addEventListener('click', () => setSizeFilter(0));
+    size3Chip.addEventListener('click', () => setSizeFilter(prefs.sizeMaxGb === 3 ? 0 : 3));
+    size8Chip.addEventListener('click', () => setSizeFilter(prefs.sizeMaxGb === 8 ? 0 : 8));
+    sizeRow.appendChild(sizeLabel);
+    sizeRow.appendChild(sizeAnyChip);
+    sizeRow.appendChild(size3Chip);
+    sizeRow.appendChild(size8Chip);
+    filtersPanel.appendChild(sizeRow);
 
     // Quant filters (dynamic from models list)
     const quantRow = document.createElement('div');

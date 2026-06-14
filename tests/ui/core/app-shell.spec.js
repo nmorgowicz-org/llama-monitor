@@ -182,6 +182,7 @@ test.describe('modals and menus', () => {
     });
     await page.fill('#modal-name', 'Fit disabled');
     await page.fill('#modal-model-path', '/tmp/model.gguf');
+    await page.click('.preset-nav-item[data-section="context"]');
     await page.locator('#modal-fit-target').evaluate(input => { input.value = '2048'; });
     await expect(page.locator('#modal-fit-enabled')).toHaveValue('');
     await page.selectOption('#modal-fit-enabled', 'false');

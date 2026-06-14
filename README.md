@@ -51,8 +51,12 @@ Ask questions about your conversation in a dedicated sliding panel. It searches 
 
 ![History Q&A](docs/screenshots/chat-history-qa-panel.png)
 
-### Guided Generation & Prompt Tooling
+### Benchmarking & MTP Sweep
+Run live throughput tests and empirical sweeps for Multi-Token Prediction (MTP) draft models directly in the Tuning panel.
 
+![Benchmarking](docs/screenshots/benchmark-results.png)
+
+### Guided Generation & Prompt Tooling
 A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and director/surprise tools help you steer replies without rebuilding the prompt stack.
 
 - Director mode: type one directive and get four distinct continuation options.

@@ -67,37 +67,6 @@
                             </div>
                         </div>
 
-                        <!-- Draft-MTP KV cache precision -->
-                        <div class="kv-inline-row">
-                            <div class="kv-inline-field">
-                                <label for="spawn-spec-draft-type-k" class="kv-inline-label">Draft-MTP K quant</label>
-                                <select id="spawn-spec-draft-type-k" title="KV cache quantization for MTP draft tokens.">
-                                    <option value="f32">f32</option>
-                                    <option value="f16">f16</option>
-                                    <option value="bf16">bf16</option>
-                                    <option value="q8_0" selected>q8_0</option>
-                                    <option value="q4_0">q4_0</option>
-                                    <option value="q4_1">q4_1</option>
-                                    <option value="iq4_nl">iq4_nl</option>
-                                    <option value="q5_0">q5_0</option>
-                                    <option value="q5_1">q5_1</option>
-                                </select>
-                            </div>
-                            <div class="kv-inline-field">
-                                <label for="spawn-spec-draft-type-v" class="kv-inline-label">Draft-MTP V quant</label>
-                                <select id="spawn-spec-draft-type-v" title="KV cache quantization for MTP draft tokens.">
-                                    <option value="f32">f32</option>
-                                    <option value="f16">f16</option>
-                                    <option value="bf16">bf16</option>
-                                    <option value="q8_0" selected>q8_0</option>
-                                    <option value="q4_0">q4_0</option>
-                                    <option value="q4_1">q4_1</option>
-                                    <option value="iq4_nl">iq4_nl</option>
-                                    <option value="q5_0">q5_0</option>
-                                    <option value="q5_1">q5_1</option>
-                                </select>
-                            </div>
-                        </div>
       <!-- Shared SVG filters for sparkline visualizations -->
       <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
         <defs>
@@ -468,16 +437,17 @@
                 <div class="benchmark-dropdown-wrap" id="benchmark-dropdown-wrap">
                   <div class="benchmark-dropdown" id="benchmark-dropdown" role="dialog" aria-label="Performance benchmark">
 
+                    <!-- ── Quick Benchmark ─────────────────────────────────────── -->
                     <!-- Idle -->
                     <div class="tune-idle" id="tune-idle">
                       <div class="tune-idle-left">
                         <svg class="tune-idle-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
                         <div class="tune-idle-text">
-                          <span class="tune-idle-label">Performance</span>
-                          <span class="tune-idle-desc">Benchmark your config and get one-click optimizations</span>
+                          <span class="tune-idle-label">Quick Benchmark</span>
+                          <span class="tune-idle-desc">Sends a test prompt and measures generation speed (t/s), prompt speed, and time-to-first-token. Then suggests one-click config improvements (flash attention, KV cache quantization, batch size, etc.).</span>
                         </div>
                       </div>
-                      <button class="tune-run-btn" id="tune-run-btn" type="button">Run Benchmark</button>
+                      <button class="tune-run-btn" id="tune-run-btn" type="button">Run</button>
                     </div>
 
                     <!-- Running -->
@@ -485,7 +455,7 @@
                       <div class="tune-running-header">
                         <span class="tune-running-pulse" aria-hidden="true"></span>
                         <span class="tune-running-label">Benchmarking</span>
-                        <span class="tune-running-hint">Sending a test prompt and measuring throughput…</span>
+                        <span class="tune-running-hint" class="tune-running-hint">Sending a test prompt and measuring throughput…</span>
                       </div>
                       <div class="tune-progress-track" role="progressbar" aria-label="Benchmark in progress">
                         <div class="tune-progress-fill" id="tune-progress-fill"></div>
@@ -502,22 +472,79 @@
                         <div class="tune-metrics-row">
                           <div class="tune-metric">
                             <div class="tune-metric-val" id="tune-gen-tps">—</div>
-                            <div class="tune-metric-lbl">gen t/s</div>
+                            <div class="tune-metric-lbl" title="Generation tokens per second — how fast the model writes output">gen t/s</div>
                           </div>
                           <div class="tune-metric-sep" aria-hidden="true"></div>
                           <div class="tune-metric">
                             <div class="tune-metric-val" id="tune-prompt-tps">—</div>
-                            <div class="tune-metric-lbl">prompt t/s</div>
+                            <div class="tune-metric-lbl" title="Prompt tokens per second — how fast the model reads the input (prefill)">prompt t/s</div>
                           </div>
                           <div class="tune-metric-sep" aria-hidden="true"></div>
                           <div class="tune-metric">
                             <div class="tune-metric-val" id="tune-ttft">—</div>
-                            <div class="tune-metric-lbl">ms first token</div>
+                            <div class="tune-metric-lbl" title="Time to first token in milliseconds — how long before the first word appears (= prefill latency)">ms first token</div>
                           </div>
                         </div>
                         <button class="tune-rerun-btn" id="tune-rerun-btn" type="button">Re-run</button>
                       </div>
                       <div class="tune-suggestions" id="tune-suggestions"></div>
+                    </div>
+
+                    <!-- ── MTP Draft Token Sweep ─────────────────────────────── -->
+                    <!-- Hidden unless MTP/speculative decoding is active in the current server config -->
+                    <div class="tune-tool-card" id="mtp-sweep-card" style="display:none;">
+                      <div class="tune-tool-card-header">
+                        <svg class="tune-idle-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                        <span class="tune-tool-card-title">Draft Token Sweep</span>
+                        <span class="tune-tool-card-badge">MTP</span>
+                      </div>
+                      <p class="tune-tool-card-desc">
+                        Finds the fastest <code>--spec-draft-n-max</code> for your setup.
+                        Restarts the server with each n-max value, benchmarks with a code-generation prompt (best signal for MTP acceptance), and recommends the winner.
+                        <strong>Takes 2–10 minutes</strong> — one model reload per probe.
+                      </p>
+
+                      <!-- Idle state -->
+                      <div id="mtp-sweep-idle">
+                        <div class="mtp-sweep-controls">
+                          <label class="tune-tool-label" for="mtp-sweep-range" title="Which n-max values to test. Wider range = more data but takes longer.">Sweep range</label>
+                          <select id="mtp-sweep-range" class="tune-tool-select">
+                            <option value="1-2">n-max 1–2 (fast, ~4 min)</option>
+                            <option value="1-4" selected>n-max 1–4 (thorough, ~8 min)</option>
+                            <option value="2-4">n-max 2–4 (skip baseline)</option>
+                            <option value="1-3">n-max 1–3</option>
+                          </select>
+                          <label class="tune-tool-label" for="mtp-sweep-prompt-type" title="Code prompts give highest MTP acceptance rates — best signal for agentic/coding use-cases. Prose is lower acceptance.">Prompt type</label>
+                          <select id="mtp-sweep-prompt-type" class="tune-tool-select">
+                            <option value="code" selected>Code (recommended)</option>
+                            <option value="default">Short prose</option>
+                          </select>
+                        </div>
+                        <button class="tune-run-btn mtp-sweep-run-btn" id="mtp-sweep-run-btn" type="button">Start Sweep</button>
+                      </div>
+
+                      <!-- Running state -->
+                      <div id="mtp-sweep-running" style="display:none;">
+                        <div class="tune-running-header">
+                          <span class="tune-running-pulse" aria-hidden="true"></span>
+                          <span class="tune-running-label">Sweeping</span>
+                          <span class="tune-running-hint" id="mtp-sweep-hint">Restarting server for each n-max value…</span>
+                        </div>
+                        <div class="mtp-sweep-timer">Elapsed: <span id="mtp-sweep-elapsed">0s</span></div>
+                        <div class="tune-progress-track" role="progressbar" aria-label="MTP sweep in progress">
+                          <div class="tune-progress-fill mtp-sweep-progress-anim"></div>
+                        </div>
+                      </div>
+
+                      <!-- Results state -->
+                      <div id="mtp-sweep-results" style="display:none;">
+                        <div id="mtp-sweep-chart" class="mtp-sweep-chart"></div>
+                        <div class="mtp-sweep-rec" id="mtp-sweep-rec-text"></div>
+                        <div class="mtp-sweep-actions">
+                          <button class="tune-run-btn mtp-sweep-apply-btn" id="mtp-sweep-apply-btn" type="button" style="display:none;">Apply</button>
+                          <button class="tune-rerun-btn" id="mtp-sweep-rerun-btn" type="button">Re-sweep</button>
+                        </div>
+                      </div>
                     </div>
 
                   </div>
@@ -2462,9 +2489,14 @@
                         <div class="pe-section-body">
                             <!-- Live VRAM estimate — updates as context/quant changes -->
                             <div id="preset-vram-display" class="preset-vram-display" style="display:none;"></div>
-                            <div class="pe-field">
-                                <label class="pe-label" for="modal-context-size" title="Maximum context length in tokens. Larger values use more VRAM. Auto-enables YaRN scaling above 262144.">Context Size (-c)</label>
-                                <input type="number" class="pe-input" id="modal-context-size" value="128000">
+                            <div class="pe-row pe-row-3" style="margin-bottom: 12px;">
+                                <div class="pe-field" style="flex: 1;">
+                                    <label class="pe-label" for="modal-context-size" title="Maximum context length in tokens. Larger values use more VRAM. Auto-enables YaRN scaling above 262144.">Context Size (-c)</label>
+                                    <div style="display: flex; gap: 8px; align-items: center;">
+                                        <input type="number" class="pe-input" id="modal-context-size" value="128000" style="flex: 1;">
+                                        <button type="button" class="btn-sm btn-preset" id="preset-vram-auto-size" title="Auto-calculate optimal context and KV quantization for available VRAM" style="white-space: nowrap; height: 32px;">Auto-size</button>
+                                    </div>
+                                </div>
                             </div>
                             <!-- Performance advisor: config-time hints (dense vs MoE, KV, MTP) -->
                             <div class="wizard-advisor" id="preset-advisor" style="display:none;">
@@ -2800,16 +2832,16 @@
                             <div id="spec-mtp-wrap" style="display:none;">
                                 <div class="pe-row pe-row-3">
                                     <div class="pe-field">
-                                        <label class="pe-label" for="modal-spec-draft-n-max" title="MTP depth: how many tokens ahead each MTP head predicts simultaneously. 2 is the recommended default for Qwen3 and DeepSeek V3. Higher may help dense models but costs VRAM. Requires --parallel 1 (set automatically).">MTP Depth (--spec-draft-n-max)</label>
+                                        <label class="pe-label" for="modal-spec-draft-n-max" title="MTP depth: tokens predicted ahead per step. 2 is the universal starting point. Try 3–4 on Apple Silicon with external Gemma4-style draft models — watch t/s and roll back if it drops.">MTP Depth (--spec-draft-n-max)</label>
                                         <input type="number" class="pe-input" id="modal-spec-draft-n-max" min="1" max="8" placeholder="2">
                                     </div>
                                     <div class="pe-field">
-                                        <label class="pe-label" for="modal-spec-draft-n-min" title="Minimum draft tokens to propose before verification. Keeps MTP engaged on short outputs. Default: 1.">Min Draft Tokens (--spec-draft-n-min)</label>
-                                        <input type="number" class="pe-input" id="modal-spec-draft-n-min" min="1" max="8" placeholder="1">
+                                        <label class="pe-label" for="modal-spec-draft-n-min" title="Minimum draft tokens before verification. Server default: 0 (no minimum). Leave blank unless you need to force the draft pipeline on short outputs.">Min Draft Tokens (--spec-draft-n-min)</label>
+                                        <input type="number" class="pe-input" id="modal-spec-draft-n-min" min="0" max="8" placeholder="0">
                                     </div>
                                     <div class="pe-field">
-                                        <label class="pe-label" for="modal-spec-draft-p-min" title="Minimum token probability to attempt draft verification. If the model is uncertain, skips drafting. Range 0–1. Default: 0.9 for draft-mtp.">Min Accept Prob (--spec-draft-p-min)</label>
-                                        <input type="number" class="pe-input" id="modal-spec-draft-p-min" min="0" max="1" step="0.05" placeholder="0.9">
+                                        <label class="pe-label" for="modal-spec-draft-p-min" title="Minimum token probability for draft acceptance. Blank = server default 0.00 (no filter). Community recommendation: 0.75 as a starting point. Try 0.5–0.9 based on your acceptance rate.">Min Accept Prob (--spec-draft-p-min)</label>
+                                        <input type="number" class="pe-input" id="modal-spec-draft-p-min" min="0" max="1" step="0.05" placeholder="0.75">
                                     </div>
                                 </div>
                                 <div class="pe-row pe-row-2">
@@ -2915,6 +2947,18 @@
                             <div class="pe-field" id="modal-json-schema-wrap" style="display:none;">
                                 <label class="pe-label" for="modal-json-schema" title="A JSON Schema defines the shape of the JSON the model returns (field names, types, required fields). Llama-server converts this to a grammar behind the scenes. Easier to write than raw GBNF for most cases.">JSON Schema (--json-schema)</label>
                                 <textarea class="pe-input" id="modal-json-schema" rows="8" placeholder="{&#10;  &quot;type&quot;: &quot;object&quot;,&#10;  &quot;properties&quot;: {&#10;    &quot;answer&quot;: { &quot;type&quot;: &quot;string&quot; }&#10;  },&#10;  &quot;required&quot;: [&quot;answer&quot;]&#10;}"></textarea>
+                            </div>
+                            <div class="pe-field">
+                                <label class="pe-label" for="modal-spec-draft-p-split" title="Draft P-Split: Proportion of tokens to speculate per step. Higher = more aggressive.">Draft P-Split</label>
+                                <input type="number" class="pe-input" id="modal-spec-draft-p-split" step="0.01" placeholder="0.1">
+                            </div>
+                            <div class="pe-field">
+                                <label class="pe-label" for="modal-image-min-tokens" title="Vision Min Tokens: Minimum tokens per image. Affects VRAM usage for multimodal models.">Vision Min Tokens</label>
+                                <input type="number" class="pe-input" id="modal-image-min-tokens" placeholder="auto">
+                            </div>
+                            <div class="pe-field">
+                                <label class="pe-label" for="modal-image-max-tokens" title="Vision Max Tokens: Maximum tokens per image. Affects VRAM usage for multimodal models.">Vision Max Tokens</label>
+                                <input type="number" class="pe-input" id="modal-image-max-tokens" placeholder="auto">
                             </div>
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-extra-args" title="Additional llama-server CLI flags (space-separated). Example: --log-verbosity 2 --no-perf">Extra Args</label>
@@ -3442,18 +3486,18 @@
                                  Enable MTP (experimental)
                              </label>
                             <!-- Companion assistant section (populated by JS when candidates detected) -->
-                            <div class="hw-mtp-depth-row hw-mtp-assistant-section" id="hw-mtp-assistant-section" style="display:none;">
+                            <div class="hw-mtp-depth-row hw-mtp-draft-section" id="hw-mtp-draft-section" style="display:none;">
                                 <div class="field-hint" style="margin-bottom:6px;font-size:11px;color:var(--color-text-muted);">
-                                    Companion MTP assistant model detected. Using a matching assistant GGUF with MTP can significantly improve generation speed.
+                                    Companion MTP draft model detected. Using a matching draft GGUF with MTP can significantly improve generation speed.
                                 </div>
                                 <div class="hw-mtp-depth-inline">
-                                    <label for="hw-mtp-assistant-select" class="hw-mtp-depth-label" title="Select the assistant/draft GGUF file for MTP. If you have multiple, pick the one that matches this model's family.">
-                                        MTP assistant (-md)
-                                    </label>
-                                    <select id="hw-mtp-assistant-select" class="hw-quant-select">
+<label for="hw-mtp-draft-select" class="hw-mtp-depth-label" title="Select the draft GGUF file for MTP. If you have multiple, pick the one that matches this model's family.">
+                                         MTP draft model (-md)
+                                     </label>
+                                     <select id="hw-mtp-draft-select" class="hw-quant-select">
                                     </select>
                                 </div>
-                              <div class="field-hint">This file is passed as <code>--model-draft</code> and enables MTP for models that require an external assistant (Gemma4-style). Recommended draft tokens/step with assistant: 4.</div>
+                               <div class="field-hint">This file is passed as <code>--model-draft</code> and enables MTP for models that require an external draft model (Gemma4-style). Recommended draft tokens/step with draft model: 4.</div>
                              </div>
                              <!-- MTP draft download offer (shown when no local draft found for Gemma4) -->
                              <div class="hw-mtp-depth-row" id="hw-mtp-download-section" style="display:none;">
@@ -3467,18 +3511,18 @@
                              </div>
                              <div class="hw-mtp-depth-row" id="hw-mtp-depth-row">
                                 <div class="hw-mtp-depth-inline">
-                                    <label for="hw-mtp-depth" class="hw-mtp-depth-label" title="How many tokens the MTP heads predict ahead simultaneously per step. 2 is the recommended default. Higher = slightly faster but costs more VRAM.">Draft tokens/step (n-max)</label>
-                                     <input type="number" id="hw-mtp-depth" min="1" max="8" value="2" class="hw-mtp-depth-input" title="How many tokens ahead to predict each step. 2 is the recommended default.">
+                                    <label for="hw-mtp-depth" class="hw-mtp-depth-label" title="Draft tokens to predict ahead per step. 2 is the recommended starting point for all models. On Apple Silicon with an external draft model you can try 3–4 — watch t/s and roll back if it drops.">Draft tokens/step (n-max)</label>
+                                     <input type="number" id="hw-mtp-depth" min="1" max="8" value="2" class="hw-mtp-depth-input" title="Start at 2. Try 3–4 on Apple Silicon with external draft models (Gemma4-style). More isn't always faster — verify with the benchmark tab.">
                                 </div>
                                 <div class="hw-mtp-depth-inline" style="margin-top:6px;">
-                                    <label for="spawn-spec-draft-n-min" class="hw-mtp-depth-label" title="Minimum draft tokens to propose before verification. Helps keep MTP engaged on short outputs. Default: 1.">Min draft tokens (n-min)</label>
-                                    <input type="number" id="spawn-spec-draft-n-min" min="1" max="8" placeholder="1" class="hw-mtp-depth-input" title="Minimum draft tokens before verification step.">
+                                    <label for="spawn-spec-draft-n-min" class="hw-mtp-depth-label" title="Minimum draft tokens to propose before verification. Server default: 0 (no minimum). Leave blank unless you want to force the draft pipeline to always engage.">Min draft tokens (n-min)</label>
+                                    <input type="number" id="spawn-spec-draft-n-min" min="0" max="8" placeholder="0" class="hw-mtp-depth-input" title="Minimum draft tokens before verification. Server default: 0. Leave blank in most cases.">
                                 </div>
                                 <div class="hw-mtp-depth-inline" style="margin-top:6px;">
-                                    <label for="spawn-spec-draft-p-min" class="hw-mtp-depth-label" title="Minimum token probability to attempt speculative verification. If the model is very uncertain, skip drafting. Range 0–1. Default: 0.9 for MTP.">Min accept prob (p-min)</label>
-                                    <input type="number" id="spawn-spec-draft-p-min" min="0" max="1" step="0.05" placeholder="0.9" class="hw-mtp-depth-input" title="Minimum token probability threshold for draft acceptance. 0.9 recommended for MTP.">
+                                    <label for="spawn-spec-draft-p-min" class="hw-mtp-depth-label" title="Minimum token probability for draft acceptance. Blank = server default (0.00 — no filter). Community consensus: 0.75 is a good starting point. Higher values (0.8–0.9) make the draft more selective; lower (0.5) accepts more aggressively. Range 0–1.">Min accept prob (p-min)</label>
+                                    <input type="number" id="spawn-spec-draft-p-min" min="0" max="1" step="0.05" placeholder="0.75" class="hw-mtp-depth-input" title="Draft acceptance threshold. 0.75 is the community-recommended starting point. Blank = server default 0.00 (no filter).">
                                 </div>
-                                <div class="field-hint">Uses <code>--spec-type draft-mtp,ngram-mod</code>, sets <code>--spec-draft-n-max</code>, and forces <code>--parallel 1</code>. Gains vary by model and backend. Benchmark enabled versus disabled to verify performance. Adds about 1.5% model memory per head.</div>
+                                <div class="field-hint">Uses <code>--spec-type draft-mtp,ngram-mod</code>, sets <code>--spec-draft-n-max</code>, and forces <code>--parallel 1</code>. Gains vary by model and hardware — benchmark on vs. off to verify. Adds ~1.5% model memory per MTP head.</div>
                             </div>
                         </div>
                     </div>
@@ -3631,27 +3675,6 @@
                                          </div>
                                      </div>
 
-                                    <!-- N-gram advanced knobs (shown for n-gram modes) -->
-                                  <div class="hardware-field" id="spawn-spec-ngram-wrap" style="display:none; grid-column: 1/-1;">
-                                         <div class="hw-section-divider">N-gram tuning <span class="info-tip" title="Adjust the speculative n-gram parameters. The defaults work well for most models — only change if you benchmark different values.">i</span></div>
-                                         <div class="hardware-grid">
-                                             <div class="hardware-field">
-                                                 <label for="spawn-spec-ngram-size">N-gram Size</label>
-                                                 <input type="number" id="spawn-spec-ngram-size" min="1" max="64" placeholder="24">
-                                                 <div class="field-hint">Window size for n-gram lookup. Default: 24. Larger = longer patterns, more memory.</div>
-                                             </div>
-                                             <div class="hardware-field">
-                                                 <label for="spawn-draft-min">Draft Min</label>
-                                                 <input type="number" id="spawn-draft-min" min="1" max="64" placeholder="8">
-                                                 <div class="field-hint">Minimum draft tokens to propose per step. Default: 8.</div>
-                                             </div>
-                                             <div class="hardware-field">
-                                                 <label for="spawn-draft-max">Draft Max</label>
-                                                 <input type="number" id="spawn-draft-max" min="1" max="128" placeholder="24">
-                                                 <div class="field-hint">Maximum draft tokens per step; higher = more aggressive. Default: 24.</div>
-                                             </div>
-                                         </div>
-                                     </div>
                                      <div class="field-hint unified-cram-hint" id="unified-cram-hint" style="display:none; margin-top:6px;">
                                          On unified memory systems (Mac, DGX Spark, etc.), the KV prefix cache RAM (-cram) is set to 0 by default to avoid wasting shared memory.
                                      </div>

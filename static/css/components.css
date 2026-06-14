@@ -2708,7 +2708,8 @@ button:disabled {
   gap: 8px;
 }
 
-.preset-vram-display .launch-card-vram-bar {
+.preset-vram-display .launch-card-vram-bar,
+.preset-vram-display .vram-bar {
   flex: 1;
   height: 6px;
   border-radius: 3px;

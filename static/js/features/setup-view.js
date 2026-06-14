@@ -30,9 +30,11 @@ export async function fetchAndRenderMemoryBar() {
     if (!bar) return;
     try {
         const headers = window.authHeaders ? window.authHeaders() : {};
-        const [sysResp, gpuResp] = await Promise.all([
+        const [sysResp, gpuResp, platResp, limResp] = await Promise.all([
             fetch('/metrics/system', { headers }),
             fetch('/metrics/gpu', { headers }),
+            fetch('/api/llama-binary/platform-info', { headers }),
+            fetch('/api/system/metal-gpu-limit', { headers }),
         ]);
 
         let totalBytes = 0;
@@ -58,6 +60,19 @@ export async function fetchAndRenderMemoryBar() {
                 } else {
                     totalBytes = totalBytes || tMb * 1024 * 1024;
                     vramUsedBytes += uMb * 1024 * 1024;
+                }
+            }
+        }
+
+        // Fallback: if GPU metrics haven't populated yet (mactop race on startup),
+        // detect unified memory from platform-info (independent of mactop).
+        if (!isUnified && platResp.ok) {
+            const plat = await platResp.json();
+            if (plat.auto_backend === 'metal') {
+                isUnified = true;
+                if (!metalGpuLimitMb && limResp.ok) {
+                    const lim = await limResp.json();
+                    metalGpuLimitMb = lim.limit_mb || 0;
                 }
             }
         }

@@ -189,8 +189,8 @@ export const wizardState = {
     quantFiles: [],      // GGUF files from HF repo for hardware-step quant swap
     mmprojFiles: [],     // mmproj files found in HF repo
     mmprojHfRepo: '',    // HF repo owning the selected projector
-    draftCandidates: [], // assistant/draft files detected near this model
-    selectedDraftPath: '', // path of chosen assistant for MTP
+    draftCandidates: [], // draft files detected near this model
+    selectedDraftPath: '', // path of chosen draft for MTP
     chatTemplatePath: null,  // local path to installed .jinja template (null = use embedded)
     chatTemplateMode: 'auto', // 'auto' | 'custom' | 'embedded'
   },
@@ -220,7 +220,7 @@ export const wizardState = {
     threadsBatch: null,
     // MTP
     mtpEnabled: true,
-    mtpDraftNMax: null,   // null = let spawn compute family default (4 for external draft, 2 for built-in)
+    mtpDraftNMax: null,   // null = let spawn compute default (2 — universal starting point)
     mtpDraftNMin: null,
     mtpDraftPMin: null,
     // Sampling (null = use llama-server default)
@@ -634,17 +634,15 @@ function cacheDom() {
   dom.vramEstimateText = document.getElementById('spawn-vram-estimate-text');
   dom.vramPill         = document.getElementById('spawn-vram-pill');
   dom.specTypeSelect     = document.getElementById('spawn-spec-type');
-   dom.mtpAssistantSection = document.getElementById('hw-mtp-assistant-section');
-   dom.mtpAssistantSelect  = document.getElementById('hw-mtp-assistant-select');
+  dom.mtpDraftSection     = document.getElementById('hw-mtp-draft-section');
+  dom.mtpDraftSelect      = document.getElementById('hw-mtp-draft-select');
+  dom.mtpAssistantSection = dom.mtpDraftSection;
+  dom.mtpAssistantSelect  = dom.mtpDraftSelect;
    dom.mtpDownloadSection  = document.getElementById('hw-mtp-download-section');
    dom.mtpDownloadInfo     = document.getElementById('hw-mtp-download-info');
    dom.mtpDownloadBtn      = document.getElementById('hw-mtp-download-btn');
    dom.draftModelWrap     = document.getElementById('spawn-draft-model-wrap');
   dom.draftModelInput    = document.getElementById('spawn-draft-model');
-  dom.specNgramWrap      = document.getElementById('spawn-spec-ngram-wrap');
-  dom.specNgramSizeInput = document.getElementById('spawn-spec-ngram-size');
-  dom.draftMinInput      = document.getElementById('spawn-draft-min');
-  dom.draftMaxInput      = document.getElementById('spawn-draft-max');
   dom.kvUnifiedSelect = document.getElementById('spawn-kv-unified');
   dom.flashAttnSelect    = document.getElementById('spawn-flash-attn');
   dom.mlockCheck         = document.getElementById('spawn-mlock');
@@ -946,7 +944,7 @@ function bindEvents() {
       dom.draftModelWrap.style.display = (isDraftModel || isDraftMtp) ? '' : 'none';
     }
 
-    // For draft-mtp: ensure MTP assistant section is visible and auto-populate
+    // For draft-mtp: ensure MTP draft section is visible and auto-populate
     // from candidates if not already set.
     if (isDraftMtp) {
       renderMtpSection();
@@ -962,7 +960,7 @@ function bindEvents() {
           dom.draftModelInput.value = best.path;
         }
       }
-      // Sync from selectedDraftPath if set (e.g. from MTP assistant dropdown)
+      // Sync from selectedDraftPath if set (e.g. from MTP draft dropdown)
       const selectedPath = wizardState.model.selectedDraftPath || '';
       if (selectedPath && dom.draftModelInput && !dom.draftModelInput.value) {
         dom.draftModelInput.value = selectedPath;
@@ -984,7 +982,6 @@ function bindEvents() {
       }
     }
 
-    if (dom.specNgramWrap) dom.specNgramWrap.style.display = isNgram ? '' : 'none';
     _updateSpecHint(v);
     refreshStepGuardrails();
   });
@@ -1228,11 +1225,11 @@ function getStepGuardState(step = wizardState.currentStep) {
     if (dom.fitEnableSelect?.value === 'true' && !dom.fitTargetInput?.value.trim()) {
       return error('Enter a fit target in MB or turn Auto-fit context to memory off.', dom.fitTargetInput);
     }
-    // Validate draft model input when shown (for draft-model or MTP modes with external assistant)
+    // Validate draft model input when shown (for draft-model or MTP modes with external draft)
     const specType = dom.specTypeSelect?.value || '';
     const showDraftInput = specType === 'draft-model' || specType.includes('draft-mtp');
     if (showDraftInput && !dom.draftModelInput?.value.trim()) {
-      // If the model has built-in MTP heads and no external assistant is selected,
+      // If the model has built-in MTP heads and no external draft is selected,
       // no draft model path is needed.
       const mtpModelPath = wizardState.model.hfFile || wizardState.model.path || '';
       const hasBuiltInMtp = wizardState.arch.mtpDepth > 0 || detectMtpFromName(mtpModelPath);
@@ -2235,7 +2232,7 @@ async function doIntrospect(path) {
       } catch { /* browse may be rate-limited; skip silently */ }
     }
 
-    // Scan directory for MTP assistant/draft model files (local models)
+    // Scan directory for MTP draft/draft model files (local models)
     if (wizardState.model.source === 'local' || wizardState.model.source === 'import') {
       const dir = path.replace(/[/\\][^/\\]+$/, '');
       try {
@@ -2245,21 +2242,21 @@ async function doIntrospect(path) {
         );
         if (browseResp.ok) {
           const bd = await browseResp.json();
-          const assistants = (bd.entries || []).filter(e => {
+          const drafts = (bd.entries || []).filter(e => {
             if (e.is_dir) return false;
             const n = e.name.toLowerCase();
             return n.includes('assistant')
-              || n.includes('mtp-draft')
-              || n.includes('draft-model')
-              || n.includes('mtp_small')
-              || n.includes('mtp-heads')
-              || n.startsWith('mtp-')
-              // Unsloth's `-MTP.gguf` naming convention
-              || n.includes('-mtp')
-              || n.includes('/mtp/');
+               || n.includes('mtp-draft')
+               || n.includes('draft-model')
+               || n.includes('mtp_small')
+               || n.includes('mtp-heads')
+               || n.startsWith('mtp-')
+               // Unsloth's `-MTP.gguf` naming convention
+               || n.includes('-mtp')
+               || n.includes('/mtp/');
           });
-          if (assistants.length) {
-            wizardState.model.draftCandidates = assistants.map(e => ({
+          if (drafts.length) {
+            wizardState.model.draftCandidates = drafts.map(e => ({
               path: e.path,
               name: e.name,
               size: e.size || 0,
@@ -2270,7 +2267,7 @@ async function doIntrospect(path) {
             if (bestDraft) {
               wizardState.model.selectedDraftPath = bestDraft.path;
             }
-            // Re-render MTP section to include assistant selector
+            // Re-render MTP section to include draft selector
             if (wizardState.currentStep === 2) renderMtpSection();
             scheduleVramUpdate();
           }
@@ -3408,7 +3405,7 @@ async function fetchHfFiles(repo) {
       }
 
       if (file.is_draft_assistant) {
-        showToast('Assistant file', 'info', 'Select a base model first — this file will be offered as the MTP draft assistant.');
+        showToast('Draft file', 'info', 'Select a base model first — this file will be offered as the MTP draft model.');
         return;
       }
 
@@ -3440,7 +3437,7 @@ async function fetchHfFiles(repo) {
           size: el.dataset.size ? Number(el.dataset.size) : 0,
           label: el.dataset.label || '',
           is_mmproj: el.dataset.mmproj === '1',
-          is_draft_assistant: el.dataset.draftAssistant === '1',
+           is_draft_assistant: el.dataset.isDraftModel === '1',
           repo_id: el.dataset.repoId || repoId,
           is_recommended_mmproj: el.dataset.recommendedMmproj === '1',
           mmproj_recommendation: el.dataset.mmprojRecommendation || '',
@@ -4805,7 +4802,7 @@ function _bestMmprojForModel(modelFilename, files) {
   return recommended.length === 1 ? recommended[0] : null;
 }
 
-// Generic draft-assistant matching: score candidates by shared token overlap.
+// Generic draft-model matching: score candidates by shared token overlap.
 function _bestDraftForModel(modelFilename, candidates) {
   if (!candidates.length) return null;
   const stem = _modelStemForSearch(modelFilename)
@@ -4831,7 +4828,7 @@ function _bestDraftForModel(modelFilename, candidates) {
       if (cset.has(t)) shared++;
     }
 
-    // Prefer smaller candidates (more likely real draft/assistant).
+    // Prefer smaller candidates (more likely real draft/model).
     const size = f.size || 0;
     const sizeBonus = size > 0 && size < 1_500_000_000 ? 1 : 0;
 
@@ -4908,7 +4905,7 @@ async function _checkGemma4MtpDraft(modelPath) {
       wizardState.model.selectedDraftPath = data.draft_path;
       dom.mtpDownloadSection.style.display = 'none';
 
-      // Re-render MTP section to show assistant selector
+      // Re-render MTP section to show draft selector
       if (wizardState.currentStep === 2) renderMtpSection();
       return;
     }
@@ -6446,7 +6443,7 @@ function renderMtpSection() {
     return;
   }
 
-  // If an assistant is selected but MTP is not explicitly disabled by the user,
+  // If a draft is selected but MTP is not explicitly disabled by the user,
   // we consider the MTP section "active" so tuning controls and draft-mtp mode are exposed.
   if (hasAssistantSelected && !hasBuiltInMtp && !_mtpUserConfigured) {
     wizardState.hardware.mtpEnabled = true;
@@ -6457,7 +6454,7 @@ function renderMtpSection() {
   const infoNote = document.getElementById('hw-mtp-info-note');
   if (infoNote && hasBuiltInMtp) { infoNote.style.display = ''; }
 
-  // Render companion assistant selector: always show for MTP models even
+  // Render companion draft selector: always show for MTP models even
   // if no candidates were auto-detected, so user can still browse.
   if (dom.mtpAssistantSection && dom.mtpAssistantSelect) {
     const candidates = wizardState.model.draftCandidates || [];
@@ -6472,7 +6469,7 @@ function renderMtpSection() {
          // Browse sentinel: open file browser for companion assistant
          if (selected === '__browse__') {
            await openModelFileBrowser(
-             'hw-mtp-assistant-select',
+             'hw-mtp-draft-select',
              'gguf',
              null,
              'draft-model',
@@ -6481,18 +6478,18 @@ function renderMtpSection() {
          }
          wizardState.model.selectedDraftPath = selected;
 
-         // If assistant selected and no explicit conflicting choice, default to draft-mtp.
+         // If draft model selected and no explicit conflicting choice, default to draft-mtp.
          if (selected && dom.specTypeSelect && !dom.specTypeSelect.value.includes('draft-mtp')) {
            dom.specTypeSelect.value = 'draft-mtp,ngram-mod';
          }
 
-         // Ensure MTP is enabled for assistant-based drafts (unless user explicitly disabled).
+         // Ensure MTP is enabled for draft-model-based drafts (unless user explicitly disabled).
          if (selected && !_mtpUserConfigured) {
            wizardState.hardware.mtpEnabled = true;
          }
 
-         // Reset n-max to null when assistant changes so renderMtpSection shows
-         // the correct family default (4 for external draft, 2 for built-in).
+         // Reset n-max to null when draft model changes so renderMtpSection
+         // re-applies the default (2 — universal starting point).
          if (!_mtpUserConfigured) {
            wizardState.hardware.mtpDraftNMax = null;
          }
@@ -6526,7 +6523,7 @@ function renderMtpSection() {
     if (candidates.length === 0) {
       const browseOpt = document.createElement('option');
       browseOpt.value = '__browse__';
-      browseOpt.textContent = '(browse for a companion assistant GGUF…)';
+      browseOpt.textContent = '(browse for a companion draft model GGUF…)';
       dom.mtpAssistantSelect.appendChild(browseOpt);
     }
 
@@ -6553,8 +6550,8 @@ function renderMtpSection() {
         }
       });
     }
-    // Show family-appropriate default: 4 for external assistant draft, 2 for built-in MTP.
-    const draftNMaxDisplay = wizardState.hardware.mtpDraftNMax ?? (hasAssistantSelected ? 4 : 2);
+    // Show family-appropriate default: 4 for external draft model, 2 for built-in MTP.
+    const draftNMaxDisplay = wizardState.hardware.mtpDraftNMax ?? 2;
     draftNMaxInput.value = draftNMaxDisplay;
   }
 
@@ -7289,7 +7286,7 @@ function renderSummary() {
   const specType = dom.specTypeSelect?.value || '';
     if (specType) {
       let sv = { 'ngram-mod': 'N-gram (fast)', 'draft-model': 'Draft model' }[specType] || specType;
-      // Show draft model filename for draft-model or MTP modes with external assistant
+      // Show draft model filename for draft-model or MTP modes with external draft model
       if (dom.draftModelInput?.value) {
         const fileName = dom.draftModelInput.value.split(/[\\/]/).pop();
         if (specType === 'draft-model') sv += ` (${fileName})`;
@@ -7616,7 +7613,11 @@ async function saveAsPreset() {
   const payload = buildPresetPayload();
   payload.name = name;
 
+  // Ensure the payload captures the current Wizard state correctly
+  // buildPresetPayload calls buildSpawnPayload which pulls from wizardState.
+
   const btn = dom.savePresetBtn;
+
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
 
   try {
@@ -7844,13 +7845,12 @@ function _renderPresetParamsStep() {
   const specType = dom.specTypeSelect?.value || '';
   if (specType) {
       const rows = [{ label: 'Type', value: specType }];
-      // Show draft model info for draft-model or MTP modes with external assistant
+      // Show draft model info for draft-model or MTP modes with external draft model
       if (dom.draftModelInput?.value) {
         const fileName = dom.draftModelInput.value.split(/[\\/]/).pop() || dom.draftModelInput.value;
         if (specType === 'draft-model') rows.push({ label: 'Draft model', value: fileName });
         else if (specType.includes('draft-mtp')) rows.push({ label: 'Draft model', value: fileName });
       }
-      if (dom.specNgramSizeInput?.value) rows.push({ label: 'N-gram size', value: dom.specNgramSizeInput.value });
       sections.push({ label: 'Speculative Decoding', rows });
     }
 
@@ -8134,30 +8134,31 @@ export function buildSpawnPayload() {
   // Respect an explicit 'draft-mtp' choice from the advanced dropdown; only
   // default to 'draft-mtp,ngram-mod' when the user hasn't already chosen a
   // draft-mtp variant (covers the common case where the dropdown is empty).
-  const assistantPath = m.selectedDraftPath || (dom.draftModelInput?.value || '').trim() || '';
-  const hasAssistant = assistantPath.length > 0;
+  const draftPath = m.selectedDraftPath || (dom.draftModelInput?.value || '').trim() || '';
+  const hasDraft = draftPath.length > 0;
 
-  // When the user has an assistant/draft model configured and has not
+  // When the user has a draft model configured and has not
   // explicitly chosen a conflicting mode, default to draft-mtp.
   let specType = specTypeUser;
-  if (mtpActive || hasAssistant) {
+  if (mtpActive || hasDraft) {
     if (!specType) {
       specType = 'draft-mtp,ngram-mod';
     }
   }
 
   // MTP requires parallel=1 when active.
-  const parallelSlots = (mtpActive || (hasAssistant && specType.includes('draft-mtp'))) ? 1 : h.parallelSlots;
+  const parallelSlots = (mtpActive || (hasDraft && specType.includes('draft-mtp'))) ? 1 : h.parallelSlots;
 
   // Resolve mmproj local path: prefer mmprojPath (local file), fall back to
   // mmprojHfFile only if it looks like an absolute path (i.e. was set from
   // a directory scan, not from an HF file list).
   const mmprojLocal = m.mmprojPath && m.mmprojPath.startsWith('/') ? m.mmprojPath : null;
 
-  // MTP n-max: 4 when assistant is present (recommended for Gemma4-style), 2 otherwise.
+  // MTP n-max: 2 is the safe universal starting point (community consensus). Users can
+  // increase to 3–4 for Gemma4-style external draft on high-bandwidth hardware (Apple Silicon).
   // Use != null so an explicit 0 from the user is not treated as "unset".
-  const usesMtpSpec = mtpActive || (hasAssistant && (specType.includes('draft-mtp') || specType.includes('draft-model')));
-  const mtpNMaxDefault = usesMtpSpec && assistantPath ? 4 : 2;
+  const usesMtpSpec = mtpActive || (hasDraft && (specType.includes('draft-mtp') || specType.includes('draft-model')));
+  const mtpNMaxDefault = 2;
   const mtpNMax = usesMtpSpec
     ? (h.mtpDraftNMax != null ? h.mtpDraftNMax : mtpNMaxDefault)
     : undefined;
@@ -8186,7 +8187,7 @@ export function buildSpawnPayload() {
     spec_draft_n_max: mtpNMax,
     spec_draft_n_min: usesMtpSpec && h.mtpDraftNMin != null ? h.mtpDraftNMin : undefined,
     spec_draft_p_min: usesMtpSpec && h.mtpDraftPMin != null ? h.mtpDraftPMin : undefined,
-    draft_model: assistantPath || '',
+    draft_model: draftPath || '',
     kv_unified: h.kvUnified,
     flash_attn: h.flashAttn || '',
     mlock: h.mlock || false,

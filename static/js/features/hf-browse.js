@@ -369,7 +369,7 @@ export async function hfListFiles({
       item.dataset.size = file.size || '';
       item.dataset.label = file.label || '';
       if (file.is_mmproj) item.dataset.mmproj = '1';
-      if (file.is_draft_assistant) item.dataset.draftAssistant = '1';
+      if (file.is_draft_assistant) item.dataset.isDraftModel = '1';
       if (file.is_recommended_mmproj) item.dataset.recommendedMmproj = '1';
       if (file.mmproj_recommendation) {
         item.dataset.mmprojRecommendation = file.mmproj_recommendation;
@@ -423,9 +423,9 @@ export async function hfListFiles({
       }
       if (file.is_draft_assistant) {
         const b = document.createElement('span');
-        b.className = 'hf-file-badge hf-file-badge-assistant';
+         b.className = 'hf-file-badge hf-file-badge-draft';
         b.textContent = 'Assistant';
-        b.title = 'MTP draft assistant — use as --model-draft for speculative decoding';
+         b.title = 'MTP draft model — use as --model-draft for speculative decoding';
         nameSpan.appendChild(b);
       }
 

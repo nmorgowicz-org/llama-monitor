@@ -101,6 +101,95 @@ export function renderDepthSweep(container, points) {
 }
 
 /**
+ * Run an online MTP n-max sweep via the backend.
+ * `nMaxValues` defaults to [1,2,3,4]; `promptType` defaults to "code".
+ * Returns `{ ok, probes: [{n_max, gen_tps, ttft_ms, error?}], recommended_n_max, applied_n_max, error? }`.
+ */
+export async function requestMtpNmaxSweep(nMaxValues = [1, 2, 3, 4], promptType = 'code') {
+  const headers = window.authHeaders
+    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+    : { 'Content-Type': 'application/json' };
+  const r = await fetch('/api/bench/mtp-sweep', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ n_max_values: nMaxValues, prompt_type: promptType }),
+  });
+  return r.json();
+}
+
+/**
+ * Render MTP n-max sweep results as a horizontal bar chart + table.
+ * `recommended` is the integer n_max the backend recommends.
+ */
+export function renderMtpSweep(container, probes, recommended) {
+  if (!container) return;
+  container.replaceChildren();
+  if (!probes || probes.length === 0) {
+    container.textContent = 'No sweep data.';
+    return;
+  }
+
+  const maxTps = Math.max(...probes.map((p) => p.gen_tps || 0), 1);
+
+  const table = document.createElement('table');
+  table.className = 'depth-sweep-table mtp-sweep-table';
+
+  const head = document.createElement('tr');
+  ['n-max', 'Gen t/s', 'TTFT ms', ''].forEach((t) => {
+    const th = document.createElement('th');
+    th.textContent = t;
+    head.appendChild(th);
+  });
+  table.appendChild(head);
+
+  probes.forEach((p) => {
+    const tr = document.createElement('tr');
+    const isRec = p.n_max === recommended;
+    if (isRec) tr.classList.add('mtp-sweep-recommended');
+
+    const nMaxTd = document.createElement('td');
+    nMaxTd.textContent = p.n_max;
+    tr.appendChild(nMaxTd);
+
+    const tpsTd = document.createElement('td');
+    if (p.error) {
+      tpsTd.textContent = 'failed';
+      tpsTd.classList.add('mtp-probe-error');
+    } else {
+      const barWrap = document.createElement('div');
+      barWrap.className = 'mtp-sweep-bar-wrap';
+      const bar = document.createElement('div');
+      bar.className = 'mtp-sweep-bar';
+      bar.style.width = `${Math.max((p.gen_tps / maxTps) * 100, 2).toFixed(0)}%`;
+      const val = document.createElement('span');
+      val.className = 'mtp-sweep-bar-val';
+      val.textContent = p.gen_tps >= 1 ? p.gen_tps.toFixed(1) : '< 1';
+      barWrap.appendChild(bar);
+      barWrap.appendChild(val);
+      tpsTd.appendChild(barWrap);
+    }
+    tr.appendChild(tpsTd);
+
+    const ttftTd = document.createElement('td');
+    ttftTd.textContent = p.error ? '—' : Math.round(p.ttft_ms);
+    tr.appendChild(ttftTd);
+
+    const recTd = document.createElement('td');
+    if (isRec) {
+      const badge = document.createElement('span');
+      badge.className = 'mtp-sweep-rec-badge';
+      badge.textContent = '★ best';
+      recTd.appendChild(badge);
+    }
+    tr.appendChild(recTd);
+
+    table.appendChild(tr);
+  });
+
+  container.appendChild(table);
+}
+
+/**
  * Resolve the full set of config keys a suggestion would change.
  * Returns a plain object suitable for Object.assign onto a config.
  */
