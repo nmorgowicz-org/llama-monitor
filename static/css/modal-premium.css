@@ -2009,6 +2009,22 @@
   overflow: hidden;
 }
 
+/* ── VRAM strip — sits between header and tab layout, full-width ── */
+.preset-vram-strip {
+  flex-shrink: 0;
+  padding: 8px 20px;
+  background: rgba(0, 0, 0, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.preset-vram-strip .preset-vram-display {
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin-bottom: 0;
+}
+
 .preset-editor-layout {
   display: flex;
   flex: 1;

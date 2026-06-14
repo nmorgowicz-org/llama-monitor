@@ -2355,6 +2355,11 @@
             </button>
         </div>
 
+        <!-- VRAM estimate strip — always visible above all tabs -->
+        <div class="preset-vram-strip" id="preset-vram-strip" style="display:none;">
+            <div id="preset-vram-display" class="preset-vram-display"></div>
+        </div>
+
         <form id="preset-form">
             <input type="hidden" id="modal-preset-id">
             <div class="preset-editor-layout">
@@ -2487,15 +2492,15 @@
                             </div>
                         </div>
                         <div class="pe-section-body">
-                            <!-- Live VRAM estimate — updates as context/quant changes -->
-                            <div id="preset-vram-display" class="preset-vram-display" style="display:none;"></div>
                             <div class="pe-row pe-row-3" style="margin-bottom: 12px;">
                                 <div class="pe-field" style="flex: 1;">
                                     <label class="pe-label" for="modal-context-size" title="Maximum context length in tokens. Larger values use more VRAM. Auto-enables YaRN scaling above 262144.">Context Size (-c)</label>
+                                    <div id="preset-context-pills" class="preset-context-pills" style="display:none;"></div>
                                     <div style="display: flex; gap: 8px; align-items: center;">
                                         <input type="number" class="pe-input" id="modal-context-size" value="128000" style="flex: 1;">
                                         <button type="button" class="btn-sm btn-preset" id="preset-vram-auto-size" title="Auto-calculate optimal context and KV quantization for available VRAM" style="white-space: nowrap; height: 32px;">Auto-size</button>
                                     </div>
+                                    <div class="pe-field-hint">On Apple Silicon a dense 27–30B drops from ~17 t/s at short context to ~7 t/s at 16k tokens. Don't over-allocate — use Auto-size or match the context you actually need.</div>
                                 </div>
                             </div>
                             <!-- Performance advisor: config-time hints (dense vs MoE, KV, MTP) -->
@@ -2522,7 +2527,7 @@
                                     </select>
                                 </div>
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-ctv" title="KV cache value quantization. f16 is the default and recommended for values. q8_0 saves ~50% VRAM with negligible quality loss.">KV Value Type (-ctv)</label>
+                                    <label class="pe-label" for="modal-ctv" title="KV cache value quantization. f16 is the default and recommended for values. q8_0 saves ~50% VRAM with negligible quality loss. On Apple Silicon with Qwen3 (head_dim=256), f16 can be faster than q8_0 due to a less-optimised Metal kernel — only drop to q8_0 if you need to fit a longer context.">KV Value Type (-ctv)</label>
                                     <select class="pe-select" id="modal-ctv">
                                         <option value="f16">f16 (default)</option>
                                         <option value="q8_0">q8_0</option>
@@ -2536,7 +2541,7 @@
                                     </select>
                                 </div>
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-flash-attn" title="Flash Attention mode: auto (default), on, off. Speeds up inference when supported by model architecture.">Flash Attn (-fa)</label>
+                                    <label class="pe-label" for="modal-flash-attn" title="Flash Attention mode. Quantized KV cache types (-ctk/-ctv below f16) require Flash Attention to use the fast fused kernel — without it the server silently falls back to a much slower path. Leave On unless you are debugging a specific crash.">Flash Attn (-fa)</label>
                                     <select class="pe-select" id="modal-flash-attn">
                                         <option value="on" selected>on</option>
                                         <option value="auto">auto</option>
@@ -2546,7 +2551,7 @@
                             </div>
                             <div class="pe-row">
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-kv-unified" title="Default leaves KV buffer selection to llama-server.">KV Unified</label>
+                                    <label class="pe-label" for="modal-kv-unified" title="Forces a single unified KV buffer across all parallel slots. Required when using quantized KV types — without it the server may fall back to a slower non-fused path. Leave Default unless you see a performance warning in the server log.">KV Unified</label>
                                     <select class="pe-select" id="modal-kv-unified">
                                         <option value="">Default</option>
                                         <option value="true">On (--kv-unified)</option>
@@ -2569,6 +2574,7 @@
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-cache-ram-mib" title="-cram / --cache-ram. Maximum KV prefix-cache size in MiB. 0 disables it, -1 removes the limit, empty uses llama-server defaults.">Prefix Cache RAM (-cram)</label>
                                 <input type="number" class="pe-input" id="modal-cache-ram-mib" min="-1" step="1" placeholder="8192 (default)">
+                                <div class="pe-field-hint">Set to 0 to disable prefix caching (reduces VRAM, hurts repeated-prompt latency). Leave empty for the default ~8 GiB. Use -1 to remove the cap for long agentic sessions with large shared system prompts.</div>
                             </div>
                         </div>
                     </div>
@@ -2589,17 +2595,26 @@
                                     <input type="number" class="pe-input" id="modal-batch-size" value="2048">
                                 </div>
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-ubatch-size" title="Physical micro-batch size. Controls memory granularity. Usually same as batch_size.">Micro-batch (-ub)</label>
+                                    <label class="pe-label" for="modal-ubatch-size" title="Physical micro-batch size for prompt evaluation. Must be ≤ batch size. Reduce to lower peak VRAM during prompt processing; smaller values can help MoE models with sparse expert activation.">Micro-batch (-ub)</label>
                                     <input type="number" class="pe-input" id="modal-ubatch-size" value="2048">
                                 </div>
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-parallel-slots" title="Number of concurrent inference slots. Each slot reserves context_size tokens of KV cache VRAM.">Parallel Slots (-np)</label>
+                                    <label class="pe-label" for="modal-parallel-slots" title="Number of concurrent inference slots. Each slot reserves context_size tokens of KV cache VRAM. For single-user interactive use keep at 1 — multiple slots divide decode throughput across requests.">Parallel Slots (-np)</label>
                                     <input type="number" class="pe-input" id="modal-parallel-slots" value="1">
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-cache-idle-slots" title="Preserve the KV cache of idle parallel slots between requests. Without this, each new request re-runs the full prefill even if the context is unchanged. Dramatically improves multi-turn latency when Parallel Slots > 1.">Cache Idle Slots</label>
+                                    <select class="pe-select" id="modal-cache-idle-slots">
+                                        <option value="">(server default)</option>
+                                        <option value="true">On — keep KV cache between requests</option>
+                                        <option value="false">Off — flush KV on every request</option>
+                                    </select>
+                                    <div class="pe-field-hint" id="cache-idle-slots-hint" style="display:none;">Enable this whenever Parallel Slots &gt; 1 — it prevents a full re-prefill on every turn, cutting latency significantly for multi-client setups.</div>
                                 </div>
                             </div>
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-prio" title="--prio: inference thread scheduling priority. 2 (High) is recommended for dedicated inference machines on Mac. 0 = Normal (OS default). Do not use 3 (Realtime) unless this machine does nothing else.">Thread Priority (--prio)</label>
+                                    <label class="pe-label" for="modal-prio" title="--prio: inference thread scheduling priority for token decode. 2 (High) is recommended for dedicated inference machines on Mac. 0 = Normal (OS default). Do not use 3 (Realtime) unless this machine does nothing else.">Thread Priority (--prio)</label>
                                     <select class="pe-select" id="modal-prio">
                                         <option value="">(default)</option>
                                         <option value="0">0 — Normal</option>
@@ -2607,6 +2622,17 @@
                                         <option value="2">2 — High (recommended for Mac)</option>
                                         <option value="3">3 — Realtime (dedicated server only)</option>
                                     </select>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-prio-batch" title="Thread priority for batch/prefill processing (--prio-batch), independent of decode priority. A mismatch — high decode priority but default prefill priority — leaves time-to-first-token at the mercy of the OS scheduler. Match to --prio for most setups.">Batch Priority (--prio-batch)</label>
+                                    <select class="pe-select" id="modal-prio-batch">
+                                        <option value="">(inherit from --prio)</option>
+                                        <option value="0">0 — Normal</option>
+                                        <option value="1">1 — Medium</option>
+                                        <option value="2">2 — High</option>
+                                        <option value="3">3 — Realtime</option>
+                                    </select>
+                                    <div class="pe-field-hint">Set to the same level as Thread Priority above. Mismatched priorities hurt time-to-first-token on busy systems even if decode is fast.</div>
                                 </div>
                             </div>
                         </div>
@@ -2625,8 +2651,9 @@
                             <div id="modal-generation-presets" style="display:none;margin-bottom:12px;"></div>
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-temperature" title="Temperature for sampling. Higher = more randomness. Empty = use server default (1.0).">Temperature (--temp)</label>
+                                    <label class="pe-label" for="modal-temperature" title="Temperature for sampling. Higher = more creative/random, lower = more deterministic. Empty = server default (1.0). Reasoning models (Qwen3, DeepSeek-R1) work best at 0.6–0.7; coding tasks at 0.1–0.3.">Temperature (--temp)</label>
                                     <input type="number" class="pe-input" id="modal-temperature" step="any" placeholder="default 1.0">
+                                    <div class="pe-field-hint">Reasoning/thinking models (Qwen3, DeepSeek-R1): use 0.6–0.7. Coding: 0.1–0.3. Creative writing: 0.8–1.0. Full 1.0 can cause repetition loops in structured tasks.</div>
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-top-p" title="Top-P cumulative probability threshold. Empty = server default (0.95).">Top-P (--top-p)</label>
@@ -2639,7 +2666,7 @@
                             </div>
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-min-p" title="Minimum probability threshold. Empty = server default (0.01).">Min-P (--min-p)</label>
+                                    <label class="pe-label" for="modal-min-p" title="Minimum probability threshold relative to the top token. Filters tokens that are unlikely compared to the model's best guess, adapting dynamically to confidence. Many users prefer min-p 0.05–0.1 with top-p at 1.0 over top-p alone.">Min-P (--min-p)</label>
                                     <input type="number" class="pe-input" id="modal-min-p" step="any" placeholder="default 0.01">
                                 </div>
                                 <div class="pe-field">
@@ -2701,12 +2728,13 @@
                         </div>
                         <div class="pe-section-body">
                             <div class="pe-field">
-                                <label class="pe-label" for="modal-tensor-split" title="VRAM distribution ratio across GPUs (e.g. '7,8,8,8' for 4 GPUs). Leave empty for single GPU.">Tensor Split (-ts)</label>
+                                <label class="pe-label" for="modal-tensor-split" title="VRAM distribution ratio across GPUs. Values are proportional, not GB — '7,8,8,8' assigns 7/31 of the model to GPU 0 and 8/31 each to GPUs 1-3. Leave empty for single GPU.">Tensor Split (-ts)</label>
                                 <input type="text" class="pe-input" id="modal-tensor-split" placeholder="7,8,8,8">
+                                <div class="pe-field-hint">Ratios, not gigabytes — '3,5' means 3/8 to GPU 0, 5/8 to GPU 1. Match the actual VRAM sizes of each GPU for best balance. Leave empty for single-GPU use.</div>
                             </div>
                             <div class="pe-row">
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-split-mode" title="How to split the model across GPUs: layer (default, split by layer) or row (split large tensors).">Split Mode</label>
+                                    <label class="pe-label" for="modal-split-mode" title="How to split the model across GPUs. Layer (default) splits by whole transformer layers. Row splits individual large tensors across GPUs — only needed when a single layer exceeds one GPU's VRAM, which is rare.">Split Mode</label>
                                     <select class="pe-select" id="modal-split-mode">
                                         <option value="">(default)</option>
                                         <option value="layer">layer</option>
@@ -2733,7 +2761,7 @@
                         <div class="pe-section-body">
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-threads" title="Number of CPU threads for token generation. Leave empty to use all available CPUs.">Threads (-t)</label>
+                                    <label class="pe-label" for="modal-threads" title="CPU threads for token generation. On Apple Silicon use P-core count (e.g. 6 on M5 Max) — using all cores includes slow E-cores. On discrete GPUs the GPU does matrix ops so a low value (4–8) is usually enough.">Threads (-t)</label>
                                     <input type="number" class="pe-input" id="modal-threads" placeholder="auto">
                                 </div>
                                 <div class="pe-field">
@@ -2741,14 +2769,16 @@
                                     <input type="number" class="pe-input" id="modal-threads-batch" placeholder="auto">
                                 </div>
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-n-cpu-moe" title="CPU threads for MoE expert layers. Useful for hybrid GPU+CPU MoE models.">CPU MoE (-n-cpu-moe)</label>
+                                    <label class="pe-label" for="modal-n-cpu-moe" title="Number of MoE expert layers to offload to CPU/RAM instead of GPU. Useful when the model's expert layers don't fully fit in VRAM. Each layer moved to GPU speeds decode; start with all experts in RAM, then move layers to GPU one by one until just before OOM.">CPU MoE (-n-cpu-moe)</label>
                                     <input type="number" class="pe-input" id="modal-n-cpu-moe" placeholder="auto">
+                                    <div class="pe-field-hint">MoE offload tuning: start with the full expert layer count in RAM. Incrementally reduce this number (move layers to GPU) until just before running out of memory — each GPU layer speeds decode.</div>
                                     <div class="moe-autotune" id="preset-moe-autotune">
                                         <button type="button" class="moe-autotune-btn" id="preset-moe-autotune-verify" title="Run llama-bench to find the fastest n_cpu_moe empirically. Requires the server to be stopped.">⚡ Auto-tune offload (sweep)</button>
                                         <span class="moe-autotune-status" id="preset-moe-autotune-status"></span>
                                     </div>
                                 </div>
                             </div>
+                            <div class="pe-field-hint" id="preset-threads-hint" style="display:none;"></div>
                         </div>
                     </div>
 
@@ -2773,8 +2803,9 @@
                                     </select>
                                 </div>
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-rope-freq-base" title="RoPE base frequency. Model-specific default if not set. Higher values extend context at quality cost.">Freq Base</label>
+                                    <label class="pe-label" for="modal-rope-freq-base" title="RoPE base frequency override. The correct value is embedded in every official GGUF — leave empty unless you are using a custom fine-tune that changed the RoPE base and didn't embed it. Increasing this beyond the model's trained value extends context window but degrades quality at longer ranges.">Freq Base</label>
                                     <input type="number" class="pe-input" id="modal-rope-freq-base" step="any" placeholder="model default">
+                                    <div class="pe-field-hint">Leave empty for all official Qwen3, Gemma 4, Llama 3.x, and Mistral models — the correct base is already in the GGUF. Only override for custom or merged models that omit the RoPE metadata.</div>
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-rope-freq-scale" title="RoPE frequency scaling factor. Auto-calculated for YaRN if not set. Lower = more context extension.">Freq Scale</label>
@@ -2811,6 +2842,14 @@
                                 </select>
                                 <div class="pe-field-hint" id="spec-type-hint" style="display:none;"></div>
                             </div>
+                            <!-- spec-default: visible when any spec type is selected -->
+                            <div id="spec-default-wrap" style="display:none;">
+                                <label class="pe-label pe-checkbox-label" style="gap:8px; cursor:pointer;">
+                                    <input type="checkbox" id="modal-spec-default">
+                                    <span title="Let llama.cpp auto-select optimal speculation parameters (p-min, n-max, verification thresholds) for your hardware. Good starting point before manual tuning — individual knobs below override when unchecked.">Use recommended defaults (--spec-default)</span>
+                                </label>
+                                <div class="pe-field-hint">When checked, llama.cpp selects p-min, n-max and verification thresholds automatically. Uncheck to tune individual knobs below.</div>
+                            </div>
                             <!-- N-gram params: visible for any ngram variant -->
                             <div id="spec-ngram-params-wrap" style="display:none;">
                                 <div class="pe-row pe-row-3">
@@ -2834,6 +2873,7 @@
                                     <div class="pe-field">
                                         <label class="pe-label" for="modal-spec-draft-n-max" title="MTP depth: tokens predicted ahead per step. 2 is the universal starting point. Try 3–4 on Apple Silicon with external Gemma4-style draft models — watch t/s and roll back if it drops.">MTP Depth (--spec-draft-n-max)</label>
                                         <input type="number" class="pe-input" id="modal-spec-draft-n-max" min="1" max="8" placeholder="2">
+                                        <div class="pe-field-hint">Start at 2. Use 3 for most quantized models (Q4–Q5). Only try 4 at F16 — diminishing returns beyond 3 at lower quants. Roll back if total t/s drops.</div>
                                     </div>
                                     <div class="pe-field">
                                         <label class="pe-label" for="modal-spec-draft-n-min" title="Minimum draft tokens before verification. Server default: 0 (no minimum). Leave blank unless you need to force the draft pipeline on short outputs.">Min Draft Tokens (--spec-draft-n-min)</label>
@@ -2842,6 +2882,7 @@
                                     <div class="pe-field">
                                         <label class="pe-label" for="modal-spec-draft-p-min" title="Minimum token probability for draft acceptance. Blank = server default 0.00 (no filter). Community recommendation: 0.75 as a starting point. Try 0.5–0.9 based on your acceptance rate.">Min Accept Prob (--spec-draft-p-min)</label>
                                         <input type="number" class="pe-input" id="modal-spec-draft-p-min" min="0" max="1" step="0.05" placeholder="0.75">
+                                        <div class="pe-field-hint">Starting point: 0.75. Lower (0.5) accepts more drafts and increases raw t/s; higher (0.9) reduces wasted verification passes. Watch the acceptance rate in the server log and tune after enabling MTP.</div>
                                     </div>
                                 </div>
                                 <div class="pe-row pe-row-2">
@@ -2875,13 +2916,30 @@
                                     </div>
                                 </div>
                             </div>
-                            <!-- Draft model path: visible for draft-model -->
+                            <!-- Draft model path + hardware: visible for draft-model or MTP with external assistant -->
                             <div id="spec-draft-model-wrap" style="display:none;">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-draft-model" title="Path to the draft model .gguf file. Must be from the same model family as the main model (e.g. a 1–3B version). The draft model proposes tokens; the main model verifies them.">Draft Model (-md)</label>
                                     <div class="pe-input-row">
                                         <input type="text" class="pe-input" id="modal-draft-model" placeholder="/path/to/draft-model.gguf">
                                         <button type="button" class="btn-sm btn-preset" id="preset-browse-draft-model-btn" title="Browse filesystem for draft model .gguf file">Browse</button>
+                                    </div>
+                                </div>
+                                <!-- Draft model hardware — only shown when spec-type is draft-model -->
+                                <div id="spec-draft-hw-wrap" class="pe-row pe-row-3" style="display:none;">
+                                    <div class="pe-field">
+                                        <label class="pe-label" for="modal-spec-draft-ngl" title="GPU layers for the draft model (--spec-draft-ngl). Without this the draft may run on CPU, negating the MTP throughput gain entirely. Set to 99 to fully offload all layers to GPU.">Draft GPU Layers</label>
+                                        <input type="number" class="pe-input" id="modal-spec-draft-ngl" placeholder="99 (fully offload)">
+                                        <div class="pe-field-hint">Set to 99. If the draft runs on CPU the speed gain disappears entirely — this is the most commonly missed spec-decoding setting.</div>
+                                    </div>
+                                    <div class="pe-field">
+                                        <label class="pe-label" for="modal-spec-draft-device" title="Device for the draft model (--spec-draft-device), e.g. Metal, CUDA:0, CUDA:1. Leave empty to use the same device as the main model. On multi-GPU rigs, pin the draft to a secondary GPU to avoid competing for memory.">Draft Device</label>
+                                        <input type="text" class="pe-input" id="modal-spec-draft-device" placeholder="same as main model">
+                                    </div>
+                                    <div class="pe-field">
+                                        <label class="pe-label" for="modal-spec-draft-n-cpu-moe" title="CPU-offloaded MoE expert layers for the draft model (--spec-draft-n-cpu-moe). Only needed when the draft is a MoE model and its expert layers don't fully fit on GPU. Mirrors the main model's CPU MoE setting.">Draft CPU MoE</label>
+                                        <input type="number" class="pe-input" id="modal-spec-draft-n-cpu-moe" placeholder="0">
+                                        <div class="pe-field-hint">MoE draft models only. Start with all experts in RAM and reduce until just before OOM — each layer moved to GPU speeds decode.</div>
                                     </div>
                                 </div>
                             </div>
@@ -2949,8 +3007,9 @@
                                 <textarea class="pe-input" id="modal-json-schema" rows="8" placeholder="{&#10;  &quot;type&quot;: &quot;object&quot;,&#10;  &quot;properties&quot;: {&#10;    &quot;answer&quot;: { &quot;type&quot;: &quot;string&quot; }&#10;  },&#10;  &quot;required&quot;: [&quot;answer&quot;]&#10;}"></textarea>
                             </div>
                             <div class="pe-field">
-                                <label class="pe-label" for="modal-spec-draft-p-split" title="Draft P-Split: Proportion of tokens to speculate per step. Higher = more aggressive.">Draft P-Split</label>
+                                <label class="pe-label" for="modal-spec-draft-p-split" title="Draft P-Split: Proportion of tokens to speculate per step in ngram-based speculation. Higher = more aggressive draft attempts. Has no effect when using draft-mtp type.">Draft P-Split</label>
                                 <input type="number" class="pe-input" id="modal-spec-draft-p-split" step="0.01" placeholder="0.1">
+                                <div class="pe-field-hint">Advanced — leave at default (0.1) for MTP-based speculation. Only adjust if using ngram spec type and tuning speculation aggressiveness.</div>
                             </div>
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-image-min-tokens" title="Vision Min Tokens: Minimum tokens per image. Affects VRAM usage for multimodal models.">Vision Min Tokens</label>

@@ -2699,7 +2699,6 @@ button:disabled {
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 8px;
   padding: 10px 12px;
-  margin-bottom: 14px;
 }
 
 .preset-vram-row {
@@ -2728,3 +2727,79 @@ button:disabled {
   opacity: 0.45;
 }
 
+
+/* ── Preset context pills ── */
+.preset-context-pills {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.preset-context-pill {
+    appearance: none;
+    box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--color-text-secondary, #94a3b8);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    white-space: nowrap;
+    line-height: 1.4;
+}
+
+.preset-context-pill:hover {
+    background: rgba(99, 102, 241, 0.12);
+    border-color: rgba(99, 102, 241, 0.4);
+    color: var(--color-text-primary, #e2e8f0);
+}
+
+.preset-context-pill.active {
+    background: rgba(99, 102, 241, 0.22);
+    color: #a5b4fc;
+    border-color: rgba(99, 102, 241, 0.6);
+}
+
+[data-theme="light"] .preset-context-pill {
+    background: rgba(0, 0, 0, 0.04);
+    color: #64748b;
+    border-color: rgba(17, 24, 39, 0.14);
+}
+
+[data-theme="light"] .preset-context-pill:hover {
+    background: rgba(99, 102, 241, 0.08);
+    border-color: rgba(99, 102, 241, 0.35);
+    color: #1e293b;
+}
+
+.preset-vram-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 5px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.preset-vram-badge--fit {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.preset-vram-badge--tight {
+    background: rgba(251, 146, 60, 0.15);
+    color: #fb923c;
+    border: 1px solid rgba(251, 146, 60, 0.3);
+}
+
+.preset-vram-badge--risk {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}

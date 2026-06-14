@@ -200,31 +200,36 @@ export async function loadPresets(selectId) {
 let _presetAdvisorTimer = null;
 let _presetAdvisorSeq = 0;
 let _presetIsUnified = null; // cached platform check
+let _presetRamBytes = 0;    // cached RAM total (bytes)
+let _presetMetalLimitMb = 0; // cached iogpu.wired_limit_mb (0 = use heuristic)
 
 // ── VRAM live estimate ────────────────────────────────────────────────────────
 let _presetVramTimer = null;
 let _presetVramSeq = 0;
 
-function _presetAvailBytes(isUnified) {
-    // Mirror effectiveAvailBytes() in spawn-wizard: metalCap(ram) − 512 MB OS reserve.
-    // Uses the heuristic cap (no sysctl fetch) — spawn-wizard shows the precise value.
-    const ramBytes = (lastSystemMetrics()?.ram_total_gb || 0) * 1024 ** 3;
-    if (isUnified && ramBytes > 0) {
-        const fraction = ramBytes <= 36 * 1024 ** 3 ? 2 / 3 : 3 / 4;
-        const cap = Math.floor(ramBytes * fraction);
-        return Math.max(0, Math.min(cap, ramBytes) - 512 * 1024 ** 2);
-    }
-    return 0;
+function _presetAvailBytes() {
+    if (!_presetIsUnified || _presetRamBytes === 0) return 0;
+    const limitBytes = _presetMetalLimitMb > 0 ? _presetMetalLimitMb * 1024 * 1024 : null;
+    const fraction = _presetRamBytes <= 36 * 1024 ** 3 ? 2 / 3 : 3 / 4;
+    const cap = limitBytes ?? Math.floor(_presetRamBytes * fraction);
+    return Math.max(0, Math.min(cap, _presetRamBytes) - 512 * 1024 * 1024);
 }
 
 async function _ensureUnifiedFlag() {
     if (_presetIsUnified !== null) return _presetIsUnified;
     try {
         const headers = window.authHeaders ? window.authHeaders() : {};
-        const r = await fetch('/api/llama-binary/platform-info', { headers });
-        const d = r.ok ? await r.json() : null;
-        _presetIsUnified = d?.auto_backend === 'metal';
-    } catch { _presetIsUnified = false; }
+        const [platform, sys] = await Promise.all([
+            fetch('/api/llama-binary/platform-info', { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
+            fetch('/metrics/system', { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
+        ]);
+        _presetIsUnified = platform?.auto_backend === 'metal';
+        _presetRamBytes = (sys?.ram_total_gb || lastSystemMetrics?.ram_total_gb || 0) * 1024 ** 3;
+        if (_presetIsUnified) {
+            const lim = await fetch('/api/system/metal-gpu-limit', { headers }).then(r => r.ok ? r.json() : null).catch(() => null);
+            if (lim?.ok && lim.limit_mb > 0) _presetMetalLimitMb = lim.limit_mb;
+        }
+    } catch { _presetIsUnified = _presetIsUnified ?? false; }
     return _presetIsUnified;
 }
 
@@ -312,8 +317,8 @@ async function autoSizePreset() {
             parallel_slots: parseInt(document.getElementById('modal-parallel-slots')?.value) || 1,
             ubatch_size: parseInt(document.getElementById('modal-ubatch-size')?.value) || 512,
             n_cpu_moe: parseInt(document.getElementById('modal-n-cpu-moe')?.value) || 0,
-            available_vram_bytes: _presetAvailBytes(await _ensureUnifiedFlag()),
-            is_unified_memory: !!await _ensureUnifiedFlag(),
+            available_vram_bytes: _presetAvailBytes(),
+            is_unified_memory: !!_presetIsUnified,
         };
 
         const resp = await fetch('/api/vram/auto-size', { method: 'POST', headers, body: JSON.stringify(body) });
@@ -348,10 +353,11 @@ async function autoSizePreset() {
 
 export function updatePresetVram() {
     const box = document.getElementById('preset-vram-display');
+    const strip = document.getElementById('preset-vram-strip');
     if (!box) return;
     const modelVal = document.getElementById('modal-model-path')?.value.trim() || '';
-    if (!modelVal) { box.style.display = 'none'; return; }
-    box.style.display = '';
+    if (!modelVal) { if (strip) strip.style.display = 'none'; return; }
+    if (strip) strip.style.display = '';
     box.innerHTML = '<div class="preset-vram-loading">Estimating VRAM…</div>';
     clearTimeout(_presetVramTimer);
     _presetVramTimer = setTimeout(async () => {
@@ -362,7 +368,7 @@ export function updatePresetVram() {
         const parallelSlots = parseInt(document.getElementById('modal-parallel-slots')?.value) || 1;
         const ubatch = parseInt(document.getElementById('modal-ubatch-size')?.value) || 512;
         const nCpuMoe = parseInt(document.getElementById('modal-n-cpu-moe')?.value) || 0;
-        const available_vram_bytes = _presetAvailBytes(isUnified);
+        const available_vram_bytes = _presetAvailBytes();
         const body = {
             model_path: modelVal,
             n_ctx: nCtx,
@@ -380,18 +386,19 @@ export function updatePresetVram() {
                 : { 'Content-Type': 'application/json' };
             const r = await fetch('/api/vram-estimate', { method: 'POST', headers, body: JSON.stringify(body) });
             if (seq !== _presetVramSeq) return;
-            if (!r.ok) { box.style.display = 'none'; return; }
+            const hideStrip = () => { if (strip) strip.style.display = 'none'; };
+            if (!r.ok) { hideStrip(); return; }
             const data = await r.json();
-            if (data.error) { box.style.display = 'none'; return; }
+            if (data.error) { hideStrip(); return; }
             _renderPresetVram(box, data);
-        } catch { if (seq === _presetVramSeq) box.style.display = 'none'; }
+        } catch { if (seq === _presetVramSeq && strip) strip.style.display = 'none'; }
     }, 350);
 }
 
 function _renderPresetVram(el, data) {
     const fmt = b => {
-        const gb = b / 1e9;
-        return gb >= 1 ? gb.toFixed(1) + ' GB' : (b / 1e6).toFixed(0) + ' MB';
+        const gib = b / (1024 ** 3);
+        return gib >= 1 ? gib.toFixed(1) + ' GiB' : (b / (1024 ** 2)).toFixed(0) + ' MiB';
     };
     const avail   = data.available_bytes || 0;  // budget we sent
     const used    = data.total_bytes || 0;       // total model + context size
@@ -407,7 +414,8 @@ function _renderPresetVram(el, data) {
     const pct = v => barTotal > 0 ? Math.max(0, Math.min(100, (v / barTotal) * 100)).toFixed(1) + '%' : '0%';
 
     const rec = data.recommendation || 'fit';
-    const dotClass = rec === 'fit' ? 'fit' : rec === 'tight' ? 'tight' : 'risk';
+    const recLabel = rec === 'fit' ? 'Fits' : rec === 'tight' ? 'Tight' : 'Risk';
+    const recClass = rec === 'fit' ? 'fit' : rec === 'tight' ? 'tight' : 'risk';
 
     const parts = [];
     if (weights > 0) parts.push(`Weights ${fmt(weights)}`);
@@ -415,6 +423,7 @@ function _renderPresetVram(el, data) {
     if (mmproj > 0) parts.push(`mmproj ${fmt(mmproj)}`);
     if (mtp > 0) parts.push(`MTP ${fmt(mtp)}`);
     if (overhead > 0) parts.push(`overhead ${fmt(overhead)}`);
+    if (avail > 0 && free > 0) parts.push(`${fmt(free)} free of ${fmt(avail)}`);
 
     // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes the VRAM bar HTML
     el.innerHTML = window.DOMPurify.sanitize(`
@@ -428,7 +437,7 @@ function _renderPresetVram(el, data) {
                 <div class="vram-segment seg-free" style="width:${pct(free)}" title="Free Headroom"></div>
             </div>
             <span class="launch-card-vram-total">~${fmt(used)}</span>
-            <span class="launch-card-vram-dot launch-card-vram-dot--${dotClass}" title="${rec}"></span>
+            <span class="preset-vram-badge preset-vram-badge--${recClass}">${recLabel}</span>
         </div>
         ${parts.length ? `<div class="preset-vram-breakdown">${parts.join(' · ')}</div>` : ''}
     `);
@@ -496,13 +505,19 @@ export function openPresetModal(mode, section) {
         // Context & KV
         setVal('modal-context-size', p.context_size || 128000);
         setVal('modal-ctk', p.ctk || 'q8_0');
+        const pillsContainer = document.getElementById('preset-context-pills'); if (pillsContainer) pillsContainer.style.display = 'flex';
+        _renderContextPills(mode, section);
         setVal('modal-ctv', p.ctv || 'f16');
         setOpt('modal-flash-attn', p.flash_attn);
         // Batching
         setVal('modal-batch-size', p.batch_size || 2048);
         setVal('modal-ubatch-size', p.ubatch_size || p.batch_size || 2048);
         setVal('modal-parallel-slots', p.parallel_slots || 1);
+        const cacheIdleHint = document.getElementById('cache-idle-slots-hint');
+        if (cacheIdleHint) cacheIdleHint.style.display = (p.parallel_slots || 1) > 1 ? '' : 'none';
         setOpt('modal-prio', p.prio != null ? String(p.prio) : '');
+        setOpt('modal-prio-batch', p.prio_batch != null ? String(p.prio_batch) : '');
+        setOpt('modal-cache-idle-slots', p.cache_idle_slots == null ? '' : p.cache_idle_slots ? 'true' : 'false');
         numOrEmpty('modal-threads', p.threads);
         numOrEmpty('modal-threads-batch', p.threads_batch);
         // Generation
@@ -541,6 +556,11 @@ export function openPresetModal(mode, section) {
         setVal('modal-spec-draft-type-k', p.spec_draft_type_k || '');
         setVal('modal-spec-draft-type-v', p.spec_draft_type_v || '');
         setVal('modal-draft-model', p.draft_model);
+        numOrEmpty('modal-spec-draft-ngl', p.spec_draft_ngl);
+        setVal('modal-spec-draft-device', p.spec_draft_device ?? '');
+        numOrEmpty('modal-spec-draft-n-cpu-moe', p.spec_draft_n_cpu_moe);
+        const specDefaultEl = document.getElementById('modal-spec-default');
+        if (specDefaultEl) specDefaultEl.checked = !!p.spec_default;
         _toggleSpecFields(specType);
         // Context extras
         setOpt('modal-kv-unified', p.kv_unified == null ? '' : String(p.kv_unified));
@@ -794,14 +814,21 @@ function _toggleSpecFields(specType) {
     const hasNgram = specType.includes('ngram');
     const hasMtp   = specType.includes('draft-mtp');
     const hasDraft = specType === 'draft-model';
-    const ngWrap  = document.getElementById('spec-ngram-params-wrap');
-    const mtpWrap = document.getElementById('spec-mtp-wrap');
-    const dmWrap  = document.getElementById('spec-draft-model-wrap');
-    const hint    = document.getElementById('spec-type-hint');
+    const hasAny   = !!specType;
+    const ngWrap     = document.getElementById('spec-ngram-params-wrap');
+    const mtpWrap    = document.getElementById('spec-mtp-wrap');
+    const dmWrap     = document.getElementById('spec-draft-model-wrap');
+    const hwWrap     = document.getElementById('spec-draft-hw-wrap');
+    const defWrap    = document.getElementById('spec-default-wrap');
+    const hint       = document.getElementById('spec-type-hint');
     if (ngWrap)  ngWrap.style.display  = hasNgram ? '' : 'none';
     if (mtpWrap) mtpWrap.style.display = hasMtp   ? '' : 'none';
     // Show draft-model input for both draft-model and MTP with external assistant.
     if (dmWrap)  dmWrap.style.display  = (hasDraft || hasMtp) ? '' : 'none';
+    // Draft hardware (ngl, device, cpu-moe) only relevant for an external draft file.
+    if (hwWrap)  hwWrap.style.display  = hasDraft ? '' : 'none';
+    // spec-default checkbox appears whenever any spec type is active.
+    if (defWrap) defWrap.style.display = hasAny ? '' : 'none';
 
     // Auto-populate draft model path from modal-draft-model if available and empty
     const draftInput = document.getElementById('modal-draft-model');
@@ -869,6 +896,8 @@ function _buildFormPreset(existing) {
         ubatch_size: parseInt(document.getElementById('modal-ubatch-size').value) || 2048,
         parallel_slots: parseInt(document.getElementById('modal-parallel-slots').value) || 1,
         prio: intOrNull('modal-prio'),
+        prio_batch: intOrNull('modal-prio-batch'),
+        cache_idle_slots: nullableBoolOpt('modal-cache-idle-slots'),
         threads: intOrNull('modal-threads'),
         threads_batch: intOrNull('modal-threads-batch'),
         temperature: floatOrNull('modal-temperature'),
@@ -890,6 +919,7 @@ function _buildFormPreset(existing) {
         rope_freq_base: floatOrNull('modal-rope-freq-base'),
         rope_freq_scale: floatOrNull('modal-rope-freq-scale'),
         spec_type: strVal('modal-spec-type') || null,
+        spec_default: document.getElementById('modal-spec-default')?.checked || false,
         ngram_spec: false,
         spec_ngram_size: intOrNull('modal-spec-ngram-size'),
         draft_min: intOrNull('modal-draft-min'),
@@ -900,6 +930,10 @@ function _buildFormPreset(existing) {
         spec_draft_type_k: valOrNull('modal-spec-draft-type-k'),
         spec_draft_type_v: valOrNull('modal-spec-draft-type-v'),
         draft_model: strVal('modal-draft-model'),
+        spec_draft_ngl: intOrNull('modal-spec-draft-ngl'),
+        spec_draft_device: valOrNull('modal-spec-draft-device'),
+        spec_draft_n_cpu_moe: intOrNull('modal-spec-draft-n-cpu-moe'),
+        spec_draft_cpu_moe: (intOrNull('modal-spec-draft-n-cpu-moe') ?? 0) > 0,
         bind_host: strVal('modal-bind-host') || null,
         port: intOrNull('modal-port'),
         api_key: strVal('modal-api-key') || null,
@@ -924,7 +958,8 @@ const CHANGE_LABELS = {
     flash_attn: 'Flash Attn', kv_unified: 'KV Unified', cache_ram_mib: 'Prefix Cache RAM',
     fit_enabled: 'Fit to VRAM', fit_target: 'Fit Target',
     batch_size: 'Batch Size', ubatch_size: 'Micro-batch', parallel_slots: 'Parallel Slots',
-    prio: 'Thread Priority', threads: 'Threads (-t)', threads_batch: 'Batch Threads (-tb)',
+    prio: 'Thread Priority', prio_batch: 'Batch Priority', cache_idle_slots: 'Cache Idle Slots',
+    threads: 'Threads (-t)', threads_batch: 'Batch Threads (-tb)',
     temperature: 'Temperature', top_p: 'Top-P', top_k: 'Top-K',
     min_p: 'Min-P', repeat_penalty: 'Repeat Penalty', presence_penalty: 'Presence Penalty',
     enable_thinking: 'Thinking Mode', preserve_thinking: 'Preserve Thinking',
@@ -933,9 +968,12 @@ const CHANGE_LABELS = {
     tensor_split: 'Tensor Split', split_mode: 'Split Mode', main_gpu: 'Main GPU',
     n_cpu_moe: 'CPU MoE Threads',
     rope_scaling: 'RoPE Scaling', rope_freq_base: 'RoPE Freq Base', rope_freq_scale: 'RoPE Freq Scale',
-    spec_type: 'Speculative Mode', spec_ngram_size: 'N-gram Size',
+    spec_type: 'Speculative Mode', spec_default: 'Spec Defaults',
+    spec_ngram_size: 'N-gram Size',
     draft_min: 'Draft Min', draft_max: 'Draft Max', spec_draft_n_max: 'MTP Depth',
-    spec_draft_n_min: 'MTP Draft N Min', spec_draft_p_min: 'MTP Draft P Min', draft_model: 'Draft Model',
+    spec_draft_n_min: 'MTP Draft N Min', spec_draft_p_min: 'MTP Draft P Min',
+    spec_draft_ngl: 'Draft GPU Layers', spec_draft_device: 'Draft Device',
+    spec_draft_n_cpu_moe: 'Draft CPU MoE', draft_model: 'Draft Model',
     bind_host: 'Bind Host', port: 'Port', api_key: 'API Key', max_tokens: 'Max Tokens',
     seed: 'Seed',
     system_prompt_file: 'System Prompt File', grammar: 'Grammar', json_schema: 'JSON Schema', extra_args: 'Extra Args',
@@ -1410,6 +1448,12 @@ export function initPresets() {
         _toggleSpecFields(this.value);
     });
 
+    // Show cache-idle-slots hint when parallel slots > 1
+    document.getElementById('modal-parallel-slots')?.addEventListener('input', function() {
+        const hint = document.getElementById('cache-idle-slots-hint');
+        if (hint) hint.style.display = parseInt(this.value) > 1 ? '' : 'none';
+    });
+
     document.getElementById('modal-structured-output-mode')?.addEventListener('change', function() {
         setStructuredOutputMode(this.value);
     });
@@ -1469,20 +1513,26 @@ function _refreshPresetThreadsHints() {
   const batchThreadsInput = document.getElementById('modal-threads-batch');
   if (!threadsInput && !batchThreadsInput) return;
 
+  const hintEl = document.getElementById('preset-threads-hint');
   if (pCores > 0 && metricsReady) {
     if (threadsInput && !threadsInput.value) {
-      threadsInput.placeholder = '1 recommended';
+      threadsInput.placeholder = `${pCores} recommended`;
     }
     if (batchThreadsInput && !batchThreadsInput.value) {
       batchThreadsInput.placeholder = `${pCores} recommended`;
     }
+    if (hintEl && _presetIsUnified) {
+      hintEl.textContent = `Apple Silicon: set both to your P-core count (${pCores}). GPU handles matrix ops; threads affect prefill speed and sampling overhead.`;
+      hintEl.style.display = '';
+    }
   } else {
     if (threadsInput && !threadsInput.value) {
-      threadsInput.placeholder = 'default';
+      threadsInput.placeholder = 'auto';
     }
     if (batchThreadsInput && !batchThreadsInput.value) {
-      batchThreadsInput.placeholder = 'default';
+      batchThreadsInput.placeholder = 'auto';
     }
+    if (hintEl) hintEl.style.display = 'none';
   }
 }
 window.__refreshPresetEditorHints = _refreshPresetThreadsHints;
@@ -1490,7 +1540,10 @@ window.__refreshPresetEditorHints = _refreshPresetThreadsHints;
 async function _fetchSystemInfoAndRefreshPresetHints() {
   try {
     const headers = window.authHeaders ? window.authHeaders() : {};
-    const res = await fetch('/api/system/info', { headers });
+    const [res] = await Promise.all([
+      fetch('/api/system/info', { headers }),
+      _ensureUnifiedFlag(), // populate _presetIsUnified before hint renders
+    ]);
     if (!res.ok) return;
     const data = await res.json();
     if (data.ok && data.p_cores > 0) {
@@ -1576,5 +1629,32 @@ export async function _showConfirm(title, message) {
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
         cancelBtn.focus();
+    });
+}
+
+function _renderContextPills(mode, section) {
+    const pillsContainer = document.getElementById('preset-context-pills');
+    if (!pillsContainer) return;
+    const pills = [
+        { label: '65k', value: 65536 },
+        { label: '131k', value: 131072 },
+        { label: '160k', value: 163840 },
+        { label: '212k', value: 212000 },
+        { label: '262k', value: 262144 },
+    ];
+    pillsContainer.innerHTML = '';
+    pills.forEach(pill => {
+        const pillEl = document.createElement('button');
+        pillEl.className = 'preset-context-pill';
+        pillEl.textContent = pill.label;
+        pillEl.onclick = () => {
+            const input = document.getElementById('modal-context-size');
+            if (input) {
+                input.value = pill.value;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        };
+        pillsContainer.appendChild(pillEl);
     });
 }
