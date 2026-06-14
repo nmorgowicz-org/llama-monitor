@@ -337,7 +337,7 @@ pub async fn start_server(
         .flatten();
 
         match health_result {
-            Some((st, stderr)) if st.success() => {
+            Some((st, _stderr)) if st.success() => {
                 // OK — binary is usable.
             }
             Some((st, stderr)) => {

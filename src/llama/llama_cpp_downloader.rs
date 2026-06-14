@@ -285,9 +285,10 @@ pub async fn cleanup_old_binaries(binaries_dir: &Path) -> Result<()> {
         let name = entry.file_name().to_string_lossy().to_string();
         let lower = name.to_lowercase();
 
-        // Handle tarballs: llama-<digits>-bin-*.tar.gz
+        // Handle tarballs: llama-b<digits>-bin-*.tar.gz (GitHub release naming)
         if lower.starts_with("llama-") && lower.ends_with(".tar.gz") && lower.contains("-bin-") {
-            if let Ok(build) = digits_between(&lower, "llama-", "-bin-") {
+            // GitHub names them "llama-b9637-bin-..." so left marker is "llama-b".
+            if let Ok(build) = digits_between(&lower, "llama-b", "-bin-") {
                 tarball_map.insert(build, entry.path());
             }
             continue;

@@ -12062,6 +12062,85 @@ fn api_llama_binary_update(
                 let binary_name = if os == "windows" { "llama-server.exe" } else { "llama-server" };
                 let dest_dir = dest_path.parent().unwrap_or(&dest_path);
 
+                // Locate extracted binary in temp dir before touching dest_dir.
+                let tmp_binary = tmp_dir.path().join(binary_name);
+                if !tmp_binary.exists() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!(
+                                "Could not find '{}' in extracted archive",
+                                binary_name
+                            )
+                        })),
+                    ));
+                }
+
+                // Set executable bit before health check (unix).
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(
+                        &tmp_binary,
+                        std::fs::Permissions::from_mode(0o755),
+                    );
+                }
+
+                // Health check on the temp binary BEFORE writing anything to dest_dir.
+                // This ensures the live binary is never overwritten with a bad one.
+                // Capture stderr to diagnose failures (Gatekeeper, missing dylib, etc.).
+                let (health_ok, stderr) = tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    async {
+                        let output = tokio::process::Command::new(&tmp_binary)
+                            .arg("--help")
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::piped())
+                            .output()
+                            .await;
+
+                        match output {
+                            Ok(out) => {
+                                let err = String::from_utf8_lossy(&out.stderr);
+                                (out.status.success(), err.to_string())
+                            }
+                            Err(e) => {
+                                (false, format!("spawn error: {}", e))
+                            }
+                        }
+                    }
+                ).await
+                .unwrap_or((false, "health check timed out".into()));
+
+                if !health_ok {
+                    let detail = stderr.trim().to_string();
+                    if detail.is_empty() {
+                        state.push_log(
+                            "[monitor] llama-binary/update: new binary failed health check (llama-server --help). Not installing.".into(),
+                        );
+                    } else {
+                        state.push_log(format!(
+                            "[monitor] llama-binary/update: new binary failed health check (llama-server --help): {}. Not installing.",
+                            detail
+                        ));
+                    }
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "New llama-server binary failed basic health check. \
+                                The downloaded file may be corrupted or incompatible. \
+                                Try updating again or install manually."
+                        })),
+                    ));
+                }
+
+                // Log update intent.
+                state.push_log(format!(
+                    "[monitor] llama-binary/update: installing {} to {}",
+                    tag,
+                    dest_path.display()
+                ));
+
                 // Ensure destination directory exists (e.g. ~/.config/llama-monitor/bin/)
                 if let Err(e) = std::fs::create_dir_all(dest_dir) {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -12099,132 +12178,22 @@ fn api_llama_binary_update(
                     ));
                 }
 
-                // Locate the extracted binary first, then make sure the configured
-                // llama_server_path itself is updated even when it uses a custom filename.
+                // If dest_path uses a custom filename (not the archive default), ensure it exists.
                 let found_path = dest_dir.join(binary_name);
-                if !found_path.exists() {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": format!(
-                                "Could not find '{}' in extracted archive",
-                                binary_name
-                            )
-                        })),
-                    ));
-                }
-
-                // Log update intent.
-                state.push_log(format!(
-                    "[monitor] llama-binary/update: installing {} to {}",
-                    tag,
-                    dest_path.display()
-                ));
-
-                // Stage new binary as llama-server.new instead of overwriting in-place.
-                // This avoids corrupting the live file if the process restarts mid-update.
-                let new_path = {
-                    let mut p = dest_path.clone();
-                    if let Some(ext) = p.extension() {
-                        p.set_extension(format!("{}.new", ext.to_string_lossy()));
-                    } else {
-                        p.set_extension("new");
-                    }
-                    p
-                };
-
-                if let Err(e) = std::fs::copy(&found_path, &new_path) {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": format!(
-                                "Failed to write new binary to {}: {}",
-                                new_path.display(),
-                                e
-                            )
-                        })),
-                    ));
-                }
-
-                // Set executable bit on the new binary (unix).
-                #[cfg(unix)]
+                if dest_path != found_path
+                    && found_path.exists()
+                    && let Err(e) = std::fs::rename(&found_path, &dest_path)
                 {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ = std::fs::set_permissions(
-                        &new_path,
-                        std::fs::Permissions::from_mode(0o755),
-                    );
+                    let _ = std::fs::copy(&found_path, &dest_path);
+                    let _ = std::fs::remove_file(&found_path);
+                    let _ = e;
                 }
 
-                // Quick health check: run llama-server --help with a short timeout.
-                // If this fails, the binary is likely corrupted or incompatible.
-                // Capture stderr to diagnose failures (Gatekeeper, missing dylib, etc.).
-                let (health_ok, stderr) = tokio::time::timeout(
-                    std::time::Duration::from_secs(6),
-                    async {
-                        let output = tokio::process::Command::new(&new_path)
-                            .arg("--help")
-                            .stdout(std::process::Stdio::null())
-                            .stderr(std::process::Stdio::piped())
-                            .output()
-                            .await;
-
-                        match output {
-                            Ok(out) => {
-                                let err = String::from_utf8_lossy(&out.stderr);
-                                (out.status.success(), err.to_string())
-                            }
-                            Err(e) => {
-                                (false, format!("spawn error: {}", e))
-                            }
-                        }
-                    }
-                ).await
-                .unwrap_or((false, "health check timed out".into()));
-
-                if !health_ok {
-                    let _ = std::fs::remove_file(&new_path);
-                    let detail = stderr.trim().to_string();
-                    if detail.is_empty() {
-                        state.push_log(
-                            "[monitor] llama-binary/update: new binary failed health check (llama-server --help). Not replacing.".into(),
-                        );
-                    } else {
-                        state.push_log(format!(
-                            "[monitor] llama-binary/update: new binary failed health check (llama-server --help): {}. Not replacing.",
-                            detail
-                        ));
-                    }
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": "New llama-server binary failed basic health check. \
-                                The downloaded file may be corrupted or incompatible. \
-                                Try updating again or install manually."
-                        })),
-                    ));
-                }
-
-                // Atomically replace the current binary with the validated one.
-                // On POSIX, rename is atomic at the filesystem level and avoids
-                // partial-file races when llama-server is started shortly after.
-                if let Err(e) = std::fs::rename(&new_path, &dest_path) {
-                    // Fallback to copy-replace if rename fails (e.g. cross-device on some setups).
-                    if let Err(e2) = std::fs::copy(&new_path, &dest_path) {
-                        let _ = std::fs::remove_file(&new_path);
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": format!(
-                                    "Failed to activate new llama-server at {}: {}; fallback copy also failed: {}",
-                                    dest_path.display(),
-                                    e,
-                                    e2
-                                )
-                            })),
-                        ));
-                    }
-                    let _ = std::fs::remove_file(&new_path);
+                // Clean up old tarballs and versioned dylibs from dest_dir.
+                // This is the authoritative cleanup — cleanup inside download_and_extract
+                // runs on a temp dir that's deleted anyway.
+                if let Err(e) = crate::llama::llama_cpp_downloader::cleanup_old_binaries(dest_dir).await {
+                    eprintln!("[warn] llama.cpp binary cleanup failed: {}", e);
                 }
 
                 state.push_log(format!(
