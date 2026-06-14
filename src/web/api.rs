@@ -12158,34 +12158,43 @@ fn api_llama_binary_update(
 
                 // Quick health check: run llama-server --help with a short timeout.
                 // If this fails, the binary is likely corrupted or incompatible.
-                let health_ok = tokio::time::timeout(
+                // Capture stderr to diagnose failures (Gatekeeper, missing dylib, etc.).
+                let (health_ok, stderr) = tokio::time::timeout(
                     std::time::Duration::from_secs(6),
                     async {
-                        match tokio::process::Command::new(&new_path)
+                        let output = tokio::process::Command::new(&new_path)
                             .arg("--help")
                             .stdout(std::process::Stdio::null())
-                            .stderr(std::process::Stdio::null())
-                            .spawn()
-                        {
-                            Ok(mut child) => {
-                                if let Ok(status) = child.wait().await {
-                                    status.success()
-                                } else {
-                                    false
-                                }
+                            .stderr(std::process::Stdio::piped())
+                            .output()
+                            .await;
+
+                        match output {
+                            Ok(out) => {
+                                let err = String::from_utf8_lossy(&out.stderr);
+                                (out.status.success(), err.to_string())
                             }
-                            Err(_) => false,
+                            Err(e) => {
+                                (false, format!("spawn error: {}", e))
+                            }
                         }
                     }
                 ).await
-                .ok()
-                .unwrap_or(false);
+                .unwrap_or((false, "health check timed out".into()));
 
                 if !health_ok {
                     let _ = std::fs::remove_file(&new_path);
-                    state.push_log(
-                        "[monitor] llama-binary/update: new binary failed health check (llama-server --help). Not replacing.".into(),
-                    );
+                    let detail = stderr.trim().to_string();
+                    if detail.is_empty() {
+                        state.push_log(
+                            "[monitor] llama-binary/update: new binary failed health check (llama-server --help). Not replacing.".into(),
+                        );
+                    } else {
+                        state.push_log(format!(
+                            "[monitor] llama-binary/update: new binary failed health check (llama-server --help): {}. Not replacing.",
+                            detail
+                        ));
+                    }
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
                             "ok": false,

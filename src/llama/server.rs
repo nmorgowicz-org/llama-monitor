@@ -313,16 +313,22 @@ pub async fn start_server(
     // Quick health check on llama-server binary before starting.
     // If this fails, the binary is likely corrupted, incomplete, or incompatible;
     // we fail fast with a clear message instead of spawning and getting killed.
+    // Capture stderr to diagnose failures (Gatekeeper, missing dylib, etc.).
     {
         let bin_path = &app_config.llama_server_path;
         let health_result = tokio::time::timeout(std::time::Duration::from_secs(4), async {
-            match TokioCommand::new(bin_path)
+            let output = TokioCommand::new(bin_path)
                 .arg("--help")
                 .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-            {
-                Ok(mut child) => child.wait().await.ok(),
+                .stderr(std::process::Stdio::piped())
+                .output()
+                .await;
+
+            match output {
+                Ok(out) => {
+                    let err = String::from_utf8_lossy(&out.stderr);
+                    Some((out.status, err.to_string()))
+                }
                 Err(_) => None,
             }
         })
@@ -331,14 +337,21 @@ pub async fn start_server(
         .flatten();
 
         match health_result {
-            Some(st) if st.success() => {
+            Some((st, stderr)) if st.success() => {
                 // OK — binary is usable.
             }
-            Some(st) => {
+            Some((st, stderr)) => {
                 let code = st.code().map_or("unknown".into(), |c| c.to_string());
-                state.push_log(format!(
-                    "[monitor] start_server: llama-server health check failed (exit code {}). Binary may be corrupted or incompatible.", code
-                ));
+                let detail = stderr.trim().to_string();
+                if detail.is_empty() {
+                    state.push_log(format!(
+                        "[monitor] start_server: llama-server health check failed (exit code {}). Binary may be corrupted or incompatible.", code
+                    ));
+                } else {
+                    state.push_log(format!(
+                        "[monitor] start_server: llama-server health check failed (exit code {}): {}. Binary may be corrupted or incompatible.", code, detail
+                    ));
+                }
                 anyhow::bail!(
                     "llama-server health check failed (exit code {}). The binary may be corrupted, \
                      truncated, or incompatible. Reinstall or update the llama.cpp binary.",
