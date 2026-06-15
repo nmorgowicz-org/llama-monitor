@@ -153,7 +153,7 @@ async function runBenchmark() {
     const resp = await fetch('/api/benchmark', {
       method: 'POST',
       headers,
-      body: JSON.stringify({}),
+      body: JSON.stringify({ tuning: true }),
     });
 
     const data = await resp.json();
