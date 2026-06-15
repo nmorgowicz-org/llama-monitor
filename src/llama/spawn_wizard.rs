@@ -229,6 +229,9 @@ pub fn classify_benchmark_result(
 ///   (informational only — there is nothing to toggle).
 /// - Qwen-style 256-dim heads at ≤32k context with quantized KV on unified memory →
 ///   switch KV to f16 (faster on Metal, avoids the quantized-KV slow path).
+/// - Gemma4-style hybrid local-attention at >64k context on unified memory →
+///   switch KV to q8_0 (global attention layers' KV grows with context; q8_0 halves
+///   per-token decode bandwidth vs f16 while maintaining quality for agentic workloads).
 /// - an MTP draft model is available but draft-mtp speculative decoding is off →
 ///   enable it.
 pub fn predict_perf_hints(
@@ -280,7 +283,49 @@ pub fn predict_perf_hints(
         });
     }
 
-    // 3. MTP available but not enabled → free ~1.4–2× decode, no quality change.
+    // 3. Gemma4-style hybrid local-attention at long context: the sliding-window layers
+    //    use a bounded KV cache (~200 MB regardless of context length), but the global
+    //    attention layers (every Nth layer, full context) grow unboundedly. At 64k+
+    //    context each global-layer KV read per decoded token adds significant bandwidth.
+    //    Switching from f16 to q8_0 halves that overhead while preserving quality for
+    //    agentic workloads. Only fire when KV is above q8_0 (i.e. f16 or bf16).
+    let kv_above_q8 = matches!(ctk, "f16" | "bf16");
+    if is_unified_memory
+        && arch.has_local_attn()
+        && arch.global_head_dim > 0
+        && context_size > 65_536
+        && kv_above_q8
+    {
+        out.push(BenchmarkSuggestion {
+            label: "Use q8_0 KV cache for long-context decode".to_string(),
+            description: format!(
+                "At {}k context, the {n_global} full-attention layers' KV cache is \
+                 ~{size_f16:.1} GB at f16 vs ~{size_q8:.1} GB at q8_0. \
+                 Halving the global-attention KV bandwidth improves decode t/s with \
+                 negligible quality loss. The local sliding-window layers' KV stays \
+                 bounded (~200 MB) regardless of context length.",
+                context_size / 1024,
+                n_global = arch.n_global_attn_layers,
+                size_f16 = (context_size as f64
+                    * arch.global_head_dim as f64
+                    * arch.n_kv_heads as f64
+                    * 2.0   // K + V
+                    * 2.0)  // f16 bytes
+                    / 1e9,
+                size_q8 = (context_size as f64
+                    * arch.global_head_dim as f64
+                    * arch.n_kv_heads as f64
+                    * 2.0
+                    * 1.0)  // q8_0 ≈ 1 byte/element
+                    / 1e9,
+            ),
+            param: "ctk".to_string(),
+            value: serde_json::json!("q8_0"),
+            patch: Some(serde_json::json!({ "ctk": "q8_0", "ctv": "q8_0" })),
+        });
+    }
+
+    // 4. MTP available but not enabled → free ~1.4–2× decode, no quality change.
     if has_mtp_model && spec_type != Some("draft-mtp") {
         out.push(BenchmarkSuggestion {
             label: "Enable MTP speculative decoding".to_string(),
