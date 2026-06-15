@@ -39,89 +39,25 @@ All commits MUST follow the [Conventional Commits](https://www.conventionalcommi
 
 ### Scope Convention
 
-Scopes should describe the **component/area** being changed, not the type of change:
+Use the area being changed as scope: `api`, `ui`, `chat`, `gpu`, `nav`, `settings`, `models`, `sessions`, `wizard`, `vram`, `hf`, `binary`, `spawn`, `docs`, `ci`. When in doubt, pick the closest match — don't invent new scopes.
 
-| Scope | Purpose |
-|-------|---------|
-| `api` | Backend API endpoints, routes |
-| `ui` | Frontend layout, styling, components |
-| `chat` | Chat features, message rendering |
-| `gpu` | GPU monitoring, metrics |
-| `nav` | Navigation, sidebar, tab switching |
-| `settings` | Settings modal, preferences |
-| `models` | Model presets, configuration |
-| `sessions` | Session management, persistence |
-| `wizard` | Spawn wizard steps, UX, hardware config UI |
-| `vram` | VRAM estimator, ModelArch heuristics, quant advisor |
-| `hf` | HuggingFace search, browse, download, file listing |
-| `binary` | llama.cpp binary download, install, platform detection |
-| `spawn` | Server launch, introspection, third-party imports |
-| `docs` | Documentation files |
-| `ci` | CI/CD, workflows, build scripts |
+### PR Titles and Release Notes
 
-**Good scope usage:**
-- `fix(nav): modal navigation state broken after export`
-- `docs(ui): add screenshots for chat features`
-- `feat(chat): add message edit/regenerate actions`
-
-**Avoid:**
-- `fix(modal): navigation broken` - too vague
-- `fix: fix: modal navigation` - redundant
-
-❌ **Invalid:**
-- `Update README` (missing type)
-- `feat add new feature` (missing colon)
-- `fix: bug fix` (no description after colon)
-- `Fix bug in GPU monitoring` (wrong format)
-
-### Branch Naming
-
-When creating branches for releases, use the format:
-
-```
-release/v<version>
-```
-
-Examples:
-- `release/v0.2.0`
-- `release/v1.0.0`
-
-### AI Agent Guidelines
-
-1. **Always use conventional commit format** - Never commit without a type prefix
-2. **Use lowercase** - `ci:` not `CI:`, `feat:` not `Feat:`
-3. **Use parentheses for scope** - `feat(api):`, not `feat api:`
-4. **Describe what changed** - Be specific about the change
-5. **Chores don't bump version** - `chore:`, `refactor:`, `ci:`, `docs:` don't trigger version bumps
-6. **feat and fix bump versions** - Only these types trigger semantic version increments
-7. **PR titles must reflect the most significant change** - If a PR contains any `fix:` or `feat:` commits, the PR title MUST also be `fix:` or `feat:`. release-please only inspects PR titles, not individual commits. Never use `refactor:`, `chore:`, or `docs:` as a PR title if the PR includes bug fixes or features.
-8. **When one PR contains multiple releasable user-facing changes, provide release-please overrides** - If a PR includes more than one distinct `feat`, `fix`, or `perf` item that should appear separately in release notes, the agent MUST add a `BEGIN_COMMIT_OVERRIDE` / `END_COMMIT_OVERRIDE` block to the PR body before merge. Inside that block, include one conventional-commit line per release note entry, for example:
-9. **NEVER put override blocks in git commit messages** - `BEGIN_COMMIT_OVERRIDE` / `END_COMMIT_OVERRIDE` belongs ONLY in PR bodies for squash-merge release notes. Every `git commit -m` must be a single conventional commit line: `fix(gpu): use -ngl all instead of hardcoded 99`.
-
-```text
-BEGIN_COMMIT_OVERRIDE
-feat(chat): add context compaction controls
-fix(chat): preserve previous compaction tombstones across retries
-perf(ui): reduce chat render work during compaction
-END_COMMIT_OVERRIDE
-```
-
-9. **Use overrides more often than you think** - If the branch contains several meaningful user-visible commits, do not collapse them into one generic `feat:` or `fix:` line just because the PR is being squash-merged. Prefer a richer override block whenever the work naturally breaks into multiple release-note bullets.
-10. **Derive override entries from the branch's releasable commits** - Before merge, review the PR commits and identify the distinct user-facing `feat`, `fix`, and `perf` items. The override block should summarize those outcomes, not internal refactor steps, and should usually track the major releasable commits on the branch.
-11. **Prefer several precise bullets over one vague bullet** - If a PR ships multiple UI improvements, chat behavior changes, or fixes, list them separately in the override block. Example:
+- PR title MUST be `feat:` or `fix:` if the PR contains any feat/fix commits. release-please inspects PR titles, not individual commits.
+- **NEVER** put `BEGIN_COMMIT_OVERRIDE` / `END_COMMIT_OVERRIDE` in git commit messages — only in PR bodies.
+- When a PR ships multiple distinct user-facing `feat`, `fix`, or `perf` items, add an override block to the PR body so each appears separately in the changelog:
 
 ```text
 BEGIN_COMMIT_OVERRIDE
 feat(chat): add send-to-stop generation toggle
 feat(chat): add assistant variant navigation and resend after user edits
 fix(chat): default auto-compaction on restored tabs
-fix(ui): restore endpoint status interaction after module extraction
 END_COMMIT_OVERRIDE
 ```
 
-12. **Do not include non-user-facing maintenance unless it matters to release notes** - Pure refactors, internal cleanup, docs-only changes, test-only changes, and CI-only changes should usually stay out of the override block unless they have a direct user-visible effect worth calling out.
-13. **Do not rely on intermediate commit messages for release notes** - Because PRs are typically squash-merged, release-please usually sees the merged PR title/body, not every branch commit. If multiple entries are needed in the changelog, use the PR body override block above.
-14. **PR body overrides should be updated before merge, not after** - If the scope of the PR changes during review, the agent should revise the override block so the final merged PR body matches what actually shipped.
+- Use overrides more than you think you need to. Prefer several precise bullets over one vague summary line.
+- Pure refactors, internal cleanup, docs-only, and CI-only changes should not appear in override blocks.
+- Update the override block before merge if the PR scope changes during review.
 
 ## Multi-Platform Compatibility (MANDATORY)
 
@@ -212,119 +148,75 @@ git diff --check
 
 ### Mandatory pre-PR checks
 
- Before pushing or marking a PR ready, agents MUST run these steps in this exact order.
- Any step that modifies files must be committed before continuing.
+Before pushing or marking a PR ready, agents MUST run these steps in this exact order.
+Any step that modifies files must be committed before continuing.
+Never rely on CI to catch issues you can catch locally.
 
- 1. `cargo clippy -- -D warnings`
-    - Fix all warnings.
+1. `cargo clippy -- -D warnings`
+   - Fix all warnings. Do not push with known clippy failures.
 
- 2. `cargo test` (or a focused subset if the full suite is too slow; CI will run it)
-    - Do not push with known test failures.
+2. `cargo test` (or a focused subset if the full suite is too slow; CI will run it)
+   - Do not push with known test failures.
 
- 3. `npm run validate-js`
- 4. `npm run lint`
-    - Fix issues; re-run after changes.
+3. `npm run validate-js`
+4. `npm run lint`
+   - Fix issues; re-run after changes.
 
- 5. `git diff --check`
-    - Run this AFTER all previous steps, on the final committed state.
-    - If it reports issues, fix them and re-run.
+5. `git diff --check`
+   - Run AFTER all previous steps, on the final committed state.
+   - If it reports issues, fix them and re-run.
 
- 6. Final formatting normalization (ABSOLUTE LAST CHECK):
-    - Run: `cargo fmt`
-    - If it changes files, commit them (e.g., `chore: apply cargo fmt`).
-    - Do not push until formatting is committed.
-    - This is the last step before the final consistency check and push; always run it even if you already did.
+6. `cargo build --release`
+   - Ensures the release binary builds cleanly. Required before any screenshot or e2e run.
 
- 7. Final consistency check (CRITICAL):
-    - Run: `git status`
-    - Ensure:
-      - No uncommitted changes from fmt/clippy/lint.
-      - No generated files (e.g., src/gen/*) left uncommitted after toolchain changes.
-    - If anything is uncommitted, commit it before pushing.
+7. Final formatting (ABSOLUTE LAST CHECK):
+   - Run: `cargo fmt`
+   - If it changes files, commit them (e.g., `chore: apply cargo fmt`).
+   - Do not push until formatting is committed.
+   - Always run this even if you already ran it earlier.
 
- If any of these fail, fix the issues before pushing.
+8. Final consistency check (CRITICAL):
+   - Run: `git status`
+   - Ensure:
+     - No uncommitted changes from fmt/clippy/lint.
+     - No generated files (e.g., `src/gen/*`) left uncommitted after toolchain changes.
+   - If anything is uncommitted, commit it before pushing.
+
+9. **JS module baseline** (only if a new `.js` file was added under `static/js/` and imported from `bootstrap.js`):
+   - Run: `cd tests/ui && npm run update-baseline`
+   - Commit the updated `tests/ui/core/js-module-baseline.json` together with the new module.
+   - Do not skip this — the baseline test will fail in CI if you do.
+
+Hard rules:
+- Never push "to see if CI passes."
+- Never ignore, comment out, or trust a failing check.
+- Include auto-generated files (e.g., `src/gen/*`) in every check and commit.
+- If a check fails and you cannot immediately fix it, STOP and ask for clarification instead of pushing.
+
+If any of these fail, fix the issues before pushing.
 
 ## Documentation Maintenance
 
-Keeping docs accurate is a first-class concern. Agents MUST update documentation when features change — not as a follow-up, but as part of the same PR.
+Docs are updated in the same PR as the code — not as follow-up. Primary doc areas:
 
-### When Docs Must Be Updated
+| Area | File |
+|------|------|
+| Chat, personas, compaction, guided generation | `docs/reference/chat.md` |
+| REST API endpoints and data shapes | `docs/reference/api.md` |
+| Dashboard, monitoring, hardware | `docs/reference/dashboard.md` |
+| Remote agent and SSH | `docs/reference/remote-agent.md` |
+| CLI flags | `docs/reference/cli-flags.md` |
+| Spawn wizard, HF integration, binary download | `docs/reference/spawn-wizard.md` |
+| VRAM estimator, ModelArch heuristics | `docs/reference/vram-estimator.md` |
 
-Update documentation whenever a change falls into any of these categories:
+**When to update:**
+- New user-visible feature → add to relevant `docs/reference/<area>.md`; README if high-impact
+- Changed UI label or element ID → update any doc prose + `capture.mjs` selectors in the same PR
+- New or changed API field → update `docs/reference/api.md` schema; keep ChatTab/ChatMessage in sync with Rust structs
+- Removed feature → remove all references and stale screenshots
+- New screenshot scenario → update `tests/ui/README.md` and the `printUsage()` block in `capture.mjs`
 
-| Change Type | Required Doc Updates |
-|-------------|---------------------|
-| New user-visible feature | `docs/reference/<area>.md`, README feature list if high-impact |
-| Changed UI label, button name, or element ID | Any doc that references the old name; update capture.mjs selectors |
-| New API endpoint | `docs/reference/api.md` with request/response schema |
-| Changed API field name or type | `docs/reference/api.md` ChatTab/Message object, any affected schemas |
-| New backend struct field | `docs/reference/api.md` if client-visible |
-| Renamed function or exported symbol | Check docs for any prose references |
-| New config file or persistence key | `docs/reference/` area doc + `AGENTS.md` File Persistence table |
-| Removed feature | Remove all doc references; remove screenshots if no longer accurate |
-| New screenshot scenario or capture script change | `tests/ui/README.md`, scenario usage block in `capture.mjs` |
-
-### Which Docs to Update
-
-| Area | Primary File | Notes |
-|------|-------------|-------|
-| Chat features, personas, compaction, guided generation | `docs/reference/chat.md` | Most frequently changed |
-| REST API endpoints and data shapes | `docs/reference/api.md` | Keep ChatTab/ChatMessage objects in sync with Rust structs |
-| Dashboard, monitoring, hardware | `docs/reference/dashboard.md` | |
-| Remote agent and SSH | `docs/reference/remote-agent.md` | |
-| CLI flags | `docs/reference/cli-flags.md` | |
-| Spawn wizard, HF integration, binary prereq, download | `docs/reference/spawn-wizard.md` | Update when wizard steps, API shapes, or hardware controls change |
-| VRAM estimator, ModelArch heuristics, quant advisor | `docs/reference/vram-estimator.md` | Update when adding new model families or changing estimation formulas |
-| High-impact features visible in the README | `README.md` | See README guidelines below |
-
-### README.md Guidelines
-
-The README is a product overview — not a feature changelog. Apply a high bar for what appears there.
-
-**Include in the README:**
-- Features that are visually striking or immediately useful to a first-time visitor
-- Features that differentiate llama-monitor from a plain llama.cpp dashboard
-- Screenshots that show off the app in an impressive or useful state
-
-**Do not include in the README:**
-- Debugging-only features (internal logs, raw metrics dumps)
-- Minor UX improvements (default value changes, layout tweaks)
-- Features that are only relevant after deep use (export formats, fine-grained settings)
-- More than 7–8 feature screenshots total — prefer fewer, higher-quality shots
-
-**Feature section structure:**
-
-```markdown
-### Feature Name
-
-One or two sentences explaining what the feature does and why it's useful. Write for
-a developer who has never seen the app — lead with the value, not the mechanism.
-
-![Alt text](docs/screenshots/filename.png)
-```
-
-Keep descriptions under 3 sentences. If a feature needs more explanation, it belongs in `docs/reference/`, not the README. Link to the reference doc at the bottom of the section if relevant.
-
-**Updating the README:**
-- Prefer updating existing sections to replacing them
-- When a feature is substantially reworked, update both the prose and the screenshot
-- When removing a feature, remove its README section and the screenshot file if it is no longer accurate
-
-### docs/reference/ Guidelines
-
-Reference docs are comprehensive. Include:
-- All parameters with their defaults and valid ranges
-- All API fields (type, default, nullability)
-- All UI controls and what they do
-- Screenshots for any non-trivial modal, panel, or workflow
-- Cross-references to related sections with relative links
-
-Avoid:
-- Repeating prose from the README verbatim
-- Writing from the perspective of a commit ("we added X") — write as if it always existed
-- Leaving stale information — if a field is renamed, update the doc in the same PR
-
----
+Write reference docs as if the feature always existed. Don't say "we added X in this PR."
 
 ## Screenshot Harness
 
@@ -334,128 +226,24 @@ All repo-managed screenshots and animated UI captures use the single harness:
 node tests/ui/capture.mjs --scenario <name>
 ```
 
-IMPORTANT: capture.mjs MUST ONLY be run sequentially, one scenario at a time.
-- Do not run multiple scenarios in parallel (no &, no &&, no parallel tool calls).
-- Each scenario launches its own llama-monitor instance and may attach to a shared remote server.
-- Running in parallel causes port conflicts, attach-timeouts, and race conditions.
-
-The harness spawns a fresh `target/release/llama-monitor` binary on a temporary port with a clean config dir, then attaches to `REMOTE_SERVER` (default `http://192.168.2.16:8001`). The remote llama.cpp server must be reachable for any scenario that sends chat messages.
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SCREENSHOT_PORT` | `8892` | Base port for the spawned monitor instance |
-| `REMOTE_SERVER` | `http://192.168.2.16:8001` | llama.cpp server to attach to |
-| `SCREENSHOT_FORM_AUTH` | `admin:secret123` | Credentials used for the auth-shell still captured by the `welcome` scenario |
-
-### Scenarios
-
-| Scenario | What It Captures | Saves To |
-|----------|-----------------|----------|
-| `welcome` | Welcome/setup screen plus form-auth shell without attach | `docs/screenshots/artifacts/` |
-| `chat` | Chat, telemetry, logs | `docs/screenshots/artifacts/` |
-| `guided-gen` | Context notes, suggestions, quick guide, director mode, surprise, explicit mode, categories | `docs/screenshots/artifacts/` |
-| `sidebar` | Chat sidebar, FTS search, context menu, title filter | `docs/screenshots/artifacts/` |
-| `settings` | Settings modal, preferences, persona, models, shortcuts | `docs/screenshots/artifacts/` |
-| `panels` | Chat config panels, style, prompt debug | `docs/screenshots/artifacts/` |
-| `dashboard` | Server tab and GPU section | `docs/screenshots/artifacts/` |
-| `sparkline` | Throughput sparkline validation stills | `docs/screenshots/artifacts/` |
-| `gifs` | Inference and GPU/system animated GIFs (900px scaled) | `docs/screenshots/artifacts/` |
-| `spawn-wizard` | Spawn wizard static stills: all 5 steps, HF browse, quant advisor, VRAM, summary | `docs/screenshots/artifacts/` |
-| `spawn-wizard-gif` | Animated GIF of the full spawn wizard flow (900px scaled, ~18s) | `docs/screenshots/artifacts/` |
-| `tls` | TLS/ACME settings panels: all four TLS modes, certificates tab, DB admin section | `docs/screenshots/artifacts/` |
-| `tune-panel` | Server tuning panel | `docs/screenshots/artifacts/` |
-| `llama-updater` | llama-server binary updater pill, version modal with release notes, and app release notes | `docs/screenshots/artifacts/` |
-| `chat-history-qa` | Chat history Q&A panel | `docs/screenshots/artifacts/` |
-| `smoke` | Startup smoke validation | no screenshots unless the scenario is extended |
-
-**Output directory convention:**
-- `docs/screenshots/` — promoted screenshots referenced in `README.md` or `docs/reference/`
-- `docs/screenshots/artifacts/` — raw harness output, `.gitignore`d; used to validate UI/UX before promoting to `docs/screenshots/`
-
-### Running Captures
+**NEVER run multiple scenarios in parallel** (no `&`, no `&&`, no parallel tool calls). Each scenario launches its own monitor instance; parallel runs cause port conflicts and race conditions.
 
 ```bash
-# Rebuild release binary first if UI code changed
+# List available scenarios
+node tests/ui/capture.mjs --list-scenarios
+
+# Run a scenario (always rebuild release binary first if static/ changed)
 cargo build --release
-
-# Welcome screen only
-node tests/ui/capture.mjs --scenario welcome
-
-# Core chat surfaces
-SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario chat
-
-# Guided-generation features
-SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario guided-gen
-
-# Sidebar and search surfaces
-SCREENSHOT_PORT=8893 node tests/ui/capture.mjs --scenario sidebar
-
-# Settings, panels, modals
-SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario settings
-SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario panels
-
-# Dashboard/server surfaces
-SCREENSHOT_PORT=8897 node tests/ui/capture.mjs --scenario dashboard
-
-# Validation stills
-SCREENSHOT_PORT=8898 node tests/ui/capture.mjs --scenario sparkline
-
-# Animated GIFs
-SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs
-SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
-SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --inference-only
-
-# Spawn wizard stills (no attach needed)
-SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario spawn-wizard --no-attach
-
-# Spawn wizard animated GIF (no attach needed)
-SCREENSHOT_PORT=8897 node tests/ui/capture.mjs --scenario spawn-wizard-gif --no-attach
-
-# TLS/security panels
-SCREENSHOT_PORT=8898 node tests/ui/capture.mjs --scenario tls
-
-# Misc panels
-SCREENSHOT_PORT=8900 node tests/ui/capture.mjs --scenario tune-panel
-SCREENSHOT_PORT=8901 node tests/ui/capture.mjs --scenario llama-updater
-SCREENSHOT_PORT=8902 node tests/ui/capture.mjs --scenario chat-history-qa
+node tests/ui/capture.mjs --scenario <name>
 ```
 
-### When to Regenerate Screenshots
+Raw output lands in `docs/screenshots/artifacts/` (gitignored). Promote files to `docs/screenshots/` manually when referencing them in README or docs.
 
-| Situation | Action |
-|-----------|--------|
-| New UI surface added (modal, panel, section) | Extend the appropriate scenario; run it; commit new screenshots |
-| Existing UI surface visually changed | Re-run the scenario that covers it; commit updated screenshots |
-| Element ID or selector changed | Update the selector in `capture.mjs` first, then re-run |
-| Screenshot referenced in docs but no longer accurate | Regenerate or remove; never leave stale screenshots in docs |
-| README hero shot is outdated | Re-run the relevant scenario, then explicitly promote the best artifact into `docs/screenshots/` |
-
-### Rules for Agents
-
-1. **Always rebuild release before running captures** when any `static/` file has changed. The harness runs `target/release/llama-monitor`, not the dev build.
-2. **Do not create new one-off screenshot scripts.** Add scenarios to `tests/ui/capture.mjs` instead.
-3. **Fix broken selectors in the same PR as the rename.** When an element ID changes (e.g., `#btn-system-prompt` → `#btn-behavior`), update `capture.mjs` at the same time to keep the harness green.
-4. **Promote screenshots from `artifacts/` to `docs/screenshots/` explicitly** when they are referenced in `README.md` or `docs/reference/`. Copy the file; do not change the artifacts path in the scenario.
-5. **Prefer updating existing scenario functions** over adding new ones for incremental changes to an existing feature area.
-6. **Log geometry/state for invisible surfaces.** If a popup, hovercard, or panel isn't appearing, add a `console.log` with element geometry before calling `captureShot`. Do not skip the capture silently.
-7. **Document new scenarios** in both the `printUsage()` block and `tests/ui/README.md`.
-8. **Use `--no-attach` only for the welcome-screen shot.** All chat and feature screenshots require an attached server.
-
-### Naming Convention
-
-Screenshots use a numeric prefix for rough ordering and a descriptive slug:
-
-```
-NN-description.png         # hero shots in docs/screenshots/
-NNb-description.png        # variant or sub-shot of the same numbered slot
-```
-
-When adding a new screenshot:
-- Pick the next available number in the relevant range
-- Use a slug that describes the UI surface, not the commit or feature branch
-- Never reuse a number that already refers to a different surface (readers bookmark images by URL)
+**Key rules:**
+- Always `cargo build --release` before captures when `static/` changed — the harness uses the release binary.
+- When an element ID changes, update `capture.mjs` selectors in the same PR.
+- Add new scenarios to `capture.mjs` (not one-off scripts); document them in `printUsage()` and `tests/ui/README.md`.
+- `--no-attach` only for the `welcome` scenario. All others require a reachable `REMOTE_SERVER`.
 
 ## Playwright UI E2E Tests
 
@@ -465,121 +253,76 @@ Playwright UI tests are separate from the Puppeteer screenshot harness. They:
 - Validate behavior and flows, not pixel-perfect visuals.
 - Are typically run near the end of a feature branch before marking a PR ready.
 
-### Core concepts (IMPORTANT)
+> **LIVE INSTANCE PROTECTION — READ FIRST**
+>
+> Default Playwright behavior (`npm test` with no flags) spawns a fresh `llama-monitor`
+> on port **7778**, and **kills any existing process on that port** before starting.
+>
+> An AI coding session, spawned model, or your active chat history may be running on 7778.
+> Killing it silently terminates the model and may corrupt ongoing work.
+>
+> **ALWAYS specify a test port when running locally. Never run bare `npm test`.**
+> Use the canonical local command below.
 
-- Two ways Playwright starts the app:
-  - Isolated (default, recommended):
-    - If neither `LLAMA_MONITOR_UI_URL` nor `LLAMA_MONITOR_TEST_PORT` is set:
-      - Playwright uses `webServer.command: node run-server.mjs`
-      - `run-server.mjs` starts a fresh `llama-monitor` on 7778 with a new temp config dir
-      - No user data (chat history, settings, presets) is used — this is the correct way for agents.
-  - Attached (advanced, not default):
-    - If `LLAMA_MONITOR_UI_URL` is set, Playwright attaches to that instance.
-    - Uses its config, its chat tabs, etc. (not isolated).
+### How isolation works
 
-- CI-equivalent run:
-  - Sequential (workers: 1), retries: 2, forbidOnly: true
-  - Isolated: fresh config dir via `run-server.mjs`
-  - Uses either cargo or the prebuilt release binary (see commands below)
+- **Isolated (always use this)**: `run-server.mjs` starts a fresh `llama-monitor` on the
+  specified port with a brand-new temp config directory. No user chat history, settings,
+  or presets are used. This is correct for all agents and PR validation.
+- **Attached (advanced only)**: If `LLAMA_MONITOR_UI_URL` is set, Playwright connects
+  to an existing instance and uses its real config and data. Avoid for PR validation.
 
-### Default (CI-equivalent, isolated) — USE THIS
-
-This is the canonical way to run e2e tests. Use this whenever asked to "run the e2e tests."
-
-From repo root, after a release build:
+### Canonical local run (CI-equivalent, isolated) — USE THIS
 
 ```bash
 cd tests/ui
-CI=1 LLAMA_MONITOR_USE_RELEASE=1 npm test
+CI=1 LLAMA_MONITOR_USE_RELEASE=1 LLAMA_MONITOR_TEST_PORT=17778 npm test
 ```
 
-Explanation:
-- CI=1:
-  - Tells Playwright:
-    - workers: 1 (sequential)
-    - retries: 2
-    - forbidOnly: true
-- No LLAMA_MONITOR_UI_URL or LLAMA_MONITOR_TEST_PORT:
-  - So Playwright uses webServer (run-server.mjs), not an existing instance.
-- LLAMA_MONITOR_USE_RELEASE=1:
-  - run-server.mjs will use `target/release/llama-monitor` instead of `cargo run`.
-  - Saves time; matches CI’s “use a built release binary” pattern.
+What each flag does:
+- `CI=1` — Playwright: workers=1 (sequential), retries=2, forbidOnly=true.
+- `LLAMA_MONITOR_USE_RELEASE=1` — uses `target/release/llama-monitor` instead of `cargo run` (faster; matches CI).
+- `LLAMA_MONITOR_TEST_PORT=17778` — spawns the test server on 17778, leaving port 7778 untouched.
 
-If you haven’t built a release yet:
-- Either rebuild first:
-  - `cargo build --release`
-- Or let run-server.mjs use cargo (slower, but fine for a single check):
-  - `cd tests/ui && CI=1 npm test`
-
-### Using a separate port when 7778 is occupied
-
-If port 7778 is already in use (e.g., a live llama-monitor or another process),
-use `LLAMA_MONITOR_TEST_PORT` so tests don't interfere:
-
+If you haven’t built a release binary yet, build it first:
 ```bash
-cd tests/ui
-CI=1 LLAMA_MONITOR_TEST_PORT=17778 npm test
+cargo build --release
 ```
 
-Notes:
-- Still isolated via run-server.mjs.
-- Still matches CI-equivalent behavior with `CI=1`.
+Or omit `LLAMA_MONITOR_USE_RELEASE=1` to let run-server.mjs use `cargo run` (slower):
+```bash
+cd tests/ui && CI=1 LLAMA_MONITOR_TEST_PORT=17778 npm test
+```
 
 ### Attaching to a live instance (advanced, not default)
 
 Only use this if you specifically want to validate against an existing running instance
 and know its state (its settings, chat tabs, etc.).
 
-- Example:
-  - Start: `cargo run --release -- --headless --port 17778` (or use target/release/llama-monitor)
-  - Then:
-    - `cd tests/ui && LLAMA_MONITOR_UI_URL=http://127.0.0.1:17778 npm test`
+```bash
+# Start an instance on a dedicated port
+target/release/llama-monitor --headless --port 17778
 
-Important:
-- This is NOT isolated:
-  - Tests will use that instance's real config and data.
-  - Avoid when running the suite for PR validation or regression checks.
+# Run tests against it (NOT isolated — uses real config)
+cd tests/ui && LLAMA_MONITOR_UI_URL=http://127.0.0.1:17778 npm test
+```
 
-### Live Instance Protection
-
-When running Playwright tests while a live llama-monitor instance is in use (e.g., for
-coding assistance, running a model, or as the AI’s active environment), the test run MUST
-not kill, restart, or connect to that instance.
-
-Default Playwright behavior:
-- Uses `run-server.mjs` on port 7778.
-- Playwright will kill any existing process on 7778 before starting its own test server.
-
-This is dangerous: an AI coding session may be running on that instance via a spawned
-model. Killing it silently terminates that model and may corrupt ongoing work.
-
-HARD RULE:
-- If port 7778 is in use for something important, do NOT run:
-  - `npm test` / `npx playwright test`
-  - without specifying a test port.
-- Instead, use LLAMA_MONITOR_TEST_PORT or attach via LLAMA_MONITOR_UI_URL
-  to a deliberately chosen instance.
-
-If you are unsure whether port 7778 is in use:
-- Assume it is.
-- Use:
-  - `cd tests/ui && CI=1 LLAMA_MONITOR_TEST_PORT=17778 npm test`
+Do not use this for PR validation or regression checks.
 
 ### Running Locally (Useful Variants)
 
 From repo root:
 
-- CI-equivalent, isolated (default / required for PRs):
-  - `cd tests/ui && CI=1 LLAMA_MONITOR_USE_RELEASE=1 npm test`
-- CI-equivalent on a different port:
-  - `cd tests/ui && CI=1 LLAMA_MONITOR_TEST_PORT=17778 npm test`
-- Debug/interactive:
-  - `cd tests/ui && LLAMA_MONITOR_TEST_PORT=17778 npm run test:headed`
-  - `cd tests/ui && LLAMA_MONITOR_TEST_PORT=17778 npm run test:debug`
-- SSH integration tests:
-  - `cd tests/ui && npm run test:ssh` (requires LLAMA_MONITOR_SSH_TARGET)
-- AI-dependent tests:
-  - `cd tests/ui && LLAMA_MONITOR_HAS_AI=1 npm run test:ai`
+- **CI-equivalent, isolated (required for PRs):**
+  `cd tests/ui && CI=1 LLAMA_MONITOR_USE_RELEASE=1 LLAMA_MONITOR_TEST_PORT=17778 npm test`
+- **Debug/interactive (headed browser):**
+  `cd tests/ui && LLAMA_MONITOR_TEST_PORT=17778 npm run test:headed`
+- **Step-through debugger:**
+  `cd tests/ui && LLAMA_MONITOR_TEST_PORT=17778 npm run test:debug`
+- **SSH integration tests:**
+  `cd tests/ui && npm run test:ssh` (requires `LLAMA_MONITOR_SSH_TARGET`)
+- **AI-dependent tests:**
+  `cd tests/ui && LLAMA_MONITOR_HAS_AI=1 npm run test:ai`
 
 Notes:
 
@@ -776,135 +519,14 @@ The lint job runs automatically in CI on every PR push that touches `static/**` 
 
 ## Pre-PR Validation
 
-Before creating a PR, the agent **must** run a cross-cutting validation pass using a sub-agent (Task tool) to catch issues that automated checks miss. This is mandatory for any PR that touches multiple files or introduces new features.
-
-### Validation Checklist
-
-The sub-agent must verify:
-
-1. **CSS integrity**: No duplicate selectors, duplicate `@keyframes`, or specificity conflicts where new styles are silently overridden
-2. **Cross-module wiring**: All new JS functions have callers, all new HTML elements have CSS rules, all new CSS classes are used in HTML
-3. **Accessibility**: All new animations have `@media (prefers-reduced-motion: reduce)` overrides
-4. **Theme coverage**: All new styled elements have `[data-theme="light"]` overrides
-5. **Backend-frontend contract**: New API fields are serialized, deserialized, and consumed on the frontend; new WebSocket messages are handled
-6. **No stale code**: No leftover blocks from refactoring (e.g., duplicate rules, commented-out sections that should be deleted)
-
-### Validation Command
-
-Use the Task tool with a prompt like:
-
-```
-Use a sub-agent to validate all changes in the current branch. Check for:
-- CSS selector duplication and specificity conflicts
-- Missing prefers-reduced-motion overrides for new animations
-- Missing light theme overrides for new styled elements
-- Broken cross-module references (JS → HTML → CSS)
-- Backend-frontend contract mismatches
-- Stale code from refactoring
-Return a detailed report of any issues found with file:line references.
-```
-
-### Action on Findings
-
-- **Critical issues** (broken functionality, silent CSS overrides): Must fix before PR
-- **Medium issues** (missing accessibility, incomplete theme coverage): Should fix before PR
-- **Low issues** (cosmetic, minor cleanup): Can note in PR description as follow-up
-
-## Pre-Push / Pre-Tag Checks (MANDATORY)
-
-Before pushing or tagging a PR as ready, the agent MUST run the same checks as CI locally.
-If any check fails, the agent MUST NOT push until all are fixed.
-This is not optional.
-
-Required checks (every time):
-
-- `git diff --check`
-- `cargo clippy -- -D warnings`
-- `cargo test`
-- `cargo build --release`
-- `npm run validate-js`
-- `npm run lint` (if `static/**` or `tests/ui/**` changed)
-- `cargo fmt -- --check` (ABSOLUTE LAST CHECK; if it fails, run cargo fmt, commit, then push)
-
-Hard rules:
-
-- Never rely on CI to catch issues you can avoid.
-- Never push "to see if CI passes."
-- Never ignore, comment out, or "trust" a failing check.
-- Include auto-generated files (e.g., src/gen/*) in every check and commit.
-- If you change code, configs, or static assets, re-run the full checklist before pushing.
-- If you are unsure whether something might affect CI, assume it does and run the checks.
-- If a check fails and you cannot immediately fix it, STOP and ask for clarification instead of pushing.
-- **JS module baseline:** If you added a new `.js` file under `static/js/` imported from `bootstrap.js`, you MUST update `tests/ui/core/js-module-baseline.json` (run `cd tests/ui && npm run update-baseline`). Commit the updated baseline with the new module.
+For any PR touching multiple files or adding features, run a sub-agent cross-cutting check for: CSS selector duplication / specificity conflicts, missing `prefers-reduced-motion` overrides on new animations, missing `[data-theme="light"]` overrides on new styled elements, broken JS→HTML→CSS cross-module references, backend-frontend API contract mismatches, and stale code left from refactoring. Critical issues (broken functionality, silent overrides) must be fixed before the PR is marked ready.
 
 ## CI/CD Workflow
 
-### Pull Requests
-
-1. **CI triggers**: CI only runs when PR has `ready-to-test` label
-2. **Title format**: Use conventional commit format (`feat:`, `fix:`, etc.)
-3. **Auto-labeling**: GitHub labels PRs based on file paths and commit titles:
-    - **File paths**: `.github/workflows/**` → `ci`, `github-actions`; `**/*.rs` → `rust`; `**/*.cs` → `csharp`; `**/*.js` → `javascript`; `static/**` → `ui`; `**/*.sh` → `shell`; `**/*.md` → `docs`; `Cargo.toml`/`Cargo.lock` → `dependencies`; `package.json` → `node-dependencies`; `tests/**` → `test`
-    - **Commit titles**: `fix(` → `fix`; `feat(` → `feat`; `refactor(` → `refactor`; `chore(` → `chore`; `perf(` → `perf`; `docs(` → `docs`; `test(` → `test`; `ci(` → `ci`
-4. **CI checks**: All PRs must pass:
-   - `cargo fmt -- --check`
-   - `cargo clippy -- -D warnings`
-   - `cargo test`
-   - `cargo build --release`
-
-### Releases
-
-- **Automated**: release-please creates release PRs when `feat:` or `fix:` commits merge to `main`
-- **Release type**: Rust (semantic versioning based on commit types)
-- **Version bump**: `feat:` → MINOR, `fix:` → PATCH, others → no bump
-- **Published release notes source**: GitHub Releases should preserve the `release-please` body generated from `CHANGELOG.md`; do not replace it with GitHub auto-generated notes for normal tagged releases.
-- **Multi-entry release notes**: If one PR contains several distinct releasable changes that should appear as separate bullets, update the PR body with a `BEGIN_COMMIT_OVERRIDE` / `END_COMMIT_OVERRIDE` block before merge.
-- **Override quality bar**: Override blocks should usually contain one line per meaningful user-facing `feat`, `fix`, or `perf` item that shipped in the PR, based on the branch's releasable commits. Prefer several specific bullets over one catch-all summary.
-
-## File Persistence
-
-All user data persists to `~/.config/llama-monitor/`:
-
-| File | Purpose |
-|------|---------|
-| `chat.db` | SQLite chat storage for tabs, messages, full-text search index, and chat metadata |
-| `backups/auto/` | Automatic hourly rolling backups (`chat_auto_<ts>.db`); last 24 kept |
-| `backups/daily/` | Automatic daily backups (`chat_daily_<day>.db`); last 7 kept |
-| `backups/manual/` | Manual API-triggered backups (`chat_<ts>.db`) and pre-restore safety copies (`pre_restore_<ts>.db`); last 7 kept |
-| `sessions.json` | Persisted session list (`Session` objects with spawn/attach mode, status, preset ID, timestamps) |
-| `presets.json` | Model presets with llama.cpp launch parameters |
-| `templates.json` | User-created or user-modified chat persona templates and explicit policy overrides |
-| `ui-settings.json` | Persisted `UiSettings` values such as paths, ports, remote-agent settings, explicit policy, guided-generation defaults, and chat input height |
-| `auth-config.json` | Persisted dashboard auth mode (`basic`, `form`, or both), username, and hashed password for the Security tab |
-| `gpu-env.json` | GPU environment overrides (`arch`, `devices`, `rocm_path`, `extra_env`) |
-| `model-tags.json` | User-assigned tags for discovered model files |
-| `ssh-known-hosts.json` | Trusted SSH host keys for remote-agent workflows |
-| `lhm-disabled.json` | Persisted Windows LibreHardwareMonitor disabled/enabled state |
-| `hf-token` | HuggingFace API token (plaintext, 600 permissions); used for authenticated HF search and model downloads |
-| `models/` | Default directory for downloaded GGUF model files; configurable via `ui-settings.json` `models_dir` |
-| `bin/` | Default directory for downloaded llama.cpp binaries (e.g. `bin/llama-server`); auto-created on first binary download |
-| `model-cache/<sha256>.json` | Cached model introspection results keyed by file SHA-256; avoids re-running `--print-model-metadata` on every load |
-
-Data is persisted:
-- Missing `sessions.json`, `templates.json`, `ui-settings.json`, `gpu-env.json`, and `model-tags.json` files are recreated from defaults at startup. Invalid existing files are left untouched and reported as warnings.
-- Sessions: autosaved every 30 seconds
-- Presets: saved immediately by the preset CRUD API
-- Templates: saved immediately by the template CRUD API
-- UI settings: saved immediately by `PUT /api/settings`
-- GPU environment: saved immediately by `PUT /api/gpu-env`
-- Chat database: updated live by chat tab/message APIs; WAL checkpointed and ANALYZE run hourly
-- Chat backups: automatic hourly (last 24) to `backups/auto/`, automatic daily (last 7) to `backups/daily/`, manual on-demand to `backups/manual/` via `POST /api/db/backup`
-
-Frontend-only browser persistence also exists in `localStorage` and is not mirrored into `~/.config/llama-monitor/`. This includes UI state such as chat style, chat font, enter-to-send, telemetry pinning, nav/sidebar collapse state, visualization preferences, last attached endpoint, last session/setup positioning, date format, update dismissals, and some guided-generation UI toggles/categories.
-
-## Git Branch Strategy
-
-- **`main`**: Stable, release-ready code
-- **`feature/*`**: Feature development branches
-- **`release/*`**: Release preparation (created by release-please)
-- **`hotfix/*`**: Critical bug fixes for production
-
-All branches should be deleted after merge.
+- **CI triggers**: only when a PR has the `ready-to-test` label
+- **PR title**: must be conventional commit format (`feat:`, `fix:`, etc.)
+- **CI checks**: `cargo fmt -- --check`, `cargo clippy -- -D warnings`, `cargo test`, `cargo build --release`
+- **Releases**: release-please auto-creates release PRs when `feat:`/`fix:` merges to `main`. `feat:` → MINOR bump, `fix:` → PATCH. Preserve the release-please body in GitHub Releases; don't replace it with auto-generated notes.
 
 ## Security Requirements (MANDATORY)
 
@@ -1072,7 +694,8 @@ If any item is unclear or not satisfied, the agent MUST either add the missing p
 
 ## Security & Auth Patterns (MANDATORY)
 
-These patterns must be followed when adding or modifying endpoints. Violations have caused real shipped bugs.
+These patterns supplement the rules in [Security Requirements](#security-requirements-mandatory) with
+concrete implementation helpers and code-level conventions. Violations have caused real shipped bugs.
 
 ### 1) Auth layers (do not mix)
 
@@ -1204,123 +827,12 @@ You MUST:
 
 If any item is unclear or not satisfied, the agent MUST either add the missing protection or explicitly document the gap and rationale in the PR description.
 
-## Phase 4: Spawn Llama-Server V2 (Polish and Hardening)
-
-Phase 4 is complete. Key additions and constraints:
-
-### New Endpoints
-
-- POST /api/hf/search: Search HuggingFace models.
-  - Requires api-token.
-  - Rate limited: 10 requests per 60 seconds (per instance).
-- POST /api/hf/files: List GGUF files for a repo.
-  - Requires api-token.
-- POST /api/hf/download: Start a model download from HF.
-  - Requires api-token.
-  - Rate limited: 10-second cooldown between starts.
-  - Path traversal checks enforced.
-- POST /api/third-party-models: Scan for GGUF models in third-party tool directories.
-  - Requires api-token.
-- POST /api/model/introspect: Introspect a local model via llama-server.
-  - Requires api-token.
-  - Caches results in ~/.config/llama-monitor/model-cache/<sha256>.json.
-
-### New Modules
-
-- src/hf/mod.rs: HuggingFace Hub integration.
-  - hf_search_models, hf_list_gguf_files, hf_download_file_stream, hf_start_download.
-- src/llama/spawn_wizard.rs: Spawn wizard coordination.
-  - Third-party model import (get_common_model_dirs, find_gguf_in_dirs).
-  - Model introspection (introspect_model) with caching.
-
-### Security Rules (Phase 4)
-
-- All new endpoints enforce api-token via check_api_token.
-- No == on tokens; use constant-time comparison.
-- Path traversal: reject "..", leading "/", leading "\"; canonicalize and confirm within models_dir.
-- No full HF token in logs or error messages.
-- Rate limiting enforced on HF search and HF download.
-
-### UI / Accessibility
-
-- Reduced-motion: disable animations when prefers-reduced-motion is set.
-- Keyboard navigation: Tab, Enter, Escape supported.
-- No innerHTML with untrusted data; use textContent.
-
----
-
 ## VRAM Estimator: Adding New Model Architectures
 
-When a new model family is released, the heuristics in `src/llama/vram_estimator.rs` need to be updated. This section documents how to gather accurate data and where to apply it.
+When a new model family is released, update `src/llama/vram_estimator.rs`. Full field-by-field guidance and the data-gathering workflow is in `docs/reference/vram-estimator.md`. Key pitfalls that have caused real bugs:
 
-### Step 1: Fetch the model card
-
-Fetch these pages in order of accuracy:
-
-1. `https://huggingface.co/<base-org>/<base-model>` — the original non-GGUF model card (e.g. `Qwen/Qwen3.6-35B-A3B`). This usually has the architecture table.
-2. `https://huggingface.co/unsloth/<model>-GGUF` — Unsloth GGUF card; often has a cleaner layout summary.
-3. For Gemma models: search for kaitchup.substack.com architecture articles (e.g. "Gemma 4 31B architecture") — these have confirmed per-layer KV head counts.
-
-### Step 2: Extract these fields (all required)
-
-| Field | Where to find it |
-|-------|-----------------|
-| `num_hidden_layers` (total) | Architecture table / config.json |
-| Attention-only layers (for hybrid DeltaNet models) | Layer layout pattern, e.g. "10 × (3 DeltaNet → 1 Attention)" |
-| `num_key_value_heads` | Config / architecture section |
-| `head_dim` | Config (often called `head_dim` or computed as `hidden_size / num_attention_heads`) |
-| `sliding_window` / local window size | Config or architecture description |
-| Global vs local layer count | Alternating pattern (e.g. "5 local : 1 global") |
-| Global layer KV heads and head_dim | Architecture section (Gemma4 differs from local) |
-| `num_experts` total | MoE section |
-| Active experts per token | **IMPORTANT**: "A3B" / "A4B" / "A10B" in the model name means **active BILLIONS OF PARAMETERS**, not active experts. Look for "routed experts" + "shared experts" in the MoE config. |
-
-### Step 3: Apply the changes
-
-**For a new named model with exact confirmed values:** add a dedicated `_arch()` function (like `qwen36_35b_a3b_arch()`).
-
-**For a new model family:** add a new `_heuristic()` function and wire it into `from_name_and_params()`.
-
-The detection order in `from_name_and_params` matters — more specific patterns must come first. New family detection should be added before the general Gemma/standard path.
-
-**Field checklist for `ModelArch`:**
-
-```rust
-Self {
-    n_layers: <total layers>,
-    n_kv_heads: <KV heads for standard/global attn layers>,
-    head_dim: <head dim for standard/local layers>,
-    global_head_dim: <head dim for global layers if different; 0 otherwise>,  // Gemma4 uses 512
-    n_global_attn_layers: <count of full-context layers; 0 if no sliding window>,
-    local_attn_window: <local window token count; 0 if no sliding window>,
-    local_kv_heads: <KV heads for local sliding-window layers>,
-    n_attn_layers: <attn-only layers for hybrid DeltaNet; 0 for standard transformers>,
-    linear_attn_state_bytes: <DeltaNet recurrent state bytes; 0 for standard>,
-    n_experts: <total experts; 0 for dense>,
-    n_experts_used: <active experts per token; 0 for dense>,
-    expert_fraction: <fraction of params in expert FFNs; 0.65 default, ~0.85 for sparse MoE>,
-    ..Default::default()
-}
-```
-
-### Step 4: Add a ground-truth test
-
-Every new architecture function requires a `#[test]` that cites the source URL in a comment and asserts the exact values for the fields listed above. See `qwen36_27b_is_hybrid_deltanet`, `gemma4_31b_dense_gets_alternating_attention`, or `qwen35_122b_a10b_is_hybrid_deltanet` for the pattern.
-
-```rust
-#[test]
-fn new_model_arch_is_correct() {
-    // Source: https://huggingface.co/<org>/<model>
-    let arch = ModelArch::from_name_and_params("Model-Name-GGUF", <param_b>);
-    assert_eq!(arch.n_layers, <N>);
-    assert_eq!(arch.n_kv_heads, <N>);
-    // ... all relevant fields
-}
-```
-
-### Common pitfalls
-
-- **"A3B" / "A4B" / "A10B" suffixes** refer to active **parameter** counts, not active expert counts. Get the real expert count from the "routed + shared" spec in the model card.
-- **Hybrid DeltaNet models** (Qwen3.5, Qwen3.6): `n_attn_layers` must be set or KV cache will be calculated using total layers (4× too many), causing max-context to be severely underestimated.
-- **Gemma4 vs Gemma3**: Gemma4 uses `global_head_dim = 512` for global layers and a 1024-token sliding window; Gemma3 uses 512. They are different heuristics.
-- **Sliding window vs hybrid DeltaNet**: These are different mechanisms. Don't set `local_attn_window` on DeltaNet models — they use `n_attn_layers` + `linear_attn_state_bytes` instead.
+- **"A3B" / "A4B" / "A10B" suffixes** are active **parameter** counts, not expert counts. Get the actual expert count from "routed + shared" in the model card.
+- **Hybrid DeltaNet models** (Qwen3.5, Qwen3.6): `n_attn_layers` must be set or KV cache inflates to total layers (4× too many), causing max-context to be severely underestimated.
+- **Gemma4 vs Gemma3**: Gemma4 uses `global_head_dim = 512` for global layers and 1024-token sliding window; Gemma3 is different. Use separate heuristics.
+- **Sliding window vs DeltaNet**: Different mechanisms. Never set `local_attn_window` on DeltaNet models — use `n_attn_layers` + `linear_attn_state_bytes`.
+- Every new `_arch()` or `_heuristic()` function requires a `#[test]` citing the source URL and asserting every relevant field. More specific detection patterns must come before general ones in `from_name_and_params()`.

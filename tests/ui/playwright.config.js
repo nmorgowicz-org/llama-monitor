@@ -33,14 +33,15 @@ const config = {
     screenshot: 'only-on-failure',
     trace: 'on-first-retry',
   },
-  webServer: (process.env.LLAMA_MONITOR_UI_URL || process.env.LLAMA_MONITOR_TEST_PORT)
+  webServer: process.env.LLAMA_MONITOR_UI_URL
               ? undefined
               : {
                   // Wrapper script creates a fresh temp config dir so tests run with a clean slate,
                   // independent of the developer's local ~/.config/llama-monitor/ data.
+                  // LLAMA_MONITOR_TEST_PORT overrides the port (default 7778); run-server.mjs reads it.
                   command: 'node run-server.mjs',
                   cwd: '.',
-                  url: 'http://127.0.0.1:7778',
+                  url: `http://127.0.0.1:${process.env.LLAMA_MONITOR_TEST_PORT || '7778'}`,
                   reuseExistingServer: false,
                   stdout: 'pipe',
                   stderr: 'pipe',
