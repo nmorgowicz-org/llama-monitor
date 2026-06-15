@@ -237,18 +237,18 @@ export async function doStop() {
     });
 
     stayBtn.addEventListener('click', () => {
-        // Stay on dashboard; disable buttons to avoid double-click.
+        // Disable buttons to avoid double-click.
         stayBtn.disabled = true;
         welcomeBtn.disabled = true;
 
-        // Fade out, then remove.
-        modal.style.transition = 'opacity 250ms ease';
-        modal.style.opacity = '0.5';
+        // Fade out briefly, then remove so the dashboard is immediately usable.
+        modal.style.transition = 'opacity 200ms ease';
+        modal.style.opacity = '0';
         modal.style.pointerEvents = 'none';
 
         setTimeout(() => {
             removeModal();
-        }, 3000);
+        }, 220);
     });
 
     // On any Escape: default to welcome screen.
