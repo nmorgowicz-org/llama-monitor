@@ -82,6 +82,8 @@ function _positionDropdown(trigger, dropdown) {
   const rect = trigger.getBoundingClientRect();
   dropdown.style.top = (rect.bottom + 8) + 'px';
   dropdown.style.left = Math.min(rect.left, window.innerWidth - 450) + 'px';
+  // Clamp height to whatever space remains below the trigger
+  dropdown.style.maxHeight = Math.max(window.innerHeight - rect.bottom - 16, 200) + 'px';
   // Reposition on scroll/resize
   const ro = new ResizeObserver(() => _positionDropdown(trigger, dropdown));
   ro.observe(trigger);
@@ -254,19 +256,23 @@ async function _applyAndRetune(suggestion, cardEl) {
   _show('tune-running');
 
   try {
-    const headers = window.authHeaders
-      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
-      : { 'Content-Type': 'application/json' };
+    // /api/sessions/spawn requires the db-admin token
+    const tokenResp = await fetch('/api/db/admin-token', {
+      headers: window.authHeaders ? window.authHeaders() : {},
+    });
+    const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
+    const adminToken = tokenData.token;
+    if (!adminToken) throw new Error('Authentication required. Could not retrieve admin token.');
 
     // Respawn with the modified config
-    const startResp = await fetch('/api/start', {
+    const startResp = await fetch('/api/sessions/spawn', {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
       body: JSON.stringify(newConfig),
     });
     const startData = await startResp.json();
     if (!startResp.ok || !startData.ok) {
-      throw new Error(startData.error || `Start failed (HTTP ${startResp.status})`);
+      throw new Error(startData.error || `Spawn failed (HTTP ${startResp.status})`);
     }
 
     // Poll until the session reports Running (max 60 s for large model loads)
@@ -397,18 +403,22 @@ async function _applyMtpNmax(nMax) {
   _startMtpTimer();
 
   try {
-    const headers = window.authHeaders
-      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
-      : { 'Content-Type': 'application/json' };
+    // /api/sessions/spawn requires the db-admin token
+    const tokenResp = await fetch('/api/db/admin-token', {
+      headers: window.authHeaders ? window.authHeaders() : {},
+    });
+    const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
+    const adminToken = tokenData.token;
+    if (!adminToken) throw new Error('Authentication required. Could not retrieve admin token.');
 
-    const startResp = await fetch('/api/start', {
+    const startResp = await fetch('/api/sessions/spawn', {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
       body: JSON.stringify(newConfig),
     });
     const startData = await startResp.json();
     if (!startResp.ok || !startData.ok) {
-      throw new Error(startData.error || `Start failed (HTTP ${startResp.status})`);
+      throw new Error(startData.error || `Spawn failed (HTTP ${startResp.status})`);
     }
 
     if (hint) hint.textContent = 'Waiting for server to become ready…';
