@@ -225,7 +225,9 @@ function showReleaseNotes(release) {
     }
     html = linkPrRefs(html);
     // eslint-disable-next-line no-unsanitized/property
-    bodyEl.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : html;
+    bodyEl.innerHTML = typeof DOMPurify !== 'undefined'
+      ? DOMPurify.sanitize(html, { ADD_ATTR: ['target'] })
+      : html;
   } else {
     bodyEl.innerHTML = '<p class="llama-version-notes-none">No release notes for this build.</p>';
   }
