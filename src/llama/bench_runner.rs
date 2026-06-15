@@ -89,6 +89,7 @@ fn parse_sweep_json(stdout: &str) -> Result<Vec<SweepPoint>, String> {
 }
 
 /// Build the base llama-bench argument vector shared by sweeps and probes.
+#[allow(clippy::too_many_arguments)]
 fn base_args(
     model_path: &str,
     ngl: i32,
