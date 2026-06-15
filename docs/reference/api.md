@@ -164,6 +164,9 @@ Response:
 ### `POST /api/sessions/spawn`
 Auth: db-admin-token.
 Creates a launch session, starts `llama-server` from a saved preset, and makes it active.
+Used by:
+- Spawn wizard
+- Tuning panel "Apply" flow (to restart llama-server with adjusted configuration)
 
 This endpoint enforces a 15-second cooldown between calls. If called too soon, it returns 429 with:
 

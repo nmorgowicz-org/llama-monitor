@@ -14,7 +14,7 @@ The benchmark UI has three states:
 2. **Running**: The button is disabled, a spinner is shown, and a hint line reads "Sending a test prompt and measuring throughput…".
 3. **Results**: The grade chip, numeric results, and suggestion cards are displayed. A "Re-run" button allows re-testing after applying changes.
 
-When the user clicks "Apply" on a suggestion card, the server is restarted with the modified configuration and the benchmark runs again automatically.
+When the user clicks "Apply" on a suggestion card, the server is restarted with the modified configuration and the benchmark runs again automatically. Under the hood, the Tuning panel uses the spawn endpoint (`POST /api/sessions/spawn`) with admin authentication to perform a clean restart.
 
 ### Grade System
 

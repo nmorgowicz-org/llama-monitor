@@ -35,6 +35,14 @@ The left conversation sidebar is the main organizer for chat sessions.
 - **Title filter** — The inline filter narrows the sidebar list by conversation names and visible persona labels only
 - **Message search entry point** — A dedicated `Search Messages` button sits under the title filter so full-text search is visible without hunting for a header icon
 - **Context menu** — Rename, pin/unpin, export JSON, export Markdown, duplicate, and delete are available from the `...` menu
+- **Multi-select and bulk actions** — Hovering or selecting a conversation reveals a checkbox:
+  - Left-click: selects only that conversation (clears others)
+  - Ctrl/Cmd+click: toggles that conversation without clearing others
+  - Checkboxes: toggle individual selection without changing the active tab
+  - While one or more conversations are selected, the sidebar shows a bulk toolbar with:
+    - **Delete** — deletes all selected conversations (with undo toast)
+    - **Archive** — archives all selected conversations
+    - **Clear** — clears the current selection
 
 ![Conversation Context Menu](../screenshots/chat-context-menu.png)
 
@@ -51,6 +59,17 @@ The sidebar's `Search Messages` button opens a larger flyout beside the conversa
 - **Collapse-safe** — If the sidebar was collapsed before search, closing search restores that state
 - **Jump to match** — Clicking a result switches to the matching tab, scrolls to the stored message row, and briefly highlights it
 - **Open via shortcut** — `Ctrl+Shift+F` opens the search flyout
+
+## Appearance and Chat Preferences
+
+Several appearance and chat behaviors are configurable via Settings and are applied globally (not per-tab).
+
+- **Chat styles** — Visual styles for the chat view (e.g., standard, compact, bubbly, paper, terminal). Changes apply immediately.
+- **Timestamps** — Controls how message timestamps are shown: off, hover, or always.
+- **Message width** — Adjusts the horizontal width of the chat message area.
+- **Chat date format** — Controls how dates are displayed (e.g., `MM/DD/YY`, `DD/MM/YY`, ISO). This setting is synced via `/api/settings`.
+- **Enter to send** — Toggle whether Enter alone sends a message or if Shift+Enter / Ctrl+Enter is required. Synced via `/api/settings`.
+- **Context card view** — Controls how the context card is rendered (e.g., gauge or compact).
 
 ## Messaging
 
