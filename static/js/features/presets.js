@@ -1223,6 +1223,8 @@ function initPresetEditorNav() {
             btn.classList.add('active');
             const activeSection = document.querySelector('.preset-editor-section[data-section="' + target + '"]');
             if (activeSection) activeSection.classList.add('active');
+            const modalBody = document.querySelector('#preset-modal .modal-body');
+            if (modalBody) modalBody.scrollTop = 0;
         });
     });
 }
