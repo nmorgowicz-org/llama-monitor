@@ -19,7 +19,7 @@ import {
 } from './chat-template-registry.js';
 import { switchView } from './setup-view.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
-import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune, requestDepthSweep, renderDepthSweep } from './tuning-cards.js';
+import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune, requestDepthSweep, renderDepthSweep, requestBatchSweep, renderBatchSweep } from './tuning-cards.js';
 import { setHeaderMode } from './attach-detach.js';
 import { lastCapabilities, lastSystemMetrics } from '../core/app-state.js';
 import {
@@ -998,6 +998,8 @@ function bindEvents() {
   document.getElementById('spawn-moe-autotune-btn')?.addEventListener('click', () => autoTuneWizard(false));
   document.getElementById('spawn-moe-autotune-verify')?.addEventListener('click', () => autoTuneWizard(true));
 
+  // Batch/ubatch sweep
+  document.getElementById('wizard-batch-sweep-btn')?.addEventListener('click', runBatchSweep);
   // Depth sweep
   document.getElementById('wizard-depth-sweep-btn')?.addEventListener('click', runDepthSweep);
 
@@ -4061,6 +4063,47 @@ async function autoTuneWizard(verify) {
   }
 }
 
+// Batch/ubatch sweep: find optimal PP throughput across common batch/ubatch combos.
+async function runBatchSweep() {
+  const statusEl = document.getElementById('wizard-batch-sweep-status');
+  const resultsEl = document.getElementById('wizard-batch-sweep-results');
+  const hw = wizardState.hardware;
+  const m = wizardState.model;
+  if (!m.path || !m.path.toLowerCase().endsWith('.gguf')) {
+    showToast('Batch sweep needs a local .gguf file', 'warn');
+    return;
+  }
+  const body = {
+    model_path: m.path,
+    ngl: 99,
+    ctk: hw.cacheTypeK,
+    ctv: hw.cacheTypeV,
+    flash_attn: hw.flashAttn === 'on',
+    n_cpu_moe: hw.nCpuMoe || null,
+    prompt_tokens: 2048,
+  };
+  if (statusEl) statusEl.textContent = 'Running… testing 10 batch/ubatch combinations, ~5–10 min total.';
+  if (resultsEl) resultsEl.replaceChildren();
+  try {
+    const data = await requestBatchSweep(body);
+    if (data.error) { if (statusEl) statusEl.textContent = data.error; return; }
+    renderBatchSweep(resultsEl, data.probes || [], data.recommended_batch_size, data.recommended_ubatch_size);
+    if (data.recommended_batch_size != null) {
+      if (statusEl) statusEl.textContent =
+        `Best: batch=${data.recommended_batch_size}, ubatch=${data.recommended_ubatch_size}. Apply to use these values.`;
+      // Auto-apply recommended values to wizard state
+      wizardState.hardware.batchSize = data.recommended_batch_size;
+      wizardState.hardware.ubatchSize = data.recommended_ubatch_size;
+      if (dom.batchSizeInput) dom.batchSizeInput.value = data.recommended_batch_size;
+      if (dom.ubatchSizeInput) dom.ubatchSizeInput.value = data.recommended_ubatch_size;
+    } else {
+      if (statusEl) statusEl.textContent = 'Sweep complete — no successful probes.';
+    }
+  } catch {
+    if (statusEl) statusEl.textContent = 'Batch sweep failed';
+  }
+}
+
 // Depth sweep: measure decode/prefill at several context depths via llama-bench.
 async function runDepthSweep() {
   const statusEl = document.getElementById('wizard-depth-sweep-status');
@@ -4079,6 +4122,8 @@ async function runDepthSweep() {
     ctk: hw.cacheTypeK,
     ctv: hw.cacheTypeV,
     flash_attn: hw.flashAttn === 'on',
+    batch_size: hw.batchSize || 2048,
+    ubatch_size: hw.ubatchSize || 512,
     n_cpu_moe: hw.nCpuMoe || null,
     depths,
   };
@@ -4110,12 +4155,12 @@ function updateAdvisor() {
     const moeBox = document.getElementById('spawn-moe-autotune');
     if (moeBox) moeBox.style.display = (arch.nExperts || 0) > 0 ? '' : 'none';
 
-    // Depth sweep is available once a local .gguf is selected.
+    // Batch/ubatch sweep and depth sweep are available once a local .gguf is selected.
+    const localGguf = !!(m.path && m.path.toLowerCase().endsWith('.gguf'));
+    const batchSweepBox = document.getElementById('wizard-batch-sweep');
+    if (batchSweepBox) batchSweepBox.style.display = localGguf ? '' : 'none';
     const sweepBox = document.getElementById('wizard-depth-sweep');
-    if (sweepBox) {
-      const localGguf = !!(m.path && m.path.toLowerCase().endsWith('.gguf'));
-      sweepBox.style.display = localGguf ? '' : 'none';
-    }
+    if (sweepBox) sweepBox.style.display = localGguf ? '' : 'none';
 
     const name = (m.path || m.hfFile || m.hfRepo || m.originFile || '').split('/').pop() || '';
     const paramB = arch.paramB || m.paramB || 0;
@@ -6779,13 +6824,14 @@ async function triggerAutoSize() {
 
     if (r.n_cpu_moe != null) wizardState.hardware.nCpuMoe = r.n_cpu_moe;
 
-    // On unified memory (Apple Silicon), disable the 8 GB KV prefix-cache RAM reservation
-    // (--cache-ram). It's a separate pool for caching previous request prompts and defaults
-    // to 8 GB, which wastes unified memory that could be used for model weights or context.
-    // Only apply if the user hasn't explicitly set a value.
-    if (isUnifiedMemory() && (wizardState.hardware.cacheRam == null || wizardState.hardware.cacheRam === 8192)) {
-      wizardState.hardware.cacheRam = 0;
-      if (dom.cacheRamInput) dom.cacheRamInput.value = '0';
+    // On unified memory (Apple Silicon), set --cache-ram to -1 (no limit, no reservation).
+    // The server default of 8 GB pre-reserves memory wastefully. -1 enables the prompt/idle-slot
+    // cache on demand without a fixed reservation, preserving slot KV state between conversation
+    // turns so long-context sessions don't re-process the full context on every message.
+    // Only apply if the user hasn't explicitly set a value, or if it's still at the old 0 default.
+    if (isUnifiedMemory() && (wizardState.hardware.cacheRam == null || wizardState.hardware.cacheRam === 8192 || wizardState.hardware.cacheRam === 0)) {
+      wizardState.hardware.cacheRam = -1;
+      if (dom.cacheRamInput) dom.cacheRamInput.value = '-1';
     }
 
     // Sync form fields
@@ -8379,12 +8425,14 @@ async function _checkBinaryPrereq() {
       }
     }
 
-    // For unified memory (Apple Silicon): default --cache-ram to 0 on first load.
-    // The default of 8 GB wastes unified memory that is better used for model/context.
-    // Only set if the user hasn't already configured a value.
+    // For unified memory (Apple Silicon): default --cache-ram to -1 (no limit, no reservation).
+    // The server default of 8 GB pre-reserves memory wastefully. -1 enables the cache without
+    // any reservation — it uses memory only as needed, while keeping --cache-idle-slots working
+    // so slot KV state is preserved between conversation turns (avoids re-processing the whole
+    // context on every message). Only set if the user hasn't already configured a value.
     if (_platformInfo?.auto_backend === 'metal' && wizardState.hardware.cacheRam == null) {
-      wizardState.hardware.cacheRam = 0;
-      if (dom.cacheRamInput) dom.cacheRamInput.value = '0';
+      wizardState.hardware.cacheRam = -1;
+      if (dom.cacheRamInput) dom.cacheRamInput.value = '-1';
     }
     // Show unified memory note about -cram.
     if (_platformInfo?.auto_backend === 'metal') {

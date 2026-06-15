@@ -101,6 +101,75 @@ export function renderDepthSweep(container, points) {
 }
 
 /**
+ * Run an offline batch/ubatch sweep via llama-bench. Server must be stopped.
+ * Returns `{ probes: [{batch_size, ubatch_size, pp_tps}], recommended_batch_size,
+ *            recommended_ubatch_size, error? }`.
+ */
+export async function requestBatchSweep(body) {
+  const headers = window.authHeaders
+    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+    : { 'Content-Type': 'application/json' };
+  const r = await fetch('/api/bench/batch-sweep', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  return r.json();
+}
+
+/**
+ * Render batch/ubatch sweep results as a table with the best row highlighted.
+ * `recommendedBatch` and `recommendedUbatch` are the winning pair.
+ */
+export function renderBatchSweep(container, probes, recommendedBatch, recommendedUbatch) {
+  if (!container) return;
+  container.replaceChildren();
+  if (!probes || probes.length === 0) {
+    container.textContent = 'No sweep data.';
+    return;
+  }
+
+  const maxTps = Math.max(...probes.map((p) => p.pp_tps), 1);
+
+  const table = document.createElement('table');
+  table.className = 'depth-sweep-table batch-sweep-table';
+  const thead = table.createTHead();
+  const hr = thead.insertRow();
+  ['Batch (-b)', 'µBatch (-ub)', 'PP t/s', ''].forEach((h) => {
+    const th = document.createElement('th');
+    th.textContent = h;
+    hr.appendChild(th);
+  });
+  const tbody = table.createTBody();
+  probes.forEach((p) => {
+    const isBest = p.batch_size === recommendedBatch && p.ubatch_size === recommendedUbatch;
+    const tr = tbody.insertRow();
+    if (isBest) tr.className = 'batch-sweep-best';
+    tr.insertCell().textContent = p.batch_size;
+    tr.insertCell().textContent = p.ubatch_size;
+    const tpsTd = tr.insertCell();
+    if (p.pp_tps > 0) {
+      const barWrap = document.createElement('div');
+      barWrap.className = 'mtp-sweep-bar-wrap';
+      const bar = document.createElement('div');
+      bar.className = 'mtp-sweep-bar';
+      bar.style.width = `${Math.max((p.pp_tps / maxTps) * 100, 2).toFixed(0)}%`;
+      const val = document.createElement('span');
+      val.className = 'mtp-sweep-bar-val';
+      val.textContent = p.pp_tps.toFixed(0);
+      barWrap.appendChild(bar);
+      barWrap.appendChild(val);
+      tpsTd.appendChild(barWrap);
+    } else {
+      tpsTd.textContent = '—';
+    }
+    tr.insertCell().textContent = isBest ? '★ best' : '';
+  });
+
+  container.appendChild(table);
+}
+
+/**
  * Run an online MTP n-max sweep via the backend.
  * `nMaxValues` defaults to [1,2,3,4]; `promptType` defaults to "code".
  * Returns `{ ok, probes: [{n_max, gen_tps, ttft_ms, error?}], recommended_n_max, applied_n_max, error? }`.
