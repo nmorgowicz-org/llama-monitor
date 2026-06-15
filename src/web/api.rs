@@ -3687,7 +3687,21 @@ fn api_bench_mtp_sweep(
                         ));
                     }
 
-                    // Let the process fully exit
+                    // Wait for the port to actually become free before the next spawn.
+                    // 2 s was too short after killing a large model on macOS; poll instead.
+                    let port_deadline = std::time::Instant::now() + Duration::from_secs(15);
+                    loop {
+                        let is_free = tokio::net::TcpListener::bind(
+                            std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+                        )
+                        .await
+                        .is_ok();
+                        if is_free || std::time::Instant::now() >= port_deadline {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                    // Extra settle time for OS memory reclaim after a large model unload.
                     tokio::time::sleep(Duration::from_secs(2)).await;
 
                     // Start with modified config

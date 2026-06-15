@@ -316,7 +316,8 @@ pub async fn start_server(
     // Capture stderr to diagnose failures (Gatekeeper, missing dylib, etc.).
     {
         let bin_path = &app_config.llama_server_path;
-        let health_result = tokio::time::timeout(std::time::Duration::from_secs(4), async {
+        // 10s gives headroom when the system is under memory pressure from prior large-model loads.
+        let health_result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
             let output = TokioCommand::new(bin_path)
                 .arg("--help")
                 .stdout(std::process::Stdio::null())
