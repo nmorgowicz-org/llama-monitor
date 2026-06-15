@@ -305,6 +305,136 @@ export async function closeChatTab(id) {
     ]);
 }
 
+export async function deleteManyChatTabs(ids) {
+    if (!ids || ids.length === 0) return;
+
+    const toDelete = ids.filter(id => chat.tabs.some(t => t.id === id));
+    if (toDelete.length === 0) return;
+
+    // Move each tab to trash.
+    const deletedIds = [];
+    for (const id of toDelete) {
+        const idx = chat.tabs.findIndex(t => t.id === id);
+        if (idx === -1) continue;
+        const [tab] = chat.tabs.splice(idx, 1);
+        chat.tabTrash.push({ tab, trashedAt: Date.now() });
+        deletedIds.push(id);
+
+        if (chat.activeTabId === id) {
+            if (chat.tabs.length) {
+                chat.activeTabId = chat.tabs[chat.tabs.length - 1].id;
+                await _loadTabMessages(chat.activeTabId);
+            } else {
+                chat.activeTabId = null;
+            }
+        }
+    }
+
+    if (deletedIds.length === 0) return;
+
+    // Fire API deletes in parallel.
+    const failures = await Promise.all(
+        deletedIds.map(async (id) => {
+            try {
+                const resp = await fetch(`/api/chat/tabs/${id}`, {
+                    method: 'DELETE',
+                    headers: window.authHeaders ? window.authHeaders() : {},
+                });
+                const body = await resp.json().catch(() => null);
+                if (!resp.ok || body?.ok === false) {
+                    throw new Error(body?.error || `Delete failed (${resp.status})`);
+                }
+            } catch (e) {
+                console.error('deleteManyChatTabs failed for', id, e);
+                return id;
+            }
+        })
+    ).then(arr => arr.filter(Boolean));
+
+    // Restore any failed deletions from trash.
+    for (const id of failures) {
+        restoreTabFromTrash(id);
+    }
+
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
+    chatViewBindings.renderChatMessages?.();
+    chatViewBindings.loadChatNames?.();
+    chatViewBindings.updateExplicitToggleUI?.();
+    chatViewBindings.syncMessageLimitInput?.();
+    chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
+    chatViewBindings.refreshChatTelemetry?.();
+    chatViewBindings.updatePersonaMenuName?.();
+    chatViewBindings.refreshChatHistoryQA?.();
+    refreshTopCockpit();
+
+    showToastWithActions(`${deletedIds.length} chat(s) deleted`, 'info', '', [
+        {
+            id: 'undo',
+            label: 'Undo',
+            primary: true,
+            handler: () => {
+                for (const id of deletedIds) {
+                    restoreTabFromTrash(id);
+                }
+            },
+        },
+    ]);
+}
+
+export function archiveManyChatTabs(ids) {
+    if (!ids || ids.length === 0) return;
+
+    const archived = [];
+    for (const id of ids) {
+        const tab = chat.tabs.find(t => t.id === id);
+        if (!tab || tab.visibility === 'archived') continue;
+        const prevVisibility = tab.visibility;
+        tab.visibility = 'archived';
+        archived.push({ id, prevVisibility });
+
+        if (chat.activeTabId === id) {
+            _selectFallbackTab(id);
+        }
+
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        fetch(`/api/chat/tabs/${id}/archive`, {
+            method: 'POST',
+            headers,
+        }).catch(e => {
+            const entry = archived.find(a => a.id === id);
+            if (entry) {
+                tab.visibility = entry.prevVisibility;
+            }
+            console.error('archiveManyChatTabs failed for', id, e);
+        });
+    }
+
+    if (archived.length > 0) {
+        chatViewBindings.renderChatTabs?.();
+        chatViewBindings.renderChatSessionsSidebar?.();
+        showToastWithActions(`${archived.length} chat(s) archived`, 'info', '', [
+            {
+                id: 'undo',
+                label: 'Undo',
+                primary: true,
+                handler: () => {
+                    for (const { id, prevVisibility } of archived) {
+                        const tab = chat.tabs.find(t => t.id === id);
+                        if (tab && tab.visibility === 'archived') {
+                            tab.visibility = prevVisibility;
+                        }
+                    }
+                    chatViewBindings.renderChatTabs?.();
+                    chatViewBindings.renderChatSessionsSidebar?.();
+                },
+            },
+        ]);
+    }
+}
+
 export function restoreTabFromTrash(id) {
     const trashIdx = chat.tabTrash.findIndex(t => t.tab.id === id);
     if (trashIdx === -1) return;

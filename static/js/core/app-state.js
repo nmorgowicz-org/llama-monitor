@@ -182,6 +182,7 @@ export const chat = {
         hiddenOpen: false,
         hiddenRevealed: false,
         activeSearchVisibility: ['active'],
+        selectedIds: new Set(),
     },
 };
 
