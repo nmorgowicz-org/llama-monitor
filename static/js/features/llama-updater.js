@@ -7,6 +7,16 @@
 
 import { showToast } from './toast.js';
 
+const LLAMA_CPP_REPO = 'https://github.com/ggml-org/llama.cpp';
+const PR_LINK_RE = /#(\d+)/g;
+
+function linkPrRefs(html) {
+  if (!PR_LINK_RE.test(html)) return html;
+  return html.replace(PR_LINK_RE, (_, id) =>
+    `<a href="${LLAMA_CPP_REPO}/pull/${id}" target="_blank" rel="noopener noreferrer" class="llama-version-pr-link">#${id}</a>`,
+  );
+}
+
 let _currentBuild = null;
 let _latestBuild  = null;
 let _updating     = false;
@@ -207,9 +217,15 @@ function showReleaseNotes(release) {
   if (notesPane) notesPane.scrollTop = 0;
 
   if (release.body && release.body.trim()) {
-    const md = typeof marked !== 'undefined' ? marked.parse(release.body) : release.body.replace(/\n/g, '<br>');
+    let html;
+    if (typeof marked !== 'undefined') {
+      html = marked.parse(release.body);
+    } else {
+      html = release.body.replace(/\n/g, '<br>');
+    }
+    html = linkPrRefs(html);
     // eslint-disable-next-line no-unsanitized/property
-    bodyEl.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(md) : md;
+    bodyEl.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : html;
   } else {
     bodyEl.innerHTML = '<p class="llama-version-notes-none">No release notes for this build.</p>';
   }

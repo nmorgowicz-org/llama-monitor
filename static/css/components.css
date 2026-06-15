@@ -2338,6 +2338,17 @@ button:disabled {
   text-decoration: underline;
 }
 
+.llama-version-pr-link {
+  color: #60a5fa;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.llama-version-pr-link:hover {
+  color: #93c5fd;
+}
+
 .llama-version-notes-body strong {
   color: var(--color-text-primary);
 }
