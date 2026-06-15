@@ -1116,6 +1116,12 @@ export async function savePreset(event) {
         closePresetModal();
         await loadPresets(savedId);
         showToast('Preset saved', 'success');
+
+        // If this is the active preset and the server is running, offer a reload.
+        const activePresetId = document.getElementById('preset-select')?.value || '';
+        if (savedId && activePresetId === savedId && sessionState.serverRunning) {
+            _offerRestartAfterPresetSave(savedId);
+        }
     } catch (err) {
         showToast('Save failed: ' + err.message, 'error');
     } finally {
@@ -1329,6 +1335,186 @@ function _applyGenerationPreset(preset) {
     setOpt('modal-reasoning', preset.reasoning ? 'on' : 'off');
     numOrEmpty('modal-reasoning-budget', preset.reasoning_budget);
     setVal('modal-reasoning-budget-message', (preset.reasoning_budget_message || '').replace(/\n/g, '\\n'));
+}
+
+// ── Restart after preset save ──────────────────────────────────────────────────
+
+function _offerRestartAfterPresetSave(presetId) {
+    if (!presetId) return;
+
+    const modal = document.createElement('div');
+    modal.className = 'stop-choice-modal';
+    modal.innerHTML = `
+        <div class="stop-choice-card">
+            <div class="stop-choice-title">Apply changes</div>
+            <div class="stop-choice-actions">
+                <button class="btn btn-stop-choice-welcome" id="restart-choice-yes">
+                    Restart llama-server
+                </button>
+                <button class="btn btn-stop-choice-stay" id="restart-choice-no">
+                    Not now
+                </button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const yesBtn = modal.querySelector('#restart-choice-yes');
+    const noBtn = modal.querySelector('#restart-choice-no');
+
+    const removeModal = () => {
+        if (modal && modal.parentNode) modal.parentNode.removeChild(modal);
+    };
+
+    noBtn.addEventListener('click', () => {
+        noBtn.disabled = true;
+        yesBtn.disabled = true;
+        modal.style.transition = 'opacity 200ms ease';
+        modal.style.opacity = '0';
+        modal.style.pointerEvents = 'none';
+        setTimeout(removeModal, 220);
+    });
+
+    yesBtn.addEventListener('click', async () => {
+        yesBtn.disabled = true;
+        noBtn.disabled = true;
+        modal.style.opacity = '0.5';
+        modal.style.pointerEvents = 'none';
+        showToast('Restarting llama-server…', 'info');
+
+        try {
+            await _restartServerWithPreset(presetId);
+        } catch (e) {
+            showToast('Restart failed: ' + (e.message || String(e)), 'error');
+        } finally {
+            removeModal();
+        }
+    });
+}
+
+async function _restartServerWithPreset(presetId) {
+    const p = sessionState.presets.find(pr => pr.id === presetId);
+    if (!p) throw new Error('Preset not found');
+
+    // Kill current server
+    try {
+        const tokenResp = await fetch('/api/db/admin-token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
+        const token = tokenData.token;
+        if (!token) throw new Error('Authentication required');
+
+        await fetch('/api/kill-llama', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token,
+            },
+            body: JSON.stringify({ confirm: 'kill' }),
+        });
+    } catch (e) {
+        throw new Error('Failed to stop server: ' + (e.message || e));
+    }
+
+    // Build config from preset
+    const config = {
+        preset_id: presetId,
+        model_path: p.model_path || '',
+        hf_repo: p.hf_repo || null,
+        context_size: p.context_size || 128000,
+        ctk: p.ctk || 'q8_0',
+        ctv: p.ctv || 'f16',
+        tensor_split: p.tensor_split || '',
+        batch_size: p.batch_size || 2048,
+        ubatch_size: p.ubatch_size || p.batch_size || 2048,
+        no_mmap: !!p.no_mmap,
+        port: p.port || 8001,
+        ngram_spec: !!p.ngram_spec,
+        parallel_slots: p.parallel_slots || 1,
+        temperature: p.temperature,
+        top_p: p.top_p,
+        top_k: p.top_k,
+        min_p: p.min_p,
+        repeat_penalty: p.repeat_penalty,
+        presence_penalty: p.presence_penalty ?? null,
+        enable_thinking: p.enable_thinking ?? null,
+        preserve_thinking: p.preserve_thinking ?? null,
+        reasoning: p.reasoning || null,
+        reasoning_budget: p.reasoning_budget ?? null,
+        reasoning_budget_message: p.reasoning_budget_message || null,
+        n_cpu_moe: p.n_cpu_moe,
+        gpu_layers: p.gpu_layers ?? null,
+        mlock: !!p.mlock,
+        flash_attn: p.flash_attn || '',
+        split_mode: p.split_mode || '',
+        main_gpu: p.main_gpu ?? null,
+        threads: p.threads ?? null,
+        threads_batch: p.threads_batch ?? null,
+        rope_scaling: p.rope_scaling || '',
+        rope_freq_base: p.rope_freq_base ?? null,
+        rope_freq_scale: p.rope_freq_scale ?? null,
+        spec_type: p.spec_type || null,
+        kv_unified: p.kv_unified ?? null,
+        cache_ram_mib: p.cache_ram_mib ?? null,
+        draft_model: p.draft_model || '',
+        draft_min: p.draft_min ?? null,
+        draft_max: p.draft_max ?? null,
+        spec_ngram_size: p.spec_ngram_size ?? null,
+        spec_draft_n_max: p.spec_draft_n_max ?? null,
+        seed: p.seed ?? null,
+        mmproj: p.mmproj || null,
+        chat_template_file: p.chat_template_file || null,
+        alias: p.alias || null,
+        max_tokens: p.max_tokens ?? null,
+        fit_enabled: p.fit_enabled ?? null,
+        fit_target: p.fit_target || null,
+        system_prompt_file: p.system_prompt_file || '',
+        extra_args: p.extra_args || '',
+        bind_host: p.bind_host || '127.0.0.1',
+        api_key: p.api_key || null,
+    };
+
+    // Spawn new server
+    const adminToken = await (async () => {
+        const tokenResp = await fetch('/api/db/admin-token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
+        return tokenData.token || null;
+    })();
+
+    if (!adminToken) throw new Error('Authentication required');
+
+    const resp = await fetch('/api/sessions/spawn', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + adminToken,
+        },
+        body: JSON.stringify(config),
+    });
+
+    if (!resp.ok) {
+        const text = await resp.text().catch(() => 'Request failed');
+        throw new Error('Spawn failed: ' + text);
+    }
+
+    const data = await resp.json().catch(() => ({}));
+    if (!data.ok) {
+        throw new Error(data.error || 'Spawn responded with an error');
+    }
+
+    // Wait for server to be ready
+    showToast('Starting llama-server…', 'info', 'Loading model on port ' + config.port, { duration: 12000 });
+    try {
+        await (await import('./spawn-readiness.js')).waitForSpawnReadiness(config.port);
+    } catch (e) {
+        throw new Error('Server did not become ready: ' + (e.message || e));
+    }
+
+    showToast('llama-server restarted', 'success', '', { duration: 6000 });
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────────
