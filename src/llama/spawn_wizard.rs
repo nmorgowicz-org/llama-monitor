@@ -154,7 +154,7 @@ pub fn classify_benchmark_result(
     if gen_tps < 5.0 {
         suggestions.push(BenchmarkSuggestion {
             label: "Try a smaller context window".to_string(),
-            description: "If you don't need very long context, reducing to 8 192 tokens can noticeably speed things up.".to_string(),
+            description: "If you don't need very long context, reducing to 8192 tokens can noticeably speed things up.".to_string(),
             param: "context_size".to_string(),
             value: serde_json::json!(8192),
             patch: None,
@@ -165,7 +165,7 @@ pub fn classify_benchmark_result(
     if prompt_tps < 300.0 {
         hints.push("Slow prompt processing — a larger batch size may help.".to_string());
         suggestions.push(BenchmarkSuggestion {
-            label: "Increase batch size to 4 096".to_string(),
+            label: "Increase batch size to 4096".to_string(),
             description: "Helps the GPU process incoming prompt tokens more efficiently."
                 .to_string(),
             param: "batch_size".to_string(),

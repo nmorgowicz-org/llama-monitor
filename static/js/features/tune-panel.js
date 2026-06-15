@@ -281,6 +281,31 @@ async function _applyAndRetune(suggestion, cardEl) {
 
     // Restore hint text and re-benchmark
     if (hint) hint.textContent = 'Sending a test prompt and measuring throughput…';
+
+    // Persist the changed config fields to the active preset so the Preset Editor stays in sync
+    const presetId = document.getElementById('preset-select')?.value;
+    if (presetId && window.sessionState?.presets && newConfig) {
+      const preset = window.sessionState.presets.find(p => p.id === presetId);
+      if (preset) {
+        try {
+          const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+          const updated = { ...preset, ...newConfig };
+          const resp = await fetch(`/api/presets/${encodeURIComponent(presetId)}`, {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify(updated),
+          });
+          if (!resp.ok) {
+            console.warn('Failed to sync preset after tuning:', resp.status);
+          }
+        } catch (e) {
+          console.warn('Failed to sync preset after tuning:', e);
+        }
+      }
+    }
+
     await runBenchmark();
   } catch (err) {
     _resetToIdle();
@@ -426,6 +451,31 @@ async function _applyMtpNmax(nMax) {
 
     _stopMtpTimer();
     _mtpSweepSetState('idle');
+
+    // Persist the new spec_draft_n_max to the active preset so the Preset Editor stays in sync
+    const presetId = document.getElementById('preset-select')?.value;
+    if (presetId && window.sessionState?.presets) {
+      const preset = window.sessionState.presets.find(p => p.id === presetId);
+      if (preset && preset.spec_draft_n_max !== nMax) {
+        try {
+          const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+          const updated = { ...preset, spec_draft_n_max: nMax };
+          const resp = await fetch(`/api/presets/${encodeURIComponent(presetId)}`, {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify(updated),
+          });
+          if (!resp.ok) {
+            console.warn('Failed to sync preset with new spec_draft_n_max:', resp.status);
+          }
+        } catch (e) {
+          console.warn('Failed to sync preset with new spec_draft_n_max:', e);
+        }
+      }
+    }
+
     showToast('Applied', 'success', `Server restarted with spec-draft-n-max = ${nMax}.`);
   } catch (err) {
     _stopMtpTimer();
