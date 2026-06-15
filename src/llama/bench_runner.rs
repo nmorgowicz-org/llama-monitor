@@ -95,6 +95,8 @@ fn base_args(
     flash_attn: bool,
     ctk: &str,
     ctv: &str,
+    batch_size: u32,
+    ubatch_size: u32,
     n_cpu_moe: Option<i32>,
 ) -> Vec<String> {
     let mut args: Vec<String> = vec![
@@ -108,6 +110,10 @@ fn base_args(
         ctk.into(),
         "-ctv".into(),
         ctv.into(),
+        "-b".into(),
+        batch_size.to_string(),
+        "-ub".into(),
+        ubatch_size.to_string(),
         "-o".into(),
         "json".into(),
         "-r".into(),
@@ -163,13 +169,24 @@ pub async fn run_sweep(
     flash_attn: bool,
     ctk: &str,
     ctv: &str,
+    batch_size: u32,
+    ubatch_size: u32,
     depths: &[u64],
     n_cpu_moe: Option<i32>,
 ) -> Result<Vec<SweepPoint>, String> {
     if depths.is_empty() {
         return Err("No depths requested".into());
     }
-    let mut args = base_args(model_path, ngl, flash_attn, ctk, ctv, n_cpu_moe);
+    let mut args = base_args(
+        model_path,
+        ngl,
+        flash_attn,
+        ctk,
+        ctv,
+        batch_size,
+        ubatch_size,
+        n_cpu_moe,
+    );
     args.push("-p".into());
     args.push("512".into());
     args.push("-n".into());
@@ -201,11 +218,22 @@ pub async fn probe_ncpumoe(
     flash_attn: bool,
     ctk: &str,
     ctv: &str,
+    batch_size: u32,
+    ubatch_size: u32,
     candidates: &[i32],
 ) -> Vec<NcpuMoeProbe> {
     let mut out = Vec::new();
     for &n in candidates {
-        let mut args = base_args(model_path, ngl, flash_attn, ctk, ctv, Some(n));
+        let mut args = base_args(
+            model_path,
+            ngl,
+            flash_attn,
+            ctk,
+            ctv,
+            batch_size,
+            ubatch_size,
+            Some(n),
+        );
         args.push("-p".into());
         args.push("0".into());
         args.push("-n".into());
@@ -220,6 +248,59 @@ pub async fn probe_ncpumoe(
         out.push(NcpuMoeProbe {
             n_cpu_moe: n,
             tg_tps,
+        });
+    }
+    out
+}
+
+/// One measured point in a batch/ubatch sweep.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BatchProbe {
+    pub batch_size: u32,
+    pub ubatch_size: u32,
+    /// Prefill throughput (tokens/s); 0.0 means the run failed or didn't fit.
+    pub pp_tps: f64,
+}
+
+/// Probe a set of (batch_size, ubatch_size) pairs measuring PP throughput only
+/// (no decode). `prompt_tokens` should be representative of the user's actual
+/// prompt length — larger values expose batch-size effects more clearly.
+#[allow(clippy::too_many_arguments)]
+pub async fn probe_batch(
+    bench_bin: &Path,
+    cwd: &Path,
+    model_path: &str,
+    ngl: i32,
+    flash_attn: bool,
+    ctk: &str,
+    ctv: &str,
+    candidates: &[(u32, u32)],
+    prompt_tokens: u32,
+    n_cpu_moe: Option<i32>,
+) -> Vec<BatchProbe> {
+    let mut out = Vec::new();
+    for &(batch, ubatch) in candidates {
+        let mut args = base_args(
+            model_path, ngl, flash_attn, ctk, ctv, batch, ubatch, n_cpu_moe,
+        );
+        args.push("-p".into());
+        args.push(prompt_tokens.to_string());
+        args.push("-n".into());
+        args.push("0".into()); // PP only
+        args.push("-r".into());
+        args.push("2".into()); // 2 runs for stability without too much wall time
+        let pp_tps = match run_bench(bench_bin, cwd, &args, Duration::from_secs(120)).await {
+            Ok(stdout) => parse_sweep_json(&stdout)
+                .ok()
+                .and_then(|pts| pts.into_iter().find(|p| p.pp_tps > 0.0))
+                .map(|p| p.pp_tps)
+                .unwrap_or(0.0),
+            Err(_) => 0.0,
+        };
+        out.push(BatchProbe {
+            batch_size: batch,
+            ubatch_size: ubatch,
+            pp_tps,
         });
     }
     out
