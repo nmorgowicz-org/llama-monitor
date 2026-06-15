@@ -151,6 +151,20 @@ function _loadSavedPreferences() {
             if (savedPreferences.spacingScale) {
                 document.documentElement.style.setProperty('--gap-md', (Number(savedPreferences.spacingScale) * 16) + 'px');
             }
+            // Apply chat-specific prefs once DOM is ready
+            if (savedPreferences.timestamps || savedPreferences.msgWidth) {
+                document.addEventListener('DOMContentLoaded', () => {
+                    const chatPage = document.querySelector('.chat-page');
+                    if (chatPage && savedPreferences.timestamps && savedPreferences.timestamps !== 'hover') {
+                        chatPage.dataset.timestamps = savedPreferences.timestamps;
+                    }
+                    const chatMsgs = document.getElementById('chat-messages');
+                    const widthMap = { narrow: '65%', normal: '82%', wide: '100%' };
+                    if (chatMsgs && savedPreferences.msgWidth && savedPreferences.msgWidth !== 'normal') {
+                        chatMsgs.style.setProperty('--chat-message-max-width', widthMap[savedPreferences.msgWidth] || '82%');
+                    }
+                }, { once: true });
+            }
         }
     } catch (_) {}
 }

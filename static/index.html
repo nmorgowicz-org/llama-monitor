@@ -562,9 +562,6 @@
                         </span>
                     </h2>
                     <div class="inference-log-tail" id="inference-log-tail" style="display:none;"></div>
-                    <div class="field-hint" style="max-width:440px;margin-top:4px;">
-                        Typical targets on a capable GPU: 10–15+ tokens/sec with low memory spikes and no red warnings.
-                    </div>
                     <div class="inference-grid" id="inference">
                         <!-- Throughput Card -->
                         <div class="widget-card widget-metric widget-speed">
@@ -697,8 +694,7 @@
                     <div class="inference-detail-grid">
                         <div class="widget-card inference-mini-panel">
                             <div class="metric-card-topline">
-                                <div class="widget-metric-label">Active sessions</div>
-                                <div class="widget-metric-subtitle">Slots are parallel conversation sessions.</div>
+                                <div class="widget-metric-label" title="Slots are parallel conversation sessions.">Active sessions</div>
                                 <div class="metric-live-chip" id="m-slots-state">idle</div>
                             </div>
                             <div class="slot-grid" id="m-slot-grid"></div>
@@ -1183,6 +1179,30 @@
                         </div>
                         <div class="chat-style-name">Bubbly</div>
                         <div class="chat-style-desc">Playful, fully rounded</div>
+                    </div>
+                    <div class="chat-style-card" data-style="paper">
+                        <div class="chat-style-preview chat-style-preview-paper">
+                            <div class="chat-style-bubble-user">Hello there!</div>
+                            <div class="chat-style-bubble-ai">Nice to meet you.</div>
+                        </div>
+                        <div class="chat-style-name">Paper</div>
+                        <div class="chat-style-desc">Editorial, no bubbles</div>
+                    </div>
+                    <div class="chat-style-card" data-style="terminal">
+                        <div class="chat-style-preview chat-style-preview-terminal">
+                            <div class="chat-style-bubble-user">Hello there!</div>
+                            <div class="chat-style-bubble-ai">Nice to meet you.</div>
+                        </div>
+                        <div class="chat-style-name">Terminal</div>
+                        <div class="chat-style-desc">Monospace, dev aesthetic</div>
+                    </div>
+                    <div class="chat-style-card" data-style="slate">
+                        <div class="chat-style-preview chat-style-preview-slate">
+                            <div class="chat-style-bubble-user">Hello there!</div>
+                            <div class="chat-style-bubble-ai">Nice to meet you.</div>
+                        </div>
+                        <div class="chat-style-name">Slate</div>
+                        <div class="chat-style-desc">Flat color, no glass</div>
                     </div>
                 </div>
             </div>
@@ -4470,38 +4490,165 @@
             </div>
             <div class="settings-content">
                 <div class="settings-pane active" id="settings-session">
-                    <h3>Session Workspace</h3>
+                    <h3>Session</h3>
                     <div class="settings-card">
-                        <p class="settings-help">
-                            Session resume is handled from the setup screen and recent-servers workspace. Runtime attach targets, remote-agent details, and local launch paths are not edited here.
-                        </p>
-                        <p class="settings-help">
-                            Use the separate Configuration modal for executable paths and remote host details.
-                        </p>
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:10px;">Chat Behavior</div>
+                        <label class="modal-field">
+                            Date &amp; Time Format
+                            <select id="settings-chat-date-format">
+                                <option value="MM/DD/YY">MM/DD/YY (US)</option>
+                                <option value="DD/MM/YY">DD/MM/YY (EU)</option>
+                                <option value="YYYY-MM-DD">YYYY-MM-DD (ISO)</option>
+                                <option value="locale">OS default</option>
+                            </select>
+                            <span class="modal-help">Format for message timestamps in the chat panel.</span>
+                        </label>
+                        <label class="modal-field">
+                            Enter to Send
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="settings-enter-to-send" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <span class="toggle-label">Press Enter to send messages (Shift+Enter for newline)</span>
+                            </div>
+                        </label>
+                        <label class="modal-field">
+                            Context Card View
+                            <div style="display:flex;gap:6px;margin-top:4px;" id="settings-ctx-view-pills">
+                                <button type="button" class="cert-mode-pill settings-ctx-view active" data-view="gauge">Gauge</button>
+                                <button type="button" class="cert-mode-pill settings-ctx-view" data-view="fleet">Fleet</button>
+                            </div>
+                            <span class="modal-help">Default layout for the context &amp; memory card on the dashboard.</span>
+                        </label>
+                    </div>
+                    <div class="settings-card" style="margin-top:14px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">Server &amp; Workspace</div>
+                        <p class="settings-help">Server paths, remote-agent SSH details, and runtime launch options are managed in <strong>Runtime Configuration</strong>.</p>
+                        <button type="button" class="btn btn-secondary" id="settings-open-config-btn" style="margin-top:8px;">Open Runtime Configuration</button>
                     </div>
                 </div>
                 <div class="settings-pane" id="settings-gpu">
-                    <h3>GPU Configuration</h3>
-                    <div class="settings-card">
-                        <p class="settings-help">
-                            GPU defaults are owned by model presets and runtime configuration. This settings modal no longer exposes placeholder GPU controls that do not persist.
-                        </p>
+                    <h3>GPU</h3>
+                    <div class="settings-card" id="settings-gpu-info-card">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:10px;">Detected Hardware</div>
+                        <div id="settings-gpu-info" style="font-size:13px;color:var(--color-text-muted);">Loading...</div>
+                    </div>
+                    <div class="settings-card" style="margin-top:14px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">Per-Model Configuration</div>
+                        <p class="settings-help">GPU layers, context size, and memory offload are configured per-model in <strong>Presets</strong>. The VRAM estimator in the preset editor gives real-time feedback as you tune each model.</p>
+                        <button type="button" class="btn btn-secondary" id="settings-open-presets-btn" style="margin-top:8px;">Open Preset Editor</button>
                     </div>
                 </div>
                 <div class="settings-pane" id="settings-models">
-                    <h3>Model Settings</h3>
+                    <h3>Models</h3>
                     <div class="settings-card">
-                        <p class="settings-help">
-                            Model paths, context sizes, speculative decoding, and GPU layering are preset-level concerns. Edit them in Presets or Runtime Configuration rather than through global placeholder fields.
-                        </p>
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:10px;">Models Directory</div>
+                        <label class="modal-field">
+                            Primary Folder
+                            <div style="display:flex;gap:6px;align-items:center;">
+                                <input type="text" id="settings-models-dir" placeholder="/path/to/models" style="flex:1;">
+                                <button type="button" class="btn btn-secondary" id="settings-models-dir-browse">Browse</button>
+                            </div>
+                            <span class="modal-help" id="settings-models-dir-hint"></span>
+                        </label>
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin:12px 0 6px;">Additional Directories</div>
+                        <p class="settings-help" style="margin-bottom:8px;">Scan extra folders for models — useful when models are spread across drives.</p>
+                        <div id="settings-extra-dirs-list" style="margin-bottom:8px;display:flex;flex-direction:column;gap:4px;"></div>
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <input type="text" id="settings-extra-dir-input" placeholder="Additional model path" style="flex:1;">
+                            <button type="button" class="btn btn-secondary" id="settings-extra-dir-browse">Browse</button>
+                            <button type="button" class="btn btn-secondary" id="settings-extra-dir-add">Add</button>
+                        </div>
+                    </div>
+                    <div class="settings-card" style="margin-top:14px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">Hugging Face Token</div>
+                        <p class="settings-help" style="margin-bottom:8px;">Enables downloading gated models and increases rate limits for HF searches.</p>
+                        <div id="settings-hf-token-status" style="display:none;font-size:12px;margin-bottom:8px;"></div>
+                        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                            <input type="password" id="settings-hf-token" placeholder="hf_..." autocomplete="off" style="flex:1;min-width:160px;font-family:monospace;font-size:12px;">
+                            <button type="button" class="btn btn-secondary" id="settings-hf-token-show">Show</button>
+                            <button type="button" class="btn btn-secondary" id="settings-hf-token-save">Save Token</button>
+                            <button type="button" class="btn btn-ghost" id="settings-hf-token-remove" style="display:none;">Remove</button>
+                        </div>
+                        <div style="margin-top:6px;">
+                            <button type="button" class="btn btn-ghost" id="settings-hf-token-refresh" style="font-size:11px;padding:3px 8px;">↻ Check status</button>
+                        </div>
+                    </div>
+                    <div class="settings-card" style="margin-top:14px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">Model Manager</div>
+                        <p class="settings-help">Browse your local library, download new GGUF files from Hugging Face, and manage multimodal projectors.</p>
+                        <button type="button" class="btn btn-secondary" id="settings-open-models-btn" style="margin-top:8px;">Open Model Manager</button>
                     </div>
                 </div>
               <div class="settings-pane" id="settings-appearance">
                       <h3>Appearance</h3>
+                      <p class="settings-help" style="margin-bottom:14px;">These preferences are device-local and stored in your browser — they don't sync across machines.</p>
                       <div class="settings-card">
-                          <p class="settings-help">
-                              Device-specific appearance preferences live in <strong>User → Preferences</strong>. Theme, font scale, spacing, and chat style remain local on purpose so different machines can keep different presentation defaults.
-                          </p>
+                          <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:10px;">Theme</div>
+                          <label class="modal-field">
+                              Color Theme
+                              <select id="settings-appearance-theme">
+                                  <option value="auto">Auto (system default)</option>
+                                  <option value="dark">Dark</option>
+                                  <option value="light">Light</option>
+                              </select>
+                          </label>
+                          <label class="modal-field" style="margin-top:10px;">
+                              Chat Message Style
+                              <select id="settings-appearance-chat-style">
+                                  <option value="rounded">Rounded (default)</option>
+                                  <option value="compact">Compact</option>
+                                  <option value="minimal">Minimal</option>
+                                  <option value="bubbly">Bubbly</option>
+                                  <option value="paper">Paper</option>
+                                  <option value="terminal">Terminal</option>
+                                  <option value="slate">Slate</option>
+                              </select>
+                          </label>
+                      </div>
+                      <div class="settings-card" style="margin-top:14px;">
+                          <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:10px;">Scale</div>
+                          <label class="modal-field">
+                              Font Size
+                              <div style="display:flex;align-items:center;gap:10px;">
+                                  <input type="range" id="settings-appearance-font-scale" min="0.8" max="1.4" step="0.1" value="1" style="width:160px;">
+                                  <span id="settings-appearance-font-scale-value" style="color:var(--text-muted);font-size:12px;min-width:32px;">1.0×</span>
+                              </div>
+                          </label>
+                          <label class="modal-field" style="margin-top:10px;">
+                              Spacing
+                              <div style="display:flex;align-items:center;gap:10px;">
+                                  <input type="range" id="settings-appearance-spacing-scale" min="0.8" max="1.4" step="0.1" value="1" style="width:160px;">
+                                  <span id="settings-appearance-spacing-scale-value" style="color:var(--text-muted);font-size:12px;min-width:32px;">1.0×</span>
+                              </div>
+                          </label>
+                      </div>
+                      <div class="settings-card" style="margin-top:14px;">
+                          <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:10px;">Chat Messages</div>
+                          <label class="modal-field">
+                              Chat Font Size
+                              <div style="display:flex;align-items:center;gap:10px;">
+                                  <input type="range" id="settings-appearance-chat-font" min="70" max="150" step="10" value="100" style="width:160px;">
+                                  <span id="settings-appearance-chat-font-value" style="color:var(--text-muted);font-size:12px;min-width:36px;">100%</span>
+                              </div>
+                          </label>
+                          <label class="modal-field" style="margin-top:10px;">
+                              Timestamps
+                              <select id="settings-appearance-timestamps">
+                                  <option value="hover">Show on hover (default)</option>
+                                  <option value="always">Always visible</option>
+                                  <option value="hidden">Hidden</option>
+                              </select>
+                          </label>
+                          <label class="modal-field" style="margin-top:10px;">
+                              Message Width
+                              <select id="settings-appearance-msg-width">
+                                  <option value="normal">Normal (82%)</option>
+                                  <option value="narrow">Narrow (65%)</option>
+                                  <option value="wide">Wide (100%)</option>
+                              </select>
+                          </label>
                       </div>
                   </div>
                   <div class="settings-pane" id="settings-chat">
@@ -4695,21 +4842,11 @@
                     </div>
                 </div>
                   <div class="settings-pane" id="settings-advanced">
-                    <h3>Advanced Settings</h3>
-                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
-                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
-                            Runtime Configuration
-                        </div>
-                        <p class="settings-help">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                            Configure server executable paths, working directories, and GPU environment settings.
-                        </p>
-                        <button type="button" class="btn btn-secondary" id="settings-open-config-btn">Open Runtime Configuration</button>
-                    </div>
+                    <h3>Advanced</h3>
                     <div class="settings-card">
-                        <p class="settings-help">
-                            This modal only retains shared workspace settings. Process launch paths, remote-agent SSH details, and environment-specific overrides live in Runtime Configuration instead of duplicating dead controls here.
-                        </p>
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">Runtime Configuration</div>
+                        <p class="settings-help">Configure server executable paths, working directories, remote-agent SSH details, and environment-specific launch options.</p>
+                        <button type="button" class="btn btn-secondary" id="settings-advanced-open-config-btn" style="margin-top:8px;">Open Runtime Configuration</button>
                     </div>
                 </div>
 
@@ -4940,7 +5077,6 @@
                             Forgot the password? Run <code>llama-monitor --clear-auth-config</code> on this machine, restart, and then set a new password here.
                         </div>
                     </div>
-                </div>
 
                 <!-- Agent Token Rotation -->
                 <div class="settings-section">
@@ -5060,6 +5196,7 @@
                         </div>
                     </div>
                 </div>
+                </div><!-- /#settings-security -->
             </div>
         </div>
         <div class="modal-buttons">
@@ -5454,6 +5591,9 @@
                             <option value="compact">Compact</option>
                             <option value="minimal">Minimal</option>
                             <option value="bubbly">Bubbly</option>
+                            <option value="paper">Paper</option>
+                            <option value="terminal">Terminal</option>
+                            <option value="slate">Slate</option>
                         </select>
                     </label>
                 </div>

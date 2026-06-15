@@ -6,6 +6,7 @@ import { setContextCardViewPreference } from './context-card.js';
 import { renderChatMessages } from './chat-render.js';
 import { getAutoPollingInterval } from './network-detection.js';
 import { showToast } from './toast.js';
+import { setEnterToSend, applyChatStyle } from './chat-params.js';
 
 // ── Secret masking helpers ────────────────────────────────────────────────────
 
@@ -113,8 +114,8 @@ export function collectSettings() {
         default_sidebar_width: parseInt(document.getElementById('settings-sidebar-width')?.value || '280', 10),
         suggestion_count: parseInt(document.getElementById('settings-suggestion-count')?.value || '5', 10),
         context_depth: parseInt(document.getElementById('settings-context-depth')?.value || '10', 10),
-        chat_date_format: settingsState.chat_date_format || 'MM/DD/YY',
-        enter_to_send: settingsState.enter_to_send !== false,
+        chat_date_format: document.getElementById('settings-chat-date-format')?.value || settingsState.chat_date_format || 'MM/DD/YY',
+        enter_to_send: document.getElementById('settings-enter-to-send') ? !!document.getElementById('settings-enter-to-send').checked : settingsState.enter_to_send !== false,
         context_notes_sidebar_expanded: !!settingsState.context_notes_sidebar_expanded,
         context_notes_intro_hidden: !!settingsState.context_notes_intro_hidden,
         persist_thinking_content: !!document.getElementById('settings-persist-thinking-content')?.checked,
@@ -326,6 +327,17 @@ export function applySettings(s) {
     const dateFmtEl = document.getElementById('chat-date-format');
     if (dateFmtEl) dateFmtEl.value = settingsState.chat_date_format;
 
+    const settingsDateFmtEl = document.getElementById('settings-chat-date-format');
+    if (settingsDateFmtEl) settingsDateFmtEl.value = settingsState.chat_date_format;
+
+    const enterToSendEl = document.getElementById('settings-enter-to-send');
+    if (enterToSendEl) enterToSendEl.checked = settingsState.enter_to_send !== false;
+
+    const ctxView = s.context_card_view || 'gauge';
+    document.querySelectorAll('.settings-ctx-view').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === ctxView);
+    });
+
     notifySettingsApplied();
 }
 
@@ -362,6 +374,19 @@ export function openSettingsModal() {
 
     const dateFmtEl = document.getElementById('chat-date-format');
     if (dateFmtEl) dateFmtEl.value = settingsState.chat_date_format || 'MM/DD/YY';
+
+    const settingsDateFmtEl = document.getElementById('settings-chat-date-format');
+    if (settingsDateFmtEl) settingsDateFmtEl.value = settingsState.chat_date_format || 'MM/DD/YY';
+
+    const enterToSendEl = document.getElementById('settings-enter-to-send');
+    if (enterToSendEl) enterToSendEl.checked = settingsState.enter_to_send !== false;
+
+    const ctxView = settingsState.context_card_view || 'gauge';
+    document.querySelectorAll('.settings-ctx-view').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === ctxView);
+    });
+
+    _initAppearanceTab();
 
     // Refresh live-changing fields from server
     (window.authFetch || fetch)('/api/settings', {
@@ -422,6 +447,82 @@ function _bindSettingsEvents() {
         controls.addEventListener('change', saveSettings);
     }
 
+    // Session tab controls
+    document.getElementById('settings-chat-date-format')?.addEventListener('change', (e) => {
+        settingsState.chat_date_format = e.target.value;
+        const mirror = document.getElementById('chat-date-format');
+        if (mirror) mirror.value = e.target.value;
+        renderChatMessages();
+        saveSettings();
+    });
+
+    document.getElementById('settings-enter-to-send')?.addEventListener('change', (e) => {
+        setEnterToSend(e.target.checked);
+        saveSettings();
+    });
+
+    document.querySelectorAll('.settings-ctx-view').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.settings-ctx-view').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const view = btn.dataset.view;
+            const mainBtn = document.getElementById('context-view-toggle-' + view);
+            if (mainBtn) mainBtn.click();
+            saveSettings();
+        });
+    });
+
+    document.getElementById('settings-open-config-btn')?.addEventListener('click', () => {
+        closeSettingsModal();
+        setTimeout(() => document.getElementById('config-modal')?.classList.add('open'), 260);
+    });
+
+    document.getElementById('settings-advanced-open-config-btn')?.addEventListener('click', () => {
+        closeSettingsModal();
+        setTimeout(() => document.getElementById('config-modal')?.classList.add('open'), 260);
+    });
+
+    // GPU tab — load hardware info when tab opens (also load on first open)
+    document.getElementById('settings-open-presets-btn')?.addEventListener('click', () => {
+        closeSettingsModal();
+        setTimeout(() => document.getElementById('preset-edit-btn')?.click(), 260);
+    });
+
+    // Models tab buttons
+    document.getElementById('settings-open-models-btn')?.addEventListener('click', () => {
+        closeSettingsModal();
+        setTimeout(() => import('./models.js').then(({ openModelsModal }) => openModelsModal()), 260);
+    });
+
+    // Appearance tab live controls
+    document.getElementById('settings-appearance-theme')?.addEventListener('change', (e) => {
+        _applyAndSaveAppearance();
+    });
+    document.getElementById('settings-appearance-chat-style')?.addEventListener('change', () => {
+        _applyAndSaveAppearance();
+    });
+    document.getElementById('settings-appearance-font-scale')?.addEventListener('input', (e) => {
+        const el = document.getElementById('settings-appearance-font-scale-value');
+        if (el) el.textContent = Number(e.target.value).toFixed(1) + '×';
+        _applyAndSaveAppearance();
+    });
+    document.getElementById('settings-appearance-spacing-scale')?.addEventListener('input', (e) => {
+        const el = document.getElementById('settings-appearance-spacing-scale-value');
+        if (el) el.textContent = Number(e.target.value).toFixed(1) + '×';
+        _applyAndSaveAppearance();
+    });
+    document.getElementById('settings-appearance-chat-font')?.addEventListener('input', (e) => {
+        const el = document.getElementById('settings-appearance-chat-font-value');
+        if (el) el.textContent = e.target.value + '%';
+        _applyAndSaveAppearance();
+    });
+    document.getElementById('settings-appearance-timestamps')?.addEventListener('change', () => {
+        _applyAndSaveAppearance();
+    });
+    document.getElementById('settings-appearance-msg-width')?.addEventListener('change', () => {
+        _applyAndSaveAppearance();
+    });
+
     // Settings tabs
     document.querySelectorAll('.settings-tab').forEach(tab => {
         tab.addEventListener('click', () => {
@@ -431,10 +532,15 @@ function _bindSettingsEvents() {
             tab.classList.add('active');
             document.getElementById('settings-' + target)?.classList.add('active');
 
-            // Load TLS config when Security tab is opened
             if (target === 'security') {
                 loadTlsConfig();
                 loadDashboardAuthConfig();
+            }
+            if (target === 'gpu') {
+                _loadSettingsGpuInfo();
+            }
+            if (target === 'appearance') {
+                _initAppearanceTab();
             }
         });
     });
@@ -516,6 +622,141 @@ function _bindSettingsEvents() {
         if (newCharEl) newCharEl.value = defaults['new-character'];
         markSettingsDirty();
     });
+}
+
+// ── GPU info (Settings > GPU tab) ────────────────────────────────────────────
+
+async function _loadSettingsGpuInfo() {
+    const el = document.getElementById('settings-gpu-info');
+    if (!el) return;
+    try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const res = await (window.authFetch || fetch)('/api/system/info', { headers });
+        if (!res.ok) { el.textContent = 'Unable to load hardware info.'; return; }
+        const d = await res.json();
+
+        const wrap = document.createElement('div');
+        const mut = document.createTreeWalker(wrap, NodeFilter.SHOW_ELEMENT);
+
+        const makeRow = (label, value) => {
+            const div = document.createElement('div');
+            div.style.marginBottom = '6px';
+            const span = document.createElement('span');
+            span.style.color = 'var(--color-text-muted)';
+            span.style.fontSize = '11px';
+            span.textContent = label;
+            div.appendChild(span);
+            const br = document.createElement('br');
+            div.appendChild(br);
+            div.appendChild(document.createTextNode(value));
+            wrap.appendChild(div);
+        };
+
+        if (d.cpu_name) {
+            let extra = '';
+            if (d.p_cores) {
+                extra = ' \u00B7 ' + d.p_cores + 'P + ' + (d.e_cores || 0) + 'E cores';
+            }
+            makeRow('CPU', d.cpu_name + extra);
+        }
+
+        if (d.ram_total_gb) {
+            makeRow('UNIFIED MEMORY', d.ram_total_gb.toFixed(1) + ' GB total');
+        }
+
+        if (Array.isArray(d.gpus) && d.gpus.length) {
+            for (const g of d.gpus) {
+                const vramMb = g.vram_total_mb || g.total_mb || g.total_memory_mb || g.vram_total || 0;
+                const name = g.name || 'Unknown GPU';
+                const vramPart = vramMb ? ' \u00B7 ' + (vramMb / 1024).toFixed(1) + ' GB VRAM' : '';
+                makeRow('GPU', name + vramPart);
+            }
+        }
+
+        if (wrap.firstChild) {
+            while (wrap.firstChild) el.appendChild(wrap.firstChild);
+        } else {
+            el.textContent = 'No hardware info available.';
+        }
+    } catch {
+        el.textContent = 'Unable to load hardware info.';
+    }
+}
+
+// ── Appearance (Settings > Appearance tab) ───────────────────────────────────
+
+function _initAppearanceTab() {
+    const saved = JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}');
+    const themeEl = document.getElementById('settings-appearance-theme');
+    const fontEl = document.getElementById('settings-appearance-font-scale');
+    const fontValEl = document.getElementById('settings-appearance-font-scale-value');
+    const spacingEl = document.getElementById('settings-appearance-spacing-scale');
+    const spacingValEl = document.getElementById('settings-appearance-spacing-scale-value');
+    const chatStyleEl = document.getElementById('settings-appearance-chat-style');
+    const chatFontEl = document.getElementById('settings-appearance-chat-font');
+    const chatFontValEl = document.getElementById('settings-appearance-chat-font-value');
+    const timestampsEl = document.getElementById('settings-appearance-timestamps');
+    const msgWidthEl = document.getElementById('settings-appearance-msg-width');
+
+    if (themeEl) themeEl.value = saved.theme || 'dark';
+    if (fontEl) { fontEl.value = saved.fontScale || '1'; if (fontValEl) fontValEl.textContent = Number(saved.fontScale || 1).toFixed(1) + '×'; }
+    if (spacingEl) { spacingEl.value = saved.spacingScale || '1'; if (spacingValEl) spacingValEl.textContent = Number(saved.spacingScale || 1).toFixed(1) + '×'; }
+    if (chatStyleEl) chatStyleEl.value = localStorage.getItem('llama-monitor-chat-style') || 'rounded';
+    const savedChatFont = parseInt(localStorage.getItem('llama-monitor-chat-font') || '100');
+    if (chatFontEl) { chatFontEl.value = savedChatFont; if (chatFontValEl) chatFontValEl.textContent = savedChatFont + '%'; }
+    if (timestampsEl) timestampsEl.value = saved.timestamps || 'hover';
+    if (msgWidthEl) msgWidthEl.value = saved.msgWidth || 'normal';
+}
+
+function _applyAndSaveAppearance() {
+    const theme = document.getElementById('settings-appearance-theme')?.value || 'dark';
+    const fontScale = document.getElementById('settings-appearance-font-scale')?.value || '1';
+    const spacingScale = document.getElementById('settings-appearance-spacing-scale')?.value || '1';
+    const chatStyle = document.getElementById('settings-appearance-chat-style')?.value || 'rounded';
+    const chatFont = parseInt(document.getElementById('settings-appearance-chat-font')?.value || '100');
+    const timestamps = document.getElementById('settings-appearance-timestamps')?.value || 'hover';
+    const msgWidth = document.getElementById('settings-appearance-msg-width')?.value || 'normal';
+
+    const effectiveTheme = theme === 'auto'
+        ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+        : theme;
+    document.documentElement.dataset.theme = effectiveTheme;
+    document.documentElement.style.fontSize = (Number(fontScale) * 16) + 'px';
+    document.documentElement.style.setProperty('--gap-md', (Number(spacingScale) * 16) + 'px');
+    applyChatStyle(chatStyle);
+
+    // Chat font size — mirrors what chat-params.js does
+    const chatFontScale = chatFont / 100;
+    const chatMessages = document.getElementById('chat-messages');
+    if (chatMessages) chatMessages.style.setProperty('--chat-font-scale', chatFontScale);
+    const chatInputRow = document.getElementById('chat-input-row');
+    if (chatInputRow) chatInputRow.style.setProperty('--chat-font-scale', chatFontScale);
+
+    // Timestamps visibility
+    const chatPage = document.querySelector('.chat-page');
+    if (chatPage) {
+        if (timestamps === 'hover') delete chatPage.dataset.timestamps;
+        else chatPage.dataset.timestamps = timestamps;
+    }
+
+    // Message max-width — set on the messages container so child .chat-message inherits
+    const widthMap = { narrow: '65%', normal: '82%', wide: '100%' };
+    const chatMsgsEl = document.getElementById('chat-messages');
+    if (chatMsgsEl) chatMsgsEl.style.setProperty('--chat-message-max-width', widthMap[msgWidth] || '82%');
+
+    localStorage.setItem('llama-monitor-chat-style', chatStyle);
+    localStorage.setItem('llama-monitor-chat-font', chatFont);
+    localStorage.setItem('llama-monitor-preferences', JSON.stringify({ theme, fontScale, spacingScale, timestamps, msgWidth }));
+
+    // Sync pref-* elements in user-preferences-modal so they stay consistent
+    const prefTheme = document.getElementById('pref-theme-mode');
+    if (prefTheme) prefTheme.value = theme;
+    const prefFont = document.getElementById('pref-font-scale');
+    if (prefFont) prefFont.value = fontScale;
+    const prefSpacing = document.getElementById('pref-spacing-scale');
+    if (prefSpacing) prefSpacing.value = spacingScale;
+    const prefChatStyle = document.getElementById('pref-chat-style');
+    if (prefChatStyle) prefChatStyle.value = chatStyle;
 }
 
 // ── TLS / Certificates ────────────────────────────────────────────────────────
