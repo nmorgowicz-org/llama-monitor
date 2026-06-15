@@ -127,8 +127,9 @@ function renderSparkline(id, points, className, isBlocked) {
     const wallLine = isBlocked ? '<line x1="120" y1="0" x2="120" y2="28" stroke="#ebcb8b" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>' : '';
     // eslint-disable-next-line no-unsanitized/property -- SVG path data from numeric array values; className is a hardcoded CSS class
     svg.innerHTML =
-        buildSparklineFillDefs(fillId, fillColor, 0.66, 0.22, 0.05) +
+        buildSparklineFillDefs(fillId, fillColor, 0.88, 0.18, 0.02) +
         '<path class="sparkline-fill ' + className + '" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + fillId + ')"></path>' +
+        '<line class="sparkline-grid" x1="0" y1="7" x2="120" y2="7"/><line class="sparkline-grid" x1="0" y1="14" x2="120" y2="14"/><line class="sparkline-grid" x1="0" y1="21" x2="120" y2="21"/>' +
         '<path class="sparkline-line ' + className + '" d="' + path + '"></path>' +
         '<line class="sparkline-current-trace ' + className + '" x1="' + Math.max(currentX - 8, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>' +
         '<circle class="sparkline-current-halo ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="7.4"></circle>' +
@@ -172,8 +173,9 @@ function renderLiveSparkline(id, points) {
     const fillId = nextSparklineGradientId(id);
     // eslint-disable-next-line no-unsanitized/property -- SVG path data built from numeric array values only
     svg.innerHTML = [
-        buildSparklineFillDefs(fillId, fillColor, 0.68, 0.24, 0.05),
+        buildSparklineFillDefs(fillId, fillColor, 0.90, 0.20, 0.02),
         '<path class="sparkline-fill live-output" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + fillId + ')"></path>',
+        '<line class="sparkline-grid" x1="0" y1="7" x2="120" y2="7"/><line class="sparkline-grid" x1="0" y1="14" x2="120" y2="14"/><line class="sparkline-grid" x1="0" y1="21" x2="120" y2="21"/>',
         '<path class="sparkline-line live-output" d="' + path + '"></path>',
         '<line class="sparkline-current-trace live-output" x1="' + Math.max(currentX - 8, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>',
         '<circle class="sparkline-peak live-output" cx="' + peak.x.toFixed(2) + '" cy="' + peak.y.toFixed(2) + '" r="2.6"></circle>',
@@ -730,12 +732,12 @@ function renderHwRing(container, pct, tone, isAlert) {
     setVizContent(container, '<div class="' + cls + '" style="--pct:' + pct.toFixed(1) + ';--gauge-color:' + tone.line + '"></div>');
 }
 
-function renderHwSparkline(container, history) {
+function renderHwSparkline(container, history, color) {
     if (!container || !history || history.length < 2) {
         setVizContent(container, '');
         return;
     }
-    const svg = buildSparklineSVG(history, 'hw-sparkline', '#8fbcbb');
+    const svg = buildSparklineSVG(history, 'hw-sparkline', color || '#8fbcbb');
     setVizContent(container, svg);
 }
 
@@ -765,16 +767,12 @@ function renderHwMetricSparkline(svgId, history, color, show) {
     const min = Math.min(...history, 0);
     const range = Math.max(max - min, 1);
     const step = width / (history.length - 1);
-    const peakValue = Math.max(...history);
-    const peakIndex = history.lastIndexOf(peakValue);
-    const peakX = peakIndex * step;
-    const peakY = height - (((peakValue - min) / range) * (height - 4)) - 2;
     const currentValue = history[history.length - 1];
     const currentX = width - 2;
-    const currentY = height - (((currentValue - min) / range) * (height - 4)) - 2;
+    const currentY = height - (((currentValue - min) / range) * (height - 10)) - 5;
     const path = history.map((value, index) => {
         const x = index * step;
-        const y = height - (((value - min) / range) * (height - 4)) - 2;
+        const y = height - (((value - min) / range) * (height - 10)) - 5;
         return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
     }).join(' ');
     var ratio = range > 0 ? (currentValue - min) / range : 0;
@@ -782,10 +780,10 @@ function renderHwMetricSparkline(svgId, history, color, show) {
     var fillId = nextSparklineGradientId(svgId);
     // eslint-disable-next-line no-unsanitized/property -- SVG path from numeric values; svgId/color from getSeverityColor()
     svg.innerHTML =
-        buildSparklineFillDefs(fillId, fillColor, 0.58, 0.18, 0.04) +
+        buildSparklineFillDefs(fillId, fillColor, 0.82, 0.14, 0.02) +
         '<path class="sparkline-fill" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + fillId + ')"></path>' +
+        '<line class="sparkline-grid" x1="0" y1="7" x2="120" y2="7"/><line class="sparkline-grid" x1="0" y1="14" x2="120" y2="14"/><line class="sparkline-grid" x1="0" y1="21" x2="120" y2="21"/>' +
         '<path class="sparkline-line" d="' + path + '" stroke="' + color + '" fill="none" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" filter="drop-shadow(0 0 5px ' + color + ')"></path>' +
-        '<circle class="sparkline-peak" cx="' + peakX.toFixed(2) + '" cy="' + peakY.toFixed(2) + '" r="2.1" fill="' + color + '" opacity="0.78"></circle>' +
         '<circle class="sparkline-current-halo" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="4.2"></circle>' +
         '<circle class="sparkline-current" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="2.1"></circle>' +
         '<circle class="sparkline-current-core" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="0.9"></circle>';
@@ -939,7 +937,7 @@ function renderHwClockRing(container, clock) {
 function buildSparklineSVG(points, cssClass, color) {
     var len = points.length;
     if (len < 2) return '';
-    var w = 120, h = 24, pad = 2;
+    var w = 120, h = 24, pad = 5;
     var max = Math.max.apply(null, points);
     var min = Math.min.apply(null, points);
     var range = max - min || 1;
@@ -947,20 +945,17 @@ function buildSparklineSVG(points, cssClass, color) {
     var pts = points.map(function(v, i) { return i * step + ',' + (h - pad - ((v - min) / range) * (h - pad * 2)); });
     var linePath = 'M' + pts.join(' L');
     var fillPath = linePath + ' L' + (len - 1) * step + ',' + h + ' L0,' + h + ' Z';
-    var peakIdx = points.indexOf(max);
-    var peakX = peakIdx * step;
-    var peakY = h - pad - ((max - min) / range) * (h - pad * 2);
     var currentVal = points[len - 1];
-    var currentX = w;
+    var currentX = w - 2;
     var currentY = h - pad - ((currentVal - min) / range) * (h - pad * 2);
     var ratio = range > 0 ? (currentVal - min) / range : 0;
     var fillColor = getThemedSparklineFillColor(color, ratio);
     var fillId = nextSparklineGradientId(cssClass);
     return '<svg class="metric-sparkline ' + cssClass + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="color:' + color + ';">' +
-        buildSparklineFillDefs(fillId, fillColor, 0.56, 0.16, 0.03) +
+        buildSparklineFillDefs(fillId, fillColor, 0.80, 0.12, 0.02) +
         '<path class="sparkline-fill" d="' + fillPath + '" fill="url(#' + fillId + ')"/>' +
+        '<line class="sparkline-grid" x1="0" y1="6" x2="' + w + '" y2="6"/><line class="sparkline-grid" x1="0" y1="12" x2="' + w + '" y2="12"/><line class="sparkline-grid" x1="0" y1="18" x2="' + w + '" y2="18"/>' +
         '<path class="sparkline-line" d="' + linePath + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
-        (len > 3 ? '<circle class="sparkline-peak" cx="' + peakX.toFixed(1) + '" cy="' + peakY.toFixed(1) + '" r="2" fill="' + color + '" opacity="0.8"/>' : '') +
         '<line class="sparkline-current-trace" x1="' + (w - 12).toFixed(1) + '" y1="' + currentY.toFixed(1) + '" x2="' + currentX.toFixed(1) + '" y2="' + currentY.toFixed(1) + '" stroke="' + color + '"></line>' +
         '<circle class="sparkline-current-halo" cx="' + currentX.toFixed(1) + '" cy="' + currentY.toFixed(1) + '" r="3.4"></circle>' +
         '<circle class="sparkline-current" cx="' + currentX.toFixed(1) + '" cy="' + currentY.toFixed(1) + '" r="2.0"></circle>' +
@@ -1159,7 +1154,7 @@ function renderGpuCard(gpuMap, visible, grade) {
     var loadTone = getMetricTone('load');
     var loadColor = loadTone.line;
     if (loadStyle === 'ring') renderHwRing(loadViz, m.load, loadTone, false);
-    else if (loadStyle === 'sparkline') renderHwSparkline(loadViz, gpuHistory.load);
+    else if (loadStyle === 'sparkline') renderHwSparkline(loadViz, gpuHistory.load, loadColor);
     else renderHwBar(loadViz, m.load, loadTone, false);
     renderHwMetricSparkline('gpu-load-spark', gpuHistory.load, loadColor, loadStyle !== 'sparkline');
     if (loadVal) loadVal.textContent = m.load + '%';
@@ -1177,7 +1172,7 @@ function renderGpuCard(gpuMap, visible, grade) {
     var powerColor = isCapped ? '#f43f5e' : powerTone.line;
     if (powerBlock) powerBlock.classList.toggle('hw-power-capped', isCapped);
     if (powerStyle === 'ring') renderHwRing(powerViz, powerPct, isCapped ? { line: '#f43f5e' } : powerTone, isCapped);
-    else if (powerStyle === 'sparkline') renderHwSparkline(powerViz, gpuHistory.power);
+    else if (powerStyle === 'sparkline') renderHwSparkline(powerViz, gpuHistory.power, powerColor);
     else renderHwBar(powerViz, powerPct, isCapped ? { start: '#fb7185', end: '#f43f5e' } : powerTone, isCapped);
     renderHwMetricSparkline('gpu-power-spark', gpuHistory.power, powerColor, powerStyle !== 'sparkline');
     if (powerVal) {
@@ -1201,7 +1196,7 @@ function renderGpuCard(gpuMap, visible, grade) {
     var vramTone = getMetricTone('memory');
     var vramColor = vramTone.line;
     if (vramStyle === 'ring') renderHwRing(vramViz, vramPct, vramTone, false);
-    else if (vramStyle === 'sparkline') renderHwSparkline(vramViz, gpuHistory.vramPct);
+    else if (vramStyle === 'sparkline') renderHwSparkline(vramViz, gpuHistory.vramPct, vramColor);
     else if (vramStyle === 'stacked') renderHwStacked(vramViz, vramPct, vramTone, false);
     else renderHwBar(vramViz, vramPct, vramTone, false);
     renderHwMetricSparkline('gpu-vram-spark', gpuHistory.vramPct, vramColor, vramStyle !== 'sparkline');
@@ -1315,7 +1310,7 @@ function renderSystemCard(sys, visible, grade) {
     var loadTone = getMetricTone('load');
     var loadColor = loadTone.line;
     if (loadStyle === 'ring') renderHwRing(loadViz, cpuLoad, loadTone, false);
-    else if (loadStyle === 'sparkline') renderHwSparkline(loadViz, sysHistory.cpuLoad);
+    else if (loadStyle === 'sparkline') renderHwSparkline(loadViz, sysHistory.cpuLoad, loadColor);
     else renderHwBar(loadViz, cpuLoad, loadTone, false);
     renderHwMetricSparkline('sys-load-spark', sysHistory.cpuLoad, loadColor, loadStyle !== 'sparkline');
     if (loadVal) loadVal.textContent = cpuLoad > 0 ? cpuLoad + '%' : '\u2014';
@@ -1327,7 +1322,7 @@ function renderSystemCard(sys, visible, grade) {
     var ramTone = getMetricTone('memory');
     var ramColor = ramTone.line;
     if (ramStyle === 'ring') renderHwRing(ramViz, ramPct, ramTone, false);
-    else if (ramStyle === 'sparkline') renderHwSparkline(ramViz, sysHistory.ramPct);
+    else if (ramStyle === 'sparkline') renderHwSparkline(ramViz, sysHistory.ramPct, ramColor);
     else if (ramStyle === 'stacked') renderHwStacked(ramViz, ramPct, ramTone, false);
     else renderHwBar(ramViz, ramPct, ramTone, false);
     renderHwMetricSparkline('sys-ram-spark', sysHistory.ramPct, ramColor, ramStyle !== 'sparkline');
@@ -1363,7 +1358,7 @@ function renderSystemCard(sys, visible, grade) {
         var powerStyle = vizPrefs.system.power || 'bar';
         var powerTone = getMetricTone('power');
         if (powerStyle === 'ring') renderHwRing(powerVizEl, powerPctSys, powerTone, false);
-        else if (powerStyle === 'sparkline') renderHwSparkline(powerVizEl, sysHistory.power);
+        else if (powerStyle === 'sparkline') renderHwSparkline(powerVizEl, sysHistory.power, powerTone.line);
         else renderHwBar(powerVizEl, powerPctSys, powerTone, false);
         renderHwMetricSparkline('sys-power-spark', sysHistory.power, powerTone.line, powerStyle !== 'sparkline');
         if (powerValEl) powerValEl.textContent = powerTotal.toFixed(1) + 'W';

@@ -948,6 +948,11 @@ function bindEvents() {
     // from candidates if not already set.
     if (isDraftMtp) {
       renderMtpSection();
+      // Default p-min to 0.75 for draft-mtp if not already set.
+      if (dom.specDraftPMinInput && !dom.specDraftPMinInput.value) {
+        dom.specDraftPMinInput.value = '0.75';
+        wizardState.hardware.mtpDraftPMin = 0.75;
+      }
       // Also auto-populate the draft model input from candidates
       const candidates = wizardState.model.draftCandidates || [];
       const existing = (dom.draftModelInput?.value || '').trim();
@@ -1894,6 +1899,13 @@ function showStep(index) {
     }
     renderMmprojSection();
     renderMtpSection();
+    // Auto-default spec type if the user hasn't made an explicit choice.
+    // MTP-named models get draft-mtp+ngram-mod; all others get ngram-mod (free perf gains).
+    if (dom.specTypeSelect && !dom.specTypeSelect.value) {
+      const modelName = (wizardState.model.localPath || wizardState.model.hfRepo || wizardState.model.hfFile || '').toLowerCase();
+      dom.specTypeSelect.value = modelName.includes('mtp') ? 'draft-mtp,ngram-mod' : 'ngram-mod';
+      dom.specTypeSelect.dispatchEvent(new Event('change'));
+    }
     _updateSpecHint(dom.specTypeSelect?.value || '');
     // Trigger download panel now (moved from file-select to hardware step entry)
     const dlPanel = document.getElementById('hf-download-panel');
@@ -2244,18 +2256,31 @@ async function doIntrospect(path) {
         );
         if (browseResp.ok) {
           const bd = await browseResp.json();
+          const modelFilename2 = path.split(/[\\/]/).pop() || '';
+          const mainFamily = _inferFamilyFromName(modelFilename2);
+          const MTP_HEAD_MAX_BYTES = 3_000_000_000; // >3 GB = full model, not an MTP head
           const drafts = (bd.entries || []).filter(e => {
             if (e.is_dir) return false;
             const n = e.name.toLowerCase();
-            return n.includes('assistant')
+            // mmproj files are image projection layers, never MTP heads.
+            if (n.includes('mmproj')) return false;
+            // Files larger than 3 GB are full models with "MTP" in their name — not heads.
+            if (e.size > 0 && e.size > MTP_HEAD_MAX_BYTES) return false;
+            const nameMatch = n.includes('assistant')
                || n.includes('mtp-draft')
                || n.includes('draft-model')
                || n.includes('mtp_small')
                || n.includes('mtp-heads')
                || n.startsWith('mtp-')
-               // Unsloth's `-MTP.gguf` naming convention
-               || n.includes('-mtp')
-               || n.includes('/mtp/');
+               || n.includes('-mtp.')
+               || /[-_]mtp[-_]/.test(n);
+            if (!nameMatch) return false;
+            // Skip candidates from a different recognizable model family.
+            if (mainFamily) {
+              const candidateFamily = _inferFamilyFromName(e.name);
+              if (candidateFamily && candidateFamily !== mainFamily) return false;
+            }
+            return true;
           });
           if (drafts.length) {
             wizardState.model.draftCandidates = drafts.map(e => ({
@@ -3445,8 +3470,13 @@ async function fetchHfFiles(repo) {
           mmproj_recommendation: el.dataset.mmprojRecommendation || '',
         };
         if (f.is_mmproj) wizardState.model.mmprojFiles.push(f);
-        else if (f.is_draft_assistant) wizardState.model.draftCandidates.push(f);
-        else wizardState.model.quantFiles.push(f);
+        else if (f.is_draft_assistant) {
+          // Exclude mmproj files and full-size models (>3 GB) from draft head candidates.
+          const fn = (f.path || '').toLowerCase();
+          if (!fn.includes('mmproj') && (f.size <= 0 || f.size <= 3_000_000_000)) {
+            wizardState.model.draftCandidates.push(f);
+          }
+        } else wizardState.model.quantFiles.push(f);
       });
 
       updateSelectedModelDisplay();
@@ -4612,11 +4642,11 @@ function _refreshThreadsHint() {
   if (pCores > 0 && metricsReady) {
     if (hintEl) {
       hintEl.textContent =
-        `Apple Silicon (${pCores} P-cores): Metal handles inference — set -t to 1. More threads don't speed up GPU inference and add CPU/GPU contention.`;
+        `Apple Silicon: use 1. GPU (Metal) handles all inference — extra CPU threads add contention without benefit.`;
     }
     if (batchHintEl) {
       batchHintEl.textContent =
-        `Prompt processing (prefill) runs on CPU. Set -tb to ${pCores} to use all P-cores for faster context ingestion.`;
+        `Apple Silicon: use ${pCores} (all P-cores) — CPU handles prefill/batch. More cores = faster prompt processing.`;
     }
     if (dom.threadsInput && !dom.threadsInput.value) {
       dom.threadsInput.placeholder = '1 recommended';
@@ -4627,12 +4657,12 @@ function _refreshThreadsHint() {
     return;
   }
 
-  if (!metricsReady) {
+ if (!metricsReady) {
     if (hintEl) {
-      hintEl.textContent = 'Blank = server default (-t). Hardware-specific guidance loads automatically.';
+      hintEl.textContent = 'Blank or -1 = server default (-t). Hardware-specific guidance loads automatically.';
     }
     if (batchHintEl) {
-      batchHintEl.textContent = 'Prompt processing threads. Blank = inherit from -t.';
+      batchHintEl.textContent = 'Prompt processing threads. Blank or -1 = inherit from -t.';
     }
     if (dom.threadsInput && !dom.threadsInput.value) {
       dom.threadsInput.placeholder = 'default';
@@ -4645,10 +4675,10 @@ function _refreshThreadsHint() {
 
   // Non-Apple Silicon / no P-cores: generic hint.
   if (hintEl) {
-    hintEl.textContent = 'Blank = server default (-t). Sets CPU threads for inference. Do not exceed physical P-core count.';
+    hintEl.textContent = 'Blank or -1 = server default (-t). Sets CPU threads for inference. Do not exceed physical P-core count.';
   }
   if (batchHintEl) {
-    batchHintEl.textContent = 'Prompt processing threads. Blank = inherit from -t.';
+    batchHintEl.textContent = 'Prompt processing threads. Blank or -1 = inherit from -t.';
   }
   if (dom.threadsInput && !dom.threadsInput.value) {
     dom.threadsInput.placeholder = 'default';
@@ -5813,11 +5843,20 @@ function _openHwTagPicker(btn, modelPath, originRepo) {
     popup.appendChild(customRow);
   });
 
-  // Position below the + button.
+  // Position below the + button, or above if there's more room there.
   document.body.appendChild(popup);
   const rect = btn.getBoundingClientRect();
+  const popupH = popup.offsetHeight;
+  const spaceBelow = window.innerHeight - rect.bottom - 8;
+  const spaceAbove = rect.top - 8;
+  if (spaceBelow >= popupH || spaceBelow >= spaceAbove) {
+    popup.style.top = `${rect.bottom + 4}px`;
+    popup.style.maxHeight = `${Math.max(120, spaceBelow)}px`;
+  } else {
+    popup.style.maxHeight = `${Math.max(120, spaceAbove)}px`;
+    popup.style.top = `${Math.max(8, rect.top - Math.min(popupH, spaceAbove) - 4)}px`;
+  }
   popup.style.left = `${rect.left}px`;
-  popup.style.top = `${rect.bottom + 4}px`;
 
   // Close on outside click.
   setTimeout(() => {
@@ -6495,6 +6534,12 @@ function renderMtpSection() {
   }
 
   section.style.display = '';
+
+  // Default p-min to 0.75 on first render (recommended starting point).
+  if (wizardState.hardware.mtpDraftPMin == null && dom.specDraftPMinInput && !dom.specDraftPMinInput.value) {
+    wizardState.hardware.mtpDraftPMin = 0.75;
+    dom.specDraftPMinInput.value = '0.75';
+  }
 
   const infoNote = document.getElementById('hw-mtp-info-note');
   if (infoNote && hasBuiltInMtp) { infoNote.style.display = ''; }
@@ -7673,23 +7718,19 @@ async function saveAsPreset() {
 
     let isUpdate = Boolean(wizardState.savedPresetId);
 
-    // If we have a saved preset ID, decide whether to update it or create new.
-    // If config has significantly diverged (different model or context size),
-    // we still update in-place but let the user rename if desired.
+    // Verify the saved preset ID still exists before attempting a PUT.
     if (isUpdate) {
       try {
         const r = await fetch(`/api/presets/${wizardState.savedPresetId}`, { headers });
-        const existing = r.ok ? await r.json().catch(() => null) : null;
-        if (existing && (
-              existing.model_path !== payload.model_path ||
-              (existing.context_size || 0) !== (payload.context_size || 0)
-            )) {
-          // Config diverged — we’ll still update the existing preset (user can rename),
-          // but we hint that it’s been changed.
-          isUpdate = true;
+        if (!r.ok) {
+          // Preset was deleted or ID is stale — create a new one instead.
+          wizardState.savedPresetId = null;
+          isUpdate = false;
         }
       } catch {
-        // If we can’t read it, proceed to update anyway.
+        // Network error — fall back to create to be safe.
+        wizardState.savedPresetId = null;
+        isUpdate = false;
       }
     }
 
@@ -8169,6 +8210,23 @@ async function waitForSpawnReadiness(port, timeoutMs = 30000) {
   throw new Error(`llama-server started but did not become reachable on port ${port} in time.`);
 }
 
+// Clamp a value that must be a u32 (non-negative integer). Returns null if absent or negative.
+function _u32(v, min = 0) {
+  if (v == null || v < min) return null;
+  return Math.floor(v);
+}
+
+// Handle -t / -tb: allow -1 (llama-server auto) or any positive integer; null if blank/invalid.
+function _threadsValue(v) {
+  if (v == null || (typeof v !== 'number' && v === '')) return null;
+  const n = Number(v);
+  if (Number.isNaN(n) || !Number.isFinite(n)) return null;
+  const i = Math.floor(n);
+  // -1 = llama-server default (auto); only positive integers allowed otherwise
+  if (i === -1 || i >= 1) return i;
+  return null;
+}
+
 export function buildSpawnPayload() {
   const h = wizardState.hardware, m = wizardState.model;
   const arch = getEffectiveArch();
@@ -8230,16 +8288,16 @@ export function buildSpawnPayload() {
     no_mmap: true,
     ngram_spec: false,
     spec_type: specType,
-    spec_draft_n_max: mtpNMax,
-    spec_draft_n_min: usesMtpSpec && h.mtpDraftNMin != null ? h.mtpDraftNMin : undefined,
+    spec_draft_n_max: _u32(mtpNMax, 1),
+    spec_draft_n_min: usesMtpSpec ? _u32(h.mtpDraftNMin) : undefined,
     spec_draft_p_min: usesMtpSpec && h.mtpDraftPMin != null ? h.mtpDraftPMin : undefined,
     draft_model: draftPath || '',
     kv_unified: h.kvUnified,
     flash_attn: h.flashAttn || '',
     mlock: h.mlock || false,
     prio: h.prio != null ? h.prio : null,
-    threads: h.threads != null ? h.threads : null,
-    threads_batch: h.threadsBatch != null ? h.threadsBatch : null,
+    threads: _threadsValue(h.threads),
+    threads_batch: _threadsValue(h.threadsBatch),
     fit_enabled: h.fitEnabled,
     fit_target: h.fitEnabled === true ? (h.fitTarget || null) : null,
     cache_ram_mib: (h.cacheRam !== null && h.cacheRam !== undefined) ? h.cacheRam : null,

@@ -329,6 +329,9 @@
    letter-spacing: 0.04em;
    position: relative;
    z-index: 1;
+   padding-bottom: 8px;
+   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+   margin-bottom: 4px;
  }
 
  .hw-metric-viz {
@@ -616,8 +619,8 @@
     border-radius: 12px;
     position: relative;
     background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.008)),
-      repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.024) 0 1px, transparent 1px 16px);
+      linear-gradient(180deg, rgba(255, 255, 255, 0.016), rgba(255, 255, 255, 0.004)),
+      repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.028) 0 1px, transparent 1px 16px);
     animation: hw-sparkline-glow 3s ease-in-out infinite;
   }
 

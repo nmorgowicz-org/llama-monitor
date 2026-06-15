@@ -241,6 +241,9 @@ export async function doStop() {
         stayBtn.disabled = true;
         welcomeBtn.disabled = true;
 
+        // Allow preset switching after stop — clear user-selection flag
+        window.__presetUserSelected = false;
+
         // Fade out briefly, then remove so the dashboard is immediately usable.
         modal.style.transition = 'opacity 200ms ease';
         modal.style.opacity = '0';

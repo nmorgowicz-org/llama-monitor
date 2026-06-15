@@ -1,7 +1,7 @@
 // ── Navigation ────────────────────────────────────────────────────────────────
 // Tab switching and sidebar collapse.
 
-import { chat, lastLlamaMetrics, metricSeries, wsData } from '../core/app-state.js';
+import { chat, contextCapacityTokens, lastLlamaMetrics, metricSeries, wsData } from '../core/app-state.js';
 import { chatScroll } from './chat-render.js';
 import { showSessionPanel, hideSessionPanel } from './chat-sessions-sidebar.js';
 import { isFocusModeActive, exitFocusMode } from './chat-focus-mode.js';
@@ -104,9 +104,12 @@ function deriveTabCtxPct(tab, capacity) {
     if (!tab || !capacity) return 0;
     const asst = (tab.messages || []).filter(m => m.role === 'assistant' && !m.compaction_marker);
     if (!asst.length) return tab.last_ctx_pct || 0;
-    const totalOutput = asst.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
-    const lastInput = asst.at(-1)?.input_tokens || 0;
-    return Math.min(200, (totalOutput + lastInput) / capacity * 100);
+    // Use tab-level cumulative totals (most accurate); fall back to summing message fields.
+    const totalInput = tab.total_input_tokens
+        || asst.reduce((sum, m) => sum + (m.input_tokens || 0), 0);
+    const totalOutput = tab.total_output_tokens
+        || asst.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
+    return Math.min(200, (totalInput + totalOutput) / capacity * 100);
 }
 
 function buildCockpitSparkline(points) {
@@ -197,7 +200,7 @@ export function refreshTopCockpit() {
         }
     }
 
-    const capacity = hasActiveEndpoint ? (l?.context_capacity_tokens || l?.kv_cache_max || 0) : 0;
+    const capacity = hasActiveEndpoint ? (contextCapacityTokens || l?.context_capacity_tokens || l?.kv_cache_max || 0) : 0;
     let worstCtx = 0;
     if (capacity > 0) {
         worstCtx = (chat.tabs || []).reduce((max, tab) => Math.max(max, deriveTabCtxPct(tab, capacity)), 0);

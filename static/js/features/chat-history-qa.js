@@ -42,6 +42,19 @@ const INSERT_WRITE_BTN_ID    = 'chqa-write-scene-btn';
 const MAX_QA_HISTORY_TURNS  = 6;   // sliding window — older turns pruned first
 const KEYWORD_TIMEOUT_MS    = 3_000;
 
+// Clean leading junk from model responses (History Q&A specific).
+// - Some models prepend ":" or "Answer:" when the prompt ends with "Question: …"
+// - Gemma models leak control tokens (mixed scripts) when chat template is imperfect.
+function cleanAnswerPrefix(text) {
+    // Strip leading junk: ":" or ": " or "Answer:" or "Answer: " or similar patterns
+    let t = text
+        .replace(/^(?:[:：]\s*|Answer[?:：]\s*)+/i, '')
+        .trimStart();
+    // If nothing else changed, also trim a lone ":" at very start
+    if (t.startsWith(':')) t = t.slice(1).trimStart();
+    return t;
+}
+
 // Dynamic limits — scale with the live context window.
 // Called fresh on every question so the values track model changes mid-session.
 function getContextLimits() {
@@ -328,6 +341,44 @@ function buildEntryEl(entry) {
     return div;
 }
 
+// ── Thinking block helpers ────────────────────────────────────────────────────
+
+function createThinkingBlock(entryId) {
+    const entryEl = document.querySelector(`.chqa-entry[data-entry-id="${CSS.escape(entryId)}"]`);
+    if (!entryEl) return null;
+    const aEl = entryEl.querySelector('.chqa-answer');
+    if (!aEl) return null;
+
+    const details = document.createElement('details');
+    details.className = 'chqa-thinking';
+    details.innerHTML =
+        `<summary class="chqa-thinking-summary">
+           <svg class="chqa-thinking-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+           <span class="chqa-thinking-label">Thinking</span>
+           <span class="chqa-thinking-dots"><span>.</span><span>.</span><span>.</span></span>
+           <span class="chqa-thinking-token-count" style="margin:0 4px; color:var(--text-muted);"></span>
+           <span class="chqa-thinking-hint">(click to expand)</span>
+        </summary>
+        <div class="chqa-thinking-body"></div>`;
+
+    aEl.insertBefore(details, aEl.firstChild);
+    return details;
+}
+
+function finalizeThinkingBlock(thinkEl, reasoning) {
+    // Remove dots and hint, set final token count
+    const summary = thinkEl.querySelector('.chqa-thinking-summary');
+    if (!summary) return;
+    const dots = summary.querySelector('.chqa-thinking-dots');
+    const hint = summary.querySelector('.chqa-thinking-hint');
+    const tokenCountEl = summary.querySelector('.chqa-thinking-token-count');
+    if (dots) dots.remove();
+    if (hint) hint.remove();
+    if (tokenCountEl) {
+        tokenCountEl.textContent = `(${Math.round(reasoning.length / 4)} tokens)`;
+    }
+}
+
 function buildAnswerActions(answerText) {
     const bar = document.createElement('div');
     bar.className = 'chqa-answer-actions';
@@ -376,9 +427,17 @@ function setAnswerBodyContent(bodyEl, entry) {
         bodyEl.innerHTML = '<span class="chqa-answer-stopped">Response stopped</span>';
         return;
     }
-    if (entry.answer) {
+      if (entry.answer) {
+        const visibleAnswer = entry.thinking
+            ? entry.answer.replace(/<\/*(antThinking|thinking|reasoning)[^>]*>/gi, ' ').replace(/\n{3,}/g, '\n\n').trim()
+            : entry.answer;
+        let html = '';
+        if (entry.thinking) {
+            html += `<details class="chqa-thinking"><summary class="chqa-thinking-summary">Thinking</summary><div class="chqa-thinking-body">${escapeHtml(entry.thinking)}</div></details>`;
+        }
+        html += renderMd(visibleAnswer);
         // eslint-disable-next-line no-unsanitized/property -- local LLM output, rendered via marked+DOMPurify
-        bodyEl.innerHTML = renderMd(entry.answer);
+        bodyEl.innerHTML = html;
     }
 }
 
@@ -643,7 +702,7 @@ async function submitQuestion(tab, question, injectionText) {
             transcript = `=== ADDED CONTEXT ===\n${injectionText}\n\n${transcript}`;
         }
 
-        const setupMsg = `Here is the conversation transcript:\n\n${transcript}\n\n---\n\nQuestion: ${question}`;
+        const setupMsg = `Here is the conversation transcript:\n\n${transcript}\n\n---\n\nPlease answer: ${question}`;
         messages = [
             { role: 'system', content: SYSTEM_PROMPT },
             { role: 'user',   content: setupMsg },
@@ -667,7 +726,9 @@ async function submitQuestion(tab, question, injectionText) {
     // ── Step 3: Stream the answer ─────────────────────────────────────────────
     abortController = new AbortController();
     let answer = '';
+    let reasoning = '';
     let failed = false;
+    let thinkEl = null;
 
     try {
         const resp = await fetch('/api/chat', {
@@ -680,8 +741,8 @@ async function submitQuestion(tab, question, injectionText) {
                 messages,
                 stream: true,
                 temperature: 0.3,
-                thinking_budget_tokens: 0,
-                chat_template_kwargs: { enable_thinking: false },
+                thinking_budget_tokens: 512,
+                chat_template_kwargs: { enable_thinking: true },
             }),
         });
 
@@ -706,14 +767,30 @@ async function submitQuestion(tab, question, injectionText) {
                 try {
                     const obj   = JSON.parse(payload);
                     const delta = obj.choices?.[0]?.delta;
-                    if (delta?.content) {
-                        answer += delta.content;
-                        scheduleStreamRender(entry.id, answer);
+                    const content = delta?.content ?? '';
+                    const reasoningDelta = delta?.reasoning_content ?? '';
+
+                    if (content) {
+                        answer += content;
+                        scheduleStreamRender(entry.id, cleanAnswerPrefix(answer));
+                    } else if (reasoningDelta) {
+                        reasoning += reasoningDelta;
+                        // Create thinking block on first reasoning token
+                        if (!thinkEl) {
+                            thinkEl = createThinkingBlock(entry.id);
+                        }
+                        // Stream reasoning content
+                        const body = thinkEl.querySelector('.chqa-thinking-body');
+                        if (body) body.textContent = reasoning;
+                        // Update token count
+                        const tokenCountEl = thinkEl.querySelector('.chqa-thinking-token-count');
+                        if (tokenCountEl) {
+                            tokenCountEl.textContent = `(${Math.round(reasoning.length / 4)} tokens)`;
+                        }
                     }
                 } catch { /* skip malformed chunk */ }
             }
         }
-
     } catch (err) {
         if (err.name === 'AbortError') {
             if (!answer) { answer = '[Stopped]'; failed = true; }
@@ -723,9 +800,22 @@ async function submitQuestion(tab, question, injectionText) {
         }
     }
 
-    // ── Step 4: Finalize entry ────────────────────────────────────────────────
+   // ── Step 4: Finalize entry ────────────────────────────────────────────────
     flushStreamRender();   // cancel any pending throttled render before the final one
+
+    // Finalize thinking block if it was created
+    if (thinkEl && reasoning.trim()) {
+        finalizeThinkingBlock(thinkEl, reasoning);
+    }
+
+    // Fallback to captured reasoning if the main content stream was empty.
+    if (!answer.trim() && reasoning.trim()) {
+        answer = reasoning.trim();
+    }
+    // Clean leading junk from some models (":", "Answer:", Gemma tokens)
+    answer = cleanAnswerPrefix(answer);
     entry.answer    = answer;
+    entry.thinking  = reasoning.trim() || undefined;
     entry.streaming = false;
     entry.error     = failed && answer !== '[Stopped]';
     updateEntryDOM(entry.id, answer, true, entry.error);

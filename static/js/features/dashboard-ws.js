@@ -22,12 +22,14 @@ import {
     setWsData,
     setLastServerState,
     setLastLlamaMetrics,
+    setContextCapacityTokens,
     setLastSystemMetrics,
     setLastGpuMetrics,
     setLastCapabilities,
     setLastGpuData,
     lastLlamaMetrics,
     lastSystemMetrics,
+    contextCapacityTokens,
     wsData,
     currentPollInterval,
     monitorState,
@@ -225,7 +227,6 @@ function ensureCachedElements() {
         mContextEmpty: document.getElementById('m-context-empty'),
         // Badges
         badgeServer: document.getElementById('badge-server'),
-        badgeChat: document.getElementById('badge-chat'),
         badgeLogs: document.getElementById('badge-logs'),
         // Endpoint
         endpointMode: document.getElementById('endpoint-mode'),
@@ -388,13 +389,18 @@ function updateDashboard(d) {
     // Store for use by status alert and other components
     setWsData(d);
 
-    // Sync preset selector to match the running session's preset (spawn mode only)
-    if (d.session_mode === 'spawn' && d.active_session_preset_id) {
+    // Sync preset selector to match the running session's preset (spawn mode only).
+    // Don't override when the user has explicitly changed it in the dropdown.
+    if (d.session_mode === 'spawn' && d.active_session_preset_id && !window.__presetUserSelected) {
         const sel = document.getElementById('preset-select');
         if (sel && sel.value !== d.active_session_preset_id) {
             const opt = sel.querySelector(`option[value="${d.active_session_preset_id}"]`);
             if (opt) sel.value = d.active_session_preset_id;
         }
+    }
+    // Clear user-selection flag once the backend and dropdown agree again.
+    if (d.session_mode !== 'spawn' || !d.active_session_preset_id) {
+        window.__presetUserSelected = false;
     }
 
     // Derive and store telemetry grade for consumption by all dashboard components
@@ -741,6 +747,17 @@ function updateServerState(d) {
 
     setLastServerState(d.server_running);
     setLastLlamaMetrics(d.llama);
+
+    // Normalize context capacity to the actual loaded limit.
+    // KV-only reports can be stale; prefer reported capacity, then KV max, then a
+    // safe default so context-pressure math is consistent across telemetry and chat.
+    const l = d.llama;
+    let capacity = l?.context_capacity_tokens || l?.kv_cache_max || 0;
+    if (capacity <= 0) capacity = l?.context_size || 0;
+    capacity = Math.max(0, Math.min(capacity, 2_097_152));
+    if (capacity > 0) {
+        setContextCapacityTokens(capacity);
+    }
     const prevSystemMetrics = lastSystemMetrics;
     setLastSystemMetrics(d.system || null);
     setLastCapabilities(d.capabilities || null);
@@ -1443,23 +1460,6 @@ function updateBadges(d) {
             badgeServer.textContent = serverText;
             if (!serverText) {
                 badgeServer.style.display = 'none';
-            }
-        }
-    }
-
-    // Chat badge \u2014 message count rarely changes between ticks
-    const tab = activeChatTab();
-    const msgCount = tab ? tab.messages.filter(m => m.role !== 'system').length : 0;
-    if (msgCount !== prevBadgeState.chat) {
-        prevBadgeState.chat = msgCount;
-        const badgeChat = ce.badgeChat;
-        if (badgeChat) {
-            if (msgCount > 0) {
-                badgeChat.textContent = ' ' + msgCount + ' msg';
-                badgeChat.style.display = '';
-            } else {
-                badgeChat.textContent = '';
-                badgeChat.style.display = 'none';
             }
         }
     }

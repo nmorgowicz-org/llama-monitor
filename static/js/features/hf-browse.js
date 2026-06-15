@@ -377,7 +377,9 @@ export async function hfListFiles({
 
       const nameSpan = document.createElement('span');
       nameSpan.className = 'hf-file-name';
-      nameSpan.textContent = fname.split('/').pop() || fname;
+      const displayName = fname.split('/').pop() || fname;
+      nameSpan.textContent = displayName;
+      nameSpan.title = displayName;
 
       const metaSpan = document.createElement('span');
       metaSpan.className = 'hf-file-size';

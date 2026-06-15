@@ -235,6 +235,32 @@
   font-style: italic;
 }
 
+/* Collapsed thinking/reasoning captured from upstream */
+.chqa-thinking {
+  margin: 0 0 6px;
+  font-size: var(--text-xs, 0.75rem);
+}
+
+.chqa-thinking-summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.chqa-thinking-summary::-webkit-details-marker { display: none; }
+
+.chqa-thinking[open] .chqa-thinking-summary { margin-bottom: 4px; }
+
+.chqa-thinking-body {
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ── Streaming indicator ──────────────────────────────────────────────────── */
 
 .chqa-thinking-dots {

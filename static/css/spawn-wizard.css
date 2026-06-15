@@ -363,6 +363,9 @@
 /* Section headings */
 
 .wizard-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--text-sm);
   font-weight: 700;
   color: var(--color-text-primary);
@@ -653,7 +656,7 @@
   flex-direction: column;
   gap: 4px;
   margin-top: 4px;
-  max-height: 160px;
+  max-height: 220px;
   overflow-y: auto;
 }
 
@@ -689,9 +692,12 @@
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-all;
   font-weight: 600;
+  line-height: 1.3;
 }
 
 .hf-file-size {
@@ -709,6 +715,9 @@
   grid-row: span 3;
   grid-template-rows: subgrid;
   align-content: start;
+  min-width: 0;
+  /* gap is ignored for the subgridded axis; applies when used standalone */
+  gap: 6px;
 }
 
 .hardware-field label {
@@ -719,6 +728,9 @@
 
 .hardware-field input,
 .hardware-field select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -5060,6 +5072,8 @@
   padding: 10px 12px;
   min-width: 220px;
   max-width: 320px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(18px);
 }

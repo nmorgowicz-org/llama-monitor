@@ -1,7 +1,7 @@
 // ── Chat Transport & Streaming ────────────────────────────────────────────────
 // /api/chat calls, streaming decode, abort controller, summarization requests.
 
-import { chat, lastLlamaMetrics } from '../core/app-state.js';
+import { chat, lastLlamaMetrics, contextCapacityTokens } from '../core/app-state.js';
 import {
     activeChatTab,
     substituteNames,
@@ -430,13 +430,9 @@ export async function regenerateQuickGuideReply(tab, msgIdx, quickGuideMeta, var
 export async function _doSendChat(tab, options = {}) {
     const { transientUserPrompt = null } = options;
     // Pre-send overflow guard: estimate token usage against current model capacity.
-    // Uses the same formula as ctx%: cumulative output tokens + last input tokens.
-    const capacity = lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
+    const capacity = contextCapacityTokens || lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
     if (capacity > 0) {
-        const asstMsgs = (tab.messages || []).filter(m => m.role === 'assistant' && !m.compaction_marker);
-        const totalOutput = asstMsgs.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
-        const lastInput = asstMsgs.at(-1)?.input_tokens || 0;
-        const estimatedTokens = totalOutput + lastInput;
+        const estimatedTokens = (tab.total_input_tokens || 0) + (tab.total_output_tokens || 0);
         if (estimatedTokens > capacity) {
             const pct = Math.round((estimatedTokens / capacity) * 100);
             // Restore the user's message before showing the toast
@@ -606,6 +602,7 @@ export async function _doSendChat(tab, options = {}) {
     let tokenUsage = null;
     const streamTimeoutMs = (params.stream_timeout ?? 120) * 1000;
     let lastContentTime = Date.now();
+    let firstTokenReceived = false;
     let regenReverted = false;
     let regenRevertReason = '';
 
@@ -654,7 +651,7 @@ export async function _doSendChat(tab, options = {}) {
         };
 
         while (true) {
-            if (streamTimeoutMs > 0 && Date.now() - lastContentTime > streamTimeoutMs) {
+            if (firstTokenReceived && streamTimeoutMs > 0 && Date.now() - lastContentTime > streamTimeoutMs) {
                 chat.abortController.abort();
                 if (!msgContent && tab._pendingVariants) {
                     regenReverted = true;
@@ -710,6 +707,8 @@ export async function _doSendChat(tab, options = {}) {
 
                     const rc = delta.reasoning_content ?? '';
                     if (rc) {
+                        firstTokenReceived = true;
+                        lastContentTime = Date.now();
                         thinkContent += rc;
                         if (!msgEl && typeof appendAssistantPlaceholder === 'function') {
                             msgEl = appendAssistantPlaceholder();
@@ -735,6 +734,7 @@ export async function _doSendChat(tab, options = {}) {
 
                     const c = delta.content ?? '';
                     if (c) {
+                        firstTokenReceived = true;
                         msgContent += c;
                         lastContentTime = Date.now();
                         const isFirstToken = !msgEl;
