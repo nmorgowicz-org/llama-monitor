@@ -121,7 +121,6 @@
                 <span class="status-dot" id="status-dot"></span>
                 <span class="status-text" id="status-text"></span>
                 <span class="badge-server" id="badge-server"></span>
-                <span class="badge-chat" id="badge-chat"></span>
              </div>
         </div>
     </div>
@@ -395,7 +394,13 @@
                     <!-- Zone 2: Preset selection + management -->
                     <div class="control-bar-zone control-bar-quick-zone control-bar-preset-zone">
                         <div class="preset-label preset-label-hint">Preset</div>
-                        <select id="preset-select" class="preset-selector"></select>
+                        <div class="preset-display-wrapper">
+                            <select id="preset-select" class="preset-selector preset-selector-ghost"></select>
+                            <div class="preset-display-visual" id="preset-display-visual">
+                                <span class="preset-display-label" id="preset-display-label"></span>
+                                <div class="preset-display-chips" id="preset-display-chips"></div>
+                            </div>
+                        </div>
                         <div class="preset-inline-actions">
                             <button class="btn-sm btn-preset btn-preset-ghost" id="preset-edit-btn" title="Edit parameters for this preset">
                                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -2806,12 +2811,12 @@
                         <div class="pe-section-body">
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-threads" title="CPU threads for token generation. On Apple Silicon use P-core count (e.g. 6 on M5 Max) — using all cores includes slow E-cores. On discrete GPUs the GPU does matrix ops so a low value (4–8) is usually enough.">Threads (-t)</label>
-                                    <input type="number" class="pe-input" id="modal-threads" placeholder="auto">
+<label class="pe-label" for="modal-threads" title="CPU threads for token generation. On Apple Silicon use P-core count (e.g. 6 on M5 Max) — using all cores includes slow E-cores. On discrete GPUs the GPU does matrix ops so a low value (4–8) is usually enough. Use -1 or leave blank for llama-server default.">Threads (-t)</label>
+                                     <input type="number" class="pe-input" id="modal-threads" placeholder="auto (-1 or blank)">
                                 </div>
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-threads-batch" title="Number of CPU threads for prompt/batch processing. Leave empty to use same as threads.">Threads Batch (-tb)</label>
-                                    <input type="number" class="pe-input" id="modal-threads-batch" placeholder="auto">
+<label class="pe-label" for="modal-threads-batch" title="Number of CPU threads for prompt/batch processing. Use -1 or leave blank to inherit from -t.">Threads Batch (-tb)</label>
+                                     <input type="number" class="pe-input" id="modal-threads-batch" placeholder="auto (-1 or blank)">
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-n-cpu-moe" title="Number of MoE expert layers to offload to CPU/RAM instead of GPU. Useful when the model's expert layers don't fully fit in VRAM. Each layer moved to GPU speeds decode; start with all experts in RAM, then move layers to GPU one by one until just before OOM.">CPU MoE (-n-cpu-moe)</label>
@@ -3057,8 +3062,8 @@
                                 <div class="pe-field-hint">Advanced — leave at default (0.1) for MTP-based speculation. Only adjust if using ngram spec type and tuning speculation aggressiveness.</div>
                             </div>
                             <div class="pe-field">
-                                <label class="pe-label" for="modal-image-min-tokens" title="Vision Min Tokens: Minimum tokens per image. Affects VRAM usage for multimodal models.">Vision Min Tokens</label>
-                                <input type="number" class="pe-input" id="modal-image-min-tokens" placeholder="auto">
+                                <label class="pe-label" for="modal-image-min-tokens" title="Vision Min Tokens: Minimum tokens per image. Affects VRAM usage for multimodal models. Required 1024 for Qwen models with an mmproj.">Vision Min Tokens</label>
+                                <input type="number" class="pe-input" id="modal-image-min-tokens" placeholder="1024 for Qwen multimodal models">
                             </div>
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-image-max-tokens" title="Vision Max Tokens: Maximum tokens per image. Affects VRAM usage for multimodal models.">Vision Max Tokens</label>
@@ -3678,13 +3683,13 @@
                             </div>
                             <div class="hardware-field">
                                 <label for="spawn-threads" title="-t: CPU thread count for inference. On Apple Silicon, Apple recommends 1 (Metal GPU handles compute). Never exceed your chip's P-core count. Leave blank for server default.">Threads (-t)</label>
-                                <input type="number" id="spawn-threads" min="1" max="64" placeholder="default" title="CPU thread count for inference (-t). Blank = server default.">
-                                <div class="field-hint" id="spawn-threads-hint">Blank = server default. Do not exceed physical P-core count.</div>
+                                <input type="number" id="spawn-threads" min="-1" max="64" placeholder="default" title="CPU thread count for inference (-t). -1 or blank = server default.">
+                                <div class="field-hint" id="spawn-threads-hint">Blank = server default. Apple Silicon: use 1 — GPU handles inference.</div>
                             </div>
                             <div class="hardware-field">
                                 <label for="spawn-threads-batch" title="-tb: CPU thread count for batch/prompt processing. Defaults to -t value if blank.">Batch Threads (-tb)</label>
-                                <input type="number" id="spawn-threads-batch" min="1" max="64" placeholder="default" title="CPU thread count for batch processing (-tb). Blank = same as -t.">
-                                <div class="field-hint" id="spawn-threads-batch-hint">Prompt processing threads. Blank = inherit from -t.</div>
+                                <input type="number" id="spawn-threads-batch" min="-1" max="64" placeholder="default" title="CPU thread count for batch processing (-tb). -1 or blank = inherit from -t.">
+                                <div class="field-hint" id="spawn-threads-batch-hint">Blank = inherit from -t. Apple Silicon: use all P-cores — CPU handles prefill.</div>
                             </div>
                             <div class="hardware-field">
                                 <label for="spawn-n-cpu-moe" title="For Mixture-of-Experts models: how many expert layers to keep in VRAM. 0 = auto. Higher = faster but uses more VRAM. Lower = saves VRAM but runs some experts on CPU.">MoE CPU experts (n_cpu_moe)</label>
@@ -3744,20 +3749,20 @@
                             <summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--accent-blue);padding:4px 0;">Advanced modes</summary>
                             <div style="padding-top:6px;">
                                 <div class="field-hint" style="margin-bottom:8px;">For most users, default is enough. These modes are for advanced tuning.</div>
-                                <div class="hardware-grid">
+                                <div class="hardware-grid" style="margin-bottom:0;">
                                     <div class="hardware-field" style="grid-column: 1/-1;">
                                          <label for="spawn-spec-type" title="How the model predicts tokens ahead. N-gram works on any model. MTP needs built-in prediction heads and can help or hurt depending on the backend. Draft model needs a second small GGUF file.">Mode</label>
                                          <select id="spawn-spec-type">
-                                             <option value="">None (disabled)</option>
-                                             <optgroup label="N-gram methods (no extra files required)">
-                                                 <option value="ngram-mod">ngram-mod — shared hash pool, best for server use (~10–30% speedup)</option>
-                                                 <option value="ngram-simple">ngram-simple — minimal overhead, looks up last n-gram in history</option>
-                                                 <option value="ngram-map-k">ngram-map-k — hash-map patterns, good for repetitive/code content</option>
-                                                 <option value="ngram-map-k4v">ngram-map-k4v — experimental: 4 values/key, complex repetition patterns</option>
+                                             <option value="">None</option>
+                                             <optgroup label="N-gram (no extra files)">
+                                                 <option value="ngram-mod">ngram-mod — best general choice</option>
+                                                 <option value="ngram-simple">ngram-simple — minimal overhead</option>
+                                                 <option value="ngram-map-k">ngram-map-k — code / repetitive content</option>
+                                                 <option value="ngram-map-k4v">ngram-map-k4v — experimental</option>
                                              </optgroup>
-                                             <optgroup label="MTP — Multi-Token Prediction">
-                                                  <option value="draft-mtp,ngram-mod">draft-mtp + ngram-mod — MTP with n-gram fallback</option>
-                                                  <option value="draft-mtp">draft-mtp — pure MTP, no n-gram fallback</option>
+                                             <optgroup label="MTP (built-in prediction heads)">
+                                                  <option value="draft-mtp,ngram-mod">draft-mtp + ngram-mod (recommended)</option>
+                                                  <option value="draft-mtp">draft-mtp only</option>
                                               </optgroup>
                                           </select>
                                          <div class="field-hint" id="spawn-spec-hint">
@@ -3770,19 +3775,20 @@
                                              <span data-spec="draft-mtp" style="display:none;">Pure MTP with built-in prediction heads only. Requires <code>--parallel 1</code>. Benchmark against MTP disabled; current Metal builds can be slower.</span>
                                          </div>
                                     </div>
-                                    <div class="hardware-field" id="spawn-draft-model-wrap" style="display:none;">
+                                 </div>
+
+                                     <div class="hardware-field" id="spawn-draft-model-wrap" style="display:none; margin-top:8px;">
                                          <label for="spawn-draft-model">Draft model path</label>
-                                         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-                                             <input type="text" id="spawn-draft-model" placeholder="/path/to/draft-model.gguf" style="flex:1;min-width:200px;">
+                                         <div style="display:flex;gap:6px;align-items:center;">
+                                             <input type="text" id="spawn-draft-model" placeholder="/path/to/draft-model.gguf" style="flex:1;min-width:0;">
                                              <button type="button" id="spawn-draft-browse-btn" class="btn-wizard-tertiary" title="Browse for a draft model GGUF file">Browse…</button>
-                                             <div id="spawn-draft-candidates" style="display:flex;gap:4px;"></div>
                                          </div>
+                                         <div id="spawn-draft-candidates" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;"></div>
                                      </div>
 
                                      <div class="field-hint unified-cram-hint" id="unified-cram-hint" style="display:none; margin-top:6px;">
                                          On unified memory systems (Mac, DGX Spark, etc.), the KV prefix cache RAM (-cram) is set to 0 by default to avoid wasting shared memory.
                                      </div>
-                                 </div>
                             </div>
                         </details>
 

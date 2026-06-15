@@ -120,7 +120,33 @@ async function installRecommendedChatTemplateForPreset() {
 }
 
 function clearFieldErrors() {
+    // Clear field-error class
     document.querySelectorAll('#preset-form .field-error').forEach(el => el.classList.remove('field-error'));
+    // Remove any inline error messages we added
+    document.querySelectorAll('#preset-form .field-error-msg').forEach(el => el.remove());
+}
+
+function markFieldError(fieldId, message) {
+    const el = document.getElementById(fieldId);
+    if (!el) return;
+    el.classList.add('field-error');
+    // Insert an inline error message if not already present
+    const existing = el.parentElement.querySelector('.field-error-msg');
+    if (existing) {
+        existing.textContent = message;
+    } else {
+        const msg = document.createElement('div');
+        msg.className = 'field-error-msg';
+        msg.textContent = message;
+        el.after(msg);
+    }
+}
+
+function scrollToFirstError() {
+    const first = document.querySelector('#preset-form .field-error');
+    if (!first) return;
+    first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (first.focus) first.focus();
 }
 
 // ── Load ───────────────────────────────────────────────────────────────────────
@@ -190,9 +216,210 @@ export async function loadPresets(selectId) {
         saveSettings();
     }
 
+    // Sync the visual preset display (short name + chips)
+    if (sel && sel.value) {
+        syncPresetDisplay(sel);
+    }
+
     // Keep the setup view preset dropdown and launch grid in sync
     import('./setup-view.js').then(m => m.syncSetupPresetSelect?.()).catch(() => {});
+
+    // Main dashboard: handle user changing the preset while on the dashboard
+    wirePresetSelectChangeHandler();
 }
+
+// Handle user switching presets in the main dashboard dropdown.
+// If a model is already loaded (different preset), prompt to stop it and load the new one.
+function wirePresetSelectChangeHandler() {
+    const sel = document.getElementById('preset-select');
+    if (!sel) return;
+
+    // Avoid duplicate wiring (populatePresetSelect can run more than once)
+    if (sel.__chqaChangeWired) return;
+    sel.__chqaChangeWired = true;
+
+    sel.addEventListener('change', async () => {
+        const chosenId = sel.value;
+        if (!chosenId) return;
+
+        // Mark as user-initiated so WS sync won't force it back
+        window.__presetUserSelected = true;
+
+        // Fetch current active session to see if something is running
+        try {
+            const resp = await fetch('/api/sessions/active', {
+                headers: window.authHeaders ? window.authHeaders() : {},
+            });
+            if (!resp.ok) return;
+            const active = await resp.json().catch(() => ({}));
+
+            // If nothing is running, or it's the same preset, nothing special to do
+            if (!active || active.status !== 'running' || active.preset_id === chosenId) {
+                return;
+            }
+
+            // Different preset is running: ask if they want to switch
+            const chosenPreset = sessionState.presets.find(p => p.id === chosenId);
+            const runningPreset = sessionState.presets.find(p => p.id === active.preset_id);
+            const chosenName = chosenPreset?.name || 'selected preset';
+            const runningName = runningPreset?.name || 'current preset';
+
+            if (!confirm(
+                `A model is already loaded (${runningName}).\n\n` +
+                `Do you want to stop it and load ${chosenName}?`
+            )) {
+                // Revert selection
+                sel.value = active.preset_id;
+                return;
+            }
+
+            // User confirmed: stop running, start new preset
+            showToast('Switching preset…', 'info');
+
+            // Stop current
+            const tokenResp = await fetch('/api/db/admin-token', {
+                headers: window.authHeaders ? window.authHeaders() : {},
+            });
+            const tokenData = await tokenResp.json().catch(() => ({}));
+            const token = tokenData.token;
+            if (token) {
+                await fetch('/api/kill-llama', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ confirm: 'kill' }),
+                }).catch(() => {});
+            }
+
+            // Short delay to allow process to shut down
+            await new Promise(r => setTimeout(r, 400));
+
+            // Start new preset via existing doStart flow
+            // We'll import attach-detach and call doStart directly
+            const { doStart } = await import('./attach-detach.js');
+            await doStart();
+
+        } catch (e) {
+            console.warn('[presets] preset-select change error:', e);
+        } finally {
+            syncPresetDisplay(sel);
+        }
+    });
+}
+
+// ── Preset display (short name + chips) ────────────────────────────────────────
+
+function syncPresetDisplay(sel) {
+    const labelEl = document.getElementById('preset-display-label');
+    const chipsEl = document.getElementById('preset-display-chips');
+    if (!labelEl || !chipsEl || !sel || !sel.value) return;
+
+    const preset = (sessionState.presets || []).find(p => p.id === sel.value);
+    if (!preset) return;
+
+    const shortName = buildShortPresetName(preset);
+    const fullName = preset.name || (preset.model_path || preset.hf_repo || '').split('/').pop() || '';
+
+    labelEl.textContent = shortName;
+    labelEl.title = fullName;
+
+    chipsEl.innerHTML = '';
+    const chips = buildPresetChips(preset);
+    for (const chip of chips) {
+        const span = document.createElement('span');
+        span.className = 'preset-display-chip';
+        span.textContent = chip.label;
+        if (chip.title) span.title = chip.title;
+        chipsEl.appendChild(span);
+    }
+}
+
+function buildShortPresetName(p) {
+    const raw = p.name || (p.model_path || p.hf_repo || '').split('/').pop() || '';
+    if (!raw) return '';
+
+    let name = raw.trim();
+
+    // Strip meta tokens: distill(ed)?, instruct, sft, full, preview
+    name = name
+        .replace(/[-_]+(distill[ed]?|instruct|sft|full|preview|lite|fast|technical|agentic)[-_\s]*/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    // Clean leading/trailing separators
+    name = name.replace(/^[-_\s]+|[-_\s]+$/g, '').trim();
+
+    // Quantization suffix: e.g. "- Q8_0", "_Q8_0", "-Q4_K_M"
+    name = name.replace(/\s*[-_]\s*(Q\d+[_-]?[A-Z0-9]+)\s*$/i, '').trim();
+
+    // Context-length suffix: e.g. "-131k", "-262k", "-8192"
+    name = name.replace(/\s*[-_]\s*(\d{2,4}k|\d{4,5})\s*$/i, '').trim();
+
+    // If too short after stripping, use original
+    const trimmed = name.replace(/[-_\s]+/g, ' ').trim();
+    if (trimmed.length < 3) return raw.split('/').pop().trim();
+
+    // Normalize separators
+    const result = trimmed.replace(/[-_\s]+/g, ' ').trim();
+
+    if (result.length > 32) {
+        return result.slice(0, 30).trim() + '\u2026';
+    }
+
+    return result || raw.split('/').pop().trim();
+}
+
+function buildPresetChips(p) {
+    const chips = [];
+    const name = p.name || (p.model_path || p.hf_repo || '').split('/').pop() || '';
+
+    // Quant chip
+    const qMatch = name.match(/(Q\d+[_-]?[A-Z0-9]+)/i);
+    if (qMatch) {
+        chips.push({ label: qMatch[1].toUpperCase() });
+    }
+
+    // Context chip
+    const ctx = p.context_size;
+    if (ctx != null && ctx > 0) {
+        let ctxLabel;
+        if (ctx <= 1000) {
+            ctxLabel = String(ctx);
+        } else if (ctx < 1_000_000) {
+            ctxLabel = Math.round(ctx / 1024) + 'k';
+        } else {
+            ctxLabel = 'large';
+        }
+        chips.push({ label: ctxLabel, title: `${ctx.toLocaleString()} tokens` });
+    }
+
+    // Draft / speculative chip
+    const spec = p.spec_type;
+    if (spec && spec !== 'none') {
+        chips.push({ label: 'Draft', title: `Speculative decoding: ${spec}` });
+    }
+
+    return chips.slice(0, 3);
+}
+
+// Click the visual display to open the underlying <select>
+document.addEventListener('DOMContentLoaded', () => {
+    const visual = document.getElementById('preset-display-visual');
+    const sel = document.getElementById('preset-select');
+    if (!visual || !sel) return;
+
+    visual.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        if (typeof sel.showPicker === 'function') {
+            sel.showPicker();
+        } else {
+            sel.focus();
+            sel.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        }
+    });
+});
 
 // ── Modal ──────────────────────────────────────────────────────────────────────
 
@@ -236,6 +463,21 @@ async function _ensureUnifiedFlag() {
 function _parseParamB(name) {
     const m = /(\d+(?:\.\d+)?)\s*b\b/i.exec(name || '');
     return m ? parseFloat(m[1]) : 0;
+}
+
+function looksLikeQwenName(name) {
+    const n = (name || '').toLowerCase();
+    return n.includes('qwen');
+}
+
+function qwenVLImageTokens(p) {
+    const name = p.model_path || '';
+    const repo = p.hf_repo || '';
+    const hasMmproj = !!p.mmproj;
+    if ((looksLikeQwenName(name) || looksLikeQwenName(repo)) && hasMmproj) {
+        return { min_tokens: 1024, max_tokens: 4096 };
+    }
+    return { min_tokens: null, max_tokens: null };
 }
 
 function applyPresetSuggestion(suggestion) {
@@ -583,7 +825,7 @@ export function openPresetModal(mode, section) {
         setVal('modal-json-schema', p.json_schema || '');
         setVal('modal-extra-args', p.extra_args);
         numOrEmpty('modal-spec-draft-p-split', p.spec_draft_p_split);
-        numOrEmpty('modal-image-min-tokens', p.image_min_tokens);
+        numOrEmpty('modal-image-min-tokens', qwenVLImageTokens(p).min_tokens);
         numOrEmpty('modal-image-max-tokens', p.image_max_tokens);
     } else {
         title.textContent = 'New Preset';
@@ -882,6 +1124,8 @@ function _buildFormPreset(existing) {
         hf_repo: modelSource.hf_repo,
         alias: strVal('modal-alias') || null,
         mmproj: strVal('modal-mmproj') || null,
+        image_min_tokens: null,
+        image_max_tokens: null,
         chat_template_file: strVal('modal-chat-template-file') || null,
         gpu_layers: intOrNull('modal-gpu-layers'),
         no_mmap: document.getElementById('modal-no-mmap').checked,
@@ -950,9 +1194,10 @@ function _buildFormPreset(existing) {
         image_max_tokens: intOrNull('modal-image-max-tokens'),
     };
 }
-
 const CHANGE_LABELS = {
-    name: 'Name', model_path: 'Model (local path or HF repo)', hf_repo: 'HuggingFace Repo', alias: 'Server Alias', mmproj: 'Multimodal Projector', chat_template_file: 'Chat Template File',
+    name: 'Name', model_path: 'Model (local path or HF repo)', hf_repo: 'HuggingFace Repo',
+    alias: 'Server Alias', mmproj: 'Multimodal Projector', chat_template_file: 'Chat Template File',
+    image_min_tokens: 'Vision Min Tokens', image_max_tokens: 'Vision Max Tokens',
     gpu_layers: 'GPU Layers', no_mmap: 'no-mmap', mlock: 'mlock',
     context_size: 'Context Size', ctk: 'KV Key Type', ctv: 'KV Value Type',
     flash_attn: 'Flash Attn', kv_unified: 'KV Unified', cache_ram_mib: 'Prefix Cache RAM',
@@ -1014,30 +1259,36 @@ export async function savePreset(event) {
     // Inline validation
     let valid = true;
     if (!preset.name) {
-        document.getElementById('modal-name').classList.add('field-error');
+        markFieldError('modal-name', 'Preset name is required.');
         valid = false;
     }
     if (!preset.model_path && !preset.hf_repo) {
-        document.getElementById('modal-model-path').classList.add('field-error');
+        markFieldError('modal-model-path', 'Model path or HuggingFace repo is required.');
         valid = false;
     }
     const gpuLayers = parseInt(document.getElementById('modal-gpu-layers').value, 10);
-    if (!isNaN(gpuLayers) && gpuLayers < 0) {
-        document.getElementById('modal-gpu-layers').classList.add('field-error');
+    if (!isNaN(gpuLayers) && gpuLayers < -1) {
+        markFieldError('modal-gpu-layers', 'GPU layers must be -1, 0, or a positive number.');
         valid = false;
     }
     const ctxSize = parseInt(document.getElementById('modal-context-size').value, 10);
     if (!isNaN(ctxSize) && ctxSize <= 0) {
-        document.getElementById('modal-context-size').classList.add('field-error');
+        markFieldError('modal-context-size', 'Context size must be a positive number.');
         valid = false;
     }
     const threads = parseInt(document.getElementById('modal-threads').value, 10);
-    if (!isNaN(threads) && threads <= 0) {
-        document.getElementById('modal-threads').classList.add('field-error');
+    if (!isNaN(threads) && threads !== -1 && threads < 1) {
+        markFieldError('modal-threads', 'Threads must be -1 (auto) or 1 or higher.');
+        valid = false;
+    }
+    const threadsBatch = parseInt(document.getElementById('modal-threads-batch').value, 10);
+    if (!isNaN(threadsBatch) && threadsBatch !== -1 && threadsBatch < 1) {
+        markFieldError('modal-threads-batch', 'Batch threads must be -1 (auto) or 1 or higher.');
         valid = false;
     }
     if (!valid) {
-        showToast('Please fix all validation errors', 'error');
+        scrollToFirstError();
+        showToast('Please fix the highlighted error(s)', 'error');
         return;
     }
 
