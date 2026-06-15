@@ -44,6 +44,15 @@ pub struct SystemMetrics {
     /// E-cluster current frequency (MHz). Populated on macOS via mactop.
     #[serde(default)]
     pub e_cluster_freq_mhz: u32,
+    /// P-cluster utilization (%). Populated on macOS via mactop.
+    #[serde(default)]
+    pub p_cluster_active: f32,
+    /// S-cluster utilization (%). Populated on macOS via mactop.
+    #[serde(default)]
+    pub s_cluster_active: f32,
+    /// E-cluster utilization (%). Populated on macOS via mactop.
+    #[serde(default)]
+    pub e_cluster_active: f32,
     // Default: all new fields are 0/false for non-macOS builds
 }
 
@@ -66,6 +75,9 @@ impl Default for SystemMetrics {
             p_cluster_freq_mhz: 0,
             s_cluster_freq_mhz: 0,
             e_cluster_freq_mhz: 0,
+            p_cluster_active: 0.0,
+            s_cluster_active: 0.0,
+            e_cluster_active: 0.0,
         }
     }
 }
@@ -88,6 +100,9 @@ pub fn get_system_metrics() -> SystemMetrics {
         p_cluster_freq_mhz,
         s_cluster_freq_mhz,
         e_cluster_freq_mhz,
+        p_cluster_active,
+        s_cluster_active,
+        e_cluster_active,
     ) = {
         #[cfg(target_os = "macos")]
         {
@@ -112,18 +127,45 @@ pub fn get_system_metrics() -> SystemMetrics {
                         cache.p_cluster_freq_mhz,
                         cache.s_cluster_freq_mhz,
                         cache.e_cluster_freq_mhz,
+                        cache.p_cluster_active,
+                        cache.s_cluster_active,
+                        cache.e_cluster_active,
                     )
                 } else {
                     // Fallback if core counts are unknown
                     let cpu_load = get_cpu_load(&sys);
                     let cpu_clock_mhz = get_cpu_clock(&sys);
-                    (cpu_load, cpu_clock_mhz, 0.0, 0.0, 0.0, 0, 0, 0)
+                    (
+                        cpu_load,
+                        cpu_clock_mhz,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0,
+                        0,
+                        0,
+                        0.0,
+                        0.0,
+                        0.0,
+                    )
                 }
             } else {
                 // Cache not yet populated — fallback to sysinfo
                 let cpu_load = get_cpu_load(&sys);
                 let cpu_clock_mhz = get_cpu_clock(&sys);
-                (cpu_load, cpu_clock_mhz, 0.0, 0.0, 0.0, 0, 0, 0)
+                (
+                    cpu_load,
+                    cpu_clock_mhz,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0,
+                    0,
+                    0,
+                    0.0,
+                    0.0,
+                    0.0,
+                )
             }
         }
         #[cfg(not(target_os = "macos"))]
@@ -137,6 +179,9 @@ pub fn get_system_metrics() -> SystemMetrics {
                 0,
                 0,
                 0,
+                0.0,
+                0.0,
+                0.0,
             )
         }
     };
@@ -162,6 +207,9 @@ pub fn get_system_metrics() -> SystemMetrics {
         p_cluster_freq_mhz,
         s_cluster_freq_mhz,
         e_cluster_freq_mhz,
+        p_cluster_active,
+        s_cluster_active,
+        e_cluster_active,
     }
 }
 

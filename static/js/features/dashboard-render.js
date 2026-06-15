@@ -979,7 +979,7 @@ function pushGpuHistory(key, value) {
     if (gpuHistory[key].length > limit) gpuHistory[key].shift();
 }
 
-var sysHistory = { cpuLoad: [], ramPct: [], cpuClock: [], power: [] };
+var sysHistory = { cpuLoad: [], ramPct: [], cpuClock: [], power: [], pCluster: [], sCluster: [], eCluster: [] };
 function pushSysHistory(key, value) {
     if (!Number.isFinite(value)) return;
     sysHistory[key].push(value);
@@ -1371,24 +1371,58 @@ function renderSystemCard(sys, visible, grade) {
         powerBlock.style.display = 'none';
     }
 
-    // Cluster frequencies (Apple Silicon only)
+    // CPU Clusters (Apple Silicon only)
     var clustersBlock = document.getElementById('sys-clusters-block');
-    var hasClusters = sys.p_cluster_freq_mhz > 0 || sys.s_cluster_freq_mhz > 0;
+    var pActive = sys.p_cluster_active || 0;
+    var sActive = sys.s_cluster_active || 0;
+    var eActive = sys.e_cluster_active || 0;
+    var hasClusters = (pActive > 0 || sActive > 0 || eActive > 0);
+
     if (clustersBlock && hasClusters) {
         clustersBlock.style.display = '';
-        var clustersVizEl = document.getElementById('sys-clusters-viz');
-        var clustersValEl = document.getElementById('sys-clusters-value');
-        var pF = sys.p_cluster_freq_mhz || 0;
-        var sF = sys.s_cluster_freq_mhz || 0;
-        var eF = sys.e_cluster_freq_mhz || 0;
-        var labels = [];
-        if (pF > 0) labels.push('P ' + pF + 'MHz');
-        if (sF > 0) labels.push('S ' + sF + 'MHz');
-        if (eF > 0) labels.push('E ' + eF + 'MHz');
-        if (labels.length > 0) {
-            renderHwChips(clustersVizEl, labels);
+
+        // Push history for each cluster
+        if (pActive > 0) pushSysHistory('pCluster', pActive);
+        if (sActive > 0) pushSysHistory('sCluster', sActive);
+        if (eActive > 0) pushSysHistory('eCluster', eActive);
+
+        // P-cores row
+        var pRow = document.getElementById('sys-cluster-p-row');
+        var pBar = document.getElementById('sys-cluster-p-bar');
+        var pVal = document.getElementById('sys-cluster-p-value');
+        if (pRow && pBar && pVal) {
+            pRow.style.display = '';
+            var pTone = getMetricTone('load');
+            renderHwBar(pBar, Math.min(100, pActive), pTone, false);
+            pVal.textContent = Math.round(pActive) + '%';
+            renderHwMetricSparkline('sys-cluster-p-spark', sysHistory.pCluster, pTone.line, true);
         }
-        if (clustersValEl) clustersValEl.textContent = '';
+
+        // S-cores row (show only if present)
+        var sRow = document.getElementById('sys-cluster-s-row');
+        var sBar = document.getElementById('sys-cluster-s-bar');
+        var sVal = document.getElementById('sys-cluster-s-value');
+        if (sActive > 0 && sRow && sBar && sVal) {
+            sRow.style.display = '';
+            var sTone = getMetricTone('load');
+            renderHwBar(sBar, Math.min(100, sActive), sTone, false);
+            sVal.textContent = Math.round(sActive) + '%';
+            renderHwMetricSparkline('sys-cluster-s-spark', sysHistory.sCluster, sTone.line, true);
+        } else if (sRow) {
+            sRow.style.display = 'none';
+        }
+
+        // E-cores row
+        var eRow = document.getElementById('sys-cluster-e-row');
+        var eBar = document.getElementById('sys-cluster-e-bar');
+        var eVal = document.getElementById('sys-cluster-e-value');
+        if (eRow && eBar && eVal) {
+            eRow.style.display = '';
+            var eTone = getMetricTone('load');
+            renderHwBar(eBar, Math.min(100, eActive), eTone, false);
+            eVal.textContent = Math.round(eActive) + '%';
+            renderHwMetricSparkline('sys-cluster-e-spark', sysHistory.eCluster, eTone.line, true);
+        }
     } else if (clustersBlock) {
         clustersBlock.style.display = 'none';
     }

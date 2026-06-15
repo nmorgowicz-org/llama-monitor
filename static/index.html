@@ -834,11 +834,36 @@
                                 <svg class="hw-metric-sparkline" id="sys-power-spark" viewBox="0 0 120 28" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
                                 <div class="hw-metric-value" id="sys-power-value">&mdash;</div>
                             </div>
-                            <div class="hw-metric-block" id="sys-clusters-block" style="display:none;">
-                                <div class="hw-metric-label">Clusters</div>
-                                <div class="hw-metric-viz" id="sys-clusters-viz"></div>
-                                <div class="hw-metric-value" id="sys-clusters-value">&mdash;</div>
-                            </div>
+                          <div class="hw-metric-block hw-clusters-block" id="sys-clusters-block" style="display:none;">
+                                 <div class="hw-metric-label">CPU Clusters</div>
+
+                                 <div class="hw-cluster-row" id="sys-cluster-p-row">
+                                     <div class="hw-cluster-meta">
+                                         <div class="hw-cluster-name">P-Cores</div>
+                                         <div class="hw-cluster-value" id="sys-cluster-p-value">&mdash;</div>
+                                     </div>
+                                     <div class="hw-cluster-bar" id="sys-cluster-p-bar"></div>
+                                     <svg class="hw-cluster-sparkline" id="sys-cluster-p-spark" viewBox="0 0 120 20" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
+                                 </div>
+
+                                 <div class="hw-cluster-row" id="sys-cluster-s-row" style="display:none;">
+                                     <div class="hw-cluster-meta">
+                                         <div class="hw-cluster-name">S-Cores</div>
+                                         <div class="hw-cluster-value" id="sys-cluster-s-value">&mdash;</div>
+                                     </div>
+                                     <div class="hw-cluster-bar" id="sys-cluster-s-bar"></div>
+                                     <svg class="hw-cluster-sparkline" id="sys-cluster-s-spark" viewBox="0 0 120 20" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
+                                 </div>
+
+                                 <div class="hw-cluster-row" id="sys-cluster-e-row">
+                                     <div class="hw-cluster-meta">
+                                         <div class="hw-cluster-name">E-Cores</div>
+                                         <div class="hw-cluster-value" id="sys-cluster-e-value">&mdash;</div>
+                                     </div>
+                                     <div class="hw-cluster-bar" id="sys-cluster-e-bar"></div>
+                                     <svg class="hw-cluster-sparkline" id="sys-cluster-e-spark" viewBox="0 0 120 20" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
+                                 </div>
+                             </div>
                         </div>
                     </div>
                 </section>
@@ -2900,9 +2925,9 @@
                                         <input type="number" class="pe-input" id="modal-spec-draft-n-min" min="0" max="8" placeholder="0">
                                     </div>
                                     <div class="pe-field">
-                                        <label class="pe-label" for="modal-spec-draft-p-min" title="Minimum token probability for draft acceptance. Blank = server default 0.00 (no filter). Community recommendation: 0.75 as a starting point. Try 0.5–0.9 based on your acceptance rate.">Min Accept Prob (--spec-draft-p-min)</label>
-                                        <input type="number" class="pe-input" id="modal-spec-draft-p-min" min="0" max="1" step="0.05" placeholder="0.75">
-                                        <div class="pe-field-hint">Starting point: 0.75. Lower (0.5) accepts more drafts and increases raw t/s; higher (0.9) reduces wasted verification passes. Watch the acceptance rate in the server log and tune after enabling MTP.</div>
+                                        <label class="pe-label" for="modal-spec-draft-p-min" title="Minimum token probability for draft acceptance. Blank = server default 0.00 (no filter). Community starting point: 0.75. Try 0.5–0.9 based on your acceptance rate.">Min Accept Prob (--spec-draft-p-min)</label>
+                                        <input type="number" class="pe-input" id="modal-spec-draft-p-min" min="0" max="1" step="0.05" placeholder="0.00">
+                                        <div class="pe-field-hint">Blank = server default 0.00 (no filter). Community starting point: 0.75. Lower (0.5) accepts more drafts; higher (0.9) reduces wasted verification passes. Watch the acceptance rate in the server log and tune from there.</div>
                                     </div>
                                 </div>
                                 <div class="pe-row pe-row-2">
@@ -3598,8 +3623,8 @@
                                     <input type="number" id="spawn-spec-draft-n-min" min="0" max="8" placeholder="0" class="hw-mtp-depth-input" title="Minimum draft tokens before verification. Server default: 0. Leave blank in most cases.">
                                 </div>
                                 <div class="hw-mtp-depth-inline" style="margin-top:6px;">
-                                    <label for="spawn-spec-draft-p-min" class="hw-mtp-depth-label" title="Minimum token probability for draft acceptance. Blank = server default (0.00 — no filter). Community consensus: 0.75 is a good starting point. Higher values (0.8–0.9) make the draft more selective; lower (0.5) accepts more aggressively. Range 0–1.">Min accept prob (p-min)</label>
-                                    <input type="number" id="spawn-spec-draft-p-min" min="0" max="1" step="0.05" placeholder="0.75" class="hw-mtp-depth-input" title="Draft acceptance threshold. 0.75 is the community-recommended starting point. Blank = server default 0.00 (no filter).">
+                                    <label for="spawn-spec-draft-p-min" class="hw-mtp-depth-label" title="Minimum token probability for draft acceptance. Blank = server default 0.00 (no filter). Community starting point: 0.75. Higher values (0.8–0.9) are more selective; lower (0.5) accepts more aggressively. Range 0–1.">Min accept prob (p-min)</label>
+                                    <input type="number" id="spawn-spec-draft-p-min" min="0" max="1" step="0.05" placeholder="0.00" class="hw-mtp-depth-input" title="Draft acceptance threshold. Blank = server default 0.00 (no filter). Community starting point: 0.75.">
                                 </div>
                                 <div class="field-hint">Uses <code>--spec-type draft-mtp,ngram-mod</code>, sets <code>--spec-draft-n-max</code>, and forces <code>--parallel 1</code>. Gains vary by model and hardware — benchmark on vs. off to verify. Adds ~1.5% model memory per MTP head.</div>
                             </div>
@@ -3827,6 +3852,16 @@
                         <div class="tune-suggestions" id="wizard-advisor-cards"></div>
                     </div>
 
+                    <!-- Batch/ubatch sweep: find optimal PP throughput (server must be stopped) -->
+                    <details class="depth-sweep" id="wizard-batch-sweep" style="display:none;">
+                        <summary class="depth-sweep-summary">Batch/ubatch sweep <span class="depth-sweep-hint">find fastest prompt processing</span></summary>
+                        <div class="depth-sweep-body">
+                            <div class="depth-sweep-hint" style="margin-bottom:6px;">Tries common batch/ubatch combinations and picks the pair with the highest PP t/s. Uses a 2048-token prompt; server must be stopped. Takes ~5–10 min.</div>
+                            <button type="button" class="depth-sweep-btn" id="wizard-batch-sweep-btn" title="Runs llama-bench with several batch/ubatch combos. Server must be stopped.">Run batch sweep</button>
+                            <span class="depth-sweep-status" id="wizard-batch-sweep-status"></span>
+                            <div class="depth-sweep-results" id="wizard-batch-sweep-results"></div>
+                        </div>
+                    </details>
                     <!-- Depth sweep: measure decode at several context depths (server must be stopped) -->
                     <details class="depth-sweep" id="wizard-depth-sweep" style="display:none;">
                         <summary class="depth-sweep-summary">Depth sweep <span class="depth-sweep-hint">measure speed vs context length</span></summary>
