@@ -758,6 +758,8 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         hf_repo: None,
         chat_template_file: None,
         mmproj: None,
+        image_min_tokens: None,
+        image_max_tokens: None,
         grammar: None,
         json_schema: None,
         cache_type_k: None,

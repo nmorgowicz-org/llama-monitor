@@ -255,6 +255,19 @@ fn build_upstream_client(timeout: Duration) -> Result<reqwest::Client, warp::Rej
         })
 }
 
+/// Client for streaming chat — no body timeout so prefill on slow hardware can run indefinitely.
+/// Only the TCP connection establishment is time-bounded.
+fn build_streaming_client() -> Result<reqwest::Client, warp::Rejection> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| {
+            warp::reject::custom(ApiError::internal(format!(
+                "Failed to create HTTP client: {e}"
+            )))
+        })
+}
+
 fn should_retry_send_error(err: &reqwest::Error) -> bool {
     err.is_timeout()
         || err.is_connect()
@@ -7862,7 +7875,9 @@ fn api_chat(
                 }
                 // Derive endpoint from active session — no user-controlled input
                 let (url, permit) = prepare_inference_request(&state).await?;
-                let client = build_upstream_client(Duration::from_secs(120))?;
+                // No body timeout — prefill on large models / slow hardware can take minutes.
+                // Inter-token stall detection lives on the JS side (streamTimeoutMs, post first-token).
+                let client = build_streaming_client()?;
                 let request_body = body.to_vec();
 
                 // Stream response from upstream — Tokio cancels automatically on client disconnect
@@ -7899,9 +7914,15 @@ fn api_chat(
                                     let line = buf[..pos].to_string();
                                     buf = buf[pos + 1..].to_string();
 
-                                    if let Some(data) = line.strip_prefix("data: ")
-                                        && !data.trim().is_empty()
-                                    {
+                                    let data = if let Some(d) = line.strip_prefix("data: ") {
+                                        d
+                                    } else if let Some(d) = line.strip_prefix("data:") {
+                                        d
+                                    } else {
+                                        continue;
+                                    };
+
+                                    if !data.trim().is_empty() {
                                         let _ = tx.send(Ok::<_, warp::Error>(
                                             warp::sse::Event::default().data(data.to_string()),
                                         ));

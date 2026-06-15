@@ -162,6 +162,10 @@ pub struct ModelPreset {
     #[serde(default)]
     pub mmproj: Option<String>,
     #[serde(default)]
+    pub image_min_tokens: Option<u32>,
+    #[serde(default)]
+    pub image_max_tokens: Option<u32>,
+    #[serde(default)]
     pub grammar: Option<String>,
     #[serde(default)]
     pub json_schema: Option<String>,
