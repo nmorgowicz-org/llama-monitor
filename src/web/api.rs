@@ -2867,7 +2867,7 @@ fn api_benchmark(
         .and(super::hf_json_body::<serde_json::Value>())
         .and_then(
             move |auth: Option<String>,
-                  _body: serde_json::Value|
+                  body: serde_json::Value|
                   {
                 let state = state.clone();
                 let cfg = app_config.clone();
@@ -2877,8 +2877,13 @@ fn api_benchmark(
                         return Ok(unauthorized_api_token());
                     }
 
-                    // Cooldown to prevent repeated heavy loads on the running llama-server.
-                    {
+                    // When tuning is active, skip cooldown so user gets live feedback.
+                    let tuning = body.get("tuning")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false);
+
+                    if !tuning {
+                        // Cooldown to prevent repeated heavy loads on the running llama-server.
                         let now = std::time::SystemTime::UNIX_EPOCH
                             .elapsed()
                             .unwrap_or_default()
@@ -3290,6 +3295,7 @@ fn api_tune_ncpumoe(
                 let param_b = body["param_b"].as_f64().unwrap_or(0.0);
                 let model_size_bytes = body["model_size_bytes"].as_u64().unwrap_or(0);
                 let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
+                let batch_size = body["batch_size"].as_u64().unwrap_or(2048) as u32;
                 let ubatch_size = body["ubatch_size"].as_u64().unwrap_or(512) as u32;
                 let verify = body["verify"].as_bool().unwrap_or(false);
 
@@ -3352,6 +3358,8 @@ fn api_tune_ncpumoe(
                     flash_attn,
                     &ctk,
                     &ctv,
+                    batch_size,
+                    ubatch_size,
                     &candidates,
                 )
                 .await;
@@ -3410,6 +3418,8 @@ fn api_bench_sweep(
                 let ctk = body["ctk"].as_str().unwrap_or("q8_0").to_string();
                 let ctv = body["ctv"].as_str().unwrap_or("q8_0").to_string();
                 let flash_attn = body["flash_attn"].as_bool().unwrap_or(true);
+                let batch_size = body["batch_size"].as_u64().unwrap_or(2048) as u32;
+                let ubatch_size = body["ubatch_size"].as_u64().unwrap_or(512) as u32;
                 let n_cpu_moe = body["n_cpu_moe"].as_i64().map(|n| n as i32);
                 let depths: Vec<u64> = body["depths"]
                     .as_array()
@@ -3427,6 +3437,8 @@ fn api_bench_sweep(
                     flash_attn,
                     &ctk,
                     &ctv,
+                    batch_size,
+                    ubatch_size,
                     &depths,
                     n_cpu_moe,
                 )
@@ -3439,6 +3451,92 @@ fn api_bench_sweep(
                         warp::reply::json(&serde_json::json!({ "error": e })),
                     )),
                 }
+            }
+        })
+}
+
+// ── Offline batch/ubatch sweep ───────────────────────────────────────────────
+//
+// Tries common (batch_size, ubatch_size) pairs via llama-bench measuring
+// PP throughput only (no decode). Returns all probe results plus the pair
+// with the highest PP t/s. Requires the server to be stopped (GPU free).
+fn api_bench_batch_sweep(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "bench" / "batch-sweep")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::hf_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let state = state.clone();
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let running = state.server_running.lock().map(|g| *g).unwrap_or(false);
+                if running {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "error": "Stop the running server before a batch sweep — llama-bench needs the GPU.",
+                        })),
+                    ));
+                }
+
+                let model_path = body["model_path"].as_str().unwrap_or("").to_string();
+                if model_path.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "error": "model_path required" })),
+                    ));
+                }
+
+                let ngl = body["ngl"].as_i64().unwrap_or(99) as i32;
+                let ctk = body["ctk"].as_str().unwrap_or("q8_0").to_string();
+                let ctv = body["ctv"].as_str().unwrap_or("q8_0").to_string();
+                let flash_attn = body["flash_attn"].as_bool().unwrap_or(true);
+                let n_cpu_moe = body["n_cpu_moe"].as_i64().map(|n| n as i32);
+                let prompt_tokens = body["prompt_tokens"].as_u64().unwrap_or(2048) as u32;
+
+                // Standard ladder of (batch, ubatch) pairs to probe.
+                // ubatch must be ≤ batch, so we test ubatch = batch (max parallelism)
+                // and ubatch = 512 (conservative baseline) at each batch size.
+                let candidates: Vec<(u32, u32)> = vec![
+                    (512, 512),
+                    (1024, 512), (1024, 1024),
+                    (2048, 512), (2048, 1024), (2048, 2048),
+                    (4096, 512), (4096, 1024), (4096, 2048), (4096, 4096),
+                ];
+
+                let bench_bin =
+                    crate::llama::bench_runner::llama_bench_path(&cfg.llama_server_path);
+                let probes = crate::llama::bench_runner::probe_batch(
+                    &bench_bin,
+                    &cfg.llama_server_cwd,
+                    &model_path,
+                    ngl,
+                    flash_attn,
+                    &ctk,
+                    &ctv,
+                    &candidates,
+                    prompt_tokens,
+                    n_cpu_moe,
+                )
+                .await;
+
+                let best = probes
+                    .iter()
+                    .filter(|p| p.pp_tps > 0.0)
+                    .max_by(|a, b| a.pp_tps.partial_cmp(&b.pp_tps).unwrap());
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "probes": probes,
+                        "recommended_batch_size": best.map(|b| b.batch_size),
+                        "recommended_ubatch_size": best.map(|b| b.ubatch_size),
+                    }),
+                )))
             }
         })
 }
@@ -5416,6 +5514,7 @@ pub fn api_routes(
     let advise_route = api_advise(app_config.clone());
     let tune_ncpumoe_route = api_tune_ncpumoe(state.clone(), app_config.clone());
     let bench_sweep_route = api_bench_sweep(state.clone(), app_config.clone());
+    let bench_batch_sweep_route = api_bench_batch_sweep(state.clone(), app_config.clone());
     let bench_mtp_sweep_route = api_bench_mtp_sweep(state.clone(), app_config.clone());
     let hf_search_route = api_hf_search(state.clone(), app_config.clone());
     let hf_files_route = api_hf_files(state.clone(), app_config.clone());
@@ -5557,6 +5656,7 @@ pub fn api_routes(
         .or(advise_route)
         .or(tune_ncpumoe_route)
         .or(bench_sweep_route)
+        .or(bench_batch_sweep_route)
         .or(bench_mtp_sweep_route)
         .or(hf_search_route)
         .or(hf_files_route)
@@ -12076,19 +12176,39 @@ fn api_llama_binary_update(
                 let binary_name = if os == "windows" { "llama-server.exe" } else { "llama-server" };
                 let dest_dir = dest_path.parent().unwrap_or(&dest_path);
 
-                // Locate extracted binary in temp dir before touching dest_dir.
-                let tmp_binary = tmp_dir.path().join(binary_name);
-                if !tmp_binary.exists() {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": format!(
-                                "Could not find '{}' in extracted archive",
-                                binary_name
-                            )
-                        })),
-                    ));
+                // Locate extracted binary in temp dir. Releases may place it at the root
+                // or inside a subdirectory (e.g. llama-bXXXX-bin-...).
+                fn find_binary(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+                    let direct = root.join(name);
+                    if direct.is_file() {
+                        return Some(direct);
+                    }
+                    for entry in std::fs::read_dir(root).ok()? {
+                        let entry = entry.ok()?;
+                        let path = entry.path();
+                        if path.is_dir()
+                            && let Some(p) = find_binary(&path, name)
+                        {
+                            return Some(p);
+                        }
+                    }
+                    None
                 }
+
+                let tmp_binary = match find_binary(tmp_dir.path(), binary_name) {
+                    Some(p) => p,
+                    None => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!(
+                                    "Could not find '{}' in extracted archive",
+                                    binary_name
+                                )
+                            })),
+                        ));
+                    }
+                };
 
                 // Set executable bit before health check (unix).
                 #[cfg(unix)]
