@@ -147,9 +147,10 @@ Scenarios:
      spawn-wizard-gif       Animated GIF walking through all setup wizard steps (1→2→3→4→5→6)
      spawn-wizard-hf-download  HF download panel: idle options and simulated progress
 
-  Performance & Updates
-    tune-panel       Performance benchmark dropdown (pill + panel) on server tab
-    llama-updater    Llama-server binary update pill and version modal with release notes
+   Performance & Updates
+    tune-panel          Performance benchmark dropdown (pill + panel) on server tab
+    benchmark-results   Runs a real benchmark and captures the results view
+    llama-updater       Llama-server binary update pill and version modal with release notes
 
   Validation
     sparkline        Sparkline validation screenshots
@@ -2600,6 +2601,61 @@ async function scenarioTunePanel(ctx, options) {
     await captureCloseUp(page, '#benchmark-dropdown-wrap', 'tune-panel-open.png', options);
 }
 
+// ── Benchmark Results ─────────────────────────────────────────────────────────
+// Runs a real benchmark via the tune panel and captures the results view.
+
+async function scenarioBenchmarkResults(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    await attachToServer(page);
+
+    await switchTab(page, 'server');
+    await sleep(2000);
+
+    // Force show the benchmark pill
+    await page.evaluate(() => {
+        const pill = document.getElementById('benchmark-pill');
+        const group = document.getElementById('inference-log-tail-group');
+        if (pill) pill.classList.add('show');
+        if (group) group.style.display = 'inline-flex';
+    });
+    await sleep(500);
+
+    // Open the dropdown
+    await page.evaluate(() => {
+        const pill = document.getElementById('benchmark-pill');
+        if (pill) pill.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await sleep(800);
+
+    // Click "Run" button inside the dropdown
+    const runBtn = await page.$('#tune-run-btn');
+    if (!runBtn) {
+        throw new Error('[CAPTURE] #tune-run-btn not found in benchmark dropdown');
+    }
+    await runBtn.click();
+
+    // Wait for the results view: #tune-results visible AND #tune-running gone
+    await page.waitForFunction(() => {
+        const results = document.getElementById('tune-results');
+        const running = document.getElementById('tune-running');
+        if (!results || !running) return false;
+        const rStyle = getComputedStyle(results);
+        const runStyle = getComputedStyle(running);
+        return (
+            rStyle.display !== 'none' &&
+            rStyle.visibility !== 'hidden' &&
+            runStyle.display === 'none'
+        );
+    }, { timeout: 90000 });
+
+    await sleep(2000);
+
+    // Capture full page then close-up of the dropdown with results
+    await captureShot(page, 'benchmark-results.png', { fullPage: true });
+    await captureCloseUp(page, '#benchmark-dropdown-wrap', 'benchmark-results.png', options);
+}
+
 // ── Llama Updater ─────────────────────────────────────────────────────────────
 // Llama-server binary update pill and version modal.
 
@@ -3587,6 +3643,7 @@ const SCENARIOS = {
     'spawn-wizard-hf-download': scenarioSpawnWizardHfDownload,
     // New features (spawn-llama-server-v2)
     'tune-panel': scenarioTunePanel,
+    'benchmark-results': scenarioBenchmarkResults,
     'llama-updater': scenarioLlamaUpdater,
     'chat-history-qa': scenarioChatHistoryQA,
     // Validation
