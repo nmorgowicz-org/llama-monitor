@@ -9,7 +9,8 @@ pub const CSS_AUTH: &str = include_str!("../../static/css/auth.css");
 pub const CSS_BASE: &str = include_str!("../../static/css/base.css");
 pub const CSS_CARDS_HARDWARE: &str = include_str!("../../static/css/cards-hardware.css");
 pub const CSS_CARDS_INFERENCE: &str = include_str!("../../static/css/cards-inference.css");
-pub const CSS_CHAT_GUIDED_GENERATION: &str = include_str!("../../static/css/chat-guided-generation.css");
+pub const CSS_CHAT_GUIDED_GENERATION: &str =
+    include_str!("../../static/css/chat-guided-generation.css");
 pub const CSS_CHAT_HISTORY_QA: &str = include_str!("../../static/css/chat-history-qa.css");
 pub const CSS_CHAT: &str = include_str!("../../static/css/chat.css");
 pub const CSS_COMMAND_PALETTE: &str = include_str!("../../static/css/command-palette.css");
@@ -31,52 +32,71 @@ pub const CONFIG_DOMPURIFY_INIT_JS: &str = include_str!("../../static/js/config/
 pub const CORE_APP_STATE_JS: &str = include_str!("../../static/js/core/app-state.js");
 pub const CORE_FORMAT_JS: &str = include_str!("../../static/js/core/format.js");
 pub const FEATURES_ANIMATE_JS: &str = include_str!("../../static/js/features/animate.js");
-pub const FEATURES_ATTACH_DETACH_JS: &str = include_str!("../../static/js/features/attach-detach.js");
+pub const FEATURES_ATTACH_DETACH_JS: &str =
+    include_str!("../../static/js/features/attach-detach.js");
 pub const FEATURES_AUTH_JS: &str = include_str!("../../static/js/features/auth.js");
-pub const FEATURES_CHAT_FOCUS_MODE_JS: &str = include_str!("../../static/js/features/chat-focus-mode.js");
-pub const FEATURES_CHAT_HISTORY_QA_JS: &str = include_str!("../../static/js/features/chat-history-qa.js");
+pub const FEATURES_CHAT_FOCUS_MODE_JS: &str =
+    include_str!("../../static/js/features/chat-focus-mode.js");
+pub const FEATURES_CHAT_HISTORY_QA_JS: &str =
+    include_str!("../../static/js/features/chat-history-qa.js");
 pub const FEATURES_CHAT_NOTES_JS: &str = include_str!("../../static/js/features/chat-notes.js");
 pub const FEATURES_CHAT_PARAMS_JS: &str = include_str!("../../static/js/features/chat-params.js");
-pub const FEATURES_CHAT_QUICK_GUIDE_JS: &str = include_str!("../../static/js/features/chat-quick-guide.js");
+pub const FEATURES_CHAT_QUICK_GUIDE_JS: &str =
+    include_str!("../../static/js/features/chat-quick-guide.js");
 pub const FEATURES_CHAT_RENDER_JS: &str = include_str!("../../static/js/features/chat-render.js");
-pub const FEATURES_CHAT_REPLY_PLAN_JS: &str = include_str!("../../static/js/features/chat-reply-plan.js");
+pub const FEATURES_CHAT_REPLY_PLAN_JS: &str =
+    include_str!("../../static/js/features/chat-reply-plan.js");
 pub const FEATURES_CHAT_SEARCH_JS: &str = include_str!("../../static/js/features/chat-search.js");
-pub const FEATURES_CHAT_SESSIONS_SIDEBAR_JS: &str = include_str!("../../static/js/features/chat-sessions-sidebar.js");
+pub const FEATURES_CHAT_SESSIONS_SIDEBAR_JS: &str =
+    include_str!("../../static/js/features/chat-sessions-sidebar.js");
 pub const FEATURES_CHAT_STATE_JS: &str = include_str!("../../static/js/features/chat-state.js");
-pub const FEATURES_CHAT_SUGGESTIONS_JS: &str = include_str!("../../static/js/features/chat-suggestions.js");
-pub const FEATURES_CHAT_TEMPLATE_REGISTRY_JS: &str = include_str!("../../static/js/features/chat-template-registry.js");
-pub const FEATURES_CHAT_TEMPLATES_JS: &str = include_str!("../../static/js/features/chat-templates.js");
-pub const FEATURES_CHAT_TRANSPORT_JS: &str = include_str!("../../static/js/features/chat-transport.js");
-pub const FEATURES_CHAT_WIDTH_OBSERVER_JS: &str = include_str!("../../static/js/features/chat-width-observer.js");
+pub const FEATURES_CHAT_SUGGESTIONS_JS: &str =
+    include_str!("../../static/js/features/chat-suggestions.js");
+pub const FEATURES_CHAT_TEMPLATE_REGISTRY_JS: &str =
+    include_str!("../../static/js/features/chat-template-registry.js");
+pub const FEATURES_CHAT_TEMPLATES_JS: &str =
+    include_str!("../../static/js/features/chat-templates.js");
+pub const FEATURES_CHAT_TRANSPORT_JS: &str =
+    include_str!("../../static/js/features/chat-transport.js");
+pub const FEATURES_CHAT_WIDTH_OBSERVER_JS: &str =
+    include_str!("../../static/js/features/chat-width-observer.js");
 pub const FEATURES_CONFIG_JS: &str = include_str!("../../static/js/features/config.js");
 pub const FEATURES_CONTEXT_CARD_JS: &str = include_str!("../../static/js/features/context-card.js");
-pub const FEATURES_DASHBOARD_RENDER_JS: &str = include_str!("../../static/js/features/dashboard-render.js");
+pub const FEATURES_DASHBOARD_RENDER_JS: &str =
+    include_str!("../../static/js/features/dashboard-render.js");
 pub const FEATURES_DASHBOARD_WS_JS: &str = include_str!("../../static/js/features/dashboard-ws.js");
 pub const FEATURES_DB_ADMIN_JS: &str = include_str!("../../static/js/features/db-admin.js");
-pub const FEATURES_FILE_BROWSER_LAUNCHER_JS: &str = include_str!("../../static/js/features/file-browser-launcher.js");
+pub const FEATURES_FILE_BROWSER_LAUNCHER_JS: &str =
+    include_str!("../../static/js/features/file-browser-launcher.js");
 pub const FEATURES_FILE_BROWSER_JS: &str = include_str!("../../static/js/features/file-browser.js");
 pub const FEATURES_HF_BROWSE_JS: &str = include_str!("../../static/js/features/hf-browse.js");
 pub const FEATURES_LHM_JS: &str = include_str!("../../static/js/features/lhm.js");
-pub const FEATURES_LLAMA_UPDATER_JS: &str = include_str!("../../static/js/features/llama-updater.js");
+pub const FEATURES_LLAMA_UPDATER_JS: &str =
+    include_str!("../../static/js/features/llama-updater.js");
 pub const FEATURES_MODELS_JS: &str = include_str!("../../static/js/features/models.js");
 pub const FEATURES_NAV_JS: &str = include_str!("../../static/js/features/nav.js");
-pub const FEATURES_NETWORK_DETECTION_JS: &str = include_str!("../../static/js/features/network-detection.js");
+pub const FEATURES_NETWORK_DETECTION_JS: &str =
+    include_str!("../../static/js/features/network-detection.js");
 pub const FEATURES_PRESETS_JS: &str = include_str!("../../static/js/features/presets.js");
 pub const FEATURES_REMOTE_AGENT_JS: &str = include_str!("../../static/js/features/remote-agent.js");
-pub const FEATURES_SENSOR_BRIDGE_JS: &str = include_str!("../../static/js/features/sensor-bridge.js");
+pub const FEATURES_SENSOR_BRIDGE_JS: &str =
+    include_str!("../../static/js/features/sensor-bridge.js");
 pub const FEATURES_SESSIONS_JS: &str = include_str!("../../static/js/features/sessions.js");
 pub const FEATURES_SETTINGS_JS: &str = include_str!("../../static/js/features/settings.js");
 pub const FEATURES_SETUP_VIEW_JS: &str = include_str!("../../static/js/features/setup-view.js");
 pub const FEATURES_SHORTCUTS_JS: &str = include_str!("../../static/js/features/shortcuts.js");
-pub const FEATURES_SPAWN_READINESS_JS: &str = include_str!("../../static/js/features/spawn-readiness.js");
+pub const FEATURES_SPAWN_READINESS_JS: &str =
+    include_str!("../../static/js/features/spawn-readiness.js");
 pub const FEATURES_SPAWN_WIZARD_JS: &str = include_str!("../../static/js/features/spawn-wizard.js");
-pub const FEATURES_TELEMETRY_GRADE_JS: &str = include_str!("../../static/js/features/telemetry-grade.js");
+pub const FEATURES_TELEMETRY_GRADE_JS: &str =
+    include_str!("../../static/js/features/telemetry-grade.js");
 pub const FEATURES_TOAST_JS: &str = include_str!("../../static/js/features/toast.js");
 pub const FEATURES_TUNE_PANEL_JS: &str = include_str!("../../static/js/features/tune-panel.js");
 pub const FEATURES_TUNING_CARDS_JS: &str = include_str!("../../static/js/features/tuning-cards.js");
 pub const FEATURES_UPDATES_JS: &str = include_str!("../../static/js/features/updates.js");
 pub const FEATURES_USER_MENU_JS: &str = include_str!("../../static/js/features/user-menu.js");
-pub const FEATURES_WORKSPACE_COMMAND_PALETTE_JS: &str = include_str!("../../static/js/features/workspace-command-palette.js");
+pub const FEATURES_WORKSPACE_COMMAND_PALETTE_JS: &str =
+    include_str!("../../static/js/features/workspace-command-palette.js");
 pub const MANIFEST_JSON: &str = include_str!("../../static/manifest.json");
 pub const ACTION_MD: &str = include_str!("../../static/prompts/action.md");
 pub const CHARACTER_MD: &str = include_str!("../../static/prompts/character.md");
