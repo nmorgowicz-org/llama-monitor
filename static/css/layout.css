@@ -991,9 +991,10 @@
   flex-shrink: 0;
   padding: 3px 8px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--color-text-muted);
+  /* Always-on amber accent: makes the pill obviously tappable even at rest */
+  border: 1px solid rgba(235, 203, 139, 0.28);
+  background: rgba(235, 203, 139, 0.05);
+  color: rgba(235, 203, 139, 0.6);
   font-size: 9px;
   font-weight: 800;
   text-transform: uppercase;
@@ -1004,26 +1005,45 @@
   user-select: none;
 }
 
-.nav-cockpit.has-session .nav-sleep-pill {
+/* Always show the pill — was gated on .has-session which hid it entirely */
+.nav-cockpit .nav-sleep-pill {
   display: inline-flex;
 }
 
-.nav-sleep-pill:hover {
-  border-color: rgba(235, 203, 139, 0.45);
-  color: rgba(235, 203, 139, 0.85);
-  background: rgba(235, 203, 139, 0.06);
+/* Dim (but don't hide) when no session is active */
+.nav-cockpit:not(.has-session) .nav-sleep-pill {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
-.nav-cockpit.is-low-power .nav-sleep-pill {
-  border-color: rgba(235, 203, 139, 0.5);
-  color: #ebcb8b;
-  background: rgba(235, 203, 139, 0.1);
+.nav-sleep-pill:hover {
+  border-color: rgba(235, 203, 139, 0.55);
+  color: rgba(235, 203, 139, 0.9);
+  background: rgba(235, 203, 139, 0.09);
   box-shadow: 0 0 8px rgba(235, 203, 139, 0.12);
 }
 
+/* Active low-power state: full amber glow */
+.nav-cockpit.is-low-power .nav-sleep-pill {
+  border-color: rgba(235, 203, 139, 0.65);
+  color: #ebcb8b;
+  background: rgba(235, 203, 139, 0.13);
+  box-shadow: 0 0 10px rgba(235, 203, 139, 0.22), inset 0 0 6px rgba(235, 203, 139, 0.06);
+}
+
 .nav-cockpit.is-low-power .nav-sleep-pill:hover {
-  border-color: rgba(235, 203, 139, 0.7);
-  background: rgba(235, 203, 139, 0.15);
+  border-color: rgba(235, 203, 139, 0.8);
+  background: rgba(235, 203, 139, 0.18);
+}
+
+/* Subtle pulse on the moon icon when the pill is available but not yet active */
+.nav-cockpit.has-session:not(.is-low-power) .nav-sleep-pill svg {
+  animation: sleep-pill-breathe 3.5s ease-in-out infinite;
+}
+
+@keyframes sleep-pill-breathe {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
 }
 
 .nav-cockpit-spark {
@@ -1150,6 +1170,50 @@
 .fb-path-input:focus {
   border-color: var(--acc-60);
   box-shadow: 0 0 0 3px var(--acc-15);
+}
+
+/* ── Theme toggle (sun/moon) ─────────────────────────────────────────────── */
+.nav-theme-toggle {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+  flex-shrink: 0;
+}
+
+.nav-theme-toggle:hover {
+  border-color: var(--acc-30);
+  background: var(--acc-10);
+  color: var(--color-text-primary);
+  box-shadow: 0 0 10px var(--acc-12);
+}
+
+/* Dark mode → show sun (switch to light), hide moon */
+:root .theme-icon-sun { display: block; }
+:root .theme-icon-moon { display: none; }
+
+/* Light mode → show moon (switch to dark), hide sun */
+[data-theme="light"] .theme-icon-sun { display: none; }
+[data-theme="light"] .theme-icon-moon { display: block; }
+
+[data-theme="light"] .nav-theme-toggle {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(241, 245, 249, 0.9));
+  color: var(--color-text-primary);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .nav-theme-toggle:hover {
+  border-color: var(--acc-30);
+  background: rgba(248, 250, 252, 0.98);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.1);
 }
 
 .nav-user {

@@ -118,6 +118,11 @@ function toggleTheme(event) {
     document.documentElement.dataset.theme = next;
     const pref = document.getElementById('pref-theme-mode');
     if (pref) pref.value = next;
+    // Persist so the next page load keeps the choice
+    try {
+        const existing = JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}');
+        localStorage.setItem('llama-monitor-preferences', JSON.stringify({ ...existing, theme: next }));
+    } catch (_) {}
     showToast('Theme set to ' + next, 'success');
 }
 
@@ -199,6 +204,9 @@ export function initUserMenu() {
 
     const themeBtn = document.getElementById('user-menu-theme');
     if (themeBtn) themeBtn.addEventListener('click', (e) => toggleTheme(e));
+
+    const navThemeToggle = document.getElementById('nav-theme-toggle');
+    if (navThemeToggle) navThemeToggle.addEventListener('click', (e) => toggleTheme(e));
 
     const helpBtn = document.getElementById('user-menu-help');
     if (helpBtn) helpBtn.addEventListener('click', (e) => openUserHelp(e));
