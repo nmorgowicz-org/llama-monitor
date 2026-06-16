@@ -65,8 +65,8 @@
 
 .log-tool-btn--active {
     color: #818cf8;
-    border-color: rgba(129, 140, 248, 0.35);
-    background: rgba(129, 140, 248, 0.08);
+    border-color: var(--acc-40);
+    background: var(--acc-08);
 }
 
 .log-font-controls {
@@ -111,7 +111,7 @@
     gap: 8px;
     padding: 12px 16px;
     background: rgba(8, 12, 22, 0.9);
-    border: 1px solid rgba(129, 140, 248, 0.22);
+    border: 1px solid var(--acc-25);
     border-top: none;
     position: relative;
 }

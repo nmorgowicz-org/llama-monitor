@@ -189,7 +189,7 @@
   inset: 0;
   border-radius: var(--radius-card);
   padding: 1px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), transparent 40%, transparent 60%, rgba(99, 102, 241, 0.15));
+  background: linear-gradient(135deg, var(--acc-30), transparent 40%, transparent 60%, var(--acc-15));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -203,11 +203,11 @@
 }
 
 .agent-setup-hero:hover {
-  border-color: rgba(99, 102, 241, 0.45);
+  border-color: var(--acc-50);
   box-shadow:
     0 18px 42px rgba(0, 0, 0, 0.45),
     0 4px 16px rgba(0, 0, 0, 0.32),
-    0 0 40px rgba(99, 102, 241, 0.12),
+    0 0 40px var(--acc-12),
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     inset 0 -1px 0 rgba(0, 0, 0, 0.25);
   transform: translateY(-2px) scale(1.005);
@@ -292,7 +292,7 @@
   inset: 0;
   border-radius: var(--radius-card);
   padding: 1px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), transparent 40%, transparent 60%, rgba(99, 102, 241, 0.15));
+  background: linear-gradient(135deg, var(--acc-30), transparent 40%, transparent 60%, var(--acc-15));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -306,11 +306,11 @@
 }
 
 .agent-setup-section:hover {
-  border-color: rgba(99, 102, 241, 0.45);
+  border-color: var(--acc-50);
   box-shadow:
     0 18px 42px rgba(0, 0, 0, 0.45),
     0 4px 16px rgba(0, 0, 0, 0.32),
-    0 0 40px rgba(99, 102, 241, 0.12),
+    0 0 40px var(--acc-12),
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     inset 0 -1px 0 rgba(0, 0, 0, 0.25);
   transform: translateY(-2px) scale(1.005);
@@ -554,10 +554,10 @@
 }
 
 .version-card:hover {
-  border-color: rgba(99, 102, 241, 0.35);
+  border-color: var(--acc-40);
   box-shadow:
     0 10px 28px rgba(0, 0, 0, 0.38),
-    0 0 24px rgba(99, 102, 241, 0.1),
+    0 0 24px var(--acc-10),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -871,7 +871,7 @@
 }
 
 .activity-segment:focus-visible {
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.22), 0 0 24px rgba(143, 188, 187, 0.34);
+  box-shadow: 0 0 0 3px var(--acc-25), 0 0 24px rgba(143, 188, 187, 0.34);
 }
 
 .activity-empty {
@@ -899,7 +899,7 @@
   inset: 0;
   border-radius: var(--radius-card);
   padding: 1px;
-  background: linear-gradient(160deg, rgba(99, 102, 241, 0.35), transparent 35%, transparent 65%, rgba(6, 182, 212, 0.2));
+  background: linear-gradient(160deg, var(--acc-40), transparent 35%, transparent 65%, rgba(6, 182, 212, 0.2));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -929,7 +929,7 @@
   width: 500px;
   height: 500px;
   transform: translate(-50%, -50%);
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.18) 0%, rgba(6, 182, 212, 0.08) 40%, transparent 70%);
+  background: radial-gradient(circle, var(--acc-18) 0%, rgba(6, 182, 212, 0.08) 40%, transparent 70%);
   filter: blur(60px);
   pointer-events: none;
   animation: agent-ambient-drift 8s ease-in-out infinite;
@@ -1034,10 +1034,10 @@
 }
 
 [data-theme="light"] .agent-setup-section:hover {
-  border-color: rgba(99, 102, 241, 0.3);
+  border-color: var(--acc-30);
   box-shadow:
     0 16px 40px rgba(15, 23, 42, 0.12),
-    0 0 24px rgba(99, 102, 241, 0.06),
+    0 0 24px var(--acc-05),
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
@@ -1050,9 +1050,9 @@
 
 [data-theme="light"] .agent-setup-field input:focus,
 [data-theme="light"] .agent-setup-field select:focus {
-  border-color: rgba(99, 102, 241, 0.5);
+  border-color: var(--acc-50);
   box-shadow:
-    0 0 0 3px rgba(99, 102, 241, 0.1),
+    0 0 0 3px var(--acc-10),
     inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 

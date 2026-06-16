@@ -1,24 +1,20 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap');
 
 /* llama-monitor — tokens
- * CONTAINS: :root (CSS custom properties), [data-theme="light"] overrides
- * KEY VARS:  --color-bg, --color-primary, --color-success, --color-error,
- *            --font-body, --font-mono, --text-*, --radius-*, --gap-*,
- *            --gradient-primary, --shadow-surface, --border-subtle
+ * CONTAINS: :root (CSS custom properties), palette overrides [data-palette="X"],
+ *           [data-theme="light"] overrides, power-saver/motion guards.
+ * KEY VARS:  --color-accent (master palette knob), --color-bg, --color-success,
+ *            --gradient-primary, --metric-*, --font-body, --font-mono
  */
 
-/* POWER OPT: pause all infinite animations when tab is hidden.
- * The body.power-saver class is toggled by the Page Visibility API in dashboard-ws.js.
- * This prevents 70+ infinite CSS animations from consuming GPU cycles while the user
- * isn't looking at the tab. */
+/* POWER OPT: pause all infinite animations when tab is hidden. */
 body.power-saver *,
 body.power-saver *::before,
 body.power-saver *::after {
   animation-play-state: paused !important;
 }
 
-/* POWER OPT: when a blocking modal/panel is open, pause decorative animation
- * on background app surfaces while leaving the foreground dialog responsive. */
+/* POWER OPT: pause decorative animations on background surfaces while a modal is open. */
 body.background-paused .top-nav-bar *,
 body.background-paused .top-nav-bar *::before,
 body.background-paused .top-nav-bar *::after,
@@ -37,9 +33,7 @@ body.background-paused .chat-sessions-panel *::after {
   animation-play-state: paused !important;
 }
 
-/* POWER OPT: honour the OS "Reduce Motion" accessibility preference.
- * Disables decorative animations for users who have motion reduction enabled —
- * also the right thing to do for battery life on Apple Silicon. */
+/* POWER OPT: honour OS "Reduce Motion" preference. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -48,6 +42,20 @@ body.background-paused .chat-sessions-panel *::after {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Smooth palette transitions — applied briefly around palette changes in JS */
+html.palette-changing,
+html.palette-changing *,
+html.palette-changing *::before,
+html.palette-changing *::after {
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease,
+    color 0.2s ease,
+    fill 0.2s ease,
+    stroke 0.2s ease !important;
 }
 
 /* Shared compositing-only pulse used by multiple card glow pseudo-elements */
@@ -60,63 +68,98 @@ body.background-paused .chat-sessions-panel *::after {
   50%       { opacity: 0.8; }
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   DEFAULT DARK THEME — Carbon Mint palette
+   ══════════════════════════════════════════════════════════════════════ */
 :root {
-  --color-bg: #0f1115;
-  --color-bg-surface: #16191e;
+  /* ── Background layers ─────────────────────────────────────────── */
+  --color-bg:          #0f1115;
+  --color-bg-surface:  #16191e;
   --color-bg-elevated: #1f232a;
   --color-bg-floating: #2a2f3a;
-  --surface-card-base: rgba(9, 13, 24, 0.96);
-  --surface-card-elevated: rgba(20, 27, 45, 0.94);
-  --surface-card-overlay: rgba(148, 163, 184, 0.12);
+
+  /* ── Surface card base (non-accent, stable across palettes) ─────── */
+  --surface-card-base:           rgba(9, 13, 24, 0.96);
+  --surface-card-elevated:       rgba(20, 27, 45, 0.94);
+  --surface-card-overlay:        rgba(148, 163, 184, 0.12);
   --surface-card-overlay-strong: rgba(148, 163, 184, 0.18);
-  --surface-card-ambient-a: rgba(56, 189, 248, 0.12);
-  --surface-card-ambient-b: rgba(45, 212, 191, 0.09);
-  --surface-card-glow: rgba(8, 145, 178, 0.16);
-  --surface-card-line: rgba(34, 211, 238, 0.26);
-  --surface-card-line-strong: rgba(103, 232, 249, 0.42);
-  --color-primary: #6366f1;
-  --color-primary-dark: #4f46e5;
-  --color-primary-light: #818cf8;
+
+  /* ── Carbon Mint palette (default) ──────────────────────────────── */
+  /* --color-accent is the single theming knob; all derived tokens cascade from it */
+  --color-accent:       #2dd4bf;
+  --color-accent-deep:  #0d9488;
+  --color-accent-light: #5eead4;
+
+  /* Primary = accent so all existing --color-primary CSS auto-follows palette */
+  --color-primary:       var(--color-accent);
+  --color-primary-dark:  var(--color-accent-deep);
+  --color-primary-light: var(--color-accent-light);
+
+  /* Gradient driven by accent vars — auto-updates on palette change */
+  --gradient-primary: linear-gradient(160deg, var(--color-accent-deep) 0%, var(--color-accent) 52%, var(--color-accent-light) 100%);
+
+  /* Card ambient glows — palette-specific rgba for depth in dark mode */
+  --surface-card-ambient-a:   rgba(45, 212, 191, 0.12);
+  --surface-card-ambient-b:   rgba(34, 211, 238, 0.08);
+  --surface-card-glow:        rgba(13, 148, 136, 0.16);
+  --surface-card-line:        rgba(94, 234, 212, 0.26);
+  --surface-card-line-strong: rgba(94, 234, 212, 0.42);
+
+  /* ── Semantic status colors (palette-stable) ─────────────────────── */
   --color-success: #10b981;
   --color-warning: #f59e0b;
-  --color-error: #f43f5e;
-  --color-info: #06b6d4;
-  --color-teal: #8fbcbb;
-  --color-blue: #88c0d1;
-  --color-green: #a3be8c;
-  --color-amber: #ebcb8b;
-  --color-red: #bf616a;
+  --color-error:   #f43f5e;
+  --color-info:    #06b6d4;
+
+  /* ── Named chart / log colors ────────────────────────────────────── */
+  --color-teal:   #8fbcbb;
+  --color-blue:   #88c0d1;
+  --color-green:  #a3be8c;
+  --color-amber:  #ebcb8b;
+  --color-red:    #bf616a;
   --color-purple: #b48ead;
-  --color-pink: #bf4080;
-  --color-cyan: #61afef;
+  --color-pink:   #bf4080;
+  --color-cyan:   #61afef;
   --color-gray-1: #4c566a;
   --color-gray-2: #888b98;
   --color-gray-3: #9ca0b0;
-  --color-text-primary: #f9fafb;
+
+  /* ── Text ────────────────────────────────────────────────────────── */
+  --color-text-primary:   #f9fafb;
   --color-text-secondary: #d1d5db;
-  --color-text-muted: #9ca3af;
-  --color-text-inverse: #111827;
-  --border-subtle: rgba(255, 255, 255, 0.07);
+  --color-text-muted:     #9ca3af;
+  --color-text-inverse:   #111827;
+  --text-on-accent:       #ffffff;
+
+  /* ── Borders ─────────────────────────────────────────────────────── */
+  --border-subtle:   rgba(255, 255, 255, 0.07);
   --border-emphasis: rgba(255, 255, 255, 0.14);
-  --shadow-surface: 0 8px 24px rgba(0, 0, 0, 0.22);
+
+  /* ── Shadows ─────────────────────────────────────────────────────── */
+  --shadow-surface:  0 8px 24px rgba(0, 0, 0, 0.22);
   --shadow-elevated: 0 18px 48px rgba(0, 0, 0, 0.34);
   --shadow-floating: 0 26px 72px rgba(0, 0, 0, 0.5);
-  --gradient-primary: linear-gradient(160deg, #6366f1 0%, #8b5cf6 52%, #06b6d4 100%);
+
+  /* Semantic gradients stay fixed regardless of palette */
   --gradient-success: linear-gradient(135deg, #10b981 0%, #14b8a6 100%);
   --gradient-warning: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
-  --gradient-error: linear-gradient(135deg, #f43f5e 0%, #ef4444 100%);
+  --gradient-error:   linear-gradient(135deg, #f43f5e 0%, #ef4444 100%);
+
+  /* ── Typography ──────────────────────────────────────────────────── */
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'Fira Code', 'SFMono-Regular', Consolas, monospace;
   --text-3xs: 0.625rem;
   --text-2xs: 0.6875rem;
-  --text-xs: 0.75rem;
-  --text-sm: 0.875rem;
+  --text-xs:  0.75rem;
+  --text-sm:  0.875rem;
   --text-base: 1rem;
-  --text-lg: 1.125rem;
-  --text-xl: 1.25rem;
+  --text-lg:  1.125rem;
+  --text-xl:  1.25rem;
   --text-2xl: 1.5rem;
   --text-3xl: 1.875rem;
-  --radius-sm: 8px;
+
+  /* ── Spacing / Radius ────────────────────────────────────────────── */
+  --radius-sm:   8px;
   --radius-base: 12px;
   --radius-card: 20px;
   --gap-xs: 8px;
@@ -124,99 +167,220 @@ body.background-paused .chat-sessions-panel *::after {
   --gap-md: 16px;
   --gap-lg: 24px;
   --gap-xl: 32px;
+
+  /* ── Layout ──────────────────────────────────────────────────────── */
   --shell-top: 114px;
   color-scheme: dark;
 
-  /* Accent-soft tokens: for buttons, chips, badges, hover/selected states */
-  --accent-soft-bg: rgba(99, 102, 241, 0.12);
-  --accent-soft-bg-strong: rgba(99, 102, 241, 0.18);
-  --accent-soft-border: rgba(99, 102, 241, 0.24);
-  --accent-subtle-bg: rgba(99, 102, 241, 0.06);
-  --accent-subtle-border: rgba(99, 102, 241, 0.15);
+  /* ── Accent-derived tokens via color-mix() — cascade from --color-accent ── */
+  --accent-soft-bg:        color-mix(in srgb, var(--color-accent) 12%, transparent);
+  --accent-soft-bg-strong: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  --accent-soft-border:    color-mix(in srgb, var(--color-accent) 24%, transparent);
+  --accent-subtle-bg:      color-mix(in srgb, var(--color-accent) 6%, transparent);
+  --accent-subtle-border:  color-mix(in srgb, var(--color-accent) 15%, transparent);
 
-  /* Neutral soft backgrounds/borders */
-  --neutral-soft-bg: rgba(255, 255, 255, 0.04);
+  /* ── Neutral soft backgrounds ────────────────────────────────────── */
+  --neutral-soft-bg:        rgba(255, 255, 255, 0.04);
   --neutral-soft-bg-strong: rgba(255, 255, 255, 0.07);
-  --neutral-soft-border: rgba(255, 255, 255, 0.08);
+  --neutral-soft-border:    rgba(255, 255, 255, 0.08);
 
-  /* Focus rings */
-  --focus-ring-soft: 0 0 0 3px rgba(99, 102, 241, 0.16);
-  --focus-ring-strong: 0 0 0 3px rgba(99, 102, 241, 0.24);
+  /* ── Focus rings (accent-driven) ─────────────────────────────────── */
+  --focus-ring-soft:   0 0 0 3px color-mix(in srgb, var(--color-accent) 16%, transparent);
+  --focus-ring-strong: 0 0 0 3px color-mix(in srgb, var(--color-accent) 24%, transparent);
 
-  /* Elevation helpers (for panels, modals, toasts) */
-  --elevation-soft: 0 6px 16px rgba(0, 0, 0, 0.22);
+  /* ── Elevation shadows ───────────────────────────────────────────── */
+  --elevation-soft:   0 6px 16px rgba(0, 0, 0, 0.22);
   --elevation-medium: 0 12px 32px rgba(0, 0, 0, 0.32);
   --elevation-strong: 0 20px 48px rgba(0, 0, 0, 0.44);
 
-  /* Text on accent backgrounds (e.g., primary buttons / gradient surfaces) */
-  --text-on-accent: #ffffff;
+  /* ── Hardware metric channel colors (JS reads these via getComputedStyle) ── */
+  --metric-load:   #34d399;
+  --metric-power:  var(--color-accent);
+  --metric-memory: #22d3ee;
+  --metric-clock:  #60a5fa;
+
+  /* ── Accent alpha steps — for box-shadows, glows, and inline tints ──────── */
+  /* These let CSS files replace literal rgba(accent, N) with var(--acc-N) so  */
+  /* the palette knob propagates without a giant regex sweep.                  */
+  --acc-05: color-mix(in srgb, var(--color-accent)  5%, transparent);
+  --acc-08: color-mix(in srgb, var(--color-accent)  8%, transparent);
+  --acc-10: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  --acc-12: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  --acc-15: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  --acc-18: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  --acc-20: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  --acc-25: color-mix(in srgb, var(--color-accent) 25%, transparent);
+  --acc-30: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  --acc-40: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  --acc-50: color-mix(in srgb, var(--color-accent) 50%, transparent);
+  --acc-60: color-mix(in srgb, var(--color-accent) 60%, transparent);
+  --acc-solid: var(--color-accent);
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   PALETTE: Cyber Rose — Pink/Magenta, high-energy futuristic
+   ══════════════════════════════════════════════════════════════════════ */
+[data-palette="cyber-rose"] {
+  --color-accent:       #f472b6;
+  --color-accent-deep:  #be185d;
+  --color-accent-light: #f9a8d4;
+
+  --surface-card-ambient-a:   rgba(244, 114, 182, 0.12);
+  --surface-card-ambient-b:   rgba(232, 121, 249, 0.08);
+  --surface-card-glow:        rgba(190, 24, 93, 0.16);
+  --surface-card-line:        rgba(249, 168, 212, 0.26);
+  --surface-card-line-strong: rgba(249, 168, 212, 0.42);
+
+  --metric-load:   #fb7185;
+  --metric-power:  var(--color-accent);
+  --metric-memory: #e879f9;
+  --metric-clock:  #c084fc;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   PALETTE: Solar Violet — Deep violet/purple, cosmic
+   ══════════════════════════════════════════════════════════════════════ */
+[data-palette="solar-violet"] {
+  --color-accent:       #a78bfa;
+  --color-accent-deep:  #6d28d9;
+  --color-accent-light: #c4b5fd;
+
+  --surface-card-ambient-a:   rgba(167, 139, 250, 0.12);
+  --surface-card-ambient-b:   rgba(99, 102, 241, 0.09);
+  --surface-card-glow:        rgba(109, 40, 217, 0.16);
+  --surface-card-line:        rgba(196, 181, 253, 0.26);
+  --surface-card-line-strong: rgba(196, 181, 253, 0.42);
+
+  --metric-load:   #34d399;
+  --metric-power:  var(--color-accent);
+  --metric-memory: #818cf8;
+  --metric-clock:  #60a5fa;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   PALETTE: Lava Core — Red/Orange, intense and powerful
+   ══════════════════════════════════════════════════════════════════════ */
+[data-palette="lava-core"] {
+  --color-accent:       #ef4444;
+  --color-accent-deep:  #b91c1c;
+  --color-accent-light: #fca5a5;
+
+  --surface-card-ambient-a:   rgba(239, 68, 68, 0.10);
+  --surface-card-ambient-b:   rgba(249, 115, 22, 0.08);
+  --surface-card-glow:        rgba(185, 28, 28, 0.16);
+  --surface-card-line:        rgba(252, 165, 165, 0.22);
+  --surface-card-line-strong: rgba(252, 165, 165, 0.36);
+
+  --metric-load:   #f97316;
+  --metric-power:  var(--color-accent);
+  --metric-memory: #fbbf24;
+  --metric-clock:  #a78bfa;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   LIGHT THEME overrides — base layer (palette-agnostic)
+   ══════════════════════════════════════════════════════════════════════ */
 [data-theme="light"] {
-  --color-bg: #f5f7fb;
-  --color-bg-surface: #ffffff;
+  --color-bg:          #f5f7fb;
+  --color-bg-surface:  #ffffff;
   --color-bg-elevated: #eef2f7;
   --color-bg-floating: #e5eaf2;
-  --surface-card-base: rgba(255, 255, 255, 0.97);
-  --surface-card-elevated: rgba(241, 245, 249, 0.96);
-  --surface-card-overlay: rgba(71, 85, 105, 0.08);
+
+  --surface-card-base:           rgba(255, 255, 255, 0.97);
+  --surface-card-elevated:       rgba(241, 245, 249, 0.96);
+  --surface-card-overlay:        rgba(71, 85, 105, 0.08);
   --surface-card-overlay-strong: rgba(71, 85, 105, 0.14);
-  --surface-card-ambient-a: rgba(56, 189, 248, 0.10);
-  --surface-card-ambient-b: rgba(45, 212, 191, 0.08);
-  --surface-card-glow: rgba(14, 116, 144, 0.12);
-  --surface-card-line: rgba(14, 165, 233, 0.18);
-  --surface-card-line-strong: rgba(6, 182, 212, 0.3);
-  --color-text-primary: #111827;
+
+  /* Carbon Mint light-mode ambient (softer on white) */
+  --surface-card-ambient-a:   rgba(45, 212, 191, 0.10);
+  --surface-card-ambient-b:   rgba(34, 211, 238, 0.07);
+  --surface-card-glow:        rgba(13, 148, 136, 0.12);
+  --surface-card-line:        rgba(94, 234, 212, 0.18);
+  --surface-card-line-strong: rgba(94, 234, 212, 0.30);
+
+  /* Light-mode accent stays the same (carbon-mint default) */
+  --color-accent:       #0d9488;
+  --color-accent-deep:  #0f766e;
+  --color-accent-light: #2dd4bf;
+
+  /* Primary cascades from accent */
+  --color-primary:       var(--color-accent);
+  --color-primary-dark:  var(--color-accent-deep);
+  --color-primary-light: var(--color-accent-light);
+
+  --color-text-primary:   #111827;
   --color-text-secondary: #374151;
-  --color-text-muted: #6b7280;
-  --border-subtle: rgba(17, 24, 39, 0.1);
+  --color-text-muted:     #6b7280;
+
+  --border-subtle:   rgba(17, 24, 39, 0.1);
   --border-emphasis: rgba(17, 24, 39, 0.18);
-  --shadow-surface: 0 8px 24px rgba(15, 23, 42, 0.1);
+
+  --shadow-surface:  0 8px 24px rgba(15, 23, 42, 0.1);
   --shadow-elevated: 0 18px 48px rgba(15, 23, 42, 0.16);
-  --color-teal: #2e7d8f;
-  --color-blue: #4a90b8;
-  --color-green: #5a8a4a;
-  --color-amber: #b8860b;
-  --color-red: #c0392b;
+  --shadow-floating: 0 26px 72px rgba(15, 23, 42, 0.18);
+
+  --color-teal:   #2e7d8f;
+  --color-blue:   #4a90b8;
+  --color-green:  #5a8a4a;
+  --color-amber:  #b8860b;
+  --color-red:    #c0392b;
   --color-purple: #8e44ad;
-  --color-pink: #c2185b;
-  --color-cyan: #2563a8;
+  --color-pink:   #c2185b;
+  --color-cyan:   #2563a8;
   --color-gray-1: #9ca3af;
   --color-gray-2: #6b7280;
   --color-gray-3: #4b5563;
-  /* Primary shades need to be darker in light mode to stay readable */
-  --color-primary: #6366f1;
-  --color-primary-dark: #4338ca;
-  --color-primary-light: #4f46e5;
+
   --color-success: #059669;
   --color-warning: #d97706;
-  --color-error: #dc2626;
-  --color-info: #0284c7;
-  --shadow-floating: 0 26px 72px rgba(15, 23, 42, 0.18);
-  --gradient-primary: linear-gradient(160deg, #6366f1 0%, #8b5cf6 52%, #0284c7 100%);
-  color-scheme: light;
+  --color-error:   #dc2626;
+  --color-info:    #0284c7;
 
-  /* Accent-soft tokens: light-optimized */
-  --accent-soft-bg: rgba(99, 102, 241, 0.1);
-  --accent-soft-bg-strong: rgba(99, 102, 241, 0.16);
-  --accent-soft-border: rgba(99, 102, 241, 0.3);
-  --accent-subtle-bg: rgba(99, 102, 241, 0.05);
-  --accent-subtle-border: rgba(99, 102, 241, 0.18);
+  --gradient-primary: linear-gradient(160deg, var(--color-accent-deep) 0%, var(--color-accent) 52%, var(--color-accent-light) 100%);
 
-  /* Neutral soft backgrounds/borders */
-  --neutral-soft-bg: rgba(15, 23, 42, 0.04);
+  --neutral-soft-bg:        rgba(15, 23, 42, 0.04);
   --neutral-soft-bg-strong: rgba(15, 23, 42, 0.07);
-  --neutral-soft-border: rgba(15, 23, 42, 0.1);
+  --neutral-soft-border:    rgba(15, 23, 42, 0.1);
 
-  /* Focus rings */
-  --focus-ring-soft: 0 0 0 3px rgba(99, 102, 241, 0.14);
-  --focus-ring-strong: 0 0 0 3px rgba(99, 102, 241, 0.24);
-
-  /* Elevation helpers (lighter, less muddy shadows) */
-  --elevation-soft: 0 6px 16px rgba(15, 23, 42, 0.12);
+  --elevation-soft:   0 6px 16px rgba(15, 23, 42, 0.12);
   --elevation-medium: 0 12px 32px rgba(15, 23, 42, 0.16);
   --elevation-strong: 0 20px 48px rgba(15, 23, 42, 0.22);
 
-  /* Text on accent backgrounds */
-  --text-on-accent: #ffffff;
+  color-scheme: light;
+}
+
+/* ── Light + Cyber Rose ──────────────────────────────────────────── */
+[data-theme="light"][data-palette="cyber-rose"] {
+  --color-accent:       #db2777;
+  --color-accent-deep:  #9d174d;
+  --color-accent-light: #f472b6;
+  --surface-card-ambient-a:   rgba(219, 39, 119, 0.08);
+  --surface-card-ambient-b:   rgba(244, 114, 182, 0.06);
+  --surface-card-glow:        rgba(157, 23, 77, 0.10);
+  --surface-card-line:        rgba(244, 114, 182, 0.16);
+  --surface-card-line-strong: rgba(244, 114, 182, 0.28);
+}
+
+/* ── Light + Solar Violet ────────────────────────────────────────── */
+[data-theme="light"][data-palette="solar-violet"] {
+  --color-accent:       #7c3aed;
+  --color-accent-deep:  #5b21b6;
+  --color-accent-light: #a78bfa;
+  --surface-card-ambient-a:   rgba(124, 58, 237, 0.08);
+  --surface-card-ambient-b:   rgba(99, 102, 241, 0.06);
+  --surface-card-glow:        rgba(91, 33, 182, 0.10);
+  --surface-card-line:        rgba(167, 139, 250, 0.16);
+  --surface-card-line-strong: rgba(167, 139, 250, 0.28);
+}
+
+/* ── Light + Lava Core ───────────────────────────────────────────── */
+[data-theme="light"][data-palette="lava-core"] {
+  --color-accent:       #dc2626;
+  --color-accent-deep:  #991b1b;
+  --color-accent-light: #f87171;
+  --surface-card-ambient-a:   rgba(220, 38, 38, 0.08);
+  --surface-card-ambient-b:   rgba(249, 115, 22, 0.06);
+  --surface-card-glow:        rgba(153, 27, 27, 0.10);
+  --surface-card-line:        rgba(248, 113, 113, 0.16);
+  --surface-card-line-strong: rgba(248, 113, 113, 0.28);
 }

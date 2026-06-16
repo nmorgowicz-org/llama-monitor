@@ -4631,8 +4631,30 @@
                       <p class="settings-help" style="margin-bottom:14px;">These preferences are device-local and stored in your browser — they don't sync across machines.</p>
                       <div class="settings-card">
                           <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:10px;">Theme</div>
-                          <label class="modal-field">
-                              Color Theme
+                          <!-- Color Palette Swatch Picker -->
+                          <div class="settings-palette-picker">
+                              <div class="settings-palette-label">Color Palette</div>
+                              <div class="settings-palette-grid" id="settings-palette-grid" role="group" aria-label="Color palette">
+                                  <button class="palette-swatch active" data-palette="" type="button" title="Carbon Mint — Teal/Emerald">
+                                      <div class="palette-swatch-gradient" style="background:linear-gradient(135deg,#0d9488,#2dd4bf,#5eead4)"></div>
+                                      <span class="palette-swatch-name">Carbon Mint</span>
+                                  </button>
+                                  <button class="palette-swatch" data-palette="cyber-rose" type="button" title="Cyber Rose — Pink/Magenta">
+                                      <div class="palette-swatch-gradient" style="background:linear-gradient(135deg,#be185d,#f472b6,#e879f9)"></div>
+                                      <span class="palette-swatch-name">Cyber Rose</span>
+                                  </button>
+                                  <button class="palette-swatch" data-palette="solar-violet" type="button" title="Solar Violet — Deep Violet">
+                                      <div class="palette-swatch-gradient" style="background:linear-gradient(135deg,#6d28d9,#a78bfa,#c4b5fd)"></div>
+                                      <span class="palette-swatch-name">Solar Violet</span>
+                                  </button>
+                                  <button class="palette-swatch" data-palette="lava-core" type="button" title="Lava Core — Red/Orange">
+                                      <div class="palette-swatch-gradient" style="background:linear-gradient(135deg,#b91c1c,#ef4444,#f97316)"></div>
+                                      <span class="palette-swatch-name">Lava Core</span>
+                                  </button>
+                              </div>
+                          </div>
+                          <label class="modal-field" style="margin-top:14px;">
+                              Color Mode
                               <select id="settings-appearance-theme">
                                   <option value="auto">Auto (system default)</option>
                                   <option value="dark">Dark</option>

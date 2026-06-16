@@ -523,6 +523,19 @@ function _bindSettingsEvents() {
         _applyAndSaveAppearance();
     });
 
+    // Palette swatch picker — single delegated listener, bound once in initSettings
+    document.getElementById('settings-palette-grid')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.palette-swatch');
+        if (!btn) return;
+        const palette = btn.dataset.palette || '';
+        document.querySelectorAll('.palette-swatch').forEach(b => {
+            b.classList.toggle('active', b === btn);
+            b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+        });
+        _applyPalette(palette);
+        _applyAndSaveAppearance();
+    });
+
     // Settings tabs
     document.querySelectorAll('.settings-tab').forEach(tab => {
         tab.addEventListener('click', () => {
@@ -685,6 +698,17 @@ async function _loadSettingsGpuInfo() {
 
 // ── Appearance (Settings > Appearance tab) ───────────────────────────────────
 
+function _applyPalette(palette) {
+    const html = document.documentElement;
+    html.classList.add('palette-changing');
+    setTimeout(() => html.classList.remove('palette-changing'), 350);
+    if (palette && palette !== 'carbon-mint') {
+        html.dataset.palette = palette;
+    } else {
+        delete html.dataset.palette;
+    }
+}
+
 function _initAppearanceTab() {
     const saved = JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}');
     const themeEl = document.getElementById('settings-appearance-theme');
@@ -697,6 +721,14 @@ function _initAppearanceTab() {
     const chatFontValEl = document.getElementById('settings-appearance-chat-font-value');
     const timestampsEl = document.getElementById('settings-appearance-timestamps');
     const msgWidthEl = document.getElementById('settings-appearance-msg-width');
+
+    // Restore palette swatch selection
+    const activePalette = saved.palette || '';
+    document.querySelectorAll('.palette-swatch').forEach(btn => {
+        const matches = (btn.dataset.palette || '') === activePalette;
+        btn.classList.toggle('active', matches);
+        btn.setAttribute('aria-pressed', String(matches));
+    });
 
     if (themeEl) themeEl.value = saved.theme || 'dark';
     if (fontEl) { fontEl.value = saved.fontScale || '1'; if (fontValEl) fontValEl.textContent = Number(saved.fontScale || 1).toFixed(1) + '×'; }
@@ -716,6 +748,7 @@ function _applyAndSaveAppearance() {
     const chatFont = parseInt(document.getElementById('settings-appearance-chat-font')?.value || '100');
     const timestamps = document.getElementById('settings-appearance-timestamps')?.value || 'hover';
     const msgWidth = document.getElementById('settings-appearance-msg-width')?.value || 'normal';
+    const palette = document.querySelector('#settings-palette-grid .palette-swatch.active')?.dataset.palette || '';
 
     const effectiveTheme = theme === 'auto'
         ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
@@ -746,7 +779,7 @@ function _applyAndSaveAppearance() {
 
     localStorage.setItem('llama-monitor-chat-style', chatStyle);
     localStorage.setItem('llama-monitor-chat-font', chatFont);
-    localStorage.setItem('llama-monitor-preferences', JSON.stringify({ theme, fontScale, spacingScale, timestamps, msgWidth }));
+    localStorage.setItem('llama-monitor-preferences', JSON.stringify({ theme, palette, fontScale, spacingScale, timestamps, msgWidth }));
 
     // Sync pref-* elements in user-preferences-modal so they stay consistent
     const prefTheme = document.getElementById('pref-theme-mode');

@@ -198,7 +198,7 @@
   gap: 3px;
   padding: 3px 9px;
   background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-  border: 1px solid rgba(99, 102, 241, 0.45);
+  border: 1px solid var(--acc-50);
   border-radius: 999px;
   color: #fff;
   font-size: 0.66rem;
@@ -206,7 +206,7 @@
   letter-spacing: 0.01em;
   cursor: pointer;
   transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.14s ease;
-  box-shadow: 0 2px 10px rgba(79, 70, 229, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-shadow: 0 2px 10px var(--acc-40), inset 0 1px 0 rgba(255, 255, 255, 0.12);
   white-space: nowrap;
   position: relative;
   z-index: 1;
@@ -214,13 +214,13 @@
 
 .btn-spawn-wizard:hover {
   background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
-  box-shadow: 0 4px 18px rgba(99, 102, 241, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  box-shadow: 0 4px 18px var(--acc-60), inset 0 1px 0 rgba(255, 255, 255, 0.14);
   transform: translateY(-1px);
 }
 
 .btn-spawn-wizard:active {
   transform: translateY(0);
-  box-shadow: 0 2px 7px rgba(79, 70, 229, 0.3);
+  box-shadow: 0 2px 7px var(--acc-30);
 }
 
 .btn-spawn-wizard svg {
@@ -260,8 +260,8 @@
   white-space: nowrap;
   padding: 2px 6px;
   border-radius: 999px;
-  background: rgba(99, 102, 241, 0.12);
-  border: 1px solid rgba(99, 102, 241, 0.25);
+  background: var(--acc-12);
+  border: 1px solid var(--acc-25);
   display: inline-flex;
   align-items: center;
   user-select: none;
@@ -298,7 +298,7 @@
   width: auto;
   padding: 7px 11px;
   border-radius: var(--radius-sm);
-  border: 1px solid rgba(99, 102, 241, 0.3);
+  border: 1px solid var(--acc-30);
   background:
     linear-gradient(180deg, rgba(26, 32, 50, 0.98), rgba(11, 16, 26, 1));
   color: var(--color-text-primary);
@@ -307,7 +307,7 @@
   outline: none;
   transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
   box-shadow:
-    0 0 16px rgba(99, 102, 241, 0.16),
+    0 0 16px var(--acc-15),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
   background-image:
     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%238b8ff7' stroke-width='1.4' fill='none'/></svg>");
@@ -322,9 +322,9 @@
 .preset-selector:focus,
 #preset-select:hover,
 #preset-select:focus {
-  border-color: rgba(99, 102, 241, 0.7);
+  border-color: var(--acc-60);
   box-shadow:
-    0 0 20px rgba(99, 102, 241, 0.32),
+    0 0 20px var(--acc-30),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -358,11 +358,11 @@
   gap: 0;
   padding: 0 10px;
   border-radius: var(--radius-sm);
-  border: 1px solid rgba(99, 102, 241, 0.35);
+  border: 1px solid var(--acc-40);
   background:
     linear-gradient(180deg, rgba(26, 32, 50, 0.98), rgba(11, 16, 26, 1));
   box-shadow:
-    0 0 16px rgba(99, 102, 241, 0.16),
+    0 0 16px var(--acc-15),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
   cursor: pointer;
   overflow: hidden;
@@ -371,9 +371,9 @@
 }
 
 .preset-display-wrapper:hover {
-  border-color: rgba(99, 102, 241, 0.7);
+  border-color: var(--acc-60);
   box-shadow:
-    0 0 20px rgba(99, 102, 241, 0.32),
+    0 0 20px var(--acc-30),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -418,8 +418,8 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--color-text-secondary);
-  background: rgba(99, 102, 241, 0.12);
-  border: 1px solid rgba(99, 102, 241, 0.28);
+  background: var(--acc-12);
+  border: 1px solid var(--acc-30);
   white-space: nowrap;
 }
 
@@ -566,7 +566,7 @@
   inset: 0;
   border-radius: var(--radius-card);
   padding: 1px;
-  background: linear-gradient(135deg, var(--surface-card-line), transparent 40%, transparent 60%, rgba(45, 212, 191, 0.16));
+  background: linear-gradient(135deg, var(--surface-card-line), transparent 40%, transparent 60%, var(--acc-15));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -608,7 +608,7 @@
 
 .widget-card.is-live::after {
   opacity: 1;
-  background: linear-gradient(135deg, rgba(103, 232, 249, 0.34), transparent 42%, rgba(45, 212, 191, 0.22));
+  background: linear-gradient(135deg, var(--acc-40), transparent 42%, var(--acc-20));
   animation: card-edge-breathe 2.8s ease-in-out infinite;
 }
 
@@ -1717,8 +1717,8 @@
 
 .stage-segment.active {
   color: #d8fbf4;
-  background: linear-gradient(135deg, rgba(34, 211, 238, 0.18), rgba(45, 212, 191, 0.14));
-  box-shadow: 0 0 18px rgba(8, 145, 178, 0.14);
+  background: linear-gradient(135deg, var(--acc-18), var(--acc-15));
+  box-shadow: 0 0 18px var(--acc-15);
 }
 
 .stage-segment.idle {
@@ -1859,7 +1859,7 @@
   height: 7px;
   border-radius: 50%;
   background: linear-gradient(135deg, #67e8f9, #5eead4);
-  box-shadow: 0 0 12px rgba(8, 145, 178, 0.24);
+  box-shadow: 0 0 12px var(--acc-25);
   animation: token-stream 1.3s ease-in-out infinite;
 }
 
@@ -2470,12 +2470,12 @@
 /* Spawn wizard button subtle tweak for light */
 [data-theme="light"] .btn-spawn-wizard {
   box-shadow:
-    0 2px 10px rgba(99, 102, 241, 0.24),
+    0 2px 10px var(--acc-25),
     inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 [data-theme="light"] .btn-spawn-wizard:hover {
   box-shadow:
-    0 4px 18px rgba(99, 102, 241, 0.32),
+    0 4px 18px var(--acc-30),
     inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }

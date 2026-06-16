@@ -88,7 +88,10 @@ function saveUserPreferences() {
     setEnterToSend(enterToSendChecked);
     saveSettings();
 
+    // Preserve other prefs (e.g. palette) that are managed elsewhere
+    const existing = JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}');
     localStorage.setItem('llama-monitor-preferences', JSON.stringify({
+        ...existing,
         theme,
         fontScale,
         spacingScale,
@@ -145,6 +148,11 @@ function _loadSavedPreferences() {
         const savedPreferences = JSON.parse(localStorage.getItem('llama-monitor-preferences') || 'null');
         if (savedPreferences) {
             applyThemePreference(savedPreferences.theme || 'dark');
+            // Apply color palette before first paint to avoid flash
+            const palette = savedPreferences.palette || '';
+            if (palette && palette !== 'carbon-mint') {
+                document.documentElement.dataset.palette = palette;
+            }
             if (savedPreferences.fontScale) {
                 document.documentElement.style.fontSize = (Number(savedPreferences.fontScale) * 16) + 'px';
             }

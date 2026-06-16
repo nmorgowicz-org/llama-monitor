@@ -19,6 +19,12 @@ function setChipState(el, label, state) {
     el.className = 'metric-live-chip ' + (state || '');
 }
 
+/** Read a CSS custom property from :root, resolved at call time so palette changes are reflected immediately. */
+function getCSSVar(name, fallback = '') {
+    const val = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return val || fallback;
+}
+
 function lerpColor(a, b, t) {
     return [
         Math.round(a[0] + (b[0] - a[0]) * t),
@@ -72,10 +78,13 @@ function buildSparklineFillDefs(fillId, fillColor, topOpacity = 0.62, midOpacity
 }
 
 function getInferenceSparklineColor(className) {
-    if (className === 'prompt') return '#7dd3fc';
-    if (className === 'generation') return '#5eead4';
-    if (className === 'live-output') return '#2dd4bf';
-    return '#5eead4';
+    const accent = getCSSVar('--color-accent', '#2dd4bf');
+    const accentLight = getCSSVar('--color-accent-light', '#5eead4');
+    const clock = getCSSVar('--metric-clock', '#60a5fa');
+    if (className === 'prompt') return clock;
+    if (className === 'generation') return accentLight;
+    if (className === 'live-output') return accent;
+    return accentLight;
 }
 
 function setCardState(card, state) {
@@ -124,7 +133,7 @@ function renderSparkline(id, points, className, isBlocked) {
     const ratio = max > 0 ? currentValue / max : 0;
     const fillColor = getThemedSparklineFillColor(getInferenceSparklineColor(className), ratio);
     const fillId = nextSparklineGradientId(id);
-    const wallLine = isBlocked ? '<line x1="120" y1="0" x2="120" y2="28" stroke="#ebcb8b" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>' : '';
+    const wallLine = isBlocked ? '<line x1="120" y1="0" x2="120" y2="28" stroke="' + getCSSVar('--color-warning', '#f59e0b') + '" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>' : '';
     // eslint-disable-next-line no-unsanitized/property -- SVG path data from numeric array values; className is a hardcoded CSS class
     svg.innerHTML =
         buildSparklineFillDefs(fillId, fillColor, 0.88, 0.18, 0.02) +
@@ -678,34 +687,35 @@ function hardwareEmptyStateCopy(kind, grade) {
 }
 
 function getMetricTone(kind) {
+    const load   = getCSSVar('--metric-load',   '#34d399');
+    const power  = getCSSVar('--metric-power',  '#2dd4bf');
+    const mem    = getCSSVar('--metric-memory', '#22d3ee');
+    const clock  = getCSSVar('--metric-clock',  '#60a5fa');
+    const accent = getCSSVar('--color-accent',  '#2dd4bf');
+    const light  = getCSSVar('--color-accent-light', '#5eead4');
     switch (kind) {
-    case 'load':
-        return { start: '#34d399', end: '#2dd4bf', line: '#2dd4bf' };
-    case 'power':
-        return { start: '#2dd4bf', end: '#67e8f9', line: '#2dd4bf' };
-    case 'memory':
-        return { start: '#14b8a6', end: '#67e8f9', line: '#22d3ee' };
-    case 'clock':
-        return { start: '#60a5fa', end: '#7dd3fc', line: '#60a5fa' };
-    default:
-        return { start: '#34d399', end: '#67e8f9', line: '#5eead4' };
+    case 'load':   return { start: load,  end: accent, line: load };
+    case 'power':  return { start: power, end: mem,    line: power };
+    case 'memory': return { start: mem,   end: light,  line: mem };
+    case 'clock':  return { start: clock, end: light,  line: clock };
+    default:       return { start: load,  end: light,  line: accent };
     }
 }
 
 function getClockTone(kind) {
+    const clock  = getCSSVar('--metric-clock',  '#60a5fa');
+    const accent = getCSSVar('--color-accent',  '#2dd4bf');
+    const light  = getCSSVar('--color-accent-light', '#5eead4');
     switch (kind) {
-    case 'memory':
-        return { start: '#60a5fa', end: '#7dd3fc', line: '#60a5fa' };
-    case 'core':
-    default:
-        return { start: '#5eead4', end: '#99f6e4', line: '#8fbcbb' };
+    case 'memory': return { start: clock,  end: light, line: clock };
+    default:       return { start: accent, end: light, line: accent };
     }
 }
 
 function getTempSeverityColor(temp) {
-    if (temp >= 90) return '#f43f5e';
-    if (temp >= 75) return '#f59e0b';
-    return '#8fbcbb';
+    if (temp >= 90) return getCSSVar('--color-error',   '#f43f5e');
+    if (temp >= 75) return getCSSVar('--color-warning', '#f59e0b');
+    return getCSSVar('--color-success', '#10b981');
 }
 
 function setVizContent(container, html) {

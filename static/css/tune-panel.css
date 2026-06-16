@@ -126,14 +126,14 @@
   color: var(--color-primary-light);
   transition: filter 0.15s, transform 0.1s, background 0.15s;
   letter-spacing: 0.01em;
-  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.15);
+  box-shadow: 0 1px 4px var(--acc-15);
 }
 
 .tune-run-btn:hover {
   filter: brightness(1.1);
   transform: translateY(-1px);
   background: var(--accent-soft-bg-strong);
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
+  box-shadow: 0 2px 8px var(--acc-25);
 }
 
 .tune-run-btn:active {
@@ -349,7 +349,7 @@
 }
 
 .tune-rerun-btn:hover {
-  background: rgba(99, 102, 241, 0.1);
+  background: var(--acc-10);
   color: var(--color-primary-light);
   border-color: var(--accent-soft-border);
 }
@@ -430,12 +430,12 @@
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, transform 0.1s;
   white-space: nowrap;
-  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.12);
+  box-shadow: 0 1px 4px var(--acc-12);
 }
 
 .tune-suggestion-apply:hover {
   background: var(--accent-soft-bg-strong);
-  border-color: rgba(99, 102, 241, 0.5);
+  border-color: var(--acc-50);
   transform: translateX(1px);
 }
 
@@ -496,7 +496,7 @@
   border: 1px solid var(--border-subtle);
   border-radius: 10px;
   background:
-    linear-gradient(180deg, rgba(99, 102, 241, 0.04), rgba(15, 23, 42, 0.02));
+    linear-gradient(180deg, var(--acc-05), rgba(15, 23, 42, 0.02));
 }
 
 .wizard-advisor-header {
@@ -636,7 +636,7 @@
 }
 
 .depth-sweep-btn:hover {
-  background: rgba(99, 102, 241, 0.08);
+  background: var(--acc-08);
 }
 
 .depth-sweep-status {
@@ -756,7 +756,7 @@
 
 [data-theme="light"] .wizard-advisor {
   background:
-    linear-gradient(180deg, rgba(99, 102, 241, 0.04), rgba(255, 255, 255, 0.02));
+    linear-gradient(180deg, var(--acc-05), rgba(255, 255, 255, 0.02));
 }
 
 [data-theme="light"] .depth-sweep {
@@ -793,9 +793,9 @@
   text-transform: uppercase;
   padding: 1px 6px;
   border-radius: 999px;
-  background: rgba(99, 102, 241, 0.14);
+  background: var(--acc-15);
   color: var(--color-primary-light);
-  border: 1px solid rgba(99, 102, 241, 0.25);
+  border: 1px solid var(--acc-25);
 }
 
 .tune-tool-card-desc {
@@ -865,7 +865,7 @@
 }
 
 .mtp-sweep-table tr.mtp-sweep-recommended {
-  background: rgba(99, 102, 241, 0.08);
+  background: var(--acc-08);
 }
 
 .mtp-sweep-bar-wrap {
@@ -898,8 +898,8 @@
   font-size: var(--text-2xs);
   font-weight: 700;
   color: var(--color-primary-light);
-  background: rgba(99, 102, 241, 0.15);
-  border: 1px solid rgba(99, 102, 241, 0.25);
+  background: var(--acc-15);
+  border: 1px solid var(--acc-25);
   border-radius: 999px;
   padding: 1px 7px;
   white-space: nowrap;

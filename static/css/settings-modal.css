@@ -53,7 +53,7 @@
   inset: 0;
   border-radius: var(--radius-card);
   padding: 1px;
-  background: linear-gradient(160deg, rgba(99, 102, 241, 0.35), transparent 35%, transparent 65%, rgba(6, 182, 212, 0.2));
+  background: linear-gradient(160deg, var(--acc-40), transparent 35%, transparent 65%, rgba(6, 182, 212, 0.2));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -132,7 +132,7 @@
   width: 500px;
   height: 500px;
   transform: translate(-50%, -50%);
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.18) 0%, rgba(6, 182, 212, 0.08) 40%, transparent 70%);
+  background: radial-gradient(circle, var(--acc-18) 0%, rgba(6, 182, 212, 0.08) 40%, transparent 70%);
   filter: blur(60px);
   pointer-events: none;
   animation: settings-ambient-drift 8s ease-in-out infinite;
@@ -288,9 +288,9 @@
 
 #settings-modal .settings-tab.active {
   color: var(--color-primary-light);
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.14), rgba(6, 182, 212, 0.08));
-  border-color: rgba(99, 102, 241, 0.25);
-  box-shadow: 0 0 16px rgba(99, 102, 241, 0.12), inset 0 0 1px rgba(99, 102, 241, 0.15);
+  background: linear-gradient(135deg, var(--acc-15), rgba(6, 182, 212, 0.08));
+  border-color: var(--acc-25);
+  box-shadow: 0 0 16px var(--acc-12), inset 0 0 1px var(--acc-15);
 }
 
 #settings-modal .settings-tab.active::before {
@@ -302,13 +302,13 @@
   width: 3px;
   border-radius: 0 3px 3px 0;
   background: var(--gradient-primary);
-  box-shadow: 0 0 8px rgba(99, 102, 241, 0.4);
+  box-shadow: 0 0 8px var(--acc-40);
 }
 
 #settings-modal .settings-tab.active svg {
   color: var(--color-primary-light);
   opacity: 1;
-  filter: drop-shadow(0 0 4px rgba(99, 102, 241, 0.3));
+  filter: drop-shadow(0 0 4px var(--acc-30));
 }
 
 /* --- Settings Content Area — widget-card treatment --- */
@@ -350,8 +350,8 @@
   position: relative;
   padding: 20px 22px;
   background:
-    radial-gradient(circle at 84% 16%, rgba(129, 140, 248, 0.08), transparent 22%),
-    radial-gradient(circle at 12% 88%, rgba(99, 102, 241, 0.05), transparent 28%),
+    radial-gradient(circle at 84% 16%, var(--acc-08), transparent 22%),
+    radial-gradient(circle at 12% 88%, var(--acc-05), transparent 28%),
     linear-gradient(145deg, rgba(40, 48, 58, 0.92), rgba(27, 33, 41, 0.98));
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-card);
@@ -360,7 +360,7 @@
     0 4px 16px rgba(0, 0, 0, 0.28),
     inset 0 1px 0 rgba(255, 255, 255, 0.06),
     inset 0 -1px 0 rgba(0, 0, 0, 0.2),
-    inset 0 40px 60px -20px rgba(99, 102, 241, 0.04);
+    inset 0 40px 60px -20px var(--acc-05);
   transition: border-color 250ms ease, box-shadow 250ms ease, transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -371,7 +371,7 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, var(--acc-40), transparent);
 }
 
 #settings-modal .settings-pane > .modal-field::after {
@@ -380,7 +380,7 @@
   inset: 0;
   border-radius: var(--radius-card);
   padding: 1px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), transparent 40%, transparent 60%, rgba(99, 102, 241, 0.15));
+  background: linear-gradient(135deg, var(--acc-30), transparent 40%, transparent 60%, var(--acc-15));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -394,11 +394,11 @@
 }
 
 #settings-modal .settings-pane > .modal-field:hover {
-  border-color: rgba(99, 102, 241, 0.45);
+  border-color: var(--acc-50);
   box-shadow:
     0 18px 42px rgba(0, 0, 0, 0.45),
     0 4px 16px rgba(0, 0, 0, 0.32),
-    0 0 40px rgba(99, 102, 241, 0.12),
+    0 0 40px var(--acc-12),
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     inset 0 -1px 0 rgba(0, 0, 0, 0.25);
   transform: translateY(-2px);
@@ -409,7 +409,7 @@
   background: linear-gradient(90deg, transparent, rgba(136, 192, 209, 0.45), transparent);
 }
 #settings-system > .modal-field::before {
-  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.5), transparent);
+  background: linear-gradient(90deg, transparent, var(--acc-50), transparent);
 }
 
 /* Elevated form controls inside widget-card fields */
@@ -433,19 +433,19 @@
 
 #settings-modal .settings-pane > .modal-field > input:not([type="checkbox"]):hover,
 #settings-modal .settings-pane > .modal-field > select:hover {
-  border-color: rgba(99, 102, 241, 0.35);
+  border-color: var(--acc-40);
   box-shadow:
     0 6px 16px rgba(0, 0, 0, 0.35),
-    0 0 20px rgba(99, 102, 241, 0.1),
+    0 0 20px var(--acc-10),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 #settings-modal .settings-pane > .modal-field > input:not([type="checkbox"]):focus,
 #settings-modal .settings-pane > .modal-field > select:focus,
 #settings-modal .settings-pane > .modal-field > textarea:focus {
-  border-color: rgba(99, 102, 241, 0.6);
+  border-color: var(--acc-60);
   box-shadow:
-    0 0 0 3px rgba(99, 102, 241, 0.15),
+    0 0 0 3px var(--acc-15),
     0 4px 12px rgba(0, 0, 0, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
@@ -499,7 +499,7 @@
   height: 2px;
   background: var(--gradient-primary);
   border-radius: 2px;
-  box-shadow: 0 0 8px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 0 8px var(--acc-30);
 }
 
 /* Field labels */
@@ -537,9 +537,9 @@
 #settings-modal .modal-field input:not([type="checkbox"]):focus,
 #settings-modal .modal-field select:focus,
 #settings-modal .modal-field textarea:focus {
-  border-color: rgba(99, 102, 241, 0.6);
+  border-color: var(--acc-60);
   box-shadow:
-    0 0 0 3px rgba(99, 102, 241, 0.12),
+    0 0 0 3px var(--acc-12),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
   background: rgba(20, 24, 30, 0.8);
 }
@@ -608,11 +608,11 @@
 }
 
 #settings-modal .toggle-switch input:checked + .toggle-slider {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.5), rgba(6, 182, 212, 0.35));
-  border-color: rgba(99, 102, 241, 0.4);
+  background: linear-gradient(135deg, var(--acc-50), rgba(6, 182, 212, 0.35));
+  border-color: var(--acc-40);
   box-shadow:
     inset 0 1px 2px rgba(0, 0, 0, 0.2),
-    0 0 12px rgba(99, 102, 241, 0.2);
+    0 0 12px var(--acc-20);
 }
 
 #settings-modal .toggle-switch input:checked + .toggle-slider::after {
@@ -692,9 +692,9 @@
 
 #settings-modal .chk input[type="checkbox"]:checked {
   background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  border-color: rgba(99, 102, 241, 0.6);
+  border-color: var(--acc-60);
   box-shadow:
-    0 0 10px rgba(99, 102, 241, 0.25),
+    0 0 10px var(--acc-25),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
@@ -704,12 +704,12 @@
 }
 
 #settings-modal .chk input[type="checkbox"]:hover {
-  border-color: rgba(99, 102, 241, 0.4);
+  border-color: var(--acc-40);
   background: rgba(25, 30, 38, 0.8);
 }
 
 #settings-modal .chk input[type="checkbox"]:checked:hover {
-  border-color: rgba(99, 102, 241, 0.7);
+  border-color: var(--acc-60);
 }
 
 #settings-modal .chk input[type="checkbox"]:focus-visible {
@@ -731,8 +731,8 @@
   line-height: 1.6;
   letter-spacing: 0;
   text-transform: none;
-  background: rgba(99, 102, 241, 0.06);
-  border: 1px solid rgba(99, 102, 241, 0.12);
+  background: var(--acc-05);
+  border: 1px solid var(--acc-12);
   border-radius: var(--radius-base);
 }
 
@@ -838,7 +838,7 @@
   border-radius: var(--radius-card);
   background:
     radial-gradient(circle at 84% 16%, rgba(235, 203, 131, 0.08), transparent 22%),
-    radial-gradient(circle at 12% 88%, rgba(99, 102, 241, 0.05), transparent 28%),
+    radial-gradient(circle at 12% 88%, var(--acc-05), transparent 28%),
     linear-gradient(145deg, rgba(40, 48, 58, 0.94), rgba(27, 33, 41, 0.99));
   box-shadow:
     0 16px 40px rgba(0, 0, 0, 0.36),
@@ -867,7 +867,7 @@
   inset: 0;
   border-radius: var(--radius-card);
   padding: 1px;
-  background: linear-gradient(135deg, rgba(235, 203, 131, 0.25), transparent 40%, transparent 60%, rgba(99, 102, 241, 0.15));
+  background: linear-gradient(135deg, rgba(235, 203, 131, 0.25), transparent 40%, transparent 60%, var(--acc-15));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -969,26 +969,26 @@
   letter-spacing: 0.02em;
   cursor: pointer;
   transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
+  box-shadow: 0 2px 8px var(--acc-25);
   animation: settings-save-breathe 3s ease-in-out infinite;
 }
 
 @keyframes settings-save-breathe {
-  0%, 100% { box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25); }
-  50% { box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4), 0 0 24px rgba(99, 102, 241, 0.15); }
+  0%, 100% { box-shadow: 0 2px 8px var(--acc-25); }
+  50% { box-shadow: 0 4px 16px var(--acc-40), 0 0 24px var(--acc-15); }
 }
 
 #settings-modal .btn-modal-save:hover {
   border-color: transparent;
   background: linear-gradient(160deg, #7577f5 0%, #9b6ff7 52%, #12c4dc 100%);
-  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.45);
+  box-shadow: 0 4px 20px var(--acc-50);
   transform: translateY(-1px);
   animation-play-state: paused;
 }
 
 #settings-modal .btn-modal-save:active {
   transform: translateY(0) scale(0.97);
-  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.2);
+  box-shadow: 0 1px 4px var(--acc-20);
   animation: none;
 }
 
@@ -1120,7 +1120,7 @@
 }
 
 [data-theme="light"] #settings-modal .settings-tab.active {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(6, 182, 212, 0.06));
+  background: linear-gradient(135deg, var(--acc-10), rgba(6, 182, 212, 0.06));
 }
 
 [data-theme="light"] #settings-modal .modal-field input:not([type="checkbox"]),
@@ -1144,7 +1144,7 @@
 /* Light theme: widget-card fields */
 [data-theme="light"] #settings-modal .settings-pane > .modal-field {
   background:
-    radial-gradient(circle at 84% 16%, rgba(99, 102, 241, 0.04), transparent 22%),
+    radial-gradient(circle at 84% 16%, var(--acc-05), transparent 22%),
     linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(240, 244, 248, 0.9));
   border-color: rgba(17, 24, 39, 0.08);
   box-shadow:
@@ -1154,10 +1154,10 @@
 }
 
 [data-theme="light"] #settings-modal .settings-pane > .modal-field:hover {
-  border-color: rgba(99, 102, 241, 0.3);
+  border-color: var(--acc-30);
   box-shadow:
     0 12px 32px rgba(15, 23, 42, 0.12),
-    0 0 24px rgba(99, 102, 241, 0.06),
+    0 0 24px var(--acc-05),
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
@@ -1172,9 +1172,9 @@
 [data-theme="light"] #settings-modal .settings-pane > .modal-field > input:not([type="checkbox"]):focus,
 [data-theme="light"] #settings-modal .settings-pane > .modal-field > select:focus,
 [data-theme="light"] #settings-modal .settings-pane > .modal-field > textarea:focus {
-  border-color: rgba(99, 102, 241, 0.5);
+  border-color: var(--acc-50);
   box-shadow:
-    0 0 0 3px rgba(99, 102, 241, 0.1),
+    0 0 0 3px var(--acc-10),
     inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
@@ -1193,7 +1193,7 @@
 }
 
 [data-theme="light"] #settings-modal .settings-help {
-  background: rgba(99, 102, 241, 0.05);
+  background: var(--acc-05);
 }
 
 [data-theme="light"] #settings-modal .btn-modal-cancel {
@@ -1397,8 +1397,8 @@
 }
 
 .db-admin-btn:hover {
-  background: rgba(99, 102, 241, 0.1);
-  border-color: rgba(99, 102, 241, 0.3);
+  background: var(--acc-10);
+  border-color: var(--acc-30);
 }
 
 .db-admin-btn:disabled {
@@ -1472,8 +1472,8 @@
 }
 
 [data-theme="light"] .db-admin-btn:hover {
-  background: rgba(99, 102, 241, 0.08);
-  border-color: rgba(99, 102, 241, 0.3);
+  background: var(--acc-08);
+  border-color: var(--acc-30);
 }
 
 [data-theme="light"] .db-admin-log {
@@ -1519,4 +1519,109 @@
 [data-theme="light"] .extra-dir-entry {
   border-color: rgba(0, 0, 0, 0.07);
   background: rgba(0, 0, 0, 0.02);
+}
+
+/* ── Palette Swatch Picker ──────────────────────────────────────────
+   Visual grid for selecting a color palette in the Appearance tab.
+   ──────────────────────────────────────────────────────────────────── */
+.settings-palette-picker {
+  margin-bottom: 16px;
+}
+
+.settings-palette-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 10px;
+}
+
+.settings-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.palette-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--radius-base, 12px);
+  background: var(--neutral-soft-bg, rgba(255,255,255,0.04));
+  cursor: pointer;
+  transition: border-color 0.18s ease, transform 0.15s ease, box-shadow 0.18s ease;
+  overflow: hidden;
+  position: relative;
+}
+
+.palette-swatch:hover {
+  border-color: var(--border-emphasis);
+  transform: translateY(-2px);
+  box-shadow: var(--elevation-medium);
+}
+
+.palette-swatch:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.palette-swatch.active {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent), var(--elevation-soft);
+}
+
+.palette-swatch.active::after {
+  content: '';
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 6l3 3 5-5' stroke='%23111' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
+  background-size: 10px 10px;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.palette-swatch-gradient {
+  width: 100%;
+  height: 42px;
+  border-radius: 0;
+  flex-shrink: 0;
+}
+
+.palette-swatch-name {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.02em;
+  padding: 5px 4px 7px;
+  text-align: center;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.palette-swatch.active .palette-swatch-name {
+  color: var(--color-accent);
+}
+
+[data-theme="light"] .palette-swatch {
+  background: var(--neutral-soft-bg, rgba(0,0,0,0.03));
+}
+
+[data-theme="light"] .palette-swatch:hover {
+  border-color: var(--border-emphasis);
+  background: var(--neutral-soft-bg-strong, rgba(0,0,0,0.06));
+}
+
+[data-theme="light"] .palette-swatch.active::after {
+  background-color: white;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
 }

@@ -21,11 +21,11 @@
 .chqa-thread::-webkit-scrollbar { width: 3px; }
 .chqa-thread::-webkit-scrollbar-track { background: transparent; }
 .chqa-thread::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.3);
+  background: var(--acc-30);
   border-radius: 2px;
 }
 .chqa-thread::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.5);
+  background: var(--acc-50);
 }
 
 /* ── Empty state ─────────────────────────────────────────────────────────── */
@@ -47,9 +47,9 @@
   height: 46px;
   border-radius: 14px;
   background:
-    radial-gradient(circle at 40% 35%, rgba(99, 102, 241, 0.22), transparent 60%),
+    radial-gradient(circle at 40% 35%, var(--acc-20), transparent 60%),
     rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  border: 1px solid var(--acc-20);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -98,15 +98,15 @@
 }
 
 .chqa-suggestion-btn:hover {
-  background: rgba(99, 102, 241, 0.1);
-  border-color: rgba(99, 102, 241, 0.28);
+  background: var(--acc-10);
+  border-color: var(--acc-30);
   color: var(--color-text-primary);
 }
 
 .chqa-suggestion-btn:focus-visible {
   outline: none;
-  border-color: rgba(99, 102, 241, 0.64);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+  border-color: var(--acc-60);
+  box-shadow: 0 0 0 3px var(--acc-15);
 }
 
 /* ── Q&A entries ─────────────────────────────────────────────────────────── */
@@ -122,9 +122,9 @@
   align-self: flex-end;
   max-width: 90%;
   background:
-    radial-gradient(circle at 20% 30%, rgba(99, 102, 241, 0.18), transparent 60%),
-    linear-gradient(135deg, rgba(99, 102, 241, 0.16), rgba(99, 102, 241, 0.08));
-  border: 1px solid rgba(99, 102, 241, 0.28);
+    radial-gradient(circle at 20% 30%, var(--acc-18), transparent 60%),
+    linear-gradient(135deg, var(--acc-15), var(--acc-08));
+  border: 1px solid var(--acc-30);
   border-radius: 14px 14px 4px 14px;
   padding: 9px 13px;
   font-size: var(--text-sm, 0.875rem);
@@ -132,7 +132,7 @@
   line-height: 1.5;
   word-break: break-word;
   box-shadow:
-    0 4px 12px rgba(99, 102, 241, 0.12),
+    0 4px 12px var(--acc-12),
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
@@ -152,7 +152,7 @@
 }
 
 .chqa-answer.streaming {
-  border-color: rgba(99, 102, 241, 0.22);
+  border-color: var(--acc-20);
 }
 
 /* ── Answer markdown body ─────────────────────────────────────────────────── */
@@ -221,7 +221,7 @@
 }
 
 .chqa-answer-body blockquote {
-  border-left: 2px solid rgba(99, 102, 241, 0.4);
+  border-left: 2px solid var(--acc-40);
   margin: 6px 0;
   padding-left: 10px;
   color: var(--color-text-muted);
@@ -274,7 +274,7 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: rgba(99, 102, 241, 0.65);
+  background: var(--acc-60);
   animation: chqa-dot-pulse 1.4s ease-in-out infinite;
 }
 
@@ -345,8 +345,8 @@
 .chqa-clear-btn:focus-visible,
 .chqa-close-btn:focus-visible {
   outline: none;
-  border-color: rgba(99, 102, 241, 0.64);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+  border-color: var(--acc-60);
+  box-shadow: 0 0 0 3px var(--acc-15);
 }
 
 /* ── Footer / input area ─────────────────────────────────────────────────── */
@@ -372,8 +372,8 @@
 }
 
 .chqa-input-wrap:focus-within {
-  border-color: rgba(99, 102, 241, 0.4);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.08);
+  border-color: var(--acc-40);
+  box-shadow: 0 0 0 2px var(--acc-08);
 }
 
 .chqa-input {
@@ -399,7 +399,7 @@
 
 .chqa-input::-webkit-scrollbar { width: 2px; }
 .chqa-input::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.3);
+  background: var(--acc-30);
   border-radius: 2px;
 }
 
@@ -424,14 +424,14 @@
 }
 
 .chqa-send-btn {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.9), rgba(79, 70, 229, 0.8));
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent));
   color: #fff;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.28);
+  box-shadow: 0 4px 12px var(--acc-30);
 }
 
 .chqa-send-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 1), rgba(79, 70, 229, 0.95));
-  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.38);
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent));
+  box-shadow: 0 6px 16px var(--acc-40);
   transform: translateY(-1px);
 }
 
@@ -456,7 +456,7 @@
 .chqa-send-btn:focus-visible,
 .chqa-stop-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.24);
+  box-shadow: 0 0 0 3px var(--acc-25);
 }
 
 .chqa-disclaimer {
@@ -510,8 +510,8 @@
 
 .chqa-copy-btn:focus-visible {
   outline: none;
-  border-color: rgba(99, 102, 241, 0.6);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+  border-color: var(--acc-60);
+  box-shadow: 0 0 0 3px var(--acc-15);
 }
 
 .chqa-insert-btn {
@@ -531,15 +531,15 @@
 }
 
 .chqa-insert-btn:hover {
-  background: rgba(99, 102, 241, 0.1);
-  border-color: rgba(99, 102, 241, 0.3);
+  background: var(--acc-10);
+  border-color: var(--acc-30);
   color: var(--color-primary-light, #818cf8);
 }
 
 .chqa-insert-btn:focus-visible {
   outline: none;
-  border-color: rgba(99, 102, 241, 0.6);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+  border-color: var(--acc-60);
+  box-shadow: 0 0 0 3px var(--acc-15);
 }
 
 /* ── Utility row (inject toggle + write-scene side by side) ──────────────── */
@@ -578,15 +578,15 @@
 }
 
 .chqa-write-scene-btn:hover {
-  background: rgba(99, 102, 241, 0.08);
-  border-color: rgba(99, 102, 241, 0.24);
+  background: var(--acc-08);
+  border-color: var(--acc-25);
   color: var(--color-text-secondary);
 }
 
 .chqa-write-scene-btn:focus-visible {
   outline: none;
-  border-color: rgba(99, 102, 241, 0.64);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+  border-color: var(--acc-60);
+  box-shadow: 0 0 0 3px var(--acc-15);
 }
 
 /* ── History insertion editor ────────────────────────────────────────────── */
@@ -595,8 +595,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  background: rgba(99, 102, 241, 0.05);
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: var(--acc-05);
+  border: 1px solid var(--acc-20);
   border-radius: 12px;
   padding: 11px 13px;
   animation: chqa-inject-slide-in 0.18s ease;
@@ -648,14 +648,14 @@
 }
 
 .chqa-insert-role-label:has(.chqa-insert-role-radio:checked) {
-  background: rgba(99, 102, 241, 0.14);
-  border-color: rgba(99, 102, 241, 0.35);
+  background: var(--acc-15);
+  border-color: var(--acc-40);
   color: var(--color-primary-light, #818cf8);
 }
 
 .chqa-insert-role-label:hover {
-  background: rgba(99, 102, 241, 0.07);
-  border-color: rgba(99, 102, 241, 0.2);
+  background: var(--acc-08);
+  border-color: var(--acc-20);
   color: var(--color-text-secondary);
 }
 
@@ -678,7 +678,7 @@
 }
 
 .chqa-insert-textarea:focus {
-  border-color: rgba(99, 102, 241, 0.38);
+  border-color: var(--acc-40);
 }
 
 .chqa-insert-textarea::placeholder {
@@ -688,7 +688,7 @@
 
 .chqa-insert-textarea::-webkit-scrollbar { width: 2px; }
 .chqa-insert-textarea::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.3);
+  background: var(--acc-30);
   border-radius: 2px;
 }
 
@@ -727,7 +727,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.85), rgba(79, 70, 229, 0.75));
+  background: linear-gradient(135deg, var(--color-accent), var(--acc-60));
   border: none;
   border-radius: 7px;
   color: #fff;
@@ -736,20 +736,20 @@
   font-weight: 500;
   padding: 5px 13px;
   cursor: pointer;
-  box-shadow: 0 3px 10px rgba(99, 102, 241, 0.24);
+  box-shadow: 0 3px 10px var(--acc-25);
   transition: background 0.14s ease, box-shadow 0.14s ease, transform 0.1s ease;
 }
 
 .chqa-insert-confirm-btn:hover {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 1), rgba(79, 70, 229, 0.95));
-  box-shadow: 0 5px 14px rgba(99, 102, 241, 0.34);
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent));
+  box-shadow: 0 5px 14px var(--acc-40);
   transform: translateY(-1px);
 }
 
 .chqa-insert-cancel-btn:focus-visible,
 .chqa-insert-confirm-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.24);
+  box-shadow: 0 0 0 3px var(--acc-25);
 }
 
 /* ── Context injection panel ─────────────────────────────────────────────── */
@@ -772,21 +772,21 @@
 }
 
 .chqa-inject-toggle:hover {
-  background: rgba(99, 102, 241, 0.08);
-  border-color: rgba(99, 102, 241, 0.24);
+  background: var(--acc-08);
+  border-color: var(--acc-25);
   color: var(--color-text-secondary);
 }
 
 .chqa-inject-toggle[aria-expanded="true"] {
-  background: rgba(99, 102, 241, 0.1);
-  border-color: rgba(99, 102, 241, 0.32);
+  background: var(--acc-10);
+  border-color: var(--acc-30);
   color: var(--color-primary-light, #818cf8);
 }
 
 .chqa-inject-toggle:focus-visible {
   outline: none;
-  border-color: rgba(99, 102, 241, 0.64);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+  border-color: var(--acc-60);
+  box-shadow: 0 0 0 3px var(--acc-15);
 }
 
 .chqa-inject-badge {
@@ -803,8 +803,8 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  background: rgba(99, 102, 241, 0.04);
-  border: 1px solid rgba(99, 102, 241, 0.16);
+  background: var(--acc-05);
+  border: 1px solid var(--acc-15);
   border-radius: 10px;
   padding: 9px 11px;
   animation: chqa-inject-slide-in 0.18s ease;
@@ -837,7 +837,7 @@
 
 .chqa-inject-input::-webkit-scrollbar { width: 2px; }
 .chqa-inject-input::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.3);
+  background: var(--acc-30);
   border-radius: 2px;
 }
 
@@ -888,11 +888,11 @@
 
 [data-theme="light"] .chqa-question {
   background:
-    radial-gradient(circle at 20% 30%, rgba(99, 102, 241, 0.1), transparent 60%),
-    linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(99, 102, 241, 0.04));
-  border-color: rgba(99, 102, 241, 0.2);
+    radial-gradient(circle at 20% 30%, var(--acc-10), transparent 60%),
+    linear-gradient(135deg, var(--acc-08), var(--acc-05));
+  border-color: var(--acc-20);
   color: #1e293b;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.06);
+  box-shadow: 0 4px 12px var(--acc-05);
 }
 
 [data-theme="light"] .chqa-answer {
@@ -922,8 +922,8 @@
 }
 
 [data-theme="light"] .chqa-suggestion-btn:hover {
-  background: rgba(99, 102, 241, 0.07);
-  border-color: rgba(99, 102, 241, 0.2);
+  background: var(--acc-08);
+  border-color: var(--acc-20);
   color: #1e293b;
 }
 
@@ -956,9 +956,9 @@
 
 [data-theme="light"] .chqa-empty-icon {
   background:
-    radial-gradient(circle at 40% 35%, rgba(99, 102, 241, 0.12), transparent 60%),
+    radial-gradient(circle at 40% 35%, var(--acc-12), transparent 60%),
     rgba(0, 0, 0, 0.03);
-  border-color: rgba(99, 102, 241, 0.15);
+  border-color: var(--acc-15);
 }
 
 [data-theme="light"] .chqa-footer {
@@ -990,8 +990,8 @@
 }
 
 [data-theme="light"] .chqa-insert-btn:hover {
-  background: rgba(99, 102, 241, 0.07);
-  border-color: rgba(99, 102, 241, 0.22);
+  background: var(--acc-08);
+  border-color: var(--acc-20);
   color: #4338ca;
 }
 
@@ -1001,14 +1001,14 @@
 }
 
 [data-theme="light"] .chqa-write-scene-btn:hover {
-  background: rgba(99, 102, 241, 0.05);
-  border-color: rgba(99, 102, 241, 0.18);
+  background: var(--acc-05);
+  border-color: var(--acc-18);
   color: #4b5563;
 }
 
 [data-theme="light"] .chqa-insert-editor {
-  background: rgba(99, 102, 241, 0.03);
-  border-color: rgba(99, 102, 241, 0.14);
+  background: var(--acc-05);
+  border-color: var(--acc-15);
 }
 
 [data-theme="light"] .chqa-insert-textarea {
@@ -1018,7 +1018,7 @@
 }
 
 [data-theme="light"] .chqa-insert-textarea:focus {
-  border-color: rgba(99, 102, 241, 0.3);
+  border-color: var(--acc-30);
 }
 
 [data-theme="light"] .chqa-insert-role-label {
@@ -1032,20 +1032,20 @@
 }
 
 [data-theme="light"] .chqa-inject-toggle:hover {
-  background: rgba(99, 102, 241, 0.05);
-  border-color: rgba(99, 102, 241, 0.18);
+  background: var(--acc-05);
+  border-color: var(--acc-18);
   color: #4b5563;
 }
 
 [data-theme="light"] .chqa-inject-toggle[aria-expanded="true"] {
-  background: rgba(99, 102, 241, 0.07);
-  border-color: rgba(99, 102, 241, 0.24);
+  background: var(--acc-08);
+  border-color: var(--acc-25);
   color: #4338ca;
 }
 
 [data-theme="light"] .chqa-inject-panel {
-  background: rgba(99, 102, 241, 0.03);
-  border-color: rgba(99, 102, 241, 0.12);
+  background: var(--acc-05);
+  border-color: var(--acc-12);
 }
 
 [data-theme="light"] .chqa-inject-input {

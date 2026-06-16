@@ -3371,6 +3371,68 @@ async function scenarioSpawnWizardGif(ctx, _options) {
     console.log('[CAPTURE] spawn-wizard-flow.gif complete.');
 }
 
+async function scenarioAppearancePalette(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    await attachToServer(page);
+    await sleep(500);
+
+    // Open settings and navigate to Appearance tab
+    await page.evaluate(() => window.openSettingsModal?.());
+    await page.waitForSelector('#settings-modal.open', { timeout: 5000 });
+    await sleep(400);
+    const appTab = await page.$('.settings-tab[data-tab="appearance"]');
+    if (appTab) {
+        await appTab.click();
+        await sleep(700);
+    }
+
+    // Check what's in the DOM
+    const paletteGridInfo = await page.evaluate(() => {
+        const grid = document.getElementById('settings-palette-grid');
+        if (!grid) return 'grid NOT FOUND';
+        const btns = grid.querySelectorAll('.palette-swatch');
+        return `grid found, ${btns.length} swatches: ` + [...btns].map(b => b.dataset.palette || '(empty)').join(', ');
+    });
+    console.log('[CAPTURE] DOM check:', paletteGridInfo);
+
+    // Full page shot with wider viewport so modal content is visible
+    await captureShot(page, 'appearance-palette-carbon-mint.png', { fullPage: true });
+
+    // Cycle through palettes using JS instead of clicking (more reliable in headless)
+    const palettes = [
+        { value: 'cyber-rose',   label: 'cyber-rose' },
+        { value: 'solar-violet', label: 'solar-violet' },
+        { value: 'lava-core',    label: 'lava-core' },
+    ];
+    for (const { value, label } of palettes) {
+        // Try clicking the button; fall back to direct DOM manipulation
+        const clicked = await page.evaluate((palette) => {
+            const btn = document.querySelector(`#settings-palette-grid .palette-swatch[data-palette="${palette}"]`);
+            if (btn) { btn.click(); return true; }
+            // Fallback: apply palette directly
+            const html = document.documentElement;
+            html.classList.add('palette-changing');
+            setTimeout(() => html.classList.remove('palette-changing'), 350);
+            if (palette) html.dataset.palette = palette; else delete html.dataset.palette;
+            return false;
+        }, value);
+        console.log(`[CAPTURE] Palette ${label}: clicked=${clicked}`);
+        await sleep(500);
+        await captureShot(page, `appearance-palette-${label}.png`, { fullPage: true });
+    }
+
+    // Restore Carbon Mint
+    await page.evaluate(() => {
+        const btn = document.querySelector('#settings-palette-grid .palette-swatch[data-palette=""]');
+        if (btn) btn.click();
+        else delete document.documentElement.dataset.palette;
+    });
+    await sleep(300);
+
+    console.log('[CAPTURE] Scenario "appearance-palette" complete.');
+}
+
 const SCENARIOS = {
     // Core
     welcome: scenarioWelcome,
@@ -3383,6 +3445,7 @@ const SCENARIOS = {
     'preset-editor': scenarioPresetEditor,
     // Configuration
     settings: scenarioSettings,
+    'appearance-palette': scenarioAppearancePalette,
     tls: scenarioTls,
     filebrowser: scenarioFilebrowser,
     panels: scenarioPanels,

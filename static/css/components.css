@@ -111,21 +111,21 @@
 
 /* Distinctive hover effects for preset action buttons */
 .btn-preset:nth-child(1):hover {
-  border-color: rgba(45, 212, 191, 0.32);
-  background: rgba(45, 212, 191, 0.08);
-  box-shadow: 0 0 12px rgba(8, 145, 178, 0.14), var(--shadow-surface);
+  border-color: var(--acc-30);
+  background: var(--acc-08);
+  box-shadow: 0 0 12px var(--acc-15), var(--shadow-surface);
 }
 
 .btn-preset:nth-child(2):hover {
-  border-color: rgba(103, 232, 249, 0.32);
-  background: rgba(103, 232, 249, 0.08);
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.14), var(--shadow-surface);
+  border-color: var(--acc-30);
+  background: var(--acc-08);
+  box-shadow: 0 0 12px var(--acc-15), var(--shadow-surface);
 }
 
 .btn-preset:nth-child(3):hover {
-  border-color: rgba(45, 212, 191, 0.32);
-  background: rgba(45, 212, 191, 0.08);
-  box-shadow: 0 0 12px rgba(45, 212, 191, 0.14), var(--shadow-surface);
+  border-color: var(--acc-30);
+  background: var(--acc-08);
+  box-shadow: 0 0 12px var(--acc-15), var(--shadow-surface);
 }
 
 .btn-preset-delete:hover {
@@ -165,24 +165,24 @@ button:disabled {
 .btn-primary,
 .btn-start,
 .btn-modal-save {
-  border-color: rgba(45, 212, 191, 0.24);
+  border-color: var(--acc-25);
   background:
     radial-gradient(circle at 25% 20%, rgba(255, 255, 255, 0.1), transparent 24%),
-    linear-gradient(180deg, rgba(45, 212, 191, 0.22), rgba(8, 145, 178, 0.16));
+    linear-gradient(180deg, var(--acc-20), var(--acc-15));
   color: white;
   box-shadow:
-    0 12px 26px rgba(8, 145, 178, 0.16),
+    0 12px 26px var(--acc-15),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .btn-secondary,
 .btn-attach {
-  border-color: rgba(34, 211, 238, 0.24);
+  border-color: var(--acc-25);
   background:
     radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.06), transparent 22%),
-    linear-gradient(180deg, rgba(34, 211, 238, 0.14), rgba(8, 145, 178, 0.08));
+    linear-gradient(180deg, var(--acc-15), var(--acc-08));
   box-shadow:
-    0 10px 22px rgba(8, 145, 178, 0.12),
+    0 10px 22px var(--acc-12),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
@@ -236,8 +236,8 @@ button:disabled {
   max-height: min(86vh, 900px);
   overflow: hidden;
   background:
-    radial-gradient(circle at 18% 16%, rgba(99, 102, 241, 0.12), transparent 28%),
-    radial-gradient(circle at 84% 18%, rgba(34, 211, 238, 0.08), transparent 24%),
+    radial-gradient(circle at 18% 16%, var(--acc-12), transparent 28%),
+    radial-gradient(circle at 84% 18%, var(--acc-08), transparent 24%),
     linear-gradient(160deg, rgba(40, 48, 58, 0.94), rgba(28, 34, 42, 0.97));
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow:
@@ -327,8 +327,8 @@ button:disabled {
 
 [data-theme="light"] .modal {
   background:
-    radial-gradient(circle at 18% 16%, rgba(99, 102, 241, 0.08), transparent 28%),
-    radial-gradient(circle at 84% 18%, rgba(34, 211, 238, 0.05), transparent 24%),
+    radial-gradient(circle at 18% 16%, var(--acc-08), transparent 28%),
+    radial-gradient(circle at 84% 18%, var(--acc-05), transparent 24%),
     linear-gradient(160deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
   border-color: rgba(15, 23, 42, 0.1);
   box-shadow:
@@ -346,7 +346,7 @@ button:disabled {
 
 [data-theme="light"] .modal-section {
   background:
-    radial-gradient(circle at top right, rgba(99, 102, 241, 0.08), transparent 30%),
+    radial-gradient(circle at top right, var(--acc-08), transparent 30%),
     linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(241, 245, 249, 0.96));
   box-shadow:
     0 10px 24px rgba(15, 23, 42, 0.08),
@@ -392,7 +392,7 @@ button:disabled {
 
 .settings-tab.active {
   color: var(--color-primary-light);
-  background: rgba(99, 102, 241, 0.12);
+  background: var(--acc-12);
 }
 
 .settings-pane {
@@ -982,8 +982,8 @@ button:disabled {
   width: min(880px, 96vw);
   max-height: min(90vh, 880px);
   background:
-    radial-gradient(circle at 15% 15%, rgba(56, 189, 248, 0.07), transparent 26%),
-    radial-gradient(circle at 85% 85%, rgba(99, 102, 241, 0.05), transparent 28%),
+    radial-gradient(circle at 15% 15%, var(--acc-08), transparent 26%),
+    radial-gradient(circle at 85% 85%, var(--acc-05), transparent 28%),
     linear-gradient(160deg, rgba(40, 48, 58, 0.94), rgba(28, 34, 42, 0.97));
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: var(--radius-card, 14px);
@@ -1014,7 +1014,7 @@ button:disabled {
   inset: 0;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.25), transparent 40%, transparent 60%, rgba(99, 102, 241, 0.15));
+  background: linear-gradient(135deg, var(--acc-25), transparent 40%, transparent 60%, var(--acc-15));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -1076,9 +1076,9 @@ button:disabled {
 }
 
 .mm-tab.active {
-  background: rgba(56, 189, 248, 0.08);
+  background: var(--acc-08);
   border-color: rgba(255, 255, 255, 0.06);
-  border-bottom-color: rgba(56, 189, 248, 0.7);
+  border-bottom-color: var(--acc-60);
   color: rgba(125, 211, 252, 0.95);
 }
 
@@ -1090,8 +1090,8 @@ button:disabled {
   padding: 0 5px;
   height: 16px;
   border-radius: 8px;
-  background: rgba(56, 189, 248, 0.15);
-  border: 1px solid rgba(56, 189, 248, 0.25);
+  background: var(--acc-15);
+  border: 1px solid var(--acc-25);
   font-size: 0.65rem;
   font-weight: 700;
   color: rgba(125, 211, 252, 0.9);
@@ -1119,8 +1119,8 @@ button:disabled {
 }
 
 .mm-refresh-btn:hover {
-  border-color: rgba(56, 189, 248, 0.4);
-  background: rgba(56, 189, 248, 0.1);
+  border-color: var(--acc-40);
+  background: var(--acc-10);
   color: rgba(125, 211, 252, 0.9);
 }
 
@@ -1181,9 +1181,9 @@ button:disabled {
 .mm-dir-settings {
   flex-shrink: 0;
   padding: 3px 8px;
-  border: 1px solid rgba(99, 102, 241, 0.3);
+  border: 1px solid var(--acc-30);
   border-radius: 5px;
-  background: rgba(99, 102, 241, 0.08);
+  background: var(--acc-08);
   color: rgba(165, 180, 252, 0.8);
   font-size: 0.7rem;
   font-weight: 600;
@@ -1193,8 +1193,8 @@ button:disabled {
 }
 
 .mm-dir-settings:hover {
-  background: rgba(99, 102, 241, 0.14);
-  border-color: rgba(99, 102, 241, 0.5);
+  background: var(--acc-15);
+  border-color: var(--acc-50);
   color: #a5b4fc;
 }
 
@@ -1252,10 +1252,10 @@ button:disabled {
 }
 
 .mm-model-card:hover {
-  border-color: rgba(56, 189, 248, 0.3);
+  border-color: var(--acc-30);
   box-shadow:
     0 10px 28px rgba(0, 0, 0, 0.36),
-    0 0 16px rgba(56, 189, 248, 0.07),
+    0 0 16px var(--acc-08),
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
   transform: translateY(-1px);
 }
@@ -1282,8 +1282,8 @@ button:disabled {
   flex-shrink: 0;
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(56, 189, 248, 0.12);
-  border: 1px solid rgba(56, 189, 248, 0.22);
+  background: var(--acc-12);
+  border: 1px solid var(--acc-20);
   font-size: 0.66rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -1324,8 +1324,8 @@ button:disabled {
 }
 
 .mm-stat-vram {
-  background: rgba(99, 102, 241, 0.07);
-  border-color: rgba(99, 102, 241, 0.15);
+  background: var(--acc-08);
+  border-color: var(--acc-15);
   color: rgba(165, 180, 252, 0.75);
 }
 
@@ -1339,7 +1339,7 @@ button:disabled {
 .mm-vram-fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, rgba(56, 189, 248, 0.6), rgba(99, 102, 241, 0.7));
+  background: linear-gradient(90deg, var(--acc-60), var(--acc-60));
   transition: width 400ms ease;
 }
 
@@ -1373,8 +1373,8 @@ button:disabled {
 }
 
 .mm-action-copy:hover {
-  border-color: rgba(56, 189, 248, 0.35);
-  background: rgba(56, 189, 248, 0.08);
+  border-color: var(--acc-40);
+  background: var(--acc-08);
   color: rgba(125, 211, 252, 0.9);
 }
 
@@ -1405,9 +1405,9 @@ button:disabled {
   max-width: 340px;
   padding: 28px 24px;
   background:
-    radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.08), transparent 40%),
+    radial-gradient(circle at 20% 20%, var(--acc-08), transparent 40%),
     linear-gradient(145deg, rgba(36, 44, 54, 0.9), rgba(22, 28, 36, 0.96));
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  border: 1px solid var(--acc-20);
   border-radius: 12px;
   text-align: center;
   box-shadow:
@@ -1436,8 +1436,8 @@ button:disabled {
   margin-top: 6px;
   padding: 9px 20px;
   border-radius: 7px;
-  border: 1px solid rgba(99, 102, 241, 0.35);
-  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid var(--acc-40);
+  background: var(--acc-12);
   color: rgba(165, 180, 252, 0.9);
   font-size: 0.82rem;
   font-weight: 700;
@@ -1446,9 +1446,9 @@ button:disabled {
 }
 
 .mm-download-cta:hover {
-  background: rgba(99, 102, 241, 0.2);
-  border-color: rgba(99, 102, 241, 0.5);
-  box-shadow: 0 0 16px rgba(99, 102, 241, 0.2);
+  background: var(--acc-20);
+  border-color: var(--acc-50);
+  box-shadow: 0 0 16px var(--acc-20);
   transform: translateY(-1px);
 }
 
@@ -1493,8 +1493,8 @@ button:disabled {
 
 [data-theme="light"] .models-manager-shell {
   background:
-    radial-gradient(circle at 15% 15%, rgba(56, 189, 248, 0.05), transparent 26%),
-    radial-gradient(circle at 85% 85%, rgba(99, 102, 241, 0.04), transparent 28%),
+    radial-gradient(circle at 15% 15%, var(--acc-05), transparent 26%),
+    radial-gradient(circle at 85% 85%, var(--acc-05), transparent 28%),
     linear-gradient(160deg, rgba(255, 255, 255, 0.97), rgba(248, 250, 252, 0.99));
   border-color: rgba(17, 24, 39, 0.1);
   box-shadow:
@@ -1518,14 +1518,14 @@ button:disabled {
 }
 
 [data-theme="light"] .mm-tab.active {
-  background: rgba(56, 189, 248, 0.06);
+  background: var(--acc-05);
   border-bottom-color: rgba(14, 165, 233, 0.6);
   color: rgba(2, 132, 199, 0.9);
 }
 
 [data-theme="light"] .mm-model-card {
   background:
-    radial-gradient(circle at top right, rgba(56, 189, 248, 0.04), transparent 30%),
+    radial-gradient(circle at top right, var(--acc-05), transparent 30%),
     linear-gradient(145deg, rgba(255, 255, 255, 0.88), rgba(241, 245, 249, 0.94));
   border-color: rgba(17, 24, 39, 0.08);
   box-shadow:
@@ -1618,8 +1618,8 @@ button:disabled {
 }
 
 .mm-lib-search-input:focus {
-  border-color: rgba(99, 102, 241, 0.4);
-  box-shadow: 0 0 10px rgba(99, 102, 241, 0.12);
+  border-color: var(--acc-40);
+  box-shadow: 0 0 10px var(--acc-12);
 }
 
 .mm-lib-controls {
@@ -1644,8 +1644,8 @@ button:disabled {
 }
 
 .mm-lib-btn:hover {
-  border-color: rgba(99, 102, 241, 0.35);
-  background: rgba(99, 102, 241, 0.08);
+  border-color: var(--acc-40);
+  background: var(--acc-08);
   color: rgba(165, 180, 252, 0.9);
 }
 
@@ -1658,8 +1658,8 @@ button:disabled {
 }
 
 .mm-lib-btn--active {
-  background: rgba(99, 102, 241, 0.12);
-  border-color: rgba(99, 102, 241, 0.35);
+  background: var(--acc-12);
+  border-color: var(--acc-40);
   color: rgba(165, 180, 252, 0.9);
 }
 
@@ -1728,8 +1728,8 @@ button:disabled {
 }
 
 .mm-lib-chip.active {
-  background: rgba(99, 102, 241, 0.15);
-  border-color: rgba(99, 102, 241, 0.4);
+  background: var(--acc-15);
+  border-color: var(--acc-40);
   color: #a5b4fc;
 }
 
@@ -1767,12 +1767,12 @@ button:disabled {
 }
 
 .mm-lib-sort-select:hover {
-  border-color: rgba(99, 102, 241, 0.35);
+  border-color: var(--acc-40);
 }
 
 .mm-lib-sort-select:focus {
-  border-color: rgba(99, 102, 241, 0.5);
-  box-shadow: 0 0 8px rgba(99, 102, 241, 0.15);
+  border-color: var(--acc-50);
+  box-shadow: 0 0 8px var(--acc-15);
 }
 
 /* ── List view mode ── */
@@ -1876,7 +1876,7 @@ button:disabled {
   left: 50%;
   transform: translate(-50%, -50%);
   background: rgba(15, 23, 42, 0.98);
-  border: 1px solid rgba(99, 102, 241, 0.18);
+  border: 1px solid var(--acc-18);
   border-radius: 10px;
   padding: 10px 12px 10px 12px;
   min-width: 180px;
@@ -2003,14 +2003,14 @@ button:disabled {
 }
 
 [data-theme="light"] .mm-lib-btn:hover {
-  border-color: rgba(99, 102, 241, 0.3);
-  background: rgba(99, 102, 241, 0.06);
+  border-color: var(--acc-30);
+  background: var(--acc-05);
   color: #6366f1;
 }
 
 [data-theme="light"] .mm-lib-btn--active {
-  background: rgba(99, 102, 241, 0.08);
-  border-color: rgba(99, 102, 241, 0.3);
+  background: var(--acc-08);
+  border-color: var(--acc-30);
   color: #6366f1;
 }
 
@@ -2034,8 +2034,8 @@ button:disabled {
 }
 
 [data-theme="light"] .mm-lib-chip.active {
-  background: rgba(99, 102, 241, 0.1);
-  border-color: rgba(99, 102, 241, 0.3);
+  background: var(--acc-10);
+  border-color: var(--acc-30);
   color: #6366f1;
 }
 
@@ -2046,7 +2046,7 @@ button:disabled {
 }
 
 [data-theme="light"] .mm-lib-sort-select:hover {
-  border-color: rgba(99, 102, 241, 0.3);
+  border-color: var(--acc-30);
 }
 
 [data-theme="light"] .mm-model-card--mmproj {
@@ -2106,7 +2106,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(circle at 16% 16%, rgba(99, 102, 241, 0.13), transparent 30%),
+    radial-gradient(circle at 16% 16%, var(--acc-12), transparent 30%),
     radial-gradient(circle at 84% 84%, rgba(245, 158, 11, 0.08), transparent 28%),
     linear-gradient(160deg, rgba(36, 44, 56, 0.96), rgba(24, 30, 42, 0.99));
   border: 1px solid rgba(255, 255, 255, 0.09);
@@ -2128,7 +2128,7 @@ button:disabled {
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent 5%, rgba(99, 102, 241, 0.5) 30%, rgba(255, 255, 255, 0.22) 50%, rgba(99, 102, 241, 0.5) 70%, transparent 95%);
+  background: linear-gradient(90deg, transparent 5%, var(--acc-50) 30%, rgba(255, 255, 255, 0.22) 50%, var(--acc-50) 70%, transparent 95%);
   pointer-events: none;
   z-index: 2;
 }
@@ -2144,7 +2144,7 @@ button:disabled {
   justify-content: space-between;
   padding: 16px 20px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-  background: linear-gradient(180deg, rgba(99, 102, 241, 0.06), transparent);
+  background: linear-gradient(180deg, var(--acc-05), transparent);
   position: relative;
   z-index: 2;
   flex-shrink: 0;
@@ -2190,7 +2190,7 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   padding: 10px 20px;
-  background: rgba(99, 102, 241, 0.06);
+  background: var(--acc-05);
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   flex-shrink: 0;
   gap: 8px;
@@ -2441,8 +2441,8 @@ button:disabled {
 }
 
 .llama-version-row--current {
-  background: rgba(99, 102, 241, 0.06);
-  border-color: rgba(99, 102, 241, 0.18);
+  background: var(--acc-05);
+  border-color: var(--acc-18);
 }
 
 .llama-version-row-info {
@@ -2475,8 +2475,8 @@ button:disabled {
 }
 
 .llama-version-badge--latest {
-  background: rgba(99, 102, 241, 0.15);
-  border: 1px solid rgba(99, 102, 241, 0.35);
+  background: var(--acc-15);
+  border: 1px solid var(--acc-40);
   color: #a5b4fc;
 }
 
@@ -2503,8 +2503,8 @@ button:disabled {
 .llama-version-install-btn {
   padding: 4px 12px;
   border-radius: 7px;
-  border: 1px solid rgba(99, 102, 241, 0.4);
-  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid var(--acc-40);
+  background: var(--acc-10);
   color: #a5b4fc;
   font-size: 11px;
   font-weight: 600;
@@ -2514,8 +2514,8 @@ button:disabled {
 }
 
 .llama-version-install-btn:hover:not(:disabled) {
-  background: rgba(99, 102, 241, 0.22);
-  border-color: rgba(99, 102, 241, 0.6);
+  background: var(--acc-25);
+  border-color: var(--acc-60);
   transform: translateY(-1px);
 }
 
@@ -2548,8 +2548,8 @@ button:disabled {
 }
 
 .fb-up-btn:hover {
-  border-color: rgba(99, 102, 241, 0.4);
-  background: rgba(99, 102, 241, 0.08);
+  border-color: var(--acc-40);
+  background: var(--acc-08);
   color: var(--color-text-primary);
 }
 
@@ -2572,7 +2572,7 @@ button:disabled {
 
 .fb-path-input:focus {
   outline: none;
-  border-color: rgba(99, 102, 241, 0.45);
+  border-color: var(--acc-50);
   color: var(--color-text-primary);
 }
 
@@ -2592,12 +2592,12 @@ button:disabled {
 }
 
 .fb-entry:focus-visible {
-  outline: 2px solid rgba(99, 102, 241, 0.6);
+  outline: 2px solid var(--acc-60);
   outline-offset: -2px;
 }
 
 .fb-entry-dir:hover {
-  background: rgba(99, 102, 241, 0.07);
+  background: var(--acc-08);
 }
 
 .fb-entry-icon {
@@ -2641,9 +2641,9 @@ button:disabled {
   letter-spacing: 0.02em;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(99, 102, 241, 0.12);
+  background: var(--acc-12);
   color: rgba(148, 151, 255, 0.75);
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  border: 1px solid var(--acc-20);
 }
 
 .fb-mmproj-badge.fb-mmproj-matched {
@@ -2689,8 +2689,8 @@ button:disabled {
 }
 
 [data-theme="light"] .fb-up-btn:hover {
-  border-color: rgba(99, 102, 241, 0.35);
-  background: rgba(99, 102, 241, 0.06);
+  border-color: var(--acc-40);
+  background: var(--acc-05);
 }
 
 [data-theme="light"] .fb-path-input {
@@ -2703,7 +2703,7 @@ button:disabled {
 }
 
 [data-theme="light"] .fb-entry-dir:hover {
-  background: rgba(99, 102, 241, 0.05);
+  background: var(--acc-05);
 }
 
 /* ── Preset Editor: live VRAM estimate ─────────────────────────────────────── */
@@ -2768,15 +2768,15 @@ button:disabled {
 }
 
 .preset-context-pill:hover {
-    background: rgba(99, 102, 241, 0.12);
-    border-color: rgba(99, 102, 241, 0.4);
+    background: var(--acc-12);
+    border-color: var(--acc-40);
     color: var(--color-text-primary, #e2e8f0);
 }
 
 .preset-context-pill.active {
-    background: rgba(99, 102, 241, 0.22);
+    background: var(--acc-25);
     color: #a5b4fc;
-    border-color: rgba(99, 102, 241, 0.6);
+    border-color: var(--acc-60);
 }
 
 [data-theme="light"] .preset-context-pill {
@@ -2786,8 +2786,8 @@ button:disabled {
 }
 
 [data-theme="light"] .preset-context-pill:hover {
-    background: rgba(99, 102, 241, 0.08);
-    border-color: rgba(99, 102, 241, 0.35);
+    background: var(--acc-08);
+    border-color: var(--acc-40);
     color: #1e293b;
 }
 

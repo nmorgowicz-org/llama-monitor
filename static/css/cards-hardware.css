@@ -1691,8 +1691,8 @@
   /* Metric block hover glow */
   .hw-metric-block:hover {
     border-color: var(--surface-card-line);
-    background: rgba(34, 211, 238, 0.03);
-    box-shadow: 0 0 18px rgba(8, 145, 178, 0.05);
+    background: var(--acc-05);
+    box-shadow: 0 0 18px var(--acc-05);
     animation: none;
   }
 
