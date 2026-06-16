@@ -732,8 +732,8 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--gap-md);
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 12px 14px;
+  border-bottom: 0;
 }
 
 .shortcut-keys-combination {

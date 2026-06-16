@@ -4890,19 +4890,14 @@
                     <!-- T-058: Low Power / auto-sleep controls -->
                     <div class="settings-card">
                         <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
-                            Low Power Mode
+                            Auto-Sleep
                         </div>
                         <p class="settings-help">
-                            Reduce dashboard activity when you're not looking. The llama-server keeps running; only polling and UI updates slow down.
+                            Automatically reduce dashboard activity when you're not looking. The llama-server keeps running; use the cockpit Low Power button for manual control.
                         </p>
 
                         <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:6px 0;">
-                            <input type="checkbox" id="settings-sleep-mode-enabled">
-                            <span>Enable Low Power Mode (auto-sleep)</span>
-                        </label>
-
-                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:6px 0;">
-                            <input type="checkbox" id="settings-sleep-mode-when-hidden">
+                            <input type="checkbox" id="settings-sleep-mode-when-hidden" checked>
                             <span>Auto-sleep when tab is hidden</span>
                         </label>
 
@@ -4910,8 +4905,9 @@
                             Auto-sleep after:
                             <select id="settings-sleep-mode-idle">
                                 <option value="300">5 min</option>
+                                <option value="600" selected>10 min</option>
                                 <option value="900">15 min</option>
-                                <option value="1800" selected>30 min</option>
+                                <option value="1800">30 min</option>
                                 <option value="0">Never</option>
                             </select>
                         </label>
@@ -4996,11 +4992,17 @@
                             </p>
                             <label class="modal-field">
                                 Certificate file path
-                                <input type="text" id="tls-custom-cert-path" placeholder="/path/to/cert.pem">
+                                <div style="display:flex;gap:6px;align-items:center;">
+                                    <input type="text" id="tls-custom-cert-path" placeholder="/path/to/cert.pem" style="flex:1;min-width:0;">
+                                    <button type="button" class="btn btn-secondary" id="tls-custom-cert-browse">Browse</button>
+                                </div>
                             </label>
                             <label class="modal-field">
                                 Key file path
-                                <input type="text" id="tls-custom-key-path" placeholder="/path/to/key.pem">
+                                <div style="display:flex;gap:6px;align-items:center;">
+                                    <input type="text" id="tls-custom-key-path" placeholder="/path/to/key.pem" style="flex:1;min-width:0;">
+                                    <button type="button" class="btn btn-secondary" id="tls-custom-key-browse">Browse</button>
+                                </div>
                             </label>
                             <button type="button" class="btn btn-secondary" id="btn-apply-custom-cert">Apply</button>
                         </div>
@@ -5039,14 +5041,21 @@
                                     <option value="powerdns">PowerDNS</option>
                                     <option value="duckdns">Duck DNS</option>
                                     <option value="inwx">INWX</option>
-                                    <option value="__other__">Other (type provider name)</option>
+                                    <option value="__other__">Other (enter lego provider code)</option>
                                 </select>
                             </label>
+                            <p class="settings-help" id="acme-provider-help" style="margin-bottom:6px;">
+                                Use the lego DNS provider code. Namecheap code: namecheap.
+                                <a id="acme-provider-doc-link" href="https://go-acme.github.io/lego/dns/namecheap/" target="_blank" rel="noopener noreferrer" style="color:var(--color-primary-light);text-decoration:underline;">Docs</a>.
+                            </p>
 
                             <label class="modal-field" id="acme-provider-custom-wrap" style="display:none;">
-                                Provider name
-                                <input type="text" id="acme-dns-provider-custom" placeholder="e.g. proxmox, linode, etc.">
+                                Provider code
+                                <input type="text" id="acme-dns-provider-custom" placeholder="lego provider code, e.g. namecheap">
                             </label>
+                            <p class="settings-help" id="acme-provider-custom-help" style="display:none;margin-bottom:6px;">
+                                Type the exact <code>Code</code> from the lego DNS provider page, not the marketing name.
+                            </p>
 
                             <div style="margin-bottom:8px;">
                                 <span style="font-size:12px;color:var(--text-muted);">Environment</span>
@@ -5073,9 +5082,9 @@
                                 <p style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">
                                     DNS provider credentials
                                 </p>
-                                <p class="settings-help" style="margin-bottom:2px;">
+                                <p class="settings-help" id="acme-credentials-help" style="margin-bottom:2px;">
                                     Enter your DNS provider's API credentials as key/value pairs.
-                                    Example for Cloudflare: CLOUDFLARE_API_TOKEN / your-token.
+                                    Example for Namecheap: NAMECHEAP_API_USER and NAMECHEAP_API_KEY.
                                 </p>
                                 <p class="settings-help" style="margin-bottom:6px;">
                                     For environment variable names, see the

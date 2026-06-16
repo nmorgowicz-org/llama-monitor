@@ -79,17 +79,15 @@ export function collectSettings() {
         }
     }
 
-    // T-058: read sleep_mode settings
-    const sleepModeEl = document.getElementById('settings-sleep-mode-enabled');
+    // T-058: read auto-sleep policy settings. Manual Low Power is controlled by the cockpit nav pill.
     const sleepWhenHiddenEl = document.getElementById('settings-sleep-mode-when-hidden');
     const sleepIdleEl = document.getElementById('settings-sleep-mode-idle');
 
-    const sleepModeEnabled = sleepModeEl ? (sleepModeEl.checked === true) : undefined;
     const sleepWhenHidden = sleepWhenHiddenEl ? (sleepWhenHiddenEl.checked === true) : undefined;
-    const sleepIdleRaw = sleepIdleEl ? (sleepIdleEl.value || '1800') : '1800';
+    const sleepIdleRaw = sleepIdleEl ? (sleepIdleEl.value || '600') : '600';
     const sleepIdleSecs = sleepIdleRaw === '0'
         ? null
-        : (parseInt(sleepIdleRaw, 10) || 1800);
+        : (parseInt(sleepIdleRaw, 10) || 600);
 
     return {
         preset_id: document.getElementById('preset-select').value,
@@ -123,7 +121,7 @@ export function collectSettings() {
         // T-058: sleep_mode settings (sent to server via PUT /api/settings)
         sleep_mode: {
             auto_sleep_when_all_hidden: sleepWhenHidden !== undefined ? sleepWhenHidden : true,
-            auto_sleep_idle_secs: sleepModeEnabled ? sleepIdleSecs : null,
+            auto_sleep_idle_secs: sleepIdleSecs,
         },
         suggestion_prompts: {
             general: document.getElementById('settings-prompt-general')?.value || '',
@@ -339,14 +337,14 @@ export function applySettings(s) {
     });
 
     if (s.sleep_mode) {
-        const sleepEnabledEl = document.getElementById('settings-sleep-mode-enabled');
         const sleepHiddenEl = document.getElementById('settings-sleep-mode-when-hidden');
         const sleepIdleEl = document.getElementById('settings-sleep-mode-idle');
-        if (sleepEnabledEl) sleepEnabledEl.checked = s.sleep_mode.auto_sleep_idle_secs !== null && s.sleep_mode.auto_sleep_idle_secs !== undefined;
-        if (sleepHiddenEl) sleepHiddenEl.checked = !!s.sleep_mode.auto_sleep_when_all_hidden;
+        if (sleepHiddenEl) sleepHiddenEl.checked = s.sleep_mode.auto_sleep_when_all_hidden !== false;
         if (sleepIdleEl && s.sleep_mode.auto_sleep_idle_secs != null) {
             const opt = sleepIdleEl.querySelector(`option[value="${s.sleep_mode.auto_sleep_idle_secs}"]`);
             if (opt) sleepIdleEl.value = String(s.sleep_mode.auto_sleep_idle_secs);
+        } else if (sleepIdleEl) {
+            sleepIdleEl.value = '0';
         }
     }
 
@@ -936,6 +934,7 @@ async function loadTlsConfig() {
             for (const [k, v] of Object.entries(dnsCfg)) {
                 addAcmeCredentialRow(k, v);
             }
+            updateAcmeProviderHelp();
 
             // Show last renewal in tls-details if present
             if (acme.last_renewal && detailsEl) {
@@ -1016,6 +1015,16 @@ function _bindTlsEvents() {
         });
     }
 
+    document.getElementById('tls-custom-cert-browse')?.addEventListener('click', async () => {
+        const { openDeferredFileBrowser } = await import('./file-browser-launcher.js');
+        openDeferredFileBrowser('tls-custom-cert-path', '');
+    });
+
+    document.getElementById('tls-custom-key-browse')?.addEventListener('click', async () => {
+        const { openDeferredFileBrowser } = await import('./file-browser-launcher.js');
+        openDeferredFileBrowser('tls-custom-key-path', '');
+    });
+
     // ACME: show/hide custom provider input
     const providerSelect = document.getElementById('acme-dns-provider');
     if (providerSelect) {
@@ -1024,8 +1033,15 @@ function _bindTlsEvents() {
             if (customWrap) {
                 customWrap.style.display = providerSelect.value === '__other__' ? 'block' : 'none';
             }
+            const customHelp = document.getElementById('acme-provider-custom-help');
+            if (customHelp) {
+                customHelp.style.display = providerSelect.value === '__other__' ? 'block' : 'none';
+            }
+            updateAcmeProviderHelp();
         });
     }
+    document.getElementById('acme-dns-provider-custom')?.addEventListener('input', updateAcmeProviderHelp);
+    updateAcmeProviderHelp();
 
     // ACME: add credential row
     const addCredBtn = document.getElementById('acme-add-credential');
@@ -1212,6 +1228,40 @@ function readAcmeCredentials() {
         }
     }
     return map;
+}
+
+function selectedAcmeProvider() {
+    const providerValue = document.getElementById('acme-dns-provider')?.value || 'cloudflare';
+    if (providerValue !== '__other__') return providerValue;
+    return (document.getElementById('acme-dns-provider-custom')?.value || '').trim().toLowerCase();
+}
+
+function updateAcmeProviderHelp() {
+    const provider = selectedAcmeProvider();
+    const link = document.getElementById('acme-provider-doc-link');
+    const credentialsHelp = document.getElementById('acme-credentials-help');
+
+    if (link) {
+        if (provider) {
+            link.href = `https://go-acme.github.io/lego/dns/${encodeURIComponent(provider)}/`;
+            link.textContent = 'Docs';
+        } else {
+            link.href = 'https://go-acme.github.io/lego/dns/';
+            link.textContent = 'Provider docs';
+        }
+    }
+
+    if (!credentialsHelp) return;
+
+    if (provider === 'namecheap') {
+        credentialsHelp.textContent = 'Namecheap uses provider code namecheap. Add NAMECHEAP_API_USER and NAMECHEAP_API_KEY as credential keys; your Namecheap account must have API access enabled.';
+    } else if (provider === 'cloudflare') {
+        credentialsHelp.textContent = 'Cloudflare commonly uses CLOUDFLARE_API_TOKEN as the credential key. Confirm the exact variables in the linked lego provider guide.';
+    } else if (provider) {
+        credentialsHelp.textContent = `Add the environment variable names listed by lego for provider code ${provider}. Use each variable name as the Key and its secret value as the Value.`;
+    } else {
+        credentialsHelp.textContent = 'Choose a provider or type a lego provider code, then add the environment variable names listed by lego as key/value credentials.';
+    }
 }
 
 // ── Dashboard auth / password reset ─────────────────────────────────────────
