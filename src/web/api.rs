@@ -12228,6 +12228,18 @@ fn api_llama_binary_update(
                     );
                 }
 
+                // On macOS, Gatekeeper quarantines the entire extracted archive — the
+                // executable, dylibs, and Metal shaders alike. Strip recursively from the
+                // whole temp dir so that both the health check and the subsequent
+                // copy_all_files into dest_dir carry clean files.
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = std::process::Command::new("xattr")
+                        .args(["-rd", "com.apple.quarantine"])
+                        .arg(tmp_dir.path())
+                        .output();
+                }
+
                 // Health check on the temp binary BEFORE writing anything to dest_dir.
                 // This ensures the live binary is never overwritten with a bad one.
                 // Capture stderr to diagnose failures (Gatekeeper, missing dylib, etc.).

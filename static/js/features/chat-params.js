@@ -1015,8 +1015,8 @@ function applyChatStyle(style) {
 
 export { applyChatStyle };
 
-const CHAT_STYLES = ['rounded', 'compact', 'minimal', 'bubbly'];
-const CHAT_STYLE_LABELS = { rounded: 'Rounded', compact: 'Compact', minimal: 'Minimal', bubbly: 'Bubbly' };
+const CHAT_STYLES = ['rounded', 'compact', 'minimal', 'bubbly', 'paper', 'terminal', 'slate'];
+const CHAT_STYLE_LABELS = { rounded: 'Rounded', compact: 'Compact', minimal: 'Minimal', bubbly: 'Bubbly', paper: 'Paper', terminal: 'Terminal', slate: 'Slate' };
 
 function toggleStylePanel() {
     const panel = document.getElementById('chat-style-panel');

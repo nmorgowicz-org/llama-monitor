@@ -316,6 +316,17 @@ pub async fn start_server(
     // Capture stderr to diagnose failures (Gatekeeper, missing dylib, etc.).
     {
         let bin_path = &app_config.llama_server_path;
+
+        // Strip macOS quarantine from the binary's directory so Gatekeeper does not
+        // SIGKILL the process when it dlopen()s co-located dylibs or Metal shaders.
+        // Covers manually placed binaries and the restart-after-update path.
+        #[cfg(target_os = "macos")]
+        if let Some(bin_dir) = bin_path.parent() {
+            let _ = std::process::Command::new("xattr")
+                .args(["-rd", "com.apple.quarantine"])
+                .arg(bin_dir)
+                .output();
+        }
         // 10s gives headroom when the system is under memory pressure from prior large-model loads.
         let health_result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
             let output = TokioCommand::new(bin_path)
