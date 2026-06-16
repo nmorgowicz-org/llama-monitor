@@ -339,13 +339,8 @@ function syncPresetDisplay(sel) {
 function buildShortPresetName(p, fullName) {
     const base = fullName || p.name || (p.model_path || p.hf_repo || '').split('/').pop() || '';
     if (!base) return '';
-    // Minimal normalization: replace underscores with hyphens, collapse multiple hyphens.
-    let name = base.replace(/_/g, '-').replace(/-{2,}/g, '-').trim();
-    // Only soft-truncate if it would overflow the display bar.
-    if (name.length > 38) {
-        name = name.slice(0, 35).trimEnd() + '\u2026';
-    }
-    return name;
+    // Normalize underscores to hyphens; CSS text-overflow handles truncation.
+    return base.replace(/_/g, '-').replace(/-{2,}/g, '-').trim();
 }
 
 function buildPresetChips(p) {
