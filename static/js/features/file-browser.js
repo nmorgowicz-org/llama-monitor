@@ -174,7 +174,7 @@ export async function fileBrowserGo(path) {
             const name = escapeHtml(e.name);
             const size = escapeHtml(e.size_display || '');
             if (e.is_dir) {
-                return `<div class="fb-entry fb-entry-dir" data-path="${escapeHtml(e.path)}">` +
+                return `<div class="fb-entry fb-entry-dir" data-path="${escapeHtml(e.path)}" title="${name}">` +
                     '<span class="fb-entry-icon">\u{1F4C1}</span>' +
                     '<span class="fb-entry-name">' + name + '</span></div>';
             } else {
@@ -198,7 +198,7 @@ export async function fileBrowserGo(path) {
                         }
                     }
                 }
-                return `<div class="fb-entry fb-entry-file fb-match" data-path="${escapeHtml(e.path)}">` +
+                return `<div class="fb-entry fb-entry-file fb-match" data-path="${escapeHtml(e.path)}" title="${name}">` +
                     '<span class="fb-entry-icon">\u{1F4C4}</span>' +
                     '<span class="fb-entry-name">' + name + '</span>' +
                     badge +

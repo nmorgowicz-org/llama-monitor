@@ -68,10 +68,12 @@ import { activeChatTab } from './chat-state.js';
 import { setRemoteAgentStatus } from './remote-agent.js';
 import { hideConnectingState, switchView } from './setup-view.js';
 import { showToast, showToastWithActions } from './toast.js';
+import { loadPresets } from './presets.js';
 
 // ── Cached DOM elements (populated at init time to avoid repeated queries) ──
 let cachedElements = null;
 let dashboardSocket = null;
+let _lastPresetRefreshId = null;
 let overlayStateObserver = null;
 const LOG_FONT_SIZE_KEY = 'llama-monitor-log-font-size';
 const LOG_FONT_SIZE_DEFAULT = 13;
@@ -395,7 +397,12 @@ function updateDashboard(d) {
         const sel = document.getElementById('preset-select');
         if (sel && sel.value !== d.active_session_preset_id) {
             const opt = sel.querySelector(`option[value="${d.active_session_preset_id}"]`);
-            if (opt) sel.value = d.active_session_preset_id;
+            if (opt) {
+                sel.value = d.active_session_preset_id;
+            } else if (_lastPresetRefreshId !== d.active_session_preset_id) {
+                _lastPresetRefreshId = d.active_session_preset_id;
+                loadPresets(d.active_session_preset_id);
+            }
         }
     }
     // Clear user-selection flag once the backend and dropdown agree again.
