@@ -175,13 +175,13 @@ Integration notes:
 Provider-agnostic design:
 - acme.rs:
   - Treats providers via:
-    - A provider name (e.g., "cloudflare", "route53").
+    - A lego DNS provider code (e.g., "cloudflare", "route53", "namecheap").
     - A map of environment variables (dns_config).
   - build_lego_command() assembles the lego command dynamically.
 - To add support for a new provider:
   - Ensure lego supports it.
-  - Use its provider name.
-  - Document required environment variables.
+  - Use its lego provider code from https://go-acme.github.io/lego/dns/.
+  - Enter the required environment variables as ACME credential key/value pairs.
 
 ## mTLS for Remote Agent
 
