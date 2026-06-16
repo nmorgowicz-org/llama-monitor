@@ -12350,7 +12350,7 @@ fn api_llama_binary_update(
                         "[monitor] llama-binary/update: restarting llama-server with previous config".into(),
                     );
 
-                    match crate::llama::server::start_server(&state, rc, &*cfg).await {
+                    match crate::llama::server::start_server(&state, rc, &cfg).await {
                         Ok(()) => {
                             state.push_log(
                                 "[monitor] llama-binary/update: llama-server restarted successfully".into(),
