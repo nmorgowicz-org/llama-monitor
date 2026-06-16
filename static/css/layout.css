@@ -984,9 +984,51 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
+.nav-sleep-pill {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-muted);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: border-color 160ms ease, color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.nav-cockpit.has-session .nav-sleep-pill {
+  display: inline-flex;
+}
+
+.nav-sleep-pill:hover {
+  border-color: rgba(235, 203, 139, 0.45);
+  color: rgba(235, 203, 139, 0.85);
+  background: rgba(235, 203, 139, 0.06);
+}
+
+.nav-cockpit.is-low-power .nav-sleep-pill {
+  border-color: rgba(235, 203, 139, 0.5);
+  color: #ebcb8b;
+  background: rgba(235, 203, 139, 0.1);
+  box-shadow: 0 0 8px rgba(235, 203, 139, 0.12);
+}
+
+.nav-cockpit.is-low-power .nav-sleep-pill:hover {
+  border-color: rgba(235, 203, 139, 0.7);
+  background: rgba(235, 203, 139, 0.15);
+}
+
 .nav-cockpit-spark {
   margin-left: auto;
-  width: 54px;
+  width: 36px;
   height: 20px;
   flex-shrink: 0;
   color: #8fbcbb;
