@@ -1413,6 +1413,13 @@ async function scenarioSettings(ctx, options) {
         if (perfTab) {
             await perfTab.click();
             await sleep(500);
+            await page.evaluate(() => {
+                const hidden = document.getElementById('settings-sleep-mode-when-hidden');
+                const idle = document.getElementById('settings-sleep-mode-idle');
+                if (hidden) hidden.checked = true;
+                if (idle) idle.value = '600';
+            });
+            await sleep(100);
             await captureShot(page, 'settings-settings-performance.png', { fullPage: true });
             await captureCloseUp(page, '#settings-modal', 'settings-settings-performance.png', options);
         }
@@ -3177,10 +3184,20 @@ async function scenarioSpawnWizardHfDownload(ctx, options) {
 
     // Ensure the HF download panel is visible in "idle" state.
     await page.evaluate(() => {
+        const prereq = document.getElementById('wizard-binary-prereq');
         const panel = document.getElementById('hf-download-panel');
         const idle = document.getElementById('hf-dlp-idle');
+        const progress = document.getElementById('hf-dlp-progress');
+        const complete = document.getElementById('hf-dlp-complete');
+        if (prereq) {
+            prereq.style.display = 'none';
+        }
         if (panel && idle) {
             panel.style.display = 'block';
+            idle.style.display = 'block';
+            if (progress) progress.style.display = 'none';
+            if (complete) complete.style.display = 'none';
+            panel.scrollIntoView({ behavior: 'instant', block: 'center' });
         }
     });
     await sleep(400);
@@ -3191,7 +3208,9 @@ async function scenarioSpawnWizardHfDownload(ctx, options) {
     // 2) Simulate a progress state for a second shot.
     await page.evaluate(() => {
         const panel = document.getElementById('hf-download-panel');
+        const idle = document.getElementById('hf-dlp-idle');
         const progress = document.getElementById('hf-dlp-progress');
+        const complete = document.getElementById('hf-dlp-complete');
         const bar = document.getElementById('hf-dlp-bar');
         const pct = document.getElementById('hf-dlp-progress-pct');
         const fileEl = document.getElementById('hf-dlp-progress-file');
@@ -3199,11 +3218,14 @@ async function scenarioSpawnWizardHfDownload(ctx, options) {
 
         if (panel && progress) {
             panel.style.display = 'block';
+            if (idle) idle.style.display = 'none';
             progress.style.display = 'block';
+            if (complete) complete.style.display = 'none';
             if (bar) bar.style.width = '64%';
             if (pct) pct.textContent = '64%';
             if (fileEl) fileEl.textContent = 'Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf';
             if (stats) stats.textContent = '3.18 GB / 4.92 GB · 98 MiB/s · 17m left';
+            panel.scrollIntoView({ behavior: 'instant', block: 'center' });
         }
     });
     await sleep(400);
