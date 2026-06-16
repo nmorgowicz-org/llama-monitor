@@ -977,6 +977,10 @@ async fn handle_register_ca(
 }
 
 pub async fn latest_release_info() -> Result<LatestReleaseInfo> {
+    if std::env::var("LLAMA_SKIP_RELEASE_CHECK").is_ok() {
+        anyhow::bail!("release check disabled (LLAMA_SKIP_RELEASE_CHECK)");
+    }
+
     let cached = LATEST_RELEASE_CACHE.with(|cache| {
         let now = Instant::now();
         let cached = cache.try_lock().ok()?;
