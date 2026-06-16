@@ -526,7 +526,8 @@ Ownership summary for the visible Settings surfaces:
 |---------|-------|-------------|
 | **Settings → Chat** guided-generation toggles, sidebar width, prompt templates | Shared workspace settings | `GET/PUT /api/settings` |
 | **Settings → Performance** refresh interval | Shared workspace settings | `GET/PUT /api/settings` |
-| **Settings → Model profile / GPU / Models / Appearance** explanatory cards | Runtime/configuration handoff only | No direct save path in Settings |
+| **Settings → Model profile / GPU / Models** explanatory cards | Runtime/configuration handoff only | No direct save path in Settings |
+| **Settings → Appearance** palette picker, color mode, chat style, font size, timestamps, message width | Device-local appearance | browser `localStorage` (`llama-monitor-preferences`) |
 | **Settings → Advanced → Open Runtime Configuration** | Runtime configuration modal | `GET/PUT /api/settings` for config-backed fields |
 | **User → Preferences** theme, spacing, chat style, font scale | Device-local preference | browser `localStorage` |
 | **User → Preferences** enter-to-send | Shared workflow preference | `GET/PUT /api/settings` |
@@ -541,7 +542,7 @@ This modal owns the runtime-specific controls:
 - **GPU Environment**: local ROCm architecture, local GPU device list, local ROCm path
 - **Remote Agent**: agent URL/token, SSH target, optional SSH autostart, guided SSH setup, install/start/update/remove actions
 
-Device-local appearance choices such as theme, spacing, chat style, and font scale remain in **User → Preferences** rather than shared workspace settings.
+Device-local appearance choices (palette, theme, spacing, chat style, font scale) are split across **Settings → Appearance** (the primary surface) and the legacy **User → Preferences** modal, both persisting to `localStorage`. Neither is shared workspace state.
 
 The endpoint you attach to is still chosen from the main session/setup flow. Configuration does not replace the attach/spawn session controls.
 

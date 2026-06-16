@@ -64,6 +64,10 @@ A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and direct
 
 ![Director Options](docs/screenshots/guided-gen-director-options.png)
 
+### Appearance & Theming
+
+Four accent palettes (Carbon Mint, Cyber Rose, Solar Violet, Lava Core) pair with dark and light modes for 8 total combinations. Switch palettes from **Settings → Appearance** — cards, sparklines, charts, and glows all update instantly. Choice is saved per device.
+
 ### TLS, ACME & mTLS
 
 Built-in TLS with ACME (Let's Encrypt) and mTLS for remote agents. Choose No HTTPS, Self-Signed, Bring Your Own Key, or fully automated ACME with DNS-01 and renewal.

@@ -33,9 +33,12 @@ When implementing a new feature or UI change:
 5) For modals and forms:
    - Match .modal, .modal-field, .guided-action-btn, and input styles.
 
-6) For dark/light themes:
-   - Provide [data-theme="light"] overrides for new themed elements.
+6) For dark/light themes and accent palettes:
+   - Provide `[data-theme="light"]` overrides for new themed elements.
    - Keep glassmorphism and glow, but soften for light theme.
+   - Use `--color-accent` (not a hardcoded color) for any interactive highlight, border glow, or fill.
+   - For translucent accent fills use `--acc-05` through `--acc-60` (not hardcoded `rgba()`).
+   - Both `data-theme` and `data-palette` are set on `<html>`; your CSS needs no JS to respond.
 
 7) For motion:
    - Add @media (prefers-reduced-motion: reduce) for animations and hover transforms.
@@ -47,15 +50,36 @@ When implementing a new feature or UI change:
 - A small number of hardcoded values still exist (e.g., special state colors, contrast tweaks). Avoid adding new ones.
 
 ### Color tokens
-- Primary: --color-primary (#6366f1), --color-primary-light (#818cf8)
-- Semantic: --color-success (#10b981), --color-warning (#f59e0b), --color-error (#f43f5e), --color-info (#06b6d4)
-- Text: --color-text-primary, --color-text-secondary, --color-text-muted, --color-text-inverse
-- Grays: --color-gray-1, --color-gray-2, --color-gray-3
+
+**Accent palette system** — `tokens.css` defines a single `--color-accent` master token that drives everything interactive. `--color-primary` is an alias (`var(--color-accent)`), so all existing CSS using `--color-primary` follows palette changes automatically.
+
+Four palettes are available via `data-palette` on `<html>` (default Carbon Mint has no attribute set):
+
+| Palette | `data-palette` value | Default accent |
+|---------|----------------------|----------------|
+| Carbon Mint | *(no attribute)* | `#2dd4bf` |
+| Cyber Rose | `cyber-rose` | `#f472b6` |
+| Solar Violet | `solar-violet` | `#a78bfa` |
+| Lava Core | `lava-core` | `#ef4444` |
+
+Each palette block also defines `--color-accent-deep` and `--color-accent-light` for gradient use, plus per-palette `--surface-card-ambient-a/b`, `--surface-card-glow`, and `--surface-card-line` so cards shift ambient hue with the accent.
+
+**Alpha step tokens** — derived via `color-mix()` so they follow the active palette automatically:
+- `--acc-05` through `--acc-60` (05, 08, 10, 12, 15, 20, 25, 30, 40, 50, 60)
+- Never write `rgba(accent-color, 0.N)` directly — pick the nearest `--acc-N` token.
+
+**Hardware metric channel colors** (fixed, not palette-following):
+- `--metric-load` `#34d399` · `--metric-power` `var(--color-accent)` · `--metric-memory` `#22d3ee` · `--metric-clock` `#60a5fa`
+
+**Other color tokens:**
+- Semantic: `--color-success` (#10b981), `--color-warning` (#f59e0b), `--color-error` (#f43f5e), `--color-info` (#06b6d4)
+- Text: `--color-text-primary`, `--color-text-secondary`, `--color-text-muted`, `--color-text-inverse`
+- Grays: `--color-gray-1`, `--color-gray-2`, `--color-gray-3`
 
 ### Surface tokens
-- --color-bg, --color-bg-surface, --color-bg-elevated, --color-bg-floating
-- --surface-card-base, --surface-card-elevated, --surface-card-overlay, --surface-card-overlay-strong
-- --surface-card-ambient-a/b, --surface-card-glow, --surface-card-line, --surface-card-line-strong
+- `--color-bg`, `--color-bg-surface`, `--color-bg-elevated`, `--color-bg-floating`
+- `--surface-card-base`, `--surface-card-elevated`, `--surface-card-overlay`, `--surface-card-overlay-strong`
+- `--surface-card-ambient-a/b`, `--surface-card-glow`, `--surface-card-line`, `--surface-card-line-strong` (vary per palette)
 
 ### Typography tokens
 - --font-body: 'Inter' stack
@@ -325,7 +349,11 @@ Example:
 ### Sparklines
 - Gradient fills with smooth curves.
 - Subtle grid, sheen animation, current-dot glow.
-- Use semantic colors: teal/blue for prompt, green for generation.
+- Read chart colors from CSS vars at render-time — never hardcode:
+  ```js
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--color-accent').trim();
+  ```
+  This means sparklines automatically reflect the active palette on every WebSocket update — no additional event wiring needed.
 
 ### Hardware cards
 - .widget-hardware: same glassmorphism base.
