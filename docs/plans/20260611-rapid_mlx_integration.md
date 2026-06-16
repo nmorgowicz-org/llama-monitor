@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Created | 2026-06-11 |
-| Last validated | 2026-06-13 |
+| Last validated | 2026-06-16 |
 | Status | Source-of-truth implementation specification |
 | Target base | `main` after PR #215 merges as-is |
 | Product scope | Local model launch, lifecycle, chat compatibility, monitoring, presets, updates, and UX |
@@ -275,9 +275,13 @@ the same components and validation. The flow becomes:
 2. **Model**
    - llama.cpp retains GGUF, Hugging Face file selection, multimodal projection, and
      quantization flows from PR #215.
-   - Rapid-MLX accepts an alias, Hugging Face repository, or local MLX model
-     directory.
-   - The UI must not ask a Rapid-MLX user to select a GGUF file or `mmproj`.
+   - Rapid-MLX accepts:
+     - an alias
+     - Hugging Face repository
+     - local MLX model directory
+     - local `.gguf` file (converted on-the-fly via gguf2mlx)
+   - The UI must not ask a Rapid-MLX user to select a GGUF file or `mmproj` in a
+     llama.cpp-specific way; the GGUF option is explicitly supported for conversion.
 3. **Runtime**
    - Display detected runtime, source, version, compatibility, and required extras.
    - Offer install, repair, version selection, and upgrade actions inline.
@@ -375,7 +379,7 @@ path and, where safe, package metadata.
 Managed installations are side-by-side and independently selectable:
 
 ```text
-<config-dir>/runtimes/rapid-mlx/
+~/.config/llama-monitor/runtimes/rapid-mlx/
   current.json
   releases.json
   <version>/
@@ -921,18 +925,44 @@ main UI depend on arbitrary JSON.
 
 ## Model Discovery and Validation
 
-Rapid-MLX model sources are not GGUF files.
+Rapid-MLX natively expects MLX-format models:
 
-### Local directory
+- weights in safetensors (e.g. weights.00.safetensors / model.safetensors)
+- config.json
+- tokenizer files
+
+This integration adds optional GGUF support via a conversion step so users can
+re-use their existing GGUFs with Rapid-MLX instead of re-downloading MLX versions.
+
+### MLX local directory
 
 Validate:
 
 - path exists and is a directory;
 - readable model metadata/config files are present;
-- no GGUF-only validation is applied;
 - validation errors name the missing requirement;
 - launch still defers final architecture support to Rapid-MLX and reports its
   redacted error accurately.
+
+### GGUF local file (for Rapid-MLX)
+
+When the user selects a `.gguf` file under Rapid-MLX, treat it as "GGUF to be
+converted to MLX via gguf2mlx" instead of rejecting it.
+
+Behavior:
+
+- Treat the GGUF as candidate source for Rapid-MLX.
+- Before launch, verify:
+  - gguf2mlx tool is installed and working;
+  - a corresponding MLX model directory does not already exist.
+- If no cached MLX directory exists:
+  - run gguf2mlx to produce an MLX-format directory.
+  - cache this MLX directory in a stable location (see "GGUF to MLX conversion").
+- Use the cached MLX directory as the actual model input to Rapid-MLX.
+- Display the conversion status and result in logs and diagnostics.
+- If conversion fails or the architecture is unsupported:
+  - show a clear explanation (no silent GGUF rejection);
+  - allow the user to fallback to llama.cpp with the same GGUF.
 
 ### Hugging Face
 
@@ -966,6 +996,121 @@ Do not reuse the GGUF VRAM estimator for MLX models. Initial Rapid-MLX UX uses:
 
 A future MLX estimator requires a separate documented formula and fixtures.
 
+## GGUF to MLX Conversion (via gguf2mlx)
+
+This is explicitly in-scope (previously deferred). It is a best-effort convenience
+layer that lets users launch Rapid-MLX from an existing GGUF without manually
+converting or re-downloading.
+
+### Role
+
+- Provide a simple UX path: user selects a local GGUF under Rapid-MLX → system
+  converts it to MLX format behind the scenes → Rapid-MLX launches from the MLX
+  directory.
+- This is NOT a general-purpose model compiler; we delegate to gguf2mlx and accept
+  its limitations.
+- llama.cpp remains the authoritative GGUF runner. If conversion fails, the user
+  should fall back there seamlessly.
+
+### Tool
+
+Use:
+
+- https://github.com/barrontang/gguf2mlx
+- Python-based; designed for exactly this conversion (GGUF → MLX safetensors + config).
+
+Integration expectations:
+
+- Installed in a controlled Python environment (managed venv) or detected on PATH.
+- Version is not pinned, but we assume its public CLI interface is stable enough:
+  - input: path to GGUF
+  - output: directory with MLX-format files
+- Treat unexpected errors as "conversion not possible" rather than a hard crash.
+
+### Storage layout
+
+Cached MLX models derived from GGUFs live under:
+~/.config/llama-monitor/models/rapid-mlx/converted/<gguf-base-name>/
+Example:
+Source GGUF:
+  ~/.config/llama-monitor/models/Qwen3.6-27B-MTP-Q5_K_S.gguf
+Converted MLX model:
+  ~/.config/llama-monitor/models/rapid-mlx/converted/Qwen3.6-27B-MTP-Q5_K_S/
+    model-00001-of-00002.safetensors
+    model-00002-of-00002.safetensors
+    model.safetensors.index.json
+    config.json
+    tokenizer.json
+    tokenizer_config.json
+    special_tokens_map.json
+    vocab.json
+    .source_gguf_path
+    .source_gguf_sha256
+Rules:
+- Use the GGUF filename without extension as the directory name.
+- Never modify the original GGUF.
+- If the source GGUF changes (new quant, updated file), create a new folder whose
+  name is derived from that new filename; do not reuse or overwrite the old one.
+- Allow the user to clean these via a "Manage converted models" area in Settings.
+
+### UX behavior
+
+In the spawn wizard:
+
+- For Rapid-MLX engine:
+  - Allow:
+    - MLX directory
+    - Hugging Face repo
+    - alias
+    - local `.gguf` file (conversion path)
+- When a GGUF is selected:
+  - Show a short label: "Will convert this GGUF to MLX for Rapid-MLX."
+  - If gguf2mlx is missing:
+    - Offer to install it as part of the Rapid-MLX setup.
+  - During launch:
+    - Perform the conversion (or confirm existing cache).
+    - Stream progress to logs and UI.
+    - On success: use cached MLX directory as model path.
+    - On failure:
+      - show clear, non-technical message (e.g. "GGUF → MLX conversion failed;
+        try llama.cpp instead or select a different model").
+      - keep the GGUF usable via llama.cpp in the same session if needed.
+
+### Constraints and notes
+
+- MTP heads and speculative decoding specifics:
+  - Current MLX / Rapid-MLX do not natively support the MTP-style speculative
+    heads grafted into many GGUF builds.
+  - A converted MLX model will behave as the base architecture only (no MTP).
+  - UI must not advertise MTP / speculative decoding for that model under MLX
+    unless Rapid-MLX explicitly proves capability at runtime.
+- Architecture support:
+  - gguf2mlx and Rapid-MLX support many mainstream families (LLaMA, Qwen, Mistral,
+    Gemma, Mixtral, etc.), but not every exotic architecture.
+  - If conversion fails due to unsupported arch, attribute it clearly:
+    "Model architecture not yet supported for MLX conversion."
+- Performance:
+  - MLX inference may be faster than GGUF on Apple Silicon for many models, but
+    the absence of MTP can affect end-to-end behavior vs llama.cpp for
+    speculative builds.
+  - This is informational; the UI can provide a short note on the MLX engine card
+    but must not block usage.
+
+### Implementation notes
+
+Key places this affects:
+
+- Spawn wizard model input:
+  - Accept `.gguf` for Rapid-MLX → interpret as "convert then serve."
+- Rapid-MLX adapter:
+  - On `serve <path>`:
+    - if path is MLX dir: use it directly.
+    - if path is `.gguf`:
+      - run conversion if needed, then use resulting MLX dir.
+- Logging and diagnostics:
+  - Include "converted from GGUF" label for those models.
+  - Include conversion step in redacted process diagnostics.
+
 ## API Surface
 
 Implement these exact backend-neutral operations:
@@ -998,6 +1143,249 @@ Progress events must be structured:
 - bounded percentage when known;
 - terminal success/failure;
 - redacted diagnostic code.
+
+## Codebase Integration Notes
+
+This section resolves the seven implementation gaps identified during plan review using
+concrete patterns from the existing codebase. Implementation agents must read these
+before touching any of the affected subsystems.
+
+### Gap 1 — Python interpreter selection
+
+The existing app has no Python detection code. All current managed tools are native
+Rust or pre-compiled binaries. Rapid-MLX introduces the first Python dependency.
+
+Resolution strategy, evaluated in order at install time:
+
+1. `python3` on `PATH` — resolve to absolute path, then check architecture: run
+   `python3 -c "import platform; print(platform.machine())"` without shell
+   (`TokioCommand::new`). Accept only `arm64`; reject `x86_64` (Rosetta Python
+   silently runs under Rosetta and produces non-native MLX code).
+2. `/opt/homebrew/bin/python3` — Homebrew Apple Silicon default. Same arch check.
+3. `/usr/bin/python3` — system Python. Same arch check. Minimum version 3.10.
+
+If no candidate passes, surface a **Needs repair** state with:
+- which Python was found (path) and why it was rejected (wrong arch, too old);
+- a link to `https://brew.sh` as the recommended installation path;
+- a manual-path override field in the runtime card (same pattern as
+  `llama_server_path` in `AppConfig`).
+
+The selected interpreter path is recorded in `metadata.json` alongside the venv
+path so the runtime can be reproduced and probed without re-resolving. Never call
+`python` (without the `3` suffix) — it is absent or aliased to Python 2 on many
+macOS systems.
+
+### Gap 2 — gguf2mlx installation scope
+
+`gguf2mlx` must be installed inside the same managed venv as Rapid-MLX. It is **not**
+a separately managed tool and must not be detected on the system PATH as primary
+mechanism.
+
+Install sequence within `src/inference/rapid_mlx/runtime.rs`:
+
+```text
+1. pip install rapid-mlx[all]    (or rapid-mlx plus selected extras)
+2. pip install gguf2mlx          (always, in same venv)
+3. Probe: venv/bin/gguf2mlx --help  (confirms CLI is functional)
+```
+
+The probe result is stored in `metadata.json` under `extras.gguf2mlx_available:
+bool`. On repair, both `rapid-mlx` and `gguf2mlx` are reinstalled into the new venv.
+
+Rationale: `gguf2mlx` depends on `mlx` and `safetensors` which are already present
+in the Rapid-MLX venv. Installing it there avoids a second Python environment and
+keeps the probe surface small. The `gguf2mlx` executable is at
+`venv/bin/gguf2mlx` — always call it by absolute path, never by bare name.
+
+### Gap 3 — HF download ownership
+
+Two existing HF download patterns in the codebase set the precedent:
+
+**App-managed download** (`src/model_download.rs`): Used when the user picks a GGUF
+file from the model browser. The app streams the file via `hf_hub` crate
+(`ApiBuilder::with_token`) and tracks byte-level progress through
+`Arc<AtomicU64>` counters. This path owns the file on disk.
+
+**Server-delegated download** (`src/llama/server.rs` line 414): When the user
+passes an HF repo to llama.cpp, the app sets `-hf <repo>` on the spawned process
+and llama-server handles the download itself. The app only sees download activity
+through log lines.
+
+For Rapid-MLX, use **server-delegated download**: `rapid-mlx serve <hf-repo-id>`
+initiates its own download via the MLX hub cache (`~/.cache/huggingface`). The app:
+
+- passes the HF token to the subprocess via `cmd.env("HF_TOKEN", token)` (parallel
+  to `hf_load_token()` which is already called in `src/web/api.rs:1941`);
+- captures download progress from the server's stdout/stderr log stream (same
+  `BufReader`/`lines()` path used for llama.cpp log capture);
+- displays a "Downloading model..." status in the readiness phase until
+  `/health/ready` returns 200.
+
+Do **not** use `model_download.rs` for Rapid-MLX HF model downloads. That path is
+for individual GGUF file acquisition and is not designed for repo-level MLX downloads.
+For the "Manage converted models" settings area, display the
+`~/.cache/huggingface/hub/` directory size as informational only; do not manage it.
+
+### Gap 4 — Disk space pre-check before GGUF conversion
+
+No disk space check exists anywhere in the codebase. GGUF→MLX conversion can require
+1.5–3× the GGUF file size as free space (BF16 safetensors are larger than Q4/Q5
+GGUFs). Add a pre-check to `src/inference/rapid_mlx/command.rs` before invoking
+`gguf2mlx`:
+
+```rust
+fn check_conversion_space(gguf_path: &Path, output_parent: &Path) -> Result<()> {
+    let gguf_size = std::fs::metadata(gguf_path)?.len();
+    let estimate = gguf_size * 3;  // conservative 3× for BF16 expansion
+    let available = available_bytes_at(output_parent)?;
+    if available < estimate {
+        anyhow::bail!(
+            "Insufficient disk space for conversion. \
+             Need ~{} GiB free, found ~{} GiB. \
+             Free space at {} or choose a different output location.",
+            estimate / 1_073_741_824,
+            available / 1_073_741_824,
+            output_parent.display(),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn available_bytes_at(path: &Path) -> Result<u64> {
+    use std::ffi::CString;
+    let c = CString::new(path.as_os_str().as_encoded_bytes())?;
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(c.as_ptr(), &mut stat) } != 0 {
+        anyhow::bail!("statvfs failed");
+    }
+    Ok(stat.f_bavail * stat.f_frsize as u64)
+}
+```
+
+The estimate and the platform-specific syscall are the only new patterns; the error
+message follows the existing bail! style in `server.rs`. The pre-check runs after
+the user confirms the conversion in the wizard, before the subprocess is spawned.
+Surface the blocking error in the same validation layer used for mutual-exclusion
+flag checks (Phase 3).
+
+### Gap 5 — Incomplete conversion cleanup
+
+The existing download manager (`src/model_download.rs`, `set_failed()` at line 368)
+renames the partial file to `.part` on failure so it is not mistaken for a complete
+download. Use a parallel sentinel-file pattern for conversions:
+
+**During conversion**: write a `.converting` file inside the output directory
+immediately before spawning `gguf2mlx`. This file contains the source GGUF path and
+conversion start time as JSON.
+
+**On completion**: delete `.converting`. If it is absent the directory is valid.
+
+**On next launch / wizard open**: if the target MLX directory exists and
+`.converting` is present, it was interrupted. Remove the directory, log the cleanup,
+and present the conversion option fresh.
+
+**On startup**: extend the existing `AppState::new()` cleanup (which already calls
+`prune_old_sessions()` and `cleanup_startup_stale_sessions()`) to scan
+`~/.config/llama-monitor/models/rapid-mlx/converted/` for directories containing
+`.converting` and remove them silently. This parallels the session stale-cleanup
+pattern at `state.rs:789`.
+
+Managed runtime **staging** directories follow the same rule: a staging directory
+under `~/.config/llama-monitor/runtimes/rapid-mlx/` that was never atomically
+renamed to its final version path is orphaned. On startup, scan for directories
+matching the staging name pattern and remove them. The atomic rename itself reuses
+the existing pattern (`path.with_extension("json.tmp")` → `fs::rename`), extended
+to directory-level renames which are atomic on the same filesystem.
+
+### Gap 6 — served-model-name for converted GGUFs
+
+In llama.cpp, `ServerConfig.alias: Option<String>` (line 190, `src/llama/server.rs`)
+maps to `--alias <name>` and sets the string returned by `/v1/models`
+as the model `id`. The poller reads this from `json["data"][0]["id"]` and stores it
+as `model_name` in `LlamaMetrics`.
+
+For Rapid-MLX, the equivalent flag is `--served-model-name`. The adapter in
+`src/inference/rapid_mlx/command.rs` must set it whenever the model source is a
+converted GGUF:
+
+```rust
+// Derive display name from the original GGUF filename (without extension).
+// Example: "Qwen3-27B-MTP-Q5_K_S.gguf" → "Qwen3-27B-MTP-Q5_K_S (MLX)"
+let display_name = gguf_path
+    .file_stem()
+    .map(|s| format!("{} (MLX)", s.to_string_lossy()))
+    .unwrap_or_else(|| "converted-model".to_string());
+cmd.arg("--served-model-name").arg(&display_name);
+```
+
+Store `display_name` in `metadata.json` for the converted model entry so the
+dashboard can show it without waiting for `/v1/models` to respond. The
+`(MLX)` suffix visually distinguishes converted models from native MLX checkpoints
+in the dashboard model card and session list.
+
+For HF-sourced and alias-sourced models, the served model name defaults to
+what Rapid-MLX reports in `/health` (`model_name` field) and `/v1/models`. Do not
+override it unless the user explicitly sets one in the preset.
+
+### Gap 7 — Polling interval
+
+The existing llama.cpp poller (`src/llama/poller.rs`) uses `poll_interval` passed
+from `app_config.llama_poll_interval`. That value:
+
+- **Default**: 1 second (`default_llama_poll_interval()` in `state.rs:477`, confirmed
+  by all six test configs in `main.rs` hardcoding `llama_poll_interval: 1`).
+- **Sleep mode**: 15 seconds (`default_sleep_llama_interval_secs()` in `state.rs:309`),
+  applied inside the poller loop when `*state.sleep_mode.borrow()` is true.
+
+The Rapid-MLX poller (`src/inference/rapid_mlx/poller.rs`) must use the same
+`app_config.llama_poll_interval` field and the same sleep-mode override. No new
+configuration field is needed.
+
+Rapid-MLX polling makes up to **three** HTTP calls per cycle (`/health`, `/v1/status`,
+optionally `/v1/cache/stats`). To avoid thundering-herd effects, spread them with
+a 200 ms gap within the same cycle rather than firing all three simultaneously.
+Apply independent per-endpoint timeouts (2 s for `/health`, 3 s for `/v1/status`,
+2 s for `/v1/cache/stats`). A timeout on one endpoint must not cancel the others or
+mark the session unhealthy; only `/health` failure degrades session state.
+
+### Gap 8 — API key secret handling
+
+For llama.cpp, the API key is currently passed as `--api-key <key>` argv (line 728,
+`src/llama/server.rs`), making it visible in process listings. Rapid-MLX supports
+the `RAPID_MLX_API_KEY` environment variable as an alternative, which keeps the key
+out of argv. Use env for Rapid-MLX:
+
+```rust
+if let Some(ref key) = config.api_key {
+    cmd.env("RAPID_MLX_API_KEY", key);
+    // Do NOT also pass --api-key; env var takes precedence and keeps key out of argv.
+}
+```
+
+The secret-store mechanism (`encrypt_value` / `decrypt_value` in `src/config.rs`)
+is already used for API tokens and ACME DNS credentials. Use the same mechanism to
+persist the Rapid-MLX API key in the preset's `rapid_mlx` section. The HF token is
+retrieved via `hf::hf_load_token()` (used at `api.rs:1941, 2432`) and passed to
+the subprocess via `cmd.env("HF_TOKEN", token)` — follow the same call site pattern
+for Rapid-MLX.
+
+### Atomic write conventions
+
+All JSON files in the codebase use a consistent atomic write pattern:
+
+```rust
+let tmp = path.with_extension("json.tmp");
+serde_json::to_writer_pretty(&std::fs::File::create(&tmp)?, &value)?;
+std::fs::rename(&tmp, &path)?;
+```
+
+This pattern is in `save_sessions` (`state.rs:607`), `ModelTags::save`
+(`state.rs:94`), and `save_tls_config` (`config.rs:368`). All new files written by
+the Rapid-MLX runtime manager (`metadata.json`, `current.json`, `releases.json`) must
+use this same pattern. `harden_file_permissions` (`config.rs:18`) must be called on
+`metadata.json` since it may contain the selected Python interpreter path and
+version info (not a secret, but good hygiene matching the encryption-key file).
 
 ## Security
 
@@ -1085,10 +1473,11 @@ Exit criteria:
 4. Extend chat request and stream parsing.
 5. Add attach detection.
 6. Add backend-specific model selection and preset editing.
+7. Integrate GGUF → MLX conversion flow (gguf2mlx) for Rapid-MLX.
 
 Exit criteria:
 
-- a local MLX model, HF repository, and supported alias can be launched;
+- a local MLX model, HF repository, alias, and GGUF (via conversion) can be launched;
 - chat streams, usage, stop, logs, restore, and preset round trips work;
 - secrets do not appear in diagnostics or process display.
 
@@ -1163,7 +1552,12 @@ secret-input, or preset-form infrastructure.
 - readiness transitions and timeout;
 - process exit and stop escalation;
 - request cancellation capability;
-- remote attach detection ambiguity.
+- remote attach detection ambiguity;
+- GGUF → MLX conversion flow:
+  - existence of gguf2mlx tool;
+  - cache layout;
+  - re-use of existing conversion;
+  - failure handling.
 
 ### Frontend tests
 
@@ -1179,7 +1573,8 @@ secret-input, or preset-form infrastructure.
 - grid reflows after card removal;
 - release manager supports notes, install, switch, rollback, and repair states;
 - saved presets round-trip through both wizard editors;
-- protected API-key values are never reflected into normal DOM/API snapshots.
+- protected API-key values are never reflected into normal DOM/API snapshots;
+- GGUF conversion hint shows when appropriate for Rapid-MLX.
 
 ### UI end-to-end tests
 
@@ -1195,6 +1590,7 @@ Add deterministic mocked/fixture-backed coverage for:
 8. live zero queue values.
 9. stale then removed optional telemetry.
 10. llama.cpp regression flow.
+11. GGUF selection under Rapid-MLX triggers conversion path (mocked).
 
 Real Rapid-MLX smoke tests are opt-in and hardware-gated. They must not make generic CI
 depend on Apple Silicon or network model downloads.
@@ -1228,6 +1624,7 @@ The feature is complete only when:
 - partial Rapid-MLX telemetry produces a deliberate smaller layout, not placeholders;
 - platform limitations are explicit and shared code compiles on all targets;
 - secrets are absent from argv, logs, diagnostics, and browser payloads;
+- GGUF → MLX conversion is integrated (where gguf2mlx supports it) as an optional path;
 - source fixtures and compatibility profiles document upstream behavior;
 - reference docs, API docs, tests, screenshot harness, and screenshots are current;
 - all mandatory checks pass.
@@ -1237,7 +1634,6 @@ The feature is complete only when:
 The following are not included unless separately designed:
 
 - launching Rapid-MLX on Linux, Windows, or Intel macOS;
-- converting GGUF models to MLX;
 - a fake shared abstraction for backend flags whose semantics differ;
 - a precise MLX unified-memory estimator without a validated formula;
 - exposing unsafe/experimental Rapid-MLX flags in the standard wizard;
@@ -1256,6 +1652,8 @@ commit being validated in their PR notes or fixture metadata.
   <https://github.com/raullenchai/Rapid-MLX/tree/be5d8bd65d293a3c667510156f62c6f593b54bf6>
 - Package metadata:
   <https://github.com/raullenchai/Rapid-MLX/blob/be5d8bd65d293a3c667510156f62c6f593b54bf6/pyproject.toml>
+- GGUF → MLX converter:
+  <https://github.com/barrontang/gguf2mlx>
 
 Before coding against a newer release, update the compatibility profile and fixtures.
 Update this document only when verified upstream drift changes the product contract or
