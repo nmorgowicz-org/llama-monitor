@@ -395,28 +395,42 @@ function buildPresetChips(p) {
         chips.push({ label: ctxLabel, title: `${ctx.toLocaleString()} tokens` });
     }
 
-    // Draft / speculative chip
-    const spec = p.spec_type;
-    if (spec && spec !== 'none') {
-        chips.push({ label: 'Draft', title: `Speculative decoding: ${spec}` });
+    // Draft / speculative chip:
+    // Only show "DRAFT" when there's an actual draft model or MTP-style spec decoding.
+    // Basic ngram or simple lookahead do NOT warrant a "DRAFT" pill.
+    const spec = (p.spec_type || '').toLowerCase();
+    const draftModel = (p.draft_model_path || p.draft_model || '').trim();
+    const hasMtp = spec.includes('mtp');
+    const isNgram = spec.includes('ngram');
+    const isSimple = spec === 'simple';
+    const isEmpty = !spec || spec === 'none';
+    if (draftModel || hasMtp) {
+        chips.push({ label: 'Draft', title: `Speculative decoding: ${p.spec_type}` });
+    } else if (!isNgram && !isSimple && !isEmpty) {
+        // Unknown/advanced spec type without ngram → still show Draft
+        chips.push({ label: 'Draft', title: `Speculative decoding: ${p.spec_type}` });
     }
 
     return chips.slice(0, 3);
 }
 
-// Click the visual display to open the underlying <select>
+// Click the preset display wrapper to open the underlying <select>
 document.addEventListener('DOMContentLoaded', () => {
-    const visual = document.getElementById('preset-display-visual');
+    const wrapper = document.querySelector('.preset-display-wrapper');
     const sel = document.getElementById('preset-select');
-    if (!visual || !sel) return;
+    if (!wrapper || !sel) return;
 
-    visual.addEventListener('mousedown', (e) => {
-        e.preventDefault();
+    wrapper.addEventListener('click', (e) => {
+        // Don't interfere with child button clicks
+        if (e.target.closest('.preset-inline-actions')) return;
+        e.stopPropagation();
+        // showPicker is the preferred, least intrusive way to open the native menu
         if (typeof sel.showPicker === 'function') {
             sel.showPicker();
         } else {
+            // Fallback: click the select directly so the browser opens its options
             sel.focus();
-            sel.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            sel.click();
         }
     });
 });

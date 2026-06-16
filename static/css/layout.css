@@ -32,7 +32,7 @@
 .control-bar-zone {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 
 .control-bar-divider {
@@ -46,7 +46,7 @@
   margin: 0 6px;
 }
 
-/* Base: pill/glass style for all control-bar buttons */
+/* Base: pill/glass style for all control-bar buttons (compact) */
 .control-bar-zone .btn,
 .btn-spawn-wizard,
 .btn-start,
@@ -55,12 +55,12 @@
 .btn-preset {
   appearance: none;
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   font-weight: 600;
-  padding: 5px 12px;
+  padding: 3px 8px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 3px;
   border: 1px solid var(--border-subtle);
   background:
     radial-gradient(circle at top, rgba(15, 23, 42, 0.97), rgba(15, 23, 42, 0.96)),
@@ -164,10 +164,10 @@
   transform: translateY(-1px);
 }
 
-/* Preset buttons: ghost-style, small */
+/* Preset buttons: ghost-style, compact */
 .btn-preset-ghost {
-  padding: 4px 8px;
-  font-size: 0.68rem;
+  padding: 2px 6px;
+  font-size: 0.62rem;
   border-radius: 999px;
   color: var(--color-text-muted);
   border: 1px solid rgba(148, 163, 184, 0.14);
@@ -177,6 +177,10 @@
   box-shadow:
     0 4px 12px rgba(0, 0, 0, 0.14),
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
 }
 
 .btn-preset-ghost:hover {
