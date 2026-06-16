@@ -424,7 +424,6 @@ pub async fn start_server(
     cmd.arg("-ub").arg(config.ubatch_size.to_string());
     cmd.arg("--no-warmup");
     cmd.arg("--jinja");
-    cmd.arg("--metrics");
     cmd.arg("--webui-mcp-proxy");
     // Disable context-shift so long conversations error clearly rather than silently
     // dropping prompt tokens. Users can extend context or use KV offload instead.
