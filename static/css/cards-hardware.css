@@ -603,9 +603,7 @@
   }
 
   .hw-sparkline circle:last-child {
-    animation: hw-peak-pulse 2s ease-in-out infinite;
-    transform-origin: center;
-    transform-box: fill-box;
+    display: none;
   }
 
   /* Inline sparkline below bar metrics */
@@ -645,27 +643,15 @@
   }
 
   .hw-metric-sparkline .sparkline-current-halo {
-    animation: hw-current-halo 2s ease-in-out infinite;
-    transform-origin: center;
-    transform-box: fill-box;
-    opacity: 0.14;
-    filter: drop-shadow(0 0 10px color-mix(in srgb, currentColor 68%, transparent));
+    display: none;
   }
 
   .hw-metric-sparkline .sparkline-current {
-    fill: rgba(10, 14, 24, 0.9);
-    stroke: currentColor;
-    stroke-width: 1.55;
-    filter: drop-shadow(0 0 5px color-mix(in srgb, currentColor 45%, transparent));
-    animation: hw-current-dot 2s ease-in-out infinite;
-    transform-origin: center;
-    transform-box: fill-box;
+    display: none;
   }
 
   .hw-metric-sparkline .sparkline-current-core {
-    fill: rgba(255, 255, 255, 0.96);
-    opacity: 1;
-    filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.28));
+    display: none;
   }
 
   .hw-metric-sparkline {
@@ -1655,9 +1641,7 @@
   }
 
   .hw-sparkline circle:last-child {
-    animation: hw-peak-pulse 2s ease-in-out infinite;
-    transform-origin: center;
-    transform-box: fill-box;
+    display: none;
   }
 
   /* Sparkline ambient line glow */

@@ -1058,38 +1058,19 @@
 }
 
 .sparkline-current-trace {
-  stroke: currentColor;
-  stroke-width: 2.8;
-  stroke-linecap: round;
-  opacity: 0.36;
-  filter: drop-shadow(0 0 12px currentColor);
-  animation: spark-current-trace 2.2s ease-in-out infinite;
-  transform-origin: center;
+  display: none;
 }
 
 .sparkline-current-halo {
-  fill: currentColor;
-  opacity: 0.14;
-  filter: drop-shadow(0 0 10px color-mix(in srgb, currentColor 68%, transparent));
-  animation: spark-current-halo 2s ease-in-out infinite;
-  transform-origin: center;
-  transform-box: fill-box;
+  display: none;
 }
 
 .sparkline-current {
-  fill: rgba(10, 14, 24, 0.9);
-  stroke: currentColor;
-  stroke-width: 1.65;
-  filter: drop-shadow(0 0 6px color-mix(in srgb, currentColor 45%, transparent));
-  animation: spark-current-dot 2s ease-in-out infinite;
-  transform-origin: center;
-  transform-box: fill-box;
+  display: none;
 }
 
 .sparkline-current-core {
-  fill: rgba(255, 255, 255, 0.96);
-  opacity: 1;
-  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.32));
+  display: none;
 }
 
 .sparkline-grid {

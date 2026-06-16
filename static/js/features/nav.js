@@ -181,6 +181,13 @@ export function refreshTopCockpit() {
     if (stateEl) {
         stateEl.textContent = label;
         stateEl.className = 'metric-live-chip nav-cockpit-state ' + stateClass;
+        if (hasActiveEndpoint) {
+            stateEl.title = isSleeping
+                ? 'Low Power — telemetry minimized, llama-server running. Click to wake.'
+                : 'Click to enter Low Power mode.';
+        } else {
+            stateEl.title = '';
+        }
     }
     cockpit.classList.toggle('is-live', stateClass === 'live');
     cockpit.classList.toggle('is-idle', stateClass !== 'live' && stateClass !== 'sleep');
@@ -310,8 +317,8 @@ export function initNav() {
     const cockpit = document.getElementById('nav-cockpit');
     if (cockpit) {
         cockpit.addEventListener('click', () => {
-            // T-057: toggle sleep/active when in low-power mode; otherwise navigate to server tab
-            if (wsData?.sleep_mode === true) {
+            // T-057: when a server session is active, toggle sleep/active. Otherwise navigate to server tab.
+            if (wsData?.sleep_mode === true || wsData?.active_session_id) {
                 fetch('/api/sleep-mode/toggle', {
                     method: 'POST',
                     headers: { Authorization: window.__API_TOKEN ? `Bearer ${window.__API_TOKEN}` : '' },
