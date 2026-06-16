@@ -295,7 +295,7 @@ fn default_auto_sleep_when_all_hidden() -> bool {
 }
 
 fn default_auto_sleep_idle_secs() -> Option<u64> {
-    Some(600)
+    Some(1800)
 }
 
 fn default_sleep_gpu_interval_secs() -> u64 {

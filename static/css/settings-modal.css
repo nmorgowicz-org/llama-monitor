@@ -291,6 +291,7 @@
   background: linear-gradient(135deg, var(--acc-15), rgba(6, 182, 212, 0.08));
   border-color: var(--acc-25);
   box-shadow: 0 0 16px var(--acc-12), inset 0 0 1px var(--acc-15);
+  padding-left: 20px;
 }
 
 #settings-modal .settings-tab.active::before {
@@ -717,6 +718,51 @@
   outline-offset: 2px;
 }
 
+/* --- 4.2a. Bare inputs in settings-card flex rows (not inside .modal-field) --- */
+/* Specifically targets known inputs outside .modal-field wrappers */
+#settings-extra-dir-input,
+#settings-hf-token,
+#dashboard-auth-username,
+#dashboard-auth-current-password,
+#dashboard-auth-new-password,
+#dashboard-auth-confirm-password {
+  min-height: 42px;
+  padding: 10px 14px;
+  color: var(--color-text-primary);
+  background: rgba(20, 24, 30, 0.6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-base);
+  outline: none;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: 0;
+  transition: border-color 200ms ease, box-shadow 200ms ease, background 200ms ease;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+#settings-extra-dir-input:focus,
+#settings-hf-token:focus,
+#dashboard-auth-username:focus,
+#dashboard-auth-current-password:focus,
+#dashboard-auth-new-password:focus,
+#dashboard-auth-confirm-password:focus {
+  border-color: var(--acc-60);
+  box-shadow:
+    0 0 0 3px var(--acc-12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  background: rgba(20, 24, 30, 0.8);
+}
+
+#settings-extra-dir-input:hover,
+#settings-hf-token:hover,
+#dashboard-auth-username:hover,
+#dashboard-auth-current-password:hover,
+#dashboard-auth-new-password:hover,
+#dashboard-auth-confirm-password:hover {
+  border-color: var(--border-emphasis);
+  background: rgba(25, 30, 38, 0.7);
+}
+
 /* --- 4.3. Help Text Callout --- */
 
 #settings-modal .settings-help {
@@ -962,7 +1008,7 @@
   padding: 10px 24px;
   border: 1px solid transparent;
   border-radius: var(--radius-base);
-  background: var(--gradient-primary);
+  background: linear-gradient(160deg, var(--color-accent-deep) 0%, color-mix(in srgb, var(--color-accent-deep) 55%, var(--color-accent)) 100%);
   color: white;
   font-weight: 700;
   font-size: var(--text-sm);

@@ -338,6 +338,18 @@ export function applySettings(s) {
         btn.classList.toggle('active', btn.dataset.view === ctxView);
     });
 
+    if (s.sleep_mode) {
+        const sleepEnabledEl = document.getElementById('settings-sleep-mode-enabled');
+        const sleepHiddenEl = document.getElementById('settings-sleep-mode-when-hidden');
+        const sleepIdleEl = document.getElementById('settings-sleep-mode-idle');
+        if (sleepEnabledEl) sleepEnabledEl.checked = s.sleep_mode.auto_sleep_idle_secs !== null && s.sleep_mode.auto_sleep_idle_secs !== undefined;
+        if (sleepHiddenEl) sleepHiddenEl.checked = !!s.sleep_mode.auto_sleep_when_all_hidden;
+        if (sleepIdleEl && s.sleep_mode.auto_sleep_idle_secs != null) {
+            const opt = sleepIdleEl.querySelector(`option[value="${s.sleep_mode.auto_sleep_idle_secs}"]`);
+            if (opt) sleepIdleEl.value = String(s.sleep_mode.auto_sleep_idle_secs);
+        }
+    }
+
     notifySettingsApplied();
 }
 
@@ -686,6 +698,7 @@ async function _loadSettingsGpuInfo() {
             }
         }
 
+        el.innerHTML = '';
         if (wrap.firstChild) {
             while (wrap.firstChild) el.appendChild(wrap.firstChild);
         } else {
