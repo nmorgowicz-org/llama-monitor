@@ -20,6 +20,9 @@ a Rapid-MLX server through the same polished product flow used for `llama-server
 This document is the implementation contract. Future agents must validate changing
 upstream facts before coding, but must not reopen settled product or architecture
 decisions without recording a concrete incompatibility and updating this document.
+The expected implementers are AI agents working across multiple sessions. Every
+milestone therefore produces a tested, named contract for the next milestone instead
+of relying on thread-local context or partially wired code.
 
 The integration is not a command substitution inside the current llama.cpp spawn
 path. PR #215 establishes a llama.cpp-specific implementation. Rapid-MLX requires a
@@ -49,6 +52,8 @@ into shared session and UI code.
     through the selected backend.
 12. The final UX must feel like one launcher with multiple engines, not two unrelated
     tools bolted together.
+13. GGUF to MLX conversion is fully in scope. It is implemented as a backend model
+    source resolver, not as wizard-only special casing or downstream spawn logic.
 
 ## Verified Upstream Baseline
 
@@ -707,6 +712,58 @@ defaults can evolve without silently changing a saved preset's intended behavior
 
 Validation must reject mutually exclusive options before spawning.
 
+### Rapid-MLX model source resolver
+
+All Rapid-MLX launch inputs pass through a model-source resolver before command
+construction. This keeps GGUF conversion fully supported without leaking conversion
+branches into the wizard, session supervisor, chat layer, or dashboard.
+
+```text
+RapidMlxModelSource
+  -> validate / convert / reuse / resolve
+  -> ResolvedRapidMlxLaunchModel
+  -> rapid-mlx serve <resolved-model>
+```
+
+`RapidMlxModelSource` is a tagged enum with these variants:
+
+- `MlxDirectory`: local MLX-format directory.
+- `HuggingFaceRepo`: repository ID and optional revision.
+- `Alias`: runtime-provided or user-entered alias.
+- `GgufFile`: local GGUF file that must be converted or matched to a cached
+  conversion before launch.
+
+`ResolvedRapidMlxLaunchModel` records:
+
+- launch argument passed to `rapid-mlx serve`;
+- display name;
+- source kind;
+- original user input;
+- converted-model metadata when applicable;
+- required environment variables, such as `HF_TOKEN`;
+- warnings and remediation hints from validation.
+
+Command construction must consume only `ResolvedRapidMlxLaunchModel`. It must not
+inspect raw GGUF paths, run conversions, choose cache directories, or know wizard
+selection details.
+
+The resolver owns:
+
+- MLX directory validation;
+- HF repo source validation and token handoff metadata;
+- alias validation when a known runtime catalog exists, or free-form alias marking
+  when it does not;
+- GGUF conversion cache lookup;
+- GGUF source hashing;
+- disk-space precheck;
+- conversion subprocess execution;
+- `.converting` sentinel cleanup;
+- conversion diagnostics and user-facing remediation.
+
+The spawn wizard may call resolver validation endpoints to preview states such as
+`ready`, `will_convert`, `needs_runtime`, `needs_gguf2mlx`, `insufficient_disk`,
+or `unsupported_conversion`. The wizard must not duplicate resolver rules.
+
 ## Launch and Process Flow
 
 ### Spawn request
@@ -998,15 +1055,16 @@ A future MLX estimator requires a separate documented formula and fixtures.
 
 ## GGUF to MLX Conversion (via gguf2mlx)
 
-This is explicitly in-scope (previously deferred). It is a best-effort convenience
-layer that lets users launch Rapid-MLX from an existing GGUF without manually
-converting or re-downloading.
+This is explicitly in-scope. It is a backend model-source resolution capability that
+lets users launch Rapid-MLX from an existing GGUF without manually converting or
+re-downloading. It must be implemented below the UI as part of the Rapid-MLX resolver,
+then surfaced by the wizard and preset editor.
 
 ### Role
 
-- Provide a simple UX path: user selects a local GGUF under Rapid-MLX → system
-  converts it to MLX format behind the scenes → Rapid-MLX launches from the MLX
-  directory.
+- Provide a simple UX path: user selects a local GGUF under Rapid-MLX → resolver
+  converts it to MLX format behind the scenes or reuses a verified cached conversion
+  → Rapid-MLX launches from the resolved MLX directory.
 - This is NOT a general-purpose model compiler; we delegate to gguf2mlx and accept
   its limitations.
 - llama.cpp remains the authoritative GGUF runner. If conversion fails, the user
@@ -1021,7 +1079,9 @@ Use:
 
 Integration expectations:
 
-- Installed in a controlled Python environment (managed venv) or detected on PATH.
+- Installed in the same controlled Python environment as Rapid-MLX for managed
+  runtimes. External runtimes may report conversion unavailable unless an explicitly
+  configured converter path passes the same probe.
 - Version is not pinned, but we assume its public CLI interface is stable enough:
   - input: path to GGUF
   - output: directory with MLX-format files
@@ -1100,13 +1160,17 @@ In the spawn wizard:
 
 Key places this affects:
 
+- Rapid-MLX model source resolver:
+  - owns all validation, cache lookup, conversion, cleanup, and diagnostics.
 - Spawn wizard model input:
-  - Accept `.gguf` for Rapid-MLX → interpret as "convert then serve."
+  - Accept `.gguf` for Rapid-MLX → call resolver preview and display the returned
+    state.
 - Rapid-MLX adapter:
   - On `serve <path>`:
     - if path is MLX dir: use it directly.
     - if path is `.gguf`:
-      - run conversion if needed, then use resulting MLX dir.
+      - this should no longer happen at command-construction time. The adapter
+        receives the already resolved MLX directory.
 - Logging and diagnostics:
   - Include "converted from GGUF" label for those models.
   - Include conversion step in redacted process diagnostics.
@@ -1267,7 +1331,7 @@ The estimate and the platform-specific syscall are the only new patterns; the er
 message follows the existing bail! style in `server.rs`. The pre-check runs after
 the user confirms the conversion in the wizard, before the subprocess is spawned.
 Surface the blocking error in the same validation layer used for mutual-exclusion
-flag checks (Phase 3).
+flag checks in Milestone 4.
 
 ### Gap 5 — Incomplete conversion cleanup
 
@@ -1420,84 +1484,203 @@ when affected files include platform guards or shared dependencies.
 
 ## Implementation Sequence
 
-### Phase 0: Baseline and fixtures
+This work is expected to land on one feature branch, but it must be built as
+contract-complete milestones. A milestone may contain several local fixups while an
+agent is working, but the durable branch history should describe meaningful layers,
+not every prompt turn. Do not begin the next milestone with known failing tests from
+the previous milestone.
+
+### Milestone 0: Baseline contracts and fixtures
 
 1. Merge/rebase onto PR #215's final mainline result.
 2. Capture Rapid-MLX CLI help and endpoint fixtures for the current stable release.
-3. Add the first compatibility profile using the reviewed commit plus current stable.
-4. Add fixture tests proving tolerant status, health, readiness, cache, models, and
-   streaming parsing.
-5. Record any upstream drift in this document before implementation relies on it.
+3. Capture `gguf2mlx --help`, successful conversion metadata when practical, and at
+   least one conversion failure fixture.
+4. Add the first compatibility profile using the reviewed commit plus current stable.
+5. Add fixture tests proving tolerant status, health, readiness, cache, models,
+   streaming, and conversion-diagnostic parsing.
+6. Record any upstream drift in this document before implementation relies on it.
 
 Exit criteria:
 
 - every required upstream claim has a source or fixture;
-- no implementation depends on an undocumented guessed field.
+- no implementation depends on an undocumented guessed field;
+- parser tests can run without a live Rapid-MLX install.
 
-### Phase 1: Backend-neutral domain
+### Milestone 1: Backend identity without behavior change
 
 1. Add `InferenceBackend`.
-2. Add session and preset schema migration.
-3. Introduce typed spawn configuration.
-4. Extract shared supervision without changing llama.cpp behavior.
-5. Route llama.cpp through enum dispatch.
-6. Add regression tests for PR #215 launch, restore, preset, stop, logs, and polling.
+2. Add `backend` to session modes with missing values defaulting to `llama_cpp`.
+3. Add preset schema migration that reads legacy flat presets and converts them to
+   the new internal shape.
+4. Introduce typed spawn configuration while still accepting legacy flat spawn
+   payloads.
+5. Add fixtures for old sessions, old presets, tagged new presets, unknown future
+   fields, and legacy spawn payloads.
 
 Exit criteria:
 
 - all existing llama.cpp tests pass;
 - old persisted data loads as llama.cpp;
-- the UI is behaviorally unchanged for llama.cpp.
+- old spawn payloads still launch llama.cpp;
+- saved presets write the new schema only after the user saves or edits them.
 
-### Phase 2: Rapid-MLX runtime management
+### Milestone 2: Shared supervisor boundary
 
-1. Add platform detection.
-2. Add explicit, managed, and PATH runtime discovery.
-3. Add live compatibility and feature probes.
-4. Add GitHub release metadata and cache.
-5. Add side-by-side managed installation, selection, rollback, deletion, and repair.
-6. Add external upgrade support.
-7. Add setup and Settings version-manager UI.
-
-Exit criteria:
-
-- install, upgrade, switch, rollback, repair, and diagnostics work;
-- a failed install cannot damage the selected runtime;
-- no version is treated as uniquely supported.
-
-### Phase 3: Spawn and chat
-
-1. Implement Rapid-MLX command construction and validation.
-2. Implement readiness and lifecycle handling.
-3. Add backend-native cancellation.
-4. Extend chat request and stream parsing.
-5. Add attach detection.
-6. Add backend-specific model selection and preset editing.
-7. Integrate GGUF → MLX conversion flow (gguf2mlx) for Rapid-MLX.
+1. Extract shared process lifecycle, stdout/stderr streaming, exit watching, stop
+   escalation, and redacted command summaries.
+2. Route llama.cpp through enum dispatch and the shared supervisor.
+3. Keep llama.cpp command construction and endpoint polling behavior unchanged.
+4. Rename newly shared state around "inference process" where practical, but avoid a
+   broad state refactor that does not help Rapid-MLX.
+5. Add regression tests for PR #215 launch, restore, preset, stop, logs, readiness,
+   and polling.
 
 Exit criteria:
 
-- a local MLX model, HF repository, alias, and GGUF (via conversion) can be launched;
-- chat streams, usage, stop, logs, restore, and preset round trips work;
-- secrets do not appear in diagnostics or process display.
+- the UI is behaviorally unchanged for llama.cpp;
+- no Rapid-MLX branches exist inside llama.cpp command construction;
+- the shared supervisor can spawn a process without knowing backend-specific flags.
 
-### Phase 4: Monitoring and UX
+### Milestone 3: Rapid-MLX runtime, Python, and converter capability
+
+1. Add Apple Silicon macOS platform detection and unavailable states for other
+   platforms.
+2. Add explicit path, managed current, and PATH runtime discovery.
+3. Add Python `arm64` and version detection.
+4. Add managed venv creation.
+5. Install Rapid-MLX and `gguf2mlx` into the same managed venv.
+6. Add core compatibility probes and optional capability probes, including converter
+   availability.
+7. Add cached probe diagnostics.
+8. Add minimal runtime UI/API states: compatible, limited, needs repair,
+   unsupported, not installed, probe failed.
+
+Exit criteria:
+
+- a runtime can be resolved and diagnosed without launching a user model;
+- converter availability is part of the runtime capability result;
+- failed managed install cannot change the selected runtime;
+- shared code still compiles on Linux and Windows.
+
+### Milestone 4: Rapid-MLX model-source resolver
+
+1. Add `RapidMlxModelSource`.
+2. Add `ResolvedRapidMlxLaunchModel`.
+3. Validate MLX local directories.
+4. Resolve HF repository sources and token handoff metadata.
+5. Resolve runtime aliases without scraping unstable decorative output.
+6. Implement GGUF conversion cache layout.
+7. Implement source hashing and cache reuse.
+8. Implement disk-space precheck.
+9. Implement `.converting` sentinel creation, cleanup, and interrupted-conversion
+   recovery.
+10. Implement conversion subprocess execution through the managed converter.
+11. Add resolver preview states for the wizard.
+
+Exit criteria:
+
+- local MLX, HF repo, alias, and GGUF inputs resolve to a launch model or a precise
+  blocked state;
+- conversion can be tested independently of spawn and wizard UI;
+- interrupted conversions cannot be mistaken for complete models;
+- insufficient disk and unsupported conversion failures are clear and nonfatal.
+
+### Milestone 5: Rapid-MLX spawn, readiness, logs, and stop
+
+1. Implement Rapid-MLX command construction from `ResolvedRapidMlxLaunchModel`.
+2. Pass `RAPID_MLX_API_KEY` and `HF_TOKEN` through environment variables only.
+3. Implement launch validation and mutual-exclusion checks.
+4. Implement `/health` and `/health/ready` readiness.
+5. Implement `/v1/models` model identity handling.
+6. Stream logs and conversion diagnostics into the existing log surface.
+7. Implement stop lifecycle through the shared supervisor.
+8. Preserve exact runtime identity in the spawned session.
+
+Exit criteria:
+
+- a local MLX model, HF repository, alias, and converted GGUF can launch;
+- readiness does not rely on TCP-open checks;
+- secrets do not appear in argv, logs, process summaries, API responses, or
+  diagnostics;
+- failed launch removes the reserved session cleanly.
+
+### Milestone 6: Chat compatibility and cancellation
+
+1. Add backend capability matrix for request fields.
+2. Send only Rapid-MLX-supported request controls.
+3. Hide or preserve-with-explanation unsupported saved fields, including `seed`
+   unless proven supported.
+4. Accept streaming `reasoning_content`.
+5. Accept usage in final chunks and dedicated usage chunks.
+6. Add backend-native cancellation when request IDs and capability exist.
+7. Add mocked stream tests.
+
+Exit criteria:
+
+- Rapid-MLX chat streams normally from a spawned or attached compatible endpoint;
+- usage and reasoning content do not create empty or duplicate UI;
+- unsupported request fields are preserved in presets but not transmitted.
+
+### Milestone 7: Engine-aware wizard and preset editor
+
+1. Add engine cards and deterministic recommendation.
+2. Keep recommendation and selected engine as separate state.
+3. Add runtime step with install/repair/probe states.
+4. Add model step for MLX directory, HF repo, alias, and GGUF conversion preview.
+5. Add backend-specific controls and capability-gated visibility.
+6. Keep shared values when changing engines and preserve backend-local values when
+   switching away and back.
+7. Update preset save/edit/restore parity in the spawn wizard and welcome-screen
+   preset editor.
+8. Add review-step summaries for engine, runtime, model source, conversion status,
+   network exposure, and non-default tuning.
+
+Exit criteria:
+
+- explicit engine choice is never overwritten by recommendation changes;
+- GGUF conversion preview and launch states are visible but owned by the resolver;
+- both preset editors round-trip llama.cpp and Rapid-MLX presets;
+- blocked states prevent silent wizard progress.
+
+### Milestone 8: Rapid-MLX polling and dashboard composition
 
 1. Add normalized optional telemetry.
-2. Replace the fixed dashboard with the card registry.
-3. Map Rapid-MLX status/cache fields conservatively.
-4. Add first-sample, stale, and removal behavior.
-5. Complete responsive wizard/setup/dashboard polish.
-6. Add accessibility states and keyboard behavior.
+2. Add Rapid-MLX poller using `/health`, `/v1/status`, optional `/v1/cache/stats`,
+   and `/v1/models`.
+3. Add initial Rapid-MLX cards from real status/cache data.
+4. Introduce the smallest card registry abstraction needed to avoid mounting invalid
+   llama.cpp cards for Rapid-MLX.
+5. Preserve all existing llama.cpp cards.
+6. Add first-sample, stale, and sustained-loss removal behavior.
+7. Add responsive grid checks for smaller Rapid-MLX layouts.
 
 Exit criteria:
 
 - Rapid-MLX shows only cards backed by real data;
 - llama.cpp retains all existing cards;
-- grid layouts remain intentional at all breakpoints;
-- no empty card or dead control is present.
+- numeric zero and absent metric are rendered differently;
+- no hidden dead controls or placeholder cards remain in the DOM.
 
-### Phase 5: Documentation and release validation
+### Milestone 9: Runtime manager polish
+
+1. Add GitHub release metadata and cache.
+2. Add install latest and selected historical release.
+3. Add switch among installed managed releases.
+4. Add rollback.
+5. Add inactive managed release deletion.
+6. Add repair/re-probe.
+7. Add external upgrade where the source supports safe automation.
+8. Add release notes with sanitized markdown rendering.
+
+Exit criteria:
+
+- install, upgrade, switch, rollback, repair, and diagnostics work;
+- a failed install cannot damage the selected runtime;
+- no version is treated as uniquely supported;
+- runtime mutation is blocked while a live session uses the affected runtime.
+
+### Milestone 10: Documentation, screenshots, and release validation
 
 1. Update `docs/reference/spawn-wizard.md`.
 2. Update `docs/reference/dashboard.md`.
@@ -1507,6 +1690,123 @@ Exit criteria:
 6. Add promoted screenshots only after final UI validation.
 7. Update README only if the finished multi-engine launcher meets the README's
    high-impact feature bar.
+8. Run the repository's mandatory pre-PR checks in order.
+
+Exit criteria:
+
+- reference docs describe the finished behavior as if it always existed;
+- screenshot and UI tests match the final selectors and flows;
+- mandatory checks pass locally before the branch is pushed or marked ready.
+
+## AI Agent Handoff Rules
+
+This implementation is expected to be shared by Codex, Claude, and local models.
+Treat this document, checked-in fixtures, and tests as the handoff surface. Do not
+depend on unstated context from a previous agent session.
+
+Hard rules:
+
+- Start each session by identifying the active milestone and reading the relevant
+  fixture/tests before editing.
+- Do not start a later milestone while the previous milestone has known failing
+  tests, unresolved migrations, or TODO-only placeholders in the contract surface.
+- Do not add UI controls before backend capability detection exists.
+- Do not add backend flags before the active compatibility profile or live probe
+  proves the flag exists.
+- Do not duplicate resolver rules in the wizard. The UI previews resolver state; it
+  does not reinterpret model paths.
+- Do not add Rapid-MLX branches inside llama.cpp command construction.
+- Do not use broad cleanup commits to hide milestone work. Keep unrelated refactors
+  out unless they are required by the milestone contract.
+- If upstream Rapid-MLX or `gguf2mlx` behavior differs from this document, update
+  fixtures and this document before wiring product code to the new behavior.
+- If a milestone creates generated files, include them in that milestone's commit.
+
+Preferred durable commit shape:
+
+```text
+refactor(spawn): add inference backend identity and migrations
+refactor(spawn): route llama.cpp through supervised inference launch
+feat(spawn): add Rapid-MLX runtime discovery and probes
+feat(spawn): add managed Rapid-MLX Python environment
+feat(spawn): add Rapid-MLX model source resolver
+feat(spawn): add GGUF to MLX conversion cache
+feat(spawn): launch Rapid-MLX sessions
+feat(chat): support Rapid-MLX streaming and capabilities
+feat(wizard): add engine-aware model and runtime flow
+feat(settings): manage Rapid-MLX runtimes
+feat(dashboard): add Rapid-MLX telemetry cards
+docs(spawn): document Rapid-MLX engine support
+test(ui): cover Rapid-MLX launch and dashboard states
+```
+
+The exact commit list may change, but each kept commit should describe a durable
+layer. Use local fixups and squashing while working instead of committing every
+agent correction as a permanent branch step.
+
+## AGENTS.md Maintenance
+
+`AGENTS.md` should change as part of this implementation, but only for durable repo
+rules that future agents must follow after the feature exists. Do not copy this
+entire plan into `AGENTS.md`; keep detailed Rapid-MLX design and milestone tracking
+in this document. `AGENTS.md` should stay short enough to be operational guidance
+for any future task.
+
+Recommended timing:
+
+- Milestone 1 or 2: add a short "Inference backend architecture" rule once
+  `InferenceBackend`, migrated sessions/presets, and the shared supervisor exist.
+- Milestone 4: add the model-source resolver rule once `RapidMlxModelSource` and
+  `ResolvedRapidMlxLaunchModel` are real contracts.
+- Milestone 8 or 10: add dashboard/capability rules after the card registry and
+  Rapid-MLX telemetry behavior are implemented.
+
+Do not update `AGENTS.md` before the referenced code contracts exist. Premature
+rules make later agents chase aspirational structure that may drift during
+implementation.
+
+Recommended `AGENTS.md` additions:
+
+- Backend boundaries:
+  - `llama.cpp` and Rapid-MLX are named inference backends selected through
+    `InferenceBackend`.
+  - Do not add Rapid-MLX conditionals inside llama.cpp command construction.
+  - Shared process lifecycle belongs in the inference supervisor; backend adapters
+    own command construction, readiness, telemetry parsing, and capability mapping.
+- Preset/session compatibility:
+  - Missing backend fields in old sessions and presets default to `llama_cpp`.
+  - New backend-specific settings must live in the backend section, not in a growing
+    flat preset shape.
+  - Legacy spawn payloads remain accepted until a documented migration removes them.
+- Rapid-MLX model resolution:
+  - All Rapid-MLX model inputs flow through `RapidMlxModelSource` and resolve to
+    `ResolvedRapidMlxLaunchModel` before command construction.
+  - GGUF to MLX conversion is resolver-owned. The wizard may preview resolver state
+    but must not duplicate conversion, hashing, cache, or cleanup rules.
+  - Command builders must never run conversion or inspect raw GGUF paths.
+- Capability-gated UI:
+  - Only mount controls and dashboard cards whose backend capability and metric data
+    exist.
+  - Preserve unsupported saved settings, but do not transmit unsupported request
+    fields to a backend.
+  - A present numeric zero is valid data; an absent metric is not zero.
+- Python/runtime safety:
+  - Invoke Python, pip, Rapid-MLX, `gguf2mlx`, Homebrew, and Git without a shell.
+  - Managed Rapid-MLX runtimes use side-by-side environments and atomic activation;
+    never mutate the active runtime in place.
+  - Rapid-MLX and `gguf2mlx` live in the same managed venv unless an explicit
+    external converter path is configured and probed.
+- Validation additions:
+  - If `src/inference/**`, preset/session schema, or platform guards change, include
+    the Windows cross-compile check before marking the PR ready.
+  - If a new JS module is added for engine/runtime UI, update the JS module baseline.
+  - Real Rapid-MLX smoke tests remain Apple-Silicon and network/hardware gated;
+    generic CI uses fixtures and mocked flows.
+
+When the implementation branch updates `AGENTS.md`, re-check the PR body override
+requirements. `AGENTS.md` changes are usually not release-note entries by themselves,
+but the Rapid-MLX work will almost certainly need a multi-line
+`BEGIN_COMMIT_OVERRIDE` block because it contains multiple user-facing `feat` items.
 
 ## File-Level Worklist
 
