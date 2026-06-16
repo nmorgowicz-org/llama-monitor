@@ -875,7 +875,7 @@ async function useSuggestion(index, mode = 'send') {
         if (!rewritten) throw new Error('rewrite returned empty content');
 
         // Send the rewritten suggestion directly as a user message
-        sendChatWithContent(rewritten);
+        sendChatWithContent(rewritten, { guided: true });
         suggestionsState.expanded = false;
         suggestionsState.rewriteLoading = false;
         updateDropdownUI();

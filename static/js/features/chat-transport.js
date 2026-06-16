@@ -273,7 +273,7 @@ export async function sendSuggestedPrompt(text) {
 
 // ── Send Chat ──────────────────────────────────────────────────────────────────
 
-export async function sendChatWithContent(text) {
+export async function sendChatWithContent(text, options = {}) {
     if (chat.busy || chat.compactionInProgress) return;
     const tab = activeChatTab();
     if (!tab) return;
@@ -291,7 +291,7 @@ export async function sendChatWithContent(text) {
 
     if (typeof renderChatMessages === 'function') renderChatMessages();
 
-    _doSendChat(tab);
+    _doSendChat(tab, options);
 }
 
 // Send a message that is already in tab.messages (for resend/regenerate — no duplicate push)
@@ -393,7 +393,7 @@ export async function sendOneShotGuideReply(instruction) {
             ? null
             : 'Apply the active guidance to the existing conversation and write the next assistant reply now. Continue naturally from the latest exchange. Write only the assistant reply. Do not write dialogue, actions, thoughts, or decisions for the user unless explicitly instructed.';
 
-        const result = await _doSendChat(tab, { transientUserPrompt });
+        const result = await _doSendChat(tab, { transientUserPrompt, guided: true });
         if (result) result.transientUserPrompt = transientUserPrompt;
         return result;
     } finally {
@@ -418,6 +418,7 @@ export async function regenerateQuickGuideReply(tab, msgIdx, quickGuideMeta, var
     try {
         const result = await _doSendChat(tab, {
             transientUserPrompt: quickGuideMeta.transientUserPrompt ?? null,
+            guided: true,
         });
         if (result) result.transientUserPrompt = quickGuideMeta.transientUserPrompt ?? null;
         return result;
@@ -428,7 +429,7 @@ export async function regenerateQuickGuideReply(tab, msgIdx, quickGuideMeta, var
 }
 
 export async function _doSendChat(tab, options = {}) {
-    const { transientUserPrompt = null } = options;
+    const { transientUserPrompt = null, guided = false } = options;
     // Pre-send overflow guard: estimate token usage against current model capacity.
     const capacity = contextCapacityTokens || lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
     if (capacity > 0) {
@@ -607,7 +608,8 @@ export async function _doSendChat(tab, options = {}) {
     let regenRevertReason = '';
 
     try {
-        const chatResp = await fetch('/api/chat', {
+        const chatEndpoint = guided ? '/api/chat/guided' : '/api/chat';
+        const chatResp = await fetch(chatEndpoint, {
             method: 'POST',
             headers: window.authHeaders
                 ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
@@ -622,8 +624,8 @@ export async function _doSendChat(tab, options = {}) {
                 min_p: params.min_p,
                 repeat_penalty: params.repeat_penalty,
                 max_tokens: params.max_tokens || 4096,
-                thinking_budget_tokens: 2048,
-                chat_template_kwargs: { enable_thinking: true },
+                thinking_budget_tokens: guided ? 0 : 2048,
+                chat_template_kwargs: { enable_thinking: guided ? false : true },
             }),
         });
 
