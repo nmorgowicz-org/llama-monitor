@@ -3525,11 +3525,13 @@
                                 <option value="all">All layers on GPU</option>
                                 <option value="manual">Manual</option>
                             </select>
+                            <div class="field-hint">Auto lets llama-server decide based on available VRAM. Manual only if you need to fine-tune offload.</div>
                         </div>
                         <div class="hardware-field" id="spawn-gpu-layers-manual-wrap" style="display:none;">
                             <label for="spawn-gpu-layers-manual">Layers count</label>
                             <input type="number" id="spawn-gpu-layers-manual" min="0" placeholder="e.g. 32">
                         </div>
+                        <!-- Context size spans 5 subgrid rows in col 2 (label, input, hint, quick-picks, padding) -->
                         <div class="hardware-field hardware-field-ctx">
                             <div class="ctx-label-row">
                                 <label for="spawn-context-size">Context size</label>
@@ -3545,6 +3547,18 @@
                                 <button type="button" class="ctx-pick" data-ctx="262144" title="256k — full Qwen training context when available">256k <span class="ctx-pick-tag">Max</span></button>
                                 <button type="button" class="ctx-pick ctx-pick-model-max" id="ctx-pick-model-max" style="display:none;" title="This model's training context limit">— <span class="ctx-pick-tag">Model max</span></button>
                             </div>
+                        </div>
+                        <!-- KV unified: explicit col 1, rows 4–6 — fills dead space beside context quick-picks.
+                             display:flex overrides hardware-field's subgrid so label/select/hint stack tightly
+                             instead of aligning to row heights set by the tall ctx-quick-picks on the right. -->
+                        <div class="hardware-field" style="grid-column:1; grid-row:4/span 3; display:flex; flex-direction:column; gap:6px;">
+                            <label for="spawn-kv-unified" title="Share a single KV cache pool across all parallel slots. Saves memory when running multiple slots; may reduce throughput.">KV unified</label>
+                            <select id="spawn-kv-unified" title="Share a single KV cache pool across all parallel slots. Saves memory when running multiple slots; may reduce throughput.">
+                                <option value="">Default</option>
+                                <option value="true">On</option>
+                                <option value="false">Off</option>
+                            </select>
+                            <div class="field-hint">Shares one KV pool across parallel slots. Leave Default unless you run multiple slots and want to reduce VRAM.</div>
                         </div>
                     </div>
 
@@ -3566,15 +3580,6 @@
                                 <option value="q4_0">q4_0 — saves VRAM</option>
                             </select>
                         </div>
-                         <div class="kv-inline-field">
-                             <label for="spawn-kv-unified" class="kv-inline-label" title="Share a single KV cache pool across all parallel slots. Saves memory when running multiple slots; may reduce throughput.">KV unified</label>
-                             <select id="spawn-kv-unified" title="Share a single KV cache pool across all parallel slots. Saves memory when running multiple slots; may reduce throughput.">
-                                 <option value="">Default</option>
-                                 <option value="true">On</option>
-                                 <option value="false">Off</option>
-                             </select>
-                             <div class="field-hint">Shares one KV pool across parallel slots. Leave Default unless you run multiple slots and want to reduce VRAM.</div>
-                         </div>
                      </div>
 
                     <!-- MTP section (shown for models with MTP heads) -->

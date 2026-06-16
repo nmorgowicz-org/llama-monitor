@@ -3641,8 +3641,7 @@
 
 .hardware-field-ctx {
   gap: 6px;
-  /* The context field has 4 children (label row, input, hint, quick-picks) so it
-   * needs more subgrid rows than the default span 3. */
+  grid-column: 2;
   grid-row: span 5;
 }
 
