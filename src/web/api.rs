@@ -12023,21 +12023,29 @@ fn api_llama_binary_update(
                     return Ok(unauthorized_api_token());
                 }
 
-                // Prevent updating while a local llama-server is running.
-                // Hot-replacing the live binary can corrupt it or leave it
-                // in an inconsistent state.
-                let local_running = *state.local_server_running.lock().unwrap();
-                if local_running {
-                    state.push_log(
-                        "[monitor] llama-binary/update: blocked — llama-server is currently running"
-                            .into(),
-                    );
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": "Cannot update llama-server while it is running. Stop the server first."
-                        })),
-                    ));
+                // Allow updating while running: stop local server if needed, then restart later.
+                let mut previous_config: Option<ServerConfig> = None;
+                {
+                    let local_running = *state.local_server_running.lock().unwrap();
+                    if local_running {
+                        state.push_log(
+                            "[monitor] llama-binary/update: server is running; stopping to allow update"
+                                .into(),
+                        );
+
+                        // Preserve current config for restart
+                        {
+                            let cfg_lock = state.server_config.lock().unwrap();
+                            previous_config = cfg_lock.clone();
+                        }
+
+                        if let Err(e) = crate::llama::server::stop_server(&state).await {
+                            state.push_log(format!(
+                                "[monitor] llama-binary/update: error while stopping server before update: {}",
+                                e
+                            ));
+                        }
+                    }
                 }
 
                 let dest_path = cfg.llama_server_path.clone();
@@ -12335,6 +12343,27 @@ fn api_llama_binary_update(
                     tag,
                     dest_path.display()
                 ));
+
+                // Restart llama-server with previous config if it was running
+                if let Some(rc) = previous_config {
+                    state.push_log(
+                        "[monitor] llama-binary/update: restarting llama-server with previous config".into(),
+                    );
+
+                    match crate::llama::server::start_server(&state, rc, &*cfg).await {
+                        Ok(()) => {
+                            state.push_log(
+                                "[monitor] llama-binary/update: llama-server restarted successfully".into(),
+                            );
+                        }
+                        Err(e) => {
+                            state.push_log(format!(
+                                "[monitor] llama-binary/update: restart failed (binary updated; start manually if needed): {}",
+                                e
+                            ));
+                        }
+                    }
+                }
 
                 // Compute SHA256 of the llama-server binary so users can
                 // verify integrity out-of-band (e.g. `sha256sum llama-server`).
