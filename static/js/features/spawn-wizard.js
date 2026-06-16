@@ -654,6 +654,7 @@ function cacheDom() {
   dom.specDraftPMinInput = document.getElementById('spawn-spec-draft-p-min');
   dom.specDraftTypeKSelect = document.getElementById('spawn-spec-draft-type-k');
   dom.specDraftTypeVSelect = document.getElementById('spawn-spec-draft-type-v');
+  dom.draftKvRow           = document.getElementById('spawn-draft-kv-row');
   dom.fitEnableSelect = document.getElementById('spawn-fit-enable');
   dom.fitTargetWrap   = document.getElementById('spawn-fit-target-wrap');
   dom.cacheRamInput   = document.getElementById('spawn-cache-ram');
@@ -938,10 +939,23 @@ function bindEvents() {
     const isDraftMtp = v && v.includes('draft-mtp');
     const isDraftModel = v === 'draft-model';
 
-    // Show/hide draft-model path input - now visible for both draft-model and MTP modes
-    // (since MTP may require a separate draft model file)
+    // draft-model: show external draft path input (required).
+    // draft-mtp: draft-mtp uses built-in heads — no external model needed, so hide this input.
     if (dom.draftModelWrap) {
-      dom.draftModelWrap.style.display = (isDraftModel || isDraftMtp) ? '' : 'none';
+      dom.draftModelWrap.style.display = isDraftModel ? '' : 'none';
+    }
+    // Draft-MTP KV quant selects: only relevant when MTP is active.
+    if (dom.draftKvRow) {
+      dom.draftKvRow.style.display = isDraftMtp ? '' : 'none';
+    }
+    // Auto-expand the speculative decoding details when a mode is active;
+    // update the collapsed summary badge so users can see the mode at a glance.
+    const specDetails = document.getElementById('spawn-spec-details');
+    if (specDetails && v) specDetails.open = true;
+    const badge = document.getElementById('spawn-spec-summary-badge');
+    if (badge) {
+      badge.textContent = v ? `— ${v}` : '';
+      badge.style.display = v ? '' : 'none';
     }
 
     // For draft-mtp: ensure MTP draft section is visible and auto-populate
@@ -1232,20 +1246,10 @@ function getStepGuardState(step = wizardState.currentStep) {
     if (dom.fitEnableSelect?.value === 'true' && !dom.fitTargetInput?.value.trim()) {
       return error('Enter a fit target in MB or turn Auto-fit context to memory off.', dom.fitTargetInput);
     }
-    // Validate draft model input when shown (for draft-model or MTP modes with external draft)
+    // draft-model requires an external file; draft-mtp uses built-in prediction heads (no file needed).
     const specType = dom.specTypeSelect?.value || '';
-    const showDraftInput = specType === 'draft-model' || specType.includes('draft-mtp');
-    if (showDraftInput && !dom.draftModelInput?.value.trim()) {
-      // If the model has built-in MTP heads and no external draft is selected,
-      // no draft model path is needed.
-      const mtpModelPath = wizardState.model.hfFile || wizardState.model.path || '';
-      const hasBuiltInMtp = wizardState.arch.mtpDepth > 0 || detectMtpFromName(mtpModelPath);
-      const hasAssistantSelected = (wizardState.model.selectedDraftPath || '').trim().length > 0;
-      if (hasBuiltInMtp && !hasAssistantSelected) {
-        // OK — using built-in MTP, no external draft needed
-      } else {
-        return error('Enter a draft model path for speculative decoding.', dom.draftModelInput);
-      }
+    if (specType === 'draft-model' && !dom.draftModelInput?.value.trim()) {
+      return error('Enter a draft model path for speculative decoding.', dom.draftModelInput);
     }
     return info('Review the VRAM estimate and adjust context, KV cache, or auto-size before continuing.');
   }
@@ -6571,6 +6575,7 @@ function renderMtpSection() {
          // If draft model selected and no explicit conflicting choice, default to draft-mtp.
          if (selected && dom.specTypeSelect && !dom.specTypeSelect.value.includes('draft-mtp')) {
            dom.specTypeSelect.value = 'draft-mtp,ngram-mod';
+           dom.specTypeSelect.dispatchEvent(new Event('change'));
          }
 
          // Ensure MTP is enabled for draft-model-based drafts (unless user explicitly disabled).
@@ -6664,6 +6669,7 @@ function renderMtpSection() {
         // Sync spec dropdown to draft-mtp when enabling
         if (checkbox.checked && dom.specTypeSelect && !dom.specTypeSelect.value.includes('draft-mtp')) {
           dom.specTypeSelect.value = 'draft-mtp,ngram-mod';
+          dom.specTypeSelect.dispatchEvent(new Event('change'));
         }
 
         renderMtpSection();

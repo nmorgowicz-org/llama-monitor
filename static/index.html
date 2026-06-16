@@ -3184,6 +3184,7 @@
                 <div class="wizard-main">
                     <div>
                         <div class="wizard-section-title">Setup profile</div>
+                        <div class="wizard-section-desc">Controls how many options appear on the hardware page. You can change this later.</div>
                     </div>
                     <div class="profile-cards">
                         <div class="profile-card" data-profile="quick">
@@ -3460,16 +3461,16 @@
                     <ul>
                         <li><strong>New to this?</strong> Start with a 7–14B Q4_K_M — good quality and fits in most GPUs.</li>
                         <li><strong>Local file</strong> — a <code>.gguf</code> already on your disk.</li>
-                        <li><strong>HuggingFace</strong> — search or paste a repo ID. llama-server streams the file from HF at startup (cached locally after).</li>
+                        <li><strong>HuggingFace</strong> — search or paste a repo ID. The wizard downloads the GGUF to your local models folder before starting.</li>
                         <li><strong>Import</strong> — reuse a model from Ollama or LM Studio.</li>
                     </ul>
                     <div class="wizard-sidebar-title" style="margin-top:14px;">Quant guide</div>
                     <ul>
-                        <li title="Best starting point — good quality, fits 8 GB GPU for 7B models"><strong>Q4_K_M</strong> — best balance ✓ start here</li>
-                        <li title="Better output quality but uses more VRAM"><strong>Q5_K_M</strong> — higher quality, needs more VRAM</li>
-                        <li title="Near-lossless quality but largest size"><strong>Q8_0</strong> — near-lossless, largest</li>
-                        <li title="imatrix quantization — slightly smaller than standard Q4 with similar quality"><strong>IQ4_XS</strong> — imatrix, slightly smaller</li>
-                        <li title="Very aggressively compressed — only suitable for huge Mixture-of-Experts models"><strong>IQ2_*</strong> — large MoE only</li>
+                        <li><strong>Q4_K_M</strong> — best balance; good quality, fits most GPUs ✓ start here</li>
+                        <li><strong>Q5_K_M</strong> — higher quality, needs ~20% more VRAM</li>
+                        <li><strong>Q8_0</strong> — near-lossless, largest file size</li>
+                        <li><strong>IQ4_XS</strong> — imatrix, slightly smaller than Q4_K_M with similar quality</li>
+                        <li><strong>IQ2_*</strong> — very aggressive compression; large MoE models only</li>
                     </ul>
                 </div>
             </div>
@@ -3566,32 +3567,13 @@
                             </select>
                         </div>
                          <div class="kv-inline-field">
-                             <label for="spawn-kv-unified" class="kv-inline-label">KV unified</label>
-                             <select id="spawn-kv-unified" title="Default leaves unified KV selection to llama-server.">
+                             <label for="spawn-kv-unified" class="kv-inline-label" title="Share a single KV cache pool across all parallel slots. Saves memory when running multiple slots; may reduce throughput.">KV unified</label>
+                             <select id="spawn-kv-unified" title="Share a single KV cache pool across all parallel slots. Saves memory when running multiple slots; may reduce throughput.">
                                  <option value="">Default</option>
                                  <option value="true">On</option>
                                  <option value="false">Off</option>
                              </select>
-                         </div>
-                     </div>
-
-                     <!-- Draft-MTP KV cache precision -->
-                     <div class="kv-inline-row">
-                         <div class="kv-inline-field">
-                             <label for="spawn-spec-draft-type-k" class="kv-inline-label">Draft-MTP K quant</label>
-                             <select id="spawn-spec-draft-type-k" title="KV cache quantization for MTP draft tokens.">
-                                 <option value="f16">f16</option>
-                                 <option value="q8_0" selected>q8_0</option>
-                                 <option value="q4_0">q4_0</option>
-                             </select>
-                         </div>
-                         <div class="kv-inline-field">
-                             <label for="spawn-spec-draft-type-v" class="kv-inline-label">Draft-MTP V quant</label>
-                             <select id="spawn-spec-draft-type-v" title="KV cache quantization for MTP draft tokens.">
-                                 <option value="f16">f16</option>
-                                 <option value="q8_0" selected>q8_0</option>
-                                 <option value="q4_0">q4_0</option>
-                             </select>
+                             <div class="field-hint">Shares one KV pool across parallel slots. Leave Default unless you run multiple slots and want to reduce VRAM.</div>
                          </div>
                      </div>
 
@@ -3657,7 +3639,8 @@
 
                     <!-- Advanced-only fields -->
                     <div class="advanced-only" id="spawn-advanced-fields">
-                        <div class="wizard-section-title">Advanced options <span class="info-tip" title="Fine-tune performance and memory. Most users can leave these at defaults.">i</span></div>
+                        <div class="wizard-section-title">Advanced options</div>
+                        <div class="field-hint" style="margin-bottom:10px;">Safe defaults for most setups. Change only if you have a specific reason.</div>
                         <div class="hardware-grid">
                             <div class="hardware-field">
                                 <label for="spawn-batch-size" title="Advanced — affects how fast prompts are processed. Internal flag: -b">Prompt batch size</label>
@@ -3757,14 +3740,14 @@
                             </div>
                         </div>
 
-                        <!-- Performance (Spec + Fit) — kept in Advanced for non-MTP models -->
-                        <details class="wizard-advanced-collapse" style="margin-top:14px;">
-                            <summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--accent-blue);padding:4px 0;">Advanced modes</summary>
+                        <!-- Speculative decoding mode selector -->
+                        <details class="wizard-advanced-collapse" id="spawn-spec-details" style="margin-top:14px;">
+                            <summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:var(--accent-blue);padding:4px 0;">Speculative decoding<span id="spawn-spec-summary-badge" style="display:none;font-weight:400;color:var(--color-text-muted);margin-left:6px;font-size:0.78rem;"></span></summary>
                             <div style="padding-top:6px;">
-                                <div class="field-hint" style="margin-bottom:8px;">For most users, default is enough. These modes are for advanced tuning.</div>
+                                <div class="field-hint" style="margin-bottom:8px;">Predicts tokens ahead and verifies them in one pass — free speed with no quality cost. N-gram works on any model; MTP needs built-in prediction heads.</div>
                                 <div class="hardware-grid" style="margin-bottom:0;">
                                     <div class="hardware-field" style="grid-column: 1/-1;">
-                                         <label for="spawn-spec-type" title="How the model predicts tokens ahead. N-gram works on any model. MTP needs built-in prediction heads and can help or hurt depending on the backend. Draft model needs a second small GGUF file.">Mode</label>
+                                         <label for="spawn-spec-type" title="How the model predicts tokens ahead. N-gram works on any model. MTP needs built-in prediction heads and can help or hurt depending on the backend. Draft model needs a second small GGUF file.">Speculative mode</label>
                                          <select id="spawn-spec-type">
                                              <option value="">None</option>
                                              <optgroup label="N-gram (no extra files)">
@@ -3789,6 +3772,26 @@
                                          </div>
                                     </div>
                                  </div>
+
+                                     <!-- Draft-MTP KV cache precision — only shown when draft-mtp mode is active -->
+                                     <div class="kv-inline-row" id="spawn-draft-kv-row" style="display:none; margin-top:8px;">
+                                         <div class="kv-inline-field">
+                                             <label for="spawn-spec-draft-type-k" class="kv-inline-label">Draft-MTP K quant</label>
+                                             <select id="spawn-spec-draft-type-k" title="KV cache quantization for MTP draft tokens.">
+                                                 <option value="f16">f16</option>
+                                                 <option value="q8_0" selected>q8_0</option>
+                                                 <option value="q4_0">q4_0</option>
+                                             </select>
+                                         </div>
+                                         <div class="kv-inline-field">
+                                             <label for="spawn-spec-draft-type-v" class="kv-inline-label">Draft-MTP V quant</label>
+                                             <select id="spawn-spec-draft-type-v" title="KV cache quantization for MTP draft tokens.">
+                                                 <option value="f16">f16</option>
+                                                 <option value="q8_0" selected>q8_0</option>
+                                                 <option value="q4_0">q4_0</option>
+                                             </select>
+                                         </div>
+                                     </div>
 
                                      <div class="hardware-field" id="spawn-draft-model-wrap" style="display:none; margin-top:8px;">
                                          <label for="spawn-draft-model">Draft model path</label>
@@ -4017,34 +4020,42 @@
                             <div class="sampling-field">
                                 <label for="spawn-temperature">Temperature</label>
                                 <input type="number" id="spawn-temperature" min="0" max="2" step="0.05" placeholder="server default">
+                                <div class="field-hint">Randomness. 0 = deterministic, ~0.7 = balanced, 1+ = creative. Agentic tasks prefer lower.</div>
                             </div>
                             <div class="sampling-field">
                                 <label for="spawn-top-p">Top-P</label>
                                 <input type="number" id="spawn-top-p" min="0" max="1" step="0.05" placeholder="server default">
+                                <div class="field-hint">Keeps only the top tokens whose cumulative probability reaches this value. 0.9 typical.</div>
                             </div>
                             <div class="sampling-field">
                                 <label for="spawn-min-p">Min-P</label>
                                 <input type="number" id="spawn-min-p" min="0" max="1" step="0.01" placeholder="server default">
+                                <div class="field-hint">Drops tokens below this fraction of the top token's probability. 0.05 is a common starting point.</div>
                             </div>
                             <div class="sampling-field">
                                 <label for="spawn-repeat-penalty">Repeat penalty</label>
                                 <input type="number" id="spawn-repeat-penalty" min="0.5" max="2" step="0.05" placeholder="server default">
+                                <div class="field-hint">Penalises recently used tokens. 1.0 = off. 1.1–1.2 reduces loops without harming quality.</div>
                             </div>
                             <div class="sampling-field">
                                 <label for="spawn-presence-penalty" title="Flat penalty added to logit of any token that has appeared. OpenAI-style presence_penalty. Use ~1.5 for EXAONE 4.5, 0 to disable.">Presence penalty</label>
                                 <input type="number" id="spawn-presence-penalty" min="0" max="3" step="0.05" placeholder="0 (disabled)">
+                                <div class="field-hint">Flat penalty for any token already seen. Reduces topic repetition. 0 = off.</div>
                             </div>
                             <div class="sampling-field">
                                 <label for="spawn-top-k">Top-K</label>
                                 <input type="number" id="spawn-top-k" min="0" step="1" placeholder="server default">
+                                <div class="field-hint">Limits candidates to the top K tokens per step. 0 = disabled (no cap).</div>
                             </div>
                             <div class="sampling-field">
                                 <label for="spawn-max-tokens">Max tokens</label>
                                 <input type="number" id="spawn-max-tokens" min="1" step="128" placeholder="server default">
+                                <div class="field-hint">Hard cap on tokens generated per request. Leave blank for no per-request limit.</div>
                             </div>
                             <div class="sampling-field">
                                 <label for="spawn-seed">Seed</label>
                                 <input type="number" id="spawn-seed" min="-1" placeholder="-1 (random)">
+                                <div class="field-hint">-1 = random each run. Set a fixed number for reproducible output.</div>
                             </div>
                         </div>
                         <div class="field-hint" style="margin-top:4px;">Defaults applied to all requests that don't override them. Values come from your selected use-case profile and model family. Leave blank for llama-server built-in defaults.</div>
@@ -4071,14 +4082,17 @@
                                      <option value="on">on (always)</option>
                                      <option value="off">off (disabled)</option>
                                  </select>
+                                 <div class="field-hint">auto lets each API request opt in or out. Use on to always reason; off to skip reasoning entirely.</div>
                              </div>
                              <div class="sampling-field">
                                  <label for="spawn-reasoning-budget" title="Maximum tokens the model can spend on its reasoning steps before answering. Higher = more thorough thinking but slower. -1 = unlimited, 0 = disabled.">Budget (tokens)</label>
                                  <input type="number" id="spawn-reasoning-budget" min="-1" step="1" placeholder="16384">
+                                 <div class="field-hint">Max tokens spent on chain-of-thought before the answer. -1 = unlimited, 0 = off. 8192–16384 typical.</div>
                              </div>
                              <div class="sampling-field">
                                    <label for="spawn-reasoning-budget-message" title="Text that appears after the reasoning block and before the final answer. Use \n for a newline before the answer. Example: \nFinal Answer:">Budget message</label>
                                       <input type="text" id="spawn-reasoning-budget-message" placeholder="\nFinal Answer:">
+                                      <div class="field-hint">Text injected after the reasoning block when the budget is hit. Leave blank unless you need a specific transition phrase.</div>
                              </div>
                         </div>
                     </div>
@@ -4136,6 +4150,7 @@
                             <div class="sampling-field">
                                 <label for="spawn-alias" title="--alias STRING. Model name reported in /v1/models and displayed in API clients. Defaults to the model filename.">Server alias</label>
                                 <input type="text" id="spawn-alias" placeholder="e.g. qwen36-27b">
+                                <div class="field-hint">Name shown in <code>/v1/models</code> and OpenAI-compatible clients. Defaults to the model filename if blank.</div>
                             </div>
                             <div class="sampling-field">
                                 <label for="spawn-api-key">Server API key</label>
@@ -4210,7 +4225,7 @@
                         Start server
                     </button>
                     <div class="spawn-status-area" id="spawn-status-area">
-                        <div class="spawn-status-text" id="spawn-status-text">Ready to spawn.</div>
+                        <div class="spawn-status-text" id="spawn-status-text">Click Start server to launch.</div>
                         <div class="spawn-progress-bar">
                             <div class="spawn-progress-fill" id="spawn-progress-fill"></div>
                         </div>
