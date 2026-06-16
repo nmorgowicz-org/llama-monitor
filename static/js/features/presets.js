@@ -319,10 +319,10 @@ function syncPresetDisplay(sel) {
     const preset = (sessionState.presets || []).find(p => p.id === sel.value);
     if (!preset) return;
 
-    const shortName = buildShortPresetName(preset);
     const fullName = preset.name || (preset.model_path || preset.hf_repo || '').split('/').pop() || '';
+    const displayName = buildShortPresetName(preset, fullName);
 
-    labelEl.textContent = shortName;
+    labelEl.textContent = displayName;
     labelEl.title = fullName;
 
     chipsEl.innerHTML = '';
@@ -336,39 +336,16 @@ function syncPresetDisplay(sel) {
     }
 }
 
-function buildShortPresetName(p) {
-    const raw = p.name || (p.model_path || p.hf_repo || '').split('/').pop() || '';
-    if (!raw) return '';
-
-    let name = raw.trim();
-
-    // Strip meta tokens: distill(ed)?, instruct, sft, full, preview
-    name = name
-        .replace(/[-_]+(distill[ed]?|instruct|sft|full|preview|lite|fast|technical|agentic)[-_\s]*/gi, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-    // Clean leading/trailing separators
-    name = name.replace(/^[-_\s]+|[-_\s]+$/g, '').trim();
-
-    // Quantization suffix: e.g. "- Q8_0", "_Q8_0", "-Q4_K_M"
-    name = name.replace(/\s*[-_]\s*(Q\d+[_-]?[A-Z0-9]+)\s*$/i, '').trim();
-
-    // Context-length suffix: e.g. "-131k", "-262k", "-8192"
-    name = name.replace(/\s*[-_]\s*(\d{2,4}k|\d{4,5})\s*$/i, '').trim();
-
-    // If too short after stripping, use original
-    const trimmed = name.replace(/[-_\s]+/g, ' ').trim();
-    if (trimmed.length < 3) return raw.split('/').pop().trim();
-
-    // Normalize separators
-    const result = trimmed.replace(/[-_\s]+/g, ' ').trim();
-
-    if (result.length > 32) {
-        return result.slice(0, 30).trim() + '\u2026';
+function buildShortPresetName(p, fullName) {
+    const base = fullName || p.name || (p.model_path || p.hf_repo || '').split('/').pop() || '';
+    if (!base) return '';
+    // Minimal normalization: replace underscores with hyphens, collapse multiple hyphens.
+    let name = base.replace(/_/g, '-').replace(/-{2,}/g, '-').trim();
+    // Only soft-truncate if it would overflow the display bar.
+    if (name.length > 38) {
+        name = name.slice(0, 35).trimEnd() + '\u2026';
     }
-
-    return result || raw.split('/').pop().trim();
+    return name;
 }
 
 function buildPresetChips(p) {
