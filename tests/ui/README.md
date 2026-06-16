@@ -77,6 +77,7 @@ node tests/ui/capture.mjs --list-scenarios
 | `sparkline` | Sparkline validation stills and clipped metric captures |
 | `gifs` | Animated inference and GPU/system captures |
 | `smoke` | Startup smoke validation |
+| `navbar` | Top nav bar: idle-dark, low-power active, idle-light (theme toggle + sleep pill) |
 
 ### Common commands
 

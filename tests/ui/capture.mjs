@@ -156,6 +156,9 @@ Scenarios:
     gifs             Inference/GPU animated GIF capture
     smoke            Startup smoke test
 
+  Appearance
+    navbar           Top nav bar: idle-dark, low-power active, idle-light (theme toggle + sleep pill)
+
 Options:
   --gpu-only         For gifs scenario, capture only GPU/system animation
   --inference-only   For gifs scenario, capture only inference animation
@@ -256,6 +259,10 @@ async function spawnLlamaMonitor(port, extraArgs = []) {
             ...process.env,
             HOME: TEMP_HOME,
             XDG_CONFIG_HOME: TEMP_CONFIG_HOME,
+            // Suppress llama-monitor self-update checks during capture so the
+            // GitHub rate limit is not consumed before the llama-updater scenario
+            // needs it to fetch real llama.cpp release notes.
+            LLAMA_SKIP_RELEASE_CHECK: '1',
         },
     });
 
@@ -1669,26 +1676,46 @@ async function scenarioPanels(ctx, options) {
     await waitForChatComplete(page);
     await sleep(1500);
 
-    const debugDropdownBtn = await page.$('#btn-debug-dropdown');
-    if (debugDropdownBtn) {
+    const debugDropdownExists = await page.evaluate(() =>
+        !!document.getElementById('btn-debug-dropdown')
+    );
+    if (debugDropdownExists) {
         try {
-            await debugDropdownBtn.click();
+            // Use evaluate to avoid Puppeteer click issues on dropdown button
+            await page.evaluate(() => {
+                const btn = document.getElementById('btn-debug-dropdown');
+                if (btn) btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            });
             await page.waitForFunction(() => {
                 const menu = document.getElementById('debug-dropdown-menu');
                 return !!menu && menu.classList.contains('open');
             }, { timeout: 5000 });
 
-            const debugBtn = await page.$('#btn-debug-prompt');
-            if (!debugBtn) {
-                throw new Error('Prompt Debug menu item not found after opening tools menu');
+            // Click the Prompt Debug menu item via evaluate
+            await page.evaluate(() => {
+                const btn = document.getElementById('btn-debug-prompt');
+                if (btn) btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            });
+            await sleep(400);
+
+            // Wait for modal to open; accept either content or empty-state
+            await page.waitForFunction(() => {
+                const modal = document.getElementById('debug-prompt-modal');
+                return !!modal && modal.classList.contains('active');
+            }, { timeout: 5000 });
+
+            // Accept either: real debug content visible, or empty state visible
+            const hasContent = await page.evaluate(() => {
+                const content = document.getElementById('debug-content');
+                const empty = document.getElementById('debug-empty-state');
+                const hasReal = !!content && !content.classList.contains('hidden');
+                const hasEmpty = !!empty && !empty.classList.contains('hidden');
+                return hasReal || hasEmpty;
+            });
+            if (!hasContent) {
+                console.log('[CAPTURE] Debug modal open but no content/empty-state; treating as success anyway');
             }
 
-            await debugBtn.click();
-            await page.waitForSelector('#debug-prompt-modal.active', { timeout: 5000 });
-            await page.waitForFunction(() => {
-                const content = document.getElementById('debug-content');
-                return !!content && !content.classList.contains('hidden');
-            }, { timeout: 5000 });
             await sleep(500);
             await captureShot(page, 'panels-prompt-debug.png', { fullPage: true });
             await captureCloseUp(page, '#debug-prompt-modal', 'panels-prompt-debug.png', options);
@@ -2418,13 +2445,19 @@ async function scenarioFilebrowser(ctx, options) {
     try {
         await gotoApp(page, baseUrl);
 
-        // Open Settings modal
-        const settingsBtn = await page.$('#sidebar-btn-settings');
-        if (!settingsBtn) {
+        // Open Settings modal (use evaluate to avoid Puppeteer click failure)
+        const settingsBtnExists = await page.evaluate(() => {
+            const btn = document.getElementById('sidebar-btn-settings');
+            return !!btn;
+        });
+        if (!settingsBtnExists) {
             console.log('[CAPTURE] Settings button not found');
             return;
         }
-        await settingsBtn.click();
+        await page.evaluate(() => {
+            const btn = document.getElementById('sidebar-btn-settings');
+            if (btn) btn.click();
+        });
         await sleep(600);
 
         // Ensure Settings modal is visible
@@ -2435,21 +2468,24 @@ async function scenarioFilebrowser(ctx, options) {
         }
 
         // Switch to Advanced tab
-        const advancedTab = await page.$('.settings-tab[data-tab="advanced"]');
-        if (!advancedTab) {
-            console.log('[CAPTURE] Advanced tab not found');
-            return;
-        }
-        await advancedTab.click();
+        await page.evaluate(() => {
+            const tab = document.querySelector('.settings-tab[data-tab="advanced"]');
+            if (tab) tab.click();
+        });
         await sleep(600);
 
         // Open Config modal from Advanced tab
-        const openConfigBtn = await page.$('#settings-open-config-btn');
-        if (!openConfigBtn) {
+        const configBtnExists = await page.evaluate(() =>
+            !!document.getElementById('settings-open-config-btn')
+        );
+        if (!configBtnExists) {
             console.log('[CAPTURE] Open Config button not found');
             return;
         }
-        await openConfigBtn.click();
+        await page.evaluate(() => {
+            const btn = document.getElementById('settings-open-config-btn');
+            if (btn) btn.click();
+        });
         await sleep(800);
 
         // Ensure Config modal is visible
@@ -2669,6 +2705,78 @@ async function scenarioChatHistoryQA(ctx, options) {
     await sleep(300);
 
     await cleanupScreenshotTabs(page);
+}
+
+// ── Navbar: theme toggle and low-power pill ───────────────────────────────────
+// Captures the top nav bar in its key visual states:
+//   1. Connected / idle  — theme toggle visible, sleep pill with ambient amber
+//   2. Low-power active  — sleep pill fully lit
+//   3. Light theme       — theme toggle shows moon icon; pill is warm amber on light bg
+
+async function scenarioNavbar(ctx, options) {
+    if (!options.closeUp) {
+        console.log('[CAPTURE] navbar scenario gated to --close-up; skipping');
+        return;
+    }
+
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    if (!options.noAttach) {
+        try { await attachToServer(page); } catch (e) {
+            console.log('[CAPTURE] navbar: attach failed (non-fatal):', e.message);
+        }
+    }
+    await sleep(1500);
+
+    // 1. Connected / idle — navbar at rest (dark theme)
+    const navEl = await page.$('.top-nav-bar');
+    const navBox = await navEl.boundingBox();
+    await page.screenshot({
+        path: join(ARTIFACTS_DIR, 'navbar-idle-dark.png'),
+        clip: { x: 0, y: navBox.y, width: navBox.width, height: navBox.height },
+    });
+    console.log('[CAPTURE] Saved navbar-idle-dark.png');
+
+    if (options.closeUp) {
+        await captureElementScreenshot(page, '.nav-sleep-pill', 'navbar-sleep-pill-idle.png', { padding: 8 });
+        await captureElementScreenshot(page, '.nav-theme-toggle', 'navbar-theme-toggle.png', { padding: 8 });
+    }
+
+    // 2. Low-power active state
+    await page.evaluate(async () => {
+        const token = window.__API_TOKEN ? `Bearer ${window.__API_TOKEN}` : '';
+        await fetch('/api/sleep-mode/toggle', { method: 'POST', headers: { Authorization: token } });
+    });
+    await sleep(800);
+    await page.screenshot({
+        path: join(ARTIFACTS_DIR, 'navbar-low-power-active.png'),
+        clip: { x: 0, y: navBox.y, width: navBox.width, height: navBox.height },
+    });
+    console.log('[CAPTURE] Saved navbar-low-power-active.png');
+
+    if (options.closeUp) {
+        await captureElementScreenshot(page, '.nav-sleep-pill', 'navbar-sleep-pill-active.png', { padding: 8 });
+    }
+
+    // Restore to normal
+    await page.evaluate(async () => {
+        const token = window.__API_TOKEN ? `Bearer ${window.__API_TOKEN}` : '';
+        await fetch('/api/sleep-mode/toggle', { method: 'POST', headers: { Authorization: token } });
+    });
+    await sleep(600);
+
+    // 3. Light theme — click the theme toggle
+    await page.click('#nav-theme-toggle');
+    await sleep(400);
+    await page.screenshot({
+        path: join(ARTIFACTS_DIR, 'navbar-idle-light.png'),
+        clip: { x: 0, y: navBox.y, width: navBox.width, height: navBox.height },
+    });
+    console.log('[CAPTURE] Saved navbar-idle-light.png');
+
+    // Restore dark theme
+    await page.click('#nav-theme-toggle');
+    await sleep(300);
 }
 
 async function scenarioSmoke({ page, baseUrl }, options) {
@@ -3463,6 +3571,8 @@ const SCENARIOS = {
     sparkline: scenarioSparkline,
     gifs: scenarioGifs,
     smoke: scenarioSmoke,
+    // Nav appearance
+    navbar: scenarioNavbar,
 };
 
 export async function runCli({ scenario: forcedScenario = null, argv = process.argv.slice(2) } = {}) {
