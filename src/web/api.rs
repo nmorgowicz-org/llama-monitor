@@ -5334,6 +5334,7 @@ pub fn api_routes(
     let put_settings = api_put_settings(state.clone(), app_config.clone());
     let browse = api_browse(state.clone(), app_config.clone());
     let chat = api_chat(state.clone(), app_config.clone());
+    let chat_guided = api_chat_guided(state.clone(), app_config.clone());
     let chat_abort = api_chat_abort(state.clone(), app_config.clone());
     let chat_suggestions = api_chat_suggestions(state.clone(), app_config.clone());
     let generate_keywords = api_generate_keywords(state.clone(), app_config.clone());
@@ -5575,6 +5576,7 @@ pub fn api_routes(
     let analyze_context_notes = api_analyze_context_notes(state.clone(), app_config.clone());
     let chat_routes = browse
         .or(chat)
+        .or(chat_guided)
         .or(chat_abort)
         .or(chat_suggestions)
         .or(generate_keywords)
@@ -7928,6 +7930,264 @@ fn api_chat(
         })
 }
 
+/// Strip inline thinking/reasoning blocks from a content string.
+/// Used by the guided chat handler to ensure no thinking leaks into guided-gen panels.
+fn strip_inline_thinking(input: &str) -> String {
+    let mut out = input.to_string();
+
+    // Strip common XML-style thinking tags and their contents.
+    let tags = ["ANTTHINKING", "THINKING", "REASONING", "THOUGHT"];
+    for tag in &tags {
+        let open_tag = format!("<{}", tag);
+        let close_tag = format!("</{}", tag);
+        let mut next = String::new();
+        let mut buf: &str = &out;
+
+        while let Some(pos) = buf.find(&open_tag) {
+            next.push_str(&buf[..pos]);
+            if let Some(end) = buf[pos..].find(&close_tag) {
+                buf = &buf[pos + end + close_tag.len()..];
+            } else {
+                break;
+            }
+        }
+        next.push_str(buf);
+        out = next;
+    }
+
+    // Strip <think>...</think> style blocks.
+    {
+        let mut open_tag = String::new();
+        open_tag.push('<');
+        open_tag.push_str("think");
+        open_tag.push('>');
+        let mut close_tag = String::new();
+        close_tag.push('<');
+        close_tag.push('/');
+        close_tag.push_str("think");
+        close_tag.push('>');
+
+        let mut next = String::new();
+        let mut buf: &str = &out;
+
+        while let Some(pos) = buf.find(&open_tag) {
+            next.push_str(&buf[..pos]);
+            if let Some(end) = buf[pos..].find(&close_tag) {
+                buf = &buf[pos + end + close_tag.len()..];
+            } else {
+                break;
+            }
+        }
+        next.push_str(buf);
+        out = next;
+    }
+
+    // Remove any orphaned open/close think tags the loop didn't consume.
+    out = out.replace("</think>", "").replace("<think>", "");
+
+    // Normalize: trim each line, collapse consecutive blank lines to one,
+    // but preserve single newlines so structured parsers can split on them.
+    let mut result = String::new();
+    let mut prev_blank = false;
+    for line in out.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !prev_blank && !result.is_empty() {
+                result.push('\n');
+            }
+            prev_blank = true;
+        } else {
+            result.push_str(trimmed);
+            result.push('\n');
+            prev_blank = false;
+        }
+    }
+    result.trim().to_string()
+}
+
+/// Returns true if the text looks like a JSON reasoning/suggestion blob
+/// rather than a simple human-readable suggestion.
+fn is_json_reasoning(text: &str) -> bool {
+    if text.len() < 150 {
+        return false;
+    }
+    let lower = text.to_ascii_lowercase();
+    let has_structures = lower.contains("{") && lower.contains("}");
+    let has_keys = lower.contains("type")
+        && (lower.contains("suggestions")
+            || lower.contains("effect")
+            || lower.contains("detail")
+            || lower.contains("description"));
+    has_structures && has_keys
+}
+
+/// Sanitize content for the guided endpoint:
+/// - Strip thinking tags.
+/// - If the content is a raw JSON suggestions/director blob, replace it with concise bullets
+///   so screenshots and the chat bubble stay clean.
+fn sanitize_guided_content(input: &str) -> String {
+    let cleaned = strip_inline_thinking(input);
+
+    // If it’s a JSON suggestions/director blob, convert to concise bullets.
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&cleaned) {
+        let entries = value
+            .get("suggestions")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .or_else(|| value.as_array().cloned());
+
+        if let Some(items) = entries {
+            let bullets: Vec<String> = items
+                .iter()
+                .filter_map(|e| {
+                    let obj = e.as_object()?;
+                    let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                    let effect = obj.get("effect").and_then(|v| v.as_str()).unwrap_or(
+                        obj.get("description")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(""),
+                    );
+                    let t = title.trim();
+                    let eff = effect.trim();
+                    if t.is_empty() && eff.is_empty() {
+                        return None;
+                    }
+                    let text = if eff.is_empty() || eff == t {
+                        t.to_string()
+                    } else if eff.len() > 120 {
+                        format!("{}: {}", t, &eff[..117].trim())
+                    } else {
+                        format!("{}: {}", t, eff)
+                    };
+                    Some(text)
+                })
+                .take(6)
+                .collect();
+
+            if !bullets.is_empty() {
+                return bullets.join("\n");
+            }
+        }
+    }
+
+    cleaned
+}
+
+/// Guided chat handler: same as api_chat but enforces thinking disabled and
+/// strips inline thinking blocks from the streamed content.
+fn api_chat_guided(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "guided")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::content_length_limit(2 * 1024 * 1024))
+        .and(warp::body::bytes())
+        .and_then(move |auth: Option<String>, body: bytes::Bytes| {
+            let cfg = app_config.clone();
+            let state = state.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let (url, permit) = prepare_inference_request(&state).await?;
+                let client = build_upstream_client(Duration::from_secs(120))?;
+                let mut request_body = body.to_vec();
+
+                // Ensure thinking is disabled for guided requests.
+                if let Ok(mut val) = serde_json::from_slice::<serde_json::Value>(&request_body) {
+                    if let Some(obj) = val.as_object_mut() {
+                        obj.insert("enable_thinking".into(), serde_json::Value::Bool(false));
+                        obj.insert(
+                            "thinking_budget_tokens".into(),
+                            serde_json::Value::Number(serde_json::Number::from(0u64)),
+                        );
+                    }
+                    request_body =
+                        serde_json::to_vec(&val).unwrap_or_else(|_| request_body.clone());
+                }
+
+                // Stream response from upstream.
+                let resp = send_upstream_request_with_retry(|| {
+                    client
+                        .post(&url)
+                        .header("Content-Type", "application/json")
+                        .body(request_body.clone())
+                })
+                .await?;
+
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
+
+                // Forward SSE events with inline thinking stripped.
+                tokio::spawn(async move {
+                    use futures_util::StreamExt;
+                    let _permit = permit;
+                    let mut stream = resp.bytes_stream();
+                    let mut buf = String::new();
+
+                    while let Some(chunk) = stream.next().await {
+                        match chunk {
+                            Ok(bytes) => {
+                                if tx.is_closed() {
+                                    return;
+                                }
+                                buf.push_str(&String::from_utf8_lossy(&bytes));
+
+                                while let Some(pos) = buf.find('\n') {
+                                    let line = buf[..pos].to_string();
+                                    buf = buf[pos + 1..].to_string();
+
+                                    if let Some(data) = line.strip_prefix("data: ")
+                                        && !data.trim().is_empty()
+                                    {
+                                        let cleaned = if let Ok(mut v) =
+                                            serde_json::from_str::<serde_json::Value>(data)
+                                        {
+                                            if let Some(obj) = v.as_object_mut()
+                                                && let Some(c) =
+                                                    obj.get("content").and_then(|x| x.as_str())
+                                            {
+                                                let s = sanitize_guided_content(c);
+                                                if s != c {
+                                                    obj.insert(
+                                                        "content".into(),
+                                                        serde_json::Value::String(s),
+                                                    );
+                                                }
+                                            }
+                                            serde_json::to_string(&v)
+                                                .unwrap_or_else(|_| data.to_string())
+                                        } else {
+                                            data.to_string()
+                                        };
+                                        let _ = tx.send(Ok::<_, warp::Error>(
+                                            warp::sse::Event::default().data(cleaned),
+                                        ));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                let _ = tx.send(Ok::<_, warp::Error>(
+                                    warp::sse::Event::default().data(format!(
+                                        "{{\"error\":\"{}\"}}",
+                                        e.to_string().replace('"', "'")
+                                    )),
+                                ));
+                                break;
+                            }
+                        }
+                    }
+                });
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::sse::reply(
+                    stream,
+                )))
+            }
+        })
+}
+
 fn api_chat_abort(
     _state: AppState,
     app_config: Arc<AppConfig>,
@@ -8200,7 +8460,8 @@ fn api_chat_suggestions(
         })
 }
 
-fn parse_suggestions(text: &str) -> Vec<String> {
+fn parse_suggestions(input: &str) -> Vec<String> {
+    let text = strip_inline_thinking(input);
     fn clean_fragment(value: &str) -> String {
         value
             .replace("**", "")
@@ -8209,7 +8470,20 @@ fn parse_suggestions(text: &str) -> Vec<String> {
             .to_string()
     }
 
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
+    fn extract_json_value(s: &str) -> Option<serde_json::Value> {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
+            return Some(v);
+        }
+        if let Some(start) = s.find('{')
+            && let Some(end) = s.rfind('}')
+            && let Ok(v) = serde_json::from_str::<serde_json::Value>(&s[start..=end])
+        {
+            return Some(v);
+        }
+        None
+    }
+
+    if let Some(value) = extract_json_value(&text) {
         let suggestions_json = value
             .get("suggestions")
             .and_then(|v| v.as_array())
@@ -8272,10 +8546,41 @@ fn parse_suggestions(text: &str) -> Vec<String> {
                 || description_lower.contains("output format")
                 || description_lower.contains("guidelines")
                 || description_lower.contains("deconstruct key elements");
-            if !title.is_empty() && !description.is_empty() && !is_meta {
+            if title.len() > 2 && !description.is_empty() && !is_meta {
                 // Combine title and description with newline
                 suggestions.push(format!("{}\n{}", title, description));
             }
+        }
+    }
+
+    // Blank-line-separated block format: each suggestion is a paragraph where the first
+    // line is the title and subsequent lines form the description. Handles [EMOJI] TITLE
+    // patterns produced by thinking-capable models that skip the --- separator convention.
+    if suggestions.is_empty() {
+        let blocks: Vec<&str> = text.split("\n\n").collect();
+        for block in &blocks {
+            let lines: Vec<&str> = block
+                .lines()
+                .map(|l| l.trim())
+                .filter(|l| !l.is_empty())
+                .collect();
+            if lines.len() < 2 {
+                continue;
+            }
+            let title = clean_fragment(lines[0]);
+            if title.len() <= 2 {
+                continue;
+            }
+            let description = clean_fragment(&lines[1..].join(" "));
+            let title_lower = title.to_ascii_lowercase();
+            let is_meta =
+                title_lower.contains("output format") || title_lower.contains("guidelines");
+            if !title.is_empty() && !description.is_empty() && !is_meta {
+                suggestions.push(format!("{}\n{}", title, description));
+            }
+        }
+        if !suggestions.is_empty() {
+            return suggestions;
         }
     }
 
@@ -8355,6 +8660,7 @@ fn parse_suggestions(text: &str) -> Vec<String> {
                     !lowercase.contains("analyze user input")
                         && !lowercase.contains("output format")
                         && !lowercase.contains("guidelines")
+                        && !is_json_reasoning(s)
                 })
                 .collect();
             if !numbered_suggestions.is_empty() {
@@ -8404,10 +8710,194 @@ fn parse_suggestions(text: &str) -> Vec<String> {
             .collect();
     }
 
-    suggestions
+    // If all we got is one huge suggestion, try to split it into shorter bullets
+    // so we don’t render a giant meta-instruction blob in the UI.
+    fn is_assistant_meta(text: &str) -> bool {
+        let t = text.to_ascii_lowercase();
+        (t.contains("the assistant")
+            || t.contains("assistant will")
+            || t.contains("assistant prompts")
+            || t.contains("assistant suggests"))
+            && (t.len() > 80)
+    }
+
+    // Try to extract a short user-facing title from lines like:
+    // "[🗣️] Ask for Target Audience The assistant prompts..."
+    fn extract_short_title(line: &str) -> Option<String> {
+        let trimmed = line.trim();
+        // Detect bracketed emoji-like prefix: "[...] Title ..."
+        if trimmed.starts_with('[') && trimmed.contains(']') {
+            let after = trimmed.split_once(']')?.1.trim();
+            // Take first 6-10 words as title candidate.
+            let words: Vec<&str> = after.split_whitespace().take(10).collect();
+            if words.len() >= 2 {
+                let candidate = words.join(" ");
+                let cand_lower = candidate.to_ascii_lowercase();
+                if cand_lower.contains("the assistant") || cand_lower.contains("assistant will") {
+                    return None;
+                }
+                if candidate.len() > 15 && candidate.len() < 120 {
+                    return Some(candidate);
+                }
+            }
+        }
+        None
+    }
+
+    if suggestions.len() == 1 && suggestions[0].len() > 400 {
+        let big = &suggestions[0];
+        let mut candidates = Vec::new();
+
+        // Try splitting by bullet-like prefixes.
+        let bullets = regex::Regex::new(r"^[-*•]\s+(.+)$").ok();
+        if let Some(re) = bullets {
+            for line in big.lines() {
+                if let Some(m) = re.captures(line).and_then(|c| c.get(1)) {
+                    let t = clean_fragment(m.as_str());
+                    if t.len() > 20 && t.len() < 300 && !is_assistant_meta(&t) {
+                        candidates.push(t);
+                    }
+                }
+            }
+        }
+
+        // If that didn't help, try to use short titles from each line (for meta bullets).
+        if candidates.is_empty() {
+            for line in big.lines() {
+                if let Some(title) = extract_short_title(line) {
+                    candidates.push(title);
+                }
+            }
+        }
+
+        // If still empty, try splitting by newlines and taking shorter lines.
+        if candidates.is_empty() {
+            for line in big.lines() {
+                let t = clean_fragment(line);
+                if t.len() > 20 && t.len() < 250 && !is_assistant_meta(&t) {
+                    candidates.push(t);
+                }
+            }
+        }
+
+        // If still empty, just truncate the big suggestion so the UI stays clean.
+        if candidates.is_empty() {
+            let truncated = if big.len() > 250 {
+                let mut end = 250;
+                while end < big.len() && !big.is_char_boundary(end) {
+                    end += 1;
+                }
+                format!("{}…", &big[..end])
+            } else {
+                big.clone()
+            };
+            suggestions = vec![truncated];
+        } else {
+            suggestions = candidates.into_iter().take(6).collect();
+        }
+    }
+
+    // Final pass: clean up any remaining assistant-fluff suggestions.
+    // Convert lines like:
+    //   "[🗣️] Ask for Target Audience The assistant prompts the user to..."
+    // into short, user-facing bullets.
+    let bracket_re = regex::Regex::new(r"\[").unwrap();
+    let mut cleaned = Vec::new();
+
+    for s in suggestions {
+        let trimmed = s.trim().to_string();
+        if trimmed.len() < 20 {
+            if !cleaned.contains(&trimmed) {
+                cleaned.push(trimmed);
+            }
+            continue;
+        }
+
+        // If this suggestion is very long and contains multiple bracketed bullets, split them.
+        if trimmed.len() > 300 && trimmed.matches('[').count() >= 2 {
+            let mut parts: Vec<usize> = Vec::new();
+            let mut last = 0;
+            for m in bracket_re.find_iter(&trimmed) {
+                if m.start() > last {
+                    continue;
+                }
+                parts.push(m.start());
+                last = m.start();
+            }
+
+            if parts.len() >= 2 {
+                for (i, &start) in parts.iter().enumerate() {
+                    let end = if i + 1 < parts.len() {
+                        parts[i + 1]
+                    } else {
+                        trimmed.len()
+                    };
+                    let part = trimmed[start..end].trim().to_string();
+                    if let Some(title) = extract_short_title(&part)
+                        && !cleaned.contains(&title)
+                    {
+                        cleaned.push(title);
+                    }
+                }
+                if !cleaned.is_empty() {
+                    continue;
+                }
+            }
+        }
+
+        // Single bullet: try short title extraction.
+        if let Some(title) = extract_short_title(&trimmed) {
+            if !cleaned.contains(&title) {
+                cleaned.push(title);
+            }
+            continue;
+        }
+
+        // If heavily meta and long, try first short phrase as a title.
+        let lower = trimmed.to_ascii_lowercase();
+        if (lower.contains("the assistant")
+            || lower.contains("assistant will")
+            || lower.contains("assistant prompts")
+            || lower.contains("assistant suggests"))
+            && trimmed.len() > 120
+        {
+            let words: Vec<&str> = trimmed.split_whitespace().take(10).collect();
+            let candidate = words.join(" ");
+            let cand_lower = candidate.to_ascii_lowercase();
+            if cand_lower.contains("the assistant") {
+                continue; // drop this bullet; it's pure meta
+            }
+            if candidate.len() >= 15 && candidate.len() <= 120 && !cleaned.contains(&candidate) {
+                cleaned.push(candidate);
+            }
+            continue;
+        }
+
+        // Otherwise keep as-is if not duplicate.
+        if trimmed.len() <= 150 && !cleaned.contains(&trimmed) {
+            cleaned.push(trimmed);
+        }
+    }
+
+    // If everything was filtered away, fall back to one short suggestion from the text.
+    if cleaned.is_empty() {
+        let short = if text.len() > 180 {
+            let mut end = 180;
+            while end < text.len() && !text.is_char_boundary(end) {
+                end += 1;
+            }
+            format!("{}…", &text[..end])
+        } else {
+            text.clone()
+        };
+        return vec![short];
+    }
+
+    cleaned.into_iter().take(6).collect()
 }
 
-fn parse_director_cards(text: &str) -> Vec<SuggestionCard> {
+fn parse_director_cards(input: &str) -> Vec<SuggestionCard> {
+    let text = strip_inline_thinking(input);
     fn clean_fragment(value: &str) -> String {
         value
             .replace("**", "")
@@ -8489,7 +8979,20 @@ fn parse_director_cards(text: &str) -> Vec<SuggestionCard> {
         (effect, detail)
     }
 
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
+    fn extract_json_value_director(s: &str) -> Option<serde_json::Value> {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
+            return Some(v);
+        }
+        if let Some(start) = s.find('{')
+            && let Some(end) = s.rfind('}')
+            && let Ok(v) = serde_json::from_str::<serde_json::Value>(&s[start..=end])
+        {
+            return Some(v);
+        }
+        None
+    }
+
+    if let Some(value) = extract_json_value_director(&text) {
         let suggestions_json = value
             .get("suggestions")
             .and_then(|v| v.as_array())
@@ -8526,7 +9029,19 @@ fn parse_director_cards(text: &str) -> Vec<SuggestionCard> {
                     } else {
                         effect
                     };
+
+                    // If detail is large and JSON-like, treat it as leaked internal output.
+                    let looks_like_json = {
+                        let d = detail.to_ascii_lowercase();
+                        d.contains("suggestions")
+                            || d.contains("type")
+                            || d.contains("effect")
+                            || d.contains("detail")
+                    };
                     let fallback_detail = if detail.is_empty() {
+                        fallback_effect.clone()
+                    } else if detail.len() > 200 && looks_like_json {
+                        // Use effect instead of dumping raw JSON into the card
                         fallback_effect.clone()
                     } else {
                         detail
@@ -8545,7 +9060,16 @@ fn parse_director_cards(text: &str) -> Vec<SuggestionCard> {
         }
     }
 
-    parse_suggestions(text)
+    let raw_suggestions = parse_suggestions(&text);
+
+    // If fallback produces a single huge JSON-like suggestion, treat as leaked reasoning.
+    let suggestions = if raw_suggestions.len() == 1 && is_json_reasoning(&raw_suggestions[0]) {
+        Vec::new()
+    } else {
+        raw_suggestions
+    };
+
+    suggestions
         .into_iter()
         .filter_map(|entry| {
             let mut parts = entry.splitn(2, '\n');
@@ -11642,7 +12166,7 @@ fn api_llama_binary_latest(
                     }
                 };
 
-                let url = "https://api.github.com/repos/ggerganov/llama.cpp/releases/latest";
+                let url = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest";
                 let resp = match client.get(url).send().await {
                     Ok(r) => r,
                     Err(e) => {
