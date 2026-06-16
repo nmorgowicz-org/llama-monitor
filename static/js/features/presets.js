@@ -235,8 +235,8 @@ function wirePresetSelectChangeHandler() {
     if (!sel) return;
 
     // Avoid duplicate wiring (populatePresetSelect can run more than once)
-    if (sel.__chqaChangeWired) return;
-    sel.__chqaChangeWired = true;
+    if (sel.__presetChangeWired) return;
+    sel.__presetChangeWired = true;
 
     sel.addEventListener('change', async () => {
         const chosenId = sel.value;
@@ -1115,8 +1115,6 @@ function _buildFormPreset(existing) {
         hf_repo: modelSource.hf_repo,
         alias: strVal('modal-alias') || null,
         mmproj: strVal('modal-mmproj') || null,
-        image_min_tokens: null,
-        image_max_tokens: null,
         chat_template_file: strVal('modal-chat-template-file') || null,
         gpu_layers: intOrNull('modal-gpu-layers'),
         no_mmap: document.getElementById('modal-no-mmap').checked,
