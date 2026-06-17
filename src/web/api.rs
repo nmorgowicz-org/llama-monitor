@@ -5165,27 +5165,35 @@ fn record_activity(state: &AppState) {
     }
 }
 
+fn touch_activity(state: &AppState) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    state
+        .last_activity_at
+        .store(now, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn api_sleep_mode_get(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     // T-062: require api-token for sleep-mode endpoints
-    warp::path("sleep-mode")
+    warp::path!("api" / "sleep-mode")
         .and(warp::get())
         .and(warp::header::optional::<String>("authorization"))
         .and(with_app_config(app_config))
         .map(move |auth: Option<String>, cfg: Arc<AppConfig>| {
             if !check_api_token(&auth, &cfg) {
-                return warp::reply::json(&serde_json::json!({
-                    "error": "Invalid or missing API token"
-                }));
+                return unauthorized_api_token();
             }
             let enabled = *state.sleep_mode.borrow();
             let config = state.sleep_mode_config.lock().unwrap().clone();
-            warp::reply::json(&serde_json::json!({
+            Box::new(warp::reply::json(&serde_json::json!({
                 "enabled": enabled,
                 "config": config
-            }))
+            }))) as Box<dyn warp::reply::Reply>
         })
 }
 
@@ -5194,25 +5202,23 @@ pub fn api_sleep_mode_toggle(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     // T-062: require api-token
-    warp::path("sleep-mode")
-        .and(warp::path("toggle"))
+    warp::path!("api" / "sleep-mode" / "toggle")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
         .and(with_app_config(app_config))
         .map(move |auth: Option<String>, cfg: Arc<AppConfig>| {
             if !check_api_token(&auth, &cfg) {
-                return warp::reply::json(&serde_json::json!({
-                    "error": "Invalid or missing API token"
-                }));
+                return unauthorized_api_token();
             }
-            record_activity(&state);
+            touch_activity(&state);
             let enabled = *state.sleep_mode.borrow();
             state.sleep_mode.send(!enabled).ok();
             state.sleep_notify.notify_waiters();
-            warp::reply::json(&serde_json::json!({
+            Box::new(warp::reply::json(&serde_json::json!({
                 "ok": true,
-                "enabled": !enabled
-            }))
+                "enabled": !enabled,
+                "sleep_mode": !enabled
+            }))) as Box<dyn warp::reply::Reply>
         })
 }
 
@@ -5221,8 +5227,7 @@ pub fn api_sleep_mode_set(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     // T-062: require api-token
-    warp::path("sleep-mode")
-        .and(warp::path("set"))
+    warp::path!("api" / "sleep-mode" / "set")
         .and(warp::post())
         .and(warp::body::json::<serde_json::Value>())
         .and(warp::header::optional::<String>("authorization"))
@@ -5230,9 +5235,7 @@ pub fn api_sleep_mode_set(
         .map(
             move |body: serde_json::Value, auth: Option<String>, cfg: Arc<AppConfig>| {
                 if !check_api_token(&auth, &cfg) {
-                    return warp::reply::json(&serde_json::json!({
-                        "error": "Invalid or missing API token"
-                    }));
+                    return unauthorized_api_token();
                 }
                 record_activity(&state);
                 let enabled = body
@@ -5241,10 +5244,11 @@ pub fn api_sleep_mode_set(
                     .unwrap_or(true);
                 state.sleep_mode.send(enabled).ok();
                 state.sleep_notify.notify_waiters();
-                warp::reply::json(&serde_json::json!({
+                Box::new(warp::reply::json(&serde_json::json!({
                     "ok": true,
-                    "enabled": enabled
-                }))
+                    "enabled": enabled,
+                    "sleep_mode": enabled
+                }))) as Box<dyn warp::reply::Reply>
             },
         )
 }
@@ -5318,6 +5322,7 @@ pub fn api_routes(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let kill_llama = api_kill_llama(state.clone(), app_config.clone());
     let get_presets = api_get_presets(state.clone(), app_config.clone());
+    let get_preset = api_get_preset(state.clone(), app_config.clone());
     let create_preset = api_create_preset(state.clone(), app_config.clone());
     let update_preset = api_update_preset(state.clone(), app_config.clone());
     let delete_preset = api_delete_preset(state.clone(), app_config.clone());
@@ -5553,6 +5558,7 @@ pub fn api_routes(
         .or(sleep_routes)
         .or(restore_hint_route);
     let preset_routes = get_presets
+        .or(get_preset)
         .or(create_preset)
         .or(update_preset)
         .or(delete_preset)
@@ -6876,6 +6882,33 @@ fn api_get_presets(
         })
 }
 
+fn api_get_preset(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "presets" / String)
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(
+            move |id: String, auth: Option<String>, cfg: Arc<AppConfig>| {
+                if !check_api_token(&auth, &cfg) {
+                    return futures_util::future::ready(Ok(unauthorized_api_token()));
+                }
+                let preset = {
+                    let presets = state.presets.lock().unwrap();
+                    presets.iter().find(|p| p.id == id).cloned()
+                };
+                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&match preset {
+                        Some(preset) => serde_json::json!({"ok": true, "preset": preset}),
+                        None => serde_json::json!({"ok": false, "error": "preset not found"}),
+                    })),
+                ))
+            },
+        )
+}
+
 fn api_create_preset(
     state: AppState,
     app_config: Arc<AppConfig>,
@@ -6884,10 +6917,13 @@ fn api_create_preset(
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |auth: Option<String>, preset: ModelPreset| {
+        .and_then(move |auth: Option<String>, mut preset: ModelPreset| {
             let cfg = app_config.clone();
             if !check_api_token(&auth, &cfg) {
                 return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
+            if preset.id.trim().is_empty() {
+                preset.id = presets::next_id();
             }
             let mut presets = state.presets.lock().unwrap();
             presets.push(preset.clone());
@@ -6909,11 +6945,12 @@ fn api_update_preset(
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
         .and_then(
-            move |id: String, auth: Option<String>, updated: ModelPreset| {
+            move |id: String, auth: Option<String>, mut updated: ModelPreset| {
                 let cfg = app_config.clone();
                 if !check_api_token(&auth, &cfg) {
                     return futures_util::future::ready(Ok(unauthorized_api_token()));
                 }
+                updated.id = id.clone();
                 let mut presets = state.presets.lock().unwrap();
                 if let Some(existing) = presets.iter_mut().find(|p| p.id == id) {
                     *existing = updated.clone();
