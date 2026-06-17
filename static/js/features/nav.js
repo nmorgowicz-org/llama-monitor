@@ -1,11 +1,12 @@
 // ── Navigation ────────────────────────────────────────────────────────────────
 // Tab switching and sidebar collapse.
 
-import { chat, contextCapacityTokens, lastLlamaMetrics, metricSeries, wsData } from '../core/app-state.js';
+import { chat, contextCapacityTokens, lastLlamaMetrics, metricSeries, setWsData, wsData } from '../core/app-state.js';
 import { chatScroll } from './chat-render.js';
 import { showSessionPanel, hideSessionPanel } from './chat-sessions-sidebar.js';
 import { isFocusModeActive, exitFocusMode } from './chat-focus-mode.js';
 import { renderCapabilityPopover } from './dashboard-render.js';
+import { showToast } from './toast.js';
 
 export function switchTab(name) {
     if (name !== 'chat' && isFocusModeActive()) exitFocusMode();
@@ -187,6 +188,34 @@ export function refreshTopCockpit() {
     cockpit.classList.toggle('is-low-power', stateClass === 'sleep');
     cockpit.classList.toggle('has-session', hasActiveEndpoint);
 
+    // Keep Low Power pill tooltip in sync with actual mode
+    const sleepPill = document.getElementById('nav-sleep-pill');
+    if (sleepPill) {
+        const isSleeping = wsData?.sleep_mode === true;
+        const unavailable = sleepPill.getAttribute('data-unavailable') === 'true';
+        sleepPill.disabled = !hasActiveEndpoint || unavailable;
+        sleepPill.setAttribute('aria-pressed', isSleeping ? 'true' : 'false');
+        if (unavailable) {
+            sleepPill.setAttribute('title', 'Low Power control is not available on this server.');
+            sleepPill.setAttribute('aria-label', 'Low Power unavailable');
+        } else if (!hasActiveEndpoint) {
+            sleepPill.setAttribute('title', 'Low Power is available after a local server session is active.');
+            sleepPill.setAttribute('aria-label', 'Low Power unavailable until a local server session is active');
+        } else if (isSleeping) {
+            sleepPill.setAttribute(
+                'title',
+                'Low Power: ON — Telemetry minimized; llama-server stays running.'
+            );
+            sleepPill.setAttribute('aria-label', 'Turn Low Power off');
+        } else {
+            sleepPill.setAttribute(
+                'title',
+                'Low Power: OFF — Click to reduce telemetry and activity while llama-server keeps running.'
+            );
+            sleepPill.setAttribute('aria-label', 'Turn Low Power on');
+        }
+    }
+
     if (throughputEl) {
         throughputEl.textContent = 'P ' + (promptDisplayRate > 0 ? promptDisplayRate.toFixed(0) : '—') + ' · G ' + (genDisplayRate > 0 ? genDisplayRate.toFixed(0) : '—');
     }
@@ -311,16 +340,89 @@ export function initNav() {
     const cockpit = document.getElementById('nav-cockpit');
     if (cockpit) {
         cockpit.addEventListener('click', () => switchTab('server'));
+        cockpit.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            switchTab('server');
+        });
     }
 
     const sleepPill = document.getElementById('nav-sleep-pill');
     if (sleepPill) {
-        sleepPill.addEventListener('click', (e) => {
+        sleepPill.addEventListener('click', async (e) => {
             e.stopPropagation();
-            fetch('/api/sleep-mode/toggle', {
-                method: 'POST',
-                headers: { Authorization: window.__API_TOKEN ? `Bearer ${window.__API_TOKEN}` : '' },
-            }).catch(() => {});
+
+            // If previously marked unavailable (e.g., 404), do nothing further
+            if (sleepPill.getAttribute('data-unavailable') === 'true') return;
+
+            // Avoid accidental double-taps
+            if (sleepPill.getAttribute('data-disabled') === 'true') return;
+            sleepPill.setAttribute('data-disabled', 'true');
+
+            const wasSleeping = wsData?.sleep_mode === true;
+
+            try {
+                const auth = window.authHeaders ? window.authHeaders() : {};
+                const res = await fetch('/api/sleep-mode/toggle', {
+                    method: 'POST',
+                    headers: {
+                        ...auth,
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                if (!res.ok) {
+                    if (res.status === 404) {
+                        showToast('Low Power control is not available on this server.', 'info');
+                        // Disable pill to avoid repeated failed clicks
+                        sleepPill.setAttribute('data-unavailable', 'true');
+                        sleepPill.disabled = true;
+                        sleepPill.style.opacity = '0.4';
+                        sleepPill.style.cursor = 'not-allowed';
+                        sleepPill.setAttribute(
+                            'title',
+                            'Low Power control is not available on this server.'
+                        );
+                    } else {
+                        showToast('Failed to toggle Low Power mode.', 'error');
+                    }
+                    return;
+                }
+
+                // Attempt to read the new mode from the response
+                let nextSleeping = wasSleeping; // fallback
+                try {
+                    const data = await res.json();
+                    if (data != null && typeof data.sleep_mode === 'boolean') {
+                        nextSleeping = data.sleep_mode;
+                    } else if (data != null && typeof data.enabled === 'boolean') {
+                        nextSleeping = data.enabled;
+                    }
+                } catch (_) {
+                    // If not JSON, assume toggled
+                    nextSleeping = !wasSleeping;
+                }
+
+                // Reflect change in local state
+                setWsData({ ...(wsData || {}), sleep_mode: nextSleeping });
+                refreshTopCockpit();
+                sleepPill.setAttribute('aria-pressed', nextSleeping ? 'true' : 'false');
+
+                if (nextSleeping) {
+                    showToast('Low Power: ON', 'success');
+                } else {
+                    showToast('Low Power: OFF', 'success');
+                }
+            } catch (err) {
+                showToast('Low Power toggle failed (network error).', 'error');
+            } finally {
+                // Allow re-toggling after a short debounce (unless marked unavailable)
+                if (sleepPill.getAttribute('data-unavailable') !== 'true') {
+                    setTimeout(() => {
+                        sleepPill.removeAttribute('data-disabled');
+                    }, 600);
+                }
+            }
         });
     }
 
