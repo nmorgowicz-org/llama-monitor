@@ -34,26 +34,69 @@ function closeUserMenu() {
     document.getElementById('nav-user-btn')?.setAttribute('aria-expanded', 'false');
 }
 
+function closePaletteDropdown() {
+    const dropdown = document.getElementById('nav-palette-dropdown');
+    const btn = document.getElementById('nav-palette-btn');
+    if (dropdown) {
+        dropdown.classList.remove('open');
+        dropdown.style.display = 'none';
+    }
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+function togglePaletteDropdown(event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    const dropdown = document.getElementById('nav-palette-dropdown');
+    const btn = document.getElementById('nav-palette-btn');
+    if (!dropdown || !btn) return;
+    const isOpen = dropdown.classList.contains('open') || dropdown.style.display === 'block';
+    const nextOpen = !isOpen;
+    dropdown.classList.toggle('open', nextOpen);
+    dropdown.style.display = nextOpen ? 'block' : 'none';
+    btn.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+}
+
+function setPalette(palette) {
+    const html = document.documentElement;
+    html.classList.add('palette-changing');
+    setTimeout(() => html.classList.remove('palette-changing'), 350);
+    if (palette && palette !== 'carbon-mint') {
+        html.dataset.palette = palette;
+    } else {
+        delete html.dataset.palette;
+    }
+    // Update active swatch
+    document.querySelectorAll('#nav-palette-dropdown .palette-swatch').forEach(btn => {
+        const matches = (btn.dataset.palette || '') === palette;
+        btn.classList.toggle('active', matches);
+        btn.setAttribute('aria-pressed', String(matches));
+    });
+    // Persist palette to localStorage
+    try {
+        const existing = JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}');
+        localStorage.setItem('llama-monitor-preferences', { ...existing, palette });
+    } catch (_) {}
+    // Close dropdown after selection
+    closePaletteDropdown();
+    showToast('Palette set to ' + (palette || 'Carbon Mint'), 'success');
+}
+
 document.addEventListener('click', event => {
     if (!event.target.closest('.nav-user') && !event.target.closest('#nav-user-menu-items')) {
         closeUserMenu();
+    }
+    if (!event.target.closest('.nav-palette-selector') && !event.target.closest('#nav-palette-dropdown')) {
+        closePaletteDropdown();
     }
 });
 
 document.addEventListener('keydown', event => {
     if (event.key === 'Escape') {
         closeUserMenu();
+        closePaletteDropdown();
     }
 });
-
-// ── User Profile ──────────────────────────────────────────────────────────────
-
-function openUserProfile(event) {
-    event?.preventDefault();
-    closeUserMenu();
-    openUserPreferencesModal();
-    showToast('Profile is local-only for now. Preferences are available here.', 'info');
-}
 
 // ── User Preferences Modal ────────────────────────────────────────────────────
 
@@ -158,6 +201,13 @@ function _loadSavedPreferences() {
             if (palette && palette !== 'carbon-mint') {
                 document.documentElement.dataset.palette = palette;
             }
+            // Sync palette swatch UI
+            const savedPalette = savedPreferences.palette || '';
+            document.querySelectorAll('#nav-palette-dropdown .palette-swatch').forEach(btn => {
+                const matches = (btn.dataset.palette || '') === savedPalette;
+                btn.classList.toggle('active', matches);
+                btn.setAttribute('aria-pressed', String(matches));
+            });
             if (savedPreferences.fontScale) {
                 document.documentElement.style.fontSize = (Number(savedPreferences.fontScale) * 16) + 'px';
             }
@@ -196,9 +246,6 @@ export function initUserMenu() {
     }
 
     // Bind user menu items
-    const profileBtn = document.getElementById('user-menu-profile');
-    if (profileBtn) profileBtn.addEventListener('click', (e) => openUserProfile(e));
-
     const prefsBtn = document.getElementById('user-menu-preferences');
     if (prefsBtn) prefsBtn.addEventListener('click', (e) => openUserPreferencesModal(e));
 
@@ -223,6 +270,22 @@ export function initUserMenu() {
 
     const prefsSave = document.getElementById('user-prefs-save');
     if (prefsSave) prefsSave.addEventListener('click', saveUserPreferences);
+
+    // Bind palette quick selector
+    const paletteBtn = document.getElementById('nav-palette-btn');
+    if (paletteBtn) {
+        paletteBtn.addEventListener('click', (e) => togglePaletteDropdown(e));
+    }
+
+    const paletteDropdown = document.getElementById('nav-palette-dropdown');
+    if (paletteDropdown) {
+        paletteDropdown.addEventListener('click', (e) => {
+            const btn = e.target.closest('.palette-swatch');
+            if (!btn) return;
+            const palette = btn.dataset.palette || '';
+            setPalette(palette);
+        });
+    }
 
     _loadSavedPreferences();
 }

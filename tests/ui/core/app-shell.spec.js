@@ -223,15 +223,16 @@ test.describe('modals and menus', () => {
     );
   });
 
-  test('profile menu opens and shows options', async ({ page }) => {
+  test('user menu opens and shows options', async ({ page }) => {
     await page.locator('#nav-user-btn').click();
     await page.waitForSelector('#nav-user-menu-items', { state: 'visible', timeout: 5000 });
     await expect(page.locator('.nav-user-menu')).toHaveClass(/open/);
+    await expect(page.getByRole('link', { name: 'Preferences' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Toggle Theme' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Logout' })).toBeVisible();
   });
 
- test('profile dropdown actions are wired', async ({ page }) => {
+  test('user menu toggle-theme flips theme', async ({ page }) => {
     await page.locator('#nav-user-btn').click();
     await page.waitForSelector('#nav-user-menu-items', { state: 'visible' });
     await page.getByRole('link', { name: 'Toggle Theme' }).click();

@@ -171,11 +171,40 @@
                     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
                 </svg>
             </button>
+            <!-- Palette quick selector -->
+            <div class="nav-palette-selector" id="nav-palette-selector">
+                <button class="nav-palette-btn" id="nav-palette-btn" type="button" aria-label="Switch color palette" title="Colors">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="13.5" cy="6.5" r="1.5" fill="currentColor"/><circle cx="17.5" cy="10.5" r="1.5" fill="currentColor"/><circle cx="8.5" cy="7.5" r="1.5" fill="currentColor"/><circle cx="6.5" cy="12.5" r="1.5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
+                    </svg>
+                </button>
+                <div class="nav-palette-dropdown" id="nav-palette-dropdown" role="menu" style="display:none;">
+                    <button class="palette-swatch active" data-palette="" type="button" title="Carbon Mint — Teal/Emerald">
+                        <div class="palette-swatch-gradient" style="background:linear-gradient(135deg,#0d9488,#2dd4bf,#5eead4)"></div>
+                        <span class="palette-swatch-name">Carbon Mint</span>
+                    </button>
+                    <button class="palette-swatch" data-palette="cyber-rose" type="button" title="Cyber Rose — Pink/Magenta">
+                        <div class="palette-swatch-gradient" style="background:linear-gradient(135deg,#be185d,#f472b6,#e879f9)"></div>
+                        <span class="palette-swatch-name">Cyber Rose</span>
+                    </button>
+                    <button class="palette-swatch" data-palette="solar-violet" type="button" title="Solar Violet — Deep Violet">
+                        <div class="palette-swatch-gradient" style="background:linear-gradient(135deg,#6d28d9,#a78bfa,#c4b5fd)"></div>
+                        <span class="palette-swatch-name">Solar Violet</span>
+                    </button>
+                    <button class="palette-swatch" data-palette="lava-core" type="button" title="Lava Core — Red/Orange">
+                        <div class="palette-swatch-gradient" style="background:linear-gradient(135deg,#b91c1c,#ef4444,#f97316)"></div>
+                        <span class="palette-swatch-name">Lava Core</span>
+                    </button>
+                </div>
+            </div>
             <div class="nav-user" id="user-menu">
                 <button class="nav-user-btn nav-user-btn-icon" id="nav-user-btn" type="button" aria-expanded="false" aria-controls="nav-user-menu-items" title="Account">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
                 </button>
                 <div class="nav-user-menu" id="nav-user-menu-items" role="menu">
+                    <a href="#" class="nav-user-menu-item" id="user-menu-preferences">Preferences</a>
+                    <a href="#" class="nav-user-menu-item" id="user-menu-theme">Toggle Theme</a>
+                    <a href="#" class="nav-user-menu-item" id="user-menu-help">Help &amp; Keyboard Shortcuts</a>
                     <a href="#" class="nav-user-menu-item" id="user-menu-logout">Logout</a>
                 </div>
             </div>
@@ -5717,7 +5746,6 @@
                     <h3 class="personalization-section-title">Behavior</h3>
                     <div class="modal-row modal-checks">
                         <label class="chk"><input type="checkbox" id="pref-auto-update" checked> Check for updates automatically</label>
-                        <label class="chk"><input type="checkbox" id="pref-data-collection"> Send anonymous usage data</label>
                         <label class="chk"><input type="checkbox" id="pref-show-toasts" checked> Show toast notifications</label>
                         <label class="chk"><input type="checkbox" id="pref-save-history" checked> Save chat history</label>
                         <label class="chk"><input type="checkbox" id="pref-enter-to-send" checked> Enter to send (Shift+Enter for newline)</label>
