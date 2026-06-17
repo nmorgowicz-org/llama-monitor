@@ -43,15 +43,15 @@ test.describe('app shell', () => {
   test('sidebar page tabs switch server, chat, and logs', async ({ page }) => {
     await enterMonitorView(page);
 
-    await page.getByRole('button', { name: /chat/i }).click();
+    await page.locator('.sidebar-btn[data-tab="chat"]').click();
     await expect(page.locator('#page-chat')).toBeVisible();
     await expect(page.locator('#page-server')).not.toBeVisible();
 
-    await page.getByRole('button', { name: /logs/i }).click();
+    await page.locator('.sidebar-btn[data-tab="logs"]').click();
     await expect(page.locator('#page-logs')).toBeVisible();
     await expect(page.locator('#page-chat')).not.toBeVisible();
 
-    await page.getByRole('button', { name: /server/i }).click();
+    await page.locator('.sidebar-btn[data-tab="server"]').click();
     await expect(page.locator('#page-server')).toBeVisible();
   });
 
