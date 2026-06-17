@@ -205,8 +205,8 @@ export async function loadPresets(selectId) {
 
     if (targetId && sessionState.presets.find(p => p.id === targetId)) {
         sel.value = targetId;
-    } else if (sessionState.presets.length > 0) {
-        sel.value = sessionState.presets[0].id;
+    } else if (sel.options.length > 0) {
+        sel.value = sel.options[0].value;
     }
 
     if (selectId === undefined && saved) {
@@ -1480,10 +1480,26 @@ async function _suggestGenerationDefaults(modelPath, fillEmpty = true) {
         const headers = window.authHeaders
             ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
             : { 'Content-Type': 'application/json' };
+
+        // Try a quick GGUF metadata read to get arch for finetunes with non-canonical names
+        let ggufArch = '';
+        if (modelPath.startsWith('/')) {
+            try {
+                const ir = await fetch('/api/models/gguf-meta', {
+                    method: 'POST', headers,
+                    body: JSON.stringify({ model_path: modelPath }),
+                });
+                if (ir.ok) {
+                    const id = await ir.json();
+                    if (id.ok && id.architecture) ggufArch = id.architecture;
+                }
+            } catch (_) { /* non-fatal */ }
+        }
+
         const resp = await fetch('/api/model-defaults', {
             method: 'POST',
             headers,
-            body: JSON.stringify({ model_name_or_repo: modelName, size_bytes: 0, tags: [] }),
+            body: JSON.stringify({ model_name_or_repo: modelName, size_bytes: 0, tags: [], gguf_arch: ggufArch }),
         });
         if (!resp.ok) return;
         const d = await resp.json();

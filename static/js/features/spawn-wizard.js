@@ -510,6 +510,7 @@ function resetWizardState() {
   wizardState.arch.mmprojBytes = 0;
   wizardState.arch.linearAttnStateBytes = 0;
   wizardState.arch.isHybridAttn = false;
+  wizardState.arch.ggufArch = '';
 
   // Reset UI state
   wizardState.currentStep = 0;
@@ -520,6 +521,7 @@ function resetWizardState() {
   wizardState.access.port = 8001;
   wizardState.access.bindHost = '127.0.0.1';
   wizardState.access.apiKey = '';
+  wizardState.savedPresetId = null;
 }
 
 export function closeSpawnWizard() {
@@ -939,10 +941,24 @@ function bindEvents() {
     const isDraftMtp = v && v.includes('draft-mtp');
     const isDraftModel = v === 'draft-model';
 
-    // draft-model: show external draft path input (required).
-    // draft-mtp: draft-mtp uses built-in heads — no external model needed, so hide this input.
+    // draft-model: required external draft path.
+    // draft-mtp variants: optional external model (overrides built-in heads); ngram-only: no draft model.
+    const showDraftPath = isDraftModel || isDraftMtp;
     if (dom.draftModelWrap) {
-      dom.draftModelWrap.style.display = isDraftModel ? '' : 'none';
+      dom.draftModelWrap.style.display = showDraftPath ? '' : 'none';
+      const lbl = dom.draftModelWrap.querySelector('label');
+      if (lbl) lbl.textContent = isDraftMtp ? 'Draft model path (optional)' : 'Draft model path';
+      let hint = dom.draftModelWrap.querySelector('.draft-model-hint');
+      if (isDraftMtp) {
+        if (!hint) {
+          hint = document.createElement('div');
+          hint.className = 'field-hint draft-model-hint';
+          dom.draftModelWrap.appendChild(hint);
+        }
+        hint.textContent = 'Leave blank to use the built-in MTP heads. Enter a path to override with a separate draft model.';
+      } else if (hint) {
+        hint.remove();
+      }
     }
     // Draft-MTP KV quant selects: only relevant when MTP is active.
     if (dom.draftKvRow) {
@@ -2180,6 +2196,12 @@ async function doIntrospect(path) {
     if (m.n_experts)      wizardState.arch.nExperts      = m.n_experts;
     if (m.n_experts_used) wizardState.arch.nExpertsUsed = m.n_experts_used;
     if (m.mtp_depth)      wizardState.arch.mtpDepth      = m.mtp_depth;
+    if (m.gguf_arch)      wizardState.arch.ggufArch      = m.gguf_arch;
+
+    // Re-fetch sampling defaults now that gguf_arch is known — the earlier call
+    // (on hardware step entry) ran before introspection completed and sent an empty
+    // gguf_arch, which causes distills/finetunes to get generic fallback presets.
+    if (m.gguf_arch) _fetchAndApplyModelSamplingDefaults();
 
     // Restore HF origin from persisted model tag so quant-swap can skip search.
     if (!wizardState.model.originRepo &&
@@ -7241,7 +7263,13 @@ async function _fetchAndApplyModelSamplingDefaults() {
     const res = await fetch('/api/model-defaults', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ model_name_or_repo: name, size_bytes: m.modelBytes || 0, tags: [] }),
+      body: JSON.stringify({
+        model_name_or_repo: name,
+        size_bytes: m.modelBytes || 0,
+        tags: [],
+        gguf_arch: wizardState.arch.ggufArch || '',
+        arch_family: wizardState.model.family || '',
+      }),
     });
     if (!res.ok) return;
     const data = await res.json();
