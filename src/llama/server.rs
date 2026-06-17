@@ -120,9 +120,9 @@ pub struct ServerConfig {
     pub main_gpu: Option<u32>,
     // Threading
     #[serde(default)]
-    pub threads: Option<u32>,
+    pub threads: Option<i32>,
     #[serde(default)]
-    pub threads_batch: Option<u32>,
+    pub threads_batch: Option<i32>,
     // Priority
     #[serde(default)]
     pub prio: Option<i32>,
@@ -430,9 +430,15 @@ pub async fn start_server(
     cmd.arg("--host")
         .arg(config.bind_host.as_deref().unwrap_or("127.0.0.1"));
     cmd.arg("--port").arg(config.port.to_string());
-    cmd.arg("-c").arg(config.context_size.to_string());
-    cmd.arg("-b").arg(config.batch_size.to_string());
-    cmd.arg("-ub").arg(config.ubatch_size.to_string());
+    if config.context_size > 0 {
+        cmd.arg("-c").arg(config.context_size.to_string());
+    }
+    if config.batch_size > 0 {
+        cmd.arg("-b").arg(config.batch_size.to_string());
+    }
+    if config.ubatch_size > 0 {
+        cmd.arg("-ub").arg(config.ubatch_size.to_string());
+    }
     cmd.arg("--no-warmup");
     cmd.arg("--jinja");
     cmd.arg("--webui-mcp-proxy");
@@ -472,12 +478,16 @@ pub async fn start_server(
         cmd.arg("-mg").arg(mg.to_string());
     }
 
-    // Threading
+    // Threading (-1 = auto, positive = explicit; 0/null = omit)
     if let Some(t) = config.threads {
-        cmd.arg("-t").arg(t.to_string());
+        if t == -1 || t > 0 {
+            cmd.arg("-t").arg(t.to_string());
+        }
     }
     if let Some(tb) = config.threads_batch {
-        cmd.arg("-tb").arg(tb.to_string());
+        if tb == -1 || tb > 0 {
+            cmd.arg("-tb").arg(tb.to_string());
+        }
     }
 
     // Priority

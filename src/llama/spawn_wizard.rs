@@ -1087,7 +1087,7 @@ pub async fn introspect_model(
 #[allow(dead_code)]
 fn gguf_arch_to_heuristic_name(gguf_arch: &str) -> &str {
     match gguf_arch {
-        "qwen3_6" | "qwen3.6" => "qwen3.6-model",
+        "qwen3_6" | "qwen3.6" | "qwen35moe" => "qwen3.6-model",
         "qwen3_5" | "qwen3.5" => "qwen3.5-model",
         "qwen3_coder_next" | "qwen3-coder-next" => "qwen3-coder-next",
         "gemma4" | "gemma-4" => "gemma4-model",

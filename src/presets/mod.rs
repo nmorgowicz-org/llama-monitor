@@ -1,22 +1,39 @@
 use anyhow::Result;
 use std::path::Path;
 
+fn null_as_zero_u32<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+    use serde::Deserialize;
+    Ok(Option::<u32>::deserialize(d)?.unwrap_or(0))
+}
+fn null_as_zero_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+    use serde::Deserialize;
+    Ok(Option::<u64>::deserialize(d)?.unwrap_or(0))
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ModelPreset {
     #[serde(default = "next_id")]
     pub id: String,
     pub name: String,
+    #[serde(default)]
     pub model_path: String,
+    #[serde(default, deserialize_with = "null_as_zero_u64")]
     pub context_size: u64,
+    #[serde(default)]
     pub ctk: String,
+    #[serde(default)]
     pub ctv: String,
+    #[serde(default)]
     pub tensor_split: String,
+    #[serde(default, deserialize_with = "null_as_zero_u32")]
     pub batch_size: u32,
+    #[serde(default, deserialize_with = "null_as_zero_u32")]
     pub ubatch_size: u32,
     #[serde(default)]
     pub no_mmap: bool,
     #[serde(default)]
     pub ngram_spec: bool,
+    #[serde(default, deserialize_with = "null_as_zero_u32")]
     pub parallel_slots: u32,
     // Generation
     #[serde(default)]
@@ -49,9 +66,9 @@ pub struct ModelPreset {
     pub main_gpu: Option<u32>,
     // Threading
     #[serde(default)]
-    pub threads: Option<u32>,
+    pub threads: Option<i32>,
     #[serde(default)]
-    pub threads_batch: Option<u32>,
+    pub threads_batch: Option<i32>,
     // Priority
     #[serde(default)]
     pub prio: Option<i32>,
