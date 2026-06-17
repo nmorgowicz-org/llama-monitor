@@ -53,6 +53,57 @@ function setStructuredOutputMode(mode) {
     if (schemaWrap) schemaWrap.style.display = normalized === 'json_schema' ? '' : 'none';
 }
 
+function isRunningStatus(status) {
+    return String(status || '').toLowerCase() === 'running';
+}
+
+export function syncSelectedPresetSelection(presetId, options = {}) {
+    const id = presetId || '';
+    const {
+        userIntent = false,
+        syncSetup = true,
+        syncDisplay = true,
+        persist = false,
+    } = options;
+
+    const mainSelect = document.getElementById('preset-select');
+    if (mainSelect && id) {
+        const opt = mainSelect.querySelector(`option[value="${CSS.escape(id)}"]`);
+        if (opt) mainSelect.value = id;
+    } else if (mainSelect && !id) {
+        mainSelect.value = '';
+    }
+
+    const selectedId = mainSelect?.value || id;
+    sessionState.selectedPresetId = selectedId;
+
+    if (syncSetup) {
+        const setupSelect = document.getElementById('setup-preset-select');
+        if (setupSelect && selectedId) {
+            const opt = setupSelect.querySelector(`option[value="${CSS.escape(selectedId)}"]`);
+            if (opt) setupSelect.value = selectedId;
+        }
+    }
+
+    if (syncDisplay && mainSelect) {
+        syncPresetDisplay(mainSelect);
+    }
+
+    if (userIntent) {
+        window.__presetUserSelected = true;
+    }
+
+    if (persist) {
+        saveSettings();
+    }
+
+    import('./setup-view.js').then(m => {
+        m.updateRunningCardHighlight?.();
+    }).catch(() => {});
+
+    return selectedId;
+}
+
 function isWindowsAbsolutePath(value) {
     return /^[A-Za-z]:[\\/]/.test(value);
 }
@@ -194,9 +245,11 @@ export async function loadPresets(selectId) {
     let targetId = selectId ?? null;
     if (targetId === null && activeResp) {
         const activeData = await activeResp.json().catch(() => null);
-        if (activeData && activeData.preset_id &&
-            (String(activeData.status || '').toLowerCase() === 'running')) {
+        if (activeData && activeData.preset_id && isRunningStatus(activeData.status)) {
+            sessionState.activeSessionPresetId = activeData.preset_id;
             targetId = activeData.preset_id;
+        } else {
+            sessionState.activeSessionPresetId = '';
         }
     }
     if (targetId === null) {
@@ -204,9 +257,9 @@ export async function loadPresets(selectId) {
     }
 
     if (targetId && sessionState.presets.find(p => p.id === targetId)) {
-        sel.value = targetId;
+        syncSelectedPresetSelection(targetId, { syncSetup: false, syncDisplay: false });
     } else if (sel.options.length > 0) {
-        sel.value = sel.options[0].value;
+        syncSelectedPresetSelection(sel.options[0].value, { syncSetup: false, syncDisplay: false });
     }
 
     if (selectId === undefined && saved) {
@@ -217,9 +270,7 @@ export async function loadPresets(selectId) {
     }
 
     // Sync the visual preset display (short name + chips)
-    if (sel && sel.value) {
-        syncPresetDisplay(sel);
-    }
+    if (sel && sel.value) syncSelectedPresetSelection(sel.value, { syncSetup: false });
 
     // Keep the setup view preset dropdown and launch grid in sync
     import('./setup-view.js').then(m => m.syncSetupPresetSelect?.()).catch(() => {});
@@ -243,7 +294,7 @@ function wirePresetSelectChangeHandler() {
         if (!chosenId) return;
 
         // Mark as user-initiated so WS sync won't force it back
-        window.__presetUserSelected = true;
+        syncSelectedPresetSelection(chosenId, { userIntent: true, persist: true });
 
         // Fetch current active session to see if something is running
         try {
@@ -254,7 +305,8 @@ function wirePresetSelectChangeHandler() {
             const active = await resp.json().catch(() => ({}));
 
             // If nothing is running, or it's the same preset, nothing special to do
-            if (!active || active.status !== 'running' || active.preset_id === chosenId) {
+            if (!active || !isRunningStatus(active.status) || active.preset_id === chosenId) {
+                showToast('Preset selected', 'info');
                 return;
             }
 
@@ -269,7 +321,8 @@ function wirePresetSelectChangeHandler() {
                 `Do you want to stop it and load ${chosenName}?`
             )) {
                 // Revert selection
-                sel.value = active.preset_id;
+                syncSelectedPresetSelection(active.preset_id, { persist: true });
+                window.__presetUserSelected = false;
                 return;
             }
 
@@ -299,12 +352,12 @@ function wirePresetSelectChangeHandler() {
             // Start new preset via existing doStart flow
             // We'll import attach-detach and call doStart directly
             const { doStart } = await import('./attach-detach.js');
-            await doStart();
+            await doStart(null, { skipRunningConfirm: true });
 
         } catch (e) {
             console.warn('[presets] preset-select change error:', e);
         } finally {
-            syncPresetDisplay(sel);
+            syncSelectedPresetSelection(sel.value);
         }
     });
 }
@@ -962,15 +1015,9 @@ function _renderPresetsPanel() {
         startBtn.title = 'Spawn this server configuration now';
         startBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            const mainSelect = document.getElementById('preset-select');
-            if (mainSelect) {
-                mainSelect.value = preset.id;
-                mainSelect.dispatchEvent(new Event('change', { bubbles: true }));
-            }
+            syncSelectedPresetSelection(preset.id, { userIntent: true, persist: true });
             closePresetsPanel();
             import('./attach-detach.js').then(({ doStartFromSetup }) => {
-                const setupSelect = document.getElementById('setup-preset-select');
-                if (setupSelect) setupSelect.value = preset.id;
                 doStartFromSetup();
             });
         });
@@ -1350,10 +1397,11 @@ export async function savePreset(event) {
         }
         closePresetModal();
         await loadPresets(savedId);
+        if (savedId) syncSelectedPresetSelection(savedId, { userIntent: true, persist: true });
         showToast('Preset saved', 'success');
 
         // If this is the active preset and the server is running, offer a reload.
-        const activePresetId = document.getElementById('preset-select')?.value || '';
+        const activePresetId = sessionState.activeSessionPresetId || '';
         if (savedId && activePresetId === savedId && sessionState.serverRunning) {
             _offerRestartAfterPresetSave(savedId);
         }
@@ -1367,21 +1415,28 @@ export async function savePreset(event) {
 
 export async function copyPreset() {
     const id = document.getElementById('preset-select').value;
+    return duplicatePresetById(id, { reopenEditor: false });
+}
+
+function buildDuplicatePresetName(baseName) {
+    const base = baseName || 'Preset';
+    let copyName = base + ' (copy)';
+    let suffixNum = 2;
+    while (sessionState.presets.some(pr => pr.name === copyName)) {
+        copyName = base + ' (copy ' + suffixNum + ')';
+        suffixNum++;
+    }
+    return copyName;
+}
+
+async function duplicatePresetById(id, options = {}) {
+    const { reopenEditor = false } = options;
     const p = sessionState.presets.find(pr => pr.id === id);
     if (!p) { showToast('No preset selected', 'warn'); return; }
 
     const copy = Object.assign({}, p);
     delete copy.id;
-
-    // Deduplicate copy names: "Foo (copy)", "Foo (copy 2)", "Foo (copy 3)", …
-    let baseName = p.name;
-    let copyName = baseName + ' (copy)';
-    let suffixNum = 2;
-    while (sessionState.presets.some(pr => pr.name === copyName)) {
-        copyName = baseName + ' (copy ' + suffixNum + ')';
-        suffixNum++;
-    }
-    copy.name = copyName;
+    copy.name = buildDuplicatePresetName(p.name);
 
     try {
         const resp = await fetch('/api/presets', {
@@ -1397,8 +1452,13 @@ export async function copyPreset() {
             return;
         }
         const data = await resp.json();
-        await loadPresets(data.preset?.id || null);
-        showToast('Preset copied', 'success');
+        const newId = data.preset?.id || data.id || null;
+        await loadPresets(newId);
+        if (newId) {
+            syncSelectedPresetSelection(newId, { userIntent: true, persist: true });
+            if (reopenEditor) openPresetModal('edit');
+        }
+        showToast(reopenEditor && newId ? 'Preset duplicated - editing copy' : 'Preset copied', 'success');
     } catch (err) {
         showToast('Copy failed: ' + err.message, 'error');
     }
@@ -1422,7 +1482,7 @@ export async function deletePreset() {
             showToast('Delete failed: ' + err, 'error');
             return;
         }
-        await loadPresets();
+        await loadPresets(null);
         showToast('Preset deleted', 'success');
     } catch (err) {
         showToast('Delete failed: ' + err.message, 'error');
@@ -1797,33 +1857,7 @@ export function initPresets() {
     // Duplicate preset from within the modal
     document.getElementById('preset-modal-duplicate')?.addEventListener('click', async () => {
         const id = document.getElementById('modal-preset-id').value;
-        const p = sessionState.presets.find(pr => pr.id === id);
-        if (!p) {
-            showToast('No preset selected', 'warn');
-            return;
-        }
-        try {
-            const auth = window.authHeaders ? window.authHeaders() : {};
-            const copy = { ...p, name: p.name + ' (copy)' };
-            delete copy.id;
-            const resp = await fetch('/api/presets', {
-                method: 'POST',
-                headers: { ...auth, 'Content-Type': 'application/json' },
-                body: JSON.stringify(copy),
-            });
-
-            if (!resp.ok) {
-                const err = await resp.text().catch(() => 'Unknown error');
-                showToast('Copy failed: ' + err, 'error');
-                return;
-            }
-
-            const data = await resp.json();
-            await loadPresets(data.preset?.id || null);
-            showToast('Preset duplicated', 'success');
-        } catch (err) {
-            showToast('Copy failed: ' + err.message, 'error');
-        }
+        await duplicatePresetById(id, { reopenEditor: true });
     });
 
     // Delete preset from within the modal (only visible in edit mode)

@@ -7756,7 +7756,8 @@ async function saveAsPreset() {
     if (isUpdate) {
       try {
         const r = await fetch(`/api/presets/${wizardState.savedPresetId}`, { headers });
-        if (!r.ok) {
+        const data = r.ok ? await r.json().catch(() => ({})) : {};
+        if (!r.ok || data.ok === false) {
           // Preset was deleted or ID is stale — create a new one instead.
           wizardState.savedPresetId = null;
           isUpdate = false;
@@ -7794,14 +7795,15 @@ async function saveAsPreset() {
     if (!wizardState.savedPresetId) {
       try {
         const data = await resp.json().catch(() => ({}));
-        if (data.id) wizardState.savedPresetId = data.id;
+        const savedId = data.preset?.id || data.id || null;
+        if (savedId) wizardState.savedPresetId = savedId;
       } catch {
         // non-fatal
       }
     }
 
     // Refresh the setup view preset dropdown
-    import('./presets.js').then(({ loadPresets }) => loadPresets().then(() => {
+    import('./presets.js').then(({ loadPresets }) => loadPresets(wizardState.savedPresetId).then(() => {
       import('./setup-view.js').then(({ syncSetupPresetSelect }) => syncSetupPresetSelect());
     }));
 

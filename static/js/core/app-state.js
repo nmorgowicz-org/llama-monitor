@@ -75,6 +75,10 @@ export const sessionState = {
     sessions: [],
     /** Currently active session ID */
     activeSessionId: 'default',
+    /** Preset currently staged in the UI for edit/start actions */
+    selectedPresetId: '',
+    /** Preset attached to the active running spawn session, if any */
+    activeSessionPresetId: '',
     /** Currently active session port */
     activeSessionPort: 8080,
     /** Whether the local server is running */

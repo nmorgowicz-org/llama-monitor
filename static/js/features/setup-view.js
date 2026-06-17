@@ -310,7 +310,7 @@ export function renderLaunchGrid() {
     const userPresets = allPresets.filter(p => !p.id.startsWith('default-'));
     const hasUserPresets = userPresets.length > 0;
     const presets = _visiblePresetsLocal(allPresets);
-    const activePresetId = document.getElementById('preset-select')?.value || '';
+    const activePresetId = sessionState.activeSessionPresetId || '';
 
     const showNewConfigCard = presets.length <= 2;
 
@@ -433,9 +433,10 @@ function _buildLaunchCard(preset, activePresetId) {
         `;
 
         card.querySelector('.launch-card-btn-edit').addEventListener('click', () => {
-            const mainSel = document.getElementById('preset-select');
-            if (mainSel) mainSel.value = preset.id;
-            import('./presets.js').then(({ openPresetModal }) => openPresetModal('edit'));
+            import('./presets.js').then(({ openPresetModal, syncSelectedPresetSelection }) => {
+                syncSelectedPresetSelection(preset.id, { userIntent: true, persist: true });
+                openPresetModal('edit');
+            });
         });
 
         // Quick-edit: click context or KV chip to open preset modal focused on context section
@@ -443,9 +444,8 @@ function _buildLaunchCard(preset, activePresetId) {
             chip.style.cursor = 'pointer';
             chip.title = 'Click to quickly edit context or KV cache settings';
             chip.addEventListener('click', () => {
-                const mainSel = document.getElementById('preset-select');
-                if (mainSel) mainSel.value = preset.id;
-                import('./presets.js').then(({ openPresetModal }) => {
+                import('./presets.js').then(({ openPresetModal, syncSelectedPresetSelection }) => {
+                    syncSelectedPresetSelection(preset.id, { userIntent: true, persist: true });
                     openPresetModal('edit', 'context');
                 });
             });
@@ -472,11 +472,10 @@ function _buildLaunchCard(preset, activePresetId) {
                 import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
                 return;
             }
-            const setupSel = document.getElementById('setup-preset-select');
-            if (setupSel) setupSel.value = preset.id;
-            const mainSel = document.getElementById('preset-select');
-            if (mainSel) mainSel.value = preset.id;
-            import('./attach-detach.js').then(({ doStartFromSetup }) => doStartFromSetup());
+            import('./presets.js').then(({ syncSelectedPresetSelection }) => {
+                syncSelectedPresetSelection(preset.id, { userIntent: true, persist: true });
+                import('./attach-detach.js').then(({ doStartFromSetup }) => doStartFromSetup());
+            });
         });
     }
 
@@ -580,7 +579,7 @@ function _buildNewConfigCard(isPrimary = false) {
 }
 
 export function updateRunningCardHighlight() {
-    const activePresetId = document.getElementById('preset-select')?.value || '';
+    const activePresetId = sessionState.activeSessionPresetId || '';
     document.querySelectorAll('.launch-card[data-preset-id]').forEach(card => {
         const isRunning = sessionState.serverRunning && card.dataset.presetId === activePresetId && activePresetId;
         card.classList.toggle('launch-card--running', !!isRunning);

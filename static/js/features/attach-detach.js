@@ -106,7 +106,9 @@ function applyCooldown(seconds, button) {
     }, 1000);
 }
 
-export async function doStart(cooldownBtn) {
+export async function doStart(cooldownBtn, options = {}) {
+    const buttonArg = cooldownBtn instanceof Event ? null : cooldownBtn;
+    const { skipRunningConfirm = false } = options;
     const config = getConfig();
     if (!config.model_path && !config.hf_repo) {
         showToast('No model source set. Edit the preset to select a local model or HuggingFace repo.', 'error');
@@ -117,6 +119,20 @@ export async function doStart(cooldownBtn) {
     if (btnStart) btnStart.disabled = true;
 
     try {
+        if (!skipRunningConfirm) {
+            const activeResp = await fetch('/api/sessions/active', {
+                headers: window.authHeaders ? window.authHeaders() : {},
+            }).catch(() => null);
+            const active = activeResp?.ok ? await activeResp.json().catch(() => ({})) : {};
+            const activeStatus = String(active.status || '').toLowerCase();
+            const activePresetId = active.preset_id || '';
+            if (activeStatus === 'running' && activePresetId && activePresetId !== config.preset_id) {
+                if (!confirm('A different preset is already running. Stop it and start the selected preset?')) {
+                    return;
+                }
+            }
+        }
+
         await doKillLlamaInternal();
 
         // V2 spawn endpoint requires db-admin-token
@@ -143,7 +159,7 @@ export async function doStart(cooldownBtn) {
                     const wait = data?.seconds_remaining || data?.error || '';
                     if (typeof wait === 'number') {
                         showToast('Start failed: Please wait ' + wait + 's', 'warning');
-                        applyCooldown(wait, cooldownBtn || btnStart);
+                        applyCooldown(wait, buttonArg || btnStart);
                     } else {
                         showToast('Start failed: too soon; please wait', 'warning');
                     }
@@ -196,6 +212,7 @@ export async function doStop() {
 
     // V2: kill-llama kills the tracked child process and clears in-memory state
     await doKillLlamaInternal();
+    sessionState.activeSessionPresetId = '';
     hideTunePanel();
     setHeaderMode(null);
 

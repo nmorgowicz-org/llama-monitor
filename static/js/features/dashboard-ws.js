@@ -68,7 +68,7 @@ import { activeChatTab } from './chat-state.js';
 import { setRemoteAgentStatus } from './remote-agent.js';
 import { hideConnectingState, switchView } from './setup-view.js';
 import { showToast, showToastWithActions } from './toast.js';
-import { loadPresets } from './presets.js';
+import { loadPresets, syncSelectedPresetSelection } from './presets.js';
 
 // ── Cached DOM elements (populated at init time to avoid repeated queries) ──
 let cachedElements = null;
@@ -391,14 +391,17 @@ function updateDashboard(d) {
     // Store for use by status alert and other components
     setWsData(d);
 
+    sessionState.activeSessionPresetId =
+        d.session_mode === 'spawn' && d.active_session_preset_id ? d.active_session_preset_id : '';
+
     // Sync preset selector to match the running session's preset (spawn mode only).
     // Don't override when the user has explicitly changed it in the dropdown.
     if (d.session_mode === 'spawn' && d.active_session_preset_id && !window.__presetUserSelected) {
         const sel = document.getElementById('preset-select');
         if (sel && sel.value !== d.active_session_preset_id) {
-            const opt = sel.querySelector(`option[value="${d.active_session_preset_id}"]`);
+            const opt = sel.querySelector(`option[value="${CSS.escape(d.active_session_preset_id)}"]`);
             if (opt) {
-                sel.value = d.active_session_preset_id;
+                syncSelectedPresetSelection(d.active_session_preset_id);
             } else if (_lastPresetRefreshId !== d.active_session_preset_id) {
                 _lastPresetRefreshId = d.active_session_preset_id;
                 loadPresets(d.active_session_preset_id);
