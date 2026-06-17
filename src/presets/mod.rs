@@ -178,6 +178,11 @@ pub struct ModelPreset {
     pub chat_template_file: Option<String>,
     #[serde(default)]
     pub mmproj: Option<String>,
+    // Vision token budget (only meaningful when mmproj is set)
+    #[serde(default)]
+    pub image_min_tokens: Option<u32>,
+    #[serde(default)]
+    pub image_max_tokens: Option<u32>,
     #[serde(default)]
     pub grammar: Option<String>,
     #[serde(default)]

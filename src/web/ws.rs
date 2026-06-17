@@ -65,9 +65,10 @@ pub fn ws_route(
                     let (mut ws_tx, mut ws_rx) = socket.split();
                     let client_visible = Arc::new(AtomicBool::new(true));
 
-                    // T-051: On open: if asleep and we have connections, wake up
+                    // T-051: On open: wake auto-sleep only. Manual sleep persists across reconnects.
                     let asleep_on_open = *state.sleep_mode.borrow();
-                    if asleep_on_open {
+                    let manual_on_open = state.sleep_mode_manual.load(Ordering::Relaxed);
+                    if asleep_on_open && !manual_on_open {
                         state.sleep_mode.send(false).ok();
                         state.sleep_notify.notify_waiters();
                     }
@@ -141,8 +142,10 @@ pub fn ws_route(
                                             .unwrap_or("stopped")
                                     };
 
+                                    let is_manual = s.sleep_mode_manual.load(Ordering::Relaxed);
                                     serde_json::json!({
                                         "sleep_mode": true,
+                                        "sleep_mode_manual": is_manual,
                                         "server_running": running,
                                         "local_server_running": local_running,
                                         "active_session_id": active_session_id,
@@ -261,8 +264,10 @@ pub fn ws_route(
                                             })
                                     };
 
+                                    let is_manual = s.sleep_mode_manual.load(Ordering::Relaxed);
                                     serde_json::json!({
                                         "sleep_mode": asleep,
+                                        "sleep_mode_manual": is_manual,
                                         "gpu": gpu,
                                         "llama": llama,
                                         "system": system,
@@ -339,18 +344,20 @@ pub fn ws_route(
                                 client_visible.store(vis, Ordering::Relaxed);
                             }
 
-                            // T-051: wake on active visibility
+                            // T-051: wake auto-sleep on active visibility; manual sleep is exempt
                             if mode == Some("active") || visible == Some(true) {
                                 let asleep = *state.sleep_mode.borrow();
-                                if asleep {
+                                let manual = state.sleep_mode_manual.load(Ordering::Relaxed);
+                                if asleep && !manual {
                                     state.sleep_mode.send(false).ok();
                                     state.sleep_notify.notify_waiters();
                                 }
                             }
                         }
 
-                        // T-051: explicit wake command from client
+                        // T-051: explicit wake command from client — clears manual flag too
                         if msg_type == Some("wake") {
+                            state.sleep_mode_manual.store(false, Ordering::Relaxed);
                             let asleep = *state.sleep_mode.borrow();
                             if asleep {
                                 state.sleep_mode.send(false).ok();

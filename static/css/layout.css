@@ -18,7 +18,7 @@
  *           .sidebar-collapse-btn, .content-area, .page,
  *           .dashboard-grid, .dashboard-header, .control-bar, .inference-grid,
  *           .widget-card (glass shell + hover + live/idle states + @keyframes card-float),
- *           .control-bar buttons + .stop-choice-modal
+ *           .control-bar buttons
  */
 
 /* ── Control bar: unified glassy buttons ── */
@@ -103,64 +103,76 @@
   color: #ffffff;
 }
 
-/* Start: green “go” accent */
-.btn-start {
-  color: var(--color-success);
-  border-color: color-mix(in srgb, var(--color-success) 40%, transparent);
+/* Start: green “go” accent — must remain visible next to Stop */
+.btn-start,
+.control-bar-zone .btn-start {
+  color: #4ade80;
+  border-color: color-mix(in srgb, var(--color-success) 50%, transparent);
   background:
-    radial-gradient(circle at top, rgba(74, 222, 128, 0.09), rgba(22, 163, 74, 0.05)),
+    radial-gradient(circle at top, rgba(74, 222, 128, 0.16), rgba(22, 163, 74, 0.1)),
     radial-gradient(circle at bottom, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.97));
   box-shadow:
-    0 6px 16px rgba(22, 163, 74, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    0 6px 18px rgba(22, 163, 74, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
-.btn-start:hover {
+.btn-start:hover,
+.control-bar-zone .btn-start:hover {
   color: #ffffff;
   border-color: var(--color-success);
   background:
-    radial-gradient(circle at top, rgba(74, 222, 128, 0.17), rgba(22, 163, 74, 0.13)),
+    radial-gradient(circle at top, rgba(74, 222, 128, 0.26), rgba(22, 163, 74, 0.19)),
     radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.98));
   box-shadow:
-    0 8px 24px rgba(22, 163, 74, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    0 8px 28px rgba(22, 163, 74, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transform: translateY(-1px);
 }
 
-/* Stop: red “stop” accent */
-.btn-stop {
-  color: var(--color-danger);
-  border-color: color-mix(in srgb, var(--color-danger) 35%, transparent);
+/* Stop: red “stop” accent — stronger fill so it reads as the dominant action when running */
+.btn-stop,
+.control-bar-zone .btn-stop {
+  color: #fecaca;
+  border-color: color-mix(in srgb, var(--color-danger) 70%, transparent);
   background:
-    radial-gradient(circle at top, rgba(248, 113, 113, 0.07), rgba(220, 38, 38, 0.04)),
-    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.97));
+    radial-gradient(circle at top, rgba(248, 113, 113, 0.35), rgba(220, 38, 38, 0.22)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.99));
   box-shadow:
-    0 6px 14px rgba(220, 38, 38, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    0 6px 20px rgba(220, 38, 38, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
-.btn-stop:hover {
+.btn-stop:hover,
+.control-bar-zone .btn-stop:hover {
   color: #ffffff;
   border-color: var(--color-danger);
   background:
-    radial-gradient(circle at top, rgba(248, 113, 113, 0.16), rgba(220, 38, 38, 0.09)),
-    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.98));
+    radial-gradient(circle at top, rgba(248, 113, 113, 0.45), rgba(220, 38, 38, 0.35)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.99));
   box-shadow:
-    0 8px 24px rgba(220, 38, 38, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    0 8px 30px rgba(220, 38, 38, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transform: translateY(-1px);
 }
 
-/* Switch Model: secondary, neutral */
+/* Models (was Switch Model): blue-family accent, library action */
 .btn-switch-model {
-  color: var(--color-text-secondary);
-  border-color: var(--border-subtle);
+  color: rgba(147, 197, 253, 0.8);
+  border-color: color-mix(in srgb, var(--color-primary-soft) 35%, transparent);
+  background:
+    radial-gradient(circle at top, var(--acc-08), rgba(15, 23, 42, 0.97)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.99));
 }
 
 .btn-switch-model:hover {
-  color: var(--color-text-primary);
-  border-color: var(--acc-40);
-  box-shadow: var(--shadow-surface);
+  color: #ffffff;
+  border-color: var(--acc-50);
+  background:
+    radial-gradient(circle at top, var(--acc-15), rgba(15, 23, 42, 0.98)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.99));
+  box-shadow:
+    0 6px 18px var(--acc-12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
   transform: translateY(-1px);
 }
 
@@ -206,127 +218,56 @@
     inset 0 1px 0 rgba(15, 23, 42, 0.4);
 }
 
-/* Disabled */
+/* Disabled: strip all color, go fully ghost so it doesn't look broken */
 .control-bar-zone .btn:disabled,
 .btn-spawn-wizard:disabled,
-.btn-start:disabled,
-.btn-stop:disabled,
 .btn-switch-model:disabled,
 .btn-preset-ghost:disabled {
-  opacity: 0.4;
+  color: rgba(148, 163, 184, 0.25);
+  border-color: rgba(148, 163, 184, 0.08);
+  background: transparent;
+  box-shadow: none;
   cursor: not-allowed;
   transform: none !important;
-  box-shadow:
-    0 4px 12px rgba(15, 23, 42, 0.28),
-    inset 0 1px 0 rgba(15, 23, 42, 0.2);
 }
 
-/* ── “Server stopped” modal: glass card ── */
-
-.stop-choice-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  background: radial-gradient(
-    ellipse at top,
-    rgba(15, 23, 42, 0.75),
-    rgba(15, 23, 42, 0.98)
-  );
-  backdrop-filter: blur(16px) saturate(180%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-
-.stop-choice-card {
-  width: min(340px, 100%);
-  padding: 16px 18px 16px 18px;
+/* Start (disabled): keep visible in dark theme so you know it's the Start button */
+.control-bar-zone .btn-start:disabled {
+  color: rgba(74, 222, 128, 0.95) !important;
+  border-color: rgba(22, 163, 74, 0.5) !important;
   background:
-    radial-gradient(circle at top, var(--acc-10), transparent 60%),
-    radial-gradient(circle at bottom right, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.97));
-  border-radius: 16px;
-  border: 1px solid var(--border-subtle);
+    radial-gradient(circle at top, rgba(22, 163, 74, 0.16), rgba(15, 23, 42, 0.99)) !important;
   box-shadow:
-    0 20px 60px rgba(0, 0, 0, 0.5),
-    0 0 0 1px var(--acc-05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+    0 4px 12px rgba(22, 163, 74, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
 }
 
-.stop-choice-title {
-  font-size: 0.84rem;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.stop-choice-title::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.6);
-  box-shadow: 0 0 6px rgba(148, 163, 184, 0.35);
-}
-
-.stop-choice-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.stop-choice-actions .btn {
-  flex: 1 1 min-content;
-  font-size: 0.74rem;
-  padding: 6px 12px;
-  border-radius: 999px;
-}
-
-/* Go to welcome screen: primary */
-.btn-stop-choice-welcome {
-  color: #ffffff;
-  border: 1px solid var(--color-primary-soft);
+[data-theme="light"] .control-bar-zone .btn-start:disabled {
+  color: rgba(21, 128, 61, 0.52) !important;
+  border-color: rgba(22, 163, 74, 0.24) !important;
   background:
-    radial-gradient(circle at top, var(--acc-18), rgba(59, 130, 246, 0.14)),
-    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.97));
-  box-shadow:
-    0 8px 22px rgba(0, 0, 0, 0.28),
-    0 0 0 1px var(--acc-05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.74), transparent 26%),
+    linear-gradient(180deg, rgba(16, 185, 129, 0.14), rgba(22, 163, 74, 0.07)) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
 }
 
-.btn-stop-choice-welcome:hover {
-  border-color: var(--acc-60);
-  box-shadow:
-    0 10px 28px var(--acc-18),
-    0 0 16px rgba(59, 130, 246, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  transform: translateY(-1px);
+/* Stop (disabled): faint red ghost */
+.control-bar-zone .btn-stop:disabled {
+  color: rgba(248, 113, 113, 0.45);
+  border-color: rgba(220, 38, 38, 0.2);
+  background: radial-gradient(circle at top, rgba(220, 38, 38, 0.07), rgba(15, 23, 42, 0.99));
+  box-shadow: none;
 }
 
-/* Stay on dashboard: secondary */
-.btn-stop-choice-stay {
-  color: var(--color-text-secondary);
-  border: 1px solid var(--border-subtle);
-  background:
-    radial-gradient(circle at top, rgba(255, 255, 255, 0.018), rgba(15, 23, 42, 0.97)),
-    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.99));
-}
-
-.btn-stop-choice-stay:hover {
-  border-color: var(--acc-40);
-  color: var(--color-text-primary);
-  box-shadow: var(--shadow-surface);
+/* Stop (disabled): keep a very faint red ghost */
+.btn-stop:disabled {
+  color: rgba(248, 113, 113, 0.25);
+  border-color: rgba(220, 38, 38, 0.1);
+  background: radial-gradient(circle at top, rgba(220, 38, 38, 0.05), rgba(15, 23, 42, 0.98));
 }
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  /* control-bar buttons */
   .control-bar-zone .btn,
   .btn-spawn-wizard,
   .btn-start,
@@ -334,12 +275,6 @@
   .btn-switch-model,
   .btn-preset,
   .btn-preset-ghost {
-    transition: none !important;
-  }
-
-  /* stop-choice modal */
-  .stop-choice-modal,
-  .stop-choice-card {
     transition: none !important;
   }
 }
@@ -1091,6 +1026,31 @@
 [data-theme="light"] .nav-cockpit.is-low-power .nav-sleep-pill:hover {
   border-color: rgba(180, 140, 40, 0.95);
   background: radial-gradient(circle at top, rgba(180, 140, 40, 0.22), rgba(180, 140, 40, 0.11));
+}
+
+/* Manual sleep: stronger glow + lock icon shows (via SVG opacity) to signal it's intentional */
+.nav-cockpit.is-low-power-manual .nav-sleep-pill {
+  border-color: rgba(235, 203, 139, 0.9);
+  color: #fcd34d;
+  background: radial-gradient(circle at top, rgba(235, 203, 139, 0.22), rgba(235, 203, 139, 0.12));
+  box-shadow: 0 0 14px rgba(235, 203, 139, 0.38), inset 0 0 8px rgba(235, 203, 139, 0.14);
+}
+
+.nav-cockpit.is-low-power-manual .nav-sleep-pill:hover {
+  border-color: rgba(235, 203, 139, 1);
+  background: radial-gradient(circle at top, rgba(235, 203, 139, 0.28), rgba(235, 203, 139, 0.16));
+}
+
+[data-theme="light"] .nav-cockpit.is-low-power-manual .nav-sleep-pill {
+  border-color: rgba(180, 140, 40, 1);
+  color: #5c3d04;
+  background: radial-gradient(circle at top, rgba(180, 140, 40, 0.22), rgba(180, 140, 40, 0.12));
+  box-shadow: 0 0 14px rgba(180, 140, 40, 0.3), inset 0 0 8px rgba(180, 140, 40, 0.14);
+}
+
+[data-theme="light"] .nav-cockpit.is-low-power-manual .nav-sleep-pill:hover {
+  border-color: rgba(180, 140, 40, 1);
+  background: radial-gradient(circle at top, rgba(180, 140, 40, 0.28), rgba(180, 140, 40, 0.18));
 }
 
 /* Subtle pulse on the moon icon when the pill is available but not yet active */

@@ -3,7 +3,7 @@
 
 import { sessionState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
-import { showToast } from './toast.js';
+import { showToast, showToastWithActions } from './toast.js';
 import { _showConfirm } from './presets.js';
 import {
     hfSearch,
@@ -395,64 +395,99 @@ function buildModelCard(m) {
     actions.className = 'mm-card-actions';
 
     if (!mmproj) {
-        const useBtn = document.createElement('button');
-        useBtn.type = 'button';
-        useBtn.className = 'mm-action-btn';
-        useBtn.title = relatedPresets.length ? 'Build a new preset from this model' : 'Open this model in the spawn wizard';
-        useBtn.textContent = relatedPresets.length ? 'New Preset' : 'Use in Wizard';
-        useBtn.addEventListener('click', () => {
-            closeModelsModal();
-            import('./spawn-wizard.js').then(({ openSpawnWizard }) => {
-                openSpawnWizard({ localPath: m.path || '', localModel: m });
-            });
-        });
-        actions.appendChild(useBtn);
+        const serverRunning = isLocalServerRunning();
 
-        if (relatedPresets.length) {
-            const editBtn = document.createElement('button');
-            editBtn.type = 'button';
-            editBtn.className = 'mm-action-btn';
-            editBtn.title = relatedPresets.length === 1
-                ? 'Edit the saved preset that uses this model'
-                : `Edit one of the ${relatedPresets.length} presets using this model`;
+        if (serverRunning) {
+            // ── Server is running: primary action is Switch or Quick Load ──────
 
             if (relatedPresets.length === 1) {
-                editBtn.textContent = 'Edit Preset';
+                // One preset → simple Switch button
+                const switchBtn = document.createElement('button');
+                switchBtn.type = 'button';
+                switchBtn.className = 'mm-action-btn mm-action-btn--switch';
+                switchBtn.title = `Switch to preset: ${relatedPresets[0].name}`;
+                switchBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg> Switch';
+                switchBtn.addEventListener('click', () => doSwitchToPreset(relatedPresets[0].id));
+                actions.appendChild(switchBtn);
+
+            } else if (relatedPresets.length > 1) {
+                // Multiple presets → inline select + Switch button
+                const switchWrap = document.createElement('div');
+                switchWrap.className = 'mm-switch-wrap';
+
+                const switchSelect = document.createElement('select');
+                switchSelect.className = 'mm-switch-select';
+                switchSelect.title = 'Pick which preset to load';
+                relatedPresets.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.id;
+                    const ctxLabel = p.context_size ? ' · ' + Math.round(p.context_size / 1024) + 'k' : '';
+                    opt.textContent = p.name + ctxLabel;
+                    switchSelect.appendChild(opt);
+                });
+
+                const switchBtn = document.createElement('button');
+                switchBtn.type = 'button';
+                switchBtn.className = 'mm-action-btn mm-action-btn--switch';
+                switchBtn.title = 'Switch to selected preset';
+                switchBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg> Switch';
+                switchBtn.addEventListener('click', () => doSwitchToPreset(switchSelect.value));
+
+                switchWrap.appendChild(switchSelect);
+                switchWrap.appendChild(switchBtn);
+                actions.appendChild(switchWrap);
+
             } else {
-                editBtn.textContent = 'Edit Presets';
+                // No preset → Quick Load (inherits current server settings)
+                const loadBtn = document.createElement('button');
+                loadBtn.type = 'button';
+                loadBtn.className = 'mm-action-btn mm-action-btn--switch';
+                loadBtn.title = 'Load this model using current server settings (port, GPU layers, etc.)';
+                loadBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg> Quick Load';
+                loadBtn.addEventListener('click', () => doQuickLoad(m));
+                actions.appendChild(loadBtn);
             }
 
-            editBtn.addEventListener('click', () => {
-                const presets = relatedPresets;
-                if (presets.length === 1) {
-                    const preset = presets[0];
-                    const select = document.getElementById('preset-select');
-                    if (select) select.value = preset.id;
-                    closeModelsModal();
-                    import('./presets.js').then(({ openPresetModal }) => openPresetModal('edit'));
-                    return;
-                }
+            // Edit preset(s) — secondary action when running
+            if (relatedPresets.length > 0) {
+                const editBtn = document.createElement('button');
+                editBtn.type = 'button';
+                editBtn.className = 'mm-action-btn';
+                editBtn.title = relatedPresets.length === 1
+                    ? 'Edit the preset for this model'
+                    : `Edit one of ${relatedPresets.length} presets`;
+                editBtn.textContent = relatedPresets.length === 1 ? 'Edit' : 'Edit…';
+                editBtn.addEventListener('click', () => _openEditPreset(relatedPresets));
+                actions.appendChild(editBtn);
+            }
 
-                // Multiple presets: ask which one to edit
-                const lines = presets.map((p, i) =>
-                    `${i + 1}. ${p.name || 'Unnamed preset'} (${(p.context_size || 0) ? Math.round(p.context_size / 1024) + 'k context' : 'default'})`
-                ).join('\n');
-                const choice = prompt(
-                    `This model is used by multiple presets.\nSelect the preset to edit (enter number):\n\n${lines}`
-                );
-                if (choice == null) return;
-                const index = parseInt(choice, 10) - 1;
-                if (Number.isNaN(index) || index < 0 || index >= presets.length) {
-                    showToast('Invalid choice', 'error');
-                    return;
-                }
-                const preset = presets[index];
-                const select = document.getElementById('preset-select');
-                if (select) select.value = preset.id;
+        } else {
+            // ── Server is not running: wizard / new-preset ───────────────────
+
+            const useBtn = document.createElement('button');
+            useBtn.type = 'button';
+            useBtn.className = 'mm-action-btn';
+            useBtn.title = relatedPresets.length ? 'Build a new preset from this model' : 'Open this model in the spawn wizard';
+            useBtn.textContent = relatedPresets.length ? 'New Preset' : 'Use in Wizard';
+            useBtn.addEventListener('click', () => {
                 closeModelsModal();
-                import('./presets.js').then(({ openPresetModal }) => openPresetModal('edit'));
+                import('./spawn-wizard.js').then(({ openSpawnWizard }) => {
+                    openSpawnWizard({ localPath: m.path || '', localModel: m });
+                });
             });
-            actions.appendChild(editBtn);
+            actions.appendChild(useBtn);
+
+            if (relatedPresets.length) {
+                const editBtn = document.createElement('button');
+                editBtn.type = 'button';
+                editBtn.className = 'mm-action-btn';
+                editBtn.title = relatedPresets.length === 1
+                    ? 'Edit the saved preset that uses this model'
+                    : `Edit one of the ${relatedPresets.length} presets using this model`;
+                editBtn.textContent = relatedPresets.length === 1 ? 'Edit Preset' : 'Edit Presets…';
+                editBtn.addEventListener('click', () => _openEditPreset(relatedPresets));
+                actions.appendChild(editBtn);
+            }
         }
     }
 
@@ -495,10 +530,99 @@ function buildModelCard(m) {
     return card;
 }
 
+function isLocalServerRunning() {
+    return !document.getElementById('btn-stop')?.disabled;
+}
+
 function findPresetsForModel(model) {
     const path = model.path || '';
     if (!path) return [];
     return (sessionState.presets || []).filter(preset => preset.model_path === path);
+}
+
+async function doSwitchToPreset(presetId) {
+    closeModelsModal();
+    const { syncSelectedPresetSelection } = await import('./presets.js');
+    syncSelectedPresetSelection(presetId, { userIntent: true, persist: true });
+    const { doStart } = await import('./attach-detach.js');
+    await doStart(null, { skipRunningConfirm: true });
+}
+
+async function doQuickLoad(model) {
+    closeModelsModal();
+
+    // Derive base config from the currently running preset
+    const runningPreset = sessionState.presets?.find(p => p.id === sessionState.activeSessionPresetId) || {};
+
+    const config = {
+        preset_id: '',
+        model_path: model.path || '',
+        hf_repo: null,
+        context_size: runningPreset.context_size || 32768,
+        ctk: runningPreset.ctk || 'q8_0',
+        ctv: runningPreset.ctv || 'f16',
+        port: runningPreset.port || 8001,
+        bind_host: runningPreset.bind_host || '127.0.0.1',
+        api_key: runningPreset.api_key || null,
+        gpu_layers: runningPreset.gpu_layers ?? null,
+        threads: runningPreset.threads ?? null,
+        threads_batch: runningPreset.threads_batch ?? null,
+        batch_size: runningPreset.batch_size || 2048,
+        ubatch_size: runningPreset.ubatch_size || runningPreset.batch_size || 2048,
+        flash_attn: runningPreset.flash_attn || '',
+        no_mmap: !!runningPreset.no_mmap,
+        mlock: !!runningPreset.mlock,
+        parallel_slots: runningPreset.parallel_slots || 1,
+        tensor_split: runningPreset.tensor_split || '',
+        split_mode: runningPreset.split_mode || '',
+        main_gpu: runningPreset.main_gpu ?? null,
+        kv_unified: runningPreset.kv_unified ?? null,
+        cache_ram_mib: runningPreset.cache_ram_mib ?? null,
+        // Clear model-specific fields — let llama-server auto-detect from GGUF
+        mmproj: null,
+        chat_template_file: null,
+        reasoning: null,
+        enable_thinking: null,
+        preserve_thinking: null,
+        reasoning_budget: null,
+        reasoning_budget_message: null,
+        draft_model: '',
+        draft_min: null,
+        draft_max: null,
+        spec_type: null,
+        spec_ngram_size: null,
+        spec_draft_n_max: null,
+        ngram_spec: false,
+        seed: runningPreset.seed ?? null,
+        alias: null,
+        max_tokens: runningPreset.max_tokens ?? null,
+        fit_enabled: null,
+        fit_target: null,
+        system_prompt_file: '',
+        extra_args: runningPreset.extra_args || '',
+        // Generation defaults — leave unset so llama-server uses its own defaults
+        temperature: runningPreset.temperature,
+        top_p: runningPreset.top_p,
+        top_k: runningPreset.top_k,
+        min_p: runningPreset.min_p,
+        repeat_penalty: runningPreset.repeat_penalty,
+        presence_penalty: runningPreset.presence_penalty ?? null,
+        n_cpu_moe: runningPreset.n_cpu_moe,
+        rope_scaling: runningPreset.rope_scaling || '',
+        rope_freq_base: runningPreset.rope_freq_base ?? null,
+        rope_freq_scale: runningPreset.rope_freq_scale ?? null,
+    };
+
+    // Cap context to the model's training limit if known
+    if (model.n_ctx_train > 0 && config.context_size > model.n_ctx_train) {
+        config.context_size = model.n_ctx_train;
+    }
+
+    const modelName = model.model_name || model.filename || 'model';
+    showToast('Loading ' + modelName + '…', 'info', 'Stopping current server', { duration: 14000 });
+
+    const { doStartWithConfig } = await import('./attach-detach.js');
+    await doStartWithConfig(config, { skipRunningConfirm: true });
 }
 
 function formatPresetSummaryLine(preset) {
@@ -513,6 +637,35 @@ function formatPresetSummaryLine(preset) {
     if (preset.bind_host === '0.0.0.0') parts.push('LAN');
     if (preset.api_key) parts.push('API key');
     return parts.join(' · ');
+}
+
+function _openEditPreset(presets) {
+    if (presets.length === 1) {
+        const select = document.getElementById('preset-select');
+        if (select) select.value = presets[0].id;
+        closeModelsModal();
+        import('./presets.js').then(({ openPresetModal }) => openPresetModal('edit'));
+        return;
+    }
+
+    // Multiple presets: show an inline chooser via toast instead of prompt()
+    showToastWithActions(
+        'Which preset to edit?',
+        'info',
+        presets.map(p => p.name).join(' · '),
+        presets.slice(0, 3).map((p, i) => ({
+            id: 'p' + i,
+            label: p.name,
+            primary: i === 0,
+            handler: () => {
+                const select = document.getElementById('preset-select');
+                if (select) select.value = p.id;
+                closeModelsModal();
+                import('./presets.js').then(({ openPresetModal }) => openPresetModal('edit'));
+            },
+        })),
+        { duration: 12000 },
+    );
 }
 
 function buildPresetSummary(presets) {

@@ -3,7 +3,7 @@
 
 import { sessionState, setupViewState } from '../core/app-state.js';
 import { updateActiveSessionInfo } from './sessions.js';
-import { showToast } from './toast.js';
+import { showToast, showToastWithActions } from './toast.js';
 import { saveSettings } from './settings.js';
 import { hideConnectingState, saveLastSessionData, showConnectingState, switchView, restorePreviousPosition, savePreviousPosition } from './setup-view.js';
 import { setTuneConfig, showTunePanel, hideTunePanel } from './tune-panel.js';
@@ -108,10 +108,18 @@ function applyCooldown(seconds, button) {
 
 export async function doStart(cooldownBtn, options = {}) {
     const buttonArg = cooldownBtn instanceof Event ? null : cooldownBtn;
-    const { skipRunningConfirm = false } = options;
     const config = getConfig();
     if (!config.model_path && !config.hf_repo) {
         showToast('No model source set. Edit the preset to select a local model or HuggingFace repo.', 'error');
+        return;
+    }
+    return doStartWithConfig(config, options, buttonArg);
+}
+
+export async function doStartWithConfig(config, options = {}, buttonArg = null) {
+    const { skipRunningConfirm = false } = options;
+    if (!config.model_path && !config.hf_repo) {
+        showToast('No model source set.', 'error');
         return;
     }
 
@@ -135,7 +143,6 @@ export async function doStart(cooldownBtn, options = {}) {
 
         await doKillLlamaInternal();
 
-        // V2 spawn endpoint requires db-admin-token
         const adminToken = await _fetchDbAdminToken();
         if (!adminToken) {
             showToast('Failed: authentication required', 'error');
@@ -184,8 +191,6 @@ export async function doStart(cooldownBtn, options = {}) {
             return;
         }
 
-        // Wait for the spawned server to become reachable
-        // Show a "starting" toast so the user knows something is happening
         showToast('Starting llama-server…', 'info', 'Loading model on port ' + config.port, { duration: 12000 });
         await waitForSpawnReadiness(config.port);
 
@@ -210,81 +215,52 @@ export async function doStop() {
     const btnStop = document.getElementById('btn-stop');
     if (btnStop) btnStop.disabled = true;
 
-    // V2: kill-llama kills the tracked child process and clears in-memory state
+    // Capture the preset that was running before killing so we can offer restart
+    const stoppedPresetId = sessionState.activeSessionPresetId || '';
+    const stoppedPreset = sessionState.presets?.find(p => p.id === stoppedPresetId);
+    const stoppedName = stoppedPreset?.name || 'server';
+
     await doKillLlamaInternal();
     sessionState.activeSessionPresetId = '';
     hideTunePanel();
     setHeaderMode(null);
-
-    // Instead of jumping straight to the welcome screen,
-    // show a small modal and let the user choose what's next.
-    const modal = document.createElement('div');
-    modal.className = 'stop-choice-modal';
-    modal.innerHTML = `
-        <div class="stop-choice-card">
-            <div class="stop-choice-title">Server stopped</div>
-            <div class="stop-choice-actions">
-                <button class="btn btn-stop-choice-welcome" id="stop-choice-welcome">
-                    Go to welcome screen
-                </button>
-                <button class="btn btn-stop-choice-stay" id="stop-choice-stay">
-                    Stay on dashboard
-                </button>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(modal);
-
-    const welcomeBtn = modal.querySelector('#stop-choice-welcome');
-    const stayBtn = modal.querySelector('#stop-choice-stay');
-
-    const removeModal = () => {
-        if (modal && modal.parentNode) {
-            modal.parentNode.removeChild(modal);
-        }
-    };
-
-    welcomeBtn.addEventListener('click', () => {
-        // Go to welcome screen (previous behavior).
-        if (document.body.classList.contains('setup-active') === false) {
-            switchView('setup');
-        }
-        removeModal();
-    });
-
-    stayBtn.addEventListener('click', () => {
-        // Disable buttons to avoid double-click.
-        stayBtn.disabled = true;
-        welcomeBtn.disabled = true;
-
-        // Allow preset switching after stop — clear user-selection flag
-        window.__presetUserSelected = false;
-
-        // Fade out briefly, then remove so the dashboard is immediately usable.
-        modal.style.transition = 'opacity 200ms ease';
-        modal.style.opacity = '0';
-        modal.style.pointerEvents = 'none';
-
-        setTimeout(() => {
-            removeModal();
-        }, 220);
-    });
-
-    // On any Escape: default to welcome screen.
-    const onKey = (e) => {
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            if (document.body.classList.contains('setup-active') === false) {
-                switchView('setup');
-            }
-            removeModal();
-            document.removeEventListener('keydown', onKey);
-        }
-    };
-    document.addEventListener('keydown', onKey);
+    window.__presetUserSelected = false;
 
     if (btnStop) btnStop.disabled = false;
+
+    const actions = [];
+
+    if (stoppedPresetId) {
+        actions.push({
+            id: 'restart',
+            label: 'Restart',
+            primary: true,
+            handler: async () => {
+                const { syncSelectedPresetSelection } = await import('./presets.js');
+                syncSelectedPresetSelection(stoppedPresetId, { userIntent: true, persist: true });
+                doStart(null, { skipRunningConfirm: true });
+            },
+        });
+    }
+
+    actions.push({
+        id: 'wizard',
+        label: 'Setup wizard',
+        primary: false,
+        handler: () => {
+            if (!document.body.classList.contains('setup-active')) {
+                switchView('setup');
+            }
+        },
+    });
+
+    showToastWithActions(
+        stoppedName + ' stopped',
+        'info',
+        stoppedPresetId ? 'Restart with the same preset, or head to setup.' : 'Head to setup to start a new session.',
+        actions,
+        { duration: 10000 },
+    );
 }
 
 // ── Kill ───────────────────────────────────────────────────────────────────────

@@ -429,7 +429,8 @@
                     <!-- Zone 1: Spawn new server (primary) -->
                     <div class="control-bar-zone control-bar-spawn-zone">
                         <button class="btn btn-spawn-wizard" id="btn-control-spawn" title="Open the setup wizard to configure and start a local llama-server">
-                            Open setup wizard
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
+                            Setup
                         </button>
                     </div>
                     <div class="control-bar-divider" aria-hidden="true"></div>
@@ -457,12 +458,18 @@
                     <div class="control-bar-divider" aria-hidden="true"></div>
                     <!-- Zone 3: Server controls (context-aware) -->
                     <div class="control-bar-zone control-bar-ops-zone">
-                        <button class="btn btn-start" id="btn-start" title="Start server using selected preset">Start</button>
-                        <button class="btn btn-stop" id="btn-stop" disabled title="Stop the running server">Stop</button>
-                     <button class="btn btn-switch-model" id="btn-switch-model" style="display:none;" title="Switch model in the current server using this preset's settings">
-                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
-                             Switch Model
-                         </button>
+                        <button class="btn btn-start" id="btn-start" title="Start server using selected preset">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>
+                            Start
+                        </button>
+                        <button class="btn btn-stop" id="btn-stop" disabled title="Stop the running server">
+                            <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                            Stop
+                        </button>
+                        <button class="btn btn-switch-model" id="btn-switch-model" style="display:none;" title="Browse your model library and switch the running model">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+                            Models
+                        </button>
                          <button class="btn btn-sm btn-secondary" id="btn-server-error-details" style="display:none;" title="Show launch diagnostics when server failed">
                              Show details
                          </button>
@@ -2668,6 +2675,25 @@
                                 <input type="number" class="pe-input" id="modal-cache-ram-mib" min="-1" step="1" placeholder="8192 (default)">
                                 <div class="pe-field-hint">Set to 0 to disable prefix caching (reduces VRAM, hurts repeated-prompt latency). Leave empty for the default ~8 GiB. Use -1 to remove the cap for long agentic sessions with large shared system prompts.</div>
                             </div>
+                            <!-- Vision tokens: shown only when mmproj is loaded -->
+                            <div id="vision-tokens-wrap" style="display:none;">
+                                <div class="pe-row pe-row-2">
+                                    <div class="pe-field">
+                                        <label class="pe-label" for="modal-image-min-tokens" title="Vision Min Tokens: Minimum tokens per image. Affects VRAM usage for multimodal models. Required 1024 for Qwen models with an mmproj.">Vision Min Tokens</label>
+                                        <input type="number" class="pe-input" id="modal-image-min-tokens" placeholder="1024 for Qwen multimodal models">
+                                    </div>
+                                    <div class="pe-field">
+                                        <label class="pe-label" for="modal-image-max-tokens" title="Vision Max Tokens: Maximum tokens per image. Affects VRAM usage for multimodal models.">Vision Max Tokens</label>
+                                        <input type="number" class="pe-input" id="modal-image-max-tokens" placeholder="auto">
+                                    </div>
+                                </div>
+                                <div class="pe-field-hint">
+                                    Configured via --image-min-tokens / --image-max-tokens.
+                                    Qwen: 1024/4096. Gemma4: 70, 140, 280, 560, or 1120 (use 1120 for OCR / documents).
+                                    When using high values (e.g. 1120), Micro-batch will be increased automatically so images fit.
+                                </div>
+                                <div class="pe-field-hint" id="vision-ubatch-hint" style="display:none;color:var(--color-warn);"></div>
+                            </div>
                         </div>
                     </div>
 
@@ -3103,14 +3129,7 @@
                                 <input type="number" class="pe-input" id="modal-spec-draft-p-split" step="0.01" placeholder="0.1">
                                 <div class="pe-field-hint">Advanced — leave at default (0.1) for MTP-based speculation. Only adjust if using ngram spec type and tuning speculation aggressiveness.</div>
                             </div>
-                            <div class="pe-field">
-                                <label class="pe-label" for="modal-image-min-tokens" title="Vision Min Tokens: Minimum tokens per image. Affects VRAM usage for multimodal models. Required 1024 for Qwen models with an mmproj.">Vision Min Tokens</label>
-                                <input type="number" class="pe-input" id="modal-image-min-tokens" placeholder="1024 for Qwen multimodal models">
-                            </div>
-                            <div class="pe-field">
-                                <label class="pe-label" for="modal-image-max-tokens" title="Vision Max Tokens: Maximum tokens per image. Affects VRAM usage for multimodal models.">Vision Max Tokens</label>
-                                <input type="number" class="pe-input" id="modal-image-max-tokens" placeholder="auto">
-                            </div>
+
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-extra-args" title="Additional llama-server CLI flags (space-separated). Example: --log-verbosity 2 --no-perf">Extra Args</label>
                                 <input type="text" class="pe-input" id="modal-extra-args" placeholder="--flag1 value1 --flag2">

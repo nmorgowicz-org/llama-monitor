@@ -1378,6 +1378,47 @@ button:disabled {
   color: rgba(125, 211, 252, 0.9);
 }
 
+/* Switch / Quick Load — primary action when server is running */
+.mm-action-btn--switch {
+  color: var(--color-text-primary);
+  border-color: var(--acc-30);
+  background: linear-gradient(135deg, var(--acc-12), var(--acc-06));
+}
+
+.mm-action-btn--switch:hover {
+  border-color: var(--acc-60);
+  background: linear-gradient(135deg, var(--acc-20), var(--acc-10));
+  color: #fff;
+  box-shadow: 0 0 8px var(--acc-18);
+}
+
+/* Inline preset select inside Switch wrap */
+.mm-switch-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.mm-switch-select {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.68rem;
+  padding: 3px 6px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  appearance: auto;
+}
+
+.mm-switch-select:focus {
+  outline: none;
+  border-color: var(--acc-40);
+}
+
 .mm-action-delete {
   margin-left: auto;
 }
@@ -2002,7 +2043,6 @@ button:disabled {
 
 /* ── Primary / modal-save ── */
 [data-theme="light"] .btn-primary,
-[data-theme="light"] .btn-start,
 [data-theme="light"] .btn-modal-save {
   background:
     radial-gradient(circle at 24% 20%, rgba(15, 23, 42, 0.02), transparent 24%),
@@ -2012,6 +2052,19 @@ button:disabled {
   box-shadow:
     0 12px 26px var(--acc-25),
     inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* ── Start: green “go” accent in light theme so it’s clearly visible vs Stop ── */
+[data-theme="light"] .btn-start,
+[data-theme="light"] .control-bar-zone .btn-start {
+  background:
+    radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.9), transparent 26%),
+    linear-gradient(180deg, rgba(16, 185, 129, 0.24), rgba(22, 163, 74, 0.14));
+  border-color: rgba(22, 163, 74, 0.55);
+  color: #15803d;
+  box-shadow:
+    0 12px 26px rgba(16, 185, 129, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 /* ── Secondary / attach ── */
@@ -2027,17 +2080,18 @@ button:disabled {
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
-/* ── Stop / kill / preset-delete ── */
+/* ── Stop / kill / preset-delete: obvious red in light theme ── */
 [data-theme="light"] .btn-stop,
 [data-theme="light"] .btn-kill,
-[data-theme="light"] .btn-preset-delete {
+[data-theme="light"] .btn-preset-delete,
+[data-theme="light"] .control-bar-zone .btn-stop {
   background:
-    radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.85), transparent 22%),
-    linear-gradient(180deg, rgba(220, 38, 38, 0.14), rgba(185, 28, 28, 0.06));
-  border-color: rgba(185, 28, 28, 0.35);
+    radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.95), transparent 24%),
+    linear-gradient(180deg, rgba(220, 38, 38, 0.24), rgba(185, 28, 28, 0.14));
+  border-color: rgba(185, 28, 28, 0.5);
   color: #b91c1c;
   box-shadow:
-    0 10px 22px rgba(185, 28, 28, 0.1),
+    0 12px 26px rgba(185, 28, 28, 0.18),
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 

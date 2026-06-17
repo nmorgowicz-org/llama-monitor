@@ -438,6 +438,7 @@
 .metric-section {
   display: grid;
   gap: var(--gap-md);
+  padding: 4px 8px 0;
 }
 
 .metric-section > .dashboard-section-title {

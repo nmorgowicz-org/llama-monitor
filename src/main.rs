@@ -409,7 +409,9 @@ fn main() -> Result<()> {
                     let elapsed = now.saturating_sub(last);
 
                     if elapsed >= idle_secs {
-                        // Auto-sleep due to inactivity
+                        // Auto-sleep due to inactivity (not user-triggered)
+                        s.sleep_mode_manual
+                            .store(false, std::sync::atomic::Ordering::Relaxed);
                         s.sleep_mode.send(true).ok();
                         s.sleep_notify.notify_waiters();
                         drop(cfg);

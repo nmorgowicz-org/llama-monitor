@@ -160,13 +160,13 @@ export function refreshTopCockpit() {
     const genDisplayRate = genRate > 0 ? genRate : (l?.last_generation_tokens_per_sec || 0);
     const generationActive = !!l?.slot_generation_active || (l?.slots_processing || 0) > 0 || genRate > 0;
 
-    // T-057: cockpit pill modes: Active / Low Power / Auto
+    // T-057: cockpit pill modes: Active / Low Power (manual) / Low Power (auto) / idle
     const isSleeping = wsData?.sleep_mode === true;
+    const isManualSleep = isSleeping && wsData?.sleep_mode_manual === true;
     let label = 'idle';
     let stateClass = 'idle';
 
     if (isSleeping) {
-        // Sleep/low-power: show it, but don't override "generating" if busy.
         label = 'low power';
         stateClass = 'sleep';
     } else if (!hasActiveEndpoint) {
@@ -186,12 +186,12 @@ export function refreshTopCockpit() {
     cockpit.classList.toggle('is-live', stateClass === 'live');
     cockpit.classList.toggle('is-idle', stateClass !== 'live' && stateClass !== 'sleep');
     cockpit.classList.toggle('is-low-power', stateClass === 'sleep');
+    cockpit.classList.toggle('is-low-power-manual', isManualSleep);
     cockpit.classList.toggle('has-session', hasActiveEndpoint);
 
     // Keep Low Power pill tooltip in sync with actual mode
     const sleepPill = document.getElementById('nav-sleep-pill');
     if (sleepPill) {
-        const isSleeping = wsData?.sleep_mode === true;
         const unavailable = sleepPill.getAttribute('data-unavailable') === 'true';
         sleepPill.disabled = !hasActiveEndpoint || unavailable;
         sleepPill.setAttribute('aria-pressed', isSleeping ? 'true' : 'false');
@@ -201,16 +201,22 @@ export function refreshTopCockpit() {
         } else if (!hasActiveEndpoint) {
             sleepPill.setAttribute('title', 'Low Power is available after a local server session is active.');
             sleepPill.setAttribute('aria-label', 'Low Power unavailable until a local server session is active');
+        } else if (isManualSleep) {
+            sleepPill.setAttribute(
+                'title',
+                'Low Power: ON (manual) — llama-server stays running; click to resume full telemetry.'
+            );
+            sleepPill.setAttribute('aria-label', 'Turn Low Power off');
         } else if (isSleeping) {
             sleepPill.setAttribute(
                 'title',
-                'Low Power: ON — Telemetry minimized; llama-server stays running.'
+                'Low Power: ON (auto) — Idle timeout triggered; click to resume full telemetry.'
             );
             sleepPill.setAttribute('aria-label', 'Turn Low Power off');
         } else {
             sleepPill.setAttribute(
                 'title',
-                'Low Power: OFF — Click to reduce telemetry and activity while llama-server keeps running.'
+                'Low Power: OFF — llama-server keeps running with minimal overhead; click to reduce telemetry.'
             );
             sleepPill.setAttribute('aria-label', 'Turn Low Power on');
         }
@@ -403,15 +409,19 @@ export function initNav() {
                     nextSleeping = !wasSleeping;
                 }
 
-                // Reflect change in local state
-                setWsData({ ...(wsData || {}), sleep_mode: nextSleeping });
+                // Reflect change in local state immediately (WS will confirm)
+                setWsData({
+                    ...(wsData || {}),
+                    sleep_mode: nextSleeping,
+                    sleep_mode_manual: nextSleeping,
+                });
                 refreshTopCockpit();
                 sleepPill.setAttribute('aria-pressed', nextSleeping ? 'true' : 'false');
 
                 if (nextSleeping) {
-                    showToast('Low Power: ON', 'success');
+                    showToast('Low Power: ON — llama-server keeps running; telemetry paused.', 'success');
                 } else {
-                    showToast('Low Power: OFF', 'success');
+                    showToast('Low Power: OFF — full telemetry resumed.', 'success');
                 }
             } catch (err) {
                 showToast('Low Power toggle failed (network error).', 'error');

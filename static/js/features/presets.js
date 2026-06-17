@@ -6,7 +6,7 @@ import { sessionState, lastSystemMetrics } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { openModelFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
 import { applySettings, saveSettings } from './settings.js';
-import { showToast } from './toast.js';
+import { showToast, showToastWithActions } from './toast.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune } from './tuning-cards.js';
 import {
     COMMUNITY_TEMPLATES,
@@ -310,49 +310,43 @@ function wirePresetSelectChangeHandler() {
                 return;
             }
 
-            // Different preset is running: ask if they want to switch
+            // Different preset is running: show a non-blocking toast to confirm switch
             const chosenPreset = sessionState.presets.find(p => p.id === chosenId);
             const runningPreset = sessionState.presets.find(p => p.id === active.preset_id);
             const chosenName = chosenPreset?.name || 'selected preset';
             const runningName = runningPreset?.name || 'current preset';
 
-            if (!confirm(
-                `A model is already loaded (${runningName}).\n\n` +
-                `Do you want to stop it and load ${chosenName}?`
-            )) {
-                // Revert selection
+            const revert = () => {
                 syncSelectedPresetSelection(active.preset_id, { persist: true });
                 window.__presetUserSelected = false;
-                return;
-            }
+            };
 
-            // User confirmed: stop running, start new preset
-            showToast('Switching preset…', 'info');
-
-            // Stop current
-            const tokenResp = await fetch('/api/db/admin-token', {
-                headers: window.authHeaders ? window.authHeaders() : {},
-            });
-            const tokenData = await tokenResp.json().catch(() => ({}));
-            const token = tokenData.token;
-            if (token) {
-                await fetch('/api/kill-llama', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`,
+            showToastWithActions(
+                `Switch to "${chosenName}"?`,
+                'info',
+                `Currently running: ${runningName}`,
+                [
+                    {
+                        id: 'restart',
+                        label: 'Restart Now',
+                        primary: true,
+                        handler: async () => {
+                            showToast('Switching preset…', 'info');
+                            const { doKillLlamaInternal, doStart } = await import('./attach-detach.js');
+                            await doKillLlamaInternal();
+                            await new Promise(r => setTimeout(r, 400));
+                            await doStart(null, { skipRunningConfirm: true });
+                        },
                     },
-                    body: JSON.stringify({ confirm: 'kill' }),
-                }).catch(() => {});
-            }
-
-            // Short delay to allow process to shut down
-            await new Promise(r => setTimeout(r, 400));
-
-            // Start new preset via existing doStart flow
-            // We'll import attach-detach and call doStart directly
-            const { doStart } = await import('./attach-detach.js');
-            await doStart(null, { skipRunningConfirm: true });
+                    {
+                        id: 'cancel',
+                        label: 'Cancel',
+                        primary: false,
+                        handler: revert,
+                    },
+                ],
+                { duration: 12000, onDismiss: revert },
+            );
 
         } catch (e) {
             console.warn('[presets] preset-select change error:', e);
@@ -510,11 +504,19 @@ function looksLikeQwenName(name) {
 }
 
 function qwenVLImageTokens(p) {
+    // Return recommended image token budgets for multimodal (mmproj) models.
+    // Qwen3.6 vision: 1024 / 4096
+    // Gemma4: 280 / 1120 (valid: 70, 140, 280, 560, 1120)
     const name = p.model_path || '';
     const repo = p.hf_repo || '';
     const hasMmproj = !!p.mmproj;
-    if ((looksLikeQwenName(name) || looksLikeQwenName(repo)) && hasMmproj) {
+    if (!hasMmproj) return { min_tokens: null, max_tokens: null };
+
+    if (looksLikeQwenName(name) || looksLikeQwenName(repo)) {
         return { min_tokens: 1024, max_tokens: 4096 };
+    }
+    if ((name || '').toLowerCase().includes('gemma') || (repo || '').toLowerCase().includes('gemma')) {
+        return { min_tokens: 280, max_tokens: 1120 };
     }
     return { min_tokens: null, max_tokens: null };
 }
@@ -848,6 +850,7 @@ export function openPresetModal(mode, section) {
         numOrEmpty('modal-cache-ram-mib', p.cache_ram_mib);
         // Model extras
         setVal('modal-mmproj', p.mmproj || '');
+        _toggleVisionTokens(!!p.mmproj);
         setVal('modal-chat-template-file', p.chat_template_file || '');
         // Advanced
         setOpt('modal-bind-host', p.bind_host || '');
@@ -1083,6 +1086,38 @@ function _renderPresetsPanel() {
 function _toggleFitTarget(enabled) {
     const wrap = document.getElementById('modal-fit-target-wrap');
     if (wrap) wrap.style.display = enabled ? '' : 'none';
+}
+
+function _toggleVisionTokens(enabled) {
+    const wrap = document.getElementById('vision-tokens-wrap');
+    if (wrap) wrap.style.display = enabled ? '' : 'none';
+}
+
+function _ensureUbatchForImageTokens(imageMaxTokens) {
+    // Gemma4-specific: non-causal vision attention requires all image tokens in a single ubatch.
+    // If image-max-tokens > ubatch, we auto-raise ubatch to avoid crashes.
+    // This constraint is Gemma4-only; other models are unaffected.
+    if (!imageMaxTokens || imageMaxTokens <= 0) return;
+
+    const modelVal = (document.getElementById('modal-model-path')?.value || '').toLowerCase();
+    const repoVal = (document.getElementById('modal-hf-repo')?.value || '').toLowerCase();
+    const isGemma4 = modelVal.includes('gemma') || repoVal.includes('gemma');
+    if (!isGemma4) return;
+
+    const ubInput = document.getElementById('modal-ubatch-size');
+    const hintEl = document.getElementById('vision-ubatch-hint');
+    if (!ubInput) return;
+    const currentUbatch = Math.max(1, Number(ubInput.value || 0));
+    if (imageMaxTokens <= currentUbatch) {
+        if (hintEl) { hintEl.style.display = 'none'; hintEl.textContent = ''; }
+        return;
+    }
+    const prev = currentUbatch;
+    ubInput.value = imageMaxTokens;
+    if (hintEl) {
+        hintEl.textContent = `Micro-batch increased from ${prev} to ${imageMaxTokens} (required for Gemma4: all image tokens must fit in one batch).`;
+        hintEl.style.display = '';
+    }
 }
 
 function _toggleSpecFields(specType) {
@@ -1653,55 +1688,33 @@ function _applyGenerationPreset(preset) {
 function _offerRestartAfterPresetSave(presetId) {
     if (!presetId) return;
 
-    const modal = document.createElement('div');
-    modal.className = 'stop-choice-modal';
-    modal.innerHTML = `
-        <div class="stop-choice-card">
-            <div class="stop-choice-title">Apply changes</div>
-            <div class="stop-choice-actions">
-                <button class="btn btn-stop-choice-welcome" id="restart-choice-yes">
-                    Restart llama-server
-                </button>
-                <button class="btn btn-stop-choice-stay" id="restart-choice-no">
-                    Not now
-                </button>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(modal);
-
-    const yesBtn = modal.querySelector('#restart-choice-yes');
-    const noBtn = modal.querySelector('#restart-choice-no');
-
-    const removeModal = () => {
-        if (modal && modal.parentNode) modal.parentNode.removeChild(modal);
-    };
-
-    noBtn.addEventListener('click', () => {
-        noBtn.disabled = true;
-        yesBtn.disabled = true;
-        modal.style.transition = 'opacity 200ms ease';
-        modal.style.opacity = '0';
-        modal.style.pointerEvents = 'none';
-        setTimeout(removeModal, 220);
-    });
-
-    yesBtn.addEventListener('click', async () => {
-        yesBtn.disabled = true;
-        noBtn.disabled = true;
-        modal.style.opacity = '0.5';
-        modal.style.pointerEvents = 'none';
-        showToast('Restarting llama-server…', 'info');
-
-        try {
-            await _restartServerWithPreset(presetId);
-        } catch (e) {
-            showToast('Restart failed: ' + (e.message || String(e)), 'error');
-        } finally {
-            removeModal();
-        }
-    });
+    showToastWithActions(
+        'Apply changes?',
+        'info',
+        'Restart llama-server to load the updated preset.',
+        [
+            {
+                id: 'restart',
+                label: 'Restart Now',
+                primary: true,
+                handler: async () => {
+                    showToast('Restarting llama-server…', 'info');
+                    try {
+                        await _restartServerWithPreset(presetId);
+                    } catch (e) {
+                        showToast('Restart failed: ' + (e.message || String(e)), 'error');
+                    }
+                },
+            },
+            {
+                id: 'later',
+                label: 'Not now',
+                primary: false,
+                handler: () => {},
+            },
+        ],
+        { duration: 12000 },
+    );
 }
 
 async function _restartServerWithPreset(presetId) {
@@ -1885,6 +1898,12 @@ export function initPresets() {
     });
     document.getElementById('preset-browse-model-btn')?.addEventListener('click', () => openModelFileBrowser('modal-model-path', 'gguf', null, 'model'));
     document.getElementById('preset-browse-mmproj-btn')?.addEventListener('click', () => openModelFileBrowser('modal-mmproj', 'gguf', null, 'mmproj'));
+    document.getElementById('modal-mmproj')?.addEventListener('input', (e) => {
+        _toggleVisionTokens(!!(e.target.value || '').trim());
+    });
+    document.getElementById('modal-image-max-tokens')?.addEventListener('input', (e) => {
+        _ensureUbatchForImageTokens(Number(e.target.value || 0));
+    });
     document.getElementById('preset-browse-chat-template-btn')?.addEventListener('click', async () => {
         try {
             await openChatTemplateLibraryBrowser('modal-chat-template-file');

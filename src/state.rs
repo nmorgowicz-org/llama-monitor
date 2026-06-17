@@ -684,6 +684,7 @@ pub struct AppState {
 
     // Sleep/low-power mode (T-042/T-043)
     pub sleep_mode: Arc<tokio::sync::watch::Sender<bool>>,
+    pub sleep_mode_manual: Arc<AtomicBool>,
     pub sleep_mode_config: Arc<Mutex<SleepModeConfig>>,
     pub sleep_notify: Arc<tokio::sync::Notify>,
     pub last_activity_at: Arc<std::sync::atomic::AtomicU64>,
@@ -781,6 +782,7 @@ impl AppState {
             monitor_inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
             last_spawn_cmd: Arc::new(Mutex::new(String::new())),
             sleep_mode: Arc::new(sleep_mode_tx),
+            sleep_mode_manual: Arc::new(AtomicBool::new(false)),
             sleep_mode_config: Arc::new(Mutex::new(sleep_cfg)),
             sleep_notify: Arc::new(tokio::sync::Notify::new()),
             last_activity_at: Arc::new(AtomicU64::new(last_activity_ts)),

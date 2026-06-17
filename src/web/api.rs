@@ -5148,7 +5148,8 @@ fn api_models_gguf_meta(
 
 // ==================== SLEEP MODE API ENDPOINTS (T-050) ====================
 
-/// Helper: record activity timestamp and wake from sleep if needed.
+/// Helper: record activity timestamp and wake from auto-sleep if needed.
+/// Manual sleep (user-toggled) is not interrupted here — only auto-sleep is.
 fn record_activity(state: &AppState) {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -5158,8 +5159,11 @@ fn record_activity(state: &AppState) {
         .last_activity_at
         .store(now, std::sync::atomic::Ordering::Relaxed);
 
-    // Wake-on-activity: disable sleep when user hits an API endpoint (T-051)
-    if *state.sleep_mode.borrow() {
+    // Wake-on-activity: only wake auto-sleep, not manual sleep (T-051)
+    let is_manual = state
+        .sleep_mode_manual
+        .load(std::sync::atomic::Ordering::Relaxed);
+    if !is_manual && *state.sleep_mode.borrow() {
         state.sleep_mode.send(false).ok();
         state.sleep_notify.notify_waiters();
     }
@@ -5212,12 +5216,17 @@ pub fn api_sleep_mode_toggle(
             }
             touch_activity(&state);
             let enabled = *state.sleep_mode.borrow();
-            state.sleep_mode.send(!enabled).ok();
+            let next = !enabled;
+            // Track manual intent so wake-on-reconnect/visibility won't override it
+            state
+                .sleep_mode_manual
+                .store(next, std::sync::atomic::Ordering::Relaxed);
+            state.sleep_mode.send(next).ok();
             state.sleep_notify.notify_waiters();
             Box::new(warp::reply::json(&serde_json::json!({
                 "ok": true,
-                "enabled": !enabled,
-                "sleep_mode": !enabled
+                "enabled": next,
+                "sleep_mode": next
             }))) as Box<dyn warp::reply::Reply>
         })
 }
@@ -5237,11 +5246,15 @@ pub fn api_sleep_mode_set(
                 if !check_api_token(&auth, &cfg) {
                     return unauthorized_api_token();
                 }
-                record_activity(&state);
+                touch_activity(&state);
                 let enabled = body
                     .get("enabled")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(true);
+                // Track manual vs auto so wake-on-reconnect doesn't override the user's choice
+                state
+                    .sleep_mode_manual
+                    .store(enabled, std::sync::atomic::Ordering::Relaxed);
                 state.sleep_mode.send(enabled).ok();
                 state.sleep_notify.notify_waiters();
                 Box::new(warp::reply::json(&serde_json::json!({
@@ -11199,6 +11212,8 @@ fn api_spawn_session_with_preset(
                     reasoning: preset.reasoning.clone(),
                     reasoning_budget: preset.reasoning_budget,
                     reasoning_budget_message: preset.reasoning_budget_message.clone(),
+                    image_min_tokens: preset.image_min_tokens,
+                    image_max_tokens: preset.image_max_tokens,
                     ..Default::default()
                 };
 

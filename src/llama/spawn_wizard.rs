@@ -326,16 +326,22 @@ pub fn predict_perf_hints(
     }
 
     // 4. MTP available but not enabled → free ~1.4–2× decode, no quality change.
-    if has_mtp_model && spec_type != Some("draft-mtp") {
+    // Only suggest if spec_type is missing or doesn't already include "draft-mtp".
+    let mtp_already_enabled = spec_type
+        .map(|s| !s.is_empty() && s.contains("draft-mtp"))
+        .unwrap_or(false);
+    if has_mtp_model && !mtp_already_enabled {
         out.push(BenchmarkSuggestion {
             label: "Enable MTP speculative decoding".to_string(),
             description:
                 "An MTP draft model is available. Multi-Token Prediction gives ~1.4–2× faster \
-                 generation with no change in output quality."
+                  generation with no change in output quality."
                     .to_string(),
             param: "spec_type".to_string(),
-            value: serde_json::json!("draft-mtp"),
-            patch: Some(serde_json::json!({ "spec_type": "draft-mtp", "spec_draft_n_max": 4 })),
+            value: serde_json::json!("draft-mtp,ngram-mod"),
+            patch: Some(
+                serde_json::json!({ "spec_type": "draft-mtp,ngram-mod", "spec_draft_n_max": 4 }),
+            ),
         });
     }
 
