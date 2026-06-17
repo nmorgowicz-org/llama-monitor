@@ -642,8 +642,14 @@ pub struct AppState {
     pub gpu_metrics: Arc<Mutex<BTreeMap<String, GpuMetrics>>>,
     pub llama_metrics: Arc<Mutex<LlamaMetrics>>,
     pub server_logs: Arc<Mutex<VecDeque<String>>>,
-    pub server_child: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
+    // Stores the PID of the running llama-server child.  The Child handle itself
+    // is moved directly into the death_watcher task so it can call wait(); stop_server
+    // kills by PID so it never needs to hold the handle.
+    pub server_child: Arc<tokio::sync::Mutex<Option<u32>>>,
     pub server_stopping: Arc<AtomicBool>, // True when stop_server is in progress (for death-watcher coordination)
+    // Fired by the death_watcher when the child exits during an intentional stop,
+    // so stop_server can unblock and know the port has been released.
+    pub server_exit_notify: Arc<tokio::sync::Notify>,
     pub server_running: Arc<Mutex<bool>>, // Whether active endpoint is reachable (for inference)
     pub local_server_running: Arc<Mutex<bool>>, // Whether a local llama-server was spawned by this app
     pub server_config: Arc<Mutex<Option<ServerConfig>>>,
@@ -745,6 +751,7 @@ impl AppState {
             server_logs: Arc::new(Mutex::new(VecDeque::new())),
             server_child: Arc::new(tokio::sync::Mutex::new(None)),
             server_stopping: Arc::new(AtomicBool::new(false)),
+            server_exit_notify: Arc::new(tokio::sync::Notify::new()),
             server_running: Arc::new(Mutex::new(false)),
             local_server_running: Arc::new(Mutex::new(false)),
             server_config: Arc::new(Mutex::new(None)),
