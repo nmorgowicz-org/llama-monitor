@@ -13107,8 +13107,9 @@ fn api_llama_binary_update(
                     dest_path.display()
                 ));
 
-                // Restart llama-server with previous config if it was running
-                if let Some(rc) = previous_config {
+                // Restart llama-server with previous config if it was running.
+                // Track whether we restarted so the frontend skips its own restart call.
+                let server_restarted = if let Some(rc) = previous_config {
                     state.push_log(
                         "[monitor] llama-binary/update: restarting llama-server with previous config".into(),
                     );
@@ -13118,15 +13119,19 @@ fn api_llama_binary_update(
                             state.push_log(
                                 "[monitor] llama-binary/update: llama-server restarted successfully".into(),
                             );
+                            true
                         }
                         Err(e) => {
                             state.push_log(format!(
                                 "[monitor] llama-binary/update: restart failed (binary updated; start manually if needed): {}",
                                 e
                             ));
+                            false
                         }
                     }
-                }
+                } else {
+                    false
+                };
 
                 // Compute SHA256 of the llama-server binary so users can
                 // verify integrity out-of-band (e.g. `sha256sum llama-server`).
@@ -13149,6 +13154,9 @@ fn api_llama_binary_update(
                         "backend": backend,
                         "arch": arch_str,
                         "sha256": sha256_hex,
+                        // True when the backend already restarted the server; frontend
+                        // must skip its own /api/llama/restart call to avoid a double-restart.
+                        "server_restarted": server_restarted,
                     }),
                 )))
             }
