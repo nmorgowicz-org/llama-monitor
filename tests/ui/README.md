@@ -77,7 +77,8 @@ node tests/ui/capture.mjs --list-scenarios
 | `sparkline` | Sparkline validation stills and clipped metric captures |
 | `gifs` | Animated inference and GPU/system captures |
 | `smoke` | Startup smoke validation |
-| `navbar` | Top nav bar: idle-dark, low-power active, idle-light (theme toggle + sleep pill) |
+| `appearance-palette` | Settings Appearance palette stills and light-mode dashboard |
+| `navbar` | Top nav bar close-ups: idle-dark, low-power active, idle-light; requires `--close-up` |
 
 ### Common commands
 
@@ -96,6 +97,9 @@ SCREENSHOT_PORT=8893 node tests/ui/capture.mjs --scenario sidebar
 
 # Settings and modal surfaces
 SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario settings
+
+# Appearance palettes and light-mode dashboard
+SCREENSHOT_PORT=8899 node tests/ui/capture.mjs --scenario appearance-palette --no-attach
 
 # Chat configuration panels
 SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario panels

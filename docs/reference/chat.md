@@ -64,6 +64,7 @@ The sidebar's `Search Messages` button opens a larger flyout beside the conversa
 
 Several appearance and chat behaviors are configurable via Settings and are applied globally (not per-tab).
 
+- **Theme and palette** — Switch between dark, light, or system color mode and choose one of the accent palettes. The selection applies across dashboard cards, chat chrome, sparklines, charts, and modal surfaces.
 - **Chat styles** — Visual styles for the chat view (e.g., standard, compact, bubbly, paper, terminal). Changes apply immediately.
 - **Timestamps** — Controls how message timestamps are shown: off, hover, or always.
 - **Message width** — Adjusts the horizontal width of the chat message area.

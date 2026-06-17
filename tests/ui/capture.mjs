@@ -158,7 +158,8 @@ Scenarios:
     smoke            Startup smoke test
 
   Appearance
-    navbar           Top nav bar: idle-dark, low-power active, idle-light (theme toggle + sleep pill)
+    appearance-palette Settings Appearance palette stills plus light-mode dashboard
+    navbar           Nav bar close-ups: idle-dark, low-power active, idle-light (requires --close-up)
 
 Options:
   --gpu-only         For gifs scenario, capture only GPU/system animation
@@ -384,9 +385,66 @@ async function attachToServer(page, remoteServer = REMOTE_SERVER) {
     console.log('[CAPTURE] Attach successful.');
 }
 
-async function gotoApp(page, baseUrl) {
-    await page.goto(baseUrl, { waitUntil: 'networkidle0' });
+async function gotoApp(page, baseUrl, waitUntil = 'networkidle0') {
+    await page.goto(baseUrl, { waitUntil });
     await sleep(1500);
+}
+
+async function loadAppDocument(page, baseUrl) {
+    try {
+        await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+    } catch (error) {
+        console.log('[CAPTURE] app navigation fallback:', error.message);
+    }
+
+    const hasAppShell = await page.$('#page-server') !== null;
+    if (hasAppShell) {
+        await sleep(1500);
+        return;
+    }
+
+    const response = await fetch(baseUrl);
+    if (!response.ok) {
+        throw new Error(`Unable to fetch app document from ${baseUrl}: ${response.status}`);
+    }
+    let html = await response.text();
+    html = html.replace('<head>', `<head><base href="${baseUrl}/">`);
+    html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(error => {
+        console.log('[CAPTURE] setContent fallback continuing:', error.message);
+    });
+    await page.waitForSelector('#page-server', { timeout: 10000 });
+    await page.evaluate(() => {
+        document.getElementById('auth-shell')?.classList.add('hidden');
+        document.body.classList.remove('auth-required');
+    });
+    await sleep(1500);
+}
+
+async function openAppearancePaneForCapture(page) {
+    await page.evaluate(() => {
+        if (typeof window.openSettingsModal === 'function') {
+            window.openSettingsModal();
+            return;
+        }
+        const modal = document.getElementById('settings-modal');
+        if (modal) {
+            modal.classList.add('open');
+            modal.removeAttribute('inert');
+            modal.setAttribute('aria-hidden', 'false');
+        }
+    });
+    await page.waitForSelector('#settings-modal.open', { timeout: 5000 });
+    await page.evaluate(() => {
+        document.querySelectorAll('.settings-tab').forEach(tab => {
+            const active = tab.dataset.tab === 'appearance';
+            tab.classList.toggle('active', active);
+            tab.setAttribute('aria-selected', String(active));
+        });
+        document.querySelectorAll('.settings-pane').forEach(pane => {
+            pane.classList.toggle('active', pane.id === 'settings-appearance');
+        });
+    });
 }
 
 async function captureAuthShell(port, viewport = DEFAULT_VIEWPORT) {
@@ -3559,21 +3617,20 @@ async function scenarioSpawnWizardGif(ctx, _options) {
 
 async function scenarioAppearancePalette(ctx, options) {
     const { page, baseUrl } = ctx;
-    await gotoApp(page, baseUrl);
-    await attachToServer(page);
+    await loadAppDocument(page, baseUrl);
+
+    if (!options.noAttach) {
+        try {
+            await attachToServer(page);
+        } catch (e) {
+            console.log('[CAPTURE] appearance-palette: attach failed (non-fatal):', e.message);
+        }
+    }
     await sleep(500);
 
-    // Open settings and navigate to Appearance tab
-    await page.evaluate(() => window.openSettingsModal?.());
-    await page.waitForSelector('#settings-modal.open', { timeout: 5000 });
+    await openAppearancePaneForCapture(page);
     await sleep(400);
-    const appTab = await page.$('.settings-tab[data-tab="appearance"]');
-    if (appTab) {
-        await appTab.click();
-        await sleep(700);
-    }
 
-    // Check what's in the DOM
     const paletteGridInfo = await page.evaluate(() => {
         const grid = document.getElementById('settings-palette-grid');
         if (!grid) return 'grid NOT FOUND';
@@ -3582,39 +3639,72 @@ async function scenarioAppearancePalette(ctx, options) {
     });
     console.log('[CAPTURE] DOM check:', paletteGridInfo);
 
-    // Full page shot with wider viewport so modal content is visible
     await captureShot(page, 'appearance-palette-carbon-mint.png', { fullPage: true });
 
-    // Cycle through palettes using JS instead of clicking (more reliable in headless)
     const palettes = [
-        { value: 'cyber-rose',   label: 'cyber-rose' },
+        { value: 'cyber-rose', label: 'cyber-rose' },
         { value: 'solar-violet', label: 'solar-violet' },
-        { value: 'lava-core',    label: 'lava-core' },
+        { value: 'lava-core', label: 'lava-core' },
     ];
     for (const { value, label } of palettes) {
-        // Try clicking the button; fall back to direct DOM manipulation
-        const clicked = await page.evaluate((palette) => {
-            const btn = document.querySelector(`#settings-palette-grid .palette-swatch[data-palette="${palette}"]`);
-            if (btn) { btn.click(); return true; }
-            // Fallback: apply palette directly
+        await page.evaluate((palette) => {
             const html = document.documentElement;
             html.classList.add('palette-changing');
             setTimeout(() => html.classList.remove('palette-changing'), 350);
-            if (palette) html.dataset.palette = palette; else delete html.dataset.palette;
-            return false;
+            if (palette) html.dataset.palette = palette;
+            else delete html.dataset.palette;
+            document.querySelectorAll('#settings-palette-grid .palette-swatch').forEach(btn => {
+                const active = (btn.dataset.palette || '') === palette;
+                btn.classList.toggle('active', active);
+                btn.setAttribute('aria-pressed', String(active));
+            });
         }, value);
-        console.log(`[CAPTURE] Palette ${label}: clicked=${clicked}`);
+        console.log(`[CAPTURE] Palette ${label}`);
         await sleep(500);
         await captureShot(page, `appearance-palette-${label}.png`, { fullPage: true });
     }
 
-    // Restore Carbon Mint
     await page.evaluate(() => {
-        const btn = document.querySelector('#settings-palette-grid .palette-swatch[data-palette=""]');
-        if (btn) btn.click();
-        else delete document.documentElement.dataset.palette;
+        delete document.documentElement.dataset.palette;
+        document.querySelectorAll('#settings-palette-grid .palette-swatch').forEach(btn => {
+            const active = (btn.dataset.palette || '') === '';
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-pressed', String(active));
+        });
     });
     await sleep(300);
+
+    await page.evaluate(() => {
+        document.getElementById('settings-modal-close')?.click();
+        document.getElementById('settings-modal')?.classList.remove('open');
+        const saved = JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}');
+        localStorage.setItem('llama-monitor-preferences', JSON.stringify({
+            ...saved,
+            theme: 'light',
+            palette: '',
+        }));
+        delete document.documentElement.dataset.palette;
+        document.documentElement.dataset.theme = 'light';
+        document.querySelectorAll('.sidebar-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === 'server');
+        });
+        document.querySelectorAll('.page').forEach(pageEl => {
+            pageEl.classList.toggle('active', pageEl.id === 'page-server');
+        });
+    });
+    await page.waitForSelector('#page-server.active', { timeout: 5000 });
+    await sleep(700);
+    await captureShot(page, 'appearance-light-dashboard.png', { fullPage: true });
+
+    await page.evaluate(() => {
+        const saved = JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}');
+        localStorage.setItem('llama-monitor-preferences', JSON.stringify({
+            ...saved,
+            theme: 'dark',
+            palette: '',
+        }));
+        document.documentElement.dataset.theme = 'dark';
+    });
 
     console.log('[CAPTURE] Scenario "appearance-palette" complete.');
 }
