@@ -60,3 +60,4 @@ scripts/*.sh
 !scripts/validate-js.sh
 !scripts/cfg-audit.sh
 .claude/
+.serena/

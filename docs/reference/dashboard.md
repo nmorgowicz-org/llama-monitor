@@ -98,7 +98,7 @@ A pill in the top navigation bar displays the currently installed build number i
 
 Clicking the pill opens a version modal that lists the last 8 `llama.cpp` releases. Each row shows the tag, a relative age, and badges for **latest** and **installed**. The currently installed build is pinned at the bottom of the list when it is older than the 8-release window.
 
-Clicking any row displays that release's notes in a side pane. The **Install** button is shown for every non-current release; clicking it downloads and replaces the `llama-server` binary. During installation the pill displays `Installing…` with a live timer. On success the running llama-server is restarted automatically to pick up the new binary.
+Clicking any row displays that release's notes in a side pane. The **Install** button is shown for every non-current release; clicking it downloads, validates, and promotes a new `llama-server` binary. During installation the pill displays `Installing…` with a live timer. On success the running llama-server is restarted automatically to pick up the new binary.
 
 ![Llama Updater Version Modal](../screenshots/llama-updater-version-modal.png)
 

@@ -7,6 +7,22 @@ use crate::config::AppConfig;
 use crate::gpu::env::{build_nvidia_env, build_rocm_env};
 use crate::state::AppState;
 
+fn describe_process_status(status: std::process::ExitStatus) -> String {
+    if let Some(code) = status.code() {
+        return format!("exit code {code}");
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return format!("signal {signal}");
+        }
+    }
+
+    "exit status unknown".to_string()
+}
+
 /// Speculative-decoding knobs, kept in a separate struct so ServerConfig
 /// stays readable. Flattened into the parent so JSON serialization is
 /// identical to before — saved presets and API payloads are unaffected.
@@ -353,21 +369,23 @@ pub async fn start_server(
                 // OK — binary is usable.
             }
             Some((st, stderr)) => {
-                let code = st.code().map_or("unknown".into(), |c| c.to_string());
+                let status = describe_process_status(st);
                 let detail = stderr.trim().to_string();
                 if detail.is_empty() {
                     state.push_log(format!(
-                        "[monitor] start_server: llama-server health check failed (exit code {}). Binary may be corrupted or incompatible.", code
+                        "[monitor] start_server: llama-server health check failed ({}). Binary may be corrupted or incompatible.",
+                        status
                     ));
                 } else {
                     state.push_log(format!(
-                        "[monitor] start_server: llama-server health check failed (exit code {}): {}. Binary may be corrupted or incompatible.", code, detail
+                        "[monitor] start_server: llama-server health check failed ({}): {}. Binary may be corrupted or incompatible.",
+                        status, detail
                     ));
                 }
                 anyhow::bail!(
-                    "llama-server health check failed (exit code {}). The binary may be corrupted, \
+                    "llama-server health check failed ({}). The binary may be corrupted, \
                      truncated, or incompatible. Reinstall or update the llama.cpp binary.",
-                    code
+                    status
                 );
             }
             None => {

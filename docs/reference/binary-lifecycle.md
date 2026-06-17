@@ -84,24 +84,26 @@ Body (all fields optional):
 ## Update pipeline
 
 The install handler follows a strict ordering to ensure the live binary is never
-replaced with a bad one and the server is never left stopped after a failed update.
+replaced with a bad one and the server is not stopped until the final install window.
 
 ```
-1. Stop live server (if running), preserving its config for restart
+1. Capture current ServerConfig if a local server is running
 2. Fetch release list from GitHub
 3. Select matching assets via select_assets(release, backend, arch)
 4. Download + extract all assets into a temp dir (tempfile::tempdir())
 5. Locate llama-server / llama-server.exe inside the temp tree
 6. Set executable bit (unix: chmod 0o755)
 7. Strip macOS Gatekeeper quarantine xattr (macOS only)
-8. Health check: run `llama-server --help` with a 10-second timeout
-9. If health check passes: copy all files from temp dir to dest_dir
+8. Health check: run `llama-server --help` from extracted temp tree with a 10-second timeout
+9. Copy release files into install target
+   - macOS: copy into a fresh sibling staging dir, health-check the staged binary, stop the server if needed, then promote the staging dir to the configured `bin/` path while preserving the previous dir as backup
+   - other platforms: stop the server if needed, copy into the configured `bin/` path, normalize the configured binary name, then health-check the installed binary
 10. Restart server with preserved config (if it was running before)
 ```
 
-If any step from 3–8 fails, the function returns an error response and the live binary
-is untouched. The server is only restarted if it was stopped in step 1 and the install
-succeeds in step 9.
+If any step from 2–8 fails, the function returns an error response and the live binary
+is untouched; if a server was running, it keeps running because it has not been stopped
+yet. The server is stopped only after pre-install validation succeeds.
 
 ### Step 3 — Asset selection (`select_assets`)
 
@@ -220,38 +222,27 @@ UI toast:
 
 ### Step 9 — Copy to destination (`copy_all_files`)
 
-A recursive file copy writes every file from `tmp_dir.path()` to `dest_dir` (the parent
-directory of `llama_server_path`). This is intentionally a full directory copy rather
-than a single binary overwrite so that GPU backends receive their shared libraries
-(`.dll`, `.so`, `.dylib`) alongside the executable.
+On macOS, the updater does not mutate the live binary directory in place. It creates
+a hidden sibling staging directory, copies all extracted release files there,
+normalizes the configured binary name, runs `llama-server --help` from the staged
+location, renames the current `bin/` directory to a timestamped backup, and
+promotes the staging directory to `bin/`. This avoids stale Gatekeeper/XProtect
+provenance state from a previous failed install or in-place overwrite poisoning the
+live path.
 
-## Artifact cleanup rules
-
-`cleanup_old_binaries` is called after every `download_and_extract`. Rules:
-
-1. **Tarballs** (`llama-b<N>-bin-*.tar.gz`): parse the build number `N` from the name;
-   keep only the entry with the highest `N`; remove all others.
-2. **Versioned dylibs** (`<prefix>.<N>.dylib`): group by prefix; keep the highest `N`
-   within each group; remove older variants.
-3. Everything else (current binaries, non-versioned libs, symlinks) is left untouched.
-
-## Version detection
-
-`GET /api/llama-binary/version` is the source of truth for the installed version.
-There is no separate manifest or lock file — the build number is read live from the
-binary's `--version` output on every request. This means the version display is always
-accurate after a restart or a manual binary replacement.
+On Linux and Windows, the updater copies into the configured binary directory,
+normalizes the configured binary name, cleans old artifacts, and health-checks
+the installed binary before reporting success.
 
 ## Server stop/restart around updates
 
 When the local server is running at update time:
 
-1. The current `ServerConfig` is captured before stopping.
-2. `stop_server` is called; the server is confirmed stopped before the download begins.
-3. After a successful install, the server is restarted with the preserved config.
-4. If the install fails, the server is **not** restarted automatically. The user must
-   restart manually. This is intentional: a failed install may leave the binary directory
-   in an intermediate state that needs inspection.
+1. The current `ServerConfig` is captured before download and validation begins.
+2. Download, extraction, and temp/staged binary health checks run while the existing server keeps running.
+3. `stop_server` is called only after the replacement candidate has passed pre-install validation.
+4. After a successful install and final installed-path health check, the server is restarted with the preserved config.
+5. If promotion fails after the old directory is moved aside, the updater attempts to restore the previous directory before returning an error.
 
 ## Expected quality bar for future backends
 
