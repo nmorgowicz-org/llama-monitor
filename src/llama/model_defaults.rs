@@ -71,12 +71,29 @@ pub struct ModelPreset {
 /// (e.g. Qwen3.6 thinking-general vs thinking-coding).
 /// The first preset is the recommended default.
 /// Returns generic fallback presets for models with no special modes.
-pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -> Vec<ModelPreset> {
+///
+/// `gguf_arch` and `arch_family` are optional supplementary hints (from GGUF
+/// `general.architecture` and wizard family detection) used when the filename
+/// alone is insufficient — e.g. for distilled or renamed finetunes.
+pub fn get_model_presets(
+    name_or_repo: &str,
+    size_bytes: u64,
+    tags: &[String],
+    gguf_arch: &str,
+    arch_family: &str,
+) -> Vec<ModelPreset> {
     let lower = name_or_repo.to_ascii_lowercase();
+    let arch_lower = gguf_arch.to_ascii_lowercase();
+    let family_lower = arch_family.to_ascii_lowercase();
 
     // Qwen3.5 family: hybrid-reasoning MoE + dense, thinking-enabled.
     // Presets from https://unsloth.ai/docs/models/qwen3.5
-    let is_qwen35 = lower.contains("qwen3.5") || lower.contains("qwen35");
+    // gguf_arch "qwen3_5" or arch_family "qwen3.5" also matches.
+    let is_qwen35 = lower.contains("qwen3.5")
+        || lower.contains("qwen35")
+        || arch_lower == "qwen3_5"
+        || arch_lower == "qwen3.5"
+        || family_lower == "qwen3.5";
 
     if is_qwen35 {
         let thinking_general = ModelDefaults {
@@ -186,8 +203,16 @@ pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -
 
     // Qwen3.6 family (including Qwopus and other derivatives):
     // preset values from https://unsloth.ai/docs/models/qwen3.6
-    let is_qwen36 =
-        (lower.contains("qwen3.6") || lower.contains("qwen36") || lower.contains("qwopus"))
+    // gguf_arch "qwen35" (shared with Qwen3.5 at the GGUF level but we default to qwen3.6
+    // for renamed finetunes), "qwen3_6", or arch_family "qwen3.6" also match — this lets
+    // distills/finetunes (e.g. "Qwable-v1.gguf") get the right presets from GGUF metadata.
+    let arch_is_qwen36 = matches!(
+        arch_lower.as_str(),
+        "qwen35" | "qwen35moe" | "qwen3_6" | "qwen3.6"
+    );
+    let is_qwen36 = arch_is_qwen36
+        || family_lower == "qwen3.6"
+        || (lower.contains("qwen3.6") || lower.contains("qwen36") || lower.contains("qwopus"))
             && (lower.contains("27b") || lower.contains("35b") || lower.contains("a3b"));
 
     if is_qwen36 {
@@ -418,14 +443,16 @@ pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -
         ];
     }
 
-    if (lower.contains("gemma-4") || lower.contains("gemma4"))
-        && (lower.contains("2b")
-            || lower.contains("4b")
-            || lower.contains("12b")
-            || lower.contains("15b")
-            || lower.contains("26b")
-            || lower.contains("31b"))
-    {
+    let is_gemma4 = arch_lower == "gemma4"
+        || family_lower == "gemma4"
+        || (lower.contains("gemma-4") || lower.contains("gemma4"))
+            && (lower.contains("2b")
+                || lower.contains("4b")
+                || lower.contains("12b")
+                || lower.contains("15b")
+                || lower.contains("26b")
+                || lower.contains("31b"));
+    if is_gemma4 {
         return vec![
             ModelPreset {
                 name: "General".into(),
@@ -745,7 +772,7 @@ mod tests {
 
     #[test]
     fn qwen36_exposes_all_planned_presets() {
-        let presets = get_model_presets("Qwen3.6-30B-A3B", 0, &[]);
+        let presets = get_model_presets("Qwen3.6-30B-A3B", 0, &[], "", "");
         assert_eq!(presets.len(), 5);
         assert_eq!(presets[0].name, "Agentic / Coding (thinking)");
         assert_eq!(presets[1].name, "Creative / Roleplay (thinking)");
@@ -755,9 +782,34 @@ mod tests {
     }
 
     #[test]
+    fn qwen36_finetune_gets_presets_via_gguf_arch() {
+        // Distill/finetune with no "qwen3.6" in the name — identified by GGUF arch.
+        // "qwen35moe" is the actual general.architecture value llama.cpp emits for Qwen3.6 MoE.
+        let presets = get_model_presets("Qwable-v1.Q5_K_M.gguf", 0, &[], "qwen35moe", "");
+        assert_eq!(presets.len(), 5);
+        assert_eq!(presets[0].name, "Agentic / Coding (thinking)");
+    }
+
+    #[test]
+    fn qwen36_finetune_gets_presets_via_gguf_arch_qwen35() {
+        // "qwen35" (without "moe") is reported by some dense Qwen3.6 variants.
+        let presets = get_model_presets("Pantheon-27B.gguf", 0, &[], "qwen35", "");
+        assert_eq!(presets.len(), 5);
+        assert_eq!(presets[0].name, "Agentic / Coding (thinking)");
+    }
+
+    #[test]
+    fn qwen36_finetune_gets_presets_via_arch_family() {
+        // Distill/finetune identified by client-side arch_family detection.
+        let presets = get_model_presets("Qwable-v1.Q5_K_M.gguf", 0, &[], "", "qwen3.6");
+        assert_eq!(presets.len(), 5);
+        assert_eq!(presets[0].name, "Agentic / Coding (thinking)");
+    }
+
+    #[test]
     fn qwen35_122b_a10b_exposes_presets_including_agentic() {
         // Source: https://unsloth.ai/docs/models/qwen3.5
-        let presets = get_model_presets("Qwen3.5-122B-A10B-GGUF", 0, &[]);
+        let presets = get_model_presets("Qwen3.5-122B-A10B-GGUF", 0, &[], "", "");
         assert_eq!(presets.len(), 5);
         assert_eq!(presets[0].name, "Thinking (General)");
         assert_eq!(presets[1].name, "Thinking (Agentic / Coding)");
@@ -780,14 +832,14 @@ mod tests {
     #[test]
     fn qwen35_reap_variant_gets_qwen35_presets() {
         // REAP (expert-pruned) variants must still match Qwen3.5 presets.
-        let presets = get_model_presets("Qwen3.5-122B-A10B-REAP-20-i1-GGUF", 0, &[]);
+        let presets = get_model_presets("Qwen3.5-122B-A10B-REAP-20-i1-GGUF", 0, &[], "", "");
         assert_eq!(presets.len(), 5);
         assert_eq!(presets[0].name, "Thinking (General)");
     }
 
     #[test]
     fn gemma4_exposes_three_presets() {
-        let presets = get_model_presets("gemma-4-26b-it", 0, &[]);
+        let presets = get_model_presets("gemma-4-26b-it", 0, &[], "", "");
         assert_eq!(presets.len(), 3);
         assert_eq!(presets[0].name, "General");
         assert_eq!(presets[1].name, "Creative / Roleplay");
@@ -795,8 +847,15 @@ mod tests {
     }
 
     #[test]
+    fn gemma4_finetune_gets_presets_via_gguf_arch() {
+        let presets = get_model_presets("my-gemma-finetune.gguf", 0, &[], "gemma4", "");
+        assert_eq!(presets.len(), 3);
+        assert_eq!(presets[0].name, "General");
+    }
+
+    #[test]
     fn generic_models_get_fallback_presets() {
-        let presets = get_model_presets("my-custom-rp-model.gguf", 0, &[]);
+        let presets = get_model_presets("my-custom-rp-model.gguf", 0, &[], "", "");
         assert_eq!(presets.len(), 2);
         assert_eq!(presets[0].name, "General");
         assert_eq!(presets[1].name, "Creative / Roleplay");

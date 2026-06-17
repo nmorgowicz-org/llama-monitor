@@ -2734,7 +2734,7 @@ fn gguf_arch_to_heuristic_name(gguf_arch: &str) -> String {
         // "qwen35" is shared by Qwen3.5 and Qwen3.6 in llama.cpp GGUF.
         // Without block_count we can't distinguish them. Default to qwen3.6
         // since renamed 27B finetunes (Pantheon, Qwopus) are qwen3.6 derivatives.
-        "qwen35" => "qwen3.6-model".into(),
+        "qwen35" | "qwen35moe" => "qwen3.6-model".into(),
         "qwen3_coder_next" | "qwen3-coder-next" => "qwen3-coder-next-model".into(),
         "gemma4" | "gemma-4" => "gemma4-model".into(),
         "gemma3" | "gemma-3" => "gemma3-27b".into(),
@@ -3145,6 +3145,8 @@ fn api_model_defaults(
                             .collect()
                     })
                     .unwrap_or_default();
+                let gguf_arch = body["gguf_arch"].as_str().unwrap_or("").to_string();
+                let arch_family = body["arch_family"].as_str().unwrap_or("").to_string();
 
                 if name_or_repo.is_empty() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -3158,6 +3160,8 @@ fn api_model_defaults(
                     &name_or_repo,
                     size_bytes,
                     &tags,
+                    &gguf_arch,
+                    &arch_family,
                 );
                 let defaults = presets
                     .first()
