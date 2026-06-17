@@ -135,18 +135,18 @@
             <h1 class="nav-title">Llama Monitor</h1>
         </div>
         <div class="nav-center">
-            <button class="nav-cockpit" id="nav-cockpit" type="button" title="Global telemetry — click to open Server">
+            <div class="nav-cockpit" id="nav-cockpit" role="button" tabindex="0" title="Global telemetry — click to open Server">
                 <span class="metric-live-chip idle nav-cockpit-state" id="nav-cockpit-state">idle</span>
                 <span class="nav-cockpit-chip nav-cockpit-throughput" id="nav-cockpit-throughput" title="Prompt and generation throughput">P &mdash; · G &mdash;</span>
                 <span class="nav-cockpit-chip nav-cockpit-spec hidden" id="nav-cockpit-spec" title="Speculative decoding efficiency — tokens accepted per decode pass"></span>
                 <span class="nav-cockpit-chip nav-cockpit-context" id="nav-cockpit-context" title="Highest chat context pressure">Ctx &mdash;</span>
                 <span class="nav-cockpit-chip nav-cockpit-gpu" id="nav-cockpit-gpu" title="Hottest GPU temperature">GPU &mdash;</span>
-                <span class="nav-sleep-pill" id="nav-sleep-pill" role="button" title="Toggle Low Power mode — llama-server stays running; telemetry and UI reduce activity">
+                <button class="nav-sleep-pill" id="nav-sleep-pill" type="button" aria-pressed="false" title="Toggle Low Power mode — llama-server stays running; telemetry and UI reduce activity">
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
                     Low Power
-                </span>
+                </button>
                 <svg class="metric-sparkline nav-cockpit-spark" id="nav-cockpit-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
-            </button>
+            </div>
         </div>
         <div class="nav-right">
             <div id="session-controls">
