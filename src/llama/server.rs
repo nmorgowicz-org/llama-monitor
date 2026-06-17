@@ -479,15 +479,15 @@ pub async fn start_server(
     }
 
     // Threading (-1 = auto, positive = explicit; 0/null = omit)
-    if let Some(t) = config.threads {
-        if t == -1 || t > 0 {
-            cmd.arg("-t").arg(t.to_string());
-        }
+    if let Some(t) = config.threads
+        && (t == -1 || t > 0)
+    {
+        cmd.arg("-t").arg(t.to_string());
     }
-    if let Some(tb) = config.threads_batch {
-        if tb == -1 || tb > 0 {
-            cmd.arg("-tb").arg(tb.to_string());
-        }
+    if let Some(tb) = config.threads_batch
+        && (tb == -1 || tb > 0)
+    {
+        cmd.arg("-tb").arg(tb.to_string());
     }
 
     // Priority
