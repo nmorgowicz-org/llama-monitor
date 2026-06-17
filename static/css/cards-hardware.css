@@ -2018,7 +2018,8 @@
 
 /* Idle pill */
 [data-theme="light"] .slot-pill.idle {
-  border-color: rgba(22, 163, 74, 0.3);
+  color: #15803d;
+  border-color: rgba(22, 163, 74, 0.45);
   box-shadow:
     0 2px 8px rgba(15, 23, 42, 0.12),
     0 0 16px rgba(16, 185, 129, 0.1),
@@ -2027,7 +2028,8 @@
 
 /* Busy pill */
 [data-theme="light"] .slot-pill.busy {
-  border-color: rgba(2, 132, 199, 0.3);
+  color: #0369a1;
+  border-color: rgba(2, 132, 199, 0.45);
   box-shadow:
     0 2px 8px rgba(15, 23, 42, 0.12),
     0 0 16px rgba(6, 182, 212, 0.1),
@@ -2077,11 +2079,14 @@
     0 2px 8px rgba(15, 23, 42, 0.06);
 }
 
-/* Reduce pseudo-element sheen in light */
+/* Reduce pseudo-element sheen in light: cooler, subtler */
 [data-theme="light"] .hw-sparkline::before,
 [data-theme="light"] .hw-metric-sparkline::before,
 [data-theme="light"] .hw-clock-footer-spark::before {
-  opacity: 0.3;
+  opacity: 0.22;
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.08), transparent 30%),
+    radial-gradient(circle at 78% 18%, rgba(15, 23, 42, 0.05), transparent 36%);
 }
 
 /* Current dot contrast on light backgrounds */
@@ -2114,14 +2119,95 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
-/* Temp gauge: soften inner shadow for light theme */
+/* Temp gauge: light background, visible track, accent arc */
 [data-theme="light"] .hw-temp-gauge {
-  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.18);
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.98) 0 54%, transparent 55%),
+    conic-gradient(
+      from -90deg,
+      var(--gauge-color, #8fbcbb) calc(var(--pct, 0) * 1%),
+      rgba(15, 23, 42, 0.12) 0
+    );
+  box-shadow:
+    inset 0 0 0 1px rgba(15, 23, 42, 0.18),
+    0 0 10px rgba(15, 23, 42, 0.04);
 }
 
-/* Temp unavailable badge */
+/* Temp value text: dark and legible */
+[data-theme="light"] .hw-temp-value {
+  color: #111827;
+}
+
+/* Temp unavailable badge: high-contrast amber on light */
 [data-theme="light"] .hw-temp-unavailable-badge {
-  background: rgba(217, 119, 6, 0.08);
-  border-color: rgba(217, 119, 6, 0.3);
-  color: #b8860b;
+  background: rgba(146, 64, 10, 0.12);
+  border-color: rgba(146, 64, 10, 0.35);
+  color: #78350f;
+}
+
+/* Ring viz: same light-mode treatment as temp gauge */
+[data-theme="light"] .hw-ring-viz {
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.98) 0 54%, transparent 55%),
+    conic-gradient(
+      from -90deg,
+      var(--gauge-color, #8fbcbb) calc(var(--pct, 0) * 1%),
+      rgba(15, 23, 42, 0.12) 0
+    );
+  box-shadow:
+    inset 0 0 0 1px rgba(15, 23, 42, 0.18),
+    0 0 10px rgba(15, 23, 42, 0.04);
+}
+
+/* Kill dark-mode-only ambient/warming pulses on light theme (too strong) */
+[data-theme="light"] .hw-temp-gauge,
+[data-theme="light"] .hw-temp-gauge.is-warming,
+[data-theme="light"] .hw-ring-viz,
+[data-theme="light"] .hw-ring-viz.is-warming {
+  animation: none;
+}
+
+/* hw-metric-label, hw-cluster-name: readable tiny labels */
+[data-theme="light"] .hw-metric-label,
+[data-theme="light"] .hw-cluster-name {
+  color: var(--color-text-secondary);
+}
+
+/* hw-clock rows, meters, bands: tiny text → secondary */
+[data-theme="light"] .hw-clock-row-label,
+[data-theme="light"] .hw-clock-unit,
+[data-theme="light"] .hw-clock-band,
+[data-theme="light"] .hw-clock-meter-label,
+[data-theme="light"] .hw-clock-meter-band {
+  color: var(--color-text-secondary);
+}
+
+/* hw-clock-chip / hw-chip: slightly stronger contrast */
+[data-theme="light"] .hw-clock-chip,
+[data-theme="light"] .hw-chip {
+  color: #1f2937;
+  background: rgba(15, 23, 42, 0.06);
+  border-color: rgba(15, 23, 42, 0.14);
+}
+
+/* gpu-table header/td contrast */
+[data-theme="light"] .gpu-table th {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="light"] .gpu-table td {
+  color: var(--color-text-primary);
+}
+
+/* Viz option text */
+[data-theme="light"] .viz-option {
+  color: var(--color-text-secondary);
+}
+
+/* hw-cluster-value, hw-metric-value: ensure primary */
+[data-theme="light"] .hw-cluster-value,
+[data-theme="light"] .hw-metric-value,
+[data-theme="light"] .hw-clock-row-value,
+[data-theme="light"] .hw-clock-meter-value {
+  color: var(--color-text-primary);
 }

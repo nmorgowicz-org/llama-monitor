@@ -947,9 +947,130 @@
 }
 
 [data-theme="light"] .tune-tool-card {
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.96);
 }
 
 [data-theme="light"] .tune-tool-select {
-  background: rgba(15, 23, 42, 0.04);
+  background: #ffffff;
+  color: #111827;
+  border-color: var(--border-subtle);
+}
+
+/* Idle / Running / Results text */
+[data-theme="light"] .tune-idle-label,
+[data-theme="light"] .tune-running-label,
+[data-theme="light"] .tune-rerun-btn {
+  color: #111827;
+}
+
+[data-theme="light"] .tune-idle-desc,
+[data-theme="light"] .tune-running-hint,
+[data-theme="light"] .tune-no-suggestions {
+  color: #4b5563;
+}
+
+[data-theme="light"] .tune-run-btn {
+  background: #ffffff;
+  color: #6366f1;
+  border-color: #6366f1;
+}
+
+/* Grade ring / metrics labels */
+[data-theme="light"] .tune-grade-ring {
+  background:
+    radial-gradient(circle, #ffffff 0 58%, transparent 61%),
+    conic-gradient(from -90deg, var(--grade-color, #8fbcbb) calc(var(--grade-pct) * 1%), rgba(15,23,42,0.08) 0);
+}
+
+[data-theme="light"] .tune-grade-label,
+[data-theme="light"] .tune-metric-lbl {
+  color: #4b5563;
+}
+
+[data-theme="light"] .tune-metric-val {
+  color: #111827;
+}
+
+/* Suggestion cards text */
+[data-theme="light"] .tune-suggestion-label {
+  color: #111827;
+}
+
+[data-theme="light"] .tune-suggestion-desc {
+  color: #4b5563;
+}
+
+/* Info suggestion */
+[data-theme="light"] .tune-suggestion-info {
+  background: rgba(245, 158, 11, 0.12);
+}
+
+/* Restarting overlay */
+[data-theme="light"] .tune-restarting-overlay {
+  background: rgba(255, 255, 255, 0.95);
+  color: #111827;
+}
+
+/* Progress track */
+[data-theme="light"] .tune-progress-track {
+  background: #e5e7eb;
+}
+
+/* Wizard advisor (spawn) */
+[data-theme="light"] .wizard-advisor {
+  background:
+    linear-gradient(180deg, rgba(99,102,241,0.04), rgba(255,255,255,0.95));
+  color: #111827;
+}
+
+[data-theme="light"] .wizard-advisor-header {
+  color: #4b5563;
+}
+
+/* MoE autotune */
+[data-theme="light"] .moe-autotune-btn {
+  background: #ffffff;
+  color: #6366f1;
+  border-color: #6366f1;
+}
+
+[data-theme="light"] .moe-autotune-verify {
+  color: #374151;
+  border-color: var(--border-subtle);
+}
+
+[data-theme="light"] .moe-autotune-status {
+  color: #4b5563;
+}
+
+/* Depth sweep */
+[data-theme="light"] .depth-sweep {
+  background: #ffffff;
+  border-color: var(--border-subtle);
+}
+
+[data-theme="light"] .depth-sweep-summary,
+[data-theme="light"] .depth-sweep-btn {
+  color: #111827;
+}
+
+[data-theme="light"] .depth-sweep-hint,
+[data-theme="light"] .depth-sweep-status {
+  color: #4b5563;
+}
+
+[data-theme="light"] .depth-sweep-table th {
+  color: #4b5563;
+}
+
+/* MTP sweep chart area */
+[data-theme="light"] .mtp-sweep-bar-val,
+[data-theme="light"] .mtp-sweep-rec,
+[data-theme="light"] .mtp-sweep-timer {
+  color: #111827;
+}
+
+[data-theme="light"] .mtp-probe-error {
+  color: #dc2626;
+  font-style: italic;
 }

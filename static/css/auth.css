@@ -176,18 +176,37 @@
     color: #0f1a2f;
 }
 
+[data-theme="light"] .auth-shell-eyebrow {
+    color: #0ea5e9;
+    background: rgba(14, 165, 233, 0.1);
+}
+
+[data-theme="light"] .auth-shell-badge {
+    background: rgba(15, 23, 42, 0.05);
+    border-color: rgba(15, 23, 42, 0.14);
+    color: #111827;
+}
+
 [data-theme="light"] .auth-shell-subtitle,
 [data-theme="light"] .auth-shell-meta,
 [data-theme="light"] .auth-shell-note,
 [data-theme="light"] .auth-shell-recovery,
 [data-theme="light"] .auth-shell-field {
-    color: rgba(36, 52, 78, 0.78);
+    color: var(--color-text-secondary, #374151);
+}
+
+[data-theme="light"] .auth-shell-error {
+    color: #b91c1c;
 }
 
 [data-theme="light"] .auth-shell-field input {
     background: rgba(255, 255, 255, 0.96);
-    color: #12203a;
+    color: var(--color-text-primary, #12203a);
     border-color: rgba(28, 52, 92, 0.12);
+}
+
+[data-theme="light"] .auth-shell-field input::placeholder {
+    color: #6b7280;
 }
 
 @media (max-width: 640px) {

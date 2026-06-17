@@ -1002,49 +1002,74 @@
 
 [data-theme="light"] .remote-agent-setup-modal {
   background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.6), transparent 22%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(240, 244, 248, 0.96));
+    radial-gradient(circle at top right, rgba(15, 23, 42, 0.015), transparent 22%),
+    linear-gradient(145deg, #ffffff, #f9fafb);
   border-color: rgba(17, 24, 39, 0.1);
   box-shadow:
-    0 24px 64px rgba(15, 23, 42, 0.15),
-    0 8px 24px rgba(15, 23, 42, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    0 24px 64px rgba(15, 23, 42, 0.14),
+    0 8px 24px rgba(15, 23, 42, 0.09),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+[data-theme="light"] .remote-agent-setup-modal .modal-header h2 {
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .agent-setup-hero {
   background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(240, 244, 248, 0.9));
-  border-color: rgba(17, 24, 39, 0.08);
+    radial-gradient(circle at top right, rgba(15, 23, 42, 0.012), transparent 22%),
+    linear-gradient(145deg, #ffffff, #f9fafb);
+  border-color: rgba(17, 24, 39, 0.09);
   box-shadow:
-    0 12px 32px rgba(15, 23, 42, 0.08),
-    0 4px 12px rgba(15, 23, 42, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    0 12px 32px rgba(15, 23, 42, 0.07),
+    0 4px 12px rgba(15, 23, 42, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="light"] .agent-setup-hero h3 {
+  color: #111827;
+}
+
+[data-theme="light"] .agent-setup-hero-desc {
+  color: #374151;
+}
+
+[data-theme="light"] .agent-endpoint-url {
+  color: #111827;
 }
 
 [data-theme="light"] .agent-setup-section {
   background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(240, 244, 248, 0.9));
-  border-color: rgba(17, 24, 39, 0.08);
+    radial-gradient(circle at top right, rgba(15, 23, 42, 0.012), transparent 22%),
+    linear-gradient(145deg, #ffffff, #f9fafb);
+  border-color: rgba(17, 24, 39, 0.09);
   box-shadow:
-    0 12px 32px rgba(15, 23, 42, 0.08),
-    0 4px 12px rgba(15, 23, 42, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    0 12px 32px rgba(15, 23, 42, 0.07),
+    0 4px 12px rgba(15, 23, 42, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 [data-theme="light"] .agent-setup-section:hover {
   border-color: var(--acc-30);
   box-shadow:
-    0 16px 40px rgba(15, 23, 42, 0.12),
+    0 16px 40px rgba(15, 23, 42, 0.11),
     0 0 24px var(--acc-05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="light"] .agent-setup-section-title {
+  color: #111827;
+}
+
+[data-theme="light"] .agent-setup-field span {
+  color: #111827;
 }
 
 [data-theme="light"] .agent-setup-field input,
 [data-theme="light"] .agent-setup-field select {
-  background: rgba(255, 255, 255, 0.7);
-  border-color: rgba(17, 24, 39, 0.1);
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.16);
+  color: #111827;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
@@ -1056,47 +1081,170 @@
     inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
+/* Status alert — readable in light mode */
 [data-theme="light"] .agent-setup-status-alert {
   background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.4), transparent 22%),
-    linear-gradient(135deg, rgba(191, 97, 106, 0.06), rgba(214, 120, 120, 0.03));
-  border-color: rgba(191, 97, 106, 0.2);
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
+    linear-gradient(135deg, rgba(239, 68, 68, 0.07), rgba(239, 68, 68, 0.03));
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+[data-theme="light"] .agent-setup-status-alert-title {
+  color: #dc2626;
+}
+
+[data-theme="light"] .agent-setup-status-alert-message {
+  color: #4b5563;
 }
 
 [data-theme="light"] .agent-setup-status-alert.warning {
   background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.4), transparent 22%),
-    linear-gradient(135deg, rgba(235, 203, 131, 0.08), rgba(235, 203, 131, 0.04));
-  border-color: rgba(235, 203, 131, 0.25);
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
+    linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.04));
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+[data-theme="light"] .agent-setup-status-alert.warning .agent-setup-status-alert-title {
+  color: #b45309;
 }
 
 [data-theme="light"] .agent-setup-status-alert.success {
   background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.4), transparent 22%),
-    linear-gradient(135deg, rgba(163, 190, 139, 0.08), rgba(163, 190, 139, 0.04));
-  border-color: rgba(163, 190, 139, 0.25);
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
+    linear-gradient(135deg, rgba(34, 197, 94, 0.08), rgba(34, 197, 94, 0.03));
+  border-color: rgba(34, 197, 94, 0.2);
 }
 
+[data-theme="light"] .agent-setup-status-alert.success .agent-setup-status-alert-title {
+  color: #15803d;
+}
+
+/* Progress area */
 [data-theme="light"] .agent-setup-progress {
   background:
-    radial-gradient(circle at top right, rgba(136, 192, 209, 0.04), transparent 22%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.8), rgba(240, 244, 248, 0.9));
-  border-color: rgba(136, 192, 209, 0.15);
-}
-
-[data-theme="light"] .version-card {
-  background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(240, 244, 248, 0.9));
-  border-color: rgba(17, 24, 39, 0.08);
+    radial-gradient(circle at top right, var(--acc-05), transparent 22%),
+    linear-gradient(145deg, #ffffff, #f9fafb);
+  border-color: rgba(15, 23, 42, 0.1);
   box-shadow:
-    0 8px 24px rgba(15, 23, 42, 0.08),
-    0 2px 8px rgba(15, 23, 42, 0.06),
+    0 8px 24px rgba(15, 23, 42, 0.06),
     inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
+[data-theme="light"] .progress-bar-container {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .progress-text {
+  color: #374151;
+}
+
+/* Status cards */
+[data-theme="light"] .agent-setup-status.ok {
+  color: #15803d;
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.2);
+}
+
+[data-theme="light"] .agent-setup-status.info {
+  color: #111827;
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.18);
+}
+
+[data-theme="light"] .agent-setup-status.error {
+  color: #dc2626;
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+/* Version cards */
+[data-theme="light"] .version-card {
+  background:
+    radial-gradient(circle at top right, rgba(15, 23, 42, 0.012), transparent 22%),
+    linear-gradient(145deg, #ffffff, #f9fafb);
+  border-color: rgba(17, 24, 39, 0.09);
+  box-shadow:
+    0 8px 24px rgba(15, 23, 42, 0.07),
+    0 2px 8px rgba(15, 23, 42, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="light"] .version-label {
+  color: #374151;
+}
+
+/* Model info + chips */
 [data-theme="light"] .model-info-pill {
   border-color: rgba(14, 116, 144, 0.14);
   background: rgba(125, 211, 252, 0.18);
-  color: #0f172a;
+  color: #020817;
+}
+
+[data-theme="light"] .model-info-text.idle {
+  color: #4b5563;
+}
+
+[data-theme="light"] .model-info-text.generating {
+  color: #111827;
+}
+
+/* Speculative chip */
+[data-theme="light"] .speculative-chip {
+  color: #374151;
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+[data-theme="light"] .speculative-chip.enabled {
+  color: #111827;
+  border-color: rgba(14, 116, 144, 0.2);
+  background: rgba(125, 211, 252, 0.14);
+}
+
+/* Config KV chips */
+[data-theme="light"] .config-kv {
+  color: #374151;
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+[data-theme="light"] .config-kv strong {
+  color: #111827;
+}
+
+[data-theme="light"] .config-empty {
+  color: #4b5563;
+}
+
+/* Activity rail */
+[data-theme="light"] .activity-rail {
+  background:
+    linear-gradient(90deg, rgba(15, 23, 42, 0.05) 1px, transparent 1px),
+    rgba(15, 23, 42, 0.025);
+}
+
+[data-theme="light"] .activity-rail::before {
+  background: rgba(15, 23, 42, 0.1);
+}
+
+[data-theme="light"] .activity-empty {
+  color: #4b5563;
+}
+
+/* Host key display */
+[data-theme="light"] .agent-setup-host-key {
+  color: #111827;
+  background: rgba(34, 197, 94, 0.06);
+  border-color: rgba(34, 197, 94, 0.2);
+}
+
+/* Ambient glow: soften in light mode */
+[data-theme="light"] #remote-agent-setup-overlay::before {
+  opacity: 0.5;
+  background: radial-gradient(circle, var(--acc-10) 0%, rgba(6, 182, 212, 0.05) 40%, transparent 70%);
+}
+
+/* Breathing border: reduce in light */
+[data-theme="light"] .remote-agent-setup-modal::after {
+  opacity: 0.35;
 }

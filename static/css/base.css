@@ -101,7 +101,10 @@ svg {
 }
 
 [data-theme="light"] body::before {
-  opacity: 0.018;
+  opacity: 0.012;
+  background-image:
+    linear-gradient(rgba(148,158,175,0.5) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148,158,175,0.5) 1px, transparent 1px);
 }
 
 /* ── Theme-aware utility classes for JS-created UI elements ───────────── */
@@ -196,5 +199,14 @@ svg {
 
 [data-theme="light"] .lhm-progress-fill {
   background: linear-gradient(90deg, #059669, #0284c7);
+}
+
+/* Light-mode: fix accent-as-text on subtle button and status callout */
+[data-theme="light"] .btn-theme-subtle {
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .status-callout {
+  color: var(--color-text-secondary);
 }
 

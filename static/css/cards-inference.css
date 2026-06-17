@@ -2402,30 +2402,30 @@
   opacity: 0.6;
 }
 
-/* Live chips */
+/* Live chips: base secondary; accents darker */
 [data-theme="light"] .metric-live-chip {
-  background: rgba(15, 23, 42, 0.04);
-  border-color: rgba(15, 23, 42, 0.16);
-  color: var(--color-text-muted);
+  background: rgba(15, 23, 42, 0.05);
+  border-color: rgba(15, 23, 42, 0.18);
+  color: #374151;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
 [data-theme="light"] .metric-live-chip.live {
-  color: #2e7d8f;
-  border-color: rgba(4, 120, 140, 0.35);
-  background: rgba(4, 120, 140, 0.08);
+  color: #0f766e;
+  border-color: rgba(15, 118, 110, 0.4);
+  background: rgba(15, 118, 110, 0.09);
 }
 
 [data-theme="light"] .metric-live-chip.warning {
   color: #b8860b;
-  border-color: rgba(217, 119, 6, 0.35);
-  background: rgba(217, 119, 6, 0.08);
+  border-color: rgba(184, 134, 11, 0.4);
+  background: rgba(184, 134, 11, 0.1);
 }
 
 [data-theme="light"] .metric-live-chip.critical {
   color: #dc2626;
-  border-color: rgba(220, 38, 38, 0.4);
-  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.45);
+  background: rgba(220, 38, 38, 0.1);
 }
 
 [data-theme="light"] .metric-live-chip.blocked {
@@ -2478,4 +2478,164 @@
   box-shadow:
     0 4px 18px var(--acc-30),
     inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+/* widget-metric-label: ensure dark text */
+[data-theme="light"] .widget-metric-label {
+  color: #111827;
+  -webkit-text-fill-color: #111827;
+}
+
+/* inference-empty-state text */
+[data-theme="light"] .inference-empty-state {
+  color: var(--color-text-secondary);
+}
+
+/* speed-label and speed-peak-badge */
+[data-theme="light"] .speed-label {
+  color: #374151;
+}
+
+[data-theme="light"] .speed-peak-badge {
+  color: #374151;
+  background: rgba(15, 23, 42, 0.06);
+  border-color: rgba(15, 23, 42, 0.14);
+}
+
+/* preset-label-hint and preset-display-chip */
+[data-theme="light"] .preset-label-hint,
+[data-theme="light"] .preset-display-chip {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="light"] .preset-display-chip {
+  background: rgba(15, 23, 42, 0.06);
+  border-color: rgba(15, 23, 42, 0.14);
+}
+
+/* context-toggle-btn */
+[data-theme="light"] .context-toggle-btn {
+  color: #374151;
+}
+
+[data-theme="light"] .context-toggle-btn:hover {
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .context-toggle-btn.active {
+  color: #0f766e;
+  background: linear-gradient(135deg, rgba(15, 118, 110, 0.18), rgba(6, 182, 212, 0.12));
+  box-shadow: 0 0 16px rgba(15, 118, 110, 0.14);
+}
+
+/* context-subtitle, context-gauge-secondary, context-pill-value */
+[data-theme="light"] .context-subtitle,
+[data-theme="light"] .context-gauge-secondary,
+[data-theme="light"] .context-pill-value {
+  color: #374151;
+}
+
+/* stage-segment: tiny text readable */
+[data-theme="light"] .stage-segment {
+  color: #374151;
+}
+
+[data-theme="light"] .stage-segment.active {
+  color: #0f766e;
+  background: linear-gradient(135deg, rgba(15, 118, 110, 0.2), rgba(6, 182, 212, 0.14));
+  box-shadow: 0 0 16px rgba(15, 118, 110, 0.14);
+}
+
+[data-theme="light"] .stage-segment.idle {
+  color: #374151;
+}
+
+/* generation-sub, generation-details */
+[data-theme="light"] .generation-sub,
+[data-theme="light"] .generation-details {
+  color: #374151;
+}
+
+/* generation-ring: light background + teal arc (preserve dark mode) */
+[data-theme="light"] .generation-ring {
+  background:
+    radial-gradient(circle at center, rgba(255, 255, 255, 1) 0 56%, transparent 57%),
+    conic-gradient(from -90deg, #0f766e calc(var(--progress) * 1%), rgba(15, 23, 42, 0.10) 0);
+  box-shadow:
+    inset 0 0 0 1px rgba(15, 23, 42, 0.08),
+    0 0 24px rgba(15, 118, 110, 0.08);
+}
+
+[data-theme="light"] .widget-generation.is-live .generation-ring {
+  animation: ring-breathe-light 2.4s ease-in-out infinite;
+}
+
+@keyframes ring-breathe-light {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08), 0 0 20px rgba(15, 118, 110, 0.08); }
+  50% { box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.24), 0 0 32px rgba(15, 118, 110, 0.16); }
+}
+
+/* generation-ring-core: light center with dark text */
+[data-theme="light"] .generation-ring-core {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
+}
+
+[data-theme="light"] .generation-main {
+  color: #111827;
+}
+
+/* generation-detail-chip: light-mode chips */
+[data-theme="light"] .generation-detail-chip {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: rgba(15, 118, 110, 0.06);
+  color: #374151;
+}
+
+/* velocity-row, slot-tile-top, slot-tile-meta, ratio-label, util-label, stat-label */
+[data-theme="light"] .velocity-row,
+[data-theme="light"] .slot-tile-top,
+[data-theme="light"] .slot-tile-meta,
+[data-theme="light"] .ratio-label,
+[data-theme="light"] .util-label,
+[data-theme="light"] .stat-label {
+  color: #374151;
+}
+
+/* accent teal inside those rows: darker */
+[data-theme="light"] .velocity-row strong {
+  color: #0f766e;
+}
+
+/* inference-config-panel / sampler-params-inline / config-kv */
+[data-theme="light"] .inference-config-panel,
+[data-theme="light"] .sampler-params-inline {
+  border-color: rgba(15, 23, 42, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.95));
+}
+
+[data-theme="light"] .config-kv .config-key {
+  color: #374151;
+}
+
+[data-theme="light"] .config-kv .config-value {
+  color: #111827;
+}
+
+/* context-gauge-footer and fleet labels */
+[data-theme="light"] .context-gauge-footer,
+[data-theme="light"] .context-fleet-agg-label,
+[data-theme="light"] .context-fleet-summary,
+[data-theme="light"] .context-fleet-footer,
+[data-theme="light"] .context-chat-strip-meta,
+[data-theme="light"] .context-pill-overflow,
+[data-theme="light"] .context-pill-empty,
+[data-theme="light"] .context-fleet-more,
+[data-theme="light"] .context-fleet-empty {
+  color: #374151;
+}
+
+/* metric-footnote */
+[data-theme="light"] .metric-footnote {
+  color: #374151;
 }

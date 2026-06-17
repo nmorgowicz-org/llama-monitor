@@ -928,6 +928,11 @@
   transform: translateY(-1px);
 }
 
+.nav-cockpit:focus-visible {
+  outline: 2px solid var(--acc-45);
+  outline-offset: 2px;
+}
+
 .nav-cockpit.is-live {
   border-color: rgba(143, 188, 187, 0.26);
   box-shadow:
@@ -997,12 +1002,18 @@
   color: rgba(235, 203, 139, 0.6);
   font-size: 9px;
   font-weight: 800;
+  font-family: inherit;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   cursor: pointer;
   transition: border-color 160ms ease, color 160ms ease, background 160ms ease, box-shadow 160ms ease;
   white-space: nowrap;
   user-select: none;
+}
+
+.nav-sleep-pill:focus-visible {
+  outline: 2px solid rgba(235, 203, 139, 0.75);
+  outline-offset: 2px;
 }
 
 /* Always show the pill — was gated on .has-session which hid it entirely */
@@ -1016,24 +1027,70 @@
   pointer-events: none;
 }
 
+.nav-sleep-pill:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.nav-sleep-pill[data-disabled="true"] {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.nav-sleep-pill[data-unavailable="true"] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .nav-sleep-pill:hover {
   border-color: rgba(235, 203, 139, 0.55);
-  color: rgba(235, 203, 139, 0.9);
+  color: rgba(235, 203, 139, 0.95);
   background: rgba(235, 203, 139, 0.09);
   box-shadow: 0 0 8px rgba(235, 203, 139, 0.12);
 }
 
+.nav-sleep-pill:active {
+  transform: translateY(1px);
+  box-shadow: 0 0 6px rgba(235, 203, 139, 0.18);
+}
+
 /* Active low-power state: full amber glow */
 .nav-cockpit.is-low-power .nav-sleep-pill {
-  border-color: rgba(235, 203, 139, 0.65);
-  color: #ebcb8b;
-  background: rgba(235, 203, 139, 0.13);
-  box-shadow: 0 0 10px rgba(235, 203, 139, 0.22), inset 0 0 6px rgba(235, 203, 139, 0.06);
+  border-color: rgba(235, 203, 139, 0.75);
+  color: #fbbf24;
+  background: radial-gradient(circle at top, rgba(235, 203, 139, 0.16), rgba(235, 203, 139, 0.08));
+  box-shadow: 0 0 10px rgba(235, 203, 139, 0.26), inset 0 0 6px rgba(235, 203, 139, 0.09);
 }
 
 .nav-cockpit.is-low-power .nav-sleep-pill:hover {
-  border-color: rgba(235, 203, 139, 0.8);
-  background: rgba(235, 203, 139, 0.18);
+  border-color: rgba(235, 203, 139, 0.9);
+  background: radial-gradient(circle at top, rgba(235, 203, 139, 0.22), rgba(235, 203, 139, 0.11));
+}
+
+/* Light mode: make pill readable, interactive, and distinct */
+[data-theme="light"] .nav-sleep-pill {
+  border-color: rgba(180, 140, 40, 0.35);
+  background: rgba(180, 140, 40, 0.06);
+  color: #92600a;
+}
+
+[data-theme="light"] .nav-sleep-pill:hover {
+  border-color: rgba(180, 140, 40, 0.6);
+  color: #92600a;
+  background: rgba(180, 140, 40, 0.1);
+  box-shadow: 0 0 8px rgba(180, 140, 40, 0.12);
+}
+
+[data-theme="light"] .nav-cockpit.is-low-power .nav-sleep-pill {
+  border-color: rgba(180, 140, 40, 0.85);
+  color: #78350f;
+  background: radial-gradient(circle at top, rgba(180, 140, 40, 0.16), rgba(180, 140, 40, 0.08));
+  box-shadow: 0 0 10px rgba(180, 140, 40, 0.24), inset 0 0 6px rgba(180, 140, 40, 0.1);
+}
+
+[data-theme="light"] .nav-cockpit.is-low-power .nav-sleep-pill:hover {
+  border-color: rgba(180, 140, 40, 0.95);
+  background: radial-gradient(circle at top, rgba(180, 140, 40, 0.22), rgba(180, 140, 40, 0.11));
 }
 
 /* Subtle pulse on the moon icon when the pill is available but not yet active */
@@ -1214,6 +1271,82 @@
   border-color: var(--acc-30);
   background: rgba(248, 250, 252, 0.98);
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.1);
+}
+
+/* ── Palette quick selector ──────────────────────────────────────────────── */
+.nav-palette-selector {
+  position: relative;
+  z-index: 200;
+}
+
+.nav-palette-btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+  flex-shrink: 0;
+}
+
+.nav-palette-btn:hover {
+  border-color: var(--acc-30);
+  background: var(--acc-10);
+  color: var(--color-text-primary);
+  box-shadow: 0 0 10px var(--acc-12);
+}
+
+[data-theme="light"] .nav-palette-btn {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(241, 245, 249, 0.9));
+  color: var(--color-text-primary);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .nav-palette-btn:hover {
+  border-color: var(--acc-30);
+  background: rgba(248, 250, 252, 0.98);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.1);
+}
+
+.nav-palette-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 9000;
+  display: none;
+  min-width: 140px;
+  padding: 6px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--color-bg);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.nav-palette-dropdown .palette-swatch {
+  width: 100%;
+  margin-bottom: 4px;
+  justify-content: flex-start;
+}
+
+.nav-palette-dropdown .palette-swatch:last-child {
+  margin-bottom: 0;
+}
+
+/* Light mode overrides */
+[data-theme="light"] .nav-palette-dropdown {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: rgba(248, 250, 252, 0.98);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.15);
+}
+
+.nav-palette-dropdown.open {
+  display: block;
 }
 
 .nav-user {
@@ -2104,19 +2237,160 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 
 [data-theme="light"] .endpoint-mode,
 [data-theme="light"] .endpoint-status,
+[data-theme="light"] .agent-status,
+[data-theme="light"] .mode-badge,
+[data-theme="light"] .status-label,
+[data-theme="light"] .badge-server,
+[data-theme="light"] .badge-chat,
+[data-theme="light"] .badge-logs,
 [data-theme="light"] .status-text {
-  color: var(--color-text-secondary);
+  color: #111827;
+}
+
+/* Micro-labels within status strip */
+[data-theme="light"] .status-label {
+  color: #1f2937;
+}
+
+/* .endpoint-mode/.endpoint-status tiny text: ensure primary weight */
+[data-theme="light"] .endpoint-mode.local,
+[data-theme="light"] .status-ok,
+[data-theme="light"] .endpoint-mode.remote {
+  color: #16a34a;
+}
+
+[data-theme="light"] .status-busy {
+  color: #b8860b;
+}
+
+[data-theme="light"] .status-err {
+  color: #dc2626;
 }
 
 [data-theme="light"] .endpoint-url {
   color: var(--color-text-muted);
 }
 
- [data-theme="light"] .badge-server,
+/* Badge backgrounds in light */
+[data-theme="light"] .badge-server,
 [data-theme="light"] .badge-chat,
 [data-theme="light"] .badge-logs {
   background: rgba(15, 23, 42, 0.06);
   border-color: rgba(15, 23, 42, 0.1);
+}
+
+/* Telemetry grade chip base text */
+[data-theme="light"] .telemetry-grade-chip {
+  color: #1f2937;
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+/* Metric badge (amber) darker for light mode */
+[data-theme="light"] .metric-badge {
+  background: rgba(217, 119, 6, 0.12);
+  color: #b8860b;
+}
+
+/* Live log tail pill and small button */
+[data-theme="light"] .inference-log-tail-btn {
+  border-color: rgba(29, 78, 216, 0.3);
+  background: rgba(29, 78, 216, 0.07);
+  color: #1d4ed8;
+}
+
+[data-theme="light"] .inference-log-tail-btn:hover {
+  background: rgba(29, 78, 216, 0.12);
+}
+
+[data-theme="light"] .inference-log-tail-btn.is-active {
+  background: rgba(29, 78, 216, 0.18);
+  color: #1e3a8a;
+}
+
+[data-theme="light"] .inference-log-tail-btn-small {
+  border-color: rgba(29, 78, 216, 0.2);
+  background: rgba(29, 78, 216, 0.06);
+  color: #1d4ed8;
+}
+
+[data-theme="light"] .inference-log-tail-btn-small:hover {
+  background: rgba(29, 78, 216, 0.14);
+}
+
+/* Live log tail panel — light theme */
+[data-theme="light"] .inference-log-tail {
+  background: rgba(15, 23, 42, 0.07);
+  border-color: rgba(15, 23, 42, 0.12);
+  color: #111827;
+  box-shadow:
+    inset 0 0 14px rgba(15, 23, 42, 0.04),
+    0 6px 16px rgba(15, 23, 42, 0.08);
+}
+
+/* Preset display wrapper — light theme (overrides cards-inference.css dark styles) */
+[data-theme="light"] .preset-display-wrapper {
+  background: rgba(248, 250, 252, 0.98);
+  border-color: rgba(15, 23, 42, 0.1);
+  color: #111827;
+}
+
+[data-theme="light"] .preset-display-wrapper:hover {
+  background: rgba(241, 245, 249, 0.98);
+}
+
+[data-theme="light"] .preset-display-visual {
+  background: rgba(15, 23, 42, 0.06);
+  color: #111827;
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+[data-theme="light"] .preset-display-label {
+  color: #111827;
+}
+
+[data-theme="light"] .preset-display-chips {
+  color: #4b5563;
+}
+
+/* Agent status tooltip children */
+[data-theme="light"] .agent-status-tooltip {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: rgba(15, 23, 42, 0.12);
+  color: #1f2937;
+  box-shadow: 0 8px 32px rgba(15, 23, 42, 0.16);
+}
+
+[data-theme="light"] .agent-tooltip-title {
+  color: #111827;
+  border-bottom-color: rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .agent-tooltip-status {
+  color: #374151;
+}
+
+[data-theme="light"] .agent-tooltip-status.connected {
+  color: #16a34a;
+}
+
+[data-theme="light"] .agent-tooltip-status.disconnected {
+  color: #4b5563;
+}
+
+[data-theme="light"] .agent-tooltip-status.warning {
+  color: #b8860b;
+}
+
+[data-theme="light"] .agent-tooltip-details,
+[data-theme="light"] .agent-tooltip-details .disconnected {
+  color: #4b5563;
+}
+
+/* Nav version: fully visible, readable */
+[data-theme="light"] .nav-version {
+  opacity: 1;
+  color: #4b5563;
 }
 
 /* ── Server error details panel ───────────────────────────────────────── */

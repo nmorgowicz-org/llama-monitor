@@ -1186,59 +1186,83 @@
 
 /* --- Light Theme Overrides --- */
 
+[data-theme="light"] #settings-modal {
+  background:
+    radial-gradient(ellipse at center, rgba(15, 23, 42, 0.16) 0%, rgba(15, 23, 42, 0.34) 100%);
+}
+
 [data-theme="light"] #settings-modal .modal {
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.88), rgba(240, 244, 248, 0.94));
+  background: linear-gradient(160deg, #ffffff, #f9fafb);
   border-color: rgba(17, 24, 39, 0.1);
   box-shadow:
     0 8px 32px rgba(15, 23, 42, 0.12),
     0 2px 12px rgba(15, 23, 42, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 [data-theme="light"] #settings-modal .modal-header {
-  background: rgba(0, 0, 0, 0.03);
+  background: rgba(15, 23, 42, 0.02);
 }
 
 [data-theme="light"] #settings-modal .settings-tabs {
-  background: rgba(0, 0, 0, 0.02);
+  background: rgba(15, 23, 42, 0.02);
 }
 
 [data-theme="light"] #settings-modal .settings-tab:hover {
-  background: rgba(0, 0, 0, 0.03);
+  background: rgba(15, 23, 42, 0.04);
 }
 
 [data-theme="light"] #settings-modal .settings-tab.active {
   background: linear-gradient(135deg, var(--acc-10), rgba(6, 182, 212, 0.06));
 }
 
+[data-theme="light"] #settings-modal .settings-pane > h3 {
+  color: #111827;
+}
+
+[data-theme="light"] #settings-modal .settings-section-label {
+  color: #4b5563;
+  opacity: 1;
+}
+
+[data-theme="light"] #settings-modal .modal-field {
+  color: #374151;
+}
+
 [data-theme="light"] #settings-modal .modal-field input:not([type="checkbox"]),
 [data-theme="light"] #settings-modal .modal-field select,
 [data-theme="light"] #settings-modal .modal-field textarea {
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.9);
+  color: #111827;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 [data-theme="light"] #settings-modal .modal-section {
   background:
-    radial-gradient(circle at 84% 16%, rgba(235, 203, 131, 0.06), transparent 22%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(240, 244, 248, 0.9));
+    radial-gradient(circle at 84% 16%, rgba(245, 158, 11, 0.05), transparent 22%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.95), rgba(240, 244, 248, 0.95));
   border-color: rgba(17, 24, 39, 0.08);
   box-shadow:
     0 8px 24px rgba(15, 23, 42, 0.08),
     0 2px 8px rgba(15, 23, 42, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="light"] #settings-modal .modal-section h3,
+[data-theme="light"] #settings-modal .modal-section summary {
+  color: #111827;
 }
 
 /* Light theme: widget-card fields */
 [data-theme="light"] #settings-modal .settings-pane > .modal-field {
   background:
     radial-gradient(circle at 84% 16%, var(--acc-05), transparent 22%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(240, 244, 248, 0.9));
+    linear-gradient(145deg, #ffffff, #f9fafb);
   border-color: rgba(17, 24, 39, 0.08);
   box-shadow:
     0 8px 24px rgba(15, 23, 42, 0.08),
     0 2px 8px rgba(15, 23, 42, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 [data-theme="light"] #settings-modal .settings-pane > .modal-field:hover {
@@ -1246,14 +1270,14 @@
   box-shadow:
     0 12px 32px rgba(15, 23, 42, 0.12),
     0 0 24px var(--acc-05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
 [data-theme="light"] #settings-modal .settings-pane > .modal-field > input:not([type="checkbox"]),
 [data-theme="light"] #settings-modal .settings-pane > .modal-field > select,
 [data-theme="light"] #settings-modal .settings-pane > .modal-field > textarea {
-  background: rgba(255, 255, 255, 0.8);
-  border-color: rgba(17, 24, 39, 0.1);
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(17, 24, 39, 0.12);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
@@ -1267,41 +1291,61 @@
 }
 
 [data-theme="light"] #settings-modal .modal-buttons {
-  background: rgba(0, 0, 0, 0.02);
+  background: rgba(15, 23, 42, 0.02);
 }
 
 [data-theme="light"] #settings-modal .toggle-slider {
-  background: rgba(0, 0, 0, 0.08);
+  background: rgba(15, 23, 42, 0.1);
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
 }
 
 [data-theme="light"] #settings-modal .chk input[type="checkbox"] {
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.9);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
+/* Light mode: ensure dropdown options and placeholders are readable */
+[data-theme="light"] #settings-modal .modal-field select option {
+  background: #ffffff;
+  color: #111827;
+}
+
+[data-theme="light"] #settings-modal .modal-field input::placeholder,
+[data-theme="light"] #settings-modal .modal-field textarea::placeholder {
+  color: #6b7280;
+  opacity: 1;
+}
+
 [data-theme="light"] #settings-modal .settings-help {
-  background: var(--acc-05);
+  background: rgba(15, 23, 42, 0.03);
+  color: #4b5563;
 }
 
 [data-theme="light"] #settings-modal .btn-modal-cancel {
-  background: rgba(0, 0, 0, 0.03);
+  background: rgba(15, 23, 42, 0.03);
+  color: #374151;
+}
+
+[data-theme="light"] #settings-modal .modal-buttons .keyboard-hint {
+  color: #4b5563;
 }
 
 [data-theme="light"] #settings-modal .modal-buttons .keyboard-hint kbd {
-  background: rgba(0, 0, 0, 0.04);
+  background: rgba(15, 23, 42, 0.04);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+  color: #4b5563;
 }
 
 /* Light theme: network status indicator */
 [data-theme="light"] .network-status-indicator {
   background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(240, 244, 248, 0.9));
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.6), transparent 22%),
+    linear-gradient(145deg, #ffffff, #f9fafb);
   border-color: rgba(235, 203, 131, 0.25);
   box-shadow:
     0 8px 24px rgba(15, 23, 42, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  color: #4b5563;
 }
 
 [data-theme="light"] .network-status-indicator.slow {
@@ -1309,7 +1353,7 @@
   box-shadow:
     0 8px 24px rgba(15, 23, 42, 0.08),
     0 0 20px rgba(235, 203, 131, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 [data-theme="light"] .network-status-indicator.good {
@@ -1317,7 +1361,11 @@
   box-shadow:
     0 8px 24px rgba(15, 23, 42, 0.08),
     0 0 20px rgba(163, 190, 139, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="light"] .network-status-text strong {
+  color: #111827;
 }
 
 [data-theme="light"] .network-status-icon {
@@ -1328,6 +1376,35 @@
 [data-theme="light"] .network-status-indicator.good .network-status-icon {
   background: rgba(163, 190, 139, 0.08);
   box-shadow: 0 0 12px rgba(163, 190, 139, 0.1);
+}
+
+/* Light theme: main content panel (right side) */
+[data-theme="light"] #settings-modal .settings-content {
+  background: #ffffff;
+}
+
+/* Light theme: pane headings (override gradient text effect) */
+[data-theme="light"] #settings-modal .settings-pane > h3 {
+  background: none;
+  -webkit-background-clip: unset;
+  -webkit-text-fill-color: #111827;
+  color: #111827;
+}
+
+/* Light theme: pane headings underbar accent */
+[data-theme="light"] #settings-modal .settings-pane > h3::after {
+  background: #6b7280;
+  box-shadow: none;
+}
+
+/* Light theme: modal-field top accent (soft, light-safe) */
+[data-theme="light"] #settings-modal .settings-pane > .modal-field::before {
+  background: linear-gradient(90deg, transparent, rgba(75, 85, 99, 0.25), transparent);
+}
+
+/* Light theme: modal-field hover gradient accent */
+[data-theme="light"] #settings-modal .settings-pane > .modal-field::after {
+  background: linear-gradient(135deg, rgba(75, 85, 99, 0.25), transparent 40%, transparent 60%, rgba(148, 163, 253, 0.15));
 }
 
 /* --- Mobile Responsive --- */
@@ -1549,27 +1626,57 @@
 
 /* Light theme overrides */
 [data-theme="light"] .db-admin-panel {
-  background: rgba(0, 0, 0, 0.02);
-  border-color: rgba(0, 0, 0, 0.08);
+  background: rgba(15, 23, 42, 0.02);
+  border-color: rgba(15, 23, 42, 0.09);
+}
+
+[data-theme="light"] .db-admin-title {
+  color: #111827;
 }
 
 [data-theme="light"] .db-stat {
-  background: rgba(0, 0, 0, 0.02);
-  border-color: rgba(0, 0, 0, 0.06);
+  background: rgba(15, 23, 42, 0.02);
+  border-color: rgba(15, 23, 42, 0.07);
+}
+
+[data-theme="light"] .db-stat-label {
+  color: #4b5563;
+}
+
+[data-theme="light"] .db-stat-value {
+  color: #111827;
 }
 
 [data-theme="light"] .db-admin-btn {
-  background: rgba(0, 0, 0, 0.03);
-  border-color: rgba(0, 0, 0, 0.1);
+  background: rgba(15, 23, 42, 0.03);
+  border-color: rgba(15, 23, 42, 0.1);
+  color: #374151;
 }
 
 [data-theme="light"] .db-admin-btn:hover {
   background: var(--acc-08);
   border-color: var(--acc-30);
+  color: #111827;
 }
 
 [data-theme="light"] .db-admin-log {
-  background: rgba(0, 0, 0, 0.03);
+  background: rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] .db-log-header {
+  color: #4b5563;
+}
+
+[data-theme="light"] .db-log-entry.success {
+  color: #15803d;
+}
+
+[data-theme="light"] .db-log-entry.error {
+  color: #dc2626;
+}
+
+[data-theme="light"] .db-log-entry.warning {
+  color: #b45309;
 }
 
 /* ── Extra model directory list ─────────────────────────────────────────────── */

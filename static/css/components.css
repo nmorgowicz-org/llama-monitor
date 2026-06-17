@@ -1974,6 +1974,441 @@ button:disabled {
   border-color: rgba(21, 128, 61, 0.18);
 }
 
+/* ==========================================================================
+   LIGHT MODE READABILITY / CONTRAST — global overrides
+   ========================================================================== */
+
+/* ── Base buttons ── */
+[data-theme="light"] .btn,
+[data-theme="light"] .btn-sm,
+[data-theme="light"] .nav-btn,
+[data-theme="light"] .nav-user-btn,
+[data-theme="light"] .btn-modal-save,
+[data-theme="light"] .btn-modal-cancel,
+[data-theme="light"] .btn-preset,
+[data-theme="light"] .btn-preset-reset,
+[data-theme="light"] .btn-firewall-fix,
+[data-theme="light"] .btn-lhm-inline,
+[data-theme="light"] .btn-session-new {
+  background:
+    radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.9), transparent 30%),
+    linear-gradient(180deg, rgba(241, 245, 249, 0.8), rgba(248, 250, 252, 0.9));
+  border-color: rgba(15, 23, 42, 0.16);
+  color: var(--color-text-primary);
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+/* ── Primary / modal-save ── */
+[data-theme="light"] .btn-primary,
+[data-theme="light"] .btn-start,
+[data-theme="light"] .btn-modal-save {
+  background:
+    radial-gradient(circle at 24% 20%, rgba(15, 23, 42, 0.02), transparent 24%),
+    linear-gradient(180deg, var(--acc-40), var(--acc-30));
+  border-color: var(--acc-60);
+  color: #020817;
+  box-shadow:
+    0 12px 26px var(--acc-25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* ── Secondary / attach ── */
+[data-theme="light"] .btn-secondary,
+[data-theme="light"] .btn-attach {
+  border-color: var(--acc-40);
+  background:
+    radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.8), transparent 22%),
+    linear-gradient(180deg, var(--acc-15), var(--acc-08));
+  color: var(--color-text-primary);
+  box-shadow:
+    0 10px 22px var(--acc-15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+/* ── Stop / kill / preset-delete ── */
+[data-theme="light"] .btn-stop,
+[data-theme="light"] .btn-kill,
+[data-theme="light"] .btn-preset-delete {
+  background:
+    radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.85), transparent 22%),
+    linear-gradient(180deg, rgba(220, 38, 38, 0.14), rgba(185, 28, 28, 0.06));
+  border-color: rgba(185, 28, 28, 0.35);
+  color: #b91c1c;
+  box-shadow:
+    0 10px 22px rgba(185, 28, 28, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+/* ── Modal shell: reduce accent glow ── */
+[data-theme="light"] .modal {
+  background:
+    radial-gradient(circle at 18% 16%, var(--acc-02), transparent 28%),
+    radial-gradient(circle at 84% 18%, var(--acc-03), transparent 24%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.99));
+}
+
+/* ── Modal header: distinct (slightly darker) surface ── */
+[data-theme="light"] .modal-header,
+[data-theme="light"] .modal-buttons {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(15, 23, 42, 0.035), transparent 60%),
+    linear-gradient(180deg, rgba(241, 245, 249, 0.7), rgba(248, 250, 252, 0.5)),
+    #ffffff;
+}
+
+/* ── Settings card: darker border, primary text ── */
+[data-theme="light"] .settings-card {
+  border-color: rgba(15, 23, 42, 0.12);
+  color: var(--color-text-primary);
+}
+
+/* ── DB admin log / stat: better contrast ── */
+[data-theme="light"] .db-log-content {
+  color: var(--color-text-secondary);
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.04), rgba(15, 23, 42, 0.02));
+}
+
+[data-theme="light"] .db-stat-label {
+  color: var(--color-text-secondary);
+}
+
+/* ── Cert-mode-pill: deeper active gradient ── */
+[data-theme="light"] .cert-mode-pill.active {
+  background:
+    radial-gradient(circle at 18% 14%, var(--acc-25), transparent 28%),
+    linear-gradient(180deg, var(--acc-30), var(--acc-18));
+  color: #020817;
+}
+
+/* ── Models Manager v2: tiny-UI text legibility ── */
+
+/* Header / tabs / close */
+[data-theme="light"] .mm-tab {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="light"] .mm-tab-count {
+  color: var(--color-text-secondary);
+  background: var(--acc-08);
+  border-color: var(--acc-20);
+}
+
+[data-theme="light"] .mm-refresh-btn,
+[data-theme="light"] .models-manager-close {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: rgba(15, 23, 42, 0.02);
+  color: var(--color-text-muted);
+}
+
+/* Directory bar */
+[data-theme="light"] .mm-dir-bar {
+  background: rgba(15, 23, 42, 0.02);
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .mm-dir-path {
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .mm-dir-settings {
+  border-color: var(--acc-40);
+  background: var(--acc-08);
+  color: var(--color-text-secondary);
+}
+
+/* Model card text */
+[data-theme="light"] .mm-card-name {
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .mm-card-meta {
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .mm-stat {
+  border-color: rgba(15, 23, 42, 0.08);
+  background: rgba(15, 23, 42, 0.02);
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .mm-stat-vram {
+  background: var(--acc-05);
+  border-color: var(--acc-15);
+  color: var(--color-text-secondary);
+}
+
+/* Card action buttons */
+[data-theme="light"] .mm-action-btn {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: rgba(15, 23, 42, 0.02);
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .mm-action-copy:hover {
+  border-color: var(--acc-40);
+  background: var(--acc-05);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="light"] .mm-action-delete:hover {
+  border-color: rgba(220, 38, 38, 0.35);
+  background: rgba(220, 38, 38, 0.08);
+  color: #b91c1c;
+}
+
+/* Quant / split / mmproj badges */
+[data-theme="light"] .mm-quant-badge {
+  background: var(--acc-05);
+  border-color: var(--acc-15);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="light"] .mm-split-badge {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(180, 83, 9, 0.25);
+  color: #b45309;
+}
+
+[data-theme="light"] .mm-mmproj-badge {
+  background: rgba(236, 72, 153, 0.08);
+  border-color: rgba(236, 72, 153, 0.18);
+  color: #be185d;
+}
+
+/* Download tab */
+[data-theme="light"] .mm-download-option {
+  background:
+    radial-gradient(circle at 20% 20%, var(--acc-05), transparent 40%),
+    linear-gradient(145deg, rgba(248, 250, 252, 0.95), rgba(241, 245, 249, 0.98));
+  border-color: var(--acc-20);
+}
+
+[data-theme="light"] .mm-download-option-title {
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .mm-download-option-desc {
+  color: var(--color-text-secondary);
+}
+
+[data-theme="light"] .mm-download-cta {
+  border-color: var(--acc-40);
+  background: var(--acc-12);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="light"] .mm-download-cta:hover {
+  background: var(--acc-20);
+  color: #020817;
+}
+
+/* Close button footer */
+[data-theme="light"] .mm-close-btn {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: rgba(15, 23, 42, 0.02);
+  color: var(--color-text-secondary);
+}
+
+/* Library toolbar elements */
+[data-theme="light"] .mm-lib-search-icon {
+  color: var(--color-text-muted);
+  background: rgba(15, 23, 42, 0.02);
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+[data-theme="light"] .mm-lib-search-input {
+  border-color: rgba(15, 23, 42, 0.14);
+  background: #fff;
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .mm-lib-search-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .mm-lib-btn {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: rgba(15, 23, 42, 0.02);
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .mm-lib-btn:hover {
+  border-color: var(--acc-40);
+  background: var(--acc-08);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="light"] .mm-lib-btn--active {
+  background: var(--acc-10);
+  border-color: var(--acc-40);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="light"] .mm-lib-sort-label {
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .mm-lib-filters-panel {
+  background: radial-gradient(circle at top, #0f172a, #020817);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Filters panel interior text (kept dark-themed) */
+[data-theme="light"] .mm-lib-filter-label {
+  color: rgba(148, 163, 184, 0.6);
+}
+
+[data-theme="light"] .mm-lib-chip {
+  border-color: rgba(255, 255, 255, 0.08);
+  color: rgba(148, 163, 184, 0.7);
+}
+
+[data-theme="light"] .mm-lib-chip.active {
+  background: var(--acc-15);
+  border-color: var(--acc-40);
+  color: #a5b4fc;
+}
+
+[data-theme="light"] .mm-lib-sort-select {
+  border-color: rgba(15, 23, 42, 0.14);
+  background: #fff;
+  color: var(--color-text-primary);
+}
+
+/* Loading/empty */
+[data-theme="light"] .mm-loading,
+[data-theme="light"] .mm-empty {
+  color: var(--color-text-muted);
+}
+
+/* Tags */
+[data-theme="light"] .mm-tag-pill {
+  color: var(--color-text-secondary);
+  background: rgba(15, 23, 42, 0.03);
+  border-color: rgba(15, 23, 42, 0.09);
+}
+
+[data-theme="light"] .mm-tag-pill:hover {
+  color: #020817;
+  background: rgba(15, 23, 42, 0.06);
+  border-color: rgba(15, 23, 42, 0.14);
+}
+
+/* Tag picker */
+[data-theme="light"] .mm-tag-picker-title {
+  color: var(--color-text-muted);
+}
+
+/* Preset pills */
+[data-theme="light"] .preset-context-pill {
+  background: rgba(15, 23, 42, 0.03);
+  color: var(--color-text-secondary);
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+[data-theme="light"] .preset-context-pill:hover {
+  background: var(--acc-05);
+  border-color: var(--acc-40);
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .preset-context-pill.active {
+  background: var(--acc-25);
+  color: #020817;
+  border-color: var(--acc-60);
+}
+
+/* File browser */
+[data-theme="light"] .file-browser-bar {
+  border-bottom-color: rgba(0, 0, 0, 0.07);
+}
+
+[data-theme="light"] .fb-up-btn {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: rgba(15, 23, 42, 0.02);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="light"] .fb-path-input {
+  border-color: rgba(15, 23, 42, 0.12);
+  background: rgba(15, 23, 42, 0.02);
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .fb-entry:hover {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] .fb-entry-size {
+  color: var(--color-text-muted);
+}
+
+/* Llama version picker */
+[data-theme="light"] .llama-version-modal-shell {
+  background:
+    radial-gradient(circle at 16% 16%, var(--acc-05), transparent 30%),
+    radial-gradient(circle at 84% 84%, var(--acc-05), transparent 28%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.99));
+  border-color: rgba(15, 23, 42, 0.1);
+  box-shadow:
+    0 20px 56px rgba(15, 23, 42, 0.1),
+    0 4px 16px rgba(15, 23, 42, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+[data-theme="light"] .llama-version-modal-header {
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+  background: radial-gradient(circle at 50% 0%, rgba(15, 23, 42, 0.02), transparent 50%);
+}
+
+[data-theme="light"] .llama-version-modal-close {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: rgba(15, 23, 42, 0.02);
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .llama-version-modal-current {
+  background: var(--acc-05);
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .llama-version-row {
+  border-color: transparent;
+}
+
+[data-theme="light"] .llama-version-row:hover {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] .llama-version-row--current {
+  background: var(--acc-05);
+  border-color: var(--acc-15);
+}
+
+[data-theme="light"] .llama-version-row-tag {
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .llama-version-row-age {
+  color: var(--color-text-muted);
+  opacity: 1;
+}
+
+[data-theme="light"] .llama-version-install-btn {
+  border-color: var(--acc-40);
+  background: var(--acc-10);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="light"] .llama-version-list-header {
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+  color: var(--color-text-muted);
+}
+
 /* ── Light theme: toolbar ── */
 [data-theme="light"] .mm-lib-toolbar {
   background: rgba(0, 0, 0, 0.02);

@@ -261,8 +261,9 @@
 }
 
 [data-theme="light"] .command-palette-search kbd {
-    background: rgba(15, 23, 42, 0.04);
-    border-color: rgba(15, 23, 42, 0.10);
+    background: rgba(15, 23, 42, 0.06);
+    border-color: rgba(15, 23, 42, 0.12);
+    color: #4b5563;
 }
 
 [data-theme="light"] .command-palette-item:hover {
@@ -275,7 +276,8 @@
 }
 
 [data-theme="light"] .command-palette-item-type {
-    background: rgba(15, 23, 42, 0.04);
+    background: rgba(15, 23, 42, 0.06);
+    color: #4b5563;
 }
 
 [data-theme="light"] .command-palette-footer {
