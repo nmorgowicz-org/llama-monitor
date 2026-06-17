@@ -40,6 +40,17 @@ function closePaletteDropdown() {
     if (dropdown) {
         dropdown.classList.remove('open');
         dropdown.style.display = 'none';
+        // Move back under its original parent so page load layout is stable
+        const parent = document.getElementById('nav-palette-selector');
+        if (parent && dropdown.parentNode !== parent) {
+            parent.appendChild(dropdown);
+            // Reset to CSS default positioning
+            dropdown.style.position = '';
+            dropdown.style.top = '';
+            dropdown.style.bottom = '';
+            dropdown.style.left = '';
+            dropdown.style.right = '';
+        }
     }
     if (btn) btn.setAttribute('aria-expanded', 'false');
 }
@@ -52,9 +63,46 @@ function togglePaletteDropdown(event) {
     if (!dropdown || !btn) return;
     const isOpen = dropdown.classList.contains('open') || dropdown.style.display === 'block';
     const nextOpen = !isOpen;
-    dropdown.classList.toggle('open', nextOpen);
-    dropdown.style.display = nextOpen ? 'block' : 'none';
-    btn.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+
+    if (nextOpen) {
+        // Show briefly to get correct size before measuring
+        dropdown.style.display = 'block';
+        dropdown.classList.add('open');
+        btn.setAttribute('aria-expanded', 'true');
+
+        // Move to body so it escapes any stacking/clip context
+        const btnRect = btn.getBoundingClientRect();
+        const winW = window.innerWidth || document.documentElement.clientWidth;
+        const winH = window.innerHeight || document.documentElement.clientHeight;
+
+        dropdown.style.position = 'fixed';
+        dropdown.style.left = '';
+        dropdown.style.top = '';
+        dropdown.style.bottom = 'auto';
+        dropdown.style.right = 'auto';
+
+        // Align its right edge with the button's right edge
+        dropdown.style.right = (winW - btnRect.right) + 'px';
+
+        requestAnimationFrame(() => {
+            const dRect = dropdown.getBoundingClientRect();
+            const spaceBelow = winH - btnRect.bottom;
+            if (dRect.height > spaceBelow - 8) {
+                // Open upward when there isn't enough room below
+                dropdown.style.top = (btnRect.top - dRect.height - 8) + 'px';
+            } else {
+                // Open downward
+                dropdown.style.top = (btnRect.bottom + 8) + 'px';
+            }
+        });
+
+        // Ensure it's in body after measurements
+        if (dropdown.parentNode !== document.body) {
+            document.body.appendChild(dropdown);
+        }
+    } else {
+        closePaletteDropdown();
+    }
 }
 
 function setPalette(palette) {
