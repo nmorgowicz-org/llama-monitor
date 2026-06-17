@@ -10,6 +10,7 @@ import {
     setTransportGetter,
     getChatViewBindings,
     getDefaultRoleBoundaryText,
+    normalizeGeneratedMessageContent,
 } from './chat-state.js';
 import {
     renderChatMessages,
@@ -827,6 +828,7 @@ export async function _doSendChat(tab, options = {}) {
 
     let finalMessage = null;
     if (msgContent) {
+        msgContent = normalizeGeneratedMessageContent(msgContent, tab, 'assistant');
         const inp = tokenUsage ? (tokenUsage.prompt_tokens ?? 0) : 0;
         const out = tokenUsage ? (tokenUsage.completion_tokens ?? 0) : 0;
         tab.total_input_tokens = (tab.total_input_tokens || 0) + inp;

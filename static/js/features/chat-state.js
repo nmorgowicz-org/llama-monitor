@@ -663,6 +663,33 @@ export function substituteNames(prompt, aiName, userName, gender) {
     return p;
 }
 
+function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function normalizeGeneratedMessageContent(content, tab, role = 'assistant') {
+    if (!content) return content;
+
+    const names = role === 'user'
+        ? [tab?.user_name, 'You', 'User']
+        : [tab?.ai_name, 'AI', 'Assistant'];
+    const labels = names
+        .map(name => (name || '').trim())
+        .filter((name, index, arr) => name && arr.indexOf(name) === index)
+        .map(escapeRegExp);
+
+    let normalized = content;
+    if (labels.length > 0) {
+        const labelPattern = new RegExp(
+            `^\\s*(?:\\*\\*)?(?:${labels.join('|')})(?:\\*\\*)?\\s*[:：\\-–—]\\s*`,
+            'i'
+        );
+        normalized = normalized.replace(labelPattern, '');
+    }
+
+    return normalized.replace(/^\s*[:：]\s*(?:\n+)?/, '');
+}
+
 export function getDefaultRoleBoundaryText(tab) {
     const assistantName = (tab?.ai_name || '{{char}}').trim();
     const userName = (tab?.user_name || '{{user}}').trim();
