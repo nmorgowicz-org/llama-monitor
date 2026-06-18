@@ -5,9 +5,18 @@ set -euo pipefail
 
 TARGET="${1:?Usage: build-single-target.sh <target>}"
 
-# When updating the osxcross-base image, update these two variables to match.
-DARWIN_VERSION="darwin25.5"
-MACOS_SDK="MacOSX26.5.sdk"
+# Auto-detect from the installed osxcross toolchain — no manual updates needed.
+DARWIN_VERSION=$(ls /opt/osxcross/target/bin/aarch64-apple-darwin*-clang 2>/dev/null \
+  | head -1 | grep -oP 'darwin[\d.]+')
+MACOS_SDK=$(ls -d /opt/osxcross/target/SDK/MacOSX*.sdk 2>/dev/null \
+  | sort -V | tail -1 | xargs basename)
+if [[ -z "$DARWIN_VERSION" || -z "$MACOS_SDK" ]]; then
+  echo "FAIL: could not detect osxcross toolchain in /opt/osxcross/target/"
+  echo "  clang binaries found: $(ls /opt/osxcross/target/bin/*-clang 2>/dev/null || echo none)"
+  echo "  SDKs found: $(ls -d /opt/osxcross/target/SDK/*.sdk 2>/dev/null || echo none)"
+  exit 1
+fi
+echo "osxcross: ${DARWIN_VERSION}, ${MACOS_SDK}"
 
 mkdir -p ~/.cargo
 cat > ~/.cargo/config.toml << CARGO_CONFIG
