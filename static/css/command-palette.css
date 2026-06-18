@@ -33,7 +33,7 @@
     border-radius: var(--radius-card);
     background:
         radial-gradient(circle at 18% 16%, var(--acc-10), transparent 28%),
-        radial-gradient(circle at 84% 18%, rgba(34, 211, 238, 0.06), transparent 24%),
+        radial-gradient(circle at 84% 18%, rgba(34,211,238,0.04), transparent 24%),
         linear-gradient(160deg, rgba(30, 35, 44, 0.97), rgba(18, 22, 30, 0.99));
     border: 1px solid rgba(255, 255, 255, 0.10);
     box-shadow:
@@ -121,7 +121,7 @@
 }
 
 .command-palette-results::-webkit-scrollbar-thumb {
-    background: var(--acc-20);
+    background: rgba(99,102,241,0.35);
     border-radius: 3px;
 }
 
@@ -140,12 +140,12 @@
 }
 
 .command-palette-item:hover {
-    background: var(--acc-08);
+    background: var(--acc-10);
 }
 
 .command-palette-item.active {
-    background: var(--acc-12);
-    border-left-color: var(--color-primary-light);
+    background: rgba(99,102,241,0.16);
+    border-left-color: rgba(99,102,241,0.9);
 }
 
 .command-palette-item-type {

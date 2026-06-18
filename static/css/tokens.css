@@ -86,9 +86,9 @@ html.palette-changing *::after {
 
   /* ── Carbon Mint palette (default) ──────────────────────────────── */
   /* --color-accent is the single theming knob; all derived tokens cascade from it */
-  --color-accent:       #2dd4bf;
-  --color-accent-deep:  #0d9488;
-  --color-accent-light: #5eead4;
+  --color-accent:       #a78bfa;
+  --color-accent-deep:  #7c3aed;
+  --color-accent-light: #c4b5fd;
 
   /* Primary = accent so all existing --color-primary CSS auto-follows palette */
   --color-primary:       var(--color-accent);
@@ -99,27 +99,27 @@ html.palette-changing *::after {
   --gradient-primary: linear-gradient(160deg, var(--color-accent-deep) 0%, var(--color-accent) 52%, var(--color-accent-light) 100%);
 
   /* Card ambient glows — palette-specific rgba for depth in dark mode */
-  --surface-card-ambient-a:   rgba(45, 212, 191, 0.12);
-  --surface-card-ambient-b:   rgba(34, 211, 238, 0.08);
-  --surface-card-glow:        rgba(13, 148, 136, 0.16);
-  --surface-card-line:        rgba(94, 234, 212, 0.26);
-  --surface-card-line-strong: rgba(94, 234, 212, 0.42);
+  --surface-card-ambient-a:   rgba(139, 92, 246, 0.11);
+  --surface-card-ambient-b:   rgba(59, 130, 246, 0.08);
+  --surface-card-glow:        rgba(79, 70, 229, 0.15);
+  --surface-card-line:        rgba(148, 163, 184, 0.22);
+  --surface-card-line-strong: rgba(148, 163, 184, 0.36);
 
   /* ── Semantic status colors (palette-stable) ─────────────────────── */
   --color-success: #10b981;
   --color-warning: #f59e0b;
   --color-error:   #f43f5e;
-  --color-info:    #06b6d4;
+  --color-info:    #6366f1;
 
   /* ── Named chart / log colors ────────────────────────────────────── */
-  --color-teal:   #8fbcbb;
-  --color-blue:   #88c0d1;
-  --color-green:  #a3be8c;
-  --color-amber:  #ebcb8b;
+  --color-teal:   #7dd3c0;
+  --color-blue:   #6b8fdb;
+  --color-green:  #56b970;
+  --color-amber:  #fbbf24;
   --color-red:    #bf616a;
-  --color-purple: #b48ead;
+  --color-purple: #a78bfa;
   --color-pink:   #bf4080;
-  --color-cyan:   #61afef;
+  --color-cyan:   #22d3ee;
   --color-gray-1: #4c566a;
   --color-gray-2: #888b98;
   --color-gray-3: #9ca0b0;
@@ -141,7 +141,7 @@ html.palette-changing *::after {
   --shadow-floating: 0 26px 72px rgba(0, 0, 0, 0.5);
 
   /* Semantic gradients stay fixed regardless of palette */
-  --gradient-success: linear-gradient(135deg, #10b981 0%, #14b8a6 100%);
+  --gradient-success: linear-gradient(135deg, #16a34a 0%, #10b981 100%);
   --gradient-warning: linear-gradient(135deg, #f59e0b 0%, #f97316 100%);
   --gradient-error:   linear-gradient(135deg, #f43f5e 0%, #ef4444 100%);
 
@@ -194,10 +194,10 @@ html.palette-changing *::after {
   --elevation-strong: 0 20px 48px rgba(0, 0, 0, 0.44);
 
   /* ── Hardware metric channel colors (JS reads these via getComputedStyle) ── */
-  --metric-load:   #34d399;
+  --metric-load:   #22c55e;
   --metric-power:  var(--color-accent);
-  --metric-memory: #22d3ee;
-  --metric-clock:  #60a5fa;
+  --metric-memory: #38bdf8;
+  --metric-clock:  #fb923c;
 
   /* ── Accent alpha steps — for box-shadows, glows, and inline tints ──────── */
   /* These let CSS files replace literal rgba(accent, N) with var(--acc-N) so  */
@@ -292,16 +292,16 @@ html.palette-changing *::after {
   --surface-card-overlay-strong: rgba(71, 85, 105, 0.14);
 
   /* Carbon Mint light-mode ambient (softer on white) */
-  --surface-card-ambient-a:   rgba(45, 212, 191, 0.10);
-  --surface-card-ambient-b:   rgba(34, 211, 238, 0.07);
-  --surface-card-glow:        rgba(13, 148, 136, 0.12);
-  --surface-card-line:        rgba(94, 234, 212, 0.18);
-  --surface-card-line-strong: rgba(94, 234, 212, 0.30);
+  --surface-card-ambient-a:   rgba(124, 58, 237, 0.09);
+  --surface-card-ambient-b:   rgba(59, 130, 246, 0.07);
+  --surface-card-glow:        rgba(79, 70, 229, 0.10);
+  --surface-card-line:        rgba(148, 163, 184, 0.15);
+  --surface-card-line-strong: rgba(148, 163, 184, 0.26);
 
   /* Light-mode accent: deepened for text readability on white */
-  --color-accent:       #0f766e;
-  --color-accent-deep:  #042f2e;
-  --color-accent-light: #2dd4bf;
+  --color-accent:       #6d28d9;
+  --color-accent-deep:  #4c1d95;
+  --color-accent-light: #c4b5fd;
 
   /* Primary cascades from accent */
   --color-primary:       var(--color-accent);
@@ -320,18 +320,18 @@ html.palette-changing *::after {
   --shadow-floating: 0 26px 72px rgba(15, 23, 42, 0.18);
 
   --color-teal:   #1f6f7f;
-  --color-blue:   #2b6a8f;
+  --color-blue:   #3b6fd0;
   --color-green:  #2f6b3a;
-  --color-amber:  #92400e;
+  --color-amber:  #b45309;
   --color-red:    #9f1239;
   --color-purple: #6a1b9a;
   --color-pink:   #ad1457;
-  --color-cyan:   #1e4a8a;
+  --color-cyan:   #0891b2;
   --color-gray-1: #9ca3af;
   --color-gray-2: #6b7280;
   --color-gray-3: #4b5563;
 
-  --color-success: #047857;
+  --color-success: #16a34a;
   --color-warning: #b45309;
   --color-error:   #b91c1c;
   --color-info:    #0369a1;

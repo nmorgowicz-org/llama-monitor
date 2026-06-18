@@ -16,7 +16,7 @@
     position: absolute;
     inset: 0;
     background:
-        radial-gradient(circle at top, rgba(86, 193, 255, 0.18), transparent 42%),
+        radial-gradient(circle at top, var(--acc-15), transparent 42%),
         radial-gradient(circle at bottom right, rgba(255, 190, 92, 0.18), transparent 34%),
         rgba(7, 10, 18, 0.84);
     backdrop-filter: blur(20px);
@@ -42,8 +42,8 @@
     gap: 8px;
     padding: 7px 12px;
     border-radius: 999px;
-    background: rgba(86, 193, 255, 0.12);
-    color: #8cd8ff;
+    background: var(--acc-15);
+    color: var(--color-accent-light);
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.12em;
@@ -108,8 +108,8 @@
 
 .auth-shell-field input:focus {
     outline: none;
-    border-color: rgba(86, 193, 255, 0.55);
-    box-shadow: 0 0 0 4px rgba(86, 193, 255, 0.14);
+    border-color: var(--acc-60);
+    box-shadow: 0 0 0 4px var(--acc-15);
 }
 
 .auth-shell-submit {
@@ -117,7 +117,7 @@
     margin-top: 8px;
     border: 0;
     border-radius: 18px;
-    background: linear-gradient(135deg, #4cc9f0, #67e8f9 54%, #ffb84d);
+    background: linear-gradient(135deg, var(--color-accent-deep), #22d3ee 55%, #facc15);
     color: #09111c;
     font-size: 15px;
     font-weight: 800;

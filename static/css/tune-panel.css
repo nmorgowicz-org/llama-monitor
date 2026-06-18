@@ -57,11 +57,11 @@
   display: inline-block;
 }
 
-/* Override the blue is-active with teal (matching live indicators) */
+/* Accent-tinted active pill (matches palette) */
 .benchmark-pill.is-active {
-  background: rgba(45, 212, 191, 0.24);
-  color: #8fbcbb;
-  border-color: rgba(45, 212, 191, 0.36);
+  background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  color: var(--color-accent-light);
+  border-color: color-mix(in srgb, var(--color-accent) 36%, transparent);
 }
 
 /* ── Panel body ─────────────────────────────────────────────────────────────── */
@@ -198,7 +198,7 @@
   left: -40%;
   width: 40%;
   border-radius: 999px;
-  background: linear-gradient(90deg, transparent 0%, #6366f1 40%, #818cf8 70%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, var(--color-accent-deep) 40%, #818cf8 70%, transparent 100%);
   animation: tune-sweep 2s ease-in-out infinite;
 }
 
@@ -267,8 +267,8 @@
   transition: background 300ms ease;
 }
 
-.tune-grade-ring.tune-grade-s { --grade-pct: 100%; --grade-color: #10b981; }
-.tune-grade-ring.tune-grade-a { --grade-pct: 78%;  --grade-color: #3b82f6; }
+.tune-grade-ring.tune-grade-s { --grade-pct: 100%; --grade-color: #fde68a; }
+.tune-grade-ring.tune-grade-a { --grade-pct: 78%;  --grade-color: #818cf8; }
 .tune-grade-ring.tune-grade-b { --grade-pct: 55%;  --grade-color: #f59e0b; }
 .tune-grade-ring.tune-grade-c { --grade-pct: 35%;  --grade-color: #f97316; }
 .tune-grade-ring.tune-grade-d { --grade-pct: 18%;  --grade-color: #ef4444; }
@@ -750,7 +750,7 @@
 
 [data-theme="light"] .tune-run-btn {
   background: var(--accent-soft-bg);
-  color: #6366f1;
+  color: var(--color-accent-deep);
   border-color: var(--accent-soft-border);
 }
 
@@ -877,7 +877,7 @@
 .mtp-sweep-bar {
   height: 10px;
   border-radius: 999px;
-  background: linear-gradient(90deg, #6366f1, #818cf8);
+  background: linear-gradient(90deg, var(--color-accent-deep), #818cf8);
   transition: width 0.4s ease;
   min-width: 2px;
 }
@@ -925,7 +925,7 @@
 
 /* Infinite-scroll animation for MTP sweep progress bar (same as regular but teal-ish) */
 .mtp-sweep-progress-anim {
-  background: linear-gradient(90deg, transparent 0%, #2dd4bf 40%, #67e8f9 70%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, #fde68a 40%, #f97316 70%, transparent 100%);
 }
 
 [data-theme="light"] .mtp-sweep-progress-anim {
@@ -971,8 +971,8 @@
 
 [data-theme="light"] .tune-run-btn {
   background: #ffffff;
-  color: #6366f1;
-  border-color: #6366f1;
+  color: var(--color-accent-deep);
+  border-color: var(--color-accent-deep);
 }
 
 /* Grade ring / metrics labels */
@@ -1030,8 +1030,8 @@
 /* MoE autotune */
 [data-theme="light"] .moe-autotune-btn {
   background: #ffffff;
-  color: #6366f1;
-  border-color: #6366f1;
+  color: var(--color-accent-deep);
+  border-color: var(--color-accent-deep);
 }
 
 [data-theme="light"] .moe-autotune-verify {

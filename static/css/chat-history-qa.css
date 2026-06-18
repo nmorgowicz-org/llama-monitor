@@ -53,7 +53,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-primary-light, #818cf8);
+  color: var(--color-primary-light);
   flex-shrink: 0;
 }
 
@@ -389,7 +389,7 @@
   min-height: 20px;
   max-height: 120px;
   overflow-y: auto;
-  caret-color: var(--color-primary-light, #818cf8);
+  caret-color: var(--color-primary-light);
 }
 
 .chqa-input::placeholder {
@@ -533,7 +533,7 @@
 .chqa-insert-btn:hover {
   background: var(--acc-10);
   border-color: var(--acc-30);
-  color: var(--color-primary-light, #818cf8);
+  color: var(--color-primary-light);
 }
 
 .chqa-insert-btn:focus-visible {
@@ -615,7 +615,7 @@
   gap: 5px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--color-primary-light, #818cf8);
+  color: var(--color-primary-light);
   user-select: none;
 }
 
@@ -650,7 +650,7 @@
 .chqa-insert-role-label:has(.chqa-insert-role-radio:checked) {
   background: var(--acc-15);
   border-color: var(--acc-40);
-  color: #4338ca;
+  color: var(--color-accent-deep);
 }
 
 .chqa-insert-role-label:hover {
@@ -674,7 +674,7 @@
   resize: none;
   outline: none;
   transition: border-color 0.16s ease;
-  caret-color: var(--color-primary-light, #818cf8);
+  caret-color: var(--color-primary-light);
 }
 
 .chqa-insert-textarea:focus {
@@ -793,7 +793,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--color-primary-light, #818cf8);
+  background: var(--color-primary-light);
   flex-shrink: 0;
   font-size: 0;
   line-height: 0;
@@ -827,7 +827,7 @@
   min-height: 56px;
   max-height: 140px;
   overflow-y: auto;
-  caret-color: var(--color-primary-light, #818cf8);
+  caret-color: var(--color-primary-light);
 }
 
 .chqa-inject-input::placeholder {
@@ -862,7 +862,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--color-primary-light, #818cf8);
+  background: var(--color-primary-light);
   flex-shrink: 0;
   animation: chqa-status-pulse 1.6s ease-in-out infinite;
 }
@@ -992,7 +992,7 @@
 [data-theme="light"] .chqa-insert-btn:hover {
   background: var(--acc-08);
   border-color: var(--acc-20);
-  color: #4338ca;
+  color: var(--color-accent-deep);
 }
 
 [data-theme="light"] .chqa-write-scene-btn {
@@ -1040,7 +1040,7 @@
 [data-theme="light"] .chqa-inject-toggle[aria-expanded="true"] {
   background: var(--acc-08);
   border-color: var(--acc-25);
-  color: #4338ca;
+  color: var(--color-accent-deep);
 }
 
 [data-theme="light"] .chqa-inject-panel {

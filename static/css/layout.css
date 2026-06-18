@@ -328,7 +328,11 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, var(--acc-15), transparent);
+  background: linear-gradient(90deg,
+    transparent,
+    color-mix(in srgb, var(--color-accent) 25%, transparent),
+    color-mix(in srgb, var(--color-accent-deep) 18%, transparent),
+    transparent);
 }
 
 .endpoint-mode,
@@ -461,9 +465,9 @@
 }
 
 .telemetry-grade-chip.grade-ok {
-    color: var(--color-ok, #4ade80);
-    border-color: var(--color-ok, #4ade80);
-    background: color-mix(in srgb, var(--color-ok, #4ade80) 10%, transparent);
+    color: var(--color-accent, var(--color-ok, #4ade80));
+    border-color: var(--color-accent, var(--color-ok, #4ade80));
+    background: color-mix(in srgb, var(--color-accent, var(--color-ok, #4ade80)) 10%, transparent);
 }
 
 .telemetry-grade-chip.grade-warning {
@@ -507,18 +511,18 @@
 }
 
 @keyframes status-badge-glow {
-  0%, 100% { box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 12px rgba(136, 192, 209, 0.25); border-color: rgba(136, 192, 209, 0.2); background: rgba(136, 192, 209, 0.04); }
-  50% { box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 24px rgba(136, 192, 209, 0.45); border-color: rgba(136, 192, 209, 0.4); background: rgba(136, 192, 209, 0.08); }
+  0%, 100% { box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 12px rgba(148,163,184,0.3); border-color: rgba(148,163,184,0.28); background: rgba(148,163,184,0.04); }
+  50% { box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 24px rgba(148,163,184,0.4); border-color: rgba(148,163,184,0.38); background: rgba(148,163,184,0.08); }
 }
 
 .endpoint-status-wrap .endpoint-status:hover,
 .endpoint-status-wrap.open .endpoint-status {
   background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(136, 192, 209, 0.6);
+  border-color: rgba(148,163,184,0.6);
   box-shadow:
     0 8px 22px rgba(0, 0, 0, 0.22),
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 0 30px rgba(136, 192, 209, 0.4);
+    0 0 30px rgba(148,163,184,0.4);
   transform: translateY(-1px);
   animation-play-state: paused;
 }
@@ -608,13 +612,13 @@
 
 .inference-log-tail-btn {
   cursor: pointer;
-  border: 1px solid rgba(149, 176, 212, 0.28);
-  background: rgba(149, 176, 212, 0.14);
-  color: #88c0d0;
+  border: 1px solid var(--acc-28);
+  background: var(--acc-14);
+  color: var(--color-accent-light);
 }
 
 .inference-log-tail-btn:hover {
-  background: rgba(149, 176, 212, 0.22);
+  background: var(--acc-22);
 }
 
 .inference-log-tail-btn.is-active {
@@ -629,9 +633,9 @@
   padding: 0 5px;
   min-width: 16px;
   border-radius: 999px;
-  border: 1px solid rgba(149, 176, 212, 0.18);
-  background: rgba(149, 176, 212, 0.09);
-  color: #88c0d0;
+  border: 1px solid var(--acc-18);
+  background: var(--acc-09);
+  color: var(--color-accent-light);
   font-size: var(--text-2xs);
   cursor: pointer;
   opacity: 0.6;
@@ -685,11 +689,11 @@
 
 .endpoint-mode.local,
 .status-ok {
-  color: var(--color-success);
+  color: var(--color-accent);
 }
 
 .endpoint-mode.remote {
-  color: var(--color-success);
+  color: var(--color-accent);
 }
 
 .status-busy {
@@ -730,8 +734,8 @@
 
 .status-dot.running,
 .status-dot.ok {
-  background: var(--color-success);
-  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.08), 0 0 18px rgba(16, 185, 129, 0.46);
+  background: var(--color-accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 8%, transparent), 0 0 18px color-mix(in srgb, var(--color-accent) 60%, transparent);
   animation: status-pulse 2.4s ease-in-out infinite;
 }
 
@@ -761,7 +765,7 @@
   padding: 7px 16px;
   background:
     radial-gradient(circle at 18% 0%, var(--acc-10), transparent 18%),
-    radial-gradient(circle at 82% 0%, var(--acc-08), transparent 16%),
+    radial-gradient(circle at 82% 0%, var(--acc-10), transparent 16%),
     rgba(22, 25, 30, 0.94);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(16px) saturate(140%);
@@ -809,9 +813,9 @@
   height: 32px;
   border-radius: var(--radius-base);
   background:
-    radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.12), transparent 24%),
-    linear-gradient(145deg, var(--acc-18), var(--acc-10));
-  border: 1px solid var(--acc-15);
+    radial-gradient(circle at 30% 28%, rgba(255,255,255,0.12), transparent 24%),
+    var(--gradient-primary);
+  border: 1px solid var(--acc-22);
   box-shadow:
     0 10px 26px var(--acc-18),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
@@ -869,10 +873,10 @@
 }
 
 .nav-cockpit.is-live {
-  border-color: rgba(143, 188, 187, 0.26);
+  border-color: rgba(148,163,184,0.28);
   box-shadow:
     0 10px 24px rgba(0, 0, 0, 0.16),
-    0 0 22px rgba(143, 188, 187, 0.08),
+    0 0 24px var(--acc-12),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
@@ -1068,17 +1072,17 @@
   width: 36px;
   height: 20px;
   flex-shrink: 0;
-  color: #8fbcbb;
+  color: var(--color-accent);
 }
 .nav-cockpit-spark .sparkline-fill.live-output {
-  color: rgba(143, 188, 187, 0.88);
+  color: color-mix(in srgb, var(--color-accent) 88%, transparent);
   opacity: 0.22;
 }
 .nav-cockpit-spark .sparkline-line.live-output {
-  stroke: #b6f5ea;
-  color: #b6f5ea;
+  stroke: var(--color-accent-light);
+  color: var(--color-accent-light);
   stroke-width: 2.2;
-  filter: drop-shadow(0 0 4px rgba(143, 188, 187, 0.42));
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-accent) 42%, transparent));
 }
 .nav-cockpit-spark .sparkline-current-trace.live-output {
   opacity: 0.52;
@@ -1474,8 +1478,8 @@
     linear-gradient(135deg, var(--acc-18), var(--acc-08));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 14px 28px var(--acc-18),
-    0 0 28px var(--acc-10);
+    0 14px 28px var(--acc-22),
+    0 0 28px var(--acc-16);
 }
 
 .sidebar-btn.active::before {
@@ -1487,7 +1491,7 @@
   width: 3px;
   border-radius: 999px;
   background: var(--gradient-primary);
-  box-shadow: 0 0 10px var(--acc-40);
+  box-shadow: 0 0 10px var(--acc-35);
 }
 
 .sidebar-icon {
@@ -1520,8 +1524,8 @@
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: rgba(244, 63, 94, 0.18);
-  color: #fecdd3;
+  background: var(--acc-18);
+  color: var(--color-accent-light);
   font-size: 0.68rem;
   font-weight: 600;
   line-height: 1;
@@ -1650,7 +1654,7 @@ body.sidebar-collapsed .content-area {
   height: 100vh;
   background:
       radial-gradient(circle at 15% 15%, var(--acc-08), transparent 28%),
-      radial-gradient(circle at 85% 80%, rgba(6, 182, 212, 0.05), transparent 24%),
+      radial-gradient(circle at 85% 80%, var(--acc-05), transparent 24%),
       linear-gradient(160deg, rgba(40, 48, 58, 0.94), rgba(28, 34, 42, 0.97));
   border-left: 1px solid rgba(255, 255, 255, 0.09);
   box-shadow:
@@ -1889,7 +1893,7 @@ body.sidebar-collapsed .content-area {
 [data-theme="light"] .slide-panel {
   background:
       radial-gradient(circle at 15% 15%, var(--acc-05), transparent 28%),
-      radial-gradient(circle at 85% 80%, rgba(6, 182, 212, 0.04), transparent 24%),
+      radial-gradient(circle at 85% 80%, var(--acc-04), transparent 24%),
       linear-gradient(160deg, rgba(255, 255, 255, 0.97), rgba(248, 250, 252, 0.98));
   border-left-color: rgba(0, 0, 0, 0.08);
   box-shadow:
@@ -1926,7 +1930,7 @@ body.sidebar-collapsed .content-area {
 
 .sidebar-resize-handle:hover,
 .sidebar-nav.is-resizing .sidebar-resize-handle {
-  background: rgba(167, 139, 250, 0.35);
+  background: var(--acc-26);
 }
 
 .sidebar-nav.collapsed .sidebar-resize-handle {
@@ -2128,17 +2132,17 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 }
 
 [data-theme="light"] .sidebar-btn.active {
-  color: #4338ca;
+  color: var(--color-accent-deep);
   background:
     radial-gradient(circle at 16% 50%, var(--acc-10), transparent 36%),
     linear-gradient(135deg, var(--acc-10), var(--acc-05));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.8),
-    0 2px 10px var(--acc-10);
+    0 2px 10px var(--acc-25);
 }
 
 [data-theme="light"] .sidebar-btn.active::before {
-  background: linear-gradient(180deg, #6366f1, #8b5cf6);
+  background: var(--gradient-primary);
   box-shadow: 0 0 8px var(--acc-30);
 }
 
@@ -2218,7 +2222,7 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 [data-theme="light"] .endpoint-mode.local,
 [data-theme="light"] .status-ok,
 [data-theme="light"] .endpoint-mode.remote {
-  color: #16a34a;
+  color: var(--color-accent);
 }
 
 [data-theme="light"] .status-busy {

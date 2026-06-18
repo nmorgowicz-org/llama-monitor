@@ -591,10 +591,10 @@ button:disabled {
 
 .settings-card:hover {
   transform: translateY(-1px);
-  border-color: rgba(99,102,241,0.22);
+  border-color: var(--acc-25);
   box-shadow:
     0 14px 32px rgba(0,0,0,0.26),
-    0 0 14px rgba(99,102,241,0.08),
+    0 0 14px var(--acc-08),
     inset 0 1px 0 rgba(255,255,255,0.06);
 }
 
@@ -618,17 +618,17 @@ button:disabled {
 }
 
 [data-theme="light"] .settings-card:hover {
-  border-color: rgba(99,102,241,0.28);
+  border-color: var(--acc-30);
   box-shadow:
     0 14px 32px rgba(15,23,42,0.09),
-    0 0 14px rgba(99,102,241,0.07),
+    0 0 14px var(--acc-08),
     inset 0 1px 0 rgba(255,255,255,0.9);
 }
 
 /* DB admin card polish */
 .db-admin-card {
   background:
-    radial-gradient(circle at 18% 18%, rgba(99,102,241,0.1), transparent 26%),
+    radial-gradient(circle at 18% 18%, var(--acc-10), transparent 26%),
     radial-gradient(circle at 84% 16%, rgba(34,211,238,0.07), transparent 24%),
     linear-gradient(180deg, var(--surface-card-elevated), var(--surface-card-base));
   border: 1px solid var(--surface-card-overlay-strong);
@@ -649,7 +649,7 @@ button:disabled {
   border-color: var(--surface-card-line);
   box-shadow:
     0 18px 44px rgba(0,0,0,0.38),
-    0 0 18px rgba(99,102,241,0.1),
+    0 0 18px var(--acc-10),
     inset 0 1px 0 rgba(255,255,255,0.07);
 }
 
@@ -710,10 +710,10 @@ button:disabled {
 
 .db-stat:hover {
   transform: translateY(-1px);
-  border-color: rgba(99,102,241,0.25);
+  border-color: var(--acc-25);
   box-shadow:
     0 10px 22px rgba(0,0,0,0.26),
-    0 0 12px rgba(99,102,241,0.09),
+    0 0 12px var(--acc-08),
     inset 0 1px 0 rgba(255,255,255,0.06);
 }
 
@@ -815,12 +815,12 @@ button:disabled {
 }
 
 .db-log-content::-webkit-scrollbar-thumb {
-  background: rgba(99,102,241,0.25);
+  background: var(--acc-25);
   border-radius: 2px;
 }
 
 .db-log-content::-webkit-scrollbar-thumb:hover {
-  background: rgba(99,102,241,0.45);
+  background: var(--acc-40);
 }
 
 /* prefers-reduced-motion for db-admin elements */
@@ -849,7 +849,7 @@ button:disabled {
 [data-theme="light"] .db-admin-card:hover {
   box-shadow:
     0 18px 44px rgba(15,23,42,0.13),
-    0 0 18px rgba(99,102,241,0.08),
+    0 0 18px var(--acc-08),
     inset 0 1px 0 rgba(255,255,255,0.9);
 }
 
@@ -861,10 +861,10 @@ button:disabled {
 }
 
 [data-theme="light"] .db-stat:hover {
-  border-color: rgba(99,102,241,0.35);
+  border-color: var(--acc-40);
   box-shadow:
     0 10px 22px rgba(15,23,42,0.1),
-    0 0 12px rgba(99,102,241,0.08),
+    0 0 12px var(--acc-08),
     inset 0 1px 0 rgba(255,255,255,0.9);
 }
 
@@ -1195,7 +1195,7 @@ button:disabled {
 .mm-dir-settings:hover {
   background: var(--acc-15);
   border-color: var(--acc-50);
-  color: #a5b4fc;
+  color: var(--color-accent);
 }
 
 /* ── Model grid ── */
@@ -1339,7 +1339,7 @@ button:disabled {
 .mm-vram-fill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--acc-60), var(--acc-60));
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent));
   transition: width 400ms ease;
 }
 
@@ -1771,7 +1771,7 @@ button:disabled {
 .mm-lib-chip.active {
   background: var(--acc-15);
   border-color: var(--acc-40);
-  color: #a5b4fc;
+  color: var(--color-accent);
 }
 
 .mm-lib-sort-wrap {
@@ -2323,7 +2323,7 @@ button:disabled {
 [data-theme="light"] .mm-lib-chip.active {
   background: var(--acc-15);
   border-color: var(--acc-40);
-  color: #a5b4fc;
+  color: var(--color-accent);
 }
 
 [data-theme="light"] .mm-lib-sort-select {
@@ -2494,13 +2494,13 @@ button:disabled {
 [data-theme="light"] .mm-lib-btn:hover {
   border-color: var(--acc-30);
   background: var(--acc-05);
-  color: #6366f1;
+  color: var(--color-accent-deep);
 }
 
 [data-theme="light"] .mm-lib-btn--active {
   background: var(--acc-08);
   border-color: var(--acc-30);
-  color: #6366f1;
+  color: var(--color-accent-deep);
 }
 
 [data-theme="light"] .mm-lib-sort-label {
@@ -2525,7 +2525,7 @@ button:disabled {
 [data-theme="light"] .mm-lib-chip.active {
   background: var(--acc-10);
   border-color: var(--acc-30);
-  color: #6366f1;
+  color: var(--color-accent-deep);
 }
 
 [data-theme="light"] .mm-lib-sort-select {
@@ -2643,7 +2643,7 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #a5b4fc;
+  color: var(--color-accent-light);
 }
 
 .llama-version-modal-title {
@@ -2651,7 +2651,7 @@ button:disabled {
   font-size: 0.92rem;
   font-weight: 700;
   letter-spacing: -0.01em;
-  background: linear-gradient(135deg, #a5b4fc, #67e8f9);
+  background: linear-gradient(135deg, var(--color-accent-light), #67e8f9);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -2819,7 +2819,7 @@ button:disabled {
 }
 
 .llama-version-notes-body a {
-  color: #a5b4fc;
+  color: var(--color-accent-light);
   text-decoration: none;
 }
 
@@ -2966,7 +2966,7 @@ button:disabled {
 .llama-version-badge--latest {
   background: var(--acc-15);
   border: 1px solid var(--acc-40);
-  color: #a5b4fc;
+  color: var(--color-accent);
 }
 
 .llama-version-badge--installed {
@@ -2994,7 +2994,7 @@ button:disabled {
   border-radius: 7px;
   border: 1px solid var(--acc-40);
   background: var(--acc-10);
-  color: #a5b4fc;
+  color: var(--color-accent);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
@@ -3264,7 +3264,7 @@ button:disabled {
 
 .preset-context-pill.active {
     background: var(--acc-25);
-    color: #a5b4fc;
+    color: var(--color-accent);
     border-color: var(--acc-60);
 }
 
