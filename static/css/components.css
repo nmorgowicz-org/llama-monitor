@@ -747,14 +747,14 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border: 1px solid rgba(8,145,178,0.45);
+  border: 1px solid var(--acc-40);
   background:
-    radial-gradient(circle at top, rgba(8,145,178,0.12), transparent 60%),
-    linear-gradient(180deg, rgba(8,145,178,0.08), rgba(8,145,178,0.03));
-  color: #b6f3f9;
+    radial-gradient(circle at top, var(--acc-12), transparent 60%),
+    linear-gradient(180deg, var(--acc-08), var(--acc-05));
+  color: var(--color-accent-light);
   box-shadow:
     0 10px 24px rgba(0,0,0,0.22),
-    0 0 14px rgba(8,145,178,0.14),
+    0 0 14px var(--acc-12),
     inset 0 1px 0 rgba(255,255,255,0.1);
   transition:
     transform 160ms ease,
@@ -765,10 +765,10 @@ button:disabled {
 
 .db-admin-btn:hover {
   transform: translateY(-1px);
-  border-color: rgba(8,145,178,0.7);
+  border-color: var(--acc-60);
   box-shadow:
     0 14px 28px rgba(0,0,0,0.26),
-    0 0 18px rgba(8,145,178,0.22),
+    0 0 18px var(--acc-18),
     inset 0 1px 0 rgba(255,255,255,0.14);
 }
 
@@ -869,17 +869,18 @@ button:disabled {
 }
 
 [data-theme="light"] .db-admin-btn {
-  border-color: rgba(8,145,178,0.6);
+  border-color: var(--acc-40);
+  color: var(--color-accent-deep);
   box-shadow:
     0 10px 24px rgba(15,23,42,0.08),
-    0 0 14px rgba(8,145,178,0.12),
+    0 0 14px var(--acc-10),
     inset 0 1px 0 rgba(255,255,255,0.7);
 }
 
 [data-theme="light"] .db-admin-btn:hover {
   box-shadow:
     0 14px 28px rgba(15,23,42,0.1),
-    0 0 18px rgba(8,145,178,0.18),
+    0 0 18px var(--acc-15),
     inset 0 1px 0 rgba(255,255,255,0.9);
 }
 
@@ -958,7 +959,7 @@ button:disabled {
     0 10px 26px var(--acc-20),
     0 0 14px var(--acc-12),
     inset 0 1px 0 rgba(255,255,255,0.35);
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
   /* remote-agent-progress-bar — width transition (visual, keep) */
@@ -1990,7 +1991,7 @@ button:disabled {
 [data-theme="light"] .mm-tag-picker {
   background: rgba(255, 255, 255, 0.98);
   border-color: rgba(15, 23, 42, 0.12);
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .mm-tag-picker-title {
@@ -2531,7 +2532,7 @@ button:disabled {
 [data-theme="light"] .mm-lib-sort-select {
   border-color: rgba(0, 0, 0, 0.1);
   background: #fff;
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .mm-lib-sort-select:hover {

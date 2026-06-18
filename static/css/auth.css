@@ -182,9 +182,9 @@
 }
 
 [data-theme="light"] .auth-shell-badge {
-    background: rgba(15, 23, 42, 0.05);
-    border-color: rgba(15, 23, 42, 0.14);
-    color: #111827;
+  background: rgba(15, 23, 42, 0.05);
+  border-color: rgba(15, 23, 42, 0.14);
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .auth-shell-subtitle,
@@ -192,7 +192,7 @@
 [data-theme="light"] .auth-shell-note,
 [data-theme="light"] .auth-shell-recovery,
 [data-theme="light"] .auth-shell-field {
-    color: var(--color-text-secondary, #374151);
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .auth-shell-error {

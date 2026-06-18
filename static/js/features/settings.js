@@ -709,19 +709,32 @@ async function _loadSettingsGpuInfo() {
 
 // ── Appearance (Settings > Appearance tab) ───────────────────────────────────
 
+function _normalizePaletteId(palette) {
+    return palette === 'carbon-mint' || palette === 'carbon_mint' ? '' : (palette || '');
+}
+
+function _readAppearancePreferences() {
+    try {
+        return JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}') || {};
+    } catch (_) {
+        return {};
+    }
+}
+
 function _applyPalette(palette) {
+    const paletteId = _normalizePaletteId(palette);
     const html = document.documentElement;
     html.classList.add('palette-changing');
     setTimeout(() => html.classList.remove('palette-changing'), 350);
-    if (palette && palette !== 'carbon-mint') {
-        html.dataset.palette = palette;
+    if (paletteId) {
+        html.dataset.palette = paletteId;
     } else {
         delete html.dataset.palette;
     }
 }
 
 function _initAppearanceTab() {
-    const saved = JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}');
+    const saved = _readAppearancePreferences();
     const themeEl = document.getElementById('settings-appearance-theme');
     const fontEl = document.getElementById('settings-appearance-font-scale');
     const fontValEl = document.getElementById('settings-appearance-font-scale-value');
@@ -734,9 +747,9 @@ function _initAppearanceTab() {
     const msgWidthEl = document.getElementById('settings-appearance-msg-width');
 
     // Restore palette swatch selection
-    const activePalette = saved.palette || '';
+    const activePalette = _normalizePaletteId(saved.palette);
     document.querySelectorAll('.palette-swatch').forEach(btn => {
-        const matches = (btn.dataset.palette || '') === activePalette;
+        const matches = _normalizePaletteId(btn.dataset.palette) === activePalette;
         btn.classList.toggle('active', matches);
         btn.setAttribute('aria-pressed', String(matches));
     });
@@ -759,7 +772,7 @@ function _applyAndSaveAppearance() {
     const chatFont = parseInt(document.getElementById('settings-appearance-chat-font')?.value || '100');
     const timestamps = document.getElementById('settings-appearance-timestamps')?.value || 'hover';
     const msgWidth = document.getElementById('settings-appearance-msg-width')?.value || 'normal';
-    const palette = document.querySelector('#settings-palette-grid .palette-swatch.active')?.dataset.palette || '';
+    const palette = _normalizePaletteId(document.querySelector('#settings-palette-grid .palette-swatch.active')?.dataset.palette);
 
     const effectiveTheme = theme === 'auto'
         ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')

@@ -898,7 +898,7 @@
 [data-theme="light"] .chqa-answer {
   background: rgba(0, 0, 0, 0.02);
   border-color: rgba(0, 0, 0, 0.07);
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .chqa-answer-body code {
@@ -918,7 +918,7 @@
 [data-theme="light"] .chqa-suggestion-btn {
   background: rgba(0, 0, 0, 0.03);
   border-color: rgba(0, 0, 0, 0.07);
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .chqa-suggestion-btn:hover {
@@ -970,23 +970,23 @@
 }
 
 [data-theme="light"] .chqa-answer-stopped {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .chqa-copy-btn {
   border-color: rgba(0, 0, 0, 0.08);
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .chqa-copy-btn:hover {
   background: rgba(0, 0, 0, 0.05);
   border-color: rgba(0, 0, 0, 0.14);
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .chqa-insert-btn {
   border-color: rgba(0, 0, 0, 0.08);
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .chqa-insert-btn:hover {
@@ -997,13 +997,13 @@
 
 [data-theme="light"] .chqa-write-scene-btn {
   border-color: rgba(0, 0, 0, 0.08);
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .chqa-write-scene-btn:hover {
   background: var(--acc-05);
   border-color: var(--acc-18);
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .chqa-insert-editor {
@@ -1023,18 +1023,18 @@
 
 [data-theme="light"] .chqa-insert-role-label {
   border-color: rgba(0, 0, 0, 0.09);
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .chqa-inject-toggle {
   border-color: rgba(0, 0, 0, 0.09);
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .chqa-inject-toggle:hover {
   background: var(--acc-05);
   border-color: var(--acc-18);
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .chqa-inject-toggle[aria-expanded="true"] {
@@ -1053,7 +1053,7 @@
 }
 
 [data-theme="light"] .chqa-status-text {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 /* ── Reduced motion ──────────────────────────────────────────────────────── */

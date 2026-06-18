@@ -1003,8 +1003,8 @@
 [data-theme="light"] .remote-agent-setup-modal {
   background:
     radial-gradient(circle at top right, rgba(15, 23, 42, 0.015), transparent 22%),
-    linear-gradient(145deg, #ffffff, #f9fafb);
-  border-color: rgba(17, 24, 39, 0.1);
+    linear-gradient(145deg, var(--surface-card-base), var(--surface-card-elevated));
+  border-color: var(--border-subtle);
   box-shadow:
     0 24px 64px rgba(15, 23, 42, 0.14),
     0 8px 24px rgba(15, 23, 42, 0.09),
@@ -1018,8 +1018,8 @@
 [data-theme="light"] .agent-setup-hero {
   background:
     radial-gradient(circle at top right, rgba(15, 23, 42, 0.012), transparent 22%),
-    linear-gradient(145deg, #ffffff, #f9fafb);
-  border-color: rgba(17, 24, 39, 0.09);
+    linear-gradient(145deg, var(--surface-card-base), var(--surface-card-elevated));
+  border-color: var(--border-subtle);
   box-shadow:
     0 12px 32px rgba(15, 23, 42, 0.07),
     0 4px 12px rgba(15, 23, 42, 0.05),
@@ -1027,22 +1027,22 @@
 }
 
 [data-theme="light"] .agent-setup-hero h3 {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .agent-setup-hero-desc {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .agent-endpoint-url {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .agent-setup-section {
   background:
     radial-gradient(circle at top right, rgba(15, 23, 42, 0.012), transparent 22%),
-    linear-gradient(145deg, #ffffff, #f9fafb);
-  border-color: rgba(17, 24, 39, 0.09);
+    linear-gradient(145deg, var(--surface-card-base), var(--surface-card-elevated));
+  border-color: var(--border-subtle);
   box-shadow:
     0 12px 32px rgba(15, 23, 42, 0.07),
     0 4px 12px rgba(15, 23, 42, 0.05),
@@ -1058,18 +1058,18 @@
 }
 
 [data-theme="light"] .agent-setup-section-title {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .agent-setup-field span {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .agent-setup-field input,
 [data-theme="light"] .agent-setup-field select {
   background: rgba(15, 23, 42, 0.04);
   border-color: rgba(15, 23, 42, 0.16);
-  color: #111827;
+  color: var(--color-text-primary);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
@@ -1094,7 +1094,7 @@
 }
 
 [data-theme="light"] .agent-setup-status-alert-message {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .agent-setup-status-alert.warning {
@@ -1123,7 +1123,7 @@
 [data-theme="light"] .agent-setup-progress {
   background:
     radial-gradient(circle at top right, var(--acc-05), transparent 22%),
-    linear-gradient(145deg, #ffffff, #f9fafb);
+    linear-gradient(145deg, var(--surface-card-base), var(--surface-card-elevated));
   border-color: rgba(15, 23, 42, 0.1);
   box-shadow:
     0 8px 24px rgba(15, 23, 42, 0.06),
@@ -1135,7 +1135,7 @@
 }
 
 [data-theme="light"] .progress-text {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 /* Status cards */
@@ -1146,7 +1146,7 @@
 }
 
 [data-theme="light"] .agent-setup-status.info {
-  color: #111827;
+  color: var(--color-text-primary);
   background: color-mix(in srgb, var(--color-accent) 8%, transparent);
   border-color: color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
@@ -1161,8 +1161,8 @@
 [data-theme="light"] .version-card {
   background:
     radial-gradient(circle at top right, rgba(15, 23, 42, 0.012), transparent 22%),
-    linear-gradient(145deg, #ffffff, #f9fafb);
-  border-color: rgba(17, 24, 39, 0.09);
+    linear-gradient(145deg, var(--surface-card-base), var(--surface-card-elevated));
+  border-color: var(--border-subtle);
   box-shadow:
     0 8px 24px rgba(15, 23, 42, 0.07),
     0 2px 8px rgba(15, 23, 42, 0.05),
@@ -1170,7 +1170,7 @@
 }
 
 [data-theme="light"] .version-label {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 /* Model info + chips */
@@ -1181,39 +1181,39 @@
 }
 
 [data-theme="light"] .model-info-text.idle {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .model-info-text.generating {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 /* Speculative chip */
 [data-theme="light"] .speculative-chip {
-  color: #374151;
+  color: var(--color-text-secondary);
   background: rgba(15, 23, 42, 0.04);
   border-color: rgba(15, 23, 42, 0.12);
 }
 
 [data-theme="light"] .speculative-chip.enabled {
-  color: #111827;
+  color: var(--color-text-primary);
   border-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
   background: color-mix(in srgb, var(--color-accent) 14%, transparent);
 }
 
 /* Config KV chips */
 [data-theme="light"] .config-kv {
-  color: #374151;
+  color: var(--color-text-secondary);
   background: rgba(15, 23, 42, 0.04);
   border-color: rgba(15, 23, 42, 0.1);
 }
 
 [data-theme="light"] .config-kv strong {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .config-empty {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 /* Activity rail */
@@ -1228,12 +1228,12 @@
 }
 
 [data-theme="light"] .activity-empty {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 /* Host key display */
 [data-theme="light"] .agent-setup-host-key {
-  color: #111827;
+  color: var(--color-text-primary);
   background: color-mix(in srgb, var(--color-success) 6%, transparent);
   border-color: color-mix(in srgb, var(--color-success) 20%, transparent);
 }

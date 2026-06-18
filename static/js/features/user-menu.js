@@ -8,6 +8,18 @@ import { saveSettings } from './settings.js';
 
 // ── User Menu ─────────────────────────────────────────────────────────────────
 
+function normalizePaletteId(palette) {
+    return palette === 'carbon-mint' || palette === 'carbon_mint' ? '' : (palette || '');
+}
+
+function readSavedPreferences() {
+    try {
+        return JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}') || {};
+    } catch (_) {
+        return {};
+    }
+}
+
 function _positionUserMenu() {
     const menu = document.getElementById('nav-user-menu-items');
     const btn = document.getElementById('nav-user-btn');
@@ -106,28 +118,29 @@ function togglePaletteDropdown(event) {
 }
 
 function setPalette(palette) {
+    const paletteId = normalizePaletteId(palette);
     const html = document.documentElement;
     html.classList.add('palette-changing');
     setTimeout(() => html.classList.remove('palette-changing'), 350);
-    if (palette && palette !== 'carbon-mint') {
-        html.dataset.palette = palette;
+    if (paletteId) {
+        html.dataset.palette = paletteId;
     } else {
         delete html.dataset.palette;
     }
     // Update active swatch
     document.querySelectorAll('#nav-palette-dropdown .palette-swatch').forEach(btn => {
-        const matches = (btn.dataset.palette || '') === palette;
+        const matches = normalizePaletteId(btn.dataset.palette) === paletteId;
         btn.classList.toggle('active', matches);
         btn.setAttribute('aria-pressed', String(matches));
     });
     // Persist palette to localStorage
     try {
-        const existing = JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}');
-        localStorage.setItem('llama-monitor-preferences', { ...existing, palette });
+        const existing = readSavedPreferences();
+        localStorage.setItem('llama-monitor-preferences', JSON.stringify({ ...existing, palette: paletteId }));
     } catch (_) {}
     // Close dropdown after selection
     closePaletteDropdown();
-    showToast('Palette set to ' + (palette || 'Carbon Mint'), 'success');
+    showToast('Palette set to ' + (paletteId || 'Carbon Mint'), 'success');
 }
 
 document.addEventListener('click', event => {
@@ -180,7 +193,7 @@ function saveUserPreferences() {
     saveSettings();
 
     // Preserve other prefs (e.g. palette) that are managed elsewhere
-    const existing = JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}');
+    const existing = readSavedPreferences();
     localStorage.setItem('llama-monitor-preferences', JSON.stringify({
         ...existing,
         theme,
@@ -241,18 +254,20 @@ async function logoutUser(event) {
 
 function _loadSavedPreferences() {
     try {
-        const savedPreferences = JSON.parse(localStorage.getItem('llama-monitor-preferences') || 'null');
+        const savedPreferences = readSavedPreferences();
         if (savedPreferences) {
             applyThemePreference(savedPreferences.theme || 'dark');
             // Apply color palette before first paint to avoid flash
-            const palette = savedPreferences.palette || '';
-            if (palette && palette !== 'carbon-mint') {
+            const palette = normalizePaletteId(savedPreferences.palette);
+            if (palette) {
                 document.documentElement.dataset.palette = palette;
+            } else {
+                delete document.documentElement.dataset.palette;
             }
             // Sync palette swatch UI
-            const savedPalette = savedPreferences.palette || '';
+            const savedPalette = normalizePaletteId(savedPreferences.palette);
             document.querySelectorAll('#nav-palette-dropdown .palette-swatch').forEach(btn => {
-                const matches = (btn.dataset.palette || '') === savedPalette;
+                const matches = normalizePaletteId(btn.dataset.palette) === savedPalette;
                 btn.classList.toggle('active', matches);
                 btn.setAttribute('aria-pressed', String(matches));
             });

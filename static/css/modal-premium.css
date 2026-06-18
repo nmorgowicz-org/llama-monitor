@@ -627,11 +627,11 @@
 }
 
 #file-browser-modal .fb-path-input:focus {
-    border-color: #38bdf8;
-    box-shadow:
-        0 0 0 3px rgba(56,189,248,0.16),
-        0 4px 12px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  border-color: var(--acc-50);
+  box-shadow:
+    0 0 0 3px var(--acc-15),
+    0 4px 12px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 #file-browser-modal .modal-body {
@@ -887,7 +887,7 @@
 }
 
 [data-theme="light"] #file-browser-modal .file-browser-hint {
-    color: #4b5563;
+    color: var(--color-text-muted);
 }
 
 [data-theme="light"] #file-browser-modal .modal {
@@ -941,15 +941,15 @@
 }
 
 [data-theme="light"] #export-modal .export-section-title {
-    color: #111827;
+    color: var(--color-text-primary);
 }
 
 [data-theme="light"] #export-modal .export-option-title {
-    color: #111827;
+    color: var(--color-text-primary);
 }
 
 [data-theme="light"] #export-modal .export-option-description {
-    color: #4b5563;
+    color: var(--color-text-muted);
 }
 
 [data-theme="light"] #export-modal .modal {
@@ -1033,16 +1033,16 @@
 
 /* Improve contrast for tiny section headers and labels */
 [data-theme="light"] .template-list-section-header {
-  color: #4b5563;
+  color: var(--color-text-muted);
   opacity: 1;
 }
 
 [data-theme="light"] .template-list-name {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .template-list-desc {
-  color: #4b5563;
+  color: var(--color-text-muted);
   opacity: 1;
 }
 
@@ -1055,15 +1055,15 @@
 [data-theme="light"] .template-preview-content {
   background: rgba(15, 23, 42, 0.02);
   border-color: rgba(15, 23, 42, 0.08);
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .template-editor-label {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .template-editor-hint {
-  color: #4b5563;
+  color: var(--color-text-muted);
   opacity: 1;
 }
 
@@ -1829,18 +1829,18 @@
 }
 
 [data-theme="light"] #preset-modal .modal-header h2 {
-  background: linear-gradient(135deg, #111827, #111827, #111827);
+  background: linear-gradient(135deg, var(--color-text-primary), var(--color-text-primary), var(--color-text-primary));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 [data-theme="light"] #preset-modal details.modal-section summary {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] #preset-modal .modal-field label {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] #preset-modal .modal {
@@ -2533,13 +2533,13 @@
 }
 
 [data-theme="light"] .preset-editor-header-info h2 {
-  color: #111827;
+  color: var(--color-text-primary);
   background: none;
-  -webkit-text-fill-color: #111827;
+  -webkit-text-fill-color: var(--color-text-primary);
 }
 
 [data-theme="light"] .preset-editor-subtitle {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .preset-editor-nav {
@@ -2550,24 +2550,24 @@
 }
 
 [data-theme="light"] .preset-nav-item {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .preset-nav-item:hover {
   background: rgba(15, 23, 42, 0.04);
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .preset-nav-item.active {
   background: var(--acc-10);
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .pe-input,
 [data-theme="light"] .pe-select {
   background: rgba(255, 255, 255, 0.9);
   border-color: rgba(17, 24, 39, 0.14);
-  color: #111827;
+  color: var(--color-text-primary);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
@@ -2580,7 +2580,7 @@
 }
 
 [data-theme="light"] .pe-label {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .pe-section-header {
@@ -2588,15 +2588,15 @@
 }
 
 [data-theme="light"] .pe-section-title {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .pe-section-desc {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .pe-field-hint {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .pe-toggle-track {
@@ -2605,11 +2605,11 @@
 }
 
 [data-theme="light"] .pe-toggle-thumb {
-  background: #4b5563;
+  background: var(--color-text-muted);
 }
 
 [data-theme="light"] .pe-toggle-label {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .preset-editor-footer {
@@ -2628,7 +2628,7 @@
 }
 
 [data-theme="light"] .preset-change-field {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .preset-change-from {

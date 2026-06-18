@@ -1308,12 +1308,12 @@
 /* Light-mode: improved contrast for small labels, controls, CSP elements */
 
 [data-theme="light"] .chat-tab-count {
-  color: #4b5563;
+  color: var(--color-text-muted);
   opacity: 0.9;
 }
 
 [data-theme="light"] .chat-tab-pin-icon::after {
-  background: #111827;
+  background: var(--color-text-primary);
   color: #f9fafb;
   border-color: rgba(0, 0, 0, 0.18);
 }
@@ -1324,20 +1324,20 @@
 }
 
 [data-theme="light"] .chat-header-label {
-  color: #4b5563;
+  color: var(--color-text-muted);
   opacity: 1;
 }
 
 [data-theme="light"] .chat-header-hide-btn {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .chat-header-hide-btn:hover {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .csp-collapsed-label {
-  color: #4b5563;
+  color: var(--color-text-muted);
   opacity: 0.9;
 }
 
@@ -1356,55 +1356,55 @@
 .csp-reveal-btn:hover { color: rgba(0, 0, 0, 0.7); }
 
 [data-theme="light"] .csp-reveal-btn {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .csp-reveal-btn:hover {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .csp-management-pill {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .csp-management-pill:hover {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .csp-search-filter-chip {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .csp-search-filter-chip:hover {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .csp-search-result-meta {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .csp-search-result-snippet {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .csp-search-result-jump {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .sidebar-note-btn {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .sidebar-note-btn:hover {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .sidebar-section-count {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .sidebar-form-label {
-  color: #4b5563;
+  color: var(--color-text-muted);
   opacity: 1;
 }
 
@@ -4907,17 +4907,17 @@
 }
 
 [data-theme="light"] .chat-params-title {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .chat-advanced-toggle {
   background: rgba(15, 23, 42, 0.03);
   border-color: rgba(15, 23, 42, 0.12);
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 [data-theme="light"] .chat-advanced-toggle:hover {
   background: rgba(15, 23, 42, 0.06);
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .chat-params-divider {
@@ -4925,13 +4925,13 @@
 }
 
 [data-theme="light"] .chat-params-grid label {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .chat-params-grid input[type="number"] {
   background: rgba(15, 23, 42, 0.03);
   border-color: rgba(15, 23, 42, 0.12);
-  color: #111827;
+  color: var(--color-text-primary);
 }
 [data-theme="light"] .chat-params-grid input[type="number"]:focus {
   border-color: var(--color-primary);
@@ -4939,7 +4939,7 @@
 }
 
 [data-theme="light"] .chat-param-label {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .chat-param-technical {
@@ -4953,11 +4953,11 @@
 }
 [data-theme="light"] .chat-param-tooltip:hover {
   background: rgba(15, 23, 42, 0.12);
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .chat-param-inline {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .chat-param-unit {
@@ -8818,9 +8818,9 @@ body.shell-width-very-tight #chat-focus-mode-btn .chat-header-label {
 }
 
 .reply-plan-chip.chip-explicit {
-    color: var(--color-warning, var(--color-warning));
-    border-color: var(--color-warning, var(--color-warning));
-    background: color-mix(in srgb, var(--color-warning, var(--color-warning)) 8%, transparent);
+    color: var(--color-warning);
+    border-color: var(--color-warning);
+    background: color-mix(in srgb, var(--color-warning) 8%, transparent);
 }
 
 .reply-plan-chip.chip-notes {
@@ -8840,9 +8840,9 @@ body.shell-width-very-tight #chat-focus-mode-btn .chat-header-label {
 }
 
 .reply-plan-chip.chip-surprise {
-    color: var(--color-error, var(--color-error));
-    border-color: var(--color-error, var(--color-error));
-    background: color-mix(in srgb, var(--color-error, var(--color-error)) 8%, transparent);
+    color: var(--color-error);
+    border-color: var(--color-error);
+    background: color-mix(in srgb, var(--color-error) 8%, transparent);
 }
 
 /* ── Light theme: Toast notifications (full pass) ─────────────────────── */
@@ -8921,7 +8921,7 @@ body.shell-width-very-tight #chat-focus-mode-btn .chat-header-label {
 
 [data-theme="light"] .toast.toast-warning .toast-icon {
   background: linear-gradient(135deg, var(--color-warning), var(--color-warning));
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .toast.toast-info .toast-icon {

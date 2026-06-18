@@ -952,7 +952,7 @@
 
 [data-theme="light"] .tune-tool-select {
   background: #ffffff;
-  color: #111827;
+  color: var(--color-text-primary);
   border-color: var(--border-subtle);
 }
 
@@ -960,13 +960,13 @@
 [data-theme="light"] .tune-idle-label,
 [data-theme="light"] .tune-running-label,
 [data-theme="light"] .tune-rerun-btn {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .tune-idle-desc,
 [data-theme="light"] .tune-running-hint,
 [data-theme="light"] .tune-no-suggestions {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .tune-run-btn {
@@ -984,20 +984,20 @@
 
 [data-theme="light"] .tune-grade-label,
 [data-theme="light"] .tune-metric-lbl {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .tune-metric-val {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 /* Suggestion cards text */
 [data-theme="light"] .tune-suggestion-label {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .tune-suggestion-desc {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 /* Info suggestion */
@@ -1008,23 +1008,23 @@
 /* Restarting overlay */
 [data-theme="light"] .tune-restarting-overlay {
   background: rgba(255, 255, 255, 0.95);
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 /* Progress track */
 [data-theme="light"] .tune-progress-track {
-  background: #e5e7eb;
+  background: var(--border-subtle);
 }
 
 /* Wizard advisor (spawn) */
 [data-theme="light"] .wizard-advisor {
   background:
     linear-gradient(180deg, var(--acc-05), rgba(255,255,255,0.95));
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .wizard-advisor-header {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 /* MoE autotune */
@@ -1035,12 +1035,12 @@
 }
 
 [data-theme="light"] .moe-autotune-verify {
-  color: #374151;
+  color: var(--color-text-secondary);
   border-color: var(--border-subtle);
 }
 
 [data-theme="light"] .moe-autotune-status {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 /* Depth sweep */
@@ -1051,23 +1051,23 @@
 
 [data-theme="light"] .depth-sweep-summary,
 [data-theme="light"] .depth-sweep-btn {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .depth-sweep-hint,
 [data-theme="light"] .depth-sweep-status {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .depth-sweep-table th {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 /* MTP sweep chart area */
 [data-theme="light"] .mtp-sweep-bar-val,
 [data-theme="light"] .mtp-sweep-rec,
 [data-theme="light"] .mtp-sweep-timer {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .mtp-probe-error {

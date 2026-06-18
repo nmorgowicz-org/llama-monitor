@@ -93,7 +93,7 @@
     padding: 4px 5px;
     border: 0;
     background: transparent;
-    color: #4b5563;
+    color: var(--color-text-muted);
     font-family: var(--font-mono, monospace);
     font-size: 0.7rem;
     cursor: pointer;
@@ -557,18 +557,18 @@
 [data-theme="light"] .log-count-badge {
   background: rgba(15, 23, 42, 0.06);
   border-color: rgba(15, 23, 42, 0.14);
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .log-tool-btn {
   background: rgba(15, 23, 42, 0.05);
   border-color: rgba(15, 23, 42, 0.14);
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .log-tool-btn:hover {
   background: rgba(15, 23, 42, 0.1);
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] #page-logs .log-panel {

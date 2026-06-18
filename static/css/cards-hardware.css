@@ -2135,7 +2135,7 @@
 
 /* Temp value text: dark and legible */
 [data-theme="light"] .hw-temp-value {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 /* Temp unavailable badge: high-contrast amber on light */

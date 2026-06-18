@@ -2210,7 +2210,7 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 [data-theme="light"] .badge-chat,
 [data-theme="light"] .badge-logs,
 [data-theme="light"] .status-text {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 /* Micro-labels within status strip */
@@ -2260,35 +2260,35 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 
 /* Live log tail pill and small button */
 [data-theme="light"] .inference-log-tail-btn {
-  border-color: rgba(29, 78, 216, 0.3);
-  background: rgba(29, 78, 216, 0.07);
-  color: #1d4ed8;
+  border-color: var(--acc-30);
+  background: var(--acc-08);
+  color: var(--color-accent-deep);
 }
 
 [data-theme="light"] .inference-log-tail-btn:hover {
-  background: rgba(29, 78, 216, 0.12);
+  background: var(--acc-12);
 }
 
 [data-theme="light"] .inference-log-tail-btn.is-active {
-  background: rgba(29, 78, 216, 0.18);
-  color: #1e3a8a;
+  background: var(--acc-18);
+  color: var(--color-accent-deep);
 }
 
 [data-theme="light"] .inference-log-tail-btn-small {
-  border-color: rgba(29, 78, 216, 0.2);
-  background: rgba(29, 78, 216, 0.06);
-  color: #1d4ed8;
+  border-color: var(--acc-20);
+  background: var(--acc-05);
+  color: var(--color-accent-deep);
 }
 
 [data-theme="light"] .inference-log-tail-btn-small:hover {
-  background: rgba(29, 78, 216, 0.14);
+  background: var(--acc-12);
 }
 
 /* Live log tail panel — light theme */
 [data-theme="light"] .inference-log-tail {
   background: rgba(15, 23, 42, 0.07);
   border-color: rgba(15, 23, 42, 0.12);
-  color: #111827;
+  color: var(--color-text-primary);
   box-shadow:
     inset 0 0 14px rgba(15, 23, 42, 0.04),
     0 6px 16px rgba(15, 23, 42, 0.08);
@@ -2298,7 +2298,7 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 [data-theme="light"] .preset-display-wrapper {
   background: rgba(248, 250, 252, 0.98);
   border-color: rgba(15, 23, 42, 0.1);
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .preset-display-wrapper:hover {
@@ -2307,16 +2307,16 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 
 [data-theme="light"] .preset-display-visual {
   background: rgba(15, 23, 42, 0.06);
-  color: #111827;
+  color: var(--color-text-primary);
   border-color: rgba(15, 23, 42, 0.1);
 }
 
 [data-theme="light"] .preset-display-label {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 [data-theme="light"] .preset-display-chips {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 /* Agent status tooltip children */
@@ -2328,12 +2328,12 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 }
 
 [data-theme="light"] .agent-tooltip-title {
-  color: #111827;
+  color: var(--color-text-primary);
   border-bottom-color: rgba(15, 23, 42, 0.08);
 }
 
 [data-theme="light"] .agent-tooltip-status {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .agent-tooltip-status.connected {
@@ -2341,7 +2341,7 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 }
 
 [data-theme="light"] .agent-tooltip-status.disconnected {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 [data-theme="light"] .agent-tooltip-status.warning {
@@ -2350,13 +2350,13 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 
 [data-theme="light"] .agent-tooltip-details,
 [data-theme="light"] .agent-tooltip-details .disconnected {
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 /* Nav version: fully visible, readable */
 [data-theme="light"] .nav-version {
   opacity: 1;
-  color: #4b5563;
+  color: var(--color-text-muted);
 }
 
 /* ── Server error details panel ───────────────────────────────────────── */

@@ -753,6 +753,17 @@
   background: color-mix(in srgb, var(--color-error) 10%, transparent);
 }
 
+.metric-live-chip.sleep {
+  color: color-mix(in srgb, var(--color-warning) 80%, transparent);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 7%, transparent);
+}
+
+.metric-live-chip.sleep::before {
+  background: color-mix(in srgb, var(--color-warning) 70%, transparent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-warning) 40%, transparent);
+}
+
 .metric-live-chip.blocked {
   color: var(--color-warning);
   border-color: color-mix(in srgb, var(--color-warning) 36%, transparent);
@@ -2409,7 +2420,7 @@
 [data-theme="light"] .metric-live-chip {
   background: rgba(15, 23, 42, 0.05);
   border-color: rgba(15, 23, 42, 0.18);
-  color: #374151;
+  color: var(--color-text-secondary);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
@@ -2485,8 +2496,8 @@
 
 /* widget-metric-label: ensure dark text */
 [data-theme="light"] .widget-metric-label {
-  color: #111827;
-  -webkit-text-fill-color: #111827;
+  color: var(--color-text-primary);
+  -webkit-text-fill-color: var(--color-text-primary);
 }
 
 /* inference-empty-state text */
@@ -2496,11 +2507,11 @@
 
 /* speed-label and speed-peak-badge */
 [data-theme="light"] .speed-label {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .speed-peak-badge {
-  color: #374151;
+  color: var(--color-text-secondary);
   background: rgba(15, 23, 42, 0.06);
   border-color: rgba(15, 23, 42, 0.14);
 }
@@ -2518,7 +2529,7 @@
 
 /* context-toggle-btn */
 [data-theme="light"] .context-toggle-btn {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .context-toggle-btn:hover {
@@ -2535,12 +2546,12 @@
 [data-theme="light"] .context-subtitle,
 [data-theme="light"] .context-gauge-secondary,
 [data-theme="light"] .context-pill-value {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 /* stage-segment: tiny text readable */
 [data-theme="light"] .stage-segment {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .stage-segment.active {
@@ -2550,13 +2561,13 @@
 }
 
 [data-theme="light"] .stage-segment.idle {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 /* generation-sub, generation-details */
 [data-theme="light"] .generation-sub,
 [data-theme="light"] .generation-details {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 /* generation-ring: light background + accent arc (preserve dark mode) */
@@ -2584,14 +2595,14 @@
 }
 
 [data-theme="light"] .generation-main {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 /* generation-detail-chip: light-mode chips */
 [data-theme="light"] .generation-detail-chip {
   border-color: rgba(15, 23, 42, 0.12);
   background: var(--acc-12);
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 /* velocity-row, slot-tile-top, slot-tile-meta, ratio-label, util-label, stat-label */
@@ -2601,7 +2612,7 @@
 [data-theme="light"] .ratio-label,
 [data-theme="light"] .util-label,
 [data-theme="light"] .stat-label {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 /* accent inside those rows: darker */
@@ -2618,11 +2629,11 @@
 }
 
 [data-theme="light"] .config-kv .config-key {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .config-kv .config-value {
-  color: #111827;
+  color: var(--color-text-primary);
 }
 
 /* context-gauge-footer and fleet labels */
@@ -2635,10 +2646,10 @@
 [data-theme="light"] .context-pill-empty,
 [data-theme="light"] .context-fleet-more,
 [data-theme="light"] .context-fleet-empty {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
 /* metric-footnote */
 [data-theme="light"] .metric-footnote {
-  color: #374151;
+  color: var(--color-text-secondary);
 }
