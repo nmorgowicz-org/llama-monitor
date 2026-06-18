@@ -4653,6 +4653,10 @@
                             </div>
                             <span class="modal-help">Default layout for the context &amp; memory card on the dashboard.</span>
                         </label>
+                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:8px 0 2px;">
+                            <input type="checkbox" id="settings-save-history" checked>
+                            <span>Save chat history</span>
+                        </label>
                     </div>
                     <div class="settings-card" style="margin-top:14px;">
                         <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">Server &amp; Workspace</div>
@@ -4947,16 +4951,16 @@
                     <h3>Performance &amp; Connection</h3>
                     <div class="settings-card">
                         <p class="settings-help">
-                            Control how frequently the dashboard refreshes metrics. Lower intervals give smoother real-time updates but use more bandwidth and battery. On slow or metered connections, a higher interval reduces network usage.
+                            Control how frequently the dashboard receives live metric updates. Lower intervals feel smoother; higher intervals reduce browser work, network traffic, battery use, and local GPU telemetry pressure.
                         </p>
                         <label class="modal-field">
                             Dashboard Refresh Rate
                             <select id="settings-ws-push-interval">
-                                <option value="auto">Auto — Adjusts to your connection speed</option>
+                                <option value="auto">Auto — Adjusts to connection quality</option>
                                 <option value="500">Normal (500ms) — Smooth real-time updates</option>
                                 <option value="1000">Balanced (1s) — Good for most connections</option>
                                 <option value="2000">Battery Saver (2s) — 75% less bandwidth</option>
-                                <option value="5000">Slow Connection (5s) — Minimum updates</option>
+                                <option value="5000">Low Power (5s) — Minimum updates</option>
                             </select>
                         </label>
                         <div id="network-status-indicator" class="network-status-indicator" style="display:none;">
@@ -4990,6 +4994,62 @@
                             </select>
                         </label>
                     </div>
+
+                    <!-- Dashboard Metrics -->
+                    <div class="settings-card">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            Dashboard Metrics
+                        </div>
+                        <p class="settings-help">
+                            Control which metrics are shown on the dashboard.
+                        </p>
+                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+                            <input type="checkbox" id="settings-dashboard-show-cpu" checked>
+                            <span>Show CPU metrics</span>
+                        </label>
+                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+                            <input type="checkbox" id="settings-dashboard-show-gpu" checked>
+                            <span>Show GPU metrics</span>
+                        </label>
+                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+                            <input type="checkbox" id="settings-dashboard-show-memory" checked>
+                            <span>Show memory metrics</span>
+                        </label>
+                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+                            <input type="checkbox" id="settings-dashboard-show-network" checked>
+                            <span>Show network metrics</span>
+                        </label>
+                    </div>
+
+                    <!-- Notifications & Feedback -->
+                    <div class="settings-card">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            Notifications &amp; Feedback
+                        </div>
+                        <p class="settings-help">
+                            Toast pop-ups and server-event notifications.
+                        </p>
+                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+                            <input type="checkbox" id="settings-show-toasts" checked>
+                            <span>Show toast notifications</span>
+                        </label>
+                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+                            <input type="checkbox" id="settings-notify-start">
+                            <span>Notify when server starts</span>
+                        </label>
+                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+                            <input type="checkbox" id="settings-notify-stop">
+                            <span>Notify when server stops</span>
+                        </label>
+                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+                            <input type="checkbox" id="settings-notify-error">
+                            <span>Notify on errors</span>
+                        </label>
+                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+                            <input type="checkbox" id="settings-notify-high-temp">
+                            <span>Notify on high GPU temperature</span>
+                        </label>
+                    </div>
                 </div>
                   <div class="settings-pane" id="settings-advanced">
                     <h3>Advanced</h3>
@@ -4997,6 +5057,13 @@
                         <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">Runtime Configuration</div>
                         <p class="settings-help">Configure server executable paths, working directories, remote-agent SSH details, and environment-specific launch options.</p>
                         <button type="button" class="btn btn-secondary" id="settings-advanced-open-config-btn" style="margin-top:8px;">Open Runtime Configuration</button>
+                    </div>
+                    <div class="settings-card" style="margin-top:14px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">Updates</div>
+                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+                            <input type="checkbox" id="settings-auto-update" checked>
+                            <span>Check for updates automatically</span>
+                        </label>
                     </div>
                 </div>
 
@@ -5714,87 +5781,6 @@
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
-</div>
-
-<!-- User Preferences Modal -->
-<div class="modal-overlay" id="user-preferences-modal">
-    <div class="modal" style="width:640px;">
-        <div class="modal-header">
-            <h2>User Preferences</h2>
-            <button type="button" class="modal-close" id="user-prefs-close" aria-label="Close">&times;</button>
-        </div>
-        <div class="modal-body">
-            <div class="personalization-panel">
-                <div class="personalization-section">
-                    <h3 class="personalization-section-title">Appearance</h3>
-                    <label class="modal-field">
-                        Theme Mode
-                        <select id="pref-theme-mode">
-                            <option value="auto">Auto (System Default)</option>
-                            <option value="light">Light Mode</option>
-                            <option value="dark">Dark Mode</option>
-                        </select>
-                    </label>
-                    <label class="modal-field">
-                        Font Scale
-                        <input type="range" id="pref-font-scale" min="0.8" max="1.4" step="0.1" value="1">
-                        <div class="range-value" id="pref-font-scale-value">1.0x</div>
-                    </label>
-                    <label class="modal-field">
-                        Spacing Scale
-                        <input type="range" id="pref-spacing-scale" min="0.8" max="1.4" step="0.1" value="1">
-                        <div class="range-value" id="pref-spacing-scale-value">1.0x</div>
-                    </label>
-                    <label class="modal-field">
-                        Chat Style
-                        <select id="pref-chat-style">
-                            <option value="rounded">Rounded (Default)</option>
-                            <option value="compact">Compact</option>
-                            <option value="minimal">Minimal</option>
-                            <option value="bubbly">Bubbly</option>
-                            <option value="paper">Paper</option>
-                            <option value="terminal">Terminal</option>
-                            <option value="slate">Slate</option>
-                        </select>
-                    </label>
-                </div>
-                
-                <div class="personalization-section">
-                    <h3 class="personalization-section-title">Dashboard</h3>
-                    <div class="modal-row modal-checks">
-                        <label class="chk"><input type="checkbox" id="pref-show-cpu" checked> Show CPU metrics</label>
-                        <label class="chk"><input type="checkbox" id="pref-show-gpu" checked> Show GPU metrics</label>
-                        <label class="chk"><input type="checkbox" id="pref-show-memory" checked> Show memory metrics</label>
-                        <label class="chk"><input type="checkbox" id="pref-show-network" checked> Show network metrics</label>
-                    </div>
-                </div>
-                
-                <div class="personalization-section">
-                    <h3 class="personalization-section-title">Behavior</h3>
-                    <div class="modal-row modal-checks">
-                        <label class="chk"><input type="checkbox" id="pref-auto-update" checked> Check for updates automatically</label>
-                        <label class="chk"><input type="checkbox" id="pref-show-toasts" checked> Show toast notifications</label>
-                        <label class="chk"><input type="checkbox" id="pref-save-history" checked> Save chat history</label>
-                        <label class="chk"><input type="checkbox" id="pref-enter-to-send" checked> Enter to send (Shift+Enter for newline)</label>
-                    </div>
-                </div>
-                
-                <div class="personalization-section">
-                    <h3 class="personalization-section-title">Notifications</h3>
-                    <div class="modal-row modal-checks">
-                        <label class="chk"><input type="checkbox" id="pref-notify-start"> Notify when server starts</label>
-                        <label class="chk"><input type="checkbox" id="pref-notify-stop"> Notify when server stops</label>
-                        <label class="chk"><input type="checkbox" id="pref-notify-error"> Notify on errors</label>
-                        <label class="chk"><input type="checkbox" id="pref-notify-high-temp"> Notify on high GPU temperature</label>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="modal-buttons">
-            <button type="button" class="btn btn-modal-cancel" id="user-prefs-cancel">Cancel</button>
-            <button type="button" class="btn btn-primary" id="user-prefs-save">Save Preferences</button>
         </div>
     </div>
 </div>

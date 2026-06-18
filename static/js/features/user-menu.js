@@ -1,11 +1,8 @@
 // ── User Menu ─────────────────────────────────────────────────────────────────
-// User menu, profile, shortcuts, logout, palette.
-// The user-preferences-modal is deprecated in favor of the Settings modal.
+// User menu, shortcuts, logout, palette.
 
 import { showToast } from './toast.js';
-import { applyChatStyle, getEnterToSend, setEnterToSend } from './chat-params.js';
 import { openKeyboardShortcutsModal } from './shortcuts.js';
-import { saveSettings } from './settings.js';
 
 // ── User Menu ─────────────────────────────────────────────────────────────────
 
@@ -160,55 +157,6 @@ document.addEventListener('keydown', event => {
     }
 });
 
-// ── User Preferences Modal (deprecated) ───────────────────────────────────────
-// Superseded by the Settings modal (switchTab('settings')).
-// Kept for backward compat (tests, screenshot harness) but no longer exposed
-// from the main menu.
-
-function openUserPreferencesModal(event) {
-    event?.preventDefault();
-    closeUserMenu();
-    const enterCheckbox = document.getElementById('pref-enter-to-send');
-    if (enterCheckbox) enterCheckbox.checked = getEnterToSend();
-    document.getElementById('user-preferences-modal')?.classList.add('open');
-}
-
-function closeUserPreferencesModal() {
-    document.getElementById('user-preferences-modal')?.classList.remove('open');
-}
-
-function saveUserPreferences() {
-    const theme = document.getElementById('pref-theme-mode')?.value || 'dark';
-    const fontScale = document.getElementById('pref-font-scale')?.value || '1';
-    const spacingScale = document.getElementById('pref-spacing-scale')?.value || '1';
-    const chatStyle = document.getElementById('pref-chat-style')?.value || 'rounded';
-    const enterToSendChecked = document.getElementById('pref-enter-to-send')?.checked !== false;
-
-    applyThemePreference(theme);
-    document.documentElement.style.fontSize = (Number(fontScale) * 16) + 'px';
-    document.documentElement.style.setProperty('--gap-md', (Number(spacingScale) * 16) + 'px');
-
-    // Chat style/font/spacing/theme remain device-local on purpose; only
-    // continuity-sensitive workflow prefs get promoted into shared settings.
-    applyChatStyle(chatStyle);
-    localStorage.setItem('llama-monitor-chat-style', chatStyle);
-
-    setEnterToSend(enterToSendChecked);
-    saveSettings();
-
-    // Preserve other prefs (e.g. palette) that are managed elsewhere
-    const existing = readSavedPreferences();
-    localStorage.setItem('llama-monitor-preferences', JSON.stringify({
-        ...existing,
-        theme,
-        fontScale,
-        spacingScale,
-    }));
-
-    closeUserPreferencesModal();
-    showToast('Preferences saved', 'success');
-}
-
 // ── Theme ─────────────────────────────────────────────────────────────────────
 
 function applyThemePreference(theme) {
@@ -224,8 +172,6 @@ function toggleTheme(event) {
     const current = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
     const next = current === 'light' ? 'dark' : 'light';
     document.documentElement.dataset.theme = next;
-    const pref = document.getElementById('pref-theme-mode');
-    if (pref) pref.value = next;
     // Persist so the next page load keeps the choice
     try {
         const existing = JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}');
@@ -347,16 +293,6 @@ export function initUserMenu() {
 
     // Show/hide Logout based on auth state
     applyLogoutVisibility();
-
-    // Bind user preferences modal buttons
-    const prefsClose = document.getElementById('user-prefs-close');
-    if (prefsClose) prefsClose.addEventListener('click', closeUserPreferencesModal);
-
-    const prefsCancel = document.getElementById('user-prefs-cancel');
-    if (prefsCancel) prefsCancel.addEventListener('click', closeUserPreferencesModal);
-
-    const prefsSave = document.getElementById('user-prefs-save');
-    if (prefsSave) prefsSave.addEventListener('click', saveUserPreferences);
 
     // Bind palette quick selector
     const paletteBtn = document.getElementById('nav-palette-btn');

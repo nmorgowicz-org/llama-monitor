@@ -489,7 +489,7 @@ The setup screen's attach card is replaced with a recent-endpoints dashboard:
 
 The dashboard pushes live data over WebSocket. The backend clamps the interval to **200 ms minimum** and **10 s maximum**; the default is **500 ms**.
 
-In the UI, go to **Settings → Performance → Dashboard Refresh Rate**. The current presets are:
+Use the nav **Cadence** chip for quick changes, or go to **Settings → Performance → Dashboard Refresh Rate**. The current presets are:
 
 | UI choice | Effective interval |
 |-----------|--------------------|
@@ -497,9 +497,11 @@ In the UI, go to **Settings → Performance → Dashboard Refresh Rate**. The cu
 | **Normal** | 500 ms |
 | **Balanced** | 1 s |
 | **Battery Saver** | 2 s |
-| **Slow Connection** | 5 s |
+| **Low Power** | 5 s |
 
-`Auto` uses the Network Information API (when available) to choose between 500 ms, 1 s, 2 s, or 5 s based on detected connection quality and Data Saver mode. See Network detection for details. If the browser cannot report network quality, it falls back to 500 ms.
+`Auto` uses the Network Information API (when available) to choose between 500 ms, 1 s, 2 s, or 5 s based on detected connection quality and Data Saver mode. If the browser cannot report network quality, it falls back to 500 ms.
+
+When the browser appears overloaded, Llama Monitor can also recommend **Battery Saver (2s)**. This uses browser timer drift as an inferred responsiveness signal; browsers do not expose reliable total CPU load across platforms.
 
 ## Settings vs. Configuration
 

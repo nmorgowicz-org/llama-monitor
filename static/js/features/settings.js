@@ -118,6 +118,24 @@ export function collectSettings() {
         context_notes_intro_hidden: !!settingsState.context_notes_intro_hidden,
         persist_thinking_content: !!document.getElementById('settings-persist-thinking-content')?.checked,
         custom_suggestion_categories: settingsState.custom_suggestion_categories || {},
+        // Dashboard metrics visibility
+        dashboard: {
+            show_cpu: !!document.getElementById('settings-dashboard-show-cpu')?.checked,
+            show_gpu: !!document.getElementById('settings-dashboard-show-gpu')?.checked,
+            show_memory: !!document.getElementById('settings-dashboard-show-memory')?.checked,
+            show_network: !!document.getElementById('settings-dashboard-show-network')?.checked,
+        },
+        // Notifications and feedback
+        show_toasts: !!document.getElementById('settings-show-toasts')?.checked,
+        notify_on: {
+            start: !!document.getElementById('settings-notify-start')?.checked,
+            stop: !!document.getElementById('settings-notify-stop')?.checked,
+            error: !!document.getElementById('settings-notify-error')?.checked,
+            high_temp: !!document.getElementById('settings-notify-high-temp')?.checked,
+        },
+        // Behavior
+        auto_update: !!document.getElementById('settings-auto-update')?.checked,
+        save_history: !!document.getElementById('settings-save-history')?.checked,
         // T-058: sleep_mode settings (sent to server via PUT /api/settings)
         sleep_mode: {
             auto_sleep_when_all_hidden: sleepWhenHidden !== undefined ? sleepWhenHidden : true,
@@ -346,6 +364,60 @@ export function applySettings(s) {
         } else if (sleepIdleEl) {
             sleepIdleEl.value = '0';
         }
+    }
+
+    // Dashboard metrics visibility
+    if (s.dashboard) {
+        if (s.dashboard.show_cpu !== undefined) {
+            const el = document.getElementById('settings-dashboard-show-cpu');
+            if (el) el.checked = s.dashboard.show_cpu;
+        }
+        if (s.dashboard.show_gpu !== undefined) {
+            const el = document.getElementById('settings-dashboard-show-gpu');
+            if (el) el.checked = s.dashboard.show_gpu;
+        }
+        if (s.dashboard.show_memory !== undefined) {
+            const el = document.getElementById('settings-dashboard-show-memory');
+            if (el) el.checked = s.dashboard.show_memory;
+        }
+        if (s.dashboard.show_network !== undefined) {
+            const el = document.getElementById('settings-dashboard-show-network');
+            if (el) el.checked = s.dashboard.show_network;
+        }
+    }
+
+    // Notifications and feedback
+    if (s.show_toasts !== undefined) {
+        const el = document.getElementById('settings-show-toasts');
+        if (el) el.checked = s.show_toasts;
+    }
+    if (s.notify_on) {
+        if (s.notify_on.start !== undefined) {
+            const el = document.getElementById('settings-notify-start');
+            if (el) el.checked = s.notify_on.start;
+        }
+        if (s.notify_on.stop !== undefined) {
+            const el = document.getElementById('settings-notify-stop');
+            if (el) el.checked = s.notify_on.stop;
+        }
+        if (s.notify_on.error !== undefined) {
+            const el = document.getElementById('settings-notify-error');
+            if (el) el.checked = s.notify_on.error;
+        }
+        if (s.notify_on.high_temp !== undefined) {
+            const el = document.getElementById('settings-notify-high-temp');
+            if (el) el.checked = s.notify_on.high_temp;
+        }
+    }
+
+    // Advanced / behavior
+    if (s.auto_update !== undefined) {
+        const el = document.getElementById('settings-auto-update');
+        if (el) el.checked = s.auto_update;
+    }
+    if (s.save_history !== undefined) {
+        const el = document.getElementById('settings-save-history');
+        if (el) el.checked = s.save_history;
     }
 
     notifySettingsApplied();
@@ -804,16 +876,6 @@ function _applyAndSaveAppearance() {
     localStorage.setItem('llama-monitor-chat-style', chatStyle);
     localStorage.setItem('llama-monitor-chat-font', chatFont);
     localStorage.setItem('llama-monitor-preferences', JSON.stringify({ theme, palette, fontScale, spacingScale, timestamps, msgWidth }));
-
-    // Sync pref-* elements in user-preferences-modal so they stay consistent
-    const prefTheme = document.getElementById('pref-theme-mode');
-    if (prefTheme) prefTheme.value = theme;
-    const prefFont = document.getElementById('pref-font-scale');
-    if (prefFont) prefFont.value = fontScale;
-    const prefSpacing = document.getElementById('pref-spacing-scale');
-    if (prefSpacing) prefSpacing.value = spacingScale;
-    const prefChatStyle = document.getElementById('pref-chat-style');
-    if (prefChatStyle) prefChatStyle.value = chatStyle;
 }
 
 // ── TLS / Certificates ────────────────────────────────────────────────────────
