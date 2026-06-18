@@ -189,8 +189,12 @@ export function refreshTopCockpit() {
     cockpit.classList.toggle('is-low-power-manual', isManualSleep);
     cockpit.classList.toggle('has-session', hasActiveEndpoint);
 
-    // Keep Low Power pill tooltip in sync with actual mode
+    // Keep Low Power pill tooltip and label in sync with actual mode
     const sleepPill = document.getElementById('nav-sleep-pill');
+    const sleepPillLabel = document.getElementById('nav-sleep-pill-label');
+    if (sleepPillLabel) {
+        sleepPillLabel.textContent = isSleeping ? 'Sleeping' : 'Low Power';
+    }
     if (sleepPill) {
         const unavailable = sleepPill.getAttribute('data-unavailable') === 'true';
         sleepPill.disabled = !hasActiveEndpoint || unavailable;
@@ -366,6 +370,7 @@ export function initNav() {
             sleepPill.setAttribute('data-disabled', 'true');
 
             const wasSleeping = wsData?.sleep_mode === true;
+            console.warn('[sleep] toggle click: wasSleeping=', wasSleeping, 'wsData.sleep_mode_manual=', wsData?.sleep_mode_manual);
 
             try {
                 const auth = window.authHeaders ? window.authHeaders() : {};
@@ -409,12 +414,14 @@ export function initNav() {
                     nextSleeping = !wasSleeping;
                 }
 
+                console.warn('[sleep] API response: nextSleeping=', nextSleeping);
                 // Reflect change in local state immediately (WS will confirm)
                 setWsData({
                     ...(wsData || {}),
                     sleep_mode: nextSleeping,
                     sleep_mode_manual: nextSleeping,
                 });
+                console.warn('[sleep] optimistic wsData set, calling refreshTopCockpit');
                 refreshTopCockpit();
                 sleepPill.setAttribute('aria-pressed', nextSleeping ? 'true' : 'false');
 

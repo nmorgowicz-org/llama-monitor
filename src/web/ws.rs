@@ -68,6 +68,12 @@ pub fn ws_route(
                     // T-051: On open: wake auto-sleep only. Manual sleep persists across reconnects.
                     let asleep_on_open = *state.sleep_mode.borrow();
                     let manual_on_open = state.sleep_mode_manual.load(Ordering::Relaxed);
+                    eprintln!(
+                        "[sleep] WS open: asleep={} manual={}{}",
+                        asleep_on_open,
+                        manual_on_open,
+                        if asleep_on_open && !manual_on_open { " → waking (auto-sleep)" } else { "" }
+                    );
                     if asleep_on_open && !manual_on_open {
                         state.sleep_mode.send(false).ok();
                         state.sleep_notify.notify_waiters();

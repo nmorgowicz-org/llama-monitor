@@ -317,6 +317,9 @@ export function initWebSocket() {
 ws.onmessage = e => {
     const d = JSON.parse(e.data);
     // Keep wsData current even when tab is hidden (needed for refresh on show)
+    if (d.sleep_mode !== undefined) {
+        console.warn('[sleep] WS push: sleep_mode=', d.sleep_mode, 'sleep_mode_manual=', d.sleep_mode_manual);
+    }
     setWsData(d);
     if (!isTabVisible) return; // skip DOM writes while tab is hidden
     updateDashboard(d);

@@ -5223,6 +5223,10 @@ pub fn api_sleep_mode_toggle(
                 .store(next, std::sync::atomic::Ordering::Relaxed);
             state.sleep_mode.send(next).ok();
             state.sleep_notify.notify_waiters();
+            eprintln!(
+                "[sleep] manual toggle: {} → {} (manual={})",
+                enabled, next, next
+            );
             Box::new(warp::reply::json(&serde_json::json!({
                 "ok": true,
                 "enabled": next,
