@@ -5,15 +5,19 @@ set -euo pipefail
 
 TARGET="${1:?Usage: build-single-target.sh <target>}"
 
+# When updating the osxcross-base image, update these two variables to match.
+DARWIN_VERSION="darwin25.5"
+MACOS_SDK="MacOSX26.5.sdk"
+
 mkdir -p ~/.cargo
-cat > ~/.cargo/config.toml << 'CARGO_CONFIG'
+cat > ~/.cargo/config.toml << CARGO_CONFIG
 [target.aarch64-apple-darwin]
-linker = "/opt/osxcross/target/bin/aarch64-apple-darwin25.1-clang"
-ar     = "/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar"
+linker = "/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-clang"
+ar     = "/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-ar"
 rustflags = [
-  "-C", "link-arg=-fuse-ld=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ld",
+  "-C", "link-arg=-fuse-ld=/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-ld",
   "-C", "link-arg=-isysroot",
-  "-C", "link-arg=/opt/osxcross/target/SDK/MacOSX26.1.sdk",
+  "-C", "link-arg=/opt/osxcross/target/SDK/${MACOS_SDK}",
 ]
 
 [target.aarch64-unknown-linux-gnu]
@@ -42,11 +46,11 @@ case "$TARGET" in
       --no-default-features --features native-tray
     ;;
   aarch64-apple-darwin)
-    SDKROOT=/opt/osxcross/target/SDK/MacOSX26.1.sdk \
-      CC_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-clang \
-      AR_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
-      AR=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
-      RANLIB=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ranlib \
+    SDKROOT="/opt/osxcross/target/SDK/${MACOS_SDK}" \
+      CC_aarch64_apple_darwin="/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-clang" \
+      AR_aarch64_apple_darwin="/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-ar" \
+      AR="/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-ar" \
+      RANLIB="/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-ranlib" \
       cargo build --release --target aarch64-apple-darwin
     ;;
   *)
