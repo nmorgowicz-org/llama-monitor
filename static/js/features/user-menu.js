@@ -1,5 +1,6 @@
 // ── User Menu ─────────────────────────────────────────────────────────────────
-// User menu, profile, preferences modal, theme toggle.
+// User menu, profile, shortcuts, logout, palette.
+// The user-preferences-modal is deprecated in favor of the Settings modal.
 
 import { showToast } from './toast.js';
 import { applyChatStyle, getEnterToSend, setEnterToSend } from './chat-params.js';
@@ -159,7 +160,10 @@ document.addEventListener('keydown', event => {
     }
 });
 
-// ── User Preferences Modal ────────────────────────────────────────────────────
+// ── User Preferences Modal (deprecated) ───────────────────────────────────────
+// Superseded by the Settings modal (switchTab('settings')).
+// Kept for backward compat (tests, screenshot harness) but no longer exposed
+// from the main menu.
 
 function openUserPreferencesModal(event) {
     event?.preventDefault();
@@ -250,6 +254,16 @@ async function logoutUser(event) {
     showToast('No signed-in account is configured for this local app.', 'info');
 }
 
+function applyLogoutVisibility() {
+    const logoutBtn = document.getElementById('user-menu-logout');
+    if (!logoutBtn) return;
+    const auth = window.__AUTH_STATE;
+    const showLogout = auth?.authenticated === true && auth?.username;
+    logoutBtn.style.display = showLogout ? '' : 'none';
+}
+
+export { applyLogoutVisibility };
+
 // ── Load saved preferences on import ──────────────────────────────────────────
 
 function _loadSavedPreferences() {
@@ -309,11 +323,18 @@ export function initUserMenu() {
     }
 
     // Bind user menu items
-    const prefsBtn = document.getElementById('user-menu-preferences');
-    if (prefsBtn) prefsBtn.addEventListener('click', (e) => openUserPreferencesModal(e));
-
-    const themeBtn = document.getElementById('user-menu-theme');
-    if (themeBtn) themeBtn.addEventListener('click', (e) => toggleTheme(e));
+    const openSettingsBtn = document.getElementById('user-menu-open-settings');
+    if (openSettingsBtn) {
+        openSettingsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            closeUserMenu();
+            if (typeof window.openSettingsModal === 'function') {
+                window.openSettingsModal();
+            } else if (typeof window.switchTab === 'function') {
+                window.switchTab('settings');
+            }
+        });
+    }
 
     const navThemeToggle = document.getElementById('nav-theme-toggle');
     if (navThemeToggle) navThemeToggle.addEventListener('click', (e) => toggleTheme(e));
@@ -323,6 +344,9 @@ export function initUserMenu() {
 
     const logoutBtn = document.getElementById('user-menu-logout');
     if (logoutBtn) logoutBtn.addEventListener('click', (e) => logoutUser(e));
+
+    // Show/hide Logout based on auth state
+    applyLogoutVisibility();
 
     // Bind user preferences modal buttons
     const prefsClose = document.getElementById('user-prefs-close');

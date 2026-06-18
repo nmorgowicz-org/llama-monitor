@@ -227,16 +227,15 @@ test.describe('modals and menus', () => {
     await page.locator('#nav-user-btn').click();
     await page.waitForSelector('#nav-user-menu-items', { state: 'visible', timeout: 5000 });
     await expect(page.locator('.nav-user-menu')).toHaveClass(/open/);
-    await expect(page.getByRole('link', { name: 'Preferences' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Toggle Theme' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Logout' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Open Settings' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Help & Keyboard Shortcuts' })).toBeVisible();
   });
 
-  test('user menu toggle-theme flips theme', async ({ page }) => {
+  test('user menu open settings clicks', async ({ page }) => {
     await page.locator('#nav-user-btn').click();
     await page.waitForSelector('#nav-user-menu-items', { state: 'visible' });
-    await page.getByRole('link', { name: 'Toggle Theme' }).click();
-    await expect(page.locator('html')).toHaveAttribute('data-theme', /light|dark/);
+    await page.getByRole('link', { name: 'Open Settings' }).click();
+    await expect(page.locator('.nav-user-menu')).not.toHaveClass(/open/);
   });
 
   test('remote agent fix opens runtime configuration', async ({ page }) => {

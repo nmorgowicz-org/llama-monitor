@@ -2,7 +2,8 @@
 // Detects slow network conditions via the Network Information API and suggests
 // adjusting the polling rate. Also monitors for connection changes.
 
-import { showToast } from './toast.js';
+import { showToast, showToastWithActions } from './toast.js';
+import { wsData } from '../core/app-state.js';
 
 let initialized = false;
 let currentEffectiveType = null;
@@ -18,6 +19,24 @@ const NETWORK_INTERVAL_MAP = {
     '3g': 2000,
     '4g': 500,
 };
+
+const CADENCE_OPTIONS = [
+    { value: 'auto', label: 'Auto', interval: null },
+    { value: '500', label: 'Smooth 500ms', interval: 500 },
+    { value: '1000', label: 'Balanced 1s', interval: 1000 },
+    { value: '2000', label: 'Battery Saver 2s', interval: 2000 },
+    { value: '5000', label: 'Low Power 5s', interval: 5000 },
+];
+
+const PRESSURE_SAMPLE_MS = 1000;
+const PRESSURE_DRIFT_MS = 350;
+const PRESSURE_CONSECUTIVE_LIMIT = 4;
+
+let cadenceInitialized = false;
+let pressureTimer = null;
+let pressureExpectedAt = 0;
+let pressureConsecutive = 0;
+let pressureSuggestionShown = false;
 
 /**
  * Returns the recommended polling interval based on current network conditions.

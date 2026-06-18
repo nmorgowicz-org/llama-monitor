@@ -161,6 +161,17 @@
                 <span class="status-dot ok" id="nav-monitoring-dot"></span>
                 <span id="nav-monitoring-label">Monitoring</span>
             </button>
+            <button class="nav-cadence-chip" id="nav-cadence-chip" type="button" aria-expanded="false" aria-controls="nav-cadence-menu" title="Dashboard refresh cadence" style="display:none;">
+                <span class="nav-cadence-label">Cadence</span>
+                <span id="nav-cadence-value">500ms</span>
+            </button>
+            <div class="nav-cadence-menu" id="nav-cadence-menu" role="menu" aria-hidden="true">
+                <button type="button" role="menuitem" data-cadence-value="auto">Auto</button>
+                <button type="button" role="menuitem" data-cadence-value="500">Smooth 500ms</button>
+                <button type="button" role="menuitem" data-cadence-value="1000">Balanced 1s</button>
+                <button type="button" role="menuitem" data-cadence-value="2000">Battery Saver 2s</button>
+                <button type="button" role="menuitem" data-cadence-value="5000">Low Power 5s</button>
+            </div>
             <button class="nav-theme-toggle" id="nav-theme-toggle" type="button" title="Toggle light / dark mode" aria-label="Toggle light / dark mode">
                 <!-- Sun icon (shown in dark mode) -->
                 <svg class="theme-icon theme-icon-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -198,12 +209,11 @@
                 </div>
             </div>
             <div class="nav-user" id="user-menu">
-                <button class="nav-user-btn nav-user-btn-icon" id="nav-user-btn" type="button" aria-expanded="false" aria-controls="nav-user-menu-items" title="Account">
+                <button class="nav-user-btn nav-user-btn-icon" id="nav-user-btn" type="button" aria-expanded="false" aria-controls="nav-user-menu-items" title="Menu">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
                 </button>
                 <div class="nav-user-menu" id="nav-user-menu-items" role="menu">
-                    <a href="#" class="nav-user-menu-item" id="user-menu-preferences">Preferences</a>
-                    <a href="#" class="nav-user-menu-item" id="user-menu-theme">Toggle Theme</a>
+                    <a href="#" class="nav-user-menu-item" id="user-menu-open-settings">Open Settings</a>
                     <a href="#" class="nav-user-menu-item" id="user-menu-help">Help &amp; Keyboard Shortcuts</a>
                     <a href="#" class="nav-user-menu-item" id="user-menu-logout">Logout</a>
                 </div>

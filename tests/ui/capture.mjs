@@ -1497,25 +1497,26 @@ async function scenarioSettings(ctx, options) {
         console.log('[CAPTURE] Settings modal failed, skipping...');
     }
 
-    // User preferences
-    const userBtn = await page.$('#nav-user-btn');
-    if (userBtn) {
-        try {
-            await userBtn.click();
-            await sleep(300);
-            const prefsBtn = await page.$('#user-menu-preferences');
-            if (prefsBtn) {
-                await prefsBtn.click();
-                await page.waitForSelector('#user-preferences-modal.open', { timeout: 5000 });
-                await sleep(500);
-                await captureShot(page, 'settings-user-preferences.png', { fullPage: true });
-                await captureCloseUp(page, '#user-preferences-modal', 'settings-user-preferences.png', options);
-                await page.keyboard.press('Escape');
-                await sleep(300);
-            }
-        } catch (e) {
-            console.log('[CAPTURE] User preferences modal failed, skipping...');
-        }
+    // User preferences (deprecated; kept for backward compat screenshots)
+    try {
+        await page.evaluate(() => {
+            // Call the user-menu module helper directly; this bypasses the (now changed) menu.
+            const fn = (window.openUserPreferencesModal ||
+                (() => {
+                    const modal = document.getElementById('user-preferences-modal');
+                    if (modal) modal.classList.add('open');
+                })
+            );
+            fn && fn();
+        });
+        await page.waitForSelector('#user-preferences-modal.open', { timeout: 5000 });
+        await sleep(500);
+        await captureShot(page, 'settings-user-preferences.png', { fullPage: true });
+        await captureCloseUp(page, '#user-preferences-modal', 'settings-user-preferences.png', options);
+        await page.keyboard.press('Escape');
+        await sleep(300);
+    } catch (e) {
+        console.log('[CAPTURE] User preferences modal failed, skipping...');
     }
 
     // Persona modal
