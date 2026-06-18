@@ -14,11 +14,19 @@ command -v aarch64-linux-gnu-g++ >/dev/null || { echo "FAIL: aarch64-linux-gnu-g
 docker info >/dev/null 2>&1 || { echo "FAIL: Docker daemon not reachable"; exit 1; }
 docker buildx version >/dev/null 2>&1 || { echo "FAIL: docker buildx plugin not available"; exit 1; }
 
-test -x /opt/osxcross/target/bin/aarch64-apple-darwin25.5-clang
-test -x /opt/osxcross/target/bin/aarch64-apple-darwin25.5-ar
-test -x /opt/osxcross/target/bin/aarch64-apple-darwin25.5-ld
-test -x /opt/osxcross/target/bin/aarch64-apple-darwin25.5-ranlib
-test -d /opt/osxcross/target/SDK/MacOSX26.5.sdk
+# When updating the osxcross-base image (new macOS SDK), update these two
+# variables to match the new darwin version and SDK name.
+DARWIN_VERSION="darwin25.5"
+MACOS_SDK="MacOSX26.5.sdk"
+
+echo "Checking osxcross toolchain (${DARWIN_VERSION}, ${MACOS_SDK})..."
+echo "  Installed clang targets: $(ls /opt/osxcross/target/bin/*-clang 2>/dev/null | xargs -n1 basename | tr '\n' ' ' || echo '(none)')"
+for tool in clang ar ld ranlib; do
+  bin="/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-${tool}"
+  test -x "$bin" || { echo "FAIL: missing osxcross tool: $bin"; echo "  Hint: update DARWIN_VERSION in this script to match the osxcross-base image tag"; exit 1; }
+done
+test -d "/opt/osxcross/target/SDK/${MACOS_SDK}" \
+  || { echo "FAIL: missing SDK dir: /opt/osxcross/target/SDK/${MACOS_SDK}"; echo "  Hint: update MACOS_SDK in this script to match the osxcross-base image"; exit 1; }
 
 for target in \
   x86_64-unknown-linux-gnu \
