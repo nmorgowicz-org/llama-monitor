@@ -14,11 +14,11 @@ command -v aarch64-linux-gnu-g++ >/dev/null || { echo "FAIL: aarch64-linux-gnu-g
 docker info >/dev/null 2>&1 || { echo "FAIL: Docker daemon not reachable"; exit 1; }
 docker buildx version >/dev/null 2>&1 || { echo "FAIL: docker buildx plugin not available"; exit 1; }
 
-test -x /opt/osxcross/target/bin/aarch64-apple-darwin25.1-clang
-test -x /opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar
-test -x /opt/osxcross/target/bin/aarch64-apple-darwin25.1-ld
-test -x /opt/osxcross/target/bin/aarch64-apple-darwin25.1-ranlib
-test -d /opt/osxcross/target/SDK/MacOSX26.1.sdk
+test -x /opt/osxcross/target/bin/aarch64-apple-darwin25.5-clang
+test -x /opt/osxcross/target/bin/aarch64-apple-darwin25.5-ar
+test -x /opt/osxcross/target/bin/aarch64-apple-darwin25.5-ld
+test -x /opt/osxcross/target/bin/aarch64-apple-darwin25.5-ranlib
+test -d /opt/osxcross/target/SDK/MacOSX26.5.sdk
 
 for target in \
   x86_64-unknown-linux-gnu \
