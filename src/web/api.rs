@@ -13072,6 +13072,24 @@ fn api_llama_binary_update(
                         .output();
                 }
 
+                // If a server is currently running, stop it BEFORE health-checking the
+                // new binary. When a model is loaded, Metal/GPU resources are in use and
+                // a second llama-server process (even for --help) can block or time out.
+                if previous_config.is_some() {
+                    state.push_log(
+                        "[monitor] llama-binary/update: server is running; stopping to allow update"
+                            .into(),
+                    );
+                    if let Err(e) = crate::llama::server::stop_server(&state).await {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Failed to stop running llama-server before update: {}", e)
+                            })),
+                        ));
+                    }
+                }
+
                 // Health check on the temp binary BEFORE writing anything to dest_dir.
                 // This ensures the live binary is never overwritten with a bad one.
                 // Capture stderr to diagnose failures (Gatekeeper, missing dylib, etc.).
@@ -13205,22 +13223,6 @@ fn api_llama_binary_update(
                         ));
                     }
 
-
-                    if previous_config.is_some() {
-                        state.push_log(
-                            "[monitor] llama-binary/update: server is running; stopping to allow update"
-                                .into(),
-                        );
-                        if let Err(e) = crate::llama::server::stop_server(&state).await {
-                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                warp::reply::json(&serde_json::json!({
-                                    "ok": false,
-                                    "error": format!("Failed to stop running llama-server before update: {}", e)
-                                })),
-                            ));
-                        }
-                    }
-
                     if dest_dir.exists() {
                         if backup_dir.exists() {
                             let _ = std::fs::remove_dir_all(&backup_dir);
@@ -13264,21 +13266,6 @@ fn api_llama_binary_update(
 
                 #[cfg(not(target_os = "macos"))]
                 {
-                    if previous_config.is_some() {
-                        state.push_log(
-                            "[monitor] llama-binary/update: server is running; stopping to allow update"
-                                .into(),
-                        );
-                        if let Err(e) = crate::llama::server::stop_server(&state).await {
-                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                warp::reply::json(&serde_json::json!({
-                                    "ok": false,
-                                    "error": format!("Failed to stop running llama-server before update: {}", e)
-                                })),
-                            ));
-                        }
-                    }
-
                     if let Err(e) = std::fs::create_dir_all(dest_dir) {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::json(&serde_json::json!({

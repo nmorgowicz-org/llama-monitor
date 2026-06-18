@@ -683,8 +683,8 @@ function updateAttachDetach(d) {
     logTailAllowed = hasLogs;
 
     if (!serverRunning) {
-        // Server not running: hide entire group
-        logTailActive = false;
+        // Server not running: hide UI, but preserve user's open/closed preference
+        // so that after restart (e.g., during updates) the tail doesn't silently close.
         if (ce.logTailGroup) ce.logTailGroup.style.display = 'none';
         if (ce.logTailBadge) ce.logTailBadge.classList.remove('is-active');
         if (ce.logTailEl) {
@@ -1274,8 +1274,10 @@ function _syncLogTailVisibility() {
     const tail = cachedElements.logTailEl;
     const minusBtn = cachedElements.logTailMinus;
     const plusBtn = cachedElements.logTailPlus;
+    const badge = cachedElements.logTailBadge;
 
     if (group) group.style.display = 'inline-flex';
+    if (badge) badge.classList.toggle('is-active', logTailActive);
     if (tail) tail.style.display = logTailActive ? '' : 'none';
     if (minusBtn) minusBtn.classList.toggle('show', logTailActive);
     if (plusBtn) plusBtn.classList.toggle('show', logTailActive);
