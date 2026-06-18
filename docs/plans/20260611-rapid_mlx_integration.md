@@ -267,6 +267,20 @@ Use these product names consistently:
 Avoid exposing implementation terms such as adapter, provider enum, Python venv,
 poller, or capability manifest in primary flows.
 
+### Active engine indicator
+
+The nav/status bar must always show the active engine while a session is running. A
+user switching between SillyTavern, opencode, and the app UI must never have to guess
+which engine is serving requests. Display: engine name + model alias + status dot.
+Example: `llama.cpp · Qwen3-27B ●` or `Rapid-MLX · gemma-3-4b-it ●`.
+
+When no session is running, the indicator is absent — do not show a placeholder or
+"none" state. The indicator appears only when there is something real to show.
+
+For llama.cpp router mode, the indicator shows the model that last received a request
+(updated via the router's SSE `model_status: loaded` events), not a static "router"
+label.
+
 ### Unified launch flow
 
 The spawn wizard and welcome-screen preset editor must remain round-trippable and use
@@ -596,29 +610,90 @@ pub enum InferenceBackend {
 }
 ```
 
-The backend adapter owns:
+### Supervisor interface (src/inference/supervisor.rs)
 
-- runtime discovery and diagnosis;
-- launch validation;
-- command/environment construction;
-- readiness behavior;
-- telemetry polling;
-- model identity;
-- supported request controls;
-- cancellation behavior;
-- log interpretation;
-- runtime version management.
+The supervisor is backend-agnostic. It receives a `SupervisedLaunch` bundle and calls back
+into a `BackendObserver` for log routing and crash handling. Neither type knows backend
+internals.
 
-The shared supervisor owns:
+```rust
+/// Everything the supervisor needs to spawn a process. Secrets are safe in `env`
+/// — the supervisor never logs env values. `redacted_summary` is the only thing
+/// shown in UI diagnostics and logs.
+pub struct SupervisedLaunch {
+    pub program:           PathBuf,
+    pub args:              Vec<OsString>,
+    pub env:               Vec<(OsString, OsString)>,
+    pub cwd:               Option<PathBuf>,
+    pub port:              u16,
+    pub redacted_summary:  String,
+}
 
-- process lifecycle;
-- stdout/stderr streaming;
-- exit watching;
-- session-state transitions;
-- stop escalation;
-- port reservation;
-- secret-safe diagnostics;
-- common persistence.
+/// Callbacks the supervisor fires back into the backend adapter.
+pub trait BackendObserver: Send + Sync + 'static {
+    /// Called for every stdout/stderr line from the child process.
+    fn on_log_line(&self, line: &str);
+    /// Called on unexpected exit (not triggered by stop()).
+    fn on_crash(&self, exit_status: std::process::ExitStatus, tail: Vec<String>);
+}
+```
+
+### Backend adapter interface (src/inference/backend.rs)
+
+The adapter builds the launch bundle and owns all backend-specific behavior.
+`BackendAdapter` is an enum so dispatch is exhaustive and zero-overhead.
+
+```rust
+pub enum BackendAdapter {
+    LlamaCpp(llama_cpp::LlamaCppAdapter),
+    RapidMlx(rapid_mlx::RapidMlxAdapter),
+}
+
+impl BackendAdapter {
+    /// Validate platform, runtime, model source, and flag conflicts before launch.
+    pub async fn validate(&self) -> Result<()>;
+    /// Build the launch bundle. Called after validate() succeeds.
+    pub async fn build_launch(&self) -> Result<SupervisedLaunch>;
+    /// Poll until the server is ready to serve requests or the deadline elapses.
+    pub async fn await_ready(&self, port: u16, deadline: Instant) -> Result<()>;
+    /// Fetch a normalized metrics snapshot. Called by the shared poller loop.
+    pub async fn poll_metrics(&self, port: u16) -> Result<InferenceMetricsSnapshot>;
+    /// Return the static capability set for the active runtime profile.
+    pub fn capabilities(&self) -> &CapabilitySet;
+}
+```
+
+### llama.cpp launch modes (src/inference/llama_cpp.rs)
+
+llama.cpp has two launch modes that share the same adapter but produce different
+`SupervisedLaunch` bundles. Router mode is defined here — not as a separate
+`InferenceBackend` variant — because it is still llama-server under the hood.
+See `docs/plans/20260618-llama_router_mode.md` for full router mode design.
+
+```rust
+pub enum LlamaCppLaunchMode {
+    SingleModel(ServerConfig),
+    Router(RouterConfig),
+}
+```
+
+The adapter picks the right arg-builder based on this enum. The supervisor, the
+session layer, and the UI never need to know which mode is active.
+
+**Ownership summary:**
+
+| Concern | Owner |
+|---|---|
+| Process spawn, PID, kill, wait | supervisor |
+| stdout/stderr line streaming | supervisor → `BackendObserver::on_log_line` |
+| Crash detection and tail collection | supervisor → `BackendObserver::on_crash` |
+| Command/env construction | adapter (`build_launch`) |
+| Readiness polling | adapter (`await_ready`) |
+| Metrics polling | adapter (`poll_metrics`) |
+| Capability set | adapter (`capabilities`) |
+| Log line interpretation / filtering | adapter (`on_log_line` implementation) |
+| Router port-tag parsing | llama.cpp adapter (`on_log_line`) |
+| Secret redaction | adapter (`redacted_summary`, env-not-argv) |
 
 ### Session persistence
 
@@ -649,6 +724,9 @@ ModelPreset
   backend
   shared
   llama_cpp
+    launch_mode       ← "single_model" | "router"
+    single_model      ← ServerConfig (present when launch_mode = single_model)
+    router            ← RouterConfig (present when launch_mode = router)
   rapid_mlx
 ```
 
@@ -876,29 +954,44 @@ premium than a full grid of placeholders.
 
 ### Normalized snapshot
 
-Create a backend-neutral snapshot whose fields are optional:
+Create a backend-neutral snapshot whose fields are optional. Use `Option<T>` throughout —
+`None` means the metric is absent; `Some(0.0)` means it is present and zero. Never
+coerce absent to zero.
 
-```text
-InferenceMetricsSnapshot
-  sampled_at
-  backend
-  health
-  ready
-  model
-  uptime_seconds
-  generation_tokens_per_second
-  prompt_tokens_per_second
-  running_requests
-  waiting_requests
-  completed_requests_total
-  prompt_tokens_total
-  completion_tokens_total
-  active_memory_bytes
-  peak_memory_bytes
-  cache_memory_bytes
-  cache_metrics
-  active_requests
-  backend_details
+```rust
+// src/inference/metrics.rs
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct InferenceMetricsSnapshot {
+    pub sampled_at:                     std::time::SystemTime,
+    pub backend:                        InferenceBackend,
+    // Health
+    pub health:                         Option<HealthState>,
+    pub ready:                          Option<bool>,
+    // Identity
+    pub model:                          Option<String>,
+    pub uptime_seconds:                 Option<f64>,
+    // Throughput
+    pub generation_tokens_per_second:   Option<f64>,
+    pub prompt_tokens_per_second:       Option<f64>,
+    // Queue
+    pub running_requests:               Option<u64>,
+    pub waiting_requests:               Option<u64>,
+    // Totals (cumulative)
+    pub completed_requests_total:       Option<u64>,
+    pub prompt_tokens_total:            Option<u64>,
+    pub completion_tokens_total:        Option<u64>,
+    // Memory (always in bytes, regardless of backend source unit)
+    pub active_memory_bytes:            Option<u64>,
+    pub peak_memory_bytes:              Option<u64>,
+    pub cache_memory_bytes:             Option<u64>,
+    // Structured opaque payloads — card registry maps these, not raw JSON
+    pub cache_metrics:                  Option<serde_json::Value>,
+    pub active_requests:                Option<Vec<serde_json::Value>>,
+    pub backend_details:                Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub enum HealthState { Ok, Degraded, NotLoaded, Unreachable }
 ```
 
 **Unit conversion**: Rapid-MLX `/v1/status` serves `metal.active_memory_gb`,
@@ -1492,20 +1585,36 @@ the previous milestone.
 
 ### Milestone 0: Baseline contracts and fixtures
 
+Fixtures are static JSON files under `tests/fixtures/rapid_mlx/`. Each file is named
+after the endpoint or CLI command it captures, e.g. `health_loaded.json`,
+`status_generating.json`, `cli_help.txt`. Rust unit tests reference these files
+directly via `include_str!` — they must never require a live Rapid-MLX install to run.
+
 1. Merge/rebase onto PR #215's final mainline result.
 2. Capture Rapid-MLX CLI help and endpoint fixtures for the current stable release.
-3. Capture `gguf2mlx --help`, successful conversion metadata when practical, and at
-   least one conversion failure fixture.
+   - `tests/fixtures/rapid_mlx/cli_help.txt` — `rapid-mlx serve --help` output
+   - `tests/fixtures/rapid_mlx/health_loaded.json` — `/health` when model is loaded
+   - `tests/fixtures/rapid_mlx/health_unloaded.json` — `/health` before model loads
+   - `tests/fixtures/rapid_mlx/status_generating.json` — `/v1/status` during generation
+   - `tests/fixtures/rapid_mlx/status_idle.json` — `/v1/status` when idle
+   - `tests/fixtures/rapid_mlx/cache_stats_vision.json` — `/v1/cache/stats` (vision model)
+   - `tests/fixtures/rapid_mlx/cache_stats_text.json` — `/v1/cache/stats` (text-only fallback)
+   - `tests/fixtures/rapid_mlx/models.json` — `/v1/models` response
+   - `tests/fixtures/rapid_mlx/stream_chunk.jsonl` — representative streaming chunks
+3. Capture `gguf2mlx --help` and at least one conversion failure fixture.
+   - `tests/fixtures/rapid_mlx/gguf2mlx_help.txt`
+   - `tests/fixtures/rapid_mlx/conversion_failure_unsupported_arch.txt`
 4. Add the first compatibility profile using the reviewed commit plus current stable.
-5. Add fixture tests proving tolerant status, health, readiness, cache, models,
-   streaming, and conversion-diagnostic parsing.
+   (`src/inference/rapid_mlx/compatibility.json`)
+5. Add fixture tests proving tolerant parsing of every fixture file above.
 6. Record any upstream drift in this document before implementation relies on it.
 
 Exit criteria:
 
 - every required upstream claim has a source or fixture;
 - no implementation depends on an undocumented guessed field;
-- parser tests can run without a live Rapid-MLX install.
+- parser tests can run without a live Rapid-MLX install;
+- fixture directory exists and is referenced in `tests/README.md`.
 
 ### Milestone 1: Backend identity without behavior change
 
@@ -1527,20 +1636,32 @@ Exit criteria:
 
 ### Milestone 2: Shared supervisor boundary
 
-1. Extract shared process lifecycle, stdout/stderr streaming, exit watching, stop
-   escalation, and redacted command summaries.
-2. Route llama.cpp through enum dispatch and the shared supervisor.
-3. Keep llama.cpp command construction and endpoint polling behavior unchanged.
-4. Rename newly shared state around "inference process" where practical, but avoid a
+1. Define `SupervisedLaunch`, `BackendObserver`, and `BackendAdapter` as described in
+   the Backend Architecture section. These are the durable contracts; get them right
+   before wiring anything to them.
+2. Extract shared process lifecycle, stdout/stderr streaming, exit watching, stop
+   escalation, and redacted command summaries into `supervisor.rs`.
+3. Route llama.cpp through `BackendAdapter::LlamaCpp` and the shared supervisor.
+4. Introduce `LlamaCppLaunchMode { SingleModel(ServerConfig), Router(RouterConfig) }`.
+   Wire `SingleModel` only; `Router` is the stub for the router mode feature
+   (see `docs/plans/20260618-llama_router_mode.md`). The stub must compile and
+   serialize/deserialize cleanly.
+5. Keep llama.cpp command construction and endpoint polling behavior unchanged.
+6. Fix llama.cpp API key: move from `--api-key <argv>` to `LLAMA_SERVER_API_KEY` env
+   var at this boundary, consistent with Rapid-MLX's secret handling in Gap 8.
+7. Rename newly shared state around "inference process" where practical, but avoid a
    broad state refactor that does not help Rapid-MLX.
-5. Add regression tests for PR #215 launch, restore, preset, stop, logs, readiness,
+8. Add regression tests for PR #215 launch, restore, preset, stop, logs, readiness,
    and polling.
 
 Exit criteria:
 
-- the UI is behaviorally unchanged for llama.cpp;
+- `SupervisedLaunch`, `BackendObserver`, and `BackendAdapter` exist as compilable types;
+- `LlamaCppLaunchMode` is defined and round-trips through preset serialization;
+- the UI is behaviorally unchanged for llama.cpp single-model mode;
 - no Rapid-MLX branches exist inside llama.cpp command construction;
-- the shared supervisor can spawn a process without knowing backend-specific flags.
+- the shared supervisor can spawn a process without knowing backend-specific flags;
+- llama.cpp API key no longer appears in argv.
 
 ### Milestone 3: Rapid-MLX runtime, Python, and converter capability
 
@@ -1704,7 +1825,28 @@ This implementation is expected to be shared by Codex, Claude, and local models.
 Treat this document, checked-in fixtures, and tests as the handoff surface. Do not
 depend on unstated context from a previous agent session.
 
-Hard rules:
+### Layer boundary cheatsheet
+
+Before writing any code, locate which layer owns the concern. If two layers seem to
+share a concern, the boundary is wrong — resolve it here first.
+
+| Concern | File | Never in |
+|---|---|---|
+| Process spawn / kill / wait | `supervisor.rs` | adapters, API handlers |
+| stdout/stderr line forwarding | `supervisor.rs` | adapters |
+| Log line interpretation, filtering | adapter `on_log_line` | supervisor |
+| Router port-tag parsing (`[PORT]`) | `llama_cpp.rs` `on_log_line` | supervisor |
+| Command/env construction | adapter `build_launch` | supervisor, API handlers |
+| Readiness polling | adapter `await_ready` | supervisor |
+| Metrics polling | adapter `poll_metrics` | supervisor |
+| Capability set | adapter `capabilities` | supervisor, UI JS |
+| Secret values | env vars in `SupervisedLaunch.env` | argv, logs, API responses |
+| Preset migration | `inference/backend.rs` migration fn | session restore path |
+| Model source resolution | `rapid_mlx/` resolver | wizard JS, API handlers |
+| Card visibility decision | card registry + snapshot fields | CSS, static JS flags |
+| GGUF→MLX conversion | `rapid_mlx/` resolver | wizard, supervisor, chat layer |
+
+### Hard rules
 
 - Start each session by identifying the active milestone and reading the relevant
   fixture/tests before editing.

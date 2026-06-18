@@ -88,8 +88,11 @@ function initEndpointStatus() {
         const open = endpointStatusWrap.classList.toggle('open');
         endpointStatus.setAttribute('aria-expanded', open ? 'true' : 'false');
         if (open) {
+            popover.classList.add('open');
             renderCapabilityPopover(wsData, wsData?.llama);
             positionPopover();
+        } else {
+            popover.classList.remove('open');
         }
     });
 
@@ -97,6 +100,7 @@ function initEndpointStatus() {
         if (!event.target.closest('.endpoint-status-wrap')) {
             endpointStatusWrap.classList.remove('open');
             endpointStatus.setAttribute('aria-expanded', 'false');
+            popover.classList.remove('open');
         }
     });
 }

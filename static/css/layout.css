@@ -546,7 +546,7 @@
   backdrop-filter: blur(18px) saturate(160%);
 }
 
-.endpoint-status-wrap.open .capability-popover {
+.capability-popover.open {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0);
@@ -932,8 +932,9 @@
 .nav-monitoring-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 8px 3px 6px;
+  gap: 3px;
+  min-height: 17px;
+  padding: 1px 6px 1px 4px;
   border-radius: 999px;
   border: 1px solid var(--border-subtle);
   background: rgba(255, 255, 255, 0.04);
@@ -1888,12 +1889,9 @@ body.sidebar-collapsed .content-area {
   }
 
   /* capability-popover — transform translateY */
-  .capability-popover {
+  .capability-popover,
+  .capability-popover.open {
     transition: opacity 180ms ease !important;
-  }
-  .endpoint-status-wrap:hover .capability-popover,
-  .endpoint-status-wrap:focus-within .capability-popover,
-  .endpoint-status-wrap.open .capability-popover {
     transform: none !important;
   }
 

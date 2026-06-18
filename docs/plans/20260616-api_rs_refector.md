@@ -146,7 +146,7 @@ src/web/api/
   common.rs
   auth.rs
   tokens.rs
-  inference.rs
+  upstream.rs          ← renamed from inference.rs (see note below)
   metrics.rs
   config.rs
   presets.rs
@@ -172,7 +172,16 @@ src/web/api/
   llama_binary.rs
   debug.rs
   self_update.rs
+  # Added by Rapid-MLX integration (not part of this refactor):
+  # inference_backends.rs  ← /api/inference/backends/* routes
 ```
+
+> **Note on `upstream.rs` naming**: the Rapid-MLX integration plan creates a top-level
+> `src/inference/` module (backend abstraction layer). Naming this HTTP helper module
+> `inference.rs` would create a confusing collision — agents and readers would conflate
+> the HTTP proxy helpers with the backend adapters. `upstream.rs` is unambiguous: it
+> holds helpers for forwarding requests *to* an upstream inference server, regardless
+> of which backend is running.
 
 Rationale:
 
@@ -239,9 +248,11 @@ Contains:
 
 Keep bootstrap routes separate from normal protected routes because `src/web/mod.rs` intentionally exposes them before the top-level auth guard.
 
-### `inference.rs`
+### `upstream.rs`
 
-Contains upstream llama-server helpers:
+Contains upstream inference-server request helpers (formerly called `inference.rs` in
+early drafts — renamed to avoid collision with the `src/inference/` module introduced
+by the Rapid-MLX integration):
 
 - active chat completions URL
 - upstream capacity checks
@@ -249,7 +260,13 @@ Contains upstream llama-server helpers:
 - reqwest client construction
 - upstream send retry behavior
 
-This module should not define user-facing routes. It is used by `chat`, `chat/suggestions`, and possibly future inference-dependent endpoints.
+This module should not define user-facing routes. It is used by `chat`, `chat/suggestions`,
+and possibly future inference-dependent endpoints.
+
+During Rapid-MLX integration (Milestone 2), the llama.cpp-specific helpers in this module
+will be absorbed by `src/inference/llama_cpp.rs`. At that point `upstream.rs` may become
+a thin dispatcher or disappear entirely. Do not add new llama.cpp-specific concepts here
+during this refactor; keep helpers generic to "forward a request to a local HTTP server."
 
 ### `chat/`
 
@@ -276,7 +293,14 @@ Contains:
 - kill llama
 - restore hint if it remains session-oriented
 
-The older preset-based spawn path must remain visible in this module because it is easy to miss when changing spawn wizard behavior.
+The older preset-based spawn path must remain visible in this module because it is easy
+to miss when changing spawn wizard behavior.
+
+**Forward note**: during Rapid-MLX integration (Milestone 1), the spawn request shape
+gains a `backend` discriminator. Do not add new llama.cpp-only fields directly to any
+shared session or spawn DTO during this refactor. Keep the session type open to a
+`backend: Option<String>` or equivalent field without interpreting it yet. The Rapid-MLX
+plan owns that migration.
 
 ### `remote_agent.rs`
 
@@ -529,7 +553,7 @@ This is the intended destination for current handlers.
 | `auth_api_routes`, auth status/login/logout | `api/auth.rs` |
 | `public_tokens_routes`, internal/db-admin token bootstrap | `api/tokens.rs` |
 | `ApiError`, token checks, bearer parsing, unauthorized replies | `api/common.rs` |
-| upstream llama-server capacity/client/retry helpers | `api/inference.rs` |
+| upstream llama-server capacity/client/retry helpers | `api/upstream.rs` |
 | `/api/presets...` | `api/presets.rs` |
 | `/api/templates...` | `api/templates.rs` |
 | `/api/models...`, model tags, GGUF meta | `api/models.rs` |
@@ -550,6 +574,24 @@ This is the intended destination for current handlers.
 | llama binary updater/restart | `api/llama_binary.rs` |
 | debug spawn/log routes | `api/debug.rs` |
 | self update route | `api/self_update.rs` |
+
+## Forward Compatibility with Subsequent Plans
+
+This refactor intentionally does not implement any Rapid-MLX, router mode, or new
+backend features. However, it should leave seams that make those features clean additions:
+
+| Future plan | Where it lands post-refactor | Seam to leave open |
+|---|---|---|
+| Rapid-MLX `/api/inference/backends/*` (MLX plan) | New `api/inference_backends.rs` | Route map in `api/mod.rs` has a clear slot for it |
+| Router mode `/api/router/*` (router plan) | `api/sessions.rs` or new `api/router.rs` | Session spawn path stays generic |
+| Rapid-MLX session `backend` discriminator | `api/sessions.rs` spawn/attach DTOs | Don't ossify spawn DTOs as llama.cpp-only |
+| Shared supervisor (`src/inference/supervisor.rs`) | Replaces `api/upstream.rs` llama.cpp helpers | Keep `upstream.rs` helpers generic and unlabeled |
+| llama.cpp binary manager expansion | `api/llama_binary.rs` (already its own module) | No changes needed |
+
+Nothing in the route group map or module design needs to change to accommodate these —
+they are new modules added alongside the existing ones. The forward note is: avoid
+patterns during this refactor that would require reopening these modules to untangle
+llama.cpp-specific coupling before the Rapid-MLX work can start.
 
 ## Security Checklist for This Refactor
 
