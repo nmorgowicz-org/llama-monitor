@@ -25,8 +25,8 @@ body {
   font-size: var(--text-base);
   line-height: 1.5;
   background:
-    radial-gradient(circle at 16% -12%, rgba(244, 114, 182, 0.13), transparent 34rem),
-    radial-gradient(circle at 88% 8%, rgba(251, 191, 36, 0.08), transparent 32rem),
+    radial-gradient(circle at 16% -12%, var(--surface-card-ambient-a), transparent 34rem),
+    radial-gradient(circle at 88% 8%, var(--surface-card-ambient-b), transparent 32rem),
     var(--color-bg);
   color: var(--color-text-primary);
 }
@@ -95,8 +95,8 @@ svg {
 
 [data-theme="light"] body {
   background:
-    radial-gradient(circle at 16% -12%, rgba(15, 23, 42, 0.06), transparent 34rem),
-    radial-gradient(circle at 88% 8%, rgba(245, 158, 11, 0.03), transparent 32rem),
+    radial-gradient(circle at 16% -12%, var(--surface-card-ambient-a), transparent 34rem),
+    radial-gradient(circle at 88% 8%, var(--surface-card-ambient-b), transparent 32rem),
     var(--color-bg);
 }
 
@@ -140,14 +140,14 @@ svg {
   font-size: var(--text-2xs);
   font-weight: 600;
   cursor: pointer;
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-error) 40%, transparent);
   color: var(--color-error);
   transition: all 150ms ease;
 }
 
 .btn-theme-danger-soft:hover {
-  background: rgba(239, 68, 68, 0.22);
+  background: color-mix(in srgb, var(--color-error) 22%, transparent);
   box-shadow: var(--elevation-soft);
 }
 
@@ -198,7 +198,7 @@ svg {
 }
 
 [data-theme="light"] .lhm-progress-fill {
-  background: linear-gradient(90deg, #059669, #0284c7);
+  background: linear-gradient(90deg, var(--color-success), var(--color-accent));
 }
 
 /* Light-mode: fix accent-as-text on subtle button and status callout */
@@ -209,4 +209,3 @@ svg {
 [data-theme="light"] .status-callout {
   color: var(--color-text-secondary);
 }
-

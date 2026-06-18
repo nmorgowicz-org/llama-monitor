@@ -57,10 +57,10 @@
   padding: 16px 18px;
   margin-bottom: 16px;
   border-radius: var(--radius-card);
-  border: 1px solid rgba(191, 97, 106, 0.3);
+  border: 1px solid color-mix(in srgb, var(--color-error) 30%, transparent);
   background:
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.02), transparent 22%),
-    linear-gradient(135deg, rgba(191, 97, 106, 0.1), rgba(214, 120, 120, 0.05));
+    linear-gradient(135deg, color-mix(in srgb, var(--color-error) 10%, transparent), color-mix(in srgb, var(--color-error) 5%, transparent));
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -77,29 +77,29 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(191, 97, 106, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-error) 40%, transparent), transparent);
 }
 
 .agent-setup-status-alert.warning {
-  border-color: rgba(235, 203, 131, 0.3);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
   background:
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.02), transparent 22%),
-    linear-gradient(135deg, rgba(235, 203, 131, 0.1), rgba(235, 203, 131, 0.05));
+    linear-gradient(135deg, color-mix(in srgb, var(--color-warning) 10%, transparent), color-mix(in srgb, var(--color-warning) 5%, transparent));
 }
 
 .agent-setup-status-alert.warning::before {
-  background: linear-gradient(90deg, transparent, rgba(235, 203, 131, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-warning) 40%, transparent), transparent);
 }
 
 .agent-setup-status-alert.success {
-  border-color: rgba(163, 190, 139, 0.3);
+  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
   background:
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.02), transparent 22%),
-    linear-gradient(135deg, rgba(163, 190, 139, 0.1), rgba(163, 190, 139, 0.05));
+    linear-gradient(135deg, color-mix(in srgb, var(--color-success) 10%, transparent), color-mix(in srgb, var(--color-success) 5%, transparent));
 }
 
 .agent-setup-status-alert.success::before {
-  background: linear-gradient(90deg, transparent, rgba(163, 190, 139, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-success) 40%, transparent), transparent);
 }
 
 .agent-setup-status-alert-icon {
@@ -120,16 +120,16 @@
 .agent-setup-status-alert-title {
   font-size: 0.85rem;
   font-weight: 600;
-  color: #bf616a;
+  color: var(--color-error);
   margin-bottom: 2px;
 }
 
 .agent-setup-status-alert.warning .agent-setup-status-alert-title {
-  color: #ebcb8b;
+  color: var(--color-warning);
 }
 
 .agent-setup-status-alert.success .agent-setup-status-alert-title {
-  color: #a3be8b;
+  color: var(--color-success);
 }
 
 .agent-setup-status-alert-message {
@@ -220,7 +220,7 @@
   height: 48px;
   margin: 0 auto;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--acc-15), rgba(6,182,212,0.15));
+  background: linear-gradient(135deg, var(--acc-15), color-mix(in srgb, var(--color-accent) 15%, transparent));
   border: 1px solid var(--acc-15);
 }
 
@@ -247,7 +247,7 @@
 }
 
 .agent-endpoint-url {
-  color: #8fbcbb;
+  color: var(--color-success);
   font-family: var(--font-mono);
   font-weight: 700;
 }
@@ -283,7 +283,7 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(136, 192, 209, 0.4), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-accent) 40%, transparent), transparent);
 }
 
 .agent-setup-section::after {
@@ -318,9 +318,9 @@
 
 /* Per-section accent colors */
 .agent-setup-section:nth-child(1)::before { background: linear-gradient(90deg, transparent, var(--acc-40), transparent); }
-.agent-setup-section:nth-child(2)::before { background: linear-gradient(90deg, transparent, rgba(149, 188, 122, 0.5), transparent); }
-.agent-setup-section:nth-child(3)::before { background: linear-gradient(90deg, transparent, rgba(6,182,212,0.5), transparent); }
-.agent-setup-section:nth-child(4)::before { background: linear-gradient(90deg, transparent, rgba(235, 203, 131, 0.5), transparent); }
+.agent-setup-section:nth-child(2)::before { background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-success) 50%, transparent), transparent); }
+.agent-setup-section:nth-child(3)::before { background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-accent) 50%, transparent), transparent); }
+.agent-setup-section:nth-child(4)::before { background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-warning) 50%, transparent), transparent); }
 
 @keyframes section-fade-in {
   from { opacity: 0; transform: translateY(8px); }
@@ -351,11 +351,11 @@
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--color-accent-deep), #22d3ee);
+  background: linear-gradient(135deg, var(--color-accent-deep), var(--color-accent-light));
   color: #16191e;
   font-size: 0.75rem;
   font-weight: 800;
-  box-shadow: 0 0 15px rgba(136, 192, 209, 0.3);
+  box-shadow: 0 0 15px color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 
 /* Grid & Fields */
@@ -392,8 +392,8 @@
 
 .agent-setup-field input:focus,
 .agent-setup-field select:focus {
-  border-color: rgba(136, 192, 209, 0.4);
-  box-shadow: 0 0 0 3px rgba(136, 192, 209, 0.08), 0 0 20px rgba(136, 192, 209, 0.12);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 8%, transparent), 0 0 20px color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
 
 /* Auth section */
@@ -433,32 +433,32 @@
 }
 
 .btn-agent-scan {
-  color: #38bdf8;
-  background: linear-gradient(135deg, rgba(56,189,248,0.12), rgba(143, 188, 187, 0.08));
-  border: 1px solid rgba(56,189,248,0.25);
-  box-shadow: 0 2px 12px rgba(56,189,248,0.15);
+  color: var(--color-accent-light);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 12%, transparent), color-mix(in srgb, var(--color-accent) 8%, transparent));
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+  box-shadow: 0 2px 12px color-mix(in srgb, var(--color-accent) 15%, transparent);
 }
 
 .btn-agent-scan:hover {
-  background: linear-gradient(135deg, rgba(56,189,248,0.18), rgba(143, 188, 187, 0.12));
-  box-shadow: 0 4px 20px rgba(56,189,248,0.25);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 18%, transparent), color-mix(in srgb, var(--color-accent) 12%, transparent));
+  box-shadow: 0 4px 20px color-mix(in srgb, var(--color-accent) 25%, transparent);
   transform: translateY(-1px);
 }
 
 .btn-agent-trust {
   color: #16191e;
-  background: linear-gradient(135deg, #16a34a, #22c55e);
-  box-shadow: 0 2px 15px rgba(22, 163, 74, 0.3);
+  background: linear-gradient(135deg, var(--color-success), var(--color-success));
+  box-shadow: 0 2px 15px color-mix(in srgb, var(--color-success) 30%, transparent);
 }
 
 .btn-agent-trust:hover {
-  box-shadow: 0 4px 25px rgba(22, 163, 74, 0.45);
+  box-shadow: 0 4px 25px color-mix(in srgb, var(--color-success) 45%, transparent);
   transform: translateY(-1px);
 }
 
 .btn-agent-install {
   color: #16191e;
-  background: linear-gradient(135deg, var(--color-accent-deep), #22d3ee);
+  background: linear-gradient(135deg, var(--color-accent-deep), var(--color-accent-light));
   box-shadow: 0 2px 15px var(--acc-25);
 }
 
@@ -469,29 +469,29 @@
 
 .btn-agent-upgrade {
   color: #16191e;
-  background: linear-gradient(135deg, #ebcb8b, #d5a10b);
-  box-shadow: 0 2px 15px rgba(235, 203, 139, 0.35);
+  background: linear-gradient(135deg, var(--color-warning), var(--color-warning));
+  box-shadow: 0 2px 15px color-mix(in srgb, var(--color-warning) 35%, transparent);
 }
 
 .btn-agent-upgrade:hover {
-  box-shadow: 0 4px 25px rgba(235, 203, 139, 0.5);
+  box-shadow: 0 4px 25px color-mix(in srgb, var(--color-warning) 50%, transparent);
   transform: translateY(-1px);
 }
 
 .btn-agent-start {
   color: #16191e;
-  background: linear-gradient(135deg, #ebcb8b, #d5a10b);
-  box-shadow: 0 2px 15px rgba(235, 203, 139, 0.35);
+  background: linear-gradient(135deg, var(--color-warning), var(--color-warning));
+  box-shadow: 0 2px 15px color-mix(in srgb, var(--color-warning) 35%, transparent);
 }
 
 .btn-agent-start:hover {
-  box-shadow: 0 4px 25px rgba(235, 203, 139, 0.5);
+  box-shadow: 0 4px 25px color-mix(in srgb, var(--color-warning) 50%, transparent);
   transform: translateY(-1px);
 }
 
 .btn-agent-done {
   color: #16191e;
-  background: linear-gradient(135deg, var(--color-accent-deep), #22d3ee);
+  background: linear-gradient(135deg, var(--color-accent-deep), var(--color-accent-light));
   box-shadow: 0 2px 15px var(--acc-25);
 }
 
@@ -503,17 +503,17 @@
 /* Host Key Display */
 .agent-setup-host-key {
   padding: 12px 14px;
-  border: 1px solid rgba(157, 188, 122, 0.25);
+  border: 1px solid color-mix(in srgb, var(--color-success) 25%, transparent);
   border-radius: var(--radius-sm);
-  background: rgba(157, 188, 122, 0.06);
+  background: color-mix(in srgb, var(--color-success) 6%, transparent);
   font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--color-text-secondary);
-  box-shadow: inset 0 0 0 1px rgba(157, 188, 122, 0.1);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-success) 10%, transparent);
 }
 
 .agent-setup-host-key strong {
-  color: #95bc7a;
+  color: var(--color-success);
   font-weight: 750;
 }
 
@@ -580,10 +580,10 @@
   display: grid;
   gap: 8px;
   padding: 16px;
-  border: 1px solid rgba(136, 192, 209, 0.2);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
   border-radius: var(--radius-card);
   background:
-    radial-gradient(circle at top right, rgba(136, 192, 209, 0.06), transparent 22%),
+    radial-gradient(circle at top right, color-mix(in srgb, var(--color-accent) 6%, transparent), transparent 22%),
     linear-gradient(145deg, rgba(40, 48, 58, 0.88), rgba(27, 33, 41, 0.95));
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.25),
@@ -599,7 +599,7 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(136, 192, 209, 0.35), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-accent) 35%, transparent), transparent);
 }
 
 .progress-bar-container {
@@ -614,7 +614,7 @@
   height: 100%;
   width: 0%;
   border-radius: 3px;
-  background: linear-gradient(90deg, var(--color-accent-deep), #22d3ee, #22c55e);
+  background: linear-gradient(90deg, var(--color-accent-deep), var(--color-accent-light), var(--color-success));
   transition: width 250ms ease;
   box-shadow: 0 0 15px var(--acc-40);
   animation: progress-shimmer 1.5s ease-in-out infinite;
@@ -642,21 +642,21 @@
 }
 
 .agent-setup-status.ok {
-  color: #95bc7a;
-  background: rgba(157, 188, 122, 0.08);
-  border: 1px solid rgba(157, 188, 122, 0.25);
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-success) 25%, transparent);
 }
 
 .agent-setup-status.info {
-  color: #88c0d1;
-  background: rgba(136, 192, 209, 0.08);
-  border: 1px solid rgba(136, 192, 209, 0.2);
+  color: var(--color-accent-light);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 
 .agent-setup-status.error {
-  color: #bf616a;
-  background: rgba(191, 97, 106, 0.08);
-  border: 1px solid rgba(191, 97, 106, 0.2);
+  color: var(--color-error);
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-error) 20%, transparent);
 }
 
 .model-info-row {
@@ -686,10 +686,10 @@
   display: inline-flex;
   align-items: center;
   padding: 6px 10px;
-  border: 1px solid rgba(143, 188, 187, 0.18);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 18%, transparent);
   border-radius: 999px;
-  background: rgba(143, 188, 187, 0.08);
-  color: #d8fbf4;
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  color: var(--color-accent-light);
   font-size: var(--text-2xs);
   font-weight: 800;
   line-height: 1;
@@ -715,7 +715,7 @@
   top: 0;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(143, 188, 187, 0.15) 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--color-accent) 15%, transparent) 50%, transparent 100%);
   animation: model-info-shimmer 2.8s ease-in-out infinite;
   pointer-events: none;
   border-radius: 2px;
@@ -723,10 +723,10 @@
 
 @keyframes model-info-glow {
   0%, 100% {
-    text-shadow: 0 0 8px rgba(143, 188, 187, 0.1);
+    text-shadow: 0 0 8px color-mix(in srgb, var(--color-accent) 10%, transparent);
   }
   50% {
-    text-shadow: 0 0 16px rgba(143, 188, 187, 0.25);
+    text-shadow: 0 0 16px color-mix(in srgb, var(--color-accent) 25%, transparent);
   }
 }
 
@@ -758,10 +758,10 @@
 }
 
 .speculative-chip.enabled {
-  color: #d8fbf4;
-  border-color: rgba(143, 188, 187, 0.3);
-  background: rgba(143, 188, 187, 0.09);
-  box-shadow: 0 0 20px rgba(143, 188, 187, 0.1);
+  color: var(--color-accent-light);
+  border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 9%, transparent);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--color-accent) 10%, transparent);
 }
 
 .config-kv-grid {
@@ -827,8 +827,8 @@
   height: 16px;
   min-width: 6px;
   border-radius: 999px;
-  background: rgba(143, 188, 187, 0.32);
-  box-shadow: 0 0 18px rgba(143, 188, 187, 0.16);
+  background: color-mix(in srgb, var(--color-accent) 32%, transparent);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--color-accent) 16%, transparent);
   transform: translateY(-50%);
   outline: none;
   overflow: visible;
@@ -841,12 +841,12 @@
 
 .activity-phase.prompt {
   border-radius: 999px 0 0 999px;
-  background: linear-gradient(90deg, rgba(136, 192, 209, 0.7), rgba(136, 192, 209, 0.42));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 70%, transparent), color-mix(in srgb, var(--color-accent) 42%, transparent));
 }
 
 .activity-phase.generation {
   border-radius: 0 999px 999px 0;
-  background: linear-gradient(90deg, rgba(163, 190, 140, 0.62), rgba(143, 188, 187, 0.92));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-success) 62%, transparent), color-mix(in srgb, var(--color-accent) 92%, transparent));
 }
 
 .activity-marker {
@@ -856,14 +856,14 @@
   width: 5px;
   height: 22px;
   border-radius: 999px;
-  background: rgba(235, 203, 139, 0.88);
-  box-shadow: 0 0 14px rgba(235, 203, 139, 0.32);
+  background: color-mix(in srgb, var(--color-warning) 88%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--color-warning) 32%, transparent);
   transform: translateY(-50%);
 }
 
 .activity-segment.active {
-  background: linear-gradient(90deg, #8fbcbb, #a3be8c);
-  box-shadow: 0 0 24px rgba(143, 188, 187, 0.34);
+  background: linear-gradient(90deg, var(--color-success), var(--color-success));
+  box-shadow: 0 0 24px color-mix(in srgb, var(--color-accent) 34%, transparent);
 }
 
 .activity-segment.complete {
@@ -871,7 +871,7 @@
 }
 
 .activity-segment:focus-visible {
-  box-shadow: 0 0 0 3px var(--acc-25), 0 0 24px rgba(143, 188, 187, 0.34);
+  box-shadow: 0 0 0 3px var(--acc-25), 0 0 24px color-mix(in srgb, var(--color-accent) 34%, transparent);
 }
 
 .activity-empty {
@@ -899,7 +899,7 @@
   inset: 0;
   border-radius: var(--radius-card);
   padding: 1px;
-  background: linear-gradient(160deg, var(--acc-40), transparent 35%, transparent 65%, rgba(6, 182, 212, 0.2));
+  background: linear-gradient(160deg, var(--acc-40), transparent 35%, transparent 65%, color-mix(in srgb, var(--color-accent) 20%, transparent));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -929,7 +929,7 @@
   width: 500px;
   height: 500px;
   transform: translate(-50%, -50%);
-  background: radial-gradient(circle, var(--acc-18) 0%, rgba(6, 182, 212, 0.08) 40%, transparent 70%);
+  background: radial-gradient(circle, var(--acc-18) 0%, color-mix(in srgb, var(--color-accent) 8%, transparent) 40%, transparent 70%);
   filter: blur(60px);
   pointer-events: none;
   animation: agent-ambient-drift 8s ease-in-out infinite;
@@ -962,19 +962,19 @@
 /* Elevated form controls */
 .agent-setup-field input:hover,
 .agent-setup-field select:hover {
-  border-color: rgba(136, 192, 209, 0.35);
+  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
   box-shadow:
     0 4px 12px rgba(0, 0, 0, 0.25),
-    0 0 16px rgba(136, 192, 209, 0.08),
+    0 0 16px color-mix(in srgb, var(--color-accent) 8%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .agent-setup-field input:focus,
 .agent-setup-field select:focus {
-  border-color: rgba(136, 192, 209, 0.5);
+  border-color: color-mix(in srgb, var(--color-accent) 50%, transparent);
   box-shadow:
-    0 0 0 3px rgba(136, 192, 209, 0.12),
-    0 0 24px rgba(136, 192, 209, 0.15),
+    0 0 0 3px color-mix(in srgb, var(--color-accent) 12%, transparent),
+    0 0 24px color-mix(in srgb, var(--color-accent) 15%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -1085,12 +1085,12 @@
 [data-theme="light"] .agent-setup-status-alert {
   background:
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
-    linear-gradient(135deg, rgba(239, 68, 68, 0.07), rgba(239, 68, 68, 0.03));
-  border-color: rgba(239, 68, 68, 0.2);
+    linear-gradient(135deg, color-mix(in srgb, var(--color-error) 7%, transparent), color-mix(in srgb, var(--color-error) 3%, transparent));
+  border-color: color-mix(in srgb, var(--color-error) 20%, transparent);
 }
 
 [data-theme="light"] .agent-setup-status-alert-title {
-  color: #dc2626;
+  color: var(--color-error);
 }
 
 [data-theme="light"] .agent-setup-status-alert-message {
@@ -1100,23 +1100,23 @@
 [data-theme="light"] .agent-setup-status-alert.warning {
   background:
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
-    linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.04));
-  border-color: rgba(245, 158, 11, 0.25);
+    linear-gradient(135deg, color-mix(in srgb, var(--color-warning) 10%, transparent), color-mix(in srgb, var(--color-warning) 4%, transparent));
+  border-color: color-mix(in srgb, var(--color-warning) 25%, transparent);
 }
 
 [data-theme="light"] .agent-setup-status-alert.warning .agent-setup-status-alert-title {
-  color: #b45309;
+  color: var(--color-warning);
 }
 
 [data-theme="light"] .agent-setup-status-alert.success {
   background:
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
-    linear-gradient(135deg, rgba(34, 197, 94, 0.08), rgba(34, 197, 94, 0.03));
-  border-color: rgba(34, 197, 94, 0.2);
+    linear-gradient(135deg, color-mix(in srgb, var(--color-success) 8%, transparent), color-mix(in srgb, var(--color-success) 3%, transparent));
+  border-color: color-mix(in srgb, var(--color-success) 20%, transparent);
 }
 
 [data-theme="light"] .agent-setup-status-alert.success .agent-setup-status-alert-title {
-  color: #15803d;
+  color: var(--color-success);
 }
 
 /* Progress area */
@@ -1140,21 +1140,21 @@
 
 /* Status cards */
 [data-theme="light"] .agent-setup-status.ok {
-  color: #15803d;
-  background: rgba(34, 197, 94, 0.1);
-  border-color: rgba(34, 197, 94, 0.2);
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 20%, transparent);
 }
 
 [data-theme="light"] .agent-setup-status.info {
   color: #111827;
-  background: rgba(59, 130, 246, 0.08);
-  border-color: rgba(59, 130, 246, 0.18);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 
 [data-theme="light"] .agent-setup-status.error {
-  color: #dc2626;
-  background: rgba(239, 68, 68, 0.08);
-  border-color: rgba(239, 68, 68, 0.2);
+  color: var(--color-error);
+  background: color-mix(in srgb, var(--color-error) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-error) 20%, transparent);
 }
 
 /* Version cards */
@@ -1175,8 +1175,8 @@
 
 /* Model info + chips */
 [data-theme="light"] .model-info-pill {
-  border-color: rgba(14, 116, 144, 0.14);
-  background: rgba(125, 211, 252, 0.18);
+  border-color: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
   color: #020817;
 }
 
@@ -1197,8 +1197,8 @@
 
 [data-theme="light"] .speculative-chip.enabled {
   color: #111827;
-  border-color: rgba(14, 116, 144, 0.2);
-  background: rgba(125, 211, 252, 0.14);
+  border-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
 }
 
 /* Config KV chips */
@@ -1234,14 +1234,14 @@
 /* Host key display */
 [data-theme="light"] .agent-setup-host-key {
   color: #111827;
-  background: rgba(34, 197, 94, 0.06);
-  border-color: rgba(34, 197, 94, 0.2);
+  background: color-mix(in srgb, var(--color-success) 6%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 20%, transparent);
 }
 
 /* Ambient glow: soften in light mode */
 [data-theme="light"] #remote-agent-setup-overlay::before {
   opacity: 0.5;
-  background: radial-gradient(circle, var(--acc-10) 0%, rgba(6, 182, 212, 0.05) 40%, transparent 70%);
+  background: radial-gradient(circle, var(--acc-10) 0%, color-mix(in srgb, var(--color-accent) 5%, transparent) 40%, transparent 70%);
 }
 
 /* Breathing border: reduce in light */

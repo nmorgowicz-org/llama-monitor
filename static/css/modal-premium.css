@@ -18,7 +18,7 @@
   overflow: hidden;
   background:
     radial-gradient(circle at 18% 18%, var(--acc-10), transparent 28%),
-    radial-gradient(circle at 82% 82%, rgba(6,182,212,0.06), transparent 26%),
+    radial-gradient(circle at 82% 82%, var(--acc-08), transparent 26%),
     linear-gradient(160deg, rgba(40, 48, 58, 0.94), rgba(28, 34, 42, 0.97));
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: var(--radius-card);
@@ -165,27 +165,27 @@
   border-color: var(--acc-30);
 }
 .template-list-item.editing {
-  background: rgba(251, 146, 60, 0.12);
-  border-color: rgba(251, 146, 60, 0.3);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
 }
 .template-list-item.active-persona {
-  background: rgba(34, 197, 94, 0.09);
+  background: color-mix(in srgb, var(--color-success) 9%, transparent);
   border-color: transparent;
-  border-left-color: rgba(34, 197, 94, 0.6);
+  border-left-color: color-mix(in srgb, var(--color-success) 60%, transparent);
 }
 .template-list-item.active-persona:hover {
-  background: rgba(34, 197, 94, 0.14);
+  background: color-mix(in srgb, var(--color-success) 14%, transparent);
 }
 .template-list-item.active-persona.selected {
-  background: rgba(34, 197, 94, 0.15);
-  border-color: rgba(34, 197, 94, 0.4);
-  border-left-color: rgba(34, 197, 94, 0.7);
+  background: color-mix(in srgb, var(--color-success) 15%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 40%, transparent);
+  border-left-color: color-mix(in srgb, var(--color-success) 70%, transparent);
 }
 .template-list-item.custom {
-  border-left-color: rgba(251, 191, 36, 0.45);
+  border-left-color: color-mix(in srgb, var(--color-warning) 45%, transparent);
 }
 .template-list-item.custom.selected {
-  border-left-color: rgba(251, 191, 36, 0.7);
+  border-left-color: color-mix(in srgb, var(--color-warning) 70%, transparent);
 }
 .template-list-info {
   display: flex;
@@ -214,9 +214,9 @@
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: rgba(34, 197, 94, 0.9);
-  background: rgba(34, 197, 94, 0.12);
-  border: 1px solid rgba(34, 197, 94, 0.25);
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-success) 25%, transparent);
   border-radius: 3px;
   padding: 1px 4px;
   line-height: 1.4;
@@ -262,8 +262,8 @@
   color: var(--text-primary);
 }
 .template-list-btn.delete:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
+  background: color-mix(in srgb, var(--color-error) 15%, transparent);
+  color: var(--color-error);
 }
 .template-manager-preview {
   flex: 1;
@@ -520,7 +520,7 @@
     display: flex;
     flex-direction: column;
     background:
-        radial-gradient(circle at 18% 18%, rgba(34,211,238,0.06), transparent 26%),
+        radial-gradient(circle at 18% 18%, var(--acc-08), transparent 26%),
         radial-gradient(circle at 82% 14%, var(--acc-05), transparent 24%),
         linear-gradient(160deg, rgba(40, 48, 58, 0.94), rgba(28, 34, 42, 0.97));
     border: 1px solid rgba(255, 255, 255, 0.09);
@@ -799,7 +799,7 @@
     left: 0;
     right: 0;
     height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(245,158,11,0.35), transparent);
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-warning) 35%, transparent), transparent);
 }
 
 #export-modal .export-panel::after {
@@ -822,7 +822,7 @@
 }
 
 #export-modal .export-panel:hover {
-    border-color: rgba(245,158,11,0.35);
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
     box-shadow:
         0 10px 32px rgba(0, 0, 0, 0.38),
         0 4px 16px rgba(0, 0, 0, 0.28),
@@ -1047,9 +1047,9 @@
 }
 
 [data-theme="light"] .template-active-badge {
-  color: #15803d;
-  background: rgba(34, 197, 94, 0.1);
-  border-color: rgba(34, 197, 94, 0.25);
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 25%, transparent);
 }
 
 [data-theme="light"] .template-preview-content {
@@ -1088,32 +1088,32 @@
 }
 
 [data-theme="light"] .template-list-item.active-persona {
-  background: rgba(34, 197, 94, 0.07);
-  border-left-color: rgba(34, 197, 94, 0.5);
+  background: color-mix(in srgb, var(--color-success) 7%, transparent);
+  border-left-color: color-mix(in srgb, var(--color-success) 50%, transparent);
 }
 
 [data-theme="light"] .template-list-item.active-persona:hover {
-  background: rgba(34, 197, 94, 0.11);
+  background: color-mix(in srgb, var(--color-success) 11%, transparent);
 }
 
 [data-theme="light"] .template-list-item.active-persona.selected {
-  background: rgba(34, 197, 94, 0.12);
-  border-color: rgba(34, 197, 94, 0.35);
-  border-left-color: rgba(34, 197, 94, 0.6);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 35%, transparent);
+  border-left-color: color-mix(in srgb, var(--color-success) 60%, transparent);
 }
 
 [data-theme="light"] .template-list-item.custom {
-  border-left-color: rgba(217, 119, 6, 0.4);
+  border-left-color: color-mix(in srgb, var(--color-warning) 40%, transparent);
 }
 
 [data-theme="light"] .template-list-item.custom.selected {
-  border-left-color: rgba(217, 119, 6, 0.65);
+  border-left-color: color-mix(in srgb, var(--color-warning) 65%, transparent);
 }
 
 [data-theme="light"] .template-active-badge {
-  color: rgba(22, 163, 74, 0.95);
-  background: rgba(34, 197, 94, 0.1);
-  border-color: rgba(34, 197, 94, 0.25);
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 25%, transparent);
 }
 
 [data-theme="light"] .template-preview-content {
@@ -1197,7 +1197,7 @@
   width: 540px;
   background:
     radial-gradient(circle at 18% 18%, var(--acc-08), transparent 28%),
-    radial-gradient(circle at 82% 82%, rgba(34,197,94,0.04), transparent 26%),
+    radial-gradient(circle at 82% 82%, var(--acc-05), transparent 26%),
     linear-gradient(160deg, rgba(40, 48, 58, 0.94), rgba(28, 34, 42, 0.97));
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: var(--radius-card);
@@ -1708,23 +1708,23 @@
   border-color: var(--acc-50);
 }
 
-/* 2: Context & KV Cache — cyan */
+/* 2: Context & KV Cache */
 #preset-modal details.modal-section:nth-of-type(2)::before {
-  background: linear-gradient(90deg, transparent, rgba(6, 182, 212, 0.55), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-info) 55%, transparent), transparent);
 }
 #preset-modal details.modal-section:nth-of-type(2):hover {
-  border-color: rgba(6, 182, 212, 0.45);
+  border-color: color-mix(in srgb, var(--color-info) 45%, transparent);
 }
 
-/* 3: Batching & Slots — emerald */
+/* 3: Batching & Slots */
 #preset-modal details.modal-section:nth-of-type(3)::before {
-  background: linear-gradient(90deg, transparent, rgba(16, 185, 129, 0.55), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-success) 55%, transparent), transparent);
 }
 #preset-modal details.modal-section:nth-of-type(3):hover {
-  border-color: rgba(16, 185, 129, 0.45);
+  border-color: color-mix(in srgb, var(--color-success) 45%, transparent);
 }
 
-/* 4: Generation — violet */
+/* 4: Generation */
 #preset-modal details.modal-section:nth-of-type(4)::before {
   background: linear-gradient(90deg, transparent, var(--acc-55), transparent);
 }
@@ -1732,44 +1732,44 @@
   border-color: var(--acc-45);
 }
 
-/* 5: GPU Distribution — amber */
+/* 5: GPU Distribution */
 #preset-modal details.modal-section:nth-of-type(5)::before {
-  background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.55), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-warning) 55%, transparent), transparent);
 }
 #preset-modal details.modal-section:nth-of-type(5):hover {
-  border-color: rgba(245, 158, 11, 0.45);
+  border-color: color-mix(in srgb, var(--color-warning) 45%, transparent);
 }
 
-/* 6: Threading — rose */
+/* 6: Threading */
 #preset-modal details.modal-section:nth-of-type(6)::before {
-  background: linear-gradient(90deg, transparent, rgba(244, 63, 94, 0.55), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-error) 55%, transparent), transparent);
 }
 #preset-modal details.modal-section:nth-of-type(6):hover {
-  border-color: rgba(244, 63, 94, 0.45);
+  border-color: color-mix(in srgb, var(--color-error) 45%, transparent);
 }
 
-/* 7: Rope Scaling — sky */
+/* 7: Rope Scaling */
 #preset-modal details.modal-section:nth-of-type(7)::before {
-  background: linear-gradient(90deg, transparent, rgba(14, 165, 233, 0.55), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-info) 55%, transparent), transparent);
 }
 #preset-modal details.modal-section:nth-of-type(7):hover {
-  border-color: rgba(14, 165, 233, 0.45);
+  border-color: color-mix(in srgb, var(--color-info) 45%, transparent);
 }
 
-/* 8: Speculative Decoding — fuchsia */
+/* 8: Speculative Decoding */
 #preset-modal details.modal-section:nth-of-type(8)::before {
-  background: linear-gradient(90deg, transparent, rgba(217, 70, 239, 0.55), transparent);
+  background: linear-gradient(90deg, transparent, var(--acc-50), transparent);
 }
 #preset-modal details.modal-section:nth-of-type(8):hover {
-  border-color: rgba(217, 70, 239, 0.45);
+  border-color: var(--acc-40);
 }
 
-/* 9: Advanced — orange */
+/* 9: Advanced */
 #preset-modal details.modal-section:nth-of-type(9)::before {
-  background: linear-gradient(90deg, transparent, rgba(249, 115, 22, 0.55), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-warning) 55%, transparent), transparent);
 }
 #preset-modal details.modal-section:nth-of-type(9):hover {
-  border-color: rgba(249, 115, 22, 0.45);
+  border-color: color-mix(in srgb, var(--color-warning) 45%, transparent);
 }
 
 /* Elevated form controls */
@@ -2072,9 +2072,9 @@
 }
 
 .preset-editor-close:hover {
-  border-color: rgba(244, 63, 94, 0.4);
-  background: rgba(244, 63, 94, 0.1);
-  color: #fca5a5;
+  border-color: color-mix(in srgb, var(--color-error) 40%, transparent);
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+  color: var(--color-error);
 }
 
 /* ── Layout: nav + content ── */
@@ -2269,7 +2269,7 @@
 }
 
 .pe-required {
-  color: rgba(244, 63, 94, 0.8);
+  color: var(--color-error);
   margin-left: 2px;
 }
 
@@ -2313,9 +2313,9 @@
 
 .pe-input.field-error,
 .pe-input.field-error:focus {
-  border-color: rgba(244, 63, 94, 0.6) !important;
+  border-color: color-mix(in srgb, var(--color-error) 60%, transparent) !important;
   box-shadow:
-    0 0 0 3px rgba(244, 63, 94, 0.12),
+    0 0 0 3px color-mix(in srgb, var(--color-error) 12%, transparent),
     0 4px 12px rgba(0, 0, 0, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
 }
@@ -2447,8 +2447,8 @@
 /* ── Change summary ── */
 .preset-change-summary {
   padding: 12px 20px 8px;
-  border-top: 1px solid rgba(245, 158, 11, 0.2);
-  background: rgba(245, 158, 11, 0.04);
+  border-top: 1px solid color-mix(in srgb, var(--color-warning) 20%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 4%, transparent);
   flex-shrink: 0;
 }
 
@@ -2457,7 +2457,7 @@
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: rgba(251, 191, 36, 0.8);
+  color: var(--color-warning);
   margin-bottom: 6px;
 }
 
@@ -2619,12 +2619,12 @@
 
 /* Change summary readable in light mode */
 [data-theme="light"] .preset-change-summary {
-  background: rgba(245, 158, 11, 0.06);
-  border-top-color: rgba(245, 158, 11, 0.22);
+  background: color-mix(in srgb, var(--color-warning) 6%, transparent);
+  border-top-color: color-mix(in srgb, var(--color-warning) 22%, transparent);
 }
 
 [data-theme="light"] .preset-change-summary-title {
-  color: #b45309;
+  color: var(--color-warning);
 }
 
 [data-theme="light"] .preset-change-field {
@@ -2632,11 +2632,11 @@
 }
 
 [data-theme="light"] .preset-change-from {
-  color: #dc2626;
+  color: var(--color-error);
 }
 
 [data-theme="light"] .preset-change-to {
-  color: #15803d;
+  color: var(--color-success);
 }
 
 /* ── Reduced motion ── */

@@ -198,7 +198,7 @@
   left: -40%;
   width: 40%;
   border-radius: 999px;
-  background: linear-gradient(90deg, transparent 0%, var(--color-accent-deep) 40%, #818cf8 70%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, var(--color-accent-deep) 40%, var(--color-accent-light) 70%, transparent 100%);
   animation: tune-sweep 2s ease-in-out infinite;
 }
 
@@ -251,10 +251,10 @@
   border-radius: 50%;
   background:
     radial-gradient(circle, rgba(12, 15, 24, 0.98) 0 58%, transparent 61%),
-    conic-gradient(from -90deg, var(--grade-color, #8fbcbb) calc(var(--grade-pct) * 1%), rgba(255, 255, 255, 0.06) 0);
+    conic-gradient(from -90deg, var(--grade-color, var(--color-accent)) calc(var(--grade-pct) * 1%), rgba(255, 255, 255, 0.06) 0);
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 0 16px rgba(143, 188, 187, 0.12);
+    0 0 16px color-mix(in srgb, var(--grade-color, var(--color-accent)) 12%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -267,11 +267,11 @@
   transition: background 300ms ease;
 }
 
-.tune-grade-ring.tune-grade-s { --grade-pct: 100%; --grade-color: #fde68a; }
-.tune-grade-ring.tune-grade-a { --grade-pct: 78%;  --grade-color: #818cf8; }
-.tune-grade-ring.tune-grade-b { --grade-pct: 55%;  --grade-color: #f59e0b; }
-.tune-grade-ring.tune-grade-c { --grade-pct: 35%;  --grade-color: #f97316; }
-.tune-grade-ring.tune-grade-d { --grade-pct: 18%;  --grade-color: #ef4444; }
+.tune-grade-ring.tune-grade-s { --grade-pct: 100%; --grade-color: var(--color-accent-light); }
+.tune-grade-ring.tune-grade-a { --grade-pct: 78%;  --grade-color: var(--color-accent); }
+.tune-grade-ring.tune-grade-b { --grade-pct: 55%;  --grade-color: var(--color-warning); }
+.tune-grade-ring.tune-grade-c { --grade-pct: 35%;  --grade-color: var(--color-warning); }
+.tune-grade-ring.tune-grade-d { --grade-pct: 18%;  --grade-color: var(--color-error); }
 
 .tune-grade-ring.tune-grade-s,
 .tune-grade-ring.tune-grade-a {
@@ -462,12 +462,12 @@
 
 .tune-suggestion-info {
   border-style: dashed;
-  background: rgba(245, 158, 11, 0.06);
+  background: color-mix(in srgb, var(--color-warning) 6%, transparent);
 }
 
 .tune-suggestion-info:hover {
-  border-color: rgba(245, 158, 11, 0.3);
-  background: rgba(245, 158, 11, 0.09);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 9%, transparent);
 }
 
 /* ── Restarting overlay inside tune-results ──────────────────────────────── */
@@ -877,7 +877,7 @@
 .mtp-sweep-bar {
   height: 10px;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--color-accent-deep), #818cf8);
+  background: linear-gradient(90deg, var(--color-accent-deep), var(--color-accent-light));
   transition: width 0.4s ease;
   min-width: 2px;
 }
@@ -890,7 +890,7 @@
 }
 
 .mtp-probe-error {
-  color: var(--color-error, #ef4444);
+  color: var(--color-error);
   font-style: italic;
 }
 
@@ -923,13 +923,13 @@
   flex-shrink: 0;
 }
 
-/* Infinite-scroll animation for MTP sweep progress bar (same as regular but teal-ish) */
+/* Infinite-scroll animation for MTP sweep progress bar */
 .mtp-sweep-progress-anim {
-  background: linear-gradient(90deg, transparent 0%, #fde68a 40%, #f97316 70%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, var(--color-accent) 40%, var(--color-accent-light) 70%, transparent 100%);
 }
 
 [data-theme="light"] .mtp-sweep-progress-anim {
-  background: linear-gradient(90deg, transparent 0%, #0d9488 40%, #0d9488 70%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, var(--color-accent) 40%, var(--color-accent-light) 70%, transparent 100%);
 }
 
 [data-theme="light"] .tune-tool-card-desc code {
@@ -938,7 +938,7 @@
 }
 
 [data-theme="light"] .mtp-sweep-progress-anim {
-  background: linear-gradient(90deg, transparent 0%, #0d9488 40%, #0d9488 70%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, var(--color-accent) 40%, var(--color-accent-light) 70%, transparent 100%);
 }
 
 [data-theme="light"] .tune-tool-card-desc code {
@@ -979,7 +979,7 @@
 [data-theme="light"] .tune-grade-ring {
   background:
     radial-gradient(circle, #ffffff 0 58%, transparent 61%),
-    conic-gradient(from -90deg, var(--grade-color, #8fbcbb) calc(var(--grade-pct) * 1%), rgba(15,23,42,0.08) 0);
+    conic-gradient(from -90deg, var(--grade-color, var(--color-accent)) calc(var(--grade-pct) * 1%), rgba(15,23,42,0.08) 0);
 }
 
 [data-theme="light"] .tune-grade-label,
@@ -1002,7 +1002,7 @@
 
 /* Info suggestion */
 [data-theme="light"] .tune-suggestion-info {
-  background: rgba(245, 158, 11, 0.12);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
 }
 
 /* Restarting overlay */
@@ -1019,7 +1019,7 @@
 /* Wizard advisor (spawn) */
 [data-theme="light"] .wizard-advisor {
   background:
-    linear-gradient(180deg, rgba(99,102,241,0.04), rgba(255,255,255,0.95));
+    linear-gradient(180deg, var(--acc-05), rgba(255,255,255,0.95));
   color: #111827;
 }
 
@@ -1071,6 +1071,6 @@
 }
 
 [data-theme="light"] .mtp-probe-error {
-  color: #dc2626;
+  color: var(--color-error);
   font-style: italic;
 }

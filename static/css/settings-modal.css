@@ -132,7 +132,7 @@
   width: 500px;
   height: 500px;
   transform: translate(-50%, -50%);
-  background: radial-gradient(circle, var(--acc-15) 0%, rgba(6,182,212,0.06) 40%, transparent 70%);
+  background: radial-gradient(circle, var(--acc-15) 0%, color-mix(in srgb, var(--color-accent) 6%, transparent) 40%, transparent 70%);
   filter: blur(60px);
   pointer-events: none;
   animation: settings-ambient-drift 8s ease-in-out infinite;
@@ -176,7 +176,7 @@
   height: 7px;
   border-radius: 50%;
   background: var(--color-warning);
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.5);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-warning) 35%, transparent);
   margin-left: 8px;
   vertical-align: middle;
   opacity: 0;
@@ -289,7 +289,7 @@
 
 #settings-modal .settings-tab.active {
   color: var(--color-primary-light);
-  background: linear-gradient(135deg, var(--acc-25), rgba(6,182,212,0.12));
+  background: linear-gradient(135deg, var(--acc-25), color-mix(in srgb, var(--color-accent) 12%, transparent));
   border-color: var(--acc-25);
   box-shadow: 0 0 16px var(--acc-25), inset 0 0 1px var(--acc-15);
   padding-left: 16px;
@@ -410,7 +410,7 @@
 
 /* Per-pane accent colors for top-line gradient */
 #settings-models > .modal-field::before {
-  background: linear-gradient(90deg, transparent, rgba(136, 192, 209, 0.45), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-accent) 45%, transparent), transparent);
 }
 #settings-system > .modal-field::before {
   background: linear-gradient(90deg, transparent, var(--acc-50), transparent);
@@ -830,8 +830,8 @@
   line-height: 1.6;
   letter-spacing: 0;
   text-transform: none;
-  background: rgba(245,158,11,0.04);
-  border: 1px solid rgba(245,158,11,0.18);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 18%, transparent);
   border-radius: var(--radius-base);
 }
 
@@ -855,7 +855,7 @@
   background:
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.02), transparent 22%),
     linear-gradient(145deg, rgba(40, 48, 58, 0.85), rgba(27, 33, 41, 0.95));
-  border: 1px solid rgba(235, 203, 131, 0.2);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 20%, transparent);
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.25),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -874,31 +874,31 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(235, 203, 131, 0.35), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-warning) 35%, transparent), transparent);
 }
 
 .network-status-indicator.slow {
-  border-color: rgba(235, 203, 131, 0.3);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.25),
-    0 0 20px rgba(235, 203, 131, 0.08),
+    0 0 20px color-mix(in srgb, var(--color-warning) 8%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .network-status-indicator.slow::before {
-  background: linear-gradient(90deg, transparent, rgba(235, 203, 131, 0.5), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-warning) 50%, transparent), transparent);
 }
 
 .network-status-indicator.good {
-  border-color: rgba(163, 190, 139, 0.2);
+  border-color: color-mix(in srgb, var(--color-success) 20%, transparent);
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.25),
-    0 0 20px rgba(163, 190, 139, 0.06),
+    0 0 20px color-mix(in srgb, var(--color-success) 6%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .network-status-indicator.good::before {
-  background: linear-gradient(90deg, transparent, rgba(163, 190, 139, 0.35), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-success) 35%, transparent), transparent);
 }
 
 .network-status-icon {
@@ -910,13 +910,13 @@
   justify-content: center;
   font-size: 16px;
   border-radius: 50%;
-  background: rgba(235, 203, 131, 0.1);
-  box-shadow: 0 0 12px rgba(235, 203, 131, 0.15);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-warning) 15%, transparent);
 }
 
 .network-status-indicator.good .network-status-icon {
-  background: rgba(163, 190, 139, 0.1);
-  box-shadow: 0 0 12px rgba(163, 190, 139, 0.15);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-success) 15%, transparent);
 }
 
 .network-status-text {
@@ -1226,7 +1226,7 @@
 }
 
 [data-theme="light"] #settings-modal .settings-tab.active {
-  background: linear-gradient(135deg, var(--acc-10), rgba(6, 182, 212, 0.06));
+  background: linear-gradient(135deg, var(--acc-10), color-mix(in srgb, var(--color-accent) 6%, transparent));
 }
 
 [data-theme="light"] #settings-modal .settings-pane > h3 {
@@ -1370,7 +1370,7 @@
   background:
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.6), transparent 22%),
     linear-gradient(145deg, #ffffff, #f9fafb);
-  border-color: rgba(235, 203, 131, 0.25);
+  border-color: color-mix(in srgb, var(--color-warning) 25%, transparent);
   box-shadow:
     0 8px 24px rgba(15, 23, 42, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
@@ -1378,18 +1378,18 @@
 }
 
 [data-theme="light"] .network-status-indicator.slow {
-  border-color: rgba(235, 203, 131, 0.35);
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
   box-shadow:
     0 8px 24px rgba(15, 23, 42, 0.08),
-    0 0 20px rgba(235, 203, 131, 0.06),
+    0 0 20px color-mix(in srgb, var(--color-warning) 6%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 [data-theme="light"] .network-status-indicator.good {
-  border-color: rgba(163, 190, 139, 0.25);
+  border-color: color-mix(in srgb, var(--color-success) 25%, transparent);
   box-shadow:
     0 8px 24px rgba(15, 23, 42, 0.08),
-    0 0 20px rgba(163, 190, 139, 0.06),
+    0 0 20px color-mix(in srgb, var(--color-success) 6%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
@@ -1398,13 +1398,13 @@
 }
 
 [data-theme="light"] .network-status-icon {
-  background: rgba(235, 203, 131, 0.08);
-  box-shadow: 0 0 12px rgba(235, 203, 131, 0.1);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-warning) 10%, transparent);
 }
 
 [data-theme="light"] .network-status-indicator.good .network-status-icon {
-  background: rgba(163, 190, 139, 0.08);
-  box-shadow: 0 0 12px rgba(163, 190, 139, 0.1);
+  background: color-mix(in srgb, var(--color-success) 8%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-success) 10%, transparent);
 }
 
 /* Light theme: main content panel (right side) */
@@ -1541,8 +1541,8 @@
 }
 
 .status-dot.warning {
-  background: #f59e0b;
-  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+  background: var(--color-warning);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-warning) 35%, transparent);
 }
 
 .db-admin-stats {
@@ -1644,11 +1644,11 @@
 }
 
 .db-log-entry.error {
-  color: #ef4444;
+  color: var(--color-error);
 }
 
 .db-log-entry.warning {
-  color: #f59e0b;
+  color: var(--color-warning);
 }
 
 .db-log-time {
@@ -1700,15 +1700,15 @@
 }
 
 [data-theme="light"] .db-log-entry.success {
-  color: #15803d;
+  color: var(--color-success);
 }
 
 [data-theme="light"] .db-log-entry.error {
-  color: #dc2626;
+  color: var(--color-error);
 }
 
 [data-theme="light"] .db-log-entry.warning {
-  color: #b45309;
+  color: var(--color-warning);
 }
 
 /* ── Extra model directory list ─────────────────────────────────────────────── */
@@ -1744,7 +1744,7 @@
 
 .extra-dir-remove:hover {
   opacity: 1;
-  color: var(--color-error, #ef4444);
+  color: var(--color-error, var(--color-error));
 }
 
 [data-theme="light"] .extra-dir-entry {

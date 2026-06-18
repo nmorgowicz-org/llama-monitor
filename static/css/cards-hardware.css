@@ -54,18 +54,18 @@
 }
 
 .slot-pill.idle {
-  color: #fde68a;
-  border-color: rgba(245, 158, 11, 0.3);
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
   box-shadow:
     0 2px 8px rgba(0, 0, 0, 0.2),
-0 0 16px rgba(245, 158, 11, 0.12),
+    0 0 16px color-mix(in srgb, var(--color-warning) 12%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  }
+}
 
-  .slot-pill.idle:hover {
-    box-shadow:
-      0 4px 16px rgba(0, 0, 0, 0.3),
-      0 0 24px rgba(245, 158, 11, 0.22),
+.slot-pill.idle:hover {
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.3),
+    0 0 24px color-mix(in srgb, var(--color-warning) 22%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
   transform: translateY(-1px);
 }
@@ -108,10 +108,10 @@
   min-height: 24px;
   padding: 3px 9px;
   margin-left: 6px;
-  border: 1px solid rgba(191, 97, 106, 0.4);
+  border: 1px solid color-mix(in srgb, var(--color-error) 40%, transparent);
   border-radius: 999px;
-  background: rgba(191, 97, 106, 0.15);
-  color: #bf616a;
+  background: color-mix(in srgb, var(--color-error) 15%, transparent);
+  color: var(--color-error);
   font-size: 0.68rem;
   font-weight: 750;
   cursor: pointer;
@@ -119,9 +119,9 @@
 }
 
 .btn-detach-top:hover {
-  background: rgba(191, 97, 106, 0.25);
-  border-color: rgba(191, 97, 106, 0.6);
-  color: #d47981;
+  background: color-mix(in srgb, var(--color-error) 25%, transparent);
+  border-color: color-mix(in srgb, var(--color-error) 60%, transparent);
+  color: var(--color-error);
 }
 
 .btn-detach-top:active {
@@ -215,9 +215,9 @@
    width: 40px;
    height: 40px;
    border-radius: 50%;
-   background:
+  background:
      radial-gradient(circle, rgba(26, 27, 38, 0.98) 0 54%, transparent 55%),
-     conic-gradient(from -90deg, var(--gauge-color, #8fbcbb) calc(var(--pct, 0) * 1%), rgba(255, 255, 255, 0.06) 0);
+     conic-gradient(from -90deg, var(--gauge-color, var(--color-accent)) calc(var(--pct, 0) * 1%), rgba(255, 255, 255, 0.06) 0);
    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
    display: flex;
    align-items: center;
@@ -238,17 +238,17 @@
    line-height: 1;
  }
 
- .hw-temp-unavailable-badge {
+.hw-temp-unavailable-badge {
    display: inline-flex;
    align-items: center;
    gap: 4px;
    padding: 2px 6px;
    margin-top: 4px;
    border-radius: 4px;
-   background: rgba(235, 203, 131, 0.1);
-   border: 1px solid rgba(235, 203, 131, 0.2);
-   font-size: 10px;
-   color: #ebcb8b;
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 20%, transparent);
+  font-size: 10px;
+  color: var(--color-warning);
    animation: badgeFadeIn 0.3s ease-out;
  }
 
@@ -534,10 +534,10 @@
     animation: hw-ring-ambient 1.8s ease-in-out infinite;
   }
 
-  @keyframes hw-ring-ambient-warm {
-    0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 16px rgba(235, 203, 139, 0.12); }
-    50% { box-shadow: inset 0 0 0 1px rgba(235, 203, 139, 0.2), 0 0 32px rgba(235, 203, 139, 0.24); }
-  }
+@keyframes hw-ring-ambient-warm {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 16px color-mix(in srgb, var(--color-warning) 12%, transparent); }
+  50% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 20%, transparent), 0 0 32px color-mix(in srgb, var(--color-warning) 24%, transparent); }
+}
 
   .hw-ring-viz.is-warming {
     animation: hw-ring-ambient-warm 1.8s ease-in-out infinite;
@@ -1578,9 +1578,9 @@
   }
 
 /* Hardware card severity animations */
-  @keyframes hw-temp-breathe {
-    0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 24px rgba(244, 63, 94, 0.14); }
-    50% { box-shadow: inset 0 0 0 1px rgba(244, 63, 94, 0.2), 0 0 36px rgba(244, 63, 94, 0.28); }
+@keyframes hw-temp-breathe {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 24px color-mix(in srgb, var(--color-error) 14%, transparent); }
+  50% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-error) 20%, transparent), 0 0 36px color-mix(in srgb, var(--color-error) 28%, transparent); }
   }
 
   .hw-temp-gauge.is-warming {
@@ -1669,9 +1669,9 @@
   }
 
   /* Power cap pulse */
-  @keyframes hw-power-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
-    50% { box-shadow: 0 0 0 6px rgba(244, 63, 94, 0.12); }
+@keyframes hw-power-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-error) 0%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-error) 12%, transparent); }
   }
 
   .hw-power-capped {
@@ -2018,11 +2018,11 @@
 
 /* Idle pill */
 [data-theme="light"] .slot-pill.idle {
-  color: #15803d;
-  border-color: rgba(22, 163, 74, 0.45);
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 45%, transparent);
   box-shadow:
     0 2px 8px rgba(15, 23, 42, 0.12),
-    0 0 16px rgba(16, 185, 129, 0.1),
+    0 0 16px color-mix(in srgb, var(--color-success) 10%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
@@ -2038,15 +2038,15 @@
 
 /* Detach button */
 [data-theme="light"] .btn-detach-top {
-  background: rgba(220, 38, 38, 0.07);
-  border-color: rgba(220, 38, 38, 0.4);
-  color: #dc2626;
+  background: color-mix(in srgb, var(--color-error) 7%, transparent);
+  border-color: color-mix(in srgb, var(--color-error) 40%, transparent);
+  color: var(--color-error);
 }
 
 [data-theme="light"] .btn-detach-top:hover {
-  background: rgba(220, 38, 38, 0.12);
-  border-color: rgba(220, 38, 38, 0.6);
-  color: #dc2626;
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-error) 60%, transparent);
+  color: var(--color-error);
 }
 
 /* Bar backgrounds */

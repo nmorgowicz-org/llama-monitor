@@ -82,7 +82,7 @@
   color: #ffffff;
   border-color: color-mix(in srgb, var(--color-primary-soft) 50%, transparent);
   background:
-    radial-gradient(circle at top, var(--acc-15), rgba(59, 130, 246, 0.14)),
+    radial-gradient(circle at top, var(--acc-15), var(--acc-12)),
     radial-gradient(circle at bottom, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.97));
   box-shadow:
     0 8px 22px rgba(0, 0, 0, 0.28),
@@ -93,26 +93,26 @@
 .btn-spawn-wizard:hover {
   border-color: var(--acc-60);
   background:
-    radial-gradient(circle at top, var(--acc-25), rgba(59, 130, 246, 0.19)),
+    radial-gradient(circle at top, var(--acc-25), var(--acc-18)),
     radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.98));
   box-shadow:
     0 10px 28px var(--acc-18),
-    0 0 16px rgba(59, 130, 246, 0.1),
+    0 0 16px var(--acc-10),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
   transform: translateY(-1px);
   color: #ffffff;
 }
 
-/* Start: green “go” accent — must remain visible next to Stop */
+/* Start action: must remain visible next to Stop */
 .btn-start,
 .control-bar-zone .btn-start {
-  color: #4ade80;
+  color: var(--color-success);
   border-color: color-mix(in srgb, var(--color-success) 50%, transparent);
   background:
-    radial-gradient(circle at top, rgba(74, 222, 128, 0.16), rgba(22, 163, 74, 0.1)),
+    radial-gradient(circle at top, color-mix(in srgb, var(--color-success) 16%, transparent), color-mix(in srgb, var(--color-success) 10%, transparent)),
     radial-gradient(circle at bottom, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.97));
   box-shadow:
-    0 6px 18px rgba(22, 163, 74, 0.18),
+    0 6px 18px color-mix(in srgb, var(--color-success) 18%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
@@ -121,43 +121,43 @@
   color: #ffffff;
   border-color: var(--color-success);
   background:
-    radial-gradient(circle at top, rgba(74, 222, 128, 0.26), rgba(22, 163, 74, 0.19)),
+    radial-gradient(circle at top, color-mix(in srgb, var(--color-success) 26%, transparent), color-mix(in srgb, var(--color-success) 19%, transparent)),
     radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.98));
   box-shadow:
-    0 8px 28px rgba(22, 163, 74, 0.26),
+    0 8px 28px color-mix(in srgb, var(--color-success) 26%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transform: translateY(-1px);
 }
 
-/* Stop: red “stop” accent — stronger fill so it reads as the dominant action when running */
+/* Stop action: stronger fill so it reads as the dominant action when running */
 .btn-stop,
 .control-bar-zone .btn-stop {
-  color: #fecaca;
-  border-color: color-mix(in srgb, var(--color-danger) 70%, transparent);
+  color: color-mix(in srgb, var(--color-error) 60%, #ffffff);
+  border-color: color-mix(in srgb, var(--color-error) 70%, transparent);
   background:
-    radial-gradient(circle at top, rgba(248, 113, 113, 0.35), rgba(220, 38, 38, 0.22)),
+    radial-gradient(circle at top, color-mix(in srgb, var(--color-error) 35%, transparent), color-mix(in srgb, var(--color-error) 22%, transparent)),
     radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.99));
   box-shadow:
-    0 6px 20px rgba(220, 38, 38, 0.26),
+    0 6px 20px color-mix(in srgb, var(--color-error) 26%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
 .btn-stop:hover,
 .control-bar-zone .btn-stop:hover {
   color: #ffffff;
-  border-color: var(--color-danger);
+  border-color: var(--color-error);
   background:
-    radial-gradient(circle at top, rgba(248, 113, 113, 0.45), rgba(220, 38, 38, 0.35)),
+    radial-gradient(circle at top, color-mix(in srgb, var(--color-error) 45%, transparent), color-mix(in srgb, var(--color-error) 35%, transparent)),
     radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.99));
   box-shadow:
-    0 8px 30px rgba(220, 38, 38, 0.38),
+    0 8px 30px color-mix(in srgb, var(--color-error) 38%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transform: translateY(-1px);
 }
 
-/* Models (was Switch Model): blue-family accent, library action */
+/* Models (was Switch Model): palette accent, library action */
 .btn-switch-model {
-  color: rgba(147, 197, 253, 0.8);
+  color: var(--color-primary-light);
   border-color: color-mix(in srgb, var(--color-primary-soft) 35%, transparent);
   background:
     radial-gradient(circle at top, var(--acc-08), rgba(15, 23, 42, 0.97)),
@@ -233,37 +233,37 @@
 
 /* Start (disabled): keep visible in dark theme so you know it's the Start button */
 .control-bar-zone .btn-start:disabled {
-  color: rgba(74, 222, 128, 0.95) !important;
-  border-color: rgba(22, 163, 74, 0.5) !important;
+  color: color-mix(in srgb, var(--color-success) 95%, transparent) !important;
+  border-color: color-mix(in srgb, var(--color-success) 50%, transparent) !important;
   background:
-    radial-gradient(circle at top, rgba(22, 163, 74, 0.16), rgba(15, 23, 42, 0.99)) !important;
+    radial-gradient(circle at top, color-mix(in srgb, var(--color-success) 16%, transparent), rgba(15, 23, 42, 0.99)) !important;
   box-shadow:
-    0 4px 12px rgba(22, 163, 74, 0.18),
+    0 4px 12px color-mix(in srgb, var(--color-success) 18%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
 }
 
 [data-theme="light"] .control-bar-zone .btn-start:disabled {
-  color: rgba(21, 128, 61, 0.52) !important;
-  border-color: rgba(22, 163, 74, 0.24) !important;
+  color: color-mix(in srgb, var(--color-success) 52%, transparent) !important;
+  border-color: color-mix(in srgb, var(--color-success) 24%, transparent) !important;
   background:
     radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.74), transparent 26%),
-    linear-gradient(180deg, rgba(16, 185, 129, 0.14), rgba(22, 163, 74, 0.07)) !important;
+    linear-gradient(180deg, color-mix(in srgb, var(--color-success) 14%, transparent), color-mix(in srgb, var(--color-success) 7%, transparent)) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
 }
 
-/* Stop (disabled): faint red ghost */
+/* Stop (disabled): faint danger ghost */
 .control-bar-zone .btn-stop:disabled {
-  color: rgba(248, 113, 113, 0.45);
-  border-color: rgba(220, 38, 38, 0.2);
-  background: radial-gradient(circle at top, rgba(220, 38, 38, 0.07), rgba(15, 23, 42, 0.99));
+  color: color-mix(in srgb, var(--color-error) 45%, transparent);
+  border-color: color-mix(in srgb, var(--color-error) 20%, transparent);
+  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-error) 7%, transparent), rgba(15, 23, 42, 0.99));
   box-shadow: none;
 }
 
-/* Stop (disabled): keep a very faint red ghost */
+/* Stop (disabled): keep a very faint danger ghost */
 .btn-stop:disabled {
-  color: rgba(248, 113, 113, 0.25);
-  border-color: rgba(220, 38, 38, 0.1);
-  background: radial-gradient(circle at top, rgba(220, 38, 38, 0.05), rgba(15, 23, 42, 0.98));
+  color: color-mix(in srgb, var(--color-error) 25%, transparent);
+  border-color: color-mix(in srgb, var(--color-error) 10%, transparent);
+  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-error) 5%, transparent), rgba(15, 23, 42, 0.98));
 }
 
 /* Reduced motion */
@@ -429,23 +429,23 @@
 }
 
 .agent-tooltip-status.warning {
-    color: #ebcb8b;
+    color: var(--color-warning);
 }
 
-/* Agent update-available state — amber warning */
+/* Agent update-available state */
 .agent-status.update-available {
-    border-color: rgba(235, 203, 131, 0.4);
-    background: rgba(235, 203, 131, 0.08);
+    border-color: color-mix(in srgb, var(--color-warning) 40%, transparent);
+    background: color-mix(in srgb, var(--color-warning) 8%, transparent);
     animation: agent-update-pulse 2.5s ease-in-out infinite;
 }
 
 .agent-status.update-available .agent-indicator {
-    color: #ebcb8b;
+    color: var(--color-warning);
 }
 
 @keyframes agent-update-pulse {
-    0%, 100% { box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 12px rgba(235, 203, 131, 0.2); }
-    50% { box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 24px rgba(235, 203, 131, 0.4); }
+    0%, 100% { box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 12px color-mix(in srgb, var(--color-warning) 20%, transparent); }
+    50% { box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 24px color-mix(in srgb, var(--color-warning) 40%, transparent); }
 }
 
 /* Telemetry grade chip */
@@ -465,21 +465,21 @@
 }
 
 .telemetry-grade-chip.grade-ok {
-    color: var(--color-accent, var(--color-ok, #4ade80));
-    border-color: var(--color-accent, var(--color-ok, #4ade80));
-    background: color-mix(in srgb, var(--color-accent, var(--color-ok, #4ade80)) 10%, transparent);
+    color: var(--color-accent);
+    border-color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
 }
 
 .telemetry-grade-chip.grade-warning {
-    color: var(--color-warning, #fbbf24);
-    border-color: var(--color-warning, #fbbf24);
-    background: color-mix(in srgb, var(--color-warning, #fbbf24) 10%, transparent);
+    color: var(--color-warning);
+    border-color: var(--color-warning);
+    background: color-mix(in srgb, var(--color-warning) 10%, transparent);
 }
 
 .telemetry-grade-chip.grade-error {
-    color: var(--color-error, #f87171);
-    border-color: var(--color-error, #f87171);
-    background: color-mix(in srgb, var(--color-error, #f87171) 10%, transparent);
+    color: var(--color-error);
+    border-color: var(--color-error);
+    background: color-mix(in srgb, var(--color-error) 10%, transparent);
 }
 
 .btn-agent-fix {
@@ -575,7 +575,7 @@
 
 .capability-led.ok {
   background: var(--color-success);
-  box-shadow: 0 0 12px rgba(16, 185, 129, 0.46);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--color-success) 46%, transparent);
 }
 
 .capability-led.muted {
@@ -595,7 +595,7 @@
   padding: 2px 8px;
   margin-left: 8px;
   border-radius: 999px;
-  background: rgba(235, 203, 139, 0.2);
+  background: color-mix(in srgb, var(--color-warning) 20%, transparent);
   color: var(--color-warning);
   font-size: var(--text-2xs);
   font-weight: 600;
@@ -935,10 +935,10 @@
   flex-shrink: 0;
   padding: 3px 8px;
   border-radius: 999px;
-  /* Always-on amber accent: makes the pill obviously tappable even at rest */
-  border: 1px solid rgba(235, 203, 139, 0.28);
-  background: rgba(235, 203, 139, 0.05);
-  color: rgba(235, 203, 139, 0.6);
+  /* Always-on warning accent: makes the pill obviously tappable even at rest */
+  border: 1px solid color-mix(in srgb, var(--color-warning) 28%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 5%, transparent);
+  color: color-mix(in srgb, var(--color-warning) 60%, transparent);
   font-size: 9px;
   font-weight: 800;
   font-family: inherit;
@@ -951,7 +951,7 @@
 }
 
 .nav-sleep-pill:focus-visible {
-  outline: 2px solid rgba(235, 203, 139, 0.75);
+  outline: 2px solid color-mix(in srgb, var(--color-warning) 75%, transparent);
   outline-offset: 2px;
 }
 
@@ -982,79 +982,79 @@
 }
 
 .nav-sleep-pill:hover {
-  border-color: rgba(235, 203, 139, 0.55);
-  color: rgba(235, 203, 139, 0.95);
-  background: rgba(235, 203, 139, 0.09);
-  box-shadow: 0 0 8px rgba(235, 203, 139, 0.12);
+  border-color: color-mix(in srgb, var(--color-warning) 55%, transparent);
+  color: color-mix(in srgb, var(--color-warning) 95%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 9%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-warning) 12%, transparent);
 }
 
 .nav-sleep-pill:active {
   transform: translateY(1px);
-  box-shadow: 0 0 6px rgba(235, 203, 139, 0.18);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-warning) 18%, transparent);
 }
 
-/* Active low-power state: full amber glow */
+/* Active low-power state: full warning glow */
 .nav-cockpit.is-low-power .nav-sleep-pill {
-  border-color: rgba(235, 203, 139, 0.75);
-  color: #fbbf24;
-  background: radial-gradient(circle at top, rgba(235, 203, 139, 0.16), rgba(235, 203, 139, 0.08));
-  box-shadow: 0 0 10px rgba(235, 203, 139, 0.26), inset 0 0 6px rgba(235, 203, 139, 0.09);
+  border-color: color-mix(in srgb, var(--color-warning) 75%, transparent);
+  color: var(--color-warning);
+  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 16%, transparent), color-mix(in srgb, var(--color-warning) 8%, transparent));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-warning) 26%, transparent), inset 0 0 6px color-mix(in srgb, var(--color-warning) 9%, transparent);
 }
 
 .nav-cockpit.is-low-power .nav-sleep-pill:hover {
-  border-color: rgba(235, 203, 139, 0.9);
-  background: radial-gradient(circle at top, rgba(235, 203, 139, 0.22), rgba(235, 203, 139, 0.11));
+  border-color: color-mix(in srgb, var(--color-warning) 90%, transparent);
+  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 22%, transparent), color-mix(in srgb, var(--color-warning) 11%, transparent));
 }
 
 /* Light mode: make pill readable, interactive, and distinct */
 [data-theme="light"] .nav-sleep-pill {
-  border-color: rgba(180, 140, 40, 0.35);
-  background: rgba(180, 140, 40, 0.06);
-  color: #92600a;
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 6%, transparent);
+  color: var(--color-warning);
 }
 
 [data-theme="light"] .nav-sleep-pill:hover {
-  border-color: rgba(180, 140, 40, 0.6);
-  color: #92600a;
-  background: rgba(180, 140, 40, 0.1);
-  box-shadow: 0 0 8px rgba(180, 140, 40, 0.12);
+  border-color: color-mix(in srgb, var(--color-warning) 60%, transparent);
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-warning) 12%, transparent);
 }
 
 [data-theme="light"] .nav-cockpit.is-low-power .nav-sleep-pill {
-  border-color: rgba(180, 140, 40, 0.85);
-  color: #78350f;
-  background: radial-gradient(circle at top, rgba(180, 140, 40, 0.16), rgba(180, 140, 40, 0.08));
-  box-shadow: 0 0 10px rgba(180, 140, 40, 0.24), inset 0 0 6px rgba(180, 140, 40, 0.1);
+  border-color: color-mix(in srgb, var(--color-warning) 85%, transparent);
+  color: var(--color-warning);
+  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 16%, transparent), color-mix(in srgb, var(--color-warning) 8%, transparent));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-warning) 24%, transparent), inset 0 0 6px color-mix(in srgb, var(--color-warning) 10%, transparent);
 }
 
 [data-theme="light"] .nav-cockpit.is-low-power .nav-sleep-pill:hover {
-  border-color: rgba(180, 140, 40, 0.95);
-  background: radial-gradient(circle at top, rgba(180, 140, 40, 0.22), rgba(180, 140, 40, 0.11));
+  border-color: color-mix(in srgb, var(--color-warning) 95%, transparent);
+  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 22%, transparent), color-mix(in srgb, var(--color-warning) 11%, transparent));
 }
 
 /* Manual sleep: stronger glow + lock icon shows (via SVG opacity) to signal it's intentional */
 .nav-cockpit.is-low-power-manual .nav-sleep-pill {
-  border-color: rgba(235, 203, 139, 0.9);
-  color: #fcd34d;
-  background: radial-gradient(circle at top, rgba(235, 203, 139, 0.22), rgba(235, 203, 139, 0.12));
-  box-shadow: 0 0 14px rgba(235, 203, 139, 0.38), inset 0 0 8px rgba(235, 203, 139, 0.14);
+  border-color: color-mix(in srgb, var(--color-warning) 90%, transparent);
+  color: var(--color-warning);
+  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 22%, transparent), color-mix(in srgb, var(--color-warning) 12%, transparent));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--color-warning) 38%, transparent), inset 0 0 8px color-mix(in srgb, var(--color-warning) 14%, transparent);
 }
 
 .nav-cockpit.is-low-power-manual .nav-sleep-pill:hover {
-  border-color: rgba(235, 203, 139, 1);
-  background: radial-gradient(circle at top, rgba(235, 203, 139, 0.28), rgba(235, 203, 139, 0.16));
+  border-color: var(--color-warning);
+  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 28%, transparent), color-mix(in srgb, var(--color-warning) 16%, transparent));
 }
 
 [data-theme="light"] .nav-cockpit.is-low-power-manual .nav-sleep-pill {
-  border-color: rgba(180, 140, 40, 1);
-  color: #5c3d04;
-  background: radial-gradient(circle at top, rgba(180, 140, 40, 0.22), rgba(180, 140, 40, 0.12));
-  box-shadow: 0 0 14px rgba(180, 140, 40, 0.3), inset 0 0 8px rgba(180, 140, 40, 0.14);
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 22%, transparent), color-mix(in srgb, var(--color-warning) 12%, transparent));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--color-warning) 30%, transparent), inset 0 0 8px color-mix(in srgb, var(--color-warning) 14%, transparent);
 }
 
 [data-theme="light"] .nav-cockpit.is-low-power-manual .nav-sleep-pill:hover {
-  border-color: rgba(180, 140, 40, 1);
-  background: radial-gradient(circle at top, rgba(180, 140, 40, 0.28), rgba(180, 140, 40, 0.18));
+  border-color: var(--color-warning);
+  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 28%, transparent), color-mix(in srgb, var(--color-warning) 18%, transparent));
 }
 
 /* Subtle pulse on the moon icon when the pill is available but not yet active */
@@ -1796,9 +1796,9 @@ body.sidebar-collapsed .content-area {
 }
 
 .btn-update-action[data-state="error"] {
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.25);
-  color: #f87171;
+  background: color-mix(in srgb, var(--color-error) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-error) 25%, transparent);
+  color: var(--color-error);
 }
 
 /* --- Reduced Motion --- */
@@ -2226,11 +2226,11 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 }
 
 [data-theme="light"] .status-busy {
-  color: #b8860b;
+  color: var(--color-warning);
 }
 
 [data-theme="light"] .status-err {
-  color: #dc2626;
+  color: var(--color-error);
 }
 
 [data-theme="light"] .endpoint-url {
@@ -2252,10 +2252,10 @@ body.chat-focus-mode #focus-mode-exit-beacon {
   border-color: rgba(15, 23, 42, 0.1);
 }
 
-/* Metric badge (amber) darker for light mode */
+/* Metric badge darker for light mode */
 [data-theme="light"] .metric-badge {
-  background: rgba(217, 119, 6, 0.12);
-  color: #b8860b;
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  color: var(--color-warning);
 }
 
 /* Live log tail pill and small button */
