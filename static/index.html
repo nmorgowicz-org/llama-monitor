@@ -130,7 +130,7 @@
     <span class="capability-popover" id="capability-popover" role="status" aria-live="polite"></span>
     <div class="top-nav-bar">
         <div class="nav-left">
-            <a href="#" class="nav-logo" id="nav-logo">
+            <a href="#" class="nav-logo" id="nav-logo" title="Home">
                 <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M16 2C8.268 2 2 8.268 2 16C2 23.732 8.268 30 16 30C23.732 30 30 23.732 30 16C30 8.268 23.732 2 16 2ZM16 26C10.477 26 6 21.523 6 16C6 10.477 10.477 6 16 6C21.523 6 26 10.477 26 16C26 21.523 21.523 26 16 26Z" fill="var(--theme-primary)"/>
                     <path d="M16 12C14.6739 12 13.4021 12.5268 12.4645 13.4645C11.5268 14.4021 11 15.6739 11 17C11 18.3261 11.5268 19.5979 12.4645 20.5355C13.4021 21.4732 14.6739 22 16 22C17.3261 22 18.5979 21.4732 19.5355 20.5355C20.4732 19.5979 21 18.3261 21 17C21 15.6739 20.4732 14.4021 19.5355 13.4645C18.5979 12.5268 17.3261 12 16 12ZM16 20C14.9391 20 13.9217 19.5786 13.1716 18.8284C12.4214 18.0783 12 17.0609 12 16C12 14.9391 12.4214 13.9217 13.1716 13.1716C13.9217 12.4214 14.9391 12 16 12C17.0609 12 18.0783 12.4214 18.8284 13.1716C19.5786 13.9217 20 14.9391 20 16C20 17.0609 19.5786 18.0783 18.8284 18.8284C18.0783 19.5786 17.0609 20 16 20Z" fill="white"/>
@@ -4915,72 +4915,6 @@
                                   <span id="settings-context-depth-value" style="color:var(--text-muted);font-size:12px;min-width:24px;text-align:center;">10</span>
                               </div>
                           </label>
-                      </div>
-                      <div class="settings-card" style="margin-top:14px;">
-                          <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
-                              Prompt Templates
-                          </div>
-                          <label class="modal-field">
-                              General Prompt
-                              <textarea id="settings-prompt-general" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                          </label>
-                          <label class="modal-field">
-                              Plot Twist Prompt
-                              <textarea id="settings-prompt-plot-twist" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                          </label>
-                          <label class="modal-field">
-                               New Character Prompt
-                               <textarea id="settings-prompt-new-character" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Context Prompt
-                               <textarea id="settings-prompt-context" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Director Prompt
-                               <textarea id="settings-prompt-director" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Explicit Prompt
-                               <textarea id="settings-prompt-explicit" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Action Prompt
-                               <textarea id="settings-prompt-action" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Comedy Prompt
-                               <textarea id="settings-prompt-comedy" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Fantasy Prompt
-                               <textarea id="settings-prompt-fantasy" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Horror Prompt
-                               <textarea id="settings-prompt-horror" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Mystery Prompt
-                               <textarea id="settings-prompt-mystery" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Noir Prompt
-                               <textarea id="settings-prompt-noir" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Romance Prompt
-                               <textarea id="settings-prompt-romance" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Sci-Fi Prompt
-                               <textarea id="settings-prompt-sci-fi" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Thriller Prompt
-                               <textarea id="settings-prompt-thriller" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <button type="button" id="settings-reset-prompts" class="btn btn-secondary" style="margin-top:8px;font-size:12px;padding:6px 12px;">Reset Prompts to Defaults</button>
                       </div>
                    </div>
                  <div class="settings-pane" id="settings-performance">

@@ -641,8 +641,9 @@ function renderCapabilityPopover(d, l, generationAvailable, contextLiveAvailable
     }
 
     // eslint-disable-next-line no-unsanitized/property -- label and value are all hardcoded string literals from the rows array above; ok is boolean
-    popover.innerHTML = rows.map(([label, value, ok]) => {
-        return '<span class="capability-row"><span class="capability-led ' + (ok ? 'ok' : 'muted') + '"></span><span>' + label + '</span><strong class="capability-val">' + value + '</strong></span>';
+    popover.innerHTML = '<div class="capability-title">Telemetry sources</div>' + rows.map(([label, value, ok]) => {
+        const tone = ok ? 'live' : (value === 'waiting' ? 'waiting' : 'absent');
+        return '<span class="capability-row"><span class="capability-led ' + (ok ? 'ok' : 'muted') + '"></span><span class="capability-label">' + label + '</span><strong class="capability-val" data-tone="' + tone + '">' + value + '</strong></span>';
     }).join('');
 }
 

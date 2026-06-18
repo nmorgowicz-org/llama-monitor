@@ -7,6 +7,7 @@ import { showSessionPanel, hideSessionPanel } from './chat-sessions-sidebar.js';
 import { isFocusModeActive, exitFocusMode } from './chat-focus-mode.js';
 import { renderCapabilityPopover } from './dashboard-render.js';
 import { showToast } from './toast.js';
+import { switchView } from './setup-view.js';
 
 export function switchTab(name) {
     if (name !== 'chat' && isFocusModeActive()) exitFocusMode();
@@ -340,10 +341,15 @@ export function initNav() {
         collapseBtn.addEventListener('click', toggleSidebarCollapse);
     }
 
-    // Bind nav logo (prevent default link navigation)
+    // Bind nav logo — returns to home (setup) view when in monitor view
     const navLogo = document.getElementById('nav-logo');
     if (navLogo) {
-        navLogo.addEventListener('click', event => event.preventDefault());
+        navLogo.addEventListener('click', event => {
+            event.preventDefault();
+            if (!document.body.classList.contains('setup-active')) {
+                switchView('setup');
+            }
+        });
     }
 
     const cockpit = document.getElementById('nav-cockpit');

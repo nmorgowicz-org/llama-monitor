@@ -816,6 +816,46 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
+/* Context card view pills (same pattern as auth-mode-pills above) */
+#settings-modal #settings-ctx-view-pills .cert-mode-pill {
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease;
+}
+
+#settings-modal #settings-ctx-view-pills .cert-mode-pill:hover {
+  transform: translateY(-1px);
+  border-color: var(--acc-30);
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.28),
+    0 0 0 1px var(--acc-15);
+  color: var(--color-text-primary);
+}
+
+#settings-modal #settings-ctx-view-pills .cert-mode-pill.active {
+  color: var(--color-text-primary);
+  border-color: var(--acc-50);
+  background:
+    radial-gradient(circle at 18% 14%, var(--acc-20), transparent 28%),
+    linear-gradient(180deg, var(--acc-25), var(--acc-12));
+  box-shadow:
+    0 10px 26px var(--acc-25),
+    0 0 18px var(--acc-15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
 /* --- 4.3. Help Text Callout --- */
 
 #settings-modal .settings-help {

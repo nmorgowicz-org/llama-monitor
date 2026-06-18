@@ -141,23 +141,7 @@ export function collectSettings() {
             auto_sleep_when_all_hidden: sleepWhenHidden !== undefined ? sleepWhenHidden : true,
             auto_sleep_idle_secs: sleepIdleSecs,
         },
-        suggestion_prompts: {
-            general: document.getElementById('settings-prompt-general')?.value || '',
-            'plot-twist': document.getElementById('settings-prompt-plot-twist')?.value || '',
-            'new-character': document.getElementById('settings-prompt-new-character')?.value || '',
-            context: document.getElementById('settings-prompt-context')?.value || '',
-            director: document.getElementById('settings-prompt-director')?.value || '',
-            explicit: document.getElementById('settings-prompt-explicit')?.value || '',
-            action: document.getElementById('settings-prompt-action')?.value || '',
-            comedy: document.getElementById('settings-prompt-comedy')?.value || '',
-            fantasy: document.getElementById('settings-prompt-fantasy')?.value || '',
-            horror: document.getElementById('settings-prompt-horror')?.value || '',
-            mystery: document.getElementById('settings-prompt-mystery')?.value || '',
-            noir: document.getElementById('settings-prompt-noir')?.value || '',
-            romance: document.getElementById('settings-prompt-romance')?.value || '',
-            'sci-fi': document.getElementById('settings-prompt-sci-fi')?.value || '',
-            thriller: document.getElementById('settings-prompt-thriller')?.value || '',
-        },
+        suggestion_prompts: settingsState.suggestion_prompts || {},
     };
 }
 
@@ -311,16 +295,6 @@ export function applySettings(s) {
         const valueEl = document.getElementById('settings-context-depth-value');
         if (el) el.value = s.context_depth;
         if (valueEl) valueEl.textContent = String(s.context_depth);
-    }
-
-    if (s.suggestion_prompts) {
-        const prompts = s.suggestion_prompts;
-        const generalEl = document.getElementById('settings-prompt-general');
-        const plotTwistEl = document.getElementById('settings-prompt-plot-twist');
-        const newCharEl = document.getElementById('settings-prompt-new-character');
-        if (generalEl && prompts.general) generalEl.value = prompts.general;
-        if (plotTwistEl && prompts['plot-twist']) plotTwistEl.value = prompts['plot-twist'];
-        if (newCharEl && prompts['new-character']) newCharEl.value = prompts['new-character'];
     }
 
     // Update central settingsState so feature modules read from a single source
@@ -626,6 +600,7 @@ function _bindSettingsEvents() {
             document.querySelectorAll('.settings-pane').forEach(p => p.classList.remove('active'));
             tab.classList.add('active');
             document.getElementById('settings-' + target)?.classList.add('active');
+            document.querySelector('#settings-modal .settings-content')?.scrollTo({ top: 0, behavior: 'instant' });
 
             if (target === 'security') {
                 loadTlsConfig();
@@ -702,21 +677,6 @@ function _bindSettingsEvents() {
         });
     });
 
-    // Reset prompts to defaults
-    document.getElementById('settings-reset-prompts')?.addEventListener('click', () => {
-        const defaults = {
-            general: "You are a creative brainstorming partner. Based on the conversation below, suggest {count} varied, actionable next steps the user could take.\n\nFormat as a numbered list. Prioritize variety: dialogue, action, investigation, social, creative approaches.\n\n[conversation context]",
-            'plot-twist': "You are a plot twist specialist. Based on the conversation below, suggest {count} unexpected, surprising events that could happen next.\n\nFormat as a numbered list. Prioritize: betrayals, revelations, power reversals, unexpected arrivals, hidden truths.\n\n[conversation context]",
-            'new-character': "You are a character introduction specialist. Based on the conversation below, suggest {count} new characters that could enter the story.\n\nFormat as: [Character Name]: [Brief description and how they connect to current story]\n\n[conversation context]",
-        };
-        const generalEl = document.getElementById('settings-prompt-general');
-        const plotTwistEl = document.getElementById('settings-prompt-plot-twist');
-        const newCharEl = document.getElementById('settings-prompt-new-character');
-        if (generalEl) generalEl.value = defaults.general;
-        if (plotTwistEl) plotTwistEl.value = defaults['plot-twist'];
-        if (newCharEl) newCharEl.value = defaults['new-character'];
-        markSettingsDirty();
-    });
 }
 
 // ── GPU info (Settings > GPU tab) ────────────────────────────────────────────

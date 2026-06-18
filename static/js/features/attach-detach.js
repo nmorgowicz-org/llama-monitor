@@ -244,20 +244,16 @@ export async function doStop() {
     }
 
     actions.push({
-        id: 'wizard',
-        label: 'Setup wizard',
+        id: 'home',
+        label: '↩ Home',
         primary: false,
-        handler: () => {
-            if (!document.body.classList.contains('setup-active')) {
-                switchView('setup');
-            }
-        },
+        handler: () => switchView('setup'),
     });
 
     showToastWithActions(
         stoppedName + ' stopped',
         'info',
-        stoppedPresetId ? 'Restart with the same preset, or head to setup.' : 'Head to setup to start a new session.',
+        stoppedPresetId ? 'Restart with the same preset, or return home.' : 'Return home to start a new session.',
         actions,
         { duration: 10000 },
     );
