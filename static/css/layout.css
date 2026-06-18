@@ -1283,6 +1283,20 @@ body:not(.setup-active) .nav-logo:active {
   box-shadow: 0 0 0 3px var(--acc-15);
 }
 
+[data-theme="light"] #server-endpoint,
+[data-theme="light"] .modal-field input,
+[data-theme="light"] .modal-field select,
+[data-theme="light"] .modal-field textarea,
+[data-theme="light"] .fb-path-input {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(245, 246, 250, 0.98));
+  border-color: rgba(15, 15, 25, 0.12);
+  color: var(--color-text-primary);
+  box-shadow:
+    0 1px 3px rgba(15, 15, 25, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
 /* ── Theme toggle (sun/moon) ─────────────────────────────────────────────── */
 .nav-theme-toggle {
   display: grid;
@@ -2190,13 +2204,42 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 }
 
 [data-theme="light"] .endpoint-health-strip {
-  background: rgba(255, 255, 255, 0.97);
+  background: #ffffff;
   border-bottom-color: rgba(15, 23, 42, 0.08);
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.07);
+  backdrop-filter: none;
 }
 
 [data-theme="light"] .endpoint-health-strip::before {
   background: linear-gradient(90deg, transparent, var(--acc-08), transparent);
+}
+
+/* Remap the dark-mode glow animation to a light-appropriate one */
+[data-theme="light"] .endpoint-status-wrap .endpoint-status {
+  animation-name: status-badge-glow-light;
+}
+
+@keyframes status-badge-glow-light {
+  0%, 100% {
+    background: rgba(15, 23, 42, 0.03);
+    border-color: rgba(15, 23, 42, 0.12);
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+  }
+  50% {
+    background: rgba(15, 23, 42, 0.05);
+    border-color: rgba(15, 23, 42, 0.18);
+    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.09);
+  }
+}
+
+[data-theme="light"] .endpoint-status-wrap .endpoint-status:hover,
+[data-theme="light"] .endpoint-status-wrap.open .endpoint-status {
+  background: rgba(15, 23, 42, 0.06);
+  border-color: var(--acc-40);
+  box-shadow:
+    0 4px 14px rgba(15, 23, 42, 0.12),
+    0 0 16px var(--acc-10);
+  transform: translateY(-1px);
 }
 
 [data-theme="light"] .top-nav-bar {
