@@ -141,6 +141,38 @@ function buildIdleCockpitPoints() {
     return [0.18, 0.42, 0.3, 0.54, 0.36, 0.62, 0.4, 0.5, 0.34, 0.46];
 }
 
+function refreshMonitoringChip(isSleeping, isManualSleep, hasActiveEndpoint) {
+    const chip = document.getElementById('nav-monitoring-chip');
+    if (!chip) return;
+
+    chip.style.display = hasActiveEndpoint ? 'inline-flex' : 'none';
+    if (!hasActiveEndpoint) return;
+
+    const dot = document.getElementById('nav-monitoring-dot');
+    const label = document.getElementById('nav-monitoring-label');
+
+    const unavailable = chip.getAttribute('data-unavailable') === 'true';
+    chip.classList.toggle('is-paused', isSleeping);
+    chip.setAttribute('aria-pressed', isSleeping ? 'true' : 'false');
+
+    if (dot) {
+        dot.className = 'status-dot ' + (isSleeping ? 'warning' : 'ok');
+    }
+    if (label) {
+        label.textContent = isSleeping ? 'Paused' : 'Monitoring';
+    }
+
+    if (unavailable) {
+        chip.setAttribute('title', 'Monitoring control is not available on this server.');
+    } else if (isManualSleep) {
+        chip.setAttribute('title', 'Monitoring paused (manual) — llama-server keeps running. Click to resume.');
+    } else if (isSleeping) {
+        chip.setAttribute('title', 'Monitoring paused (idle timeout) — llama-server keeps running. Click to resume.');
+    } else {
+        chip.setAttribute('title', 'Dashboard monitoring active — click to pause telemetry while server keeps running.');
+    }
+}
+
 export function refreshTopCockpit() {
     const cockpit = document.getElementById('nav-cockpit');
     if (!cockpit) return;
@@ -160,14 +192,13 @@ export function refreshTopCockpit() {
     const genDisplayRate = genRate > 0 ? genRate : (l?.last_generation_tokens_per_sec || 0);
     const generationActive = !!l?.slot_generation_active || (l?.slots_processing || 0) > 0 || genRate > 0;
 
-    // T-057: cockpit pill modes: Active / Low Power (manual) / Low Power (auto) / idle
     const isSleeping = wsData?.sleep_mode === true;
     const isManualSleep = isSleeping && wsData?.sleep_mode_manual === true;
     let label = 'idle';
     let stateClass = 'idle';
 
     if (isSleeping) {
-        label = 'low power';
+        label = 'paused';
         stateClass = 'sleep';
     } else if (!hasActiveEndpoint) {
         label = 'attach';
@@ -185,46 +216,10 @@ export function refreshTopCockpit() {
     }
     cockpit.classList.toggle('is-live', stateClass === 'live');
     cockpit.classList.toggle('is-idle', stateClass !== 'live' && stateClass !== 'sleep');
-    cockpit.classList.toggle('is-low-power', stateClass === 'sleep');
-    cockpit.classList.toggle('is-low-power-manual', isManualSleep);
     cockpit.classList.toggle('has-session', hasActiveEndpoint);
 
-    // Keep Low Power pill tooltip and label in sync with actual mode
-    const sleepPill = document.getElementById('nav-sleep-pill');
-    const sleepPillLabel = document.getElementById('nav-sleep-pill-label');
-    if (sleepPillLabel) {
-        sleepPillLabel.textContent = isSleeping ? 'Sleeping' : 'Low Power';
-    }
-    if (sleepPill) {
-        const unavailable = sleepPill.getAttribute('data-unavailable') === 'true';
-        sleepPill.disabled = !hasActiveEndpoint || unavailable;
-        sleepPill.setAttribute('aria-pressed', isSleeping ? 'true' : 'false');
-        if (unavailable) {
-            sleepPill.setAttribute('title', 'Low Power control is not available on this server.');
-            sleepPill.setAttribute('aria-label', 'Low Power unavailable');
-        } else if (!hasActiveEndpoint) {
-            sleepPill.setAttribute('title', 'Low Power is available after a local server session is active.');
-            sleepPill.setAttribute('aria-label', 'Low Power unavailable until a local server session is active');
-        } else if (isManualSleep) {
-            sleepPill.setAttribute(
-                'title',
-                'Low Power: ON (manual) — llama-server stays running; click to resume full telemetry.'
-            );
-            sleepPill.setAttribute('aria-label', 'Turn Low Power off');
-        } else if (isSleeping) {
-            sleepPill.setAttribute(
-                'title',
-                'Low Power: ON (auto) — Idle timeout triggered; click to resume full telemetry.'
-            );
-            sleepPill.setAttribute('aria-label', 'Turn Low Power off');
-        } else {
-            sleepPill.setAttribute(
-                'title',
-                'Low Power: OFF — llama-server keeps running with minimal overhead; click to reduce telemetry.'
-            );
-            sleepPill.setAttribute('aria-label', 'Turn Low Power on');
-        }
-    }
+    // Update monitoring chip in nav-right
+    refreshMonitoringChip(isSleeping, isManualSleep, hasActiveEndpoint);
 
     if (throughputEl) {
         throughputEl.textContent = 'P ' + (promptDisplayRate > 0 ? promptDisplayRate.toFixed(0) : '—') + ' · G ' + (genDisplayRate > 0 ? genDisplayRate.toFixed(0) : '—');
@@ -357,51 +352,36 @@ export function initNav() {
         });
     }
 
-    const sleepPill = document.getElementById('nav-sleep-pill');
-    if (sleepPill) {
-        sleepPill.addEventListener('click', async (e) => {
+    const monitoringChip = document.getElementById('nav-monitoring-chip');
+    if (monitoringChip) {
+        monitoringChip.addEventListener('click', async (e) => {
             e.stopPropagation();
 
-            // If previously marked unavailable (e.g., 404), do nothing further
-            if (sleepPill.getAttribute('data-unavailable') === 'true') return;
-
-            // Avoid accidental double-taps
-            if (sleepPill.getAttribute('data-disabled') === 'true') return;
-            sleepPill.setAttribute('data-disabled', 'true');
+            if (monitoringChip.getAttribute('data-unavailable') === 'true') return;
+            if (monitoringChip.getAttribute('data-disabled') === 'true') return;
+            monitoringChip.setAttribute('data-disabled', 'true');
 
             const wasSleeping = wsData?.sleep_mode === true;
-            console.warn('[sleep] toggle click: wasSleeping=', wasSleeping, 'wsData.sleep_mode_manual=', wsData?.sleep_mode_manual);
 
             try {
                 const auth = window.authHeaders ? window.authHeaders() : {};
                 const res = await fetch('/api/sleep-mode/toggle', {
                     method: 'POST',
-                    headers: {
-                        ...auth,
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { ...auth, 'Content-Type': 'application/json' },
                 });
 
                 if (!res.ok) {
                     if (res.status === 404) {
-                        showToast('Low Power control is not available on this server.', 'info');
-                        // Disable pill to avoid repeated failed clicks
-                        sleepPill.setAttribute('data-unavailable', 'true');
-                        sleepPill.disabled = true;
-                        sleepPill.style.opacity = '0.4';
-                        sleepPill.style.cursor = 'not-allowed';
-                        sleepPill.setAttribute(
-                            'title',
-                            'Low Power control is not available on this server.'
-                        );
+                        showToast('Monitoring control is not available on this server.', 'info');
+                        monitoringChip.setAttribute('data-unavailable', 'true');
+                        monitoringChip.setAttribute('title', 'Monitoring control is not available on this server.');
                     } else {
-                        showToast('Failed to toggle Low Power mode.', 'error');
+                        showToast('Failed to toggle monitoring.', 'error');
                     }
                     return;
                 }
 
-                // Attempt to read the new mode from the response
-                let nextSleeping = wasSleeping; // fallback
+                let nextSleeping = wasSleeping;
                 try {
                     const data = await res.json();
                     if (data != null && typeof data.sleep_mode === 'boolean') {
@@ -410,34 +390,22 @@ export function initNav() {
                         nextSleeping = data.enabled;
                     }
                 } catch (_) {
-                    // If not JSON, assume toggled
                     nextSleeping = !wasSleeping;
                 }
 
-                console.warn('[sleep] API response: nextSleeping=', nextSleeping);
-                // Reflect change in local state immediately (WS will confirm)
-                setWsData({
-                    ...(wsData || {}),
-                    sleep_mode: nextSleeping,
-                    sleep_mode_manual: nextSleeping,
-                });
-                console.warn('[sleep] optimistic wsData set, calling refreshTopCockpit');
+                setWsData({ ...(wsData || {}), sleep_mode: nextSleeping, sleep_mode_manual: nextSleeping });
                 refreshTopCockpit();
-                sleepPill.setAttribute('aria-pressed', nextSleeping ? 'true' : 'false');
 
                 if (nextSleeping) {
-                    showToast('Low Power: ON — llama-server keeps running; telemetry paused.', 'success');
+                    showToast('Monitoring paused — llama-server keeps running.', 'success');
                 } else {
-                    showToast('Low Power: OFF — full telemetry resumed.', 'success');
+                    showToast('Monitoring resumed.', 'success');
                 }
-            } catch (err) {
-                showToast('Low Power toggle failed (network error).', 'error');
+            } catch (_err) {
+                showToast('Monitoring toggle failed (network error).', 'error');
             } finally {
-                // Allow re-toggling after a short debounce (unless marked unavailable)
-                if (sleepPill.getAttribute('data-unavailable') !== 'true') {
-                    setTimeout(() => {
-                        sleepPill.removeAttribute('data-disabled');
-                    }, 600);
+                if (monitoringChip.getAttribute('data-unavailable') !== 'true') {
+                    setTimeout(() => monitoringChip.removeAttribute('data-disabled'), 600);
                 }
             }
         });

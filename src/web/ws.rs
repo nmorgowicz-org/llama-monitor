@@ -66,7 +66,7 @@ pub fn ws_route(
                     let client_visible = Arc::new(AtomicBool::new(true));
 
                     // T-051: On open: wake auto-sleep only. Manual sleep persists across reconnects.
-                    let asleep_on_open = *state.sleep_mode.borrow();
+                    let asleep_on_open = state.sleep_mode.load(Ordering::Relaxed);
                     let manual_on_open = state.sleep_mode_manual.load(Ordering::Relaxed);
                     eprintln!(
                         "[sleep] WS open: asleep={} manual={}{}",
@@ -75,7 +75,7 @@ pub fn ws_route(
                         if asleep_on_open && !manual_on_open { " → waking (auto-sleep)" } else { "" }
                     );
                     if asleep_on_open && !manual_on_open {
-                        state.sleep_mode.send(false).ok();
+                        state.sleep_mode.store(false, Ordering::Relaxed);
                         state.sleep_notify.notify_waiters();
                     }
 
@@ -95,7 +95,7 @@ pub fn ws_route(
                                 // Check if the push interval has changed in settings
                                 let current_ms = {
                                     let settings = s.ui_settings.lock().unwrap();
-                                    let asleep = *s.sleep_mode.borrow();
+                                    let asleep = s.sleep_mode.load(Ordering::Relaxed);
                                     clamped_push_interval_ms(&settings, asleep)
                                 };
                                 if current_ms != last_interval_ms {
@@ -103,7 +103,7 @@ pub fn ws_route(
                                 }
 
                                 // T-049 / T-053: effective interval depends on visibility + sleep_mode
-                                let asleep = *s.sleep_mode.borrow();
+                                let asleep = s.sleep_mode.load(Ordering::Relaxed);
                                 let client_vis = update_visible.load(Ordering::Relaxed);
                                 let effective_interval_ms = if asleep {
                                     last_interval_ms.max(WS_PUSH_INTERVAL_SLEEP_MS)
@@ -128,7 +128,7 @@ pub fn ws_route(
 
                                 let running = *s.server_running.lock().unwrap();
                                 let local_running = *s.local_server_running.lock().unwrap();
-                                let asleep = *s.sleep_mode.borrow();
+                                let asleep = s.sleep_mode.load(Ordering::Relaxed);
 
                                 // T-049: when asleep, send minimal payload (heartbeat + critical flags)
                                 let json = if asleep {
@@ -352,10 +352,10 @@ pub fn ws_route(
 
                             // T-051: wake auto-sleep on active visibility; manual sleep is exempt
                             if mode == Some("active") || visible == Some(true) {
-                                let asleep = *state.sleep_mode.borrow();
+                                let asleep = state.sleep_mode.load(Ordering::Relaxed);
                                 let manual = state.sleep_mode_manual.load(Ordering::Relaxed);
                                 if asleep && !manual {
-                                    state.sleep_mode.send(false).ok();
+                                    state.sleep_mode.store(false, Ordering::Relaxed);
                                     state.sleep_notify.notify_waiters();
                                 }
                             }
@@ -364,9 +364,9 @@ pub fn ws_route(
                         // T-051: explicit wake command from client — clears manual flag too
                         if msg_type == Some("wake") {
                             state.sleep_mode_manual.store(false, Ordering::Relaxed);
-                            let asleep = *state.sleep_mode.borrow();
+                            let asleep = state.sleep_mode.load(Ordering::Relaxed);
                             if asleep {
-                                state.sleep_mode.send(false).ok();
+                                state.sleep_mode.store(false, Ordering::Relaxed);
                                 state.sleep_notify.notify_waiters();
                             }
                         }

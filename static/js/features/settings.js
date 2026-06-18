@@ -79,7 +79,7 @@ export function collectSettings() {
         }
     }
 
-    // T-058: read auto-sleep policy settings. Manual Low Power is controlled by the cockpit nav pill.
+    // T-058: read auto-pause policy settings. Manual monitoring toggle is the nav-monitoring-chip.
     const sleepWhenHiddenEl = document.getElementById('settings-sleep-mode-when-hidden');
     const sleepIdleEl = document.getElementById('settings-sleep-mode-idle');
 

@@ -689,7 +689,7 @@ pub struct AppState {
     pub last_spawn_cmd: Arc<Mutex<String>>,
 
     // Sleep/low-power mode (T-042/T-043)
-    pub sleep_mode: Arc<tokio::sync::watch::Sender<bool>>,
+    pub sleep_mode: Arc<AtomicBool>,
     pub sleep_mode_manual: Arc<AtomicBool>,
     pub sleep_mode_config: Arc<Mutex<SleepModeConfig>>,
     pub sleep_notify: Arc<tokio::sync::Notify>,
@@ -738,7 +738,8 @@ impl AppState {
         // T-042/T-043/T-044: sleep_mode and config initialization
         let sleep_cfg = ui_settings.sleep_mode.clone();
 
-        let (sleep_mode_tx, _) = tokio::sync::watch::channel(false);
+        // sleep_mode stored as AtomicBool; watch::channel was used before but send()
+        // silently fails when no receivers exist, so the value never updated.
 
         let last_activity_ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -788,7 +789,7 @@ impl AppState {
             tls_config: Arc::new(Mutex::new(tls_config)),
             monitor_inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
             last_spawn_cmd: Arc::new(Mutex::new(String::new())),
-            sleep_mode: Arc::new(sleep_mode_tx),
+            sleep_mode: Arc::new(AtomicBool::new(false)),
             sleep_mode_manual: Arc::new(AtomicBool::new(false)),
             sleep_mode_config: Arc::new(Mutex::new(sleep_cfg)),
             sleep_notify: Arc::new(tokio::sync::Notify::new()),

@@ -5163,8 +5163,10 @@ fn record_activity(state: &AppState) {
     let is_manual = state
         .sleep_mode_manual
         .load(std::sync::atomic::Ordering::Relaxed);
-    if !is_manual && *state.sleep_mode.borrow() {
-        state.sleep_mode.send(false).ok();
+    if !is_manual && state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed) {
+        state
+            .sleep_mode
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         state.sleep_notify.notify_waiters();
     }
 }
@@ -5192,7 +5194,7 @@ pub fn api_sleep_mode_get(
             if !check_api_token(&auth, &cfg) {
                 return unauthorized_api_token();
             }
-            let enabled = *state.sleep_mode.borrow();
+            let enabled = state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
             let config = state.sleep_mode_config.lock().unwrap().clone();
             Box::new(warp::reply::json(&serde_json::json!({
                 "enabled": enabled,
@@ -5215,17 +5217,19 @@ pub fn api_sleep_mode_toggle(
                 return unauthorized_api_token();
             }
             touch_activity(&state);
-            let enabled = *state.sleep_mode.borrow();
+            let enabled = state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
             let next = !enabled;
             // Track manual intent so wake-on-reconnect/visibility won't override it
             state
                 .sleep_mode_manual
                 .store(next, std::sync::atomic::Ordering::Relaxed);
-            state.sleep_mode.send(next).ok();
+            state
+                .sleep_mode
+                .store(next, std::sync::atomic::Ordering::Relaxed);
             state.sleep_notify.notify_waiters();
             eprintln!(
-                "[sleep] manual toggle: {} → {} (manual={})",
-                enabled, next, next
+                "[monitoring] manual toggle: monitoring={} (manual={})",
+                !next, next
             );
             Box::new(warp::reply::json(&serde_json::json!({
                 "ok": true,
@@ -5259,7 +5263,9 @@ pub fn api_sleep_mode_set(
                 state
                     .sleep_mode_manual
                     .store(enabled, std::sync::atomic::Ordering::Relaxed);
-                state.sleep_mode.send(enabled).ok();
+                state
+                    .sleep_mode
+                    .store(enabled, std::sync::atomic::Ordering::Relaxed);
                 state.sleep_notify.notify_waiters();
                 Box::new(warp::reply::json(&serde_json::json!({
                     "ok": true,

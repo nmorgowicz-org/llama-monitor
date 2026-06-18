@@ -141,10 +141,6 @@
                 <span class="nav-cockpit-chip nav-cockpit-spec hidden" id="nav-cockpit-spec" title="Speculative decoding efficiency — tokens accepted per decode pass"></span>
                 <span class="nav-cockpit-chip nav-cockpit-context" id="nav-cockpit-context" title="Highest chat context pressure">Ctx &mdash;</span>
                 <span class="nav-cockpit-chip nav-cockpit-gpu" id="nav-cockpit-gpu" title="Hottest GPU temperature">GPU &mdash;</span>
-                <button class="nav-sleep-pill" id="nav-sleep-pill" type="button" aria-pressed="false" title="Toggle Low Power mode — llama-server stays running; telemetry and UI reduce activity">
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-                    Low Power
-                </button>
                 <svg class="metric-sparkline nav-cockpit-spark" id="nav-cockpit-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
             </div>
         </div>
@@ -160,6 +156,10 @@
                     <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/>
                 </svg>
                 <span id="update-pill-text"></span>
+            </button>
+            <button class="nav-monitoring-chip" id="nav-monitoring-chip" type="button" aria-pressed="false" title="Dashboard monitoring active — click to pause telemetry" style="display:none;">
+                <span class="status-dot ok" id="nav-monitoring-dot"></span>
+                <span id="nav-monitoring-label">Monitoring</span>
             </button>
             <button class="nav-theme-toggle" id="nav-theme-toggle" type="button" title="Toggle light / dark mode" aria-label="Toggle light / dark mode">
                 <!-- Sun icon (shown in dark mode) -->
@@ -4955,13 +4955,13 @@
                         </div>
                     </div>
 
-                    <!-- T-058: Low Power / auto-sleep controls -->
+                    <!-- T-058: auto-sleep / monitoring controls -->
                     <div class="settings-card">
                         <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
-                            Auto-Sleep
+                            Auto-Pause
                         </div>
                         <p class="settings-help">
-                            Automatically reduce dashboard activity when you're not looking. The llama-server keeps running; use the cockpit Low Power button for manual control.
+                            Automatically pause dashboard monitoring when you're not looking. The llama-server keeps running; use the Monitoring chip in the nav bar to pause manually.
                         </p>
 
                         <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:6px 0;">

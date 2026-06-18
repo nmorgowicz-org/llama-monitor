@@ -928,143 +928,91 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
-.nav-sleep-pill {
-  display: none;
+/* ── Monitoring chip (nav-right) ─────────────────────────────────────────── */
+.nav-monitoring-chip {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  padding: 3px 8px;
+  gap: 5px;
+  padding: 3px 8px 3px 6px;
   border-radius: 999px;
-  /* Always-on warning accent: makes the pill obviously tappable even at rest */
-  border: 1px solid color-mix(in srgb, var(--color-warning) 28%, transparent);
-  background: color-mix(in srgb, var(--color-warning) 5%, transparent);
-  color: color-mix(in srgb, var(--color-warning) 60%, transparent);
-  font-size: 9px;
-  font-weight: 800;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-secondary);
+  font-size: 0.62rem;
+  font-weight: 700;
   font-family: inherit;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  cursor: pointer;
-  transition: border-color 160ms ease, color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+  letter-spacing: 0.05em;
   white-space: nowrap;
+  cursor: pointer;
   user-select: none;
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: border-color 160ms ease, color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
 
-.nav-sleep-pill:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--color-warning) 75%, transparent);
+.nav-monitoring-chip:hover {
+  border-color: color-mix(in srgb, var(--color-text-secondary) 50%, transparent);
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.nav-monitoring-chip:active {
+  transform: translateY(1px);
+}
+
+.nav-monitoring-chip:focus-visible {
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
-/* Always show the pill — was gated on .has-session which hid it entirely */
-.nav-cockpit .nav-sleep-pill {
-  display: inline-flex;
-}
-
-/* Dim (but don't hide) when no session is active */
-.nav-cockpit:not(.has-session) .nav-sleep-pill {
-  opacity: 0.45;
-  pointer-events: none;
-}
-
-.nav-sleep-pill:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.nav-sleep-pill[data-disabled="true"] {
+.nav-monitoring-chip[data-disabled="true"] {
   opacity: 0.7;
   cursor: progress;
 }
 
-.nav-sleep-pill[data-unavailable="true"] {
+.nav-monitoring-chip[data-unavailable="true"] {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
-.nav-sleep-pill:hover {
-  border-color: color-mix(in srgb, var(--color-warning) 55%, transparent);
-  color: color-mix(in srgb, var(--color-warning) 95%, transparent);
-  background: color-mix(in srgb, var(--color-warning) 9%, transparent);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--color-warning) 12%, transparent);
+/* Paused state: warning amber */
+.nav-monitoring-chip.is-paused {
+  border-color: color-mix(in srgb, var(--color-warning) 50%, transparent);
+  color: color-mix(in srgb, var(--color-warning) 90%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 7%, transparent);
+  box-shadow:
+    0 0 10px color-mix(in srgb, var(--color-warning) 20%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
-.nav-sleep-pill:active {
-  transform: translateY(1px);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--color-warning) 18%, transparent);
-}
-
-/* Active low-power state: full warning glow */
-.nav-cockpit.is-low-power .nav-sleep-pill {
+.nav-monitoring-chip.is-paused:hover {
   border-color: color-mix(in srgb, var(--color-warning) 75%, transparent);
   color: var(--color-warning);
-  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 16%, transparent), color-mix(in srgb, var(--color-warning) 8%, transparent));
-  box-shadow: 0 0 10px color-mix(in srgb, var(--color-warning) 26%, transparent), inset 0 0 6px color-mix(in srgb, var(--color-warning) 9%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
 }
 
-.nav-cockpit.is-low-power .nav-sleep-pill:hover {
-  border-color: color-mix(in srgb, var(--color-warning) 90%, transparent);
-  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 22%, transparent), color-mix(in srgb, var(--color-warning) 11%, transparent));
+[data-theme="light"] .nav-monitoring-chip {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.14);
+  color: var(--color-text-secondary);
 }
 
-/* Light mode: make pill readable, interactive, and distinct */
-[data-theme="light"] .nav-sleep-pill {
-  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
-  background: color-mix(in srgb, var(--color-warning) 6%, transparent);
-  color: var(--color-warning);
+[data-theme="light"] .nav-monitoring-chip:hover {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.22);
 }
 
-[data-theme="light"] .nav-sleep-pill:hover {
+[data-theme="light"] .nav-monitoring-chip.is-paused {
   border-color: color-mix(in srgb, var(--color-warning) 60%, transparent);
   color: var(--color-warning);
-  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--color-warning) 12%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
 }
 
-[data-theme="light"] .nav-cockpit.is-low-power .nav-sleep-pill {
+[data-theme="light"] .nav-monitoring-chip.is-paused:hover {
   border-color: color-mix(in srgb, var(--color-warning) 85%, transparent);
-  color: var(--color-warning);
-  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 16%, transparent), color-mix(in srgb, var(--color-warning) 8%, transparent));
-  box-shadow: 0 0 10px color-mix(in srgb, var(--color-warning) 24%, transparent), inset 0 0 6px color-mix(in srgb, var(--color-warning) 10%, transparent);
-}
-
-[data-theme="light"] .nav-cockpit.is-low-power .nav-sleep-pill:hover {
-  border-color: color-mix(in srgb, var(--color-warning) 95%, transparent);
-  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 22%, transparent), color-mix(in srgb, var(--color-warning) 11%, transparent));
-}
-
-/* Manual sleep: stronger glow + lock icon shows (via SVG opacity) to signal it's intentional */
-.nav-cockpit.is-low-power-manual .nav-sleep-pill {
-  border-color: color-mix(in srgb, var(--color-warning) 90%, transparent);
-  color: var(--color-warning);
-  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 22%, transparent), color-mix(in srgb, var(--color-warning) 12%, transparent));
-  box-shadow: 0 0 14px color-mix(in srgb, var(--color-warning) 38%, transparent), inset 0 0 8px color-mix(in srgb, var(--color-warning) 14%, transparent);
-}
-
-.nav-cockpit.is-low-power-manual .nav-sleep-pill:hover {
-  border-color: var(--color-warning);
-  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 28%, transparent), color-mix(in srgb, var(--color-warning) 16%, transparent));
-}
-
-[data-theme="light"] .nav-cockpit.is-low-power-manual .nav-sleep-pill {
-  border-color: var(--color-warning);
-  color: var(--color-warning);
-  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 22%, transparent), color-mix(in srgb, var(--color-warning) 12%, transparent));
-  box-shadow: 0 0 14px color-mix(in srgb, var(--color-warning) 30%, transparent), inset 0 0 8px color-mix(in srgb, var(--color-warning) 14%, transparent);
-}
-
-[data-theme="light"] .nav-cockpit.is-low-power-manual .nav-sleep-pill:hover {
-  border-color: var(--color-warning);
-  background: radial-gradient(circle at top, color-mix(in srgb, var(--color-warning) 28%, transparent), color-mix(in srgb, var(--color-warning) 18%, transparent));
-}
-
-/* Subtle pulse on the moon icon when the pill is available but not yet active */
-.nav-cockpit.has-session:not(.is-low-power) .nav-sleep-pill svg {
-  animation: sleep-pill-breathe 3.5s ease-in-out infinite;
-}
-
-@keyframes sleep-pill-breathe {
-  0%, 100% { opacity: 0.7; }
-  50% { opacity: 1; }
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
 }
 
 .nav-cockpit-spark {
