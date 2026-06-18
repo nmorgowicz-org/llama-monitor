@@ -170,6 +170,11 @@ test.describe('preset flow', () => {
 
     await page.locator('#preset-select').selectOption('other');
 
+    // Wait for the restart confirmation toast and click "Restart Now"
+    const restartBtn = page.locator('.toast-with-actions [data-action="restart"]');
+    await expect(restartBtn).toBeVisible({ timeout: 5000 });
+    await restartBtn.click();
+
     await expect.poll(() => state.spawnPayloads.length).toBe(1);
     expect(state.spawnPayloads[0].preset_id).toBe('other');
   });
