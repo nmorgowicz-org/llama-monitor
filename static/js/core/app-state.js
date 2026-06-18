@@ -73,6 +73,8 @@ export const sessionState = {
     presets: [],
     /** Loaded sessions from backend */
     sessions: [],
+    /** Loaded preset collections from backend */
+    collections: [],
     /** Currently active session ID */
     activeSessionId: 'default',
     /** Preset currently staged in the UI for edit/start actions */

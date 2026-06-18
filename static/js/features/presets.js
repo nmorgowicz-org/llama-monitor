@@ -205,10 +205,11 @@ function scrollToFirstError() {
 export async function loadPresets(selectId) {
     const auth = window.authHeaders ? window.authHeaders() : {};
 
-    const [presetsResp, settingsResp, activeResp] = await Promise.all([
+    const [presetsResp, settingsResp, activeResp, collectionsResp] = await Promise.all([
         fetch('/api/presets', { headers: auth }),
         selectId === undefined ? fetch('/api/settings', { headers: auth }) : Promise.resolve(null),
         selectId === undefined ? fetch('/api/sessions/active', { headers: auth }) : Promise.resolve(null),
+        selectId === undefined ? fetch('/api/collections', { headers: auth }) : Promise.resolve(null),
     ]);
 
     if (presetsResp.status === 401) {
@@ -217,6 +218,16 @@ export async function loadPresets(selectId) {
     }
 
     sessionState.presets = await presetsResp.json();
+    if (collectionsResp && collectionsResp.ok) {
+        try {
+            const collectionsData = await collectionsResp.json();
+            sessionState.collections = collectionsData.collections || [];
+        } catch {
+            sessionState.collections = [];
+        }
+    } else {
+        sessionState.collections = [];
+    }
     let saved = null;
     if (settingsResp) {
         if (settingsResp.status === 401) {

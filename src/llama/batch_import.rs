@@ -773,6 +773,7 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         api_key: None,
         alias: None,
         benchmark_mode: false,
+        tags: Vec::new(),
     }
 }
 

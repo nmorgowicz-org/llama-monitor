@@ -263,6 +263,137 @@ fn is_draft_assistant_filename(name: &str, size_bytes: u64) -> bool {
     is_broad && size_bytes > 0 && size_bytes <= 3_000_000_000
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ModelClassification {
+    /// Family slug: qwen35, qwen36, qwen3, llama3, gemma4, gemma, mistral, exaone, heretic, other.
+    pub family: String,
+    /// Size class: tiny (≤3B), small (4–7B), medium (8–17B), large (22–40B), huge (≥70B).
+    pub size_class: String,
+    /// Primary use hints: general, coding, roleplay, agentic, vision.
+    pub primary_use: Vec<String>,
+    /// MoE (mixture-of-experts) detected.
+    pub is_moe: bool,
+    /// Multi-token prediction / speculative heads detected.
+    pub has_mtp: bool,
+}
+
+/// Classify a discovered model into family/size/use categories.
+/// Intentionally heuristic, based on filename and existing metadata.
+pub fn classify_model(m: &DiscoveredModel) -> ModelClassification {
+    let name = m.model_name.as_deref().unwrap_or_default();
+    let lower = name.to_ascii_lowercase();
+    let param_b = m.param_b.unwrap_or(0.0);
+
+    let family = detect_family(&lower);
+    let size_class = detect_size_class(param_b);
+    let is_moe = lower.contains("moe")
+        || lower.contains("a3b")
+        || lower.contains("a10b")
+        || lower.contains("mixtral")
+        || lower.contains("deepseek")
+        || lower.contains("qwen3.5")
+        || lower.contains("qwen3.6")
+        || lower.contains("qwen35")
+        || lower.contains("qwen36");
+    let has_mtp = lower.contains("mtp") || lower.contains("draft");
+    let primary_use = detect_primary_use(&lower, is_moe);
+
+    ModelClassification {
+        family,
+        size_class,
+        primary_use,
+        is_moe,
+        has_mtp,
+    }
+}
+
+fn detect_family(name: &str) -> String {
+    // Order: most specific first.
+    if name.contains("qwen3.6") || name.contains("qwen36") || name.contains("qwopus") {
+        return "qwen36".into();
+    }
+    if name.contains("qwen3.5") || name.contains("qwen35") {
+        return "qwen35".into();
+    }
+    if name.contains("qwen3") {
+        return "qwen3".into();
+    }
+    if name.contains("exaone-4.5") || name.contains("exaone4.5") {
+        return "exaone".into();
+    }
+    if (name.contains("gemma-4") || name.contains("gemma4"))
+        && (name.contains("2b")
+            || name.contains("4b")
+            || name.contains("12b")
+            || name.contains("15b")
+            || name.contains("26b")
+            || name.contains("31b"))
+    {
+        return "gemma4".into();
+    }
+    if name.contains("gemma") {
+        return "gemma".into();
+    }
+    if name.contains("heretic") {
+        return "heretic".into();
+    }
+    if name.contains("llama-3") || name.contains("llama3") {
+        return "llama3".into();
+    }
+    if name.contains("mistral") || name.contains("mixtral") {
+        return "mistral".into();
+    }
+    "other".into()
+}
+
+fn detect_size_class(param_b: f32) -> String {
+    if param_b <= 0.0 {
+        return "unknown".into();
+    }
+    if param_b <= 3.0 {
+        "tiny"
+    } else if param_b <= 7.0 {
+        "small"
+    } else if param_b <= 17.0 {
+        "medium"
+    } else if param_b <= 40.0 {
+        "large"
+    } else {
+        "huge"
+    }
+    .into()
+}
+
+fn detect_primary_use(name: &str, is_moe: bool) -> Vec<String> {
+    let mut uses = Vec::new();
+
+    // Vision / multimodal
+    if name.contains("vl") || name.contains("vision") {
+        uses.push("vision".into());
+    }
+
+    // Coding / agentic / roleplay / general heuristics
+    let has_coding = name.contains("code") || name.contains("coder");
+    let has_roleplay =
+        name.contains("roleplay") || name.contains("chat") || name.contains("instruct");
+    let has_agentic = name.contains("agentic") || name.contains("agent") || is_moe;
+
+    if has_coding {
+        uses.push("coding".into());
+    }
+    if has_agentic {
+        uses.push("agentic".into());
+    }
+    if has_roleplay && !uses.contains(&"coding".to_string()) {
+        uses.push("roleplay".into());
+    }
+    if uses.is_empty() {
+        uses.push("general".into());
+    }
+
+    uses
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,5 +476,84 @@ mod tests {
         assert_eq!(format_size(1_500_000_000), "1.4 GB");
         assert_eq!(format_size(50_000_000), "47.7 MB");
         assert_eq!(format_size(500_000), "488 KB");
+    }
+
+    fn make_model(name: &str, param_b: f32) -> DiscoveredModel {
+        use std::path::PathBuf;
+        DiscoveredModel {
+            path: PathBuf::from("/tmp/test.gguf"),
+            filename: name.to_string(),
+            size_bytes: 1_000_000_000,
+            size_display: "976.6 MB".into(),
+            quant_type: Some("Q4_0".into()),
+            model_name: Some(name.into()),
+            is_split: false,
+            param_b: Some(param_b),
+            vram_est_gb: Some(5.0),
+            quant_style: Some("standard"),
+            last_modified: 0,
+            is_mmproj: false,
+            is_draft_assistant: false,
+        }
+    }
+
+    #[test]
+    fn test_classify_qwen35() {
+        let c = classify_model(&make_model("Qwen3.5-27B-Q4_0", 27.0));
+        assert_eq!(c.family, "qwen35");
+        assert_eq!(c.size_class, "large");
+        assert!(c.is_moe);
+    }
+
+    #[test]
+    fn test_classify_qwen36() {
+        let c = classify_model(&make_model("Qwen3.6-27B-A3B-Q4_0", 27.0));
+        assert_eq!(c.family, "qwen36");
+        assert_eq!(c.size_class, "large");
+        assert!(c.is_moe);
+    }
+
+    #[test]
+    fn test_classify_llama3() {
+        let c = classify_model(&make_model("Llama-3.2-3B-Instruct-Q4_0", 3.0));
+        assert_eq!(c.family, "llama3");
+        assert_eq!(c.size_class, "tiny");
+        assert!(!c.is_moe);
+    }
+
+    #[test]
+    fn test_classify_size_tiny() {
+        let c = classify_model(&make_model("TinyModel-Q4_0", 1.5));
+        assert_eq!(c.size_class, "tiny");
+    }
+
+    #[test]
+    fn test_classify_size_small() {
+        let c = classify_model(&make_model("SmallModel-Q4_0", 7.0));
+        assert_eq!(c.size_class, "small");
+    }
+
+    #[test]
+    fn test_classify_size_medium() {
+        let c = classify_model(&make_model("MediumModel-Q4_0", 12.0));
+        assert_eq!(c.size_class, "medium");
+    }
+
+    #[test]
+    fn test_classify_size_huge() {
+        let c = classify_model(&make_model("HugeModel-Q4_0", 70.0));
+        assert_eq!(c.size_class, "huge");
+    }
+
+    #[test]
+    fn test_classify_primary_use_coding() {
+        let c = classify_model(&make_model("CodeModel-7B-Coder-Q4_0", 7.0));
+        assert!(c.primary_use.contains(&"coding".to_string()));
+    }
+
+    #[test]
+    fn test_classify_primary_use_vision() {
+        let c = classify_model(&make_model("VisionModel-VL-7B-Q4_0", 7.0));
+        assert!(c.primary_use.contains(&"vision".to_string()));
     }
 }

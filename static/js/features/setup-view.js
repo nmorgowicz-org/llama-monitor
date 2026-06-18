@@ -6,6 +6,68 @@ import { doAttachFromSetup } from './attach-detach.js';
 import { escapeHtml } from '../core/format.js';
 import { quickStartSession } from './sessions.js';
 import { showToast } from './toast.js';
+
+// ── Model / preset classification (mirrors backend) ───────────────────────────
+
+function classifyPresetName(nameOrRepo) {
+    const name = (nameOrRepo || '').toString().toLowerCase();
+    let family = 'other';
+    if (name.includes('qwen3.6') || name.includes('qwen36') || name.includes('qwopus')) family = 'qwen36';
+    else if (name.includes('qwen3.5') || name.includes('qwen35')) family = 'qwen35';
+    else if (name.includes('qwen3')) family = 'qwen3';
+    else if (name.includes('llama-3') || name.includes('llama3')) family = 'llama3';
+    else if (name.includes('gemma-4') || name.includes('gemma4')) family = 'gemma4';
+    else if (name.includes('gemma')) family = 'gemma';
+    else if (name.includes('mistral') || name.includes('mixtral')) family = 'mistral';
+    else if (name.includes('exaone-4.5') || name.includes('exaone4.5')) family = 'exaone';
+    else if (name.includes('heretic')) family = 'heretic';
+    return family;
+}
+
+function classifyPreset(preset) {
+    const name = (preset.name || '') + ' ' + (preset.model_path || '') + ' ' + (preset.hf_repo || '');
+    const lower = name.toLowerCase();
+    const family = classifyPresetName(name);
+    // Extract param size (simplified: look for XB pattern)
+    const m = lower.match(/(\d+(?:\.\d+)?)b\b/);
+    const paramB = m ? parseFloat(m[1]) : 0;
+    let sizeClass = 'unknown';
+    if (paramB > 0) {
+        if (paramB <= 3) sizeClass = 'tiny';
+        else if (paramB <= 7) sizeClass = 'small';
+        else if (paramB <= 17) sizeClass = 'medium';
+        else if (paramB <= 40) sizeClass = 'large';
+        else sizeClass = 'huge';
+    }
+    const isMoe = lower.includes('moe') || lower.includes('a3b') || lower.includes('a10b') ||
+                  lower.includes('mixtral') || lower.includes('deepseek') ||
+                  lower.includes('qwen3.5') || lower.includes('qwen3.6');
+    return { family, sizeClass, isMoe };
+}
+
+// ── Quantization tag extraction ───────────────────────────────────────────────
+
+function extractQuantFromFilename(filename) {
+    if (!filename) return null;
+    if (/mmproj/i.test(filename)) return null;
+    const base = filename.replace(/\.gguf$/i, '');
+    // APEX-MTP draft models: extract quality label after -APEX-MTP-
+    const mtp = base.match(/-APEX-(?:MTP-)?(.+)$/i);
+    if (mtp) return mtp[1];
+    // Standard GGUF quant suffix after - or . separator: Q4_K_M, IQ2_XXS, BF16, F16, F32 …
+    const m = base.match(/[-.]((IQ\d+|Q\d+)(?:_[A-Z0-9]+)*|BF16|F16|F32)$/i);
+    return m ? m[1].toUpperCase() : null;
+}
+
+// ── Launch filters state (for filter bar + grouping) ──────────────────────────
+
+const launchFilters = {
+    family: null,
+    size: null,
+    tags: [],
+    collection: null,
+    groupByFamily: false
+};
 // ── Memory bar ────────────────────────────────────────────────────────────────
 // Same Metal cap logic as effectiveAvailBytes() in spawn-wizard.js.
 
@@ -309,20 +371,62 @@ export function renderLaunchGrid() {
     const allPresets = sessionState.presets || [];
     const userPresets = allPresets.filter(p => !p.id.startsWith('default-'));
     const hasUserPresets = userPresets.length > 0;
-    const presets = _visiblePresetsLocal(allPresets);
+    let presets = _visiblePresetsLocal(allPresets);
     const activePresetId = sessionState.activeSessionPresetId || '';
-
     const showNewConfigCard = presets.length <= 2;
 
+    // Apply filters
+    presets = _filterPresets(presets);
+
+    // Optional grouped view
+    if (launchFilters.groupByFamily && presets.length > 4) {
+        _renderGroupedLaunchGrid(grid, presets, activePresetId, hasUserPresets, showNewConfigCard);
+    } else {
+        _renderFlatLaunchGrid(grid, presets, activePresetId, hasUserPresets, showNewConfigCard);
+    }
+
+    // Stamp last-launched timestamps if session data is already available
+    _applyLastLaunchedToCards();
+    // Memory bar and drop zone: init once (idempotent after first call)
+    if (!document.getElementById('setup-drop-zone')?._dzInited) {
+        initSetupDropZone();
+        const dz = document.getElementById('setup-drop-zone');
+        if (dz) dz._dzInited = true;
+    }
+    fetchAndRenderMemoryBar();
+}
+
+function _filterPresets(presets) {
+    const f = launchFilters;
+    if (!f.family && !f.size && !f.collection && (f.tags || []).length === 0) return presets;
+
+    return presets.filter(p => {
+        const c = classifyPreset(p);
+        if (f.family && c.family !== f.family) return false;
+        if (f.size && c.sizeClass !== f.size) return false;
+
+        if (f.collection) {
+            const col = (sessionState.collections || []).find(co => co.id === f.collection);
+            if (!col || !col.preset_ids.includes(p.id)) return false;
+        }
+
+        if ((f.tags || []).length > 0) {
+            const presetTags = (p.tags || []);
+            if (!f.tags.some(t => presetTags.includes(t))) return false;
+        }
+
+        return true;
+    });
+}
+
+function _renderFlatLaunchGrid(grid, presets, activePresetId, hasUserPresets, showNewConfigCard) {
     if (!hasUserPresets) {
-        // Onboarding hint (first-time / no presets)
         const hint = document.createElement('div');
         hint.className = 'launch-grid-hint';
         hint.style.gridColumn = '1 / -1';
         hint.textContent = 'New here? Open the setup wizard to pick a model and start your first local AI in a few steps.';
         grid.appendChild(hint);
 
-        // No user presets: New Config goes first so it's the obvious CTA
         if (showNewConfigCard) {
             const newCard = _buildNewConfigCard(true);
             newCard.style.animationDelay = '80ms';
@@ -334,7 +438,6 @@ export function renderLaunchGrid() {
             grid.appendChild(card);
         });
     } else {
-        // User has presets: show them first (leftmost), New Config goes last only when presets are few
         presets.forEach((preset, i) => {
             const card = _buildLaunchCard(preset, activePresetId);
             card.style.animationDelay = `${i * 55}ms`;
@@ -346,15 +449,54 @@ export function renderLaunchGrid() {
             grid.appendChild(newCard);
         }
     }
-    // Stamp last-launched timestamps if session data is already available
-    _applyLastLaunchedToCards();
-    // Memory bar and drop zone: init once (idempotent after first call)
-    if (!document.getElementById('setup-drop-zone')?._dzInited) {
-        initSetupDropZone();
-        const dz = document.getElementById('setup-drop-zone');
-        if (dz) dz._dzInited = true;
+}
+
+function _renderGroupedLaunchGrid(grid, presets, activePresetId, hasUserPresets, showNewConfigCard) {
+    const byFamily = {};
+    presets.forEach(p => {
+        const c = classifyPreset(p);
+        const key = c.family === 'other' ? 'other' : c.family;
+        if (!byFamily[key]) byFamily[key] = [];
+        byFamily[key].push(p);
+    });
+
+    const familyLabels = {
+        qwen36: 'Qwen3.6',
+        qwen35: 'Qwen3.5',
+        qwen3: 'Qwen3',
+        llama3: 'Llama 3.x',
+        gemma4: 'Gemma4',
+        gemma: 'Gemma',
+        mistral: 'Mistral / MoE',
+        exaone: 'EXAONE',
+        heretic: 'Heretic',
+        other: 'Other'
+    };
+
+    let i = 0;
+    const sections = Object.keys(byFamily);
+    for (const fam of sections) {
+        const header = document.createElement('div');
+        header.className = 'launch-grid-group';
+        header.style.gridColumn = '1 / -1';
+        const label = familyLabels[fam] || fam;
+        const list = byFamily[fam];
+        header.textContent = `${label} (${list.length})`;
+        grid.appendChild(header);
+
+        list.forEach(p => {
+            const card = _buildLaunchCard(p, activePresetId);
+            card.style.animationDelay = `${i * 55}ms`;
+            grid.appendChild(card);
+            i++;
+        });
     }
-    fetchAndRenderMemoryBar();
+
+    if (showNewConfigCard) {
+        const newCard = _buildNewConfigCard(false);
+        newCard.style.animationDelay = `${i * 55}ms`;
+        grid.appendChild(newCard);
+    }
 }
 
 function _buildLaunchCard(preset, activePresetId) {
@@ -375,6 +517,7 @@ function _buildLaunchCard(preset, activePresetId) {
     const ctxK = preset.context_size ? Math.round(preset.context_size / 1024) : 128;
     const ctxDisplay = ctxK >= 1000 ? `${(ctxK / 1024).toFixed(1)}M context` : `${ctxK}k context`;
     const ctkDisplay = (preset.ctk || 'q8_0') + '/' + (preset.ctv || 'f16');
+    const quantTag = extractQuantFromFilename(modelFile);
 
     if (isExample) {
         // Example card: dimmed, no edit button, use-wizard CTA only
@@ -400,18 +543,34 @@ function _buildLaunchCard(preset, activePresetId) {
             import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard({ templatePreset: preset }));
         });
     } else {
+        const c = classifyPreset(preset);
+        const familyLabel = c.family !== 'other' ? c.family.toUpperCase() : '';
+        const sizeLabel = c.sizeClass !== 'unknown' && c.sizeClass !== 'huge' ? c.sizeClass.charAt(0).toUpperCase() + c.sizeClass.slice(1) : '';
+        const presetTags = (preset.tags || []);
+        const tagPills = presetTags.length > 0
+            ? '<div class="launch-card-tags">' +
+              presetTags.slice(0, 3).map(t => `<span class="launch-tag">${escapeHtml(t)}</span>`).join('') +
+              (presetTags.length > 3 ? `<span class="launch-tag launch-tag--more">+${presetTags.length - 3}</span>` : '') +
+              '</div>' : '';
+
         // eslint-disable-next-line no-unsanitized/property -- content sanitized via escapeHtml
         card.innerHTML = `
             <div class="launch-card-top">
                 <div class="launch-card-name" title="${escapeHtml(preset.name)}">${escapeHtml(preset.name)}</div>
                 ${isRunning ? '<span class="launch-card-running-badge">● Running</span>' : ''}
             </div>
+            <div class="launch-card-meta">
+                ${familyLabel ? `<span class="launch-meta-badge launch-meta-badge--family" title="Model family">${escapeHtml(familyLabel)}</span>` : ''}
+                ${sizeLabel ? `<span class="launch-meta-badge launch-meta-badge--size" title="Size class">${escapeHtml(sizeLabel)}</span>` : ''}
+            </div>
             <div class="launch-card-model ${hasModel ? '' : 'launch-card-model--empty'}" title="${escapeHtml(modelFile || '')}">${escapeHtml(modelFile || 'No model configured')}</div>
             <div class="launch-card-chips">
                 <span class="launch-chip">${ctxDisplay}</span>
                 <span class="launch-chip">${ctkDisplay}</span>
+                ${quantTag ? `<span class="launch-chip launch-chip--quant" title="File quantization: ${escapeHtml(quantTag)}">${escapeHtml(quantTag)}</span>` : ''}
                 ${preset.ngram_spec ? '<span class="launch-chip launch-chip--accent">n-gram</span>' : ''}
             </div>
+            ${tagPills}
             ${hasModel ? '<div class="launch-card-vram launch-card-vram--loading"><span class="launch-card-vram-total">…</span></div>' : ''}
             <div class="launch-card-actions">
                 <button class="launch-card-btn-edit" type="button">Edit</button>
@@ -440,7 +599,7 @@ function _buildLaunchCard(preset, activePresetId) {
         });
 
         // Quick-edit: click context or KV chip to open preset modal focused on context section
-        card.querySelectorAll('.launch-chip').forEach(chip => {
+        card.querySelectorAll('.launch-chip:not(.launch-chip--quant)').forEach(chip => {
             chip.style.cursor = 'pointer';
             chip.title = 'Click to quickly edit context or KV cache settings';
             chip.addEventListener('click', () => {
@@ -876,6 +1035,172 @@ export function syncSetupPresetSelect() {
     renderLaunchGrid();
 }
 
+// ── Launch Filters ────────────────────────────────────────────────────────────
+
+export async function initLaunchFilters() {
+    const bar = document.getElementById('setup-filter-bar');
+    if (!bar) return;
+
+    // Only populate if we have multiple presets (avoid clutter with 0-2)
+    const presets = sessionState.presets || [];
+    const userPresets = presets.filter(p => !p.id.startsWith('default-'));
+    if (userPresets.length < 3) {
+        bar.style.display = 'none';
+        return;
+    }
+    bar.style.display = '';
+
+    // Populate family pills based on available families
+    const families = new Set();
+    userPresets.forEach(p => {
+        const f = classifyPreset(p).family;
+        if (f !== 'other') families.add(f);
+    });
+
+    const familyContainer = document.getElementById('setup-filter-family-pills');
+    if (familyContainer) {
+        // Keep "All" button
+        const allBtn = familyContainer.querySelector('[data-filter="family-all"]');
+        if (allBtn) allBtn.addEventListener('click', () => {
+            launchFilters.family = null;
+            updateFilterPillActive(familyContainer, 'family-all');
+            renderLaunchGrid();
+        });
+        const familyLabels = {
+            qwen36: 'Qwen3.6',
+            qwen35: 'Qwen3.5',
+            qwen3: 'Qwen3',
+            llama3: 'Llama 3.x',
+            gemma4: 'Gemma4',
+            gemma: 'Gemma',
+            mistral: 'Mistral',
+            exaone: 'EXAONE',
+            heretic: 'Heretic',
+        };
+        for (const fam of families) {
+            const btn = document.createElement('button');
+            btn.className = 'launch-filter-pill';
+            btn.dataset.filter = fam;
+            btn.type = 'button';
+            btn.textContent = familyLabels[fam] || fam;
+            btn.addEventListener('click', () => {
+                launchFilters.family = fam;
+                updateFilterPillActive(familyContainer, fam);
+                renderLaunchGrid();
+            });
+            familyContainer.appendChild(btn);
+        }
+    }
+
+    // Size pills
+    const sizeContainer = document.getElementById('setup-filter-size-pills');
+    if (sizeContainer) {
+        const sizes = ['tiny', 'small', 'medium', 'large'];
+        const allBtn = sizeContainer.querySelector('[data-filter="size-all"]');
+        if (allBtn) allBtn.addEventListener('click', () => {
+            launchFilters.size = null;
+            updateFilterPillActive(sizeContainer, 'size-all');
+            renderLaunchGrid();
+        });
+        for (const s of sizes) {
+            const btn = document.createElement('button');
+            btn.className = 'launch-filter-pill';
+            btn.dataset.filter = s;
+            btn.type = 'button';
+            btn.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+            btn.addEventListener('click', () => {
+                launchFilters.size = s;
+                updateFilterPillActive(sizeContainer, s);
+                renderLaunchGrid();
+            });
+            sizeContainer.appendChild(btn);
+        }
+    }
+
+    // Tags button: simple pill picker popup
+    const tagsBtn = document.getElementById('setup-filter-tags-btn');
+    if (tagsBtn) {
+        const knownTags = ['coding', 'agentic', 'roleplay', 'creative', 'vision', 'fast'];
+        tagsBtn.addEventListener('click', () => {
+            if (document.querySelector('.launch-tags-popup')) return;
+            const popup = document.createElement('div');
+            popup.className = 'launch-tags-popup';
+            // Build via DOM to satisfy no-unsanitized rule
+            knownTags.forEach(t => {
+                const label = document.createElement('label');
+                label.className = 'launch-tag-option';
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.value = t;
+                label.appendChild(input);
+                label.appendChild(document.createTextNode(t));
+                popup.appendChild(label);
+            });
+            const apply = () => {
+                launchFilters.tags = [...popup.querySelectorAll('input:checked')].map(i => i.value);
+                if (launchFilters.tags.length > 0) {
+                    tagsBtn.classList.add('launch-filter-pill--active');
+                    tagsBtn.textContent = `+ ${launchFilters.tags.length}`;
+                } else {
+                    tagsBtn.classList.remove('launch-filter-pill--active');
+                    tagsBtn.textContent = '+ Tags';
+                }
+                popup.remove();
+                renderLaunchGrid();
+            };
+            popup.addEventListener('click', e => {
+                if (e.target.tagName === 'INPUT') {
+                    setTimeout(apply, 50);
+                }
+            });
+            tagsBtn.parentElement.appendChild(popup);
+        });
+    }
+
+    // Collections dropdown
+    const collectionsGroup = document.getElementById('setup-filter-collections-group');
+    const collectionsSelect = document.getElementById('setup-filter-collections');
+    if (collectionsSelect && collectionsGroup) {
+        const collections = sessionState.collections || [];
+        if (collections.length > 0) {
+            collectionsGroup.style.display = '';
+            collectionsSelect.innerHTML = '<option value="all">All</option>';
+            collections.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.name;
+                collectionsSelect.appendChild(opt);
+            });
+            collectionsSelect.addEventListener('change', () => {
+                launchFilters.collection = collectionsSelect.value === 'all' ? null : collectionsSelect.value;
+                renderLaunchGrid();
+            });
+        }
+    }
+
+    // Group by family toggle
+    const groupToggle = document.getElementById('setup-filter-group-by-family');
+    if (groupToggle) {
+        const saved = localStorage.getItem('llama-monitor-group-by-family');
+        if (saved === '1') {
+            launchFilters.groupByFamily = true;
+            groupToggle.checked = true;
+        }
+        groupToggle.addEventListener('change', () => {
+            launchFilters.groupByFamily = !!groupToggle.checked;
+            localStorage.setItem('llama-monitor-group-by-family', launchFilters.groupByFamily ? '1' : '0');
+            renderLaunchGrid();
+        });
+    }
+}
+
+function updateFilterPillActive(container, activeId) {
+    if (!container) return;
+    container.querySelectorAll('.launch-filter-pill').forEach(btn => {
+        btn.classList.toggle('launch-filter-pill--active', btn.dataset.filter === activeId);
+    });
+}
+
 // ── Initialization ────────────────────────────────────────────────────────────
 
 export function initViewState() {
@@ -892,6 +1217,9 @@ export function initViewState() {
     document.getElementById('setup-models-btn')?.addEventListener('click', () => {
         import('./models.js').then(({ openModelsModal }) => openModelsModal());
     });
+
+    // Init filter bar after presets are loaded
+    initLaunchFilters();
 
     document.body.classList.add('setup-active');
     const setupView = document.getElementById('view-setup');

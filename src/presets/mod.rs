@@ -209,6 +209,9 @@ pub struct ModelPreset {
     pub alias: Option<String>,
     #[serde(default)]
     pub benchmark_mode: bool,
+    /// User-assigned tags for organization (general, coding, roleplay, custom).
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 pub fn next_id() -> String {

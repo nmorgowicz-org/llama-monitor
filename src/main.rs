@@ -5,6 +5,7 @@ mod agent;
 mod certs;
 mod chat_storage;
 mod cli;
+mod collections;
 mod config;
 mod gpu;
 mod hf;

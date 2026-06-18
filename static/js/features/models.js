@@ -66,6 +66,8 @@ function loadPrefs() {
         sizeMaxGb: 0,
         quantFilters: {},
         tagFilter: '',
+        familyFilter: '',
+        sizeClassFilter: '',
     };
     try {
         const raw = localStorage.getItem(PREFS_KEY);
@@ -232,6 +234,18 @@ function applyFilters(models) {
         if (prefs.tagFilter) {
             const tags = Array.isArray(m.tags) ? m.tags : [];
             if (!tags.includes(prefs.tagFilter)) return false;
+        }
+
+        // family filter (from backend classification)
+        if (prefs.familyFilter) {
+            const c = m.classification || {};
+            if ((c.family || '') !== prefs.familyFilter) return false;
+        }
+
+        // size-class filter (from backend classification)
+        if (prefs.sizeClassFilter) {
+            const c = m.classification || {};
+            if ((c.size_class || '') !== prefs.sizeClassFilter) return false;
         }
 
         return true;
@@ -868,7 +882,8 @@ function buildLibraryToolbar(models) {
     filtersBtn.title = 'Filter models by type, quantization, or tag';
     const hasActiveFilters = !prefs.showMmproj || !prefs.showMain || !prefs.showSplit ||
         !prefs.showDraftModels || prefs.sizeMaxGb > 0 ||
-        Object.values(prefs.quantFilters).some(v => v === false) || !!prefs.tagFilter;
+        Object.values(prefs.quantFilters).some(v => v === false) ||
+        !!prefs.tagFilter || !!prefs.familyFilter || !!prefs.sizeClassFilter;
     if (hasActiveFilters) filtersBtn.classList.add('mm-lib-btn--active');
     // eslint-disable-next-line no-unsanitized/property -- static SVG, no user data
     filtersBtn.innerHTML =
@@ -949,6 +964,93 @@ function buildLibraryToolbar(models) {
     sizeRow.appendChild(size3Chip);
     sizeRow.appendChild(size8Chip);
     filtersPanel.appendChild(sizeRow);
+
+    // Family filter (from classification)
+    const familySet = new Set();
+    models.forEach(m => {
+        const f = (m.classification || {}).family || '';
+        if (f && f !== 'other') familySet.add(f);
+    });
+
+    if (familySet.size > 0) {
+        const familyRow = document.createElement('div');
+        familyRow.className = 'mm-lib-filter-row';
+        const familyLabel = document.createElement('span');
+        familyLabel.className = 'mm-lib-filter-label';
+        familyLabel.textContent = 'Family';
+
+        const noneChip = createChip('All', !prefs.familyFilter);
+        noneChip.addEventListener('click', () => {
+            prefs.familyFilter = '';
+            savePrefs();
+            loadModels();
+        });
+        familyRow.appendChild(familyLabel);
+        familyRow.appendChild(noneChip);
+
+        const familyLabels = {
+            qwen36: 'Qwen3.6',
+            qwen35: 'Qwen3.5',
+            qwen3: 'Qwen3',
+            llama3: 'Llama 3.x',
+            gemma4: 'Gemma4',
+            gemma: 'Gemma',
+            mistral: 'Mistral',
+            exaone: 'EXAONE',
+            heretic: 'Heretic',
+        };
+
+        familySet.forEach(fam => {
+            const chip = createChip(familyLabels[fam] || fam, prefs.familyFilter === fam);
+            chip.classList.toggle('active', prefs.familyFilter === fam);
+            chip.addEventListener('click', () => {
+                prefs.familyFilter = prefs.familyFilter === fam ? '' : fam;
+                savePrefs();
+                loadModels();
+            });
+            familyRow.appendChild(chip);
+        });
+
+        filtersPanel.appendChild(familyRow);
+    }
+
+    // Size-class filter (from classification)
+    const sizeClassSet = new Set();
+    models.forEach(m => {
+        const s = (m.classification || {}).size_class || '';
+        if (s && s !== 'unknown') sizeClassSet.add(s);
+    });
+
+    if (sizeClassSet.size > 0) {
+        const sizeClassRow = document.createElement('div');
+        sizeClassRow.className = 'mm-lib-filter-row';
+        const sizeClassLabel = document.createElement('span');
+        sizeClassLabel.className = 'mm-lib-filter-label';
+        sizeClassLabel.textContent = 'Size class';
+
+        const noneChip = createChip('All', !prefs.sizeClassFilter);
+        noneChip.addEventListener('click', () => {
+            prefs.sizeClassFilter = '';
+            savePrefs();
+            loadModels();
+        });
+        sizeClassRow.appendChild(sizeClassLabel);
+        sizeClassRow.appendChild(noneChip);
+
+        ['tiny', 'small', 'medium', 'large', 'huge'].forEach(sc => {
+            if (!sizeClassSet.has(sc)) return;
+            const chip = createChip(sc.charAt(0).toUpperCase() + sc.slice(1), prefs.sizeClassFilter === sc);
+            chip.classList.toggle('active', prefs.sizeClassFilter === sc);
+            chip.addEventListener('click', () => {
+                prefs.sizeClassFilter = prefs.sizeClassFilter === sc ? '' : sc;
+                savePrefs();
+                loadModels();
+            });
+            sizeClassRow.appendChild(chip);
+        });
+
+        filtersPanel.appendChild(sizeClassRow);
+    }
 
     // Quant filters (dynamic from models list)
     const quantRow = document.createElement('div');

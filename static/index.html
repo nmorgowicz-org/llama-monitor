@@ -351,6 +351,42 @@
                             <button class="setup-spawn-running-btn" id="setup-spawn-running-btn" type="button">View monitor →</button>
                         </div>
 
+                        <!-- Preset filter bar -->
+                        <div class="launch-filter-bar" id="setup-filter-bar">
+                            <div class="launch-filter-bar-left">
+                                <div class="launch-filter-group">
+                                    <span class="launch-filter-label">Family</span>
+                                    <div class="launch-filter-pills" id="setup-filter-family-pills">
+                                        <button class="launch-filter-pill" data-filter="family-all" type="button">All</button>
+                                    </div>
+                                </div>
+                                <div class="launch-filter-group">
+                                    <span class="launch-filter-label">Size</span>
+                                    <div class="launch-filter-pills" id="setup-filter-size-pills">
+                                        <button class="launch-filter-pill" data-filter="size-all" type="button">All</button>
+                                    </div>
+                                </div>
+                                <div class="launch-filter-group">
+                                    <span class="launch-filter-label">Tags</span>
+                                    <button class="launch-filter-pill launch-filter-pill--btn" id="setup-filter-tags-btn" type="button">
+                                        + Tags
+                                    </button>
+                                </div>
+                                <div class="launch-filter-group" id="setup-filter-collections-group" style="display:none;">
+                                    <span class="launch-filter-label">Collections</span>
+                                    <select class="launch-filter-select" id="setup-filter-collections">
+                                        <option value="all">All</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="launch-filter-bar-right">
+                                <label class="launch-filter-toggle" title="Group cards by model family">
+                                    <input type="checkbox" id="setup-filter-group-by-family">
+                                    <span class="launch-filter-toggle-label">Group by family</span>
+                                </label>
+                            </div>
+                        </div>
+
                         <!-- Preset cards grid (populated by renderLaunchGrid) -->
                         <div class="launch-grid" id="setup-launch-grid">
                             <div class="launch-card-skeleton"></div>

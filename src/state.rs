@@ -663,6 +663,7 @@ pub struct AppState {
     pub models_dir: Option<PathBuf>,
     pub model_tags: Arc<Mutex<ModelTags>>,
     pub model_tags_path: PathBuf,
+    pub preset_collections: Arc<Mutex<crate::collections::PresetCollections>>,
     pub gpu_env: Arc<Mutex<GpuEnv>>,
     pub gpu_env_path: PathBuf,
     pub ui_settings: Arc<Mutex<UiSettings>>,
@@ -717,6 +718,11 @@ impl AppState {
             .and_then(|dir| crate::models::scan_models_dir(dir).ok())
             .unwrap_or_default();
         let model_tags = ModelTags::load(&model_tags_path);
+        let preset_collections = {
+            let default_cfg = std::path::PathBuf::from(".");
+            let config_dir = model_tags_path.parent().unwrap_or(&default_cfg);
+            crate::collections::load_collections(config_dir)
+        };
 
         let sessions = load_sessions(&sessions_path);
         let templates = presets::load_templates(&templates_path);
@@ -766,6 +772,7 @@ impl AppState {
             models_dir,
             model_tags: Arc::new(Mutex::new(model_tags)),
             model_tags_path,
+            preset_collections: Arc::new(Mutex::new(preset_collections)),
             gpu_env: Arc::new(Mutex::new(gpu_env)),
             gpu_env_path,
             ui_settings: Arc::new(Mutex::new(ui_settings)),

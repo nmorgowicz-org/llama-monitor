@@ -5359,6 +5359,10 @@ pub fn api_routes(
     let delete_model_file = api_delete_model_file(state.clone(), app_config.clone());
     let get_model_tags = api_get_model_tags(state.clone(), app_config.clone());
     let put_model_tags = api_put_model_tags(state.clone(), app_config.clone());
+    let get_collections = api_get_collections(state.clone(), app_config.clone());
+    let create_collection = api_create_collection(state.clone(), app_config.clone());
+    let patch_collection = api_patch_collection(state.clone(), app_config.clone());
+    let delete_collection = api_delete_collection(state.clone(), app_config.clone());
     let get_gpu_env = api_get_gpu_env(state.clone(), app_config.clone());
     let put_gpu_env = api_put_gpu_env(state.clone(), app_config.clone());
     let get_settings = api_get_settings(state.clone(), app_config.clone());
@@ -5596,6 +5600,10 @@ pub fn api_routes(
         .or(get_model_tags)
         .or(put_model_tags)
         .or(models_gguf_meta_route);
+    let collection_routes = get_collections
+        .or(create_collection)
+        .or(patch_collection)
+        .or(delete_collection);
     let config_routes = get_gpu_env
         .or(put_gpu_env)
         .or(get_settings_full)
@@ -5739,6 +5747,7 @@ pub fn api_routes(
         .or(preset_routes)
         .or(template_routes)
         .or(model_routes)
+        .or(collection_routes)
         .or(config_routes)
         .or(chat_routes)
         .or(db_routes)
@@ -7177,10 +7186,12 @@ fn api_get_models(
                 .into_iter()
                 .map(|m| {
                     let model_path = m.path.to_string_lossy().to_string();
+                    let cls = models::classify_model(&m);
                     let mut obj = serde_json::to_value(m).unwrap_or_default();
                     if let Some(model_obj) = obj.as_object_mut() {
                         let model_tags = tags.get(&model_path).cloned().unwrap_or_default();
                         model_obj.insert("tags".into(), serde_json::json!(model_tags));
+                        model_obj.insert("classification".into(), serde_json::json!(cls));
                     }
                     obj
                 })
@@ -7357,6 +7368,208 @@ fn api_put_model_tags(
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                     warp::reply::json(&serde_json::json!({"ok": true})),
                 ))
+            }
+        })
+}
+
+/// GET /api/collections — list preset collections
+fn api_get_collections(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "collections")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
+            let collections = state.preset_collections.lock().unwrap().clone();
+            futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                Box::new(warp::reply::json(&collections)),
+            ))
+        })
+}
+
+/// POST /api/collections — create a collection
+fn api_create_collection(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "collections")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            let st = state.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let name = match body.get("name").and_then(|v| v.as_str()) {
+                    Some(n) if !n.is_empty() => n.to_string(),
+                    _ => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "missing or empty name"}),
+                            ),
+                        ));
+                    }
+                };
+                let description = body
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let preset_ids = body
+                    .get("preset_ids")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let config_dir = st
+                    .model_tags_path
+                    .parent()
+                    .unwrap_or(&std::path::PathBuf::from("."))
+                    .to_path_buf();
+                let mut collections = st.preset_collections.lock().unwrap();
+                let id = crate::collections::unique_id("coll", &name, &collections.collections);
+                let new = crate::collections::PresetCollection {
+                    id,
+                    name,
+                    description,
+                    preset_ids,
+                };
+                collections.collections.push(new.clone());
+                if let Err(e) = crate::collections::save_collections(&config_dir, &collections) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Failed to save collections: {e}")
+                        })),
+                    ));
+                }
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({"ok": true, "collection": new}),
+                )))
+            }
+        })
+}
+
+/// PATCH /api/collections/:id — update a collection
+fn api_patch_collection(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "collections" / String)
+        .and(warp::patch())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::safe_json_body::<serde_json::Value>())
+        .and_then(
+            move |id: String, auth: Option<String>, body: serde_json::Value| {
+                let cfg = app_config.clone();
+                let st = state.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let config_dir = st
+                        .model_tags_path
+                        .parent()
+                        .unwrap_or(&std::path::PathBuf::from("."))
+                        .to_path_buf();
+                    let mut collections = st.preset_collections.lock().unwrap();
+                    let col = match collections.collections.iter_mut().find(|c| c.id == id) {
+                        Some(c) => c,
+                        None => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "collection not found"
+                                })),
+                            ));
+                        }
+                    };
+                    if let Some(name) = body.get("name").and_then(|v| v.as_str()) {
+                        col.name = name.to_string();
+                    }
+                    if let Some(desc) = body.get("description") {
+                        col.description = if desc.is_null() {
+                            None
+                        } else {
+                            desc.as_str().map(|s| s.to_string())
+                        };
+                    }
+                    if let Some(ids) = body.get("preset_ids").and_then(|v| v.as_array()) {
+                        col.preset_ids = ids
+                            .iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect();
+                    }
+                    if let Err(e) = crate::collections::save_collections(&config_dir, &collections)
+                    {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Failed to save collections: {e}")
+                            })),
+                        ));
+                    }
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({"ok": true}),
+                    )))
+                }
+            },
+        )
+}
+
+/// DELETE /api/collections/:id — delete a collection
+fn api_delete_collection(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "collections" / String)
+        .and(warp::delete())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |id: String, auth: Option<String>| {
+            let cfg = app_config.clone();
+            let st = state.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let config_dir = st
+                    .model_tags_path
+                    .parent()
+                    .unwrap_or(&std::path::PathBuf::from("."))
+                    .to_path_buf();
+                let mut collections = st.preset_collections.lock().unwrap();
+                let before = collections.collections.len();
+                collections.collections.retain(|c| c.id != id);
+                if collections.collections.len() == before {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "collection not found"
+                        })),
+                    ));
+                }
+                if let Err(e) = crate::collections::save_collections(&config_dir, &collections) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Failed to save collections: {e}")
+                        })),
+                    ));
+                }
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({"ok": true}),
+                )))
             }
         })
 }
