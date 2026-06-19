@@ -304,7 +304,7 @@ function renderFleetView(model) {
     const avgPct = model.aggregateChatPressure.avgPct;
     if (fleetAggFill) {
         const fillWidth = avgPct != null ? Math.min(100, Math.max(0, avgPct)) : 0;
-        fleetAggFill.style.width = `${fillWidth}%`;
+        fleetAggFill.style.transform = `scaleX(${fillWidth / 100})`;
         fleetAggFill.className = `context-fleet-agg-fill ${pctState(avgPct)}`;
     }
     if (fleetAggLabel) {

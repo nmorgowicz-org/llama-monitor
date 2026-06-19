@@ -1260,7 +1260,10 @@ export function setRemoteAgentStatus(message, kind) {
     const el = document.getElementById('remote-agent-status');
     if (!el) return;
 
-    el.style.color = kind === 'error' ? '#bf616a' : kind === 'ok' ? '#a3be8c' : '#9aa7b7';
+    el.style.color =
+         kind === 'error' ? 'var(--color-error)' :
+         kind === 'ok' ? 'var(--color-success)' :
+         'var(--color-text-muted)';
     // eslint-disable-next-line no-unsanitized/property -- all call sites pass hardcoded strings or strings with server data wrapped in escapeHtml()
     el.innerHTML = message;
 }
@@ -1930,7 +1933,7 @@ function updateRemoteAgentPanelState(data) {
     const updateIndicator = document.getElementById('remote-agent-update-indicator');
     if (updateIndicator) {
         updateIndicator.style.display = isUpdateAvailable ? 'flex' : 'none';
-        updateIndicator.style.color = '#ebcb8b';
+        updateIndicator.style.color = 'var(--color-warning)';
     }
 
     const buttonsEl = document.getElementById('remote-agent-buttons');
@@ -1961,13 +1964,13 @@ function updateRemoteAgentPanelState(data) {
 
         if (isRunning && isUpdateAvailable) {
             document.getElementById('remote-agent-status-indicator').textContent = '\u25cf Update available';
-            document.getElementById('remote-agent-status-indicator').style.color = '#ebcb8b';
+            document.getElementById('remote-agent-status-indicator').style.color = 'var(--color-warning)';
         } else if (isRunning) {
             document.getElementById('remote-agent-status-indicator').textContent = '\u25cf Ready';
-            document.getElementById('remote-agent-status-indicator').style.color = '#a3be8c';
+            document.getElementById('remote-agent-status-indicator').style.color = 'var(--color-success)';
         } else {
             document.getElementById('remote-agent-status-indicator').textContent = '\u25cf Not running';
-            document.getElementById('remote-agent-status-indicator').style.color = '#8899aa';
+            document.getElementById('remote-agent-status-indicator').style.color = 'var(--color-text-muted)';
         }
     }
 }

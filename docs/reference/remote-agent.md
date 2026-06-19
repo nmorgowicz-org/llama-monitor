@@ -1,6 +1,6 @@
 # Remote Agent
 
-The remote agent adds host-level telemetry to remote llama.cpp endpoints. Without it, Llama Monitor can still attach to a remote server and read inference metrics, but GPU, CPU, RAM, and host-health data remain unavailable.
+The remote agent adds host-level telemetry to remote llama.cpp endpoints. Without it, Llama Monitor can still attach to a remote server and read performance metrics, but GPU, CPU, RAM, and host-health data remain unavailable.
 
 ## What it adds
 
@@ -10,7 +10,9 @@ When a remote agent is installed and reachable, the dashboard can show:
 - CPU load, temperature, RAM, and host/platform details
 - Agent reachability, installed version, and update availability
 
-This is what upgrades a remote attach session from **Inference only** to **Full telemetry**.
+This is what upgrades a remote attach session from **Basic** to **Full telemetry**.
+
+![GPU & System telemetry from a remote agent](../screenshots/gpu-metrics.gif)
 
 ## Agent states and indicators
 
@@ -214,7 +216,7 @@ The app chooses an OS-appropriate install/start path and command for the managed
 
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
-| **Inference only** status on a remote session | No agent is running or the agent URL is not reachable | Open the Agent flow or Runtime Configuration and start/install the agent |
+| **Basic** status on a remote session | No agent is running or the agent URL is not reachable | Open the Agent flow or Runtime Configuration and start/install the agent |
 | **Agent Started, HTTP Blocked** warning | The process started, but port `7779` is blocked or bound incorrectly | Open the remote firewall and confirm the agent is listening on `0.0.0.0` when remote access is required |
 | Host-key mismatch | The remote server fingerprint changed | Re-scan the key and verify the host before trusting it again |
 | Start/install buttons complain about missing SSH target | Guided settings were not applied or no target was saved | Run **Guided SSH Setup** and click **Use These Settings** |

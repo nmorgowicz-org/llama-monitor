@@ -1,7 +1,7 @@
 // ── Suggestions (Dropdown) ──────────────────────────────────────────────────
 // Dropdown menu with AI-generated suggestions (General, Plot Twist, New Character).
 
-import { activeChatTab, autoResizeChatInput, persistChatTabs } from './chat-state.js';
+import { activeChatTab, autoResizeChatInput, normalizeGeneratedMessageContent, persistChatTabs } from './chat-state.js';
 import { chat, settingsState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showToastWithActions } from './toast.js';
@@ -659,7 +659,7 @@ async function fetchSuggestionRewrite(prompt) {
         }
     }
 
-    return output.trim();
+    return normalizeGeneratedMessageContent(output.trim(), activeChatTab(), 'user');
 }
 
 async function rewriteSuggestionDraft() {
@@ -875,7 +875,7 @@ async function useSuggestion(index, mode = 'send') {
         if (!rewritten) throw new Error('rewrite returned empty content');
 
         // Send the rewritten suggestion directly as a user message
-        sendChatWithContent(rewritten);
+        sendChatWithContent(rewritten, { guided: true });
         suggestionsState.expanded = false;
         suggestionsState.rewriteLoading = false;
         updateDropdownUI();

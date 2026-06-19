@@ -1,0 +1,12 @@
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+# Disable debuginfo in dev/test profiles to cut LLVM codegen memory ~60-70%.
+# The opt cgu.* workers inside rustc consume ~6 GiB generating DWARF symbols,
+# which is unnecessary for clippy and cargo test in CI.
+[profile.dev]
+debug = 0
+
+[profile.test]
+debug = 0

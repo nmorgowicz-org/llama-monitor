@@ -16,8 +16,8 @@
     position: absolute;
     inset: 0;
     background:
-        radial-gradient(circle at top, rgba(86, 193, 255, 0.18), transparent 42%),
-        radial-gradient(circle at bottom right, rgba(255, 190, 92, 0.18), transparent 34%),
+        radial-gradient(circle at top, var(--acc-15), transparent 42%),
+        radial-gradient(circle at bottom right, var(--acc-18), transparent 34%),
         rgba(7, 10, 18, 0.84);
     backdrop-filter: blur(20px);
 }
@@ -42,8 +42,8 @@
     gap: 8px;
     padding: 7px 12px;
     border-radius: 999px;
-    background: rgba(86, 193, 255, 0.12);
-    color: #8cd8ff;
+    background: var(--acc-15);
+    color: var(--color-accent-light);
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.12em;
@@ -108,8 +108,8 @@
 
 .auth-shell-field input:focus {
     outline: none;
-    border-color: rgba(86, 193, 255, 0.55);
-    box-shadow: 0 0 0 4px rgba(86, 193, 255, 0.14);
+    border-color: var(--acc-60);
+    box-shadow: 0 0 0 4px var(--acc-15);
 }
 
 .auth-shell-submit {
@@ -117,14 +117,14 @@
     margin-top: 8px;
     border: 0;
     border-radius: 18px;
-    background: linear-gradient(135deg, #4cc9f0, #67e8f9 54%, #ffb84d);
+    background: linear-gradient(135deg, var(--color-accent-deep), var(--color-accent-light) 55%, var(--color-warning));
     color: #09111c;
     font-size: 15px;
     font-weight: 800;
     letter-spacing: 0.02em;
     cursor: pointer;
     transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease;
-    box-shadow: 0 18px 36px rgba(76, 201, 240, 0.2);
+    box-shadow: 0 18px 36px color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 
 .auth-shell-submit:hover {
@@ -140,7 +140,7 @@
 .auth-shell-error {
     min-height: 20px;
     margin: 0;
-    color: #ff9e9e;
+    color: var(--color-error);
     font-size: 13px;
 }
 
@@ -157,7 +157,7 @@
 
 [data-theme="light"] .auth-shell-backdrop {
     background:
-        radial-gradient(circle at top, rgba(57, 145, 255, 0.16), transparent 42%),
+        radial-gradient(circle at top, color-mix(in srgb, var(--color-accent) 16%, transparent), transparent 42%),
         radial-gradient(circle at bottom right, rgba(255, 174, 66, 0.18), transparent 34%),
         rgba(244, 248, 255, 0.76);
 }
@@ -176,18 +176,37 @@
     color: #0f1a2f;
 }
 
+[data-theme="light"] .auth-shell-eyebrow {
+    color: var(--color-accent-light);
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+[data-theme="light"] .auth-shell-badge {
+  background: rgba(15, 23, 42, 0.05);
+  border-color: rgba(15, 23, 42, 0.14);
+  color: var(--color-text-primary);
+}
+
 [data-theme="light"] .auth-shell-subtitle,
 [data-theme="light"] .auth-shell-meta,
 [data-theme="light"] .auth-shell-note,
 [data-theme="light"] .auth-shell-recovery,
 [data-theme="light"] .auth-shell-field {
-    color: rgba(36, 52, 78, 0.78);
+  color: var(--color-text-secondary);
+}
+
+[data-theme="light"] .auth-shell-error {
+    color: var(--color-error);
 }
 
 [data-theme="light"] .auth-shell-field input {
     background: rgba(255, 255, 255, 0.96);
-    color: #12203a;
+    color: var(--color-text-primary, #12203a);
     border-color: rgba(28, 52, 92, 0.12);
+}
+
+[data-theme="light"] .auth-shell-field input::placeholder {
+    color: #6b7280;
 }
 
 @media (max-width: 640px) {

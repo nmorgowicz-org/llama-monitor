@@ -3,11 +3,13 @@
 
 import { sessionState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
-import { doAttach, doStart } from './attach-detach.js';
-import { openDeferredFileBrowser } from './file-browser-launcher.js';
+import { doAttach, doStart, setHeaderMode } from './attach-detach.js';
+import { openModelFileBrowser } from './file-browser-launcher.js';
 import { loadPresets } from './presets.js';
 import { saveSettings } from './settings.js';
-import { showConnectingState } from './setup-view.js';
+import { setTuneConfig, showTunePanel } from './tune-panel.js';
+import { waitForSpawnReadiness } from './spawn-readiness.js';
+import { showConnectingState, switchView } from './setup-view.js';
 import { showToast } from './toast.js';
 
 // ── Load ───────────────────────────────────────────────────────────────────────
@@ -63,6 +65,8 @@ export function renderSessionList() {
         const modeIcon = isSpawn ? '🖥' : '🔗';
         const endpoint = isAttach ? s.mode.Attach.endpoint : '';
         const port = isSpawn ? s.mode.Spawn.port : '';
+        const bindHost = isSpawn ? (s.mode.Spawn.bind_host || '127.0.0.1') : '';
+        const hasApiKey = isAttach ? !!s.mode.Attach.api_key : !!s.mode.Spawn?.api_key;
         const presetId = s.preset_id || '';
         const presetObj = sessionState.presets.find(p => p.id === presetId);
         const presetName = presetObj ? presetObj.name : (isSpawn ? '(no preset)' : '');
@@ -71,7 +75,9 @@ export function renderSessionList() {
                            s.status === 'Disconnected' ? 'Disconnected' : (s.status || '');
 
         const name = escapeHtml(s.name);
-        const detailText = modeText + (port ? ' : ' + port : '') + (isSpawn && presetName ? ' · ' + escapeHtml(presetName) : '') + (endpoint ? ' · ' + escapeHtml(endpoint) : '');
+        const bindText = isSpawn ? (bindHost === '0.0.0.0' ? ' · LAN visible' : ' · localhost') : '';
+        const apiKeyText = hasApiKey ? ' · API key' : '';
+        const detailText = modeText + (port ? ' : ' + port : '') + bindText + apiKeyText + (isSpawn && presetName ? ' · ' + escapeHtml(presetName) : '') + (endpoint ? ' · ' + escapeHtml(endpoint) : '');
         const statusHtml = statusText ? '<span class="session-item-status">' + escapeHtml(statusText) + '</span>' : '';
 
         let actionsHtml = '';
@@ -122,7 +128,9 @@ export function quickStartSession(sessionId) {
 export async function deleteSession(sessionId) {
     if (!confirm('Delete this session?')) return;
     try {
-        const tokenResp = await fetch('/api/db/admin-token');
+        const tokenResp = await fetch('/api/db/admin-token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         const tokenData = await tokenResp.json();
         const token = tokenData.token;
         if (!token) {
@@ -290,7 +298,9 @@ export async function saveSession(event) {
     if (url === '/api/sessions/spawn') {
         // spawn requires db-admin-token
         try {
-            const tokenResp = await fetch('/api/db/admin-token');
+            const tokenResp = await fetch('/api/db/admin-token', {
+                headers: window.authHeaders ? window.authHeaders() : {},
+            });
             const tokenData = await tokenResp.json();
             const token = tokenData.token;
             if (!token) {
@@ -320,12 +330,41 @@ export async function saveSession(event) {
         showToast('Failed: authentication required', 'error');
         return;
     }
+    if (resp.status === 429) {
+        const data429 = await resp.json().catch(() => ({}));
+        const wait = data429?.seconds_remaining
+            ? `Please wait ${data429.seconds_remaining}s`
+            : 'Too soon; please wait';
+        showToast('Failed: ' + wait, 'warning');
+        return;
+    }
     const data = await resp.json();
     if (data.ok) {
         closeSessionModal();
         loadSessions();
         updateActiveSessionInfo();
         showToast(mode === 'attach' ? 'Attached to endpoint' : 'Session created', 'success');
+
+        // Switch to monitor view for both spawn and attach, matching doAttach/doStart behavior
+        if (mode === 'spawn') {
+            // Wait for the spawned server to become reachable
+            const port = parseInt(target, 10) || 8001;
+            try {
+                await waitForSpawnReadiness(port);
+            } catch (err) {
+                // Non-fatal — switch view anyway; show a warning with the key message.
+                const msg = (err?.message || 'Server did not become ready').split('\n')[0].trim();
+                showToast('Server starting – this may take a moment. If it stays unresponsive, check logs for details: ' + msg, 'warning');
+            }
+            setHeaderMode('Spawn:' + (parseInt(target, 10) || 8001));
+            showTunePanel();
+            switchView('monitor');
+        } else {
+            // attach mode — already reachable (backend health-checks before accepting)
+            setHeaderMode('Attach:' + target);
+            showTunePanel();
+            switchView('monitor');
+        }
     } else {
         showToast('Failed to create session: ' + data.error, 'error');
     }
@@ -374,14 +413,16 @@ export function initSessions() {
     document.getElementById('session-modal-cancel')?.addEventListener('click', closeSessionModal);
     document.getElementById('btn-new-session')?.addEventListener('click', showNewSessionForm);
     document.getElementById('session-create-first')?.addEventListener('click', showNewSessionForm);
-    document.getElementById('session-browse-model-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-session-model-path', 'gguf'));
+    document.getElementById('session-browse-model-btn')?.addEventListener('click', () => openModelFileBrowser('modal-session-model-path', 'gguf', null, 'model'));
 
     // Bind session form submit
     const sessionForm = document.getElementById('session-form');
     if (sessionForm) sessionForm.addEventListener('submit', saveSession);
 
-    // Bind nav new session button
-    document.getElementById('nav-new-session-btn')?.addEventListener('click', openSessionModal);
+    // Bind nav new session button — opens spawn wizard
+    document.getElementById('nav-new-session-btn')?.addEventListener('click', () => {
+        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+    });
 
     // Bind setup view link
     document.getElementById('setup-browse-sessions-link')?.addEventListener('click', (e) => {
@@ -423,6 +464,7 @@ export function initSessions() {
     // Initial load
     loadSessions();
 
-    // Poll active session info
-    setInterval(updateActiveSessionInfo, 2000);
+    // Note: periodic polling of active session info removed — the WebSocket
+    // delivers the same data (session_mode, active_session_id, endpoint) on
+    // every tick, so the HTTP poll was redundant.
 }

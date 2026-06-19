@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use crate::chat_storage::ChatStorage;
@@ -12,6 +13,91 @@ use crate::llama::server::ServerConfig;
 use crate::models::DiscoveredModel;
 use crate::presets;
 use crate::presets::ModelPreset;
+use std::sync::atomic::AtomicU64;
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ModelTags {
+    #[serde(default)]
+    pub tags: BTreeMap<String, Vec<String>>,
+}
+
+// Legacy format when model-tags.json was a simple array/object with a "tags" field.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyModelTags {
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+impl ModelTags {
+    pub fn load(path: &Path) -> Self {
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                // Try legacy shape: { "tags": [...] }
+                if let Ok(legacy) = serde_json::from_str::<LegacyModelTags>(&content) {
+                    if !legacy.tags.is_empty() {
+                        eprintln!("[info] ModelTags: migrating legacy format in {:?}", path);
+                    }
+                    let tags = Self::default();
+                    if let Err(e) = tags.save(path) {
+                        eprintln!("[warn] ModelTags: failed to migrate {:?}: {e}", path);
+                    }
+                    return tags;
+                }
+
+                // Older versions loaded a direct map without the "tags" wrapper.
+                if let Ok(tags) = serde_json::from_str::<BTreeMap<String, Vec<String>>>(&content) {
+                    let tags = Self { tags };
+                    if let Err(e) = tags.save(path) {
+                        eprintln!("[warn] ModelTags: failed to migrate {:?}: {e}", path);
+                    }
+                    return tags;
+                }
+
+                // Current format: { "tags": { "model-id": ["tag1", "tag2"] } }
+                if let Ok(tags) = serde_json::from_str::<Self>(&content) {
+                    return tags;
+                }
+
+                eprintln!(
+                    "[warn] ModelTags: corrupted JSON in {:?}, loading empty tags",
+                    path
+                );
+                Self::default()
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let tags = Self::default();
+                if !path.as_os_str().is_empty()
+                    && let Err(e) = tags.save(path)
+                {
+                    eprintln!(
+                        "[warn] ModelTags: failed to initialize missing file {:?}: {e}",
+                        path
+                    );
+                }
+                tags
+            }
+            Err(e) => {
+                eprintln!(
+                    "[warn] ModelTags: could not read {:?}, loading empty tags (error: {})",
+                    path, e
+                );
+                Self::default()
+            }
+        }
+    }
+
+    pub fn save(&self, path: &Path) -> anyhow::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(&tmp, json)?;
+        std::fs::rename(&tmp, path)?;
+        Ok(())
+    }
+}
 use crate::system::SystemMetrics;
 
 fn sensor_bridge_setup_available() -> bool {
@@ -89,6 +175,10 @@ pub struct UiSettings {
     pub llama_server_cwd: String,
     #[serde(default)]
     pub models_dir: String,
+    /// Additional directories to scan for models (beyond the primary download dir).
+    /// Useful for models spread across multiple drives or folders.
+    #[serde(default)]
+    pub extra_models_dirs: Vec<String>,
     #[serde(default)]
     pub server_endpoint: String,
     #[serde(default = "default_llama_poll_interval")]
@@ -149,9 +239,79 @@ pub struct UiSettings {
     /// Shared context notes intro visibility.
     #[serde(default)]
     pub context_notes_intro_hidden: bool,
+    /// Whether assistant thinking blocks should be stored in chat history and restored later.
+    #[serde(default)]
+    pub persist_thinking_content: bool,
     /// Shared custom suggestion categories used by the suggestions workspace.
     #[serde(default)]
     pub custom_suggestion_categories: HashMap<String, CustomSuggestionCategory>,
+    /// Sleep/low-power mode settings persisted in ui-settings.json (T-044).
+    #[serde(default)]
+    pub sleep_mode: SleepModeConfig,
+}
+
+/// Sleep/low-power mode configuration (T-043).
+///
+/// Controls automatic transitions and intervals while asleep.
+/// Loaded from ui-settings.json or defaults (T-044).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SleepModeConfig {
+    /// If true, automatically enter sleep when all browser tabs are hidden.
+    #[serde(default = "default_auto_sleep_when_all_hidden")]
+    pub auto_sleep_when_all_hidden: bool,
+    /// If set, automatically enter sleep after this many seconds of inactivity
+    /// with no connections and no generating activity.
+    #[serde(default)]
+    pub auto_sleep_idle_secs: Option<u64>,
+    /// GPU poller interval (seconds) while asleep.
+    #[serde(default = "default_sleep_gpu_interval_secs")]
+    pub sleep_gpu_interval_secs: u64,
+    /// System metrics poller interval (seconds) while asleep.
+    #[serde(default = "default_sleep_sys_interval_secs")]
+    pub sleep_sys_interval_secs: u64,
+    /// Llama metrics poller interval (seconds) while asleep.
+    #[serde(default = "default_sleep_llama_interval_secs")]
+    pub sleep_llama_interval_secs: u64,
+    /// WebSocket broadcast interval (milliseconds) while asleep.
+    #[serde(default = "default_sleep_ws_interval_ms")]
+    pub sleep_ws_interval_ms: u64,
+}
+
+impl Default for SleepModeConfig {
+    fn default() -> Self {
+        Self {
+            auto_sleep_when_all_hidden: default_auto_sleep_when_all_hidden(),
+            auto_sleep_idle_secs: default_auto_sleep_idle_secs(),
+            sleep_gpu_interval_secs: default_sleep_gpu_interval_secs(),
+            sleep_sys_interval_secs: default_sleep_sys_interval_secs(),
+            sleep_llama_interval_secs: default_sleep_llama_interval_secs(),
+            sleep_ws_interval_ms: default_sleep_ws_interval_ms(),
+        }
+    }
+}
+
+fn default_auto_sleep_when_all_hidden() -> bool {
+    true
+}
+
+fn default_auto_sleep_idle_secs() -> Option<u64> {
+    Some(600)
+}
+
+fn default_sleep_gpu_interval_secs() -> u64 {
+    15
+}
+
+fn default_sleep_sys_interval_secs() -> u64 {
+    15
+}
+
+fn default_sleep_llama_interval_secs() -> u64 {
+    15
+}
+
+fn default_sleep_ws_interval_ms() -> u64 {
+    10_000
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
@@ -195,6 +355,10 @@ fn default_ws_push_interval_ms() -> u64 {
 pub enum SessionMode {
     Spawn {
         port: u16,
+        #[serde(default)]
+        bind_host: Option<String>,
+        #[serde(default)]
+        api_key: Option<String>,
     },
     Attach {
         endpoint: String,
@@ -204,7 +368,11 @@ pub enum SessionMode {
 
 impl Default for SessionMode {
     fn default() -> Self {
-        SessionMode::Spawn { port: 8001 }
+        SessionMode::Spawn {
+            port: 8001,
+            bind_host: None,
+            api_key: None,
+        }
     }
 }
 
@@ -241,12 +409,23 @@ impl Session {
             .as_secs()
     }
 
-    pub fn new_spawn(id: String, name: String, port: u16, preset_id: String) -> Self {
+    pub fn new_spawn(
+        id: String,
+        name: String,
+        port: u16,
+        preset_id: String,
+        bind_host: Option<String>,
+        api_key: Option<String>,
+    ) -> Self {
         let now = Self::now();
         Self {
             id,
             name,
-            mode: SessionMode::Spawn { port },
+            mode: SessionMode::Spawn {
+                port,
+                bind_host,
+                api_key,
+            },
             status: SessionStatus::Stopped,
             preset_id,
             created_at: now,
@@ -311,6 +490,7 @@ impl Default for UiSettings {
             llama_server_path: String::new(),
             llama_server_cwd: String::new(),
             models_dir: String::new(),
+            extra_models_dirs: Vec::new(),
             server_endpoint: String::new(),
             llama_poll_interval: default_llama_poll_interval(),
             remote_agent_url: String::new(),
@@ -333,20 +513,42 @@ impl Default for UiSettings {
             enter_to_send: default_true(),
             context_notes_sidebar_expanded: false,
             context_notes_intro_hidden: false,
+            persist_thinking_content: false,
             custom_suggestion_categories: HashMap::new(),
+            sleep_mode: SleepModeConfig::default(),
         }
     }
 }
 
 pub fn load_ui_settings(path: &Path) -> UiSettings {
-    if path.exists()
-        && let Ok(contents) = std::fs::read_to_string(path)
-        && let Ok(mut s) = serde_json::from_str::<UiSettings>(&contents)
-    {
-        s.remote_agent_token = decrypt_value(&s.remote_agent_token);
-        return s;
+    match std::fs::read_to_string(path) {
+        Ok(contents) => match serde_json::from_str::<UiSettings>(&contents) {
+            Ok(mut settings) => {
+                settings.remote_agent_token = decrypt_value(&settings.remote_agent_token);
+                settings
+            }
+            Err(e) => {
+                eprintln!("[warn] Invalid UI settings file {:?}: {e}", path);
+                UiSettings::default()
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let settings = UiSettings::default();
+            if !path.as_os_str().is_empty()
+                && let Err(e) = save_ui_settings(path, &settings)
+            {
+                eprintln!(
+                    "[warn] Failed to initialize missing UI settings file {:?}: {e}",
+                    path
+                );
+            }
+            settings
+        }
+        Err(e) => {
+            eprintln!("[warn] Failed to read UI settings file {:?}: {e}", path);
+            UiSettings::default()
+        }
     }
-    UiSettings::default()
 }
 
 pub fn save_ui_settings(path: &Path, settings: &UiSettings) -> anyhow::Result<()> {
@@ -366,18 +568,37 @@ pub fn save_ui_settings(path: &Path, settings: &UiSettings) -> anyhow::Result<()
 
 /// Load sessions from file
 pub fn load_sessions(path: &Path) -> Vec<Session> {
-    if path.exists()
-        && let Ok(contents) = std::fs::read_to_string(path)
-        && let Ok(sessions) = serde_json::from_str::<Vec<Session>>(&contents)
-    {
-        return sessions;
+    match std::fs::read_to_string(path) {
+        Ok(contents) => match serde_json::from_str::<Vec<Session>>(&contents) {
+            Ok(sessions) => return sessions,
+            Err(e) => eprintln!("[warn] Invalid sessions file {:?}: {e}", path),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let sessions = default_sessions();
+            if !path.as_os_str().is_empty()
+                && let Err(e) = save_sessions(path, &sessions)
+            {
+                eprintln!(
+                    "[warn] Failed to initialize missing sessions file {:?}: {e}",
+                    path
+                );
+            }
+            return sessions;
+        }
+        Err(e) => eprintln!("[warn] Failed to read sessions file {:?}: {e}", path),
     }
-    // Return default session if no file exists
+
+    default_sessions()
+}
+
+fn default_sessions() -> Vec<Session> {
     vec![Session::new_spawn(
         "default".to_string(),
         "Default Session".to_string(),
         8001,
         String::new(),
+        None,
+        None,
     )]
 }
 
@@ -402,6 +623,7 @@ pub struct AppPaths {
     pub gpu_env_path: PathBuf,
     pub ui_settings_path: PathBuf,
     pub sessions_path: PathBuf,
+    pub model_tags_path: PathBuf,
 }
 
 /// Generate unique session ID
@@ -420,7 +642,14 @@ pub struct AppState {
     pub gpu_metrics: Arc<Mutex<BTreeMap<String, GpuMetrics>>>,
     pub llama_metrics: Arc<Mutex<LlamaMetrics>>,
     pub server_logs: Arc<Mutex<VecDeque<String>>>,
-    pub server_child: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
+    // Stores the PID of the running llama-server child.  The Child handle itself
+    // is moved directly into the death_watcher task so it can call wait(); stop_server
+    // kills by PID so it never needs to hold the handle.
+    pub server_child: Arc<tokio::sync::Mutex<Option<u32>>>,
+    pub server_stopping: Arc<AtomicBool>, // True when stop_server is in progress (for death-watcher coordination)
+    // Fired by the death_watcher when the child exits during an intentional stop,
+    // so stop_server can unblock and know the port has been released.
+    pub server_exit_notify: Arc<tokio::sync::Notify>,
     pub server_running: Arc<Mutex<bool>>, // Whether active endpoint is reachable (for inference)
     pub local_server_running: Arc<Mutex<bool>>, // Whether a local llama-server was spawned by this app
     pub server_config: Arc<Mutex<Option<ServerConfig>>>,
@@ -432,6 +661,9 @@ pub struct AppState {
     pub templates_path: PathBuf,
     pub discovered_models: Arc<Mutex<Vec<DiscoveredModel>>>,
     pub models_dir: Option<PathBuf>,
+    pub model_tags: Arc<Mutex<ModelTags>>,
+    pub model_tags_path: PathBuf,
+    pub preset_collections: Arc<Mutex<crate::collections::PresetCollections>>,
     pub gpu_env: Arc<Mutex<GpuEnv>>,
     pub gpu_env_path: PathBuf,
     pub ui_settings: Arc<Mutex<UiSettings>>,
@@ -455,6 +687,14 @@ pub struct AppState {
     pub chat_storage: Arc<ChatStorage>,
     pub tls_config: Arc<Mutex<TLSConfig>>,
     pub monitor_inference_gate: Arc<tokio::sync::Semaphore>,
+    pub last_spawn_cmd: Arc<Mutex<String>>,
+
+    // Sleep/low-power mode (T-042/T-043)
+    pub sleep_mode: Arc<AtomicBool>,
+    pub sleep_mode_manual: Arc<AtomicBool>,
+    pub sleep_mode_config: Arc<Mutex<SleepModeConfig>>,
+    pub sleep_notify: Arc<tokio::sync::Notify>,
+    pub last_activity_at: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl AppState {
@@ -472,10 +712,17 @@ impl AppState {
         let gpu_env_path = paths.gpu_env_path;
         let ui_settings_path = paths.ui_settings_path;
         let sessions_path = paths.sessions_path;
+        let model_tags_path = paths.model_tags_path;
         let discovered = models_dir
             .as_ref()
             .and_then(|dir| crate::models::scan_models_dir(dir).ok())
             .unwrap_or_default();
+        let model_tags = ModelTags::load(&model_tags_path);
+        let preset_collections = {
+            let default_cfg = std::path::PathBuf::from(".");
+            let config_dir = model_tags_path.parent().unwrap_or(&default_cfg);
+            crate::collections::load_collections(config_dir)
+        };
 
         let sessions = load_sessions(&sessions_path);
         let templates = presets::load_templates(&templates_path);
@@ -494,11 +741,24 @@ impl AppState {
             sensor_bridge_setup_available: false,
         };
 
+        // T-042/T-043/T-044: sleep_mode and config initialization
+        let sleep_cfg = ui_settings.sleep_mode.clone();
+
+        // sleep_mode stored as AtomicBool; watch::channel was used before but send()
+        // silently fails when no receivers exist, so the value never updated.
+
+        let last_activity_ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
         let state = Self {
             gpu_metrics: Arc::new(Mutex::new(BTreeMap::new())),
             llama_metrics: Arc::new(Mutex::new(LlamaMetrics::default())),
             server_logs: Arc::new(Mutex::new(VecDeque::new())),
             server_child: Arc::new(tokio::sync::Mutex::new(None)),
+            server_stopping: Arc::new(AtomicBool::new(false)),
+            server_exit_notify: Arc::new(tokio::sync::Notify::new()),
             server_running: Arc::new(Mutex::new(false)),
             local_server_running: Arc::new(Mutex::new(false)),
             server_config: Arc::new(Mutex::new(None)),
@@ -510,20 +770,14 @@ impl AppState {
             templates_path,
             discovered_models: Arc::new(Mutex::new(discovered)),
             models_dir,
+            model_tags: Arc::new(Mutex::new(model_tags)),
+            model_tags_path,
+            preset_collections: Arc::new(Mutex::new(preset_collections)),
             gpu_env: Arc::new(Mutex::new(gpu_env)),
             gpu_env_path,
             ui_settings: Arc::new(Mutex::new(ui_settings)),
             ui_settings_path,
-            system_metrics: Arc::new(Mutex::new(SystemMetrics {
-                cpu_name: "Unknown CPU".to_string(),
-                cpu_temp: 0.0,
-                cpu_temp_available: false,
-                cpu_load: 0,
-                cpu_clock_mhz: 0,
-                ram_total_gb: 0.0,
-                ram_used_gb: 0.0,
-                motherboard: "Unknown".to_string(),
-            })),
+            system_metrics: Arc::new(Mutex::new(SystemMetrics::default())),
             sessions: Arc::new(Mutex::new(sessions)),
             active_session_id: Arc::new(Mutex::new(active_session_id)),
             sessions_path,
@@ -541,15 +795,59 @@ impl AppState {
             chat_storage,
             tls_config: Arc::new(Mutex::new(tls_config)),
             monitor_inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
+            last_spawn_cmd: Arc::new(Mutex::new(String::new())),
+            sleep_mode: Arc::new(AtomicBool::new(false)),
+            sleep_mode_manual: Arc::new(AtomicBool::new(false)),
+            sleep_mode_config: Arc::new(Mutex::new(sleep_cfg)),
+            sleep_notify: Arc::new(tokio::sync::Notify::new()),
+            last_activity_at: Arc::new(AtomicU64::new(last_activity_ts)),
         };
 
         // Prune old inactive sessions on startup (older than 7 days)
         state.prune_old_sessions(7 * 24 * 60 * 60);
 
+        // If there are many stale sessions but no active session, clear them so
+        // the app doesn’t present an empty welcome screen while silently hitting
+        // the session limit.
+        state.cleanup_startup_stale_sessions();
+
         state
     }
 
     pub fn push_log(&self, line: String) {
+        // Filter high-frequency poll noise that clutters the console
+        if is_noise_log(&line) {
+            return;
+        }
+
+        // Only echo important lines to stderr (terminal):
+        // - Internal monitor messages ([monitor])
+        // - Lines indicating an error/failure/health issue
+        // All lines are still stored for the UI and Logs tab.
+        // Use ascii_lowercase (cheaper than unicode case-folding) and any()
+        // to short-circuit — all our patterns are pure ASCII.
+        let is_important = line.starts_with("[monitor]") || {
+            let lower = line.to_ascii_lowercase();
+            [
+                "error",
+                "oom",
+                "out of memory",
+                "killed",
+                "health check",
+                "failed",
+                "cannot update",
+                "not responding",
+                "corrupt",
+                "incompatible",
+            ]
+            .iter()
+            .any(|p| lower.contains(p))
+        };
+
+        if is_important {
+            eprintln!("[llama-monitor] {line}");
+        }
+
         let mut logs = self.server_logs.lock().unwrap();
         if logs.len() >= MAX_LOG_LINES {
             logs.pop_front();
@@ -621,6 +919,41 @@ impl AppState {
                 }
             }
 
+            // If still at capacity, try to remove obviously stale sessions:
+            // - Spawn sessions with status=Running but no local server running.
+            // - Sessions stuck in Error(...) (non-recoverable / not usable).
+            if sessions.len() >= MAX_SESSIONS {
+                let active_id = self.active_session_id.lock().unwrap();
+                let local_running = *self.local_server_running.lock().unwrap();
+
+                let mut to_remove: Option<usize> = None;
+
+                for (i, s) in sessions.iter().enumerate() {
+                    // Never evict the current active session.
+                    if s.id == *active_id {
+                        continue;
+                    }
+
+                    let stale = matches!(&s.status, SessionStatus::Error(_))
+                        || (matches!(&s.status, SessionStatus::Running)
+                            && matches!(&s.mode, SessionMode::Spawn { .. })
+                            && !local_running);
+
+                    if stale {
+                        to_remove = Some(i);
+                        break;
+                    }
+                }
+
+                if let Some(idx) = to_remove {
+                    eprintln!(
+                        "[info] Auto-removing stale session (making room): {} ({})",
+                        sessions[idx].name, sessions[idx].id
+                    );
+                    sessions.remove(idx);
+                }
+            }
+
             // If still at capacity and no inactive sessions, we're truly full
             if sessions.len() >= MAX_SESSIONS {
                 eprintln!(
@@ -650,12 +983,16 @@ impl AppState {
 
         let len_before = sessions.len();
         sessions.retain(|s| {
-            let is_old = now.saturating_sub(s.created_at) > max_age_secs;
-            let is_inactive = s.is_inactive();
+            let age_secs = now.saturating_sub(s.created_at);
+            let is_old = age_secs > max_age_secs;
+            let is_error = matches!(&s.status, SessionStatus::Error(_));
+            let is_inactive = s.is_inactive() || is_error;
+
             if is_old && is_inactive {
+                let days = (age_secs / 86_400).max(1);
                 eprintln!(
-                    "[info] Pruning old inactive session: {} ({} days old)",
-                    s.name, is_old as u64
+                    "[info] Pruning old inactive session: {} (~{} days old)",
+                    s.name, days
                 );
                 removed += 1;
                 false
@@ -669,6 +1006,82 @@ impl AppState {
         }
 
         removed
+    }
+
+    /// On startup: if we have many stale sessions but no active session selected,
+    /// wipe them and start fresh so the user doesn’t encounter “session limit reached”
+    /// on an otherwise empty welcome screen.
+    pub fn cleanup_startup_stale_sessions(&self) {
+        let (active_id, local_running) = {
+            let active_id = self.active_session_id.lock().unwrap();
+            let local_running = *self.local_server_running.lock().unwrap();
+            (active_id.clone(), local_running)
+        };
+
+        // Only act if there’s no meaningful active session.
+        if !active_id.is_empty() {
+            return;
+        }
+
+        let (total, stale_count) = {
+            let sessions = match self.sessions.lock() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[error] Failed to acquire sessions lock for startup cleanup: {e}");
+                    return;
+                }
+            };
+
+            let total = sessions.len();
+            let stale_count = sessions
+                .iter()
+                .filter(|s| {
+                    // Spawn-only sessions: disposable (must re-spawn) → aggressively stale.
+                    if matches!(&s.mode, SessionMode::Spawn { .. }) {
+                        return matches!(
+                            &s.status,
+                            SessionStatus::Stopped
+                                | SessionStatus::Disconnected
+                                | SessionStatus::Error(_)
+                                | SessionStatus::Running if !local_running
+                        );
+                    }
+
+                    // Attach sessions: keep longer (user may reconnect).
+                    // Only treat as stale if definitively not in use.
+                    if matches!(&s.mode, SessionMode::Attach { .. }) {
+                        return matches!(
+                            &s.status,
+                            SessionStatus::Stopped | SessionStatus::Error(_)
+                        );
+                    }
+
+                    false
+                })
+                .count();
+
+            (total, stale_count)
+        };
+
+        // Threshold: if there are several stale sessions and almost all are stale,
+        // treat it as “ghost sessions” and reset.
+        if total >= 5 && stale_count >= total {
+            eprintln!(
+                "[info] Startup cleanup: {} of {} sessions are stale; resetting to empty",
+                stale_count, total
+            );
+
+            let mut sessions = self.sessions.lock().unwrap();
+            sessions.clear();
+
+            let mut active = self.active_session_id.lock().unwrap();
+            active.clear();
+
+            // Force a fresh sessions.json.
+            if let Err(e) = save_sessions(&self.sessions_path, &sessions) {
+                eprintln!("[error] Failed to persist cleared sessions list: {e}");
+            }
+        }
     }
 
     pub fn remove_session(&self, session_id: &str) -> bool {
@@ -880,6 +1293,20 @@ impl AppState {
     }
 }
 
+/// Returns `true` if the given log line is known llama.cpp poll noise.
+///
+/// These patterns are safe to suppress in the push_log echo loop because
+/// they represent routine server status updates that add no value to terminal output
+/// but fire frequently on every poll cycle.
+///
+/// Patterns filtered:
+/// - `update_slots` + `all slots are idle` — idle-slot poll noise on every tick
+/// - `stop: cancel task` + `id_task` — task cancellation on every idle tick
+fn is_noise_log(line: &str) -> bool {
+    (line.contains("update_slots") && line.contains("all slots are idle"))
+        || (line.contains("stop: cancel task") && line.contains("id_task"))
+}
+
 #[allow(dead_code)]
 pub fn endpoint_kind_from_endpoint(endpoint: &str) -> EndpointKind {
     if endpoint_is_local(endpoint) {
@@ -963,6 +1390,7 @@ fn local_interface_ips() -> Vec<IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn test_paths(sessions_path: PathBuf) -> AppPaths {
         AppPaths {
@@ -972,11 +1400,87 @@ mod tests {
             gpu_env_path: PathBuf::new(),
             ui_settings_path: PathBuf::new(),
             sessions_path,
+            model_tags_path: PathBuf::new(),
         }
     }
 
     fn test_tls_config() -> TLSConfig {
         TLSConfig::default()
+    }
+
+    #[test]
+    fn model_tags_missing_file_is_recreated_and_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model-tags.json");
+
+        let mut tags = ModelTags::load(&path);
+        assert!(path.exists());
+        assert!(tags.tags.is_empty());
+
+        tags.tags
+            .insert("/models/example.gguf".into(), vec!["family:test".into()]);
+        tags.save(&path).unwrap();
+
+        assert_eq!(ModelTags::load(&path).tags, tags.tags);
+    }
+
+    #[test]
+    fn model_tags_migrates_direct_map_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model-tags.json");
+        fs::write(
+            &path,
+            r#"{"/models/example.gguf":["family:test","favorite"]}"#,
+        )
+        .unwrap();
+
+        let tags = ModelTags::load(&path);
+        assert_eq!(
+            tags.tags.get("/models/example.gguf"),
+            Some(&vec!["family:test".to_string(), "favorite".to_string()])
+        );
+
+        let migrated: ModelTags = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(migrated.tags, tags.tags);
+    }
+
+    #[test]
+    fn missing_ui_settings_and_sessions_files_are_recreated() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join("ui-settings.json");
+        let sessions_path = dir.path().join("sessions.json");
+
+        let settings = load_ui_settings(&settings_path);
+        let sessions = load_sessions(&sessions_path);
+
+        assert!(settings_path.exists());
+        assert!(sessions_path.exists());
+        assert_eq!(settings.ws_push_interval_ms, default_ws_push_interval_ms());
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "default");
+    }
+
+    #[test]
+    fn filters_llama_server_cancel_task_noise_with_variable_prefixes() {
+        assert!(is_noise_log(
+            "0.43.327.046 W srv          stop: cancel task, id_task = 28"
+        ));
+        assert!(is_noise_log(
+            "5.41.976.030 W srv          stop: cancel task, id_task = 168"
+        ));
+        assert!(is_noise_log(
+            "\u{1b}[1;36msrv\u{1b}[0m          stop: cancel task, id_task = 66"
+        ));
+    }
+
+    #[test]
+    fn preserves_other_llama_server_stop_logs() {
+        assert!(!is_noise_log(
+            "0.43.327.046 W srv          stop: server shutdown requested"
+        ));
+        assert!(!is_noise_log(
+            "0.43.327.046 E srv          stop: cancel task queue failed"
+        ));
     }
 
     #[test]
@@ -1070,7 +1574,14 @@ mod tests {
                 test_tls_config(),
             );
             let session = if mode == "spawn" {
-                Session::new_spawn("test".to_string(), "Test".to_string(), 8001, String::new())
+                Session::new_spawn(
+                    "test".to_string(),
+                    "Test".to_string(),
+                    8001,
+                    String::new(),
+                    None,
+                    None,
+                )
             } else {
                 Session::new_attach(
                     "test".to_string(),
@@ -1150,6 +1661,8 @@ mod tests {
             "Existing".to_string(),
             8001,
             String::new(),
+            None,
+            None,
         ));
 
         assert!(state.set_active_session("existing"));
@@ -1173,6 +1686,8 @@ mod tests {
             "Existing".to_string(),
             8001,
             String::new(),
+            None,
+            None,
         ));
 
         assert!(state.set_active_session("existing"));

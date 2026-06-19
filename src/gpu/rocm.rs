@@ -119,6 +119,7 @@ pub fn parse_rocm_json(json: &serde_json::Value) -> Result<BTreeMap<String, GpuM
                 vram_total,
                 sclk_mhz,
                 mclk_mhz,
+                metal_gpu_limit_mb: None,
             },
         );
     }

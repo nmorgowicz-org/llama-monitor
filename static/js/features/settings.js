@@ -6,6 +6,7 @@ import { setContextCardViewPreference } from './context-card.js';
 import { renderChatMessages } from './chat-render.js';
 import { getAutoPollingInterval } from './network-detection.js';
 import { showToast } from './toast.js';
+import { setEnterToSend, applyChatStyle } from './chat-params.js';
 
 // ── Secret masking helpers ────────────────────────────────────────────────────
 
@@ -78,12 +79,23 @@ export function collectSettings() {
         }
     }
 
+    // T-058: read auto-pause policy settings. Manual monitoring toggle is the nav-monitoring-chip.
+    const sleepWhenHiddenEl = document.getElementById('settings-sleep-mode-when-hidden');
+    const sleepIdleEl = document.getElementById('settings-sleep-mode-idle');
+
+    const sleepWhenHidden = sleepWhenHiddenEl ? (sleepWhenHiddenEl.checked === true) : undefined;
+    const sleepIdleRaw = sleepIdleEl ? (sleepIdleEl.value || '600') : '600';
+    const sleepIdleSecs = sleepIdleRaw === '0'
+        ? null
+        : (parseInt(sleepIdleRaw, 10) || 600);
+
     return {
         preset_id: document.getElementById('preset-select').value,
         port: port,
         llama_server_path: document.getElementById('set-server-path').value,
         llama_server_cwd: document.getElementById('set-server-cwd').value,
-        models_dir: '',
+        models_dir: document.getElementById('settings-models-dir')?.value.trim() || '',
+        extra_models_dirs: _getExtraModelsDirs(),
         server_endpoint: endpoint,
         remote_agent_url: document.getElementById('set-remote-agent-url')?.value.trim() || '',
         remote_agent_token: getSecretValue('set-remote-agent-token') || '',
@@ -100,28 +112,36 @@ export function collectSettings() {
         default_sidebar_width: parseInt(document.getElementById('settings-sidebar-width')?.value || '280', 10),
         suggestion_count: parseInt(document.getElementById('settings-suggestion-count')?.value || '5', 10),
         context_depth: parseInt(document.getElementById('settings-context-depth')?.value || '10', 10),
-        chat_date_format: settingsState.chat_date_format || 'MM/DD/YY',
-        enter_to_send: settingsState.enter_to_send !== false,
+        chat_date_format: document.getElementById('settings-chat-date-format')?.value || settingsState.chat_date_format || 'MM/DD/YY',
+        enter_to_send: document.getElementById('settings-enter-to-send') ? !!document.getElementById('settings-enter-to-send').checked : settingsState.enter_to_send !== false,
         context_notes_sidebar_expanded: !!settingsState.context_notes_sidebar_expanded,
         context_notes_intro_hidden: !!settingsState.context_notes_intro_hidden,
+        persist_thinking_content: !!document.getElementById('settings-persist-thinking-content')?.checked,
         custom_suggestion_categories: settingsState.custom_suggestion_categories || {},
-        suggestion_prompts: {
-            general: document.getElementById('settings-prompt-general')?.value || '',
-            'plot-twist': document.getElementById('settings-prompt-plot-twist')?.value || '',
-            'new-character': document.getElementById('settings-prompt-new-character')?.value || '',
-            context: document.getElementById('settings-prompt-context')?.value || '',
-            director: document.getElementById('settings-prompt-director')?.value || '',
-            explicit: document.getElementById('settings-prompt-explicit')?.value || '',
-            action: document.getElementById('settings-prompt-action')?.value || '',
-            comedy: document.getElementById('settings-prompt-comedy')?.value || '',
-            fantasy: document.getElementById('settings-prompt-fantasy')?.value || '',
-            horror: document.getElementById('settings-prompt-horror')?.value || '',
-            mystery: document.getElementById('settings-prompt-mystery')?.value || '',
-            noir: document.getElementById('settings-prompt-noir')?.value || '',
-            romance: document.getElementById('settings-prompt-romance')?.value || '',
-            'sci-fi': document.getElementById('settings-prompt-sci-fi')?.value || '',
-            thriller: document.getElementById('settings-prompt-thriller')?.value || '',
+        // Dashboard metrics visibility
+        dashboard: {
+            show_cpu: !!document.getElementById('settings-dashboard-show-cpu')?.checked,
+            show_gpu: !!document.getElementById('settings-dashboard-show-gpu')?.checked,
+            show_memory: !!document.getElementById('settings-dashboard-show-memory')?.checked,
+            show_network: !!document.getElementById('settings-dashboard-show-network')?.checked,
         },
+        // Notifications and feedback
+        show_toasts: !!document.getElementById('settings-show-toasts')?.checked,
+        notify_on: {
+            start: !!document.getElementById('settings-notify-start')?.checked,
+            stop: !!document.getElementById('settings-notify-stop')?.checked,
+            error: !!document.getElementById('settings-notify-error')?.checked,
+            high_temp: !!document.getElementById('settings-notify-high-temp')?.checked,
+        },
+        // Behavior
+        auto_update: !!document.getElementById('settings-auto-update')?.checked,
+        save_history: !!document.getElementById('settings-save-history')?.checked,
+        // T-058: sleep_mode settings (sent to server via PUT /api/settings)
+        sleep_mode: {
+            auto_sleep_when_all_hidden: sleepWhenHidden !== undefined ? sleepWhenHidden : true,
+            auto_sleep_idle_secs: sleepIdleSecs,
+        },
+        suggestion_prompts: settingsState.suggestion_prompts || {},
     };
 }
 
@@ -178,6 +198,16 @@ export function applySettings(s) {
     if (s.llama_server_cwd !== undefined) {
         const serverCwdInput = document.getElementById('set-server-cwd');
         if (serverCwdInput) serverCwdInput.value = s.llama_server_cwd;
+    }
+
+    if (s.models_dir !== undefined) {
+        const el = document.getElementById('settings-models-dir');
+        if (el) el.value = s.models_dir;
+        _updateModelsDirHint(s.models_dir);
+    }
+
+    if (Array.isArray(s.extra_models_dirs)) {
+        _renderExtraModelsDirs(s.extra_models_dirs);
     }
 
     if (s.server_endpoint) {
@@ -267,16 +297,6 @@ export function applySettings(s) {
         if (valueEl) valueEl.textContent = String(s.context_depth);
     }
 
-    if (s.suggestion_prompts) {
-        const prompts = s.suggestion_prompts;
-        const generalEl = document.getElementById('settings-prompt-general');
-        const plotTwistEl = document.getElementById('settings-prompt-plot-twist');
-        const newCharEl = document.getElementById('settings-prompt-new-character');
-        if (generalEl && prompts.general) generalEl.value = prompts.general;
-        if (plotTwistEl && prompts['plot-twist']) plotTwistEl.value = prompts['plot-twist'];
-        if (newCharEl && prompts['new-character']) newCharEl.value = prompts['new-character'];
-    }
-
     // Update central settingsState so feature modules read from a single source
     settingsState.enabled_context_notes = s.enabled_context_notes !== false;
     settingsState.enabled_suggestions = s.enabled_suggestions !== false;
@@ -288,10 +308,91 @@ export function applySettings(s) {
     settingsState.enter_to_send = s.enter_to_send !== false;
     settingsState.context_notes_sidebar_expanded = !!s.context_notes_sidebar_expanded;
     settingsState.context_notes_intro_hidden = !!s.context_notes_intro_hidden;
+    settingsState.persist_thinking_content = !!s.persist_thinking_content;
     settingsState.custom_suggestion_categories = s.custom_suggestion_categories || {};
+
+    const persistThinkingEl = document.getElementById('settings-persist-thinking-content');
+    if (persistThinkingEl) persistThinkingEl.checked = settingsState.persist_thinking_content;
 
     const dateFmtEl = document.getElementById('chat-date-format');
     if (dateFmtEl) dateFmtEl.value = settingsState.chat_date_format;
+
+    const settingsDateFmtEl = document.getElementById('settings-chat-date-format');
+    if (settingsDateFmtEl) settingsDateFmtEl.value = settingsState.chat_date_format;
+
+    const enterToSendEl = document.getElementById('settings-enter-to-send');
+    if (enterToSendEl) enterToSendEl.checked = settingsState.enter_to_send !== false;
+
+    const ctxView = s.context_card_view || 'gauge';
+    document.querySelectorAll('.settings-ctx-view').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === ctxView);
+    });
+
+    if (s.sleep_mode) {
+        const sleepHiddenEl = document.getElementById('settings-sleep-mode-when-hidden');
+        const sleepIdleEl = document.getElementById('settings-sleep-mode-idle');
+        if (sleepHiddenEl) sleepHiddenEl.checked = s.sleep_mode.auto_sleep_when_all_hidden !== false;
+        if (sleepIdleEl && s.sleep_mode.auto_sleep_idle_secs != null) {
+            const opt = sleepIdleEl.querySelector(`option[value="${s.sleep_mode.auto_sleep_idle_secs}"]`);
+            if (opt) sleepIdleEl.value = String(s.sleep_mode.auto_sleep_idle_secs);
+        } else if (sleepIdleEl) {
+            sleepIdleEl.value = '0';
+        }
+    }
+
+    // Dashboard metrics visibility
+    if (s.dashboard) {
+        if (s.dashboard.show_cpu !== undefined) {
+            const el = document.getElementById('settings-dashboard-show-cpu');
+            if (el) el.checked = s.dashboard.show_cpu;
+        }
+        if (s.dashboard.show_gpu !== undefined) {
+            const el = document.getElementById('settings-dashboard-show-gpu');
+            if (el) el.checked = s.dashboard.show_gpu;
+        }
+        if (s.dashboard.show_memory !== undefined) {
+            const el = document.getElementById('settings-dashboard-show-memory');
+            if (el) el.checked = s.dashboard.show_memory;
+        }
+        if (s.dashboard.show_network !== undefined) {
+            const el = document.getElementById('settings-dashboard-show-network');
+            if (el) el.checked = s.dashboard.show_network;
+        }
+    }
+
+    // Notifications and feedback
+    if (s.show_toasts !== undefined) {
+        const el = document.getElementById('settings-show-toasts');
+        if (el) el.checked = s.show_toasts;
+    }
+    if (s.notify_on) {
+        if (s.notify_on.start !== undefined) {
+            const el = document.getElementById('settings-notify-start');
+            if (el) el.checked = s.notify_on.start;
+        }
+        if (s.notify_on.stop !== undefined) {
+            const el = document.getElementById('settings-notify-stop');
+            if (el) el.checked = s.notify_on.stop;
+        }
+        if (s.notify_on.error !== undefined) {
+            const el = document.getElementById('settings-notify-error');
+            if (el) el.checked = s.notify_on.error;
+        }
+        if (s.notify_on.high_temp !== undefined) {
+            const el = document.getElementById('settings-notify-high-temp');
+            if (el) el.checked = s.notify_on.high_temp;
+        }
+    }
+
+    // Advanced / behavior
+    if (s.auto_update !== undefined) {
+        const el = document.getElementById('settings-auto-update');
+        if (el) el.checked = s.auto_update;
+    }
+    if (s.save_history !== undefined) {
+        const el = document.getElementById('settings-save-history');
+        if (el) el.checked = s.save_history;
+    }
 
     notifySettingsApplied();
 }
@@ -329,6 +430,25 @@ export function openSettingsModal() {
 
     const dateFmtEl = document.getElementById('chat-date-format');
     if (dateFmtEl) dateFmtEl.value = settingsState.chat_date_format || 'MM/DD/YY';
+
+    const settingsDateFmtEl = document.getElementById('settings-chat-date-format');
+    if (settingsDateFmtEl) settingsDateFmtEl.value = settingsState.chat_date_format || 'MM/DD/YY';
+
+    const enterToSendEl = document.getElementById('settings-enter-to-send');
+    if (enterToSendEl) enterToSendEl.checked = settingsState.enter_to_send !== false;
+
+    const ctxView = settingsState.context_card_view || 'gauge';
+    document.querySelectorAll('.settings-ctx-view').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.view === ctxView);
+    });
+
+    _initAppearanceTab();
+
+    // Refresh live-changing fields from server
+    (window.authFetch || fetch)('/api/settings', {
+        headers: window.authHeaders ? window.authHeaders() : {},
+    }).then(r => r.ok ? r.json() : null).then(s => { if (s) applySettings(s); }).catch(() => {});
+    _refreshHfTokenStatus();
 }
 
 export function closeSettingsModal() {
@@ -383,6 +503,95 @@ function _bindSettingsEvents() {
         controls.addEventListener('change', saveSettings);
     }
 
+    // Session tab controls
+    document.getElementById('settings-chat-date-format')?.addEventListener('change', (e) => {
+        settingsState.chat_date_format = e.target.value;
+        const mirror = document.getElementById('chat-date-format');
+        if (mirror) mirror.value = e.target.value;
+        renderChatMessages();
+        saveSettings();
+    });
+
+    document.getElementById('settings-enter-to-send')?.addEventListener('change', (e) => {
+        setEnterToSend(e.target.checked);
+        saveSettings();
+    });
+
+    document.querySelectorAll('.settings-ctx-view').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.settings-ctx-view').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const view = btn.dataset.view;
+            const mainBtn = document.getElementById('context-view-toggle-' + view);
+            if (mainBtn) mainBtn.click();
+            saveSettings();
+        });
+    });
+
+    document.getElementById('settings-open-config-btn')?.addEventListener('click', () => {
+        closeSettingsModal();
+        setTimeout(() => document.getElementById('config-modal')?.classList.add('open'), 260);
+    });
+
+    document.getElementById('settings-advanced-open-config-btn')?.addEventListener('click', () => {
+        closeSettingsModal();
+        setTimeout(() => document.getElementById('config-modal')?.classList.add('open'), 260);
+    });
+
+    // GPU tab — load hardware info when tab opens (also load on first open)
+    document.getElementById('settings-open-presets-btn')?.addEventListener('click', () => {
+        closeSettingsModal();
+        setTimeout(() => document.getElementById('preset-edit-btn')?.click(), 260);
+    });
+
+    // Models tab buttons
+    document.getElementById('settings-open-models-btn')?.addEventListener('click', () => {
+        closeSettingsModal();
+        setTimeout(() => import('./models.js').then(({ openModelsModal }) => openModelsModal()), 260);
+    });
+
+    // Appearance tab live controls
+    document.getElementById('settings-appearance-theme')?.addEventListener('change', (e) => {
+        _applyAndSaveAppearance();
+    });
+    document.getElementById('settings-appearance-chat-style')?.addEventListener('change', () => {
+        _applyAndSaveAppearance();
+    });
+    document.getElementById('settings-appearance-font-scale')?.addEventListener('input', (e) => {
+        const el = document.getElementById('settings-appearance-font-scale-value');
+        if (el) el.textContent = Number(e.target.value).toFixed(1) + '×';
+        _applyAndSaveAppearance();
+    });
+    document.getElementById('settings-appearance-spacing-scale')?.addEventListener('input', (e) => {
+        const el = document.getElementById('settings-appearance-spacing-scale-value');
+        if (el) el.textContent = Number(e.target.value).toFixed(1) + '×';
+        _applyAndSaveAppearance();
+    });
+    document.getElementById('settings-appearance-chat-font')?.addEventListener('input', (e) => {
+        const el = document.getElementById('settings-appearance-chat-font-value');
+        if (el) el.textContent = e.target.value + '%';
+        _applyAndSaveAppearance();
+    });
+    document.getElementById('settings-appearance-timestamps')?.addEventListener('change', () => {
+        _applyAndSaveAppearance();
+    });
+    document.getElementById('settings-appearance-msg-width')?.addEventListener('change', () => {
+        _applyAndSaveAppearance();
+    });
+
+    // Palette swatch picker — single delegated listener, bound once in initSettings
+    document.getElementById('settings-palette-grid')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.palette-swatch');
+        if (!btn) return;
+        const palette = btn.dataset.palette || '';
+        document.querySelectorAll('.palette-swatch').forEach(b => {
+            b.classList.toggle('active', b === btn);
+            b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+        });
+        _applyPalette(palette);
+        _applyAndSaveAppearance();
+    });
+
     // Settings tabs
     document.querySelectorAll('.settings-tab').forEach(tab => {
         tab.addEventListener('click', () => {
@@ -391,11 +600,17 @@ function _bindSettingsEvents() {
             document.querySelectorAll('.settings-pane').forEach(p => p.classList.remove('active'));
             tab.classList.add('active');
             document.getElementById('settings-' + target)?.classList.add('active');
+            document.querySelector('#settings-modal .settings-content')?.scrollTo({ top: 0, behavior: 'instant' });
 
-            // Load TLS config when Security tab is opened
             if (target === 'security') {
                 loadTlsConfig();
                 loadDashboardAuthConfig();
+            }
+            if (target === 'gpu') {
+                _loadSettingsGpuInfo();
+            }
+            if (target === 'appearance') {
+                _initAppearanceTab();
             }
         });
     });
@@ -462,21 +677,165 @@ function _bindSettingsEvents() {
         });
     });
 
-    // Reset prompts to defaults
-    document.getElementById('settings-reset-prompts')?.addEventListener('click', () => {
-        const defaults = {
-            general: "You are a creative brainstorming partner. Based on the conversation below, suggest {count} varied, actionable next steps the user could take.\n\nFormat as a numbered list. Prioritize variety: dialogue, action, investigation, social, creative approaches.\n\n[conversation context]",
-            'plot-twist': "You are a plot twist specialist. Based on the conversation below, suggest {count} unexpected, surprising events that could happen next.\n\nFormat as a numbered list. Prioritize: betrayals, revelations, power reversals, unexpected arrivals, hidden truths.\n\n[conversation context]",
-            'new-character': "You are a character introduction specialist. Based on the conversation below, suggest {count} new characters that could enter the story.\n\nFormat as: [Character Name]: [Brief description and how they connect to current story]\n\n[conversation context]",
+}
+
+// ── GPU info (Settings > GPU tab) ────────────────────────────────────────────
+
+async function _loadSettingsGpuInfo() {
+    const el = document.getElementById('settings-gpu-info');
+    if (!el) return;
+    try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const res = await (window.authFetch || fetch)('/api/system/info', { headers });
+        if (!res.ok) { el.textContent = 'Unable to load hardware info.'; return; }
+        const d = await res.json();
+
+        const wrap = document.createElement('div');
+        const mut = document.createTreeWalker(wrap, NodeFilter.SHOW_ELEMENT);
+
+        const makeRow = (label, value) => {
+            const div = document.createElement('div');
+            div.style.marginBottom = '6px';
+            const span = document.createElement('span');
+            span.style.color = 'var(--color-text-muted)';
+            span.style.fontSize = '11px';
+            span.textContent = label;
+            div.appendChild(span);
+            const br = document.createElement('br');
+            div.appendChild(br);
+            div.appendChild(document.createTextNode(value));
+            wrap.appendChild(div);
         };
-        const generalEl = document.getElementById('settings-prompt-general');
-        const plotTwistEl = document.getElementById('settings-prompt-plot-twist');
-        const newCharEl = document.getElementById('settings-prompt-new-character');
-        if (generalEl) generalEl.value = defaults.general;
-        if (plotTwistEl) plotTwistEl.value = defaults['plot-twist'];
-        if (newCharEl) newCharEl.value = defaults['new-character'];
-        markSettingsDirty();
+
+        if (d.cpu_name) {
+            let extra = '';
+            if (d.p_cores) {
+                extra = ' \u00B7 ' + d.p_cores + 'P + ' + (d.e_cores || 0) + 'E cores';
+            }
+            makeRow('CPU', d.cpu_name + extra);
+        }
+
+        if (d.ram_total_gb) {
+            makeRow('UNIFIED MEMORY', d.ram_total_gb.toFixed(1) + ' GB total');
+        }
+
+        if (Array.isArray(d.gpus) && d.gpus.length) {
+            for (const g of d.gpus) {
+                const vramMb = g.vram_total_mb || g.total_mb || g.total_memory_mb || g.vram_total || 0;
+                const name = g.name || 'Unknown GPU';
+                const vramPart = vramMb ? ' \u00B7 ' + (vramMb / 1024).toFixed(1) + ' GB VRAM' : '';
+                makeRow('GPU', name + vramPart);
+            }
+        }
+
+        el.innerHTML = '';
+        if (wrap.firstChild) {
+            while (wrap.firstChild) el.appendChild(wrap.firstChild);
+        } else {
+            el.textContent = 'No hardware info available.';
+        }
+    } catch {
+        el.textContent = 'Unable to load hardware info.';
+    }
+}
+
+// ── Appearance (Settings > Appearance tab) ───────────────────────────────────
+
+function _normalizePaletteId(palette) {
+    return palette === 'carbon-mint' || palette === 'carbon_mint' ? '' : (palette || '');
+}
+
+function _readAppearancePreferences() {
+    try {
+        return JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}') || {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function _applyPalette(palette) {
+    const paletteId = _normalizePaletteId(palette);
+    const html = document.documentElement;
+    html.classList.add('palette-changing');
+    setTimeout(() => html.classList.remove('palette-changing'), 350);
+    if (paletteId) {
+        html.dataset.palette = paletteId;
+    } else {
+        delete html.dataset.palette;
+    }
+}
+
+function _initAppearanceTab() {
+    const saved = _readAppearancePreferences();
+    const themeEl = document.getElementById('settings-appearance-theme');
+    const fontEl = document.getElementById('settings-appearance-font-scale');
+    const fontValEl = document.getElementById('settings-appearance-font-scale-value');
+    const spacingEl = document.getElementById('settings-appearance-spacing-scale');
+    const spacingValEl = document.getElementById('settings-appearance-spacing-scale-value');
+    const chatStyleEl = document.getElementById('settings-appearance-chat-style');
+    const chatFontEl = document.getElementById('settings-appearance-chat-font');
+    const chatFontValEl = document.getElementById('settings-appearance-chat-font-value');
+    const timestampsEl = document.getElementById('settings-appearance-timestamps');
+    const msgWidthEl = document.getElementById('settings-appearance-msg-width');
+
+    // Restore palette swatch selection
+    const activePalette = _normalizePaletteId(saved.palette);
+    document.querySelectorAll('.palette-swatch').forEach(btn => {
+        const matches = _normalizePaletteId(btn.dataset.palette) === activePalette;
+        btn.classList.toggle('active', matches);
+        btn.setAttribute('aria-pressed', String(matches));
     });
+
+    if (themeEl) themeEl.value = saved.theme || 'dark';
+    if (fontEl) { fontEl.value = saved.fontScale || '1'; if (fontValEl) fontValEl.textContent = Number(saved.fontScale || 1).toFixed(1) + '×'; }
+    if (spacingEl) { spacingEl.value = saved.spacingScale || '1'; if (spacingValEl) spacingValEl.textContent = Number(saved.spacingScale || 1).toFixed(1) + '×'; }
+    if (chatStyleEl) chatStyleEl.value = localStorage.getItem('llama-monitor-chat-style') || 'rounded';
+    const savedChatFont = parseInt(localStorage.getItem('llama-monitor-chat-font') || '100');
+    if (chatFontEl) { chatFontEl.value = savedChatFont; if (chatFontValEl) chatFontValEl.textContent = savedChatFont + '%'; }
+    if (timestampsEl) timestampsEl.value = saved.timestamps || 'hover';
+    if (msgWidthEl) msgWidthEl.value = saved.msgWidth || 'normal';
+}
+
+function _applyAndSaveAppearance() {
+    const theme = document.getElementById('settings-appearance-theme')?.value || 'dark';
+    const fontScale = document.getElementById('settings-appearance-font-scale')?.value || '1';
+    const spacingScale = document.getElementById('settings-appearance-spacing-scale')?.value || '1';
+    const chatStyle = document.getElementById('settings-appearance-chat-style')?.value || 'rounded';
+    const chatFont = parseInt(document.getElementById('settings-appearance-chat-font')?.value || '100');
+    const timestamps = document.getElementById('settings-appearance-timestamps')?.value || 'hover';
+    const msgWidth = document.getElementById('settings-appearance-msg-width')?.value || 'normal';
+    const palette = _normalizePaletteId(document.querySelector('#settings-palette-grid .palette-swatch.active')?.dataset.palette);
+
+    const effectiveTheme = theme === 'auto'
+        ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+        : theme;
+    document.documentElement.dataset.theme = effectiveTheme;
+    document.documentElement.style.fontSize = (Number(fontScale) * 16) + 'px';
+    document.documentElement.style.setProperty('--gap-md', (Number(spacingScale) * 16) + 'px');
+    applyChatStyle(chatStyle);
+
+    // Chat font size — mirrors what chat-params.js does
+    const chatFontScale = chatFont / 100;
+    const chatMessages = document.getElementById('chat-messages');
+    if (chatMessages) chatMessages.style.setProperty('--chat-font-scale', chatFontScale);
+    const chatInputRow = document.getElementById('chat-input-row');
+    if (chatInputRow) chatInputRow.style.setProperty('--chat-font-scale', chatFontScale);
+
+    // Timestamps visibility
+    const chatPage = document.querySelector('.chat-page');
+    if (chatPage) {
+        if (timestamps === 'hover') delete chatPage.dataset.timestamps;
+        else chatPage.dataset.timestamps = timestamps;
+    }
+
+    // Message max-width — set on the messages container so child .chat-message inherits
+    const widthMap = { narrow: '65%', normal: '82%', wide: '100%' };
+    const chatMsgsEl = document.getElementById('chat-messages');
+    if (chatMsgsEl) chatMsgsEl.style.setProperty('--chat-message-max-width', widthMap[msgWidth] || '82%');
+
+    localStorage.setItem('llama-monitor-chat-style', chatStyle);
+    localStorage.setItem('llama-monitor-chat-font', chatFont);
+    localStorage.setItem('llama-monitor-preferences', JSON.stringify({ theme, palette, fontScale, spacingScale, timestamps, msgWidth }));
 }
 
 // ── TLS / Certificates ────────────────────────────────────────────────────────
@@ -610,6 +969,7 @@ async function loadTlsConfig() {
             for (const [k, v] of Object.entries(dnsCfg)) {
                 addAcmeCredentialRow(k, v);
             }
+            updateAcmeProviderHelp();
 
             // Show last renewal in tls-details if present
             if (acme.last_renewal && detailsEl) {
@@ -690,6 +1050,16 @@ function _bindTlsEvents() {
         });
     }
 
+    document.getElementById('tls-custom-cert-browse')?.addEventListener('click', async () => {
+        const { openDeferredFileBrowser } = await import('./file-browser-launcher.js');
+        openDeferredFileBrowser('tls-custom-cert-path', '');
+    });
+
+    document.getElementById('tls-custom-key-browse')?.addEventListener('click', async () => {
+        const { openDeferredFileBrowser } = await import('./file-browser-launcher.js');
+        openDeferredFileBrowser('tls-custom-key-path', '');
+    });
+
     // ACME: show/hide custom provider input
     const providerSelect = document.getElementById('acme-dns-provider');
     if (providerSelect) {
@@ -698,8 +1068,15 @@ function _bindTlsEvents() {
             if (customWrap) {
                 customWrap.style.display = providerSelect.value === '__other__' ? 'block' : 'none';
             }
+            const customHelp = document.getElementById('acme-provider-custom-help');
+            if (customHelp) {
+                customHelp.style.display = providerSelect.value === '__other__' ? 'block' : 'none';
+            }
+            updateAcmeProviderHelp();
         });
     }
+    document.getElementById('acme-dns-provider-custom')?.addEventListener('input', updateAcmeProviderHelp);
+    updateAcmeProviderHelp();
 
     // ACME: add credential row
     const addCredBtn = document.getElementById('acme-add-credential');
@@ -886,6 +1263,40 @@ function readAcmeCredentials() {
         }
     }
     return map;
+}
+
+function selectedAcmeProvider() {
+    const providerValue = document.getElementById('acme-dns-provider')?.value || 'cloudflare';
+    if (providerValue !== '__other__') return providerValue;
+    return (document.getElementById('acme-dns-provider-custom')?.value || '').trim().toLowerCase();
+}
+
+function updateAcmeProviderHelp() {
+    const provider = selectedAcmeProvider();
+    const link = document.getElementById('acme-provider-doc-link');
+    const credentialsHelp = document.getElementById('acme-credentials-help');
+
+    if (link) {
+        if (provider) {
+            link.href = `https://go-acme.github.io/lego/dns/${encodeURIComponent(provider)}/`;
+            link.textContent = 'Docs';
+        } else {
+            link.href = 'https://go-acme.github.io/lego/dns/';
+            link.textContent = 'Provider docs';
+        }
+    }
+
+    if (!credentialsHelp) return;
+
+    if (provider === 'namecheap') {
+        credentialsHelp.textContent = 'Namecheap uses provider code namecheap. Add NAMECHEAP_API_USER and NAMECHEAP_API_KEY as credential keys; your Namecheap account must have API access enabled.';
+    } else if (provider === 'cloudflare') {
+        credentialsHelp.textContent = 'Cloudflare commonly uses CLOUDFLARE_API_TOKEN as the credential key. Confirm the exact variables in the linked lego provider guide.';
+    } else if (provider) {
+        credentialsHelp.textContent = `Add the environment variable names listed by lego for provider code ${provider}. Use each variable name as the Key and its secret value as the Value.`;
+    } else {
+        credentialsHelp.textContent = 'Choose a provider or type a lego provider code, then add the environment variable names listed by lego as key/value credentials.';
+    }
 }
 
 // ── Dashboard auth / password reset ─────────────────────────────────────────
@@ -1149,7 +1560,188 @@ export function initSettings() {
     if (document.getElementById('settings-security')?.classList.contains('active')) {
         loadDashboardAuthConfig();
     }
+    _bindModelSettingsEvents();
 }
+
+// ── Models directory + HF token helpers ──────────────────────────────────────
+
+function _getExtraModelsDirs() {
+    return [...document.querySelectorAll('#settings-extra-dirs-list .extra-dir-entry')]
+        .map(el => el.dataset.path)
+        .filter(Boolean);
+}
+
+function _renderExtraModelsDirs(dirs) {
+    const list = document.getElementById('settings-extra-dirs-list');
+    if (!list) return;
+    list.innerHTML = '';
+    for (const dir of dirs) _addExtraDirItem(dir);
+}
+
+function _addExtraDirItem(path) {
+    if (!path) return;
+    const list = document.getElementById('settings-extra-dirs-list');
+    if (!list) return;
+    // Deduplicate
+    if ([...list.querySelectorAll('.extra-dir-entry')].some(el => el.dataset.path === path)) return;
+    const item = document.createElement('div');
+    item.className = 'extra-dir-entry';
+    item.dataset.path = path;
+    const label = document.createElement('span');
+    label.className = 'extra-dir-path';
+    label.textContent = path;
+    label.title = path;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-ghost extra-dir-remove';
+    btn.textContent = '×';
+    btn.setAttribute('aria-label', 'Remove');
+    btn.addEventListener('click', () => { item.remove(); markSettingsDirty(); });
+    item.appendChild(label);
+    item.appendChild(btn);
+    list.appendChild(item);
+}
+
+function _updateModelsDirHint(dir) {
+    const hint = document.getElementById('settings-models-dir-hint');
+    if (!hint) return;
+    if (dir) {
+        hint.textContent = `Scanning: ${dir}`;
+        hint.style.display = '';
+    } else {
+        hint.style.display = 'none';
+    }
+}
+
+function _bindModelSettingsEvents() {
+    // Models dir — browse button
+    document.getElementById('settings-models-dir-browse')?.addEventListener('click', async () => {
+        const { openDeferredFileBrowser } = await import('./file-browser-launcher.js');
+        openDeferredFileBrowser('settings-models-dir', 'dir');
+    });
+
+    // Models dir — clear button
+    document.getElementById('settings-models-dir-clear')?.addEventListener('click', () => {
+        const el = document.getElementById('settings-models-dir');
+        if (el) el.value = '';
+        _updateModelsDirHint('');
+        markSettingsDirty();
+    });
+
+    // Models dir — save on change
+    document.getElementById('settings-models-dir')?.addEventListener('change', () => {
+        const val = document.getElementById('settings-models-dir')?.value.trim() || '';
+        _updateModelsDirHint(val);
+        markSettingsDirty();
+    });
+
+    // Extra model dirs — add button
+    document.getElementById('settings-extra-dir-add')?.addEventListener('click', () => {
+        const input = document.getElementById('settings-extra-dir-input');
+        const val = input?.value.trim();
+        if (!val) return;
+        _addExtraDirItem(val);
+        if (input) input.value = '';
+        markSettingsDirty();
+    });
+
+    // Extra model dirs — add on Enter in input
+    document.getElementById('settings-extra-dir-input')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            document.getElementById('settings-extra-dir-add')?.click();
+        }
+    });
+
+    // Extra model dirs — browse button
+    document.getElementById('settings-extra-dir-browse')?.addEventListener('click', async () => {
+        const { openDeferredFileBrowser } = await import('./file-browser-launcher.js');
+        openDeferredFileBrowser('settings-extra-dir-input', 'dir');
+    });
+
+    // HF token — show/hide toggle
+    document.getElementById('settings-hf-token-show')?.addEventListener('click', (e) => {
+        const input = document.getElementById('settings-hf-token');
+        if (!input) return;
+        const isPassword = input.type === 'password';
+        input.type = isPassword ? 'text' : 'password';
+        e.currentTarget.textContent = isPassword ? 'Hide' : 'Show';
+    });
+
+    // HF token — save button
+    document.getElementById('settings-hf-token-save')?.addEventListener('click', async () => {
+        const token = document.getElementById('settings-hf-token')?.value.trim() || '';
+        if (!token) return;
+        const btn = document.getElementById('settings-hf-token-save');
+        const origText = btn?.textContent;
+        if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+        try {
+            const res = await (window.authFetch || fetch)('/api/hf/token', {
+                method: 'PUT',
+                headers: window.authHeaders ? { ...window.authHeaders(), 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (data.ok) {
+                if (btn) { btn.textContent = '✓ Saved'; setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 1500); }
+                _refreshHfTokenStatus();
+                // Clear field after save
+                const inputEl = document.getElementById('settings-hf-token');
+                if (inputEl) inputEl.value = '';
+            } else {
+                if (btn) { btn.textContent = 'Failed'; setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000); }
+            }
+        } catch {
+            if (btn) { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000); }
+        }
+    });
+
+    // HF token — remove button
+    document.getElementById('settings-hf-token-remove')?.addEventListener('click', async () => {
+        try {
+            await (window.authFetch || fetch)('/api/hf/token', {
+                method: 'DELETE',
+                headers: window.authHeaders ? window.authHeaders() : {},
+            });
+            _refreshHfTokenStatus();
+        } catch { /* ignore */ }
+    });
+
+    // Load HF token status when Models tab is activated
+    document.querySelectorAll('.settings-tab[data-tab="models"]').forEach(btn => {
+        btn.addEventListener('click', _refreshHfTokenStatus);
+    });
+
+    // Also load immediately if Models tab is already active
+    if (document.getElementById('settings-models')?.classList.contains('active')) {
+        _refreshHfTokenStatus();
+    }
+}
+
+async function _refreshHfTokenStatus() {
+    const statusEl = document.getElementById('settings-hf-token-status');
+    const removeBtn = document.getElementById('settings-hf-token-remove');
+    if (!statusEl) return;
+    try {
+        const res = await (window.authFetch || fetch)('/api/hf/token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        statusEl.style.display = '';
+        if (data.set) {
+            statusEl.textContent = '✓ Token saved — authenticated HF requests active.';
+            statusEl.style.color = 'var(--accent-green,#a3e635)';
+            if (removeBtn) removeBtn.style.display = '';
+        } else {
+            statusEl.textContent = 'No token saved — rate limits apply to HF searches.';
+            statusEl.style.color = 'var(--color-text-muted)';
+            if (removeBtn) removeBtn.style.display = 'none';
+        }
+    } catch { /* ignore */ }
+}
+
+export { _refreshHfTokenStatus as refreshHfTokenStatus };
 
 // ── Token rotation confirmation helper ────────────────────────────────────────
 

@@ -82,9 +82,11 @@ function updateToastProgress(toastElement, percent, message) {
     }
 }
 
-export function showToastWithActions(title, type, message, actions = []) {
+export function showToastWithActions(title, type, message, actions = [], options = {}) {
     const container = document.getElementById('toast-container');
     if (!container) return;
+
+    const { onDismiss = null, duration = Math.max(TOAST_AUTO_DISMISS, 5000) } = options;
 
     const toast = document.createElement('div');
     toast.className = 'toast toast-' + type + ' toast-with-actions';
@@ -118,9 +120,12 @@ export function showToastWithActions(title, type, message, actions = []) {
         <button class="toast-close" data-toast-close="">&times;</button>
     `;
 
+    let actionTaken = false;
+
     if (actions.length > 0) {
         toast.querySelectorAll('[data-action]').forEach(btn => {
             btn.addEventListener('click', () => {
+                actionTaken = true;
                 const action = actions.find(a => a.id === btn.dataset.action);
                 if (action && action.handler) action.handler();
                 toast.classList.remove('show');
@@ -129,13 +134,19 @@ export function showToastWithActions(title, type, message, actions = []) {
         });
     }
 
+    // Close button also counts as dismissed without action
+    toast.querySelector('[data-toast-close]')?.addEventListener('click', () => {
+        if (!actionTaken && onDismiss) onDismiss();
+    });
+
     container.appendChild(toast);
     requestAnimationFrame(() => { toast.classList.add('show'); });
 
     setTimeout(() => {
+        if (!actionTaken && onDismiss) onDismiss();
         toast.classList.remove('show');
         setTimeout(() => toast.remove(), 300);
-    }, Math.max(TOAST_AUTO_DISMISS, 5000));
+    }, duration);
 }
 
 function showToastProgress(title, type = 'info') {

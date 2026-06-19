@@ -790,7 +790,7 @@ function updateCtxPressureBar(pct) {
     if (!bar || !fill) return;
     if (!pct || pct <= 0) { bar.style.display = 'none'; return; }
     bar.style.display = 'block';
-    fill.style.width = Math.min(pct, 100) + '%';
+    fill.style.transform = 'scaleX(' + Math.min(pct, 100) / 100 + ')';
     fill.className = 'ctx-pressure-fill' +
         (pct >= 90 ? ' ctx-pressure-critical' :
          pct >= 75 ? ' ctx-pressure-high' :
@@ -938,13 +938,13 @@ export function refreshChatTelemetry() {
         const promptPct = monitorState.speedMax.prompt > 0 && promptDisplayRate > 0
             ? Math.max(4, (promptDisplayRate / monitorState.speedMax.prompt) * 100)
             : 0;
-        promptBar.style.width = promptPct + '%';
+        promptBar.style.transform = 'scaleX(' + (promptPct / 100) + ')';
     }
     if (genBar) {
         const genPct = monitorState.speedMax.generation > 0 && genDisplayRate > 0
             ? Math.max(4, (genDisplayRate / monitorState.speedMax.generation) * 100)
             : 0;
-        genBar.style.width = genPct + '%';
+        genBar.style.transform = 'scaleX(' + (genPct / 100) + ')';
     }
 
     const capacity = hasActiveEndpoint ? (l?.context_capacity_tokens || l?.kv_cache_max || 0) : 0;
@@ -1015,8 +1015,8 @@ function applyChatStyle(style) {
 
 export { applyChatStyle };
 
-const CHAT_STYLES = ['rounded', 'compact', 'minimal', 'bubbly'];
-const CHAT_STYLE_LABELS = { rounded: 'Rounded', compact: 'Compact', minimal: 'Minimal', bubbly: 'Bubbly' };
+const CHAT_STYLES = ['rounded', 'compact', 'minimal', 'bubbly', 'paper', 'terminal', 'slate'];
+const CHAT_STYLE_LABELS = { rounded: 'Rounded', compact: 'Compact', minimal: 'Minimal', bubbly: 'Bubbly', paper: 'Paper', terminal: 'Terminal', slate: 'Slate' };
 
 function toggleStylePanel() {
     const panel = document.getElementById('chat-style-panel');
@@ -2106,7 +2106,7 @@ function populatePayloadJson(data) {
     pre.textContent = JSON.stringify(data.requestPayload || {}, null, 2);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function initDebugHandlers() {
     const btn = document.getElementById('btn-debug-prompt');
     const closeBtn = document.getElementById('debug-modal-close');
     const overlay = document.getElementById('debug-prompt-modal');
@@ -2241,4 +2241,10 @@ document.addEventListener('DOMContentLoaded', () => {
     hidePayloadBtn?.addEventListener('click', () => {
         document.getElementById('debug-payload-section')?.classList.add('hidden');
     });
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDebugHandlers);
+} else {
+    initDebugHandlers();
+}

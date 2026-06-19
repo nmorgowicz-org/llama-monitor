@@ -1,8 +1,14 @@
 // ── Dashboard WebSocket Transport ──────────────────────────────────────────────
 // WebSocket creation, onmessage dispatch, and dashboard update logic.
 // Imports state from app-state.js and render functions from dashboard-render.js.
+//
+// POWER OPTIMIZATION: Page Visibility API throttling.
+// When the tab is hidden, we skip the dashboard update entirely — no need to
+// parse JSON and write DOM if the user isn't looking at it. The WebSocket
+// still stays connected and receives data, but we discard the messages until
+// the tab becomes visible again. This saves ~100+ DOM writes per tick.
 
-import { formatMetricAge, formatMetricNumber } from '../core/format.js';
+import { formatMetricAge, formatMetricNumber, escapeHtml } from '../core/format.js';
 import { deriveTelemetryGrade, gradeLabel, gradeStatusClass, gradeActionCopy } from '../features/telemetry-grade.js';
 import {
     sessionState,
@@ -16,12 +22,14 @@ import {
     setWsData,
     setLastServerState,
     setLastLlamaMetrics,
+    setContextCapacityTokens,
     setLastSystemMetrics,
     setLastGpuMetrics,
     setLastCapabilities,
     setLastGpuData,
     lastLlamaMetrics,
     lastSystemMetrics,
+    contextCapacityTokens,
     wsData,
     currentPollInterval,
     monitorState,
@@ -59,9 +67,134 @@ import { refreshTopCockpit } from './nav.js';
 import { activeChatTab } from './chat-state.js';
 import { setRemoteAgentStatus } from './remote-agent.js';
 import { hideConnectingState, switchView } from './setup-view.js';
+import { showToast, showToastWithActions } from './toast.js';
+import { loadPresets, syncSelectedPresetSelection } from './presets.js';
 
 // ── Cached DOM elements (populated at init time to avoid repeated queries) ──
 let cachedElements = null;
+let dashboardSocket = null;
+let _lastPresetRefreshId = null;
+let overlayStateObserver = null;
+const LOG_FONT_SIZE_KEY = 'llama-monitor-log-font-size';
+const LOG_FONT_SIZE_DEFAULT = 13;
+const LOG_FONT_SIZE_MIN = 8;
+const LOG_FONT_SIZE_MAX = 18;
+const LOG_TAIL_ENABLED_KEY = 'llama-monitor-log-tail-enabled';
+const LOG_TAIL_LINES_KEY = 'llama-monitor-log-tail-lines';
+const LOG_TAIL_LINES_DEFAULT = 2;
+const LOG_TAIL_LINES_MIN = 1;
+const LOG_TAIL_LINES_MAX = 6;
+
+// ── Badge change detection — skip DOM writes when badge content is unchanged ──
+let prevBadgeState = { server: null, chat: null, logs: null };
+
+// ── Power optimization: Page Visibility API throttling ─────────────────────────
+// When the tab is hidden, skip all dashboard updates (no DOM writes needed) and
+// pause all infinite CSS animations (70+) via the power-saver body class.
+// The GPU poller interval (in main.rs) automatically tracks the configured
+// ws_push_interval_ms setting, so when the user selects "Battery Saver" the
+// GPU hardware reads slow down proportionally.
+// When the tab becomes visible, do one full update to refresh stale state.
+let isTabVisible = true;
+
+function isElementActuallyVisible(el) {
+    if (!el) return false;
+    const style = getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+}
+
+function hasBlockingOverlayOpen() {
+    const candidates = [
+        ...document.querySelectorAll(
+            '.modal-overlay.open, .modal-overlay.active, .modal-overlay[style*="display: block"], .modal-overlay[style*="display:block"], .keyboard-shortcut-overlay.open, .keyboard-shortcut-overlay.active, #release-notes-panel.open'
+        ),
+        document.getElementById('command-palette-overlay'),
+    ].filter(isElementActuallyVisible);
+
+    return candidates.length > 0;
+}
+
+function isBackgroundUiSuspended() {
+    return !isTabVisible || hasBlockingOverlayOpen();
+}
+
+function syncBackgroundPowerState() {
+    document.body.classList.toggle('power-saver', !isTabVisible);
+    document.body.classList.toggle('background-paused', hasBlockingOverlayOpen());
+}
+
+function ensureOverlayStateObserver() {
+    if (overlayStateObserver || !document.body) return;
+    let scheduled = false;
+    const scheduleSync = () => {
+        if (scheduled) return;
+        scheduled = true;
+        requestAnimationFrame(() => {
+            scheduled = false;
+            syncBackgroundPowerState();
+        });
+    };
+
+    overlayStateObserver = new MutationObserver(scheduleSync);
+    overlayStateObserver.observe(document.body, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'aria-hidden', 'inert'],
+    });
+    scheduleSync();
+}
+
+function computeClientMode() {
+    // T-053: active / idle / sleep modes for backend sleep orchestration
+    if (!isTabVisible) return 'sleep';
+    if (hasBlockingOverlayOpen()) return 'idle';
+    const tab = currentMonitorTab();
+    if (tab === 'chat') return 'active';
+    if (isMonitorViewActive()) return 'active';
+    return 'idle';
+}
+
+function sendWsClientState() {
+    if (!dashboardSocket || dashboardSocket.readyState !== WebSocket.OPEN) return;
+    try {
+        const mode = computeClientMode();
+        dashboardSocket.send(JSON.stringify({
+            type: 'client-visibility',
+            visible: isTabVisible,
+            mode: mode,
+        }));
+    } catch {
+        // Ignore transient send failures; the next state change will retry.
+    }
+}
+
+function currentMonitorTab() {
+    const activePage = document.querySelector('.page.active');
+    if (!activePage || !activePage.id) return 'server';
+    return activePage.id.replace(/^page-/, '');
+}
+
+function isMonitorViewActive() {
+    return setupViewState.view === 'monitor';
+}
+
+document.addEventListener('visibilitychange', () => {
+    const wasVisible = isTabVisible;
+    isTabVisible = !document.hidden;
+
+    // Toggle background power classes to pause/resume animation work
+    syncBackgroundPowerState();
+    sendWsClientState();
+
+    if (!wasVisible && isTabVisible) {
+        // Tab just became visible — schedule a refresh so stale data gets updated
+        requestAnimationFrame(() => {
+            if (wsData) {
+                updateDashboard(wsData);
+            }
+        });
+    }
+});
 
 function ensureCachedElements() {
     if (cachedElements) return;
@@ -96,7 +229,6 @@ function ensureCachedElements() {
         mContextEmpty: document.getElementById('m-context-empty'),
         // Badges
         badgeServer: document.getElementById('badge-server'),
-        badgeChat: document.getElementById('badge-chat'),
         badgeLogs: document.getElementById('badge-logs'),
         // Endpoint
         endpointMode: document.getElementById('endpoint-mode'),
@@ -121,20 +253,114 @@ function ensureCachedElements() {
         mActivityState: document.getElementById('m-activity-state'),
         // Logs
         logPanel: document.getElementById('log-panel'),
+        // Live log tail (Inference Metrics)
+        logTailGroup: document.getElementById('inference-log-tail-group'),
+        logTailBadge: document.getElementById('inference-log-tail-badge'),
+        logTailEl: document.getElementById('inference-log-tail'),
+        logTailMinus: document.getElementById('inference-log-tail-minus'),
+        logTailPlus: document.getElementById('inference-log-tail-plus'),
     };
+}
+
+/** Live log tail feature state */
+let logTailActive = false;
+let logTailLines = LOG_TAIL_LINES_DEFAULT;
+let logTailAllowed = false;
+let logTailLastUpdateMs = 0;
+const LOG_TAIL_UPDATE_INTERVAL_MS = 600;
+
+function _readLogTailConfig() {
+    const cfg = { enabled: false, lines: LOG_TAIL_LINES_DEFAULT };
+    try {
+        const en = localStorage.getItem(LOG_TAIL_ENABLED_KEY);
+        if (en === '1' || en === 'true') cfg.enabled = true;
+        const n = Number.parseInt(localStorage.getItem(LOG_TAIL_LINES_KEY), 10);
+        if (Number.isFinite(n)) {
+            cfg.lines = Math.min(LOG_TAIL_LINES_MAX, Math.max(LOG_TAIL_LINES_MIN, n));
+        }
+    } catch {
+        // ignore
+    }
+    return cfg;
+}
+
+function _saveLogTailConfig(enabled, lines) {
+    try {
+        localStorage.setItem(LOG_TAIL_ENABLED_KEY, enabled ? '1' : '0');
+        localStorage.setItem(LOG_TAIL_LINES_KEY, String(lines));
+    } catch {
+        // ignore
+    }
+}
+
+function _applyLogTailLines(lines) {
+    logTailLines = Math.min(LOG_TAIL_LINES_MAX, Math.max(LOG_TAIL_LINES_MIN, lines));
+    ensureCachedElements();
+    const tail = cachedElements.logTailEl;
+    if (tail) {
+        tail.style.setProperty('--log-tail-lines', logTailLines);
+    }
+    _updateLogTail(wsData || null);
 }
 
 // ── WebSocket setup ───────────────────────────────────────────────────────────
 
 export function initWebSocket() {
+    ensureOverlayStateObserver();
+    _initLogFontControls();
+    _initLogTailFeature();
     const ws = new WebSocket(
         (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'
     );
+    dashboardSocket = ws;
 
 ws.onmessage = e => {
     const d = JSON.parse(e.data);
+    // Keep wsData current even when tab is hidden (needed for refresh on show)
+    setWsData(d);
+    if (!isTabVisible) return; // skip DOM writes while tab is hidden
     updateDashboard(d);
 };
+
+    // One-time restore-hint on first connect (T-061)
+    let _restoreHintDone = false;
+    ws.onopen = () => {
+        sendWsClientState();
+
+        if (_restoreHintDone) return;
+        _restoreHintDone = true;
+
+        fetch('/api/sessions/restore-hint')
+            .then(r => r.json())
+            .then(data => {
+                try {
+                    if (data.suggested_action === 'resume_active' && typeof switchView === 'function') {
+                        switchView('monitor');
+                    } else if (data.suggested_action === 'suggest_recent_attach') {
+                        // T-061: show a non-intrusive banner prompting reconnect to the running server
+                        showToastWithActions(
+                            'Running server detected',
+                            'info',
+                            'A server is running from your last session. Reconnect from "Recent servers".',
+                            [{
+                                id: 'reconnect',
+                                label: 'Reconnect',
+                                primary: true,
+                                handler: () => {
+                                    const recent = document.querySelector('.recent-endpoint-item');
+                                    if (recent) recent.click();
+                                },
+                            }]
+                        );
+                    }
+                } catch (_) {
+                    // best-effort; never block startup
+                }
+            })
+            .catch(() => {
+                // ignore — no restore hint available
+            });
+    };
 
 // Poll context card after chat tabs load
 window.onChatTabsLoaded = () => {
@@ -146,9 +372,11 @@ window.onChatTabsLoaded = () => {
     ws.onerror = e => console.error('WebSocket error:', e);
 
     ws.onclose = () => {
+        if (dashboardSocket === ws) dashboardSocket = null;
         ensureCachedElements();
         if (cachedElements.statusText) cachedElements.statusText.textContent = 'Disconnected';
         sessionState.prevLogLen = 0;
+        sessionState.prevLogs = [];
     };
 
     return ws;
@@ -163,9 +391,45 @@ function updateDashboard(d) {
     // Store for use by status alert and other components
     setWsData(d);
 
+    sessionState.activeSessionPresetId =
+        d.session_mode === 'spawn' && d.active_session_preset_id ? d.active_session_preset_id : '';
+
+    // Sync preset selector to match the running session's preset (spawn mode only).
+    // Don't override when the user has explicitly changed it in the dropdown.
+    if (d.session_mode === 'spawn' && d.active_session_preset_id && !window.__presetUserSelected) {
+        const sel = document.getElementById('preset-select');
+        if (sel && sel.value !== d.active_session_preset_id) {
+            const opt = sel.querySelector(`option[value="${CSS.escape(d.active_session_preset_id)}"]`);
+            if (opt) {
+                syncSelectedPresetSelection(d.active_session_preset_id);
+            } else if (_lastPresetRefreshId !== d.active_session_preset_id) {
+                _lastPresetRefreshId = d.active_session_preset_id;
+                loadPresets(d.active_session_preset_id);
+            }
+        }
+    }
+    // Clear user-selection flag once the backend and dropdown agree again.
+    if (d.session_mode !== 'spawn' || !d.active_session_preset_id) {
+        window.__presetUserSelected = false;
+    }
+
     // Derive and store telemetry grade for consumption by all dashboard components
     const grade = deriveTelemetryGrade(d);
     window.__telemetryGrade = grade;
+    const inMonitorView = isMonitorViewActive();
+    const activeTab = currentMonitorTab();
+
+    // Attach/Detach buttons and server header
+    updateAttachDetach(d);
+
+    // Keep session/runtime state current even when the setup flow is on-screen.
+    // The setup path and blocking modal flows still need state sync, but they
+    // do not need the hidden background surfaces to keep re-rendering 2x/sec.
+    updateServerState(d);
+
+    if (!inMonitorView || hasBlockingOverlayOpen()) {
+        return;
+    }
 
     // Endpoint health strip
     updateEndpointStrip(d);
@@ -173,25 +437,25 @@ function updateDashboard(d) {
     // Agent status
     updateAgentStatus(d);
 
-    // Attach/Detach buttons and server header
-    updateAttachDetach(d);
+    // T-055: if asleep, skip heavy telemetry updates (GPU, system, logs, sparklines)
+    const isSleeping = d.sleep_mode === true;
 
-    // Server state
-    updateServerState(d);
-
-    // Inference metrics
+    // Inference metrics (lightweight; always update for basic status)
     updateInferenceMetrics(d);
-    refreshChatTelemetry();
+    _updateLogTail(d);
+    if (activeTab === 'chat') {
+        refreshChatTelemetry();
+    }
     refreshTopCockpit();
 
-    // GPU card
-    updateGpuCard(d);
+    // GPU card — freeze when asleep
+    if (activeTab === 'server' && !isSleeping) updateGpuCard(d);
 
-    // System card
-    updateSystemCard(d);
+    // System card — freeze when asleep
+    if (activeTab === 'server' && !isSleeping) updateSystemCard(d);
 
-    // Logs
-    updateLogs(d);
+    // Logs — freeze when asleep
+    if (activeTab === 'logs' && !isSleeping) updateLogs(d);
 
     // Badges
     updateBadges(d);
@@ -344,6 +608,32 @@ function updateAgentStatus(d) {
 
 // ── Attach/Detach buttons ────────────────────────────────────────────────────
 
+function _updateSetupRunningStrip(isRunning, endpoint) {
+    const strip = document.getElementById('setup-spawn-running-strip');
+    if (!strip) return;
+    if (!isRunning) {
+        strip.style.display = 'none';
+        return;
+    }
+    const nameEl = document.getElementById('setup-spawn-running-name');
+    const endpointEl = document.getElementById('setup-spawn-running-endpoint');
+    const btn = document.getElementById('setup-spawn-running-btn');
+
+    if (nameEl) {
+        const presetName = document.getElementById('preset-select')?.selectedOptions[0]?.text || 'Server';
+        nameEl.textContent = presetName;
+    }
+    if (endpointEl && endpoint) {
+        const port = endpoint.split(':').pop();
+        endpointEl.textContent = ':' + port;
+    }
+    if (btn && !btn._bound) {
+        btn._bound = true;
+        btn.addEventListener('click', () => switchView('monitor'));
+    }
+    strip.style.display = '';
+}
+
 function updateAttachDetach(d) {
     const ce = cachedElements;
     const serverHeader = ce.serverHeader;
@@ -352,30 +642,64 @@ function updateAttachDetach(d) {
     const btnDetachTop = ce.btnDetachTop;
     const historicBadge = ce.historicBadge;
 
+    const isSpawn = d.session_mode === 'spawn';
     const isAttach = d.session_mode === 'attach' && d.active_session_endpoint;
 
-    if (isAttach) {
+    // Welcome screen running-server banner
+    _updateSetupRunningStrip(isSpawn && d.server_running, d.active_session_endpoint);
+
+    if (isSpawn) {
+        // Spawn mode: server header is irrelevant — URL is implicit from config
         if (serverHeader) serverHeader.style.display = 'none';
+        btnAttach.style.display = 'none';
+        btnDetach.style.display = 'none';
+        if (btnDetachTop) btnDetachTop.style.display = 'none';
+    } else if (isAttach) {
+        // Attach mode: show header so user can see the connected endpoint
+        if (serverHeader) serverHeader.style.display = '';
         btnAttach.style.display = 'none';
         btnDetach.style.display = 'inline-block';
         if (btnDetachTop) btnDetachTop.style.display = 'inline-block';
-
         if (typeof setupViewState !== 'undefined' && setupViewState.view === 'setup') {
-            // TODO: import from setup-view.js when that module is extracted
             hideConnectingState();
             switchView('monitor');
         }
     } else {
+        // No active session: show header with Attach button
         if (serverHeader) serverHeader.style.display = '';
         btnAttach.style.display = 'inline-block';
         btnDetach.style.display = 'none';
         if (btnDetachTop) btnDetachTop.style.display = 'none';
     }
 
-    if (historicBadge) {
+   if (historicBadge) {
         historicBadge.style.display = isAttach ? 'none' : 'inline-block';
     }
+
+  // Live log tail pill group: show benchmark pill when server connected.
+    // Log tail badge only allowed when spawn mode and logs exist.
+    const serverRunning = d.server_running ?? false;
+    const hasLogs = isSpawn && d.logs && d.logs.length > 0;
+    logTailAllowed = hasLogs;
+
+    if (!serverRunning) {
+        // Server not running: hide UI, but preserve user's open/closed preference
+        // so that after restart (e.g., during updates) the tail doesn't silently close.
+        if (ce.logTailGroup) ce.logTailGroup.style.display = 'none';
+        if (ce.logTailBadge) ce.logTailBadge.classList.remove('is-active');
+        if (ce.logTailEl) {
+            ce.logTailEl.style.display = 'none';
+            ce.logTailEl.innerHTML = '';
+        }
+    } else if (ce.logTailGroup) {
+        // Server running: show group (benchmark pill visible in all modes)
+        _syncLogTailVisibility();
+    }
 }
+
+// Last session error tracking: used to show a prominent warning when the
+// server crashes (e.g., OOM) so the user can see/understand/take action.
+let lastSessionErrorShown = '';
 
 // ── Server state ─────────────────────────────────────────────────────────────
 
@@ -388,18 +712,92 @@ function updateServerState(d) {
     const btnStart = ce.btnStart;
     const btnStop = ce.btnStop;
 
-    dot.className = 'status-dot ' + (sessionState.serverRunning ? 'running' : 'stopped');
-    txt.textContent = sessionState.serverRunning ? 'Running' : 'Stopped';
+    // Handle active session error status (OOM, crash, etc.) prominently.
+    const sessionStatus = d.active_session_status || '';
+    const sessionError = d.active_session_error || '';
+    const isError = sessionStatus === 'error' && sessionError;
 
-    const localRunning = d.local_server_running || false;
-    if (btnStart) btnStart.disabled = localRunning;
-    if (btnStop) btnStop.disabled = !localRunning;
+    if (isError && sessionError !== lastSessionErrorShown) {
+        lastSessionErrorShown = sessionError;
+        showToast(
+            'Server error',
+            'error',
+            sessionError,
+            { duration: 12000 }
+        );
+
+        // Show diagnostics in the main control bar if present
+        showServerErrorDetails(d);
+
+        // Show diagnostics on the welcome / Local Server panel if present
+        showLocalServerErrorBar(sessionError, d);
+    }
+
+    if (isError) {
+        dot.className = 'status-dot stopped';
+        txt.textContent = 'Error';
+        // Make sure Start button is enabled so user can try again immediately
+        if (btnStart) btnStart.disabled = false;
+        if (btnStop) btnStop.disabled = true;
+    } else {
+        dot.className = 'status-dot ' + (sessionState.serverRunning ? 'running' : 'stopped');
+        txt.textContent = sessionState.serverRunning ? 'Running' : 'Stopped';
+        hideServerErrorDetails();
+        hideLocalServerErrorBar();
+    }
+
+    if (!isError) {
+        const localRunning = d.local_server_running || false;
+        if (btnStart) btnStart.disabled = localRunning;
+        if (btnStop) btnStop.disabled = !localRunning;
+    }
+
+    const btnSwitchModel = document.getElementById('btn-switch-model');
+    if (btnSwitchModel) btnSwitchModel.style.display = (d.local_server_running || false) ? '' : 'none';
 
     setLastServerState(d.server_running);
     setLastLlamaMetrics(d.llama);
+
+    // Normalize context capacity to the actual loaded limit.
+    // KV-only reports can be stale; prefer reported capacity, then KV max, then a
+    // safe default so context-pressure math is consistent across telemetry and chat.
+    const l = d.llama;
+    let capacity = l?.context_capacity_tokens || l?.kv_cache_max || 0;
+    if (capacity <= 0) capacity = l?.context_size || 0;
+    capacity = Math.max(0, Math.min(capacity, 2_097_152));
+    if (capacity > 0) {
+        setContextCapacityTokens(capacity);
+    }
+    const prevSystemMetrics = lastSystemMetrics;
     setLastSystemMetrics(d.system || null);
     setLastCapabilities(d.capabilities || null);
     setLastGpuMetrics(d.gpu || {});
+
+    // If system metrics just became available or changed (e.g., pCores known),
+    // notify consumers that need to update hints (spawn wizard, preset editor, etc.)
+    if (d.system && (!prevSystemMetrics || prevSystemMetrics.p_cores == null)) {
+      window.__refreshSpawnWizardHints?.();
+      window.__refreshPresetEditorHints?.();
+    }
+
+    // Sync session port/endpoint from WebSocket data (replaces removed HTTP poll)
+    const ep = d.active_session_endpoint;
+    if (ep) {
+        try {
+            const url = new URL(ep);
+            const port = parseInt(url.port) || 8080;
+            if (sessionState.activeSessionPort !== port) {
+                sessionState.activeSessionPort = port;
+            }
+            // Keep the endpoint input in sync
+            const endpointInput = document.getElementById('server-endpoint');
+            if (endpointInput && endpointInput.value !== ep) {
+                endpointInput.value = ep;
+            }
+        } catch {
+            // ignore parse errors
+        }
+    }
 }
 
 // ── Inference metrics ────────────────────────────────────────────────────────
@@ -453,11 +851,11 @@ function updateInferenceMetrics(d) {
             promptMaxEl.textContent = 'peak ' + monitorState.speedMax.prompt.toFixed(0);
         }
         const promptPct = Math.max((promptDisplayRate / monitorState.speedMax.prompt) * 100, 4);
-        if (promptBar) promptBar.style.width = promptPct + '%';
+        if (promptBar) promptBar.style.transform = 'scaleX(' + (promptPct / 100) + ')';
     } else {
         promptEl.textContent = '\u2014';
         if (promptMaxEl) promptMaxEl.textContent = '';
-        if (promptBar) promptBar.style.width = '0%';
+        if (promptBar) promptBar.style.transform = 'scaleX(0)';
     }
 
     // Generation throughput
@@ -473,11 +871,11 @@ function updateInferenceMetrics(d) {
             genMaxEl.textContent = 'peak ' + monitorState.speedMax.generation.toFixed(0);
         }
         const genPct = Math.max((genDisplayRate / monitorState.speedMax.generation) * 100, 4);
-        if (genBar) genBar.style.width = genPct + '%';
+        if (genBar) genBar.style.transform = 'scaleX(' + (genPct / 100) + ')';
     } else {
         genEl.textContent = '\u2014';
         if (genMaxEl) genMaxEl.textContent = '';
-        if (genBar) genBar.style.width = '0%';
+        if (genBar) genBar.style.transform = 'scaleX(0)';
     }
 
     // Sparklines
@@ -492,10 +890,10 @@ function updateInferenceMetrics(d) {
     if (promptDisplayRate > 0 && genDisplayRate > 0) {
         const ratio = promptDisplayRate / genDisplayRate;
         const ratioPct = Math.min((ratio / 50) * 100, 100);
-        if (ratioBar) ratioBar.style.width = ratioPct + '%';
+        if (ratioBar) ratioBar.style.transform = 'scaleX(' + (ratioPct / 100) + ')';
         if (ratioValue) ratioValue.textContent = ratio.toFixed(1) + ':1';
     } else {
-        if (ratioBar) ratioBar.style.width = '0%';
+        if (ratioBar) ratioBar.style.transform = 'scaleX(0)';
         if (ratioValue) ratioValue.textContent = '\u2014';
     }
 
@@ -609,25 +1007,395 @@ function updateSystemCard(d) {
 
 // ── Logs ─────────────────────────────────────────────────────────────────────
 
-function updateLogs(d) {
-    const logs = d.logs || [];
-    const isAttached = d.session_mode === 'attach' && d.active_session_endpoint;
-    const emptyState = document.getElementById('logs-empty-state');
-    const logsPage = document.getElementById('page-logs');
+let logAutoScroll = true; // true = follow tail; false = user has scrolled up
 
-    if (logs.length !== sessionState.prevLogLen) {
-        const el = cachedElements.logPanel;
-        const wasAtBottom = el && (el.scrollHeight - el.scrollTop - el.clientHeight < 40);
+function _parseLogLevel(line) {
+    // llama.cpp v2 format: "INFO  [component] message" or "WARN [...]" etc.
+    const levelMatch = line.match(/^(INFO|WARN|ERROR|DEBUG|VERB|FATAL)\b/i);
+    if (levelMatch) return levelMatch[1].toUpperCase();
+    // Legacy format: starts with timestamp + level, e.g. "2024-01-01T... INFO ..."
+    const tsFmt = line.match(/^\d{4}-\d{2}-\d{2}T\S+\s+(INFO|WARN|ERROR|DEBUG)\b/i);
+    if (tsFmt) return tsFmt[1].toUpperCase();
+    // llama.cpp single-letter level after short timestamp, e.g. "1515.01.190.648 W slot ..."
+    const singleLetter = line.match(/^\d[\d\.]+\s+([IiWwEeDd])\b/);
+    if (singleLetter) {
+        const c = singleLetter[1].toUpperCase();
+        if (c === 'W') return 'WARN';
+        if (c === 'E') return 'ERROR';
+        if (c === 'I') return 'INFO';
+        if (c === 'D') return 'DEBUG';
+    }
+    return 'OTHER';
+}
 
-        if (el) {
-            el.textContent = logs.join('\n');
-            if (wasAtBottom) el.scrollTop = el.scrollHeight;
+function _levelClass(level) {
+    if (level === 'WARN')  return 'log-warn';
+    if (level === 'ERROR' || level === 'FATAL') return 'log-error';
+    if (level === 'DEBUG' || level === 'VERB')  return 'log-debug';
+    return 'log-info';
+}
+
+function _colorizeLogLine(line) {
+    if (!line) return escapeHtml(line || '');
+
+    let s = escapeHtml(line);
+
+    // 1) Full-level words: INFO/WARN/ERROR/DEBUG/VERB/FATAL
+    s = s.replace(
+        /\b((?:INFO|WARN(ING)?|ERROR|DEBUG|VERB|FATAL))\b/g,
+        '<span class="log-lev">$1</span>'
+    );
+
+    // 2) Single-letter level after timestamp/IP-like prefix: e.g. "1392.56.898.909 W slot ..."
+    // Match: leading digits/letters/dots, then space, then one of I/W/E/D near a word boundary.
+    s = s.replace(
+        /^([\w\.]+)\s+([IiWwEeDd])\b/g,
+        '$1 <span class="log-lev">$2</span>'
+    );
+
+    // 3) Key components / actions (llama.cpp style: "slot", "srv", "llm_load_tensors", etc.)
+    s = s.replace(
+        /\b((?:slot|srv|begin|create_check|update_slots|release_slot|launch_slot|print_timing|statistics|reasoning-budget|ngram-mod|draft-acceptance|draft-mtp|llm_load_tensors|llama_perf_context|ggml_backend_\w+_log_allocated_size|prompt_cache|prompt_save|prompt_load))\b/g,
+        '<span class="log-comp">$1</span>'
+    );
+
+    // 4) Metrics: e.g. "335.46 ms", "635 tokens", "124.16 tokens per second"
+    // - "X.Y ms" or integer ms
+    s = s.replace(
+        /(\d+\.?\d*)\s*ms\b/g,
+        '<span class="log-metric">$1 ms</span>'
+    );
+    // - tokens per second
+    s = s.replace(
+        /(\d+\.?\d*)\s*tokens?\s+per\s+second\b/g,
+        '<span class="log-metric">$1 tokens per second</span>'
+    );
+    // - "N tokens" (only when preceded by space, to avoid hitting random IDs too harshly)
+    s = s.replace(
+        /(?<=\s)(\d+\.?\d*)\s*tokens?\b/g,
+        ' <span class="log-metric">$1 tokens</span>'
+    );
+
+    // 5) n_tokens values (prompt processing / final token counts)
+    s = s.replace(
+        /\bn_tokens\s*=\s*(\d+)/g,
+        'n_tokens = <span class="log-important">$1</span>'
+    );
+
+    // 6) n_decoded (generation progress)
+    s = s.replace(
+        /\bn_decoded\s*=\s*(\d+)/g,
+        'n_decoded = <span class="log-important">$1</span>'
+    );
+
+    // 7) progress (prompt processing progress, e.g. "progress = 0.84")
+    s = s.replace(
+        /\bprogress\s*=\s*([\d.]+)/g,
+        'progress = <span class="log-important">$1</span>'
+    );
+
+    // 8) draft acceptance rate and related stats
+    s = s.replace(
+        /\bdraft acceptance\s*=\s*([\d.]+)/g,
+        'draft acceptance = <span class="log-metric">$1</span>'
+    );
+    // - "N accepted" / "N generated" in speculative lines
+    s = s.replace(
+        /(\d+)\s+(?:accepted|generated)\b/g,
+        '<span class="log-metric">$1</span> $2'
+    );
+
+    // 9) Cache and checkpoint metrics
+    // - "cache reuse" / "cache state"
+    s = s.replace(
+        /cache (?:reuse|state|save|rm|load)\b/gi,
+        '<span class="log-metric">cache $1</span>'
+    );
+    // - "checkpoints: N"
+    s = s.replace(
+        /\bcheckpoints:\s*(\d+)/gi,
+        'checkpoints: <span class="log-metric">$1</span>'
+    );
+
+    // 10) graphs reused
+    s = s.replace(
+        /graphs reused = (\d+)/g,
+        'graphs reused = <span class="log-metric">$1</span>'
+    );
+
+    // 11) prompt eval time / eval time / total time in print_timing output
+    s = s.replace(
+        /(prompt eval time|eval time|total time)\s*=/g,
+        '<span class="log-metric">$1</span> ='
+    );
+
+    // 12) Memory / cache sizes (MiB/GiB)
+    s = s.replace(
+        /(\d+\.?\d*)\s*(MiB|GiB)/gi,
+        '<span class="log-size">$1 $2</span>'
+    );
+
+    // 13) Similarity scores (f_keep, sim) important for caching
+    s = s.replace(
+        /\b(f_keep|sim)\s*=\s*([\d.]+)/g,
+        '$1 = <span class="log-metric">$2</span>'
+    );
+
+    return s;
+}
+
+function _renderLogLine(line) {
+    const div = document.createElement('div');
+    div.className = 'log-line ' + _levelClass(_parseLogLevel(line));
+    // eslint-disable-next-line no-unsanitized/property -- _colorizeLogLine uses escapeHtml and only safe inline spans
+    div.innerHTML = _colorizeLogLine(line);
+    return div;
+}
+
+function _initLogScrollTracking(el) {
+    if (el._logScrollBound) return;
+    el._logScrollBound = true;
+    el.addEventListener('scroll', () => {
+        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+        if (!atBottom && logAutoScroll) {
+            logAutoScroll = false;
+            _syncLogScrollLockBtn();
+        } else if (atBottom && !logAutoScroll) {
+            logAutoScroll = true;
+            _syncLogScrollLockBtn();
         }
+    }, { passive: true });
+}
 
-        sessionState.prevLogLen = logs.length;
+function _syncLogScrollLockBtn() {
+    const btn = document.getElementById('log-scroll-lock-btn');
+    if (!btn) return;
+    btn.setAttribute('aria-pressed', String(logAutoScroll));
+    btn.classList.toggle('log-tool-btn--locked', !logAutoScroll);
+}
+
+function _readLogFontSize() {
+    try {
+        const stored = Number.parseInt(localStorage.getItem(LOG_FONT_SIZE_KEY), 10);
+        if (Number.isFinite(stored)) {
+            return Math.min(LOG_FONT_SIZE_MAX, Math.max(LOG_FONT_SIZE_MIN, stored));
+        }
+    } catch {
+        // Storage can be unavailable in hardened browser contexts.
+    }
+    return LOG_FONT_SIZE_DEFAULT;
+}
+
+function _applyLogFontSize(size) {
+    const normalized = Math.min(LOG_FONT_SIZE_MAX, Math.max(LOG_FONT_SIZE_MIN, size));
+    const panel = document.getElementById('log-panel');
+    const valueBtn = document.getElementById('log-font-size-btn');
+    const decreaseBtn = document.getElementById('log-font-decrease-btn');
+    const increaseBtn = document.getElementById('log-font-increase-btn');
+
+    if (panel) panel.style.setProperty('--log-font-size', `${normalized}px`);
+    if (valueBtn) valueBtn.textContent = `${normalized}px`;
+    if (decreaseBtn) decreaseBtn.disabled = normalized <= LOG_FONT_SIZE_MIN;
+    if (increaseBtn) increaseBtn.disabled = normalized >= LOG_FONT_SIZE_MAX;
+
+    try {
+        localStorage.setItem(LOG_FONT_SIZE_KEY, String(normalized));
+    } catch {
+        // Keep the current-page setting even when persistence is unavailable.
+    }
+    return normalized;
+}
+
+function _initLogFontControls() {
+    const decreaseBtn = document.getElementById('log-font-decrease-btn');
+    const increaseBtn = document.getElementById('log-font-increase-btn');
+    const valueBtn = document.getElementById('log-font-size-btn');
+    if (!decreaseBtn || !increaseBtn || !valueBtn || decreaseBtn._logFontBound) return;
+
+    decreaseBtn._logFontBound = true;
+    let size = _applyLogFontSize(_readLogFontSize());
+    decreaseBtn.addEventListener('click', () => {
+        size = _applyLogFontSize(size - 1);
+    });
+    increaseBtn.addEventListener('click', () => {
+        size = _applyLogFontSize(size + 1);
+    });
+    valueBtn.addEventListener('click', () => {
+        size = _applyLogFontSize(LOG_FONT_SIZE_DEFAULT);
+    });
+}
+
+function _initLogTailFeature() {
+    ensureCachedElements();
+    const group = cachedElements.logTailGroup;
+    const badge = cachedElements.logTailBadge;
+    const tail = cachedElements.logTailEl;
+    const minusBtn = cachedElements.logTailMinus;
+    const plusBtn = cachedElements.logTailPlus;
+
+    if (!group || !badge || !tail || minusBtn === undefined || plusBtn === undefined || badge._logTailBound) return;
+    badge._logTailBound = true;
+
+    const cfg = _readLogTailConfig();
+    logTailActive = cfg.enabled;
+    _applyLogTailLines(cfg.lines);
+
+    // Pill toggle
+    badge.addEventListener('click', () => {
+        logTailActive = !logTailActive;
+        badge.classList.toggle('is-active', logTailActive);
+        _syncLogTailVisibility();
+        _saveLogTailConfig(logTailActive, logTailLines);
+        if (logTailActive) {
+            _updateLogTail(wsData || null);
+        } else {
+            tail.innerHTML = '';
+        }
+    });
+
+    // + / - buttons
+    minusBtn.addEventListener('click', () => {
+        _applyLogTailLines(logTailLines - 1);
+        _saveLogTailConfig(logTailActive, logTailLines);
+    });
+
+    plusBtn.addEventListener('click', () => {
+        _applyLogTailLines(logTailLines + 1);
+        _saveLogTailConfig(logTailActive, logTailLines);
+    });
+
+    // Don't show anything until updateAttachDetach confirms it is allowed.
+}
+
+function _syncLogTailVisibility() {
+    if (!logTailAllowed) return;
+
+    const group = cachedElements.logTailGroup;
+    const tail = cachedElements.logTailEl;
+    const minusBtn = cachedElements.logTailMinus;
+    const plusBtn = cachedElements.logTailPlus;
+    const badge = cachedElements.logTailBadge;
+
+    if (group) group.style.display = 'inline-flex';
+    if (badge) badge.classList.toggle('is-active', logTailActive);
+    if (tail) tail.style.display = logTailActive ? '' : 'none';
+    if (minusBtn) minusBtn.classList.toggle('show', logTailActive);
+    if (plusBtn) plusBtn.classList.toggle('show', logTailActive);
+}
+
+function _updateLogTail(d) {
+    if (!logTailActive || !logTailAllowed) return;
+    const now = Date.now();
+    if (now - logTailLastUpdateMs < LOG_TAIL_UPDATE_INTERVAL_MS) return;
+    logTailLastUpdateMs = now;
+
+    ensureCachedElements();
+    const tail = cachedElements.logTailEl;
+    if (!tail) return;
+
+    const logs = d.logs;
+    if (!Array.isArray(logs) || logs.length === 0) {
+        tail.innerHTML = '';
+        return;
     }
 
-    // Show empty state whenever there are no logs (attach or spawn mode).
+    const lastN = logs.slice(-logTailLines);
+
+    // Ensure tail only contains the lines we want to show
+    while (tail.children.length > lastN.length) {
+        tail.removeChild(tail.lastChild);
+    }
+
+    for (let i = 0; i < lastN.length; i++) {
+        const line = lastN[i];
+        if (!line) continue;
+
+        let el = tail.children[i];
+        if (!el) {
+            el = document.createElement('div');
+            tail.appendChild(el);
+        }
+
+        el.className = 'log-line ' + _levelClass(_parseLogLevel(line));
+        // eslint-disable-next-line no-unsanitized/property -- _colorizeLogLine uses escapeHtml and only safe inline spans
+        el.innerHTML = _colorizeLogLine(line);
+    }
+}
+
+function _initLogToolbar(el) {
+    const copyBtn = document.getElementById('log-copy-btn');
+    if (copyBtn && !copyBtn._logBound) {
+        copyBtn._logBound = true;
+        copyBtn.addEventListener('click', () => {
+            const text = (copyBtn._currentLogs || []).join('\n');
+            navigator.clipboard?.writeText(text).then(() => {
+                const span = copyBtn.querySelector('span');
+                const orig = span?.textContent;
+                if (span) span.textContent = 'Copied!';
+                setTimeout(() => { if (span) span.textContent = orig; }, 1500);
+            });
+        });
+    }
+    const scrollBtn = document.getElementById('log-scroll-lock-btn');
+    if (scrollBtn && !scrollBtn._logBound) {
+        scrollBtn._logBound = true;
+        scrollBtn.addEventListener('click', () => {
+            logAutoScroll = !logAutoScroll;
+            _syncLogScrollLockBtn();
+            if (logAutoScroll && el) el.scrollTop = el.scrollHeight;
+        });
+    }
+    const cmdBtn = document.getElementById('log-cmd-btn');
+    const cmdPanel = document.getElementById('log-cmd-panel');
+    if (cmdBtn && cmdPanel && !cmdBtn._logBound) {
+        cmdBtn._logBound = true;
+        cmdBtn.addEventListener('click', () => {
+            const open = cmdPanel.getAttribute('aria-hidden') === 'false';
+            cmdPanel.setAttribute('aria-hidden', String(open));
+            cmdPanel.classList.toggle('open', !open);
+            cmdBtn.classList.toggle('log-tool-btn--active', !open);
+        });
+    }
+    const cmdCopyBtn = document.getElementById('log-cmd-copy-btn');
+    if (cmdCopyBtn && !cmdCopyBtn._logBound) {
+        cmdCopyBtn._logBound = true;
+        cmdCopyBtn.addEventListener('click', () => {
+            const pre = document.getElementById('log-cmd-pre');
+            const text = pre?.textContent || '';
+            if (!text) return;
+            navigator.clipboard?.writeText(text).then(() => {
+                const orig = cmdCopyBtn.textContent;
+                cmdCopyBtn.textContent = 'Copied!';
+                setTimeout(() => { cmdCopyBtn.textContent = orig; }, 1500);
+            });
+        });
+    }
+}
+
+function _findLogOverlap(previous, current) {
+    const maxOverlap = Math.min(previous.length, current.length);
+    for (let overlap = maxOverlap; overlap > 0; overlap--) {
+        const previousStart = previous.length - overlap;
+        let matches = true;
+        for (let i = 0; i < overlap; i++) {
+            if (previous[previousStart + i] !== current[i]) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) return overlap;
+    }
+    return 0;
+}
+
+export function updateLogs(d) {
+    ensureCachedElements();
+    const logs = d.logs || [];
+    const emptyState = document.getElementById('logs-empty-state');
+    const logsPage = document.getElementById('page-logs');
+    const el = cachedElements.logPanel;
+
+    // Show/hide empty state
     if (emptyState) {
         if (logs.length === 0) {
             emptyState.classList.add('visible');
@@ -637,47 +1405,298 @@ function updateLogs(d) {
             logsPage?.classList.remove('logs-empty-mode');
         }
     }
+
+    if (!el) return;
+
+    _initLogScrollTracking(el);
+    _initLogToolbar(el);
+
+    // Update copy button's closure with current logs
+    const copyBtn = document.getElementById('log-copy-btn');
+    if (copyBtn) copyBtn._currentLogs = logs;
+
+    const previousLogs = sessionState.prevLogs || [];
+    const overlap = _findLogOverlap(previousLogs, logs);
+    const expiredCount = previousLogs.length - overlap;
+    const newLines = logs.slice(overlap);
+
+    if (previousLogs.length > 0 && overlap === 0) {
+        // The buffer was cleared or replaced with unrelated output.
+        el.innerHTML = '';
+    } else {
+        for (let i = 0; i < expiredCount; i++) {
+            el.firstElementChild?.remove();
+        }
+    }
+
+    if (newLines.length > 0) {
+        const frag = document.createDocumentFragment();
+        for (const line of newLines) {
+            frag.appendChild(_renderLogLine(line));
+        }
+        el.appendChild(frag);
+
+        if (logAutoScroll) el.scrollTop = el.scrollHeight;
+    }
+    sessionState.prevLogLen = logs.length;
+    sessionState.prevLogs = logs.slice();
+
+    // Update count badge
+    const badge = document.getElementById('log-count-badge');
+    if (badge) badge.textContent = logs.length === 0 ? '' : `${logs.length} line${logs.length === 1 ? '' : 's'}`;
+
+    // Update spawn command display if present in payload
+    if (d.last_spawn_cmd !== undefined) {
+        const pre = document.getElementById('log-cmd-pre');
+        const cmdBtn = document.getElementById('log-cmd-btn');
+        if (pre) pre.textContent = d.last_spawn_cmd || '(no spawn command recorded — attach mode or server not yet started)';
+        if (cmdBtn) cmdBtn.style.display = d.last_spawn_cmd ? '' : 'none';
+    }
 }
 
 // ── Badges ───────────────────────────────────────────────────────────────────
 
 function updateBadges(d) {
     const isAttached = d.session_mode === 'attach' && d.active_session_endpoint;
-
-    // Server badge
-    const badgeParts = [];
-    if (isAttached) {
-        const gpuEntries = Object.entries(d.gpu || {});
-        if (gpuEntries.length > 0) badgeParts.push('GPU ' + Math.max(...gpuEntries.map(([,m]) => m.temp)).toFixed(0) + 'C');
-    }
     const ce = cachedElements;
-    const badgeServer = ce.badgeServer;
-    if (badgeServer) badgeServer.textContent = badgeParts.length ? ' ' + badgeParts.join(' \u00b7 ') : '';
 
-    // Chat badge
-    const badgeChat = ce.badgeChat;
-    const tab = activeChatTab();
-    const msgCount = tab ? tab.messages.filter(m => m.role !== 'system').length : 0;
-    if (badgeChat) {
-        if (msgCount > 0) {
-            badgeChat.textContent = ' ' + msgCount + ' msg';
-            badgeChat.style.display = '';
-        } else {
-            badgeChat.textContent = '';
-            badgeChat.style.display = 'none';
+    // Server badge \u2014 GPU temp changes infrequently; skip write when unchanged
+    const gpuEntries = Object.entries(d.gpu || {});
+    const serverText = (isAttached && gpuEntries.length > 0)
+        ? ' GPU ' + Math.max(...gpuEntries.map(([,m]) => m.temp)).toFixed(0) + 'C'
+        : '';
+    if (serverText !== prevBadgeState.server) {
+        prevBadgeState.server = serverText;
+        const badgeServer = ce.badgeServer;
+        if (badgeServer) {
+            badgeServer.textContent = serverText;
+            if (!serverText) {
+                badgeServer.style.display = 'none';
+            }
         }
     }
 
-    // Logs badge
-    const badgeLogs = ce.badgeLogs;
+    // Logs badge \u2014 count only changes when new logs arrive
     const logs = d.logs || [];
-    if (badgeLogs) {
-        if (logs.length > 0) {
-            badgeLogs.textContent = ' ' + logs.length;
-            badgeLogs.style.display = '';
-        } else {
-            badgeLogs.textContent = '';
-            badgeLogs.style.display = 'none';
+    if (logs.length !== prevBadgeState.logs) {
+        prevBadgeState.logs = logs.length;
+        const badgeLogs = ce.badgeLogs;
+        if (badgeLogs) {
+            if (logs.length > 0) {
+                badgeLogs.textContent = ' ' + logs.length;
+                badgeLogs.style.display = '';
+            } else {
+                badgeLogs.textContent = '';
+                badgeLogs.style.display = 'none';
+            }
         }
     }
+}
+
+// ── Server error details panel ─────────────────────────────────────────
+
+let _lastServerErrorData = null;
+
+function showServerErrorDetails(d) {
+    _lastServerErrorData = d;
+    const wrapper = document.getElementById('server-error-details-wrapper');
+    const btn = document.getElementById('btn-server-error-details');
+    if (!wrapper || !btn) return;
+    wrapper.style.display = 'flex';
+    btn.style.display = '';
+}
+
+function hideServerErrorDetails() {
+    const wrapper = document.getElementById('server-error-details-wrapper');
+    const btn = document.getElementById('btn-server-error-details');
+    if (wrapper) wrapper.style.display = 'none';
+    if (btn) btn.style.display = 'none';
+    _lastServerErrorData = null;
+}
+
+function populateServerErrorDetails(data) {
+    const wrapper = document.getElementById('server-error-details-wrapper');
+    const panel = document.getElementById('server-error-details-panel');
+    const body = document.getElementById('server-error-details-body');
+    if (!wrapper || !panel || !body || !data) return;
+
+    const err = data.active_session_error || '';
+    const cmd = data.last_spawn_cmd || '';
+    const logs = data.logs || [];
+
+    // Short summary (first ~200 chars)
+    const summary = err.length > 200
+        ? err.substring(0, 200).trim() + '...'
+        : err;
+
+    // Filter non-[monitor] lines and take last 20
+    const serverLogs = logs
+        .filter(l => !l.startsWith('[monitor]'))
+        .slice(-20);
+
+    let html = '';
+
+    if (summary) {
+        html += `<div class="error-summary">${escapeHtml(summary)}</div>`;
+    }
+
+    if (cmd) {
+        html += `<code class="error-cmd">${escapeHtml(cmd)}</code>`;
+    }
+
+    if (serverLogs.length > 0) {
+        html += `<code class="error-logs">${serverLogs.map(escapeHtml).join('\n')}</code>`;
+    }
+
+    if (!summary && !cmd && serverLogs.length === 0) {
+        html += `<div class="error-summary">
+No additional context captured. Check the full Logs tab for more details.
+</div>`;
+    }
+
+    html += `<div style="margin-top:4px;">
+    <a href="#" id="error-open-logs-link" style="color:var(--color-primary);font-size:10px;text-decoration:underline;">
+        Open Logs tab
+    </a>
+</div>`;
+
+    // eslint-disable-next-line no-unsanitized/property -- values sanitized via escapeHtml
+    body.innerHTML = html;
+
+    const link = body.querySelector('#error-open-logs-link');
+    if (link) {
+        link.addEventListener('click', e => {
+            e.preventDefault();
+            const logsBtn = document.querySelector('.sidebar-btn[data-tab="logs"]');
+            if (logsBtn) logsBtn.click();
+        });
+    }
+
+    wrapper.style.display = 'flex';
+    panel.style.display = '';
+}
+
+// Bind buttons once (after DOM ready).
+document.addEventListener('DOMContentLoaded', () => {
+    const detailsBtn = document.getElementById('btn-server-error-details');
+    const closeBtn = document.getElementById('server-error-details-close');
+
+    if (detailsBtn) {
+        detailsBtn.addEventListener('click', () => {
+            if (!_lastServerErrorData) return;
+            populateServerErrorDetails(_lastServerErrorData);
+            detailsBtn.blur();
+        });
+    }
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            const panel = document.getElementById('server-error-details-panel');
+            if (panel) panel.style.display = 'none';
+        });
+    }
+
+    // Welcome screen "Show details"
+    const localDetailsBtn = document.getElementById('local-server-error-details-btn');
+    const localCloseBtn = document.getElementById('local-server-error-details-close');
+
+    if (localDetailsBtn) {
+        localDetailsBtn.addEventListener('click', () => {
+            if (!_lastLocalServerErrorData) return;
+            populateLocalServerErrorDetails(_lastLocalServerErrorData);
+            localDetailsBtn.blur();
+        });
+    }
+
+    if (localCloseBtn) {
+        localCloseBtn.addEventListener('click', () => {
+            const panel = document.getElementById('local-server-error-details');
+            if (panel) panel.style.display = 'none';
+        });
+    }
+});
+
+// ── Local Server (welcome screen) spawn error bar ──────────────────────
+
+let _lastLocalServerErrorData = null;
+
+function showLocalServerErrorBar(sessionError, d) {
+    const bar = document.getElementById('local-server-error-bar');
+    const textEl = document.getElementById('local-server-error-bar-text');
+    if (!bar || !textEl) return;
+
+    _lastLocalServerErrorData = d;
+
+    const short = (sessionError || '').length > 140
+        ? (sessionError || '').substring(0, 140).trim() + '...'
+        : (sessionError || '');
+
+    textEl.textContent = short || 'Launch failed';
+    bar.style.display = 'flex';
+}
+
+function hideLocalServerErrorBar() {
+    const bar = document.getElementById('local-server-error-bar');
+    const details = document.getElementById('local-server-error-details');
+    if (bar) bar.style.display = 'none';
+    if (details) details.style.display = 'none';
+    _lastLocalServerErrorData = null;
+}
+
+function populateLocalServerErrorDetails(data) {
+    const details = document.getElementById('local-server-error-details');
+    const body = document.getElementById('local-server-error-details-body');
+    if (!details || !body || !data) return;
+
+    const err = data.active_session_error || '';
+    const cmd = data.last_spawn_cmd || '';
+    const logs = data.logs || [];
+
+    const summary = (err || '').length > 220
+        ? (err || '').substring(0, 220).trim() + '...'
+        : (err || '');
+
+    const serverLogs = logs
+        .filter(l => !l.startsWith('[monitor]'))
+        .slice(-20);
+
+    let html = '';
+
+    if (summary) {
+        html += `<div class="error-summary">${escapeHtml(summary)}</div>`;
+    }
+
+    if (cmd) {
+        html += `<code class="error-cmd">${escapeHtml(cmd)}</code>`;
+    }
+
+    if (serverLogs.length > 0) {
+        html += `<code class="error-logs">${serverLogs.map(escapeHtml).join('\n')}</code>`;
+    }
+
+    if (!summary && !cmd && serverLogs.length === 0) {
+        html += `<div class="error-summary">
+No additional context captured. Open the Logs tab or run llama-monitor from a terminal to see full output.
+</div>`;
+    }
+
+    html += `<div style="margin-top:4px;">
+    <a href="#" id="local-error-open-logs-link" style="color:var(--color-primary);font-size:10px;text-decoration:underline;">
+        Open Logs tab
+    </a>
+</div>`;
+
+    // eslint-disable-next-line no-unsanitized/property -- values sanitized via escapeHtml
+    body.innerHTML = html;
+
+    const link = body.querySelector('#local-error-open-logs-link');
+    if (link) {
+        link.addEventListener('click', e => {
+            e.preventDefault();
+            const logsBtn = document.querySelector('.sidebar-btn[data-tab="logs"]');
+            if (logsBtn) logsBtn.click();
+        });
+    }
+
+    details.style.display = 'block';
 }

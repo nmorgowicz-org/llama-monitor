@@ -24,7 +24,7 @@ Hovering the endpoint status chip in the top nav opens a popover listing per-sub
 
 | Row | Meaning |
 |-----|---------|
-| **Inference** | Whether llama.cpp inference metrics are live |
+| **Inference** | Whether llama.cpp performance metrics are live |
 | **Slots** | Whether slot data is available |
 | **Metrics** | Whether throughput / context metrics are being reported |
 | **Generation progress** | Whether the server exposes live generation budget |
@@ -40,13 +40,15 @@ The popover is populated in real time from WebSocket data; each row shows a gree
 
 The Server tab is the main monitoring dashboard. It combines llama.cpp inference data from `/metrics` and `/slots` with host telemetry when available.
 
+![Inference Section](../screenshots/dashboard-inference-section.png)
+
 | Card | What it shows |
 |------|----------------|
 | **Throughput** | Prompt and generation speeds, peak tracking, throughput ratio bar, metric age, and delta indicators |
 | **Generation** | Output tokens, remaining budget, generation ring progress, stage indicators (Prompt/Output), live output estimation sparkline |
 | **Context Window** | Gauge or fleet view of context pressure across chat tabs |
-| **Slot Activity** | Per-slot state, output tokens, context usage, slot utilization bar, and batch efficiency |
-| **Request Activity** | Activity rail (recent request timeline), request count, and average duration |
+| **Active sessions** | Per-slot state, output tokens, context usage, slot utilization bar, and batch efficiency |
+| **Connection details** | Activity rail (recent request timeline), request count, and average duration |
 | **Model & Decoding** | Active model name, quantization, sampler config inline, speculative decoding chip and config grid |
 
 ![Server Tab](../screenshots/settings-server-tab.png)
@@ -72,6 +74,292 @@ Additional metrics and indicators shown on the Server tab when data is available
 - **Recent task strip**: Summarizes the last completed task (task ID, output tokens, duration, estimated t/s).
 - **Request stats**: Total completed requests and average duration over the last 10 minutes.
 
+### Tuning panel
+
+The Tuning panel provides access to server tuning settings, including sampling parameters and system-level tuning knobs.
+
+- Open the **Tune** button in the Server tab header to reveal the panel.
+- Adjust sampling (temperature, top_p, etc.), memory tuning, and speculative decoding settings where available.
+- Changes apply to the running llama-server when supported.
+
+![Tuning Panel](../screenshots/tune-panel-open.png)
+
+## Llama Updater
+
+The Llama Updater manages the `llama-server` binary version directly from the dashboard. It detects when a newer `llama.cpp` release is available, lets the user review release notes, and performs the install.
+
+### Version pill
+
+A pill in the top navigation bar displays the currently installed build number in the form `llama.cpp · bXXXXX`. When a newer build is available on GitHub, the pill turns red and shows an upward arrow (↑) with the latest build number, for example `llama.cpp · ↑ b5432`. Hovering the pill shows a tooltip with the full upgrade range (e.g., `Update available: b4321 → b5432. Click to manage.`).
+
+![Llama Updater Pill](../screenshots/llama-updater-pill.png)
+
+### Version modal
+
+Clicking the pill opens a version modal that lists the last 8 `llama.cpp` releases. Each row shows the tag, a relative age, and badges for **latest** and **installed**. The currently installed build is pinned at the bottom of the list when it is older than the 8-release window.
+
+Clicking any row displays that release's notes in a side pane. The **Install** button is shown for every non-current release; clicking it downloads, validates, and promotes a new `llama-server` binary. During installation the pill displays `Installing…` with a live timer. On success the running llama-server is restarted automatically to pick up the new binary.
+
+![Llama Updater Version Modal](../screenshots/llama-updater-version-modal.png)
+
+### Background version checks
+
+On startup the frontend checks for a new version after a short delay to avoid competing with first-paint work. Thereafter a background poll fires every 30 minutes while the tab is visible. Polling stops while the tab is hidden (minimized or inactive) and resumes on visibility change.
+
+### API endpoints
+
+All endpoints require an `api-token`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/llama-binary/version` | Returns the installed build number and binary path |
+| `GET` | `/api/llama-binary/latest` | Fetches the latest GitHub release (cached 30 minutes) |
+| `GET` | `/api/llama-binary/releases` | Lists the last 8 releases (cached 30 minutes) |
+| `GET` | `/api/llama-binary/release?build=XXXXX` | Fetches a single release by build number (cached 5 minutes) |
+| `POST` | `/api/llama-binary/update` | Downloads and installs a release |
+
+#### `GET /api/llama-binary/version`
+
+Returns:
+
+```json
+{
+  "build": 4567,
+  "version": "b4567",
+  "path": "/path/to/llama-server"
+}
+```
+
+If the binary is missing or `--version` fails, `build` and `version` are returned as `null`.
+
+#### `GET /api/llama-binary/latest`
+
+Returns:
+
+```json
+{
+  "tag": "b5432",
+  "build": 5432,
+  "assets": ["llama-server-metal-x86_64.bin", ...],
+  "published_at": "2025-01-15T12:00:00Z"
+}
+```
+
+#### `GET /api/llama-binary/releases`
+
+Returns:
+
+```json
+{
+  "releases": [
+    {
+      "tag": "b5432",
+      "build": 5432,
+      "published_at": "2025-01-15T12:00:00Z",
+      "body": "Release notes text..."
+    }
+  ]
+}
+```
+
+#### `POST /api/llama-binary/update`
+
+Request body:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `tag` | `string` | Yes | Tag to install (e.g., `b5432`) |
+
+Response on success:
+
+```json
+{
+  "ok": true,
+  "sha256": "abcdef..."
+}
+```
+
+Response on failure:
+
+```json
+{
+  "ok": false,
+  "error": "Cannot update llama-server while it is running. Stop the server first."
+}
+```
+
+The endpoint refuses to overwrite the binary while a local llama-server is running. After a successful install the frontend attempts to restart the server automatically.
+
+## Benchmark
+
+The Benchmark feature runs a live throughput test against the active llama-server, grades the result, and returns actionable tuning suggestions. Access it through the **Tune** button in the Server tab header.
+
+### Benchmark flow
+
+The benchmark UI has three states:
+
+1. **Idle**: A "Run Benchmark" button is displayed in the Tune panel.
+2. **Running**: The button is disabled, a spinner is shown, and a hint line reads "Sending a test prompt and measuring throughput…".
+3. **Results**: The grade chip, numeric results, and suggestion cards are displayed. A "Re-run" button allows re-testing after applying changes.
+
+When the user clicks "Apply" on a suggestion card, the server is restarted with the modified configuration and the benchmark runs again automatically.
+
+### Grade system
+
+The generation throughput (`gen_tokens_per_second`) is mapped to a 5-tier letter grade:
+
+| Grade | Minimum t/s | Label |
+|-------|-------------|-------|
+| **S** | 25 | Excellent |
+| **A** | 12 | Good |
+| **B** | 6 | Usable |
+| **C** | 3 | Slow |
+| **D** | 0 | Very Slow |
+
+The grade chip appears in the results area with a color corresponding to the letter.
+
+### Results
+
+The benchmark sends a short test prompt through the server's chat completions endpoint and measures:
+
+| Field | Description |
+|-------|-------------|
+| `gen_tokens_per_second` | Generation throughput (tokens/sec during decode) |
+| `prompt_tokens_per_second` | Prefill throughput (tokens/sec during prompt processing) |
+| `time_to_first_token_ms` | Time to first token in milliseconds |
+
+The backend sends a 512-token generation request with `temperature: 0.5` and `stream: true`. Thinking mode is disabled (`enable_thinking: false`) so reasoning tokens do not inflate TTFT.
+
+### Performance suggestions
+
+The response includes a `suggestions` array of tuning recommendations, each with:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `label` | `string` | Short title of the suggestion |
+| `description` | `string` | Explanation of why the change helps |
+| `param` | `string` | Config key to modify (empty for informational-only cards) |
+| `value` | `any` | Target value for the param |
+| `patch` | `object \| null` | Multi-field change; merged wholesale on Apply |
+
+Common suggestions include:
+
+- **Enable flash attention** — when TTFT exceeds 1.5 s.
+- **Try a smaller context window** — when gen t/s is below 5.
+- **Increase batch size** — when prompt t/s is below 300.
+- **Offload MoE layers to CPU** — for MoE models, sets `n_cpu_moe` to a recommended value.
+
+Each suggestion is rendered as a card with an **Apply** button. When the suggestion's `param` already matches the current config, the card is hidden automatically.
+
+### Cooldown
+
+The benchmark endpoint enforces a 15-second cooldown to prevent repeated heavy loads on the running llama-server. Attempts within the cooldown window return `429 Too Many Requests`.
+
+### API
+
+#### `POST /api/benchmark`
+
+Requires `api-token`. Request body can be empty `{}`.
+
+Response on success:
+
+```json
+{
+  "prompt_tokens_per_second": 850.0,
+  "gen_tokens_per_second": 15.3,
+  "time_to_first_token_ms": 1200.0,
+  "verdict": "good",
+  "hints": ["String hint..."],
+  "suggestions": [
+    {
+      "label": "Enable flash attention",
+      "description": "Cuts time-to-first-token and reduces VRAM pressure at large context.",
+      "param": "flash_attn",
+      "value": "on",
+      "patch": null
+    }
+  ]
+}
+```
+
+Response on cooldown:
+
+```json
+{
+  "ok": false,
+  "error": "Benchmark rate limited. Try again in 15 seconds.",
+  "seconds_remaining": 8
+}
+```
+
+## Tuning Cards
+
+The tuning cards system is a shared card renderer used by the Tune Panel, Setup wizard performance advisor, and Preset Editor advisor. A single rendering function displays tuning advice consistently across all surfaces.
+
+### Card contract
+
+Each suggestion follows this structure (defined in `spawn_wizard.rs`):
+
+```json
+{
+  "label": "Enable flash attention",
+  "description": "Cuts time-to-first-token and reduces VRAM pressure at large context.",
+  "param": "flash_attn",
+  "value": "on",
+  "patch": null
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `label` | `string` | Short title displayed at the top of the card |
+| `description` | `string` | Detailed explanation of the suggestion |
+| `param` | `string` | Configuration key this suggestion modifies. Empty string (`""`) means the card is informational only |
+| `value` | `any` | Target value to set for `param` |
+| `patch` | `object \| null` | When present, a multi-field object merged wholesale onto the config on Apply |
+
+### Applied vs pending
+
+Cards are marked as pending if the current config does not yet have the suggestion's primary `param` set to the target `value`. Once a suggestion is applied, the card disappears from the list automatically. When all suggestions are applied, an empty-state message is shown: "Your config looks well-tuned for this hardware."
+
+### Informational vs actionable
+
+- **Informational cards**: `param` is an empty string. These provide context (e.g., "Dense model is bandwidth-bound on this Mac") but have no Apply button.
+- **Actionable cards**: `param` is a non-empty string. These have an **Apply** button that triggers the caller's `onApply` handler. Clicking Apply modifies the config, restarts the server, and re-runs the benchmark (in the Tune Panel) or validates the new settings (in the Setup wizard and Preset Editor).
+
+### n_cpu_moe tuning
+
+The n_cpu_moe auto-tuner estimates the optimal number of MoE layers to offload to CPU based on available VRAM and model architecture. It is accessed via:
+
+#### `POST /api/tune/ncpumoe`
+
+Requires `api-token`. Request body:
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | `string` | No | `""` | Model name for architecture detection |
+| `param_b` | `number` | No | `0` | Model size in billions of parameters |
+| `model_size_bytes` | `number` | No | `0` | GGUF file size |
+| `available_vram_bytes` | `number` | No | `0` | Available VRAM |
+| `ubatch_size` | `number` | No | `512` | Unified batch size |
+| `verify` | `boolean` | No | `false` | Run empirical llama-bench sweep |
+| `model_path` | `string` | No | `""` | Path to GGUF (required for `verify: true`) |
+| `ngl` | `number` | No | `99` | GPU layers |
+| `ctk` | `string` | No | `"q8_0"` | Key cache type |
+| `ctv` | `string` | No | `"q8_0"` | Value cache type |
+| `flash_attn` | `boolean` | No | `true` | Flash attention |
+
+Response:
+
+```json
+{
+  "recommended_n_cpu_moe": 3,
+  "verified": false
+}
+```
+
+When `verify: true`, the backend runs a llama-bench probe sweep across candidate values and returns the fastest configuration. The `verified` field indicates whether the recommendation was backed by empirical measurement. Empirical verification requires no server to be running (llama-bench needs exclusive GPU access).
+
 ### Context Window card
 
 The Context Window card has two toggleable views:
@@ -92,7 +380,7 @@ Host metrics are available in two ways:
 
 - **Local session**: the dashboard reads GPU/system data directly from the same machine.
 - **Remote session with agent**: the remote agent reports GPU/system/process telemetry back to the dashboard.
-- **Remote session without agent**: you still get inference metrics, but GPU/system cards stay limited.
+- **Remote session without agent**: you still get performance metrics, but GPU/system cards stay limited.
 
 ### GPU metrics
 
@@ -142,9 +430,9 @@ The UI exposes telemetry availability directly:
 
 | State | Meaning |
 |-------|---------|
-| **Full telemetry** | Inference metrics plus host GPU/system data |
-| **Inference only** | Connected to llama.cpp, but no host telemetry source is available |
-| **Limited** | Partial host telemetry is available but some sensors are missing |
+| **Full telemetry** | Performance metrics plus host GPU/system data |
+| **Basic** | Connected to llama.cpp, but no host telemetry source is available |
+| **Partial** | Partial host telemetry is available but some sensors are missing |
 | **Error** | The dashboard cannot reach the required endpoint |
 
 This matters most for remote endpoints: attaching to a remote llama.cpp server alone does not grant GPU or system metrics.
@@ -201,7 +489,7 @@ The setup screen's attach card is replaced with a recent-endpoints dashboard:
 
 The dashboard pushes live data over WebSocket. The backend clamps the interval to **200 ms minimum** and **10 s maximum**; the default is **500 ms**.
 
-In the UI, go to **Settings → Performance → Dashboard Refresh Rate**. The current presets are:
+Use the nav **Cadence** chip for quick changes, or go to **Settings → Performance → Dashboard Refresh Rate**. The current presets are:
 
 | UI choice | Effective interval |
 |-----------|--------------------|
@@ -209,9 +497,11 @@ In the UI, go to **Settings → Performance → Dashboard Refresh Rate**. The cu
 | **Normal** | 500 ms |
 | **Balanced** | 1 s |
 | **Battery Saver** | 2 s |
-| **Slow Connection** | 5 s |
+| **Low Power** | 5 s |
 
-`Auto` uses the Network Information API (when available) to choose between 500 ms, 1 s, 2 s, or 5 s based on detected connection quality and Data Saver mode. See Network detection for details. If the browser cannot report network quality, it falls back to 500 ms.
+`Auto` uses the Network Information API (when available) to choose between 500 ms, 1 s, 2 s, or 5 s based on detected connection quality and Data Saver mode. If the browser cannot report network quality, it falls back to 500 ms.
+
+When the browser appears overloaded, Llama Monitor can also recommend **Battery Saver (2s)**. This uses browser timer drift as an inferred responsiveness signal; browsers do not expose reliable total CPU load across platforms.
 
 ## Settings vs. Configuration
 
@@ -238,7 +528,8 @@ Ownership summary for the visible Settings surfaces:
 |---------|-------|-------------|
 | **Settings → Chat** guided-generation toggles, sidebar width, prompt templates | Shared workspace settings | `GET/PUT /api/settings` |
 | **Settings → Performance** refresh interval | Shared workspace settings | `GET/PUT /api/settings` |
-| **Settings → Session / GPU / Models / Appearance** explanatory cards | Runtime/configuration handoff only | No direct save path in Settings |
+| **Settings → Model profile / GPU / Models** explanatory cards | Runtime/configuration handoff only | No direct save path in Settings |
+| **Settings → Appearance** palette picker, color mode, chat style, font size, timestamps, message width | Device-local appearance | browser `localStorage` (`llama-monitor-preferences`) |
 | **Settings → Advanced → Open Runtime Configuration** | Runtime configuration modal | `GET/PUT /api/settings` for config-backed fields |
 | **User → Preferences** theme, spacing, chat style, font scale | Device-local preference | browser `localStorage` |
 | **User → Preferences** enter-to-send | Shared workflow preference | `GET/PUT /api/settings` |
@@ -253,9 +544,13 @@ This modal owns the runtime-specific controls:
 - **GPU Environment**: local ROCm architecture, local GPU device list, local ROCm path
 - **Remote Agent**: agent URL/token, SSH target, optional SSH autostart, guided SSH setup, install/start/update/remove actions
 
-Device-local appearance choices such as theme, spacing, chat style, and font scale remain in **User → Preferences** rather than shared workspace settings.
+Device-local appearance choices (palette, theme, spacing, chat style, font scale) are split across **Settings → Appearance** (the primary surface) and the legacy **User → Preferences** modal, both persisting to `localStorage`. Neither is shared workspace state.
 
 The endpoint you attach to is still chosen from the main session/setup flow. Configuration does not replace the attach/spawn session controls.
+
+### Log console
+
+The **Logs** page keeps each llama-server output entry on one line and provides horizontal scrolling for long entries. Use the `-` and `+` toolbar controls to adjust the console font from 8px to 18px. The selected size is stored in browser `localStorage`; click the size readout to reset it to 13px. The console retains the latest 500 lines and continues following new output as older entries rotate out.
 
 ## Visualization options
 

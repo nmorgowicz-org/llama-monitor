@@ -448,17 +448,31 @@ pub struct AppConfig {
     // Arc<RwLock> so all Arc<AppConfig> clones share the same backing store.
     live_api_token_store: std::sync::Arc<std::sync::RwLock<Option<String>>>,
     live_db_admin_token_store: std::sync::Arc<std::sync::RwLock<Option<String>>>,
+
+    // Spawn V2: additional directories
+    pub binaries_dir: PathBuf,
+    pub default_models_dir: PathBuf,
+    pub scripts_dir: PathBuf,
+    pub certs_dir: PathBuf,
 }
 
 impl AppConfig {
     pub fn from_args(args: AppArgs) -> Self {
-        let default_server_path = PathBuf::from("llama-server");
         let default_server_cwd = PathBuf::from(".");
 
         let config_dir = args.config_dir.unwrap_or_else(|| {
             let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
             home.join(".config").join("llama-monitor")
         });
+
+        // Default binary location: ~/.config/llama-monitor/bin/llama-server
+        // Subdirectory keeps binaries separate from JSON config files.
+        let binary_name = if cfg!(windows) {
+            "llama-server.exe"
+        } else {
+            "llama-server"
+        };
+        let default_server_path = config_dir.join("bin").join(binary_name);
 
         let presets_file = args
             .presets_file
@@ -499,6 +513,12 @@ impl AppConfig {
             live_db_admin_token_store: std::sync::Arc::new(std::sync::RwLock::new(
                 ensure_db_admin_token(&config_dir),
             )),
+
+            // Spawn V2: additional directories (backward-compatible defaults)
+            binaries_dir: config_dir.join("binaries"),
+            default_models_dir: config_dir.join("models"),
+            scripts_dir: config_dir.join("scripts"),
+            certs_dir: config_dir.join("certs"),
         }
     }
 
@@ -554,6 +574,12 @@ impl AppConfig {
             tls_config: TLSConfig::default(),
             live_api_token_store: std::sync::Arc::new(std::sync::RwLock::new(api_token)),
             live_db_admin_token_store: std::sync::Arc::new(std::sync::RwLock::new(db_admin_token)),
+
+            // Spawn V2: additional directories (test defaults)
+            binaries_dir: std::path::PathBuf::from("/tmp/llama-monitor-test/binaries"),
+            default_models_dir: std::path::PathBuf::from("/tmp/llama-monitor-test/models"),
+            scripts_dir: std::path::PathBuf::from("/tmp/llama-monitor-test/scripts"),
+            certs_dir: std::path::PathBuf::from("/tmp/llama-monitor-test/certs"),
         }
     }
 }

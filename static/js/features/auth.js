@@ -39,18 +39,44 @@ function renderMethodBadges(methods) {
     if (methods.basic) badges.appendChild(buildBadge('Basic Auth Available'));
 }
 
+const _PERSON_SVG = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>`;
+const _LOCK_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
+
+function _navUserLabelSpan(text) {
+    const s = document.createElement('span');
+    s.className = 'nav-user-btn-label';
+    s.textContent = text;
+    return s;
+}
+
 function updateUserLabel() {
     const btn = document.getElementById('nav-user-btn');
     if (!btn) return;
-    if (authState.authenticated && authState.username) {
-        btn.textContent = `👤 ${authState.username}`;
-        return;
+
+    const isLogged = authState.authenticated && authState.username;
+
+    if (isLogged) {
+        // eslint-disable-next-line no-unsanitized/property -- static SVG, no user data
+        btn.innerHTML = _PERSON_SVG;
+        btn.appendChild(_navUserLabelSpan(authState.username));
+        btn.classList.remove('nav-user-btn-icon');
+    } else if (authState.methods.form) {
+        // eslint-disable-next-line no-unsanitized/property -- static SVG, no user data
+        btn.innerHTML = _LOCK_SVG;
+        btn.appendChild(_navUserLabelSpan('Sign In'));
+        btn.classList.remove('nav-user-btn-icon');
+    } else {
+        // Anonymous / no auth required — icon only, no label
+        // eslint-disable-next-line no-unsanitized/property -- static SVG, no user data
+        btn.innerHTML = _PERSON_SVG;
+        btn.classList.add('nav-user-btn-icon');
     }
-    if (authState.methods.form) {
-        btn.textContent = '🔐 Sign In';
-        return;
+
+    // Show/hide Logout based on auth; only meaningful when truly logged in
+    const logoutBtn = document.getElementById('user-menu-logout');
+    if (logoutBtn) {
+        logoutBtn.style.display = isLogged ? '' : 'none';
     }
-    btn.textContent = '👤 User';
 }
 
 function buildBadge(text) {
@@ -91,6 +117,7 @@ async function fetchAuthStatus() {
         const res = await nativeFetch('/api/auth/status', { cache: 'no-store', credentials: 'same-origin' });
         if (!res.ok) return authState;
         authState = await res.json();
+        window.__AUTH_STATE = authState;
         updateUserLabel();
         return authState;
     } catch {

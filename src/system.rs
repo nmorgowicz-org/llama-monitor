@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+use crate::gpu::mactop_cache;
 use sysinfo::System;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -18,18 +20,175 @@ pub struct SystemMetrics {
     pub ram_used_gb: f64,
     #[serde(default)]
     pub motherboard: String,
+    /// Performance-core count (Apple Silicon only; 0 = unknown/not applicable).
+    #[serde(default)]
+    pub p_cores: u32,
+    /// Efficiency-core count (Apple Silicon only; 0 = unknown/not applicable).
+    #[serde(default)]
+    pub e_cores: u32,
+    /// Total system power drawn (Watts). Populated on macOS via mactop.
+    #[serde(default)]
+    pub power_total_w: f32,
+    /// CPU power drawn (Watts). Populated on macOS via mactop.
+    #[serde(default)]
+    pub power_cpu_w: f32,
+    /// GPU power drawn (Watts). Populated on macOS via mactop.
+    #[serde(default)]
+    pub power_gpu_w: f32,
+    /// P-cluster current frequency (MHz). Populated on macOS via mactop.
+    #[serde(default)]
+    pub p_cluster_freq_mhz: u32,
+    /// S-cluster current frequency (MHz). Populated on macOS via mactop.
+    #[serde(default)]
+    pub s_cluster_freq_mhz: u32,
+    /// E-cluster current frequency (MHz). Populated on macOS via mactop.
+    #[serde(default)]
+    pub e_cluster_freq_mhz: u32,
+    /// P-cluster utilization (%). Populated on macOS via mactop.
+    #[serde(default)]
+    pub p_cluster_active: f32,
+    /// S-cluster utilization (%). Populated on macOS via mactop.
+    #[serde(default)]
+    pub s_cluster_active: f32,
+    /// E-cluster utilization (%). Populated on macOS via mactop.
+    #[serde(default)]
+    pub e_cluster_active: f32,
+    // Default: all new fields are 0/false for non-macOS builds
+}
+
+impl Default for SystemMetrics {
+    fn default() -> Self {
+        Self {
+            cpu_name: String::new(),
+            cpu_temp: 0.0,
+            cpu_temp_available: false,
+            cpu_load: 0,
+            cpu_clock_mhz: 0,
+            ram_total_gb: 0.0,
+            ram_used_gb: 0.0,
+            motherboard: String::new(),
+            p_cores: 0,
+            e_cores: 0,
+            power_total_w: 0.0,
+            power_cpu_w: 0.0,
+            power_gpu_w: 0.0,
+            p_cluster_freq_mhz: 0,
+            s_cluster_freq_mhz: 0,
+            e_cluster_freq_mhz: 0,
+            p_cluster_active: 0.0,
+            s_cluster_active: 0.0,
+            e_cluster_active: 0.0,
+        }
+    }
 }
 
 pub fn get_system_metrics() -> SystemMetrics {
-    let mut sys = System::new_all();
+    let mut sys = sysinfo::System::new_all();
     sys.refresh_all();
 
     let cpu_name = get_cpu_name();
     let (cpu_temp, cpu_temp_available) = get_cpu_temp(&sys);
-    let cpu_load = get_cpu_load(&sys);
-    let cpu_clock_mhz = get_cpu_clock(&sys);
+
+    // On Apple Silicon, use mactop cache for accurate real-time clock, load, and power.
+    // The GPU poller populates this every ~500ms, so data is fresh.
+    let (
+        cpu_load,
+        cpu_clock_mhz,
+        power_total_w,
+        power_cpu_w,
+        power_gpu_w,
+        p_cluster_freq_mhz,
+        s_cluster_freq_mhz,
+        e_cluster_freq_mhz,
+        p_cluster_active,
+        s_cluster_active,
+        e_cluster_active,
+    ) = {
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(cache) = mactop_cache::get_cache() {
+                // Weighted average of cluster utilization based on core counts
+                let (p_cores, s_cores) = get_core_counts();
+                let total_cores = p_cores + s_cores;
+                if total_cores > 0 {
+                    let weighted_load = (cache.p_cluster_active * p_cores as f32
+                        + cache.s_cluster_active * s_cores as f32)
+                        / total_cores as f32;
+                    let cpu_load = weighted_load as u32;
+
+                    // Use P-cluster frequency as the "main" clock (it's the one doing heavy work)
+                    let cpu_clock_mhz = cache.p_cluster_freq_mhz;
+                    (
+                        cpu_load,
+                        cpu_clock_mhz,
+                        cache.power_total_w,
+                        cache.power_cpu_w,
+                        cache.power_gpu_w,
+                        cache.p_cluster_freq_mhz,
+                        cache.s_cluster_freq_mhz,
+                        cache.e_cluster_freq_mhz,
+                        cache.p_cluster_active,
+                        cache.s_cluster_active,
+                        cache.e_cluster_active,
+                    )
+                } else {
+                    // Fallback if core counts are unknown
+                    let cpu_load = get_cpu_load(&sys);
+                    let cpu_clock_mhz = get_cpu_clock(&sys);
+                    (
+                        cpu_load,
+                        cpu_clock_mhz,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0,
+                        0,
+                        0,
+                        0.0,
+                        0.0,
+                        0.0,
+                    )
+                }
+            } else {
+                // Cache not yet populated — fallback to sysinfo
+                let cpu_load = get_cpu_load(&sys);
+                let cpu_clock_mhz = get_cpu_clock(&sys);
+                (
+                    cpu_load,
+                    cpu_clock_mhz,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0,
+                    0,
+                    0,
+                    0.0,
+                    0.0,
+                    0.0,
+                )
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            (
+                get_cpu_load(&sys),
+                get_cpu_clock(&sys),
+                0.0,
+                0.0,
+                0.0,
+                0,
+                0,
+                0,
+                0.0,
+                0.0,
+                0.0,
+            )
+        }
+    };
+
     let (ram_total_gb, ram_used_gb) = get_ram_info(&sys);
     let motherboard = get_motherboard();
+    let (p_cores, e_cores) = get_core_counts();
 
     SystemMetrics {
         cpu_name,
@@ -40,7 +199,39 @@ pub fn get_system_metrics() -> SystemMetrics {
         ram_total_gb,
         ram_used_gb,
         motherboard,
+        p_cores,
+        e_cores,
+        power_total_w,
+        power_cpu_w,
+        power_gpu_w,
+        p_cluster_freq_mhz,
+        s_cluster_freq_mhz,
+        e_cluster_freq_mhz,
+        p_cluster_active,
+        s_cluster_active,
+        e_cluster_active,
     }
+}
+
+#[cfg(target_os = "macos")]
+fn get_core_counts() -> (u32, u32) {
+    fn sysctl_u32(key: &str) -> u32 {
+        std::process::Command::new("sysctl")
+            .args(["-n", key])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0)
+    }
+    let p = sysctl_u32("hw.perflevel0.physicalcpu");
+    let e = sysctl_u32("hw.perflevel1.physicalcpu");
+    (p, e)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn get_core_counts() -> (u32, u32) {
+    (0, 0)
 }
 
 #[cfg(target_os = "windows")]

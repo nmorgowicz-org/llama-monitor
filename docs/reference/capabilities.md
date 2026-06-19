@@ -44,7 +44,7 @@ inference: true, system: false, gpu: false, host_metrics: false, tray: true
 ```
 Inference is optimistically set to true; all host metrics are false until a session connects.
 
-### Local Spawn session
+### Local Launch session
 ```
 inference: true, system: true, gpu: true, cpu_temperature: true, memory: true, host_metrics: true, tray: true
 ```
@@ -60,7 +60,7 @@ Full capabilities. Attaching to a local server still has access to local host me
 ```
 inference: true, system: false, gpu: false, cpu_temperature: false, memory: false, host_metrics: false, tray: true
 ```
-Inference-only. No host metrics because the server is on a different machine.
+Basic. No host metrics because the server is on a different machine.
 
 ### Remote Attach session — agent connected
 ```
@@ -98,6 +98,9 @@ Included alongside capabilities in the WebSocket message and `/api/capabilities`
 | `"Headless"` | No graphical session; tray not available |
 | `"Failed"` | Tray initialization failed |
 
+In desktop mode, clicking the tray icon toggles the compact metrics popover. The popover closes
+when its X button is clicked or when focus moves to another app or window.
+
 ---
 
 ## Status Pill Mapping
@@ -107,11 +110,11 @@ The top-nav status pill derives its label and color directly from capabilities:
 | Condition | Text | Color |
 |-----------|------|-------|
 | `inference = false` | Error | Red |
-| `inference = true`, `host_metrics = false` | Inference only | Yellow |
-| `inference = true`, `host_metrics = true`, `system = false` or `gpu = false` | Limited | Yellow |
-| `inference = true`, `host_metrics = true`, `system = true`, `gpu = true` | OK | Green (pulsing) |
+| `inference = true`, `host_metrics = false` | Basic | Yellow |
+| `inference = true`, `host_metrics = true`, `system = false` or `gpu = false` | Partial | Yellow |
+| `inference = true`, `host_metrics = true`, `system = true`, `gpu = true` | Full | Green (pulsing) |
 
-The pill label is independent of `endpoint_kind` — a Remote session with the agent running shows green OK, the same as Local.
+The pill label is independent of `endpoint_kind` — a Remote session with the agent running shows green Full, the same as Local.
 
 ---
 

@@ -19,12 +19,12 @@ use crate::state::AppState;
 use api::ApiError;
 use auth::AuthManager;
 
-/// Global rate limiter: 200 req/s with 500 burst (generous for local-first use).
+/// Global rate limiter: essentially unlimited for local-first use.
 fn global_rate_limit() -> impl Filter<Extract = ((),), Error = warp::Rejection> + Clone {
     static WINDOW_START: AtomicU64 = AtomicU64::new(0);
     static REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
 
-    let limit = 200u64 + 500u64; // max_per_second + burst_allowance
+    let limit = u64::MAX; // effectively unlimited
 
     warp::any().and_then(move || async move {
         let now = SystemTime::now()
@@ -273,6 +273,17 @@ impl warp::reject::Reject for JsonParseError {}
 pub fn safe_json_body<T: serde::de::DeserializeOwned>()
 -> impl Filter<Extract = (T,), Error = warp::Rejection> + Clone {
     warp::body::content_length_limit(2_000_000)
+        .and(warp::body::bytes())
+        .and_then(move |body: bytes::Bytes| async move {
+            let body = body.as_ref();
+            serde_json::from_slice::<T>(body).map_err(|_| warp::reject::custom(JsonParseError))
+        })
+}
+
+/// Like safe_json_body but with a 256 KB limit, used for HF endpoints.
+pub fn hf_json_body<T: serde::de::DeserializeOwned>()
+-> impl Filter<Extract = (T,), Error = warp::Rejection> + Clone {
+    warp::body::content_length_limit(256 * 1024)
         .and(warp::body::bytes())
         .and_then(move |body: bytes::Bytes| async move {
             let body = body.as_ref();

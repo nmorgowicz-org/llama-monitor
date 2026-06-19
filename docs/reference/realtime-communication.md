@@ -1,25 +1,26 @@
 # Real-Time Communication
 
-Llama Monitor uses a WebSocket connection to push live dashboard state from the server to the browser. The connection is supplemented by client-side network quality detection that can auto-adjust polling intervals.
+Llama Monitor uses a WebSocket connection to push live dashboard state from the server to the browser. Client-side network quality and browser-pressure detection can recommend or apply less aggressive dashboard cadences.
 
 ## WebSocket Connection
 
-```
+```text
 ws://localhost:7778/ws
 ```
 
-The server pushes messages on a configurable interval (default 500ms). The client never sends messages; the connection is receive-only. When no active session exists, the server waits silently until one is established before resuming pushes.
+The server pushes messages on a configurable interval (default 500ms). The browser also sends lightweight `client-visibility` messages so the server can slow hidden or idle clients without changing the global setting. When no active session exists, the server waits silently until one is established before resuming pushes.
 
 ### Polling Interval
 
-Configurable from 200ms to 10s via Settings > Performance. The interval controls how often the server pushes updated metrics to all connected clients.
+Configurable from 200ms to 10s via the nav **Cadence** chip or **Settings > Performance**. The interval controls how often the server pushes dashboard updates. For local sessions, GPU telemetry is also kept from polling faster than the dashboard can display it; system metrics and remote-agent checks may still use their own cadence.
 
 | Interval | Use Case |
 |----------|----------|
 | 200ms | Maximum responsiveness, higher CPU/network usage |
-| 500ms | Default — balanced responsiveness and resource usage |
+| 500ms | Default, balanced responsiveness and resource usage |
 | 1000ms | Moderate updates, lower resource usage |
-| 2000ms+ | Slow networks, minimal resource usage |
+| 2000ms | Battery saver, lower browser and telemetry pressure |
+| 5000ms | Low power or slow networks, minimal updates |
 
 ## Network Quality Detection
 
@@ -28,7 +29,7 @@ The browser's [Network Information API](https://developer.mozilla.org/en-US/docs
 ### Auto-Detection Mapping
 
 | Connection Type | Auto Interval | Label |
-|----------------|---------------|-------|
+|-----------------|---------------|-------|
 | `slow-2g` | 5000ms | Very Slow (2G) |
 | `2g` | 5000ms | Slow (2G) |
 | `3g` | 2000ms | Moderate (3G) |
@@ -39,7 +40,11 @@ The browser's [Network Information API](https://developer.mozilla.org/en-US/docs
 | RTT > 100ms | 1000ms | Elevated Latency |
 | Unknown / API unavailable | 500ms | Detected |
 
-When a slow network is detected, the dashboard shows a toast notification suggesting the user adjust the polling rate. The suggestion is shown once per session.
+When a slow network is detected, the dashboard shows an action toast that can switch cadence to **Auto**. The suggestion is shown once per session.
+
+## Browser Pressure Detection
+
+The dashboard samples browser main-thread timer drift. If visible dashboard timers repeatedly run late while the cadence is faster than 2s, the UI shows a one-time recommendation to switch to **Battery Saver (2s)**. This is an inferred signal: browsers do not expose reliable cross-platform CPU load, but sustained timer drift is a useful indicator that dashboard rendering, GPU driver polling, or other local work is affecting responsiveness.
 
 ### Browser Support
 

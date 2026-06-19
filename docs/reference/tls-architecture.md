@@ -17,6 +17,8 @@ High-level principles:
 
 ## TLS Modes
 
+![Security & Certificates settings panel](../screenshots/tls-certificates-tab.png)
+
 llama-monitor supports four TLS modes, configured via:
 - CLI flags.
 - Settings → Security & Certificates (UI).
@@ -24,6 +26,42 @@ llama-monitor supports four TLS modes, configured via:
 
 Config is persisted to:
 - ~/.config/llama-monitor/tls-config.json
+
+### tls-config.json Schema
+
+```json
+{
+  "mode": "none",
+  "acme": {
+    "enabled": false,
+    "fqdn": "",
+    "environment": "staging",
+    "dnsProvider": "cloudflare",
+    "dnsConfig": {},
+    "validationDelay": 300,
+    "lastRenewal": null,
+    "certPath": "",
+    "keyPath": ""
+  },
+  "customCertPath": "",
+  "customKeyPath": ""
+}
+```
+
+| Field | Type | Values |
+|-------|------|--------|
+| `mode` | string | `"none"`, `"self-signed"`, `"custom"`, `"acme"` |
+| `acme.enabled` | boolean | Whether ACME is active |
+| `acme.fqdn` | string | Fully-qualified domain name |
+| `acme.environment` | string | `"staging"` or `"production"` |
+| `acme.dnsProvider` | string | DNS provider name (e.g., `"cloudflare"`) |
+| `acme.dnsConfig` | object | Provider-specific credentials |
+| `acme.validationDelay` | integer | Delay in seconds before DNS validation |
+| `acme.lastRenewal` | string or null | ISO timestamp of last renewal |
+| `acme.certPath` | string | Path to ACME-managed cert |
+| `acme.keyPath` | string | Path to ACME-managed key |
+| `customCertPath` | string | Path to custom certificate |
+| `customKeyPath` | string | Path to custom private key |
 
 Modes:
 
@@ -96,6 +134,8 @@ Notes:
 
 ### 4) Let’s Encrypt (ACME)
 
+![ACME / Let’s Encrypt configuration](../screenshots/tls-mode-acme-full.png)
+
 Behavior:
 - llama-monitor uses the ACME protocol to obtain and renew TLS certificates from Let’s Encrypt.
 - Uses DNS-01 validation via the lego client.
@@ -135,13 +175,13 @@ Integration notes:
 Provider-agnostic design:
 - acme.rs:
   - Treats providers via:
-    - A provider name (e.g., "cloudflare", "route53").
+    - A lego DNS provider code (e.g., "cloudflare", "route53", "namecheap").
     - A map of environment variables (dns_config).
   - build_lego_command() assembles the lego command dynamically.
 - To add support for a new provider:
   - Ensure lego supports it.
-  - Use its provider name.
-  - Document required environment variables.
+  - Use its lego provider code from https://go-acme.github.io/lego/dns/.
+  - Enter the required environment variables as ACME credential key/value pairs.
 
 ## mTLS for Remote Agent
 
@@ -252,6 +292,19 @@ Common issues:
     - Client certificate is signed by the device’s CA.
     - Device CA is present in the agent’s `cas/` directory.
     - Certificate includes "agent-client" role marker.
+
+## DB Admin & Security
+
+The Security & Certificates panel includes a DB Admin section for high-impact operations protected by the db-admin-token (e.g., database backups and restores).
+
+- View or regenerate the db-admin-token.
+- Perform DB backups, restores, and advanced operations via the UI or API.
+
+These operations require:
+- Proper authentication (api-token and/or db-admin-token).
+- Confirmation for destructive actions to prevent accidental use.
+
+![DB Admin Section](../screenshots/tls-db-admin-section.png)
 
 For deeper technical details and code references, see:
 - docs/archive/security/20260516-tls_acme_implementation.md

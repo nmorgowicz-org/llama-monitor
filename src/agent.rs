@@ -441,16 +441,7 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     }
 
     let system_metrics: Arc<Mutex<system::SystemMetrics>> =
-        Arc::new(Mutex::new(system::SystemMetrics {
-            cpu_name: String::new(),
-            cpu_temp: 0.0,
-            cpu_temp_available: false,
-            cpu_load: 0,
-            cpu_clock_mhz: 0,
-            ram_total_gb: 0.0,
-            ram_used_gb: 0.0,
-            motherboard: String::new(),
-        }));
+        Arc::new(Mutex::new(system::SystemMetrics::default()));
 
     {
         let system_metrics = Arc::clone(&system_metrics);
@@ -986,6 +977,10 @@ async fn handle_register_ca(
 }
 
 pub async fn latest_release_info() -> Result<LatestReleaseInfo> {
+    if std::env::var("LLAMA_SKIP_RELEASE_CHECK").is_ok() {
+        anyhow::bail!("release check disabled (LLAMA_SKIP_RELEASE_CHECK)");
+    }
+
     let cached = LATEST_RELEASE_CACHE.with(|cache| {
         let now = Instant::now();
         let cached = cache.try_lock().ok()?;
@@ -1437,8 +1432,20 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
             enabled = false;
         }
 
+        // T-048: slow poll when asleep
+        let asleep = state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
+        let interval = if asleep {
+            if let Ok(cfg) = state.sleep_mode_config.lock() {
+                Duration::from_secs(cfg.sleep_llama_interval_secs.max(1))
+            } else {
+                REMOTE_AGENT_POLL_INTERVAL
+            }
+        } else {
+            REMOTE_AGENT_POLL_INTERVAL
+        };
+
         tokio::select! {
-            _ = tokio::time::sleep(REMOTE_AGENT_POLL_INTERVAL) => {}
+            _ = tokio::time::sleep(interval) => {}
             _ = state.agent_poll_notify.notified() => {}
         }
     }
@@ -1595,6 +1602,15 @@ fn remote_agent_url_for_active_session(
     state: &AppState,
     configured_url: Option<&str>,
 ) -> Option<String> {
+    // When a local session is active (Spawn or localhost Attach), never poll the remote
+    // agent for metrics — it would overwrite local gpu/system data with remote data.
+    {
+        let active_id = state.active_session_id.lock().unwrap().clone();
+        if !active_id.is_empty() && state.active_session_uses_local_metrics() {
+            return None;
+        }
+    }
+
     if let Some(url) = configured_url.filter(|url| !url.trim().is_empty()) {
         return Some(url.trim().to_string());
     }

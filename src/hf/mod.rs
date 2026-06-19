@@ -1,0 +1,2398 @@
+//! HuggingFace Hub integration.
+//!
+//! Provides:
+//! - Model search (keyword + author filter + sort)
+//! - Author/org model browsing
+//! - GGUF file listing with real sizes (HF tree API)
+//! - Quant-type classification (standard / imatrix / unsloth-dynamic)
+//! - Quant provider detection (bartowski / mradermacher / unsloth / etc.)
+//! - Streaming download with resume support
+//! - HF token management
+
+use anyhow::{Context, Result};
+use hf_hub::api::sync::ApiBuilder;
+use hf_hub::{Repo, RepoType};
+use std::path::Path;
+use std::sync::LazyLock;
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
+
+static HF_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+});
+
+// ── Search sort options ───────────────────────────────────────────────────────
+
+/// Sort order for HF model search / author browse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum HfSort {
+    #[default]
+    Downloads, // most downloaded (best signal for quality community quants)
+    Likes,     // most liked
+    CreatedAt, // newest first
+    Trending,  // HF trending score
+}
+
+impl HfSort {
+    fn as_api_str(self) -> &'static str {
+        match self {
+            HfSort::Downloads => "downloads",
+            HfSort::Likes => "likes",
+            HfSort::CreatedAt => "createdAt",
+            HfSort::Trending => "trendingScore",
+        }
+    }
+}
+
+// ── Quant-type and provider classification ────────────────────────────────────
+
+/// How the GGUF file was quantized / what calibration was used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum QuantFileType {
+    #[default]
+    Standard, // standard llama.cpp quants (Q4_K_M, Q5_K_M, Q8_0, …)
+    Imatrix,        // importance-matrix calibrated (typically mradermacher's i1-* naming)
+    UnslothDynamic, // Unsloth UD-* dynamic quants (mixed bpw per layer)
+    BnB,            // bitsandbytes (rare in GGUF land but worth flagging)
+    Unknown,
+}
+
+#[allow(dead_code)]
+impl QuantFileType {
+    #[allow(dead_code)]
+    pub fn label(self) -> &'static str {
+        match self {
+            QuantFileType::Standard => "Standard",
+            QuantFileType::Imatrix => "imatrix",
+            QuantFileType::UnslothDynamic => "UD (Unsloth)",
+            QuantFileType::BnB => "BnB",
+            QuantFileType::Unknown => "Unknown",
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn description(self) -> &'static str {
+        match self {
+            QuantFileType::Standard => "Standard llama.cpp quantization",
+            QuantFileType::Imatrix => {
+                "Importance-matrix calibrated — generally better quality at same size"
+            }
+            QuantFileType::UnslothDynamic => {
+                "Unsloth dynamic quant — per-layer mixed bpw, excellent quality/size tradeoff"
+            }
+            QuantFileType::BnB => "bitsandbytes quantization",
+            QuantFileType::Unknown => "Unknown quantization type",
+        }
+    }
+}
+
+/// Who made the quantization.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum QuantProvider {
+    Bartowski,       // bartowski — standard Q4_K_M/Q5_K_M/Q8_0, extremely reliable
+    Mradermacher,    // mradermacher — imatrix specialist, i1-* naming
+    Unsloth,         // Unsloth — UD dynamic quants, best quality/size
+    Lmstudio,        // LM Studio community quants
+    TheBlokeRetired, // TheBloke (retired, legacy quants still widely used)
+    #[default]
+    Community, // other community quantizer
+    Official,        // first-party / model author's own quants
+}
+
+#[allow(dead_code)]
+impl QuantProvider {
+    #[allow(dead_code)]
+    pub fn label(&self) -> &'static str {
+        match self {
+            QuantProvider::Bartowski => "bartowski",
+            QuantProvider::Mradermacher => "mradermacher",
+            QuantProvider::Unsloth => "unsloth",
+            QuantProvider::Lmstudio => "LM Studio",
+            QuantProvider::TheBlokeRetired => "TheBloke",
+            QuantProvider::Community => "community",
+            QuantProvider::Official => "official",
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn description(&self) -> &'static str {
+        match self {
+            QuantProvider::Bartowski => {
+                "Standard quants — Q4_K_M through Q8_0. Fast, reliable, no imatrix."
+            }
+            QuantProvider::Mradermacher => {
+                "imatrix expert. i1-* files use importance calibration for better quality at same bpw."
+            }
+            QuantProvider::Unsloth => {
+                "UD dynamic quants — mixed bpw per layer. Excellent quality/size. Also fine-tunes."
+            }
+            QuantProvider::Lmstudio => "LM Studio community quants.",
+            QuantProvider::TheBlokeRetired => {
+                "TheBloke (retired). Legacy GGUF quants; well-tested but not the latest models."
+            }
+            QuantProvider::Community => "Community quantizer.",
+            QuantProvider::Official => "Model author's own quantization.",
+        }
+    }
+
+    /// Infer provider from HF repo owner username.
+    pub fn from_username(username: &str) -> Self {
+        match username.to_ascii_lowercase().as_str() {
+            "bartowski" => QuantProvider::Bartowski,
+            "mradermacher" => QuantProvider::Mradermacher,
+            "unsloth" => QuantProvider::Unsloth,
+            "lmstudio-community" | "lmstudio" => QuantProvider::Lmstudio,
+            "davidau" | "davidau-hf" => QuantProvider::Community,
+            "mudler" => QuantProvider::Community,
+            "jackrong" => QuantProvider::Community,
+            "prithivmlmods" => QuantProvider::Community,
+            _ => QuantProvider::Community,
+        }
+    }
+}
+
+/// Detect quant file type from GGUF filename patterns.
+#[allow(dead_code)]
+pub fn detect_quant_type(filename: &str) -> QuantFileType {
+    let lower = filename.to_ascii_lowercase();
+    // Unsloth UD: "UD-" anywhere or "-UD-" — e.g. "Qwen3.6-27B-UD-Q4_K_S.gguf"
+    if lower.contains("-ud-") || lower.contains("/ud-") || lower.starts_with("ud-") {
+        return QuantFileType::UnslothDynamic;
+    }
+    // Unsloth compact/apex variants
+    if lower.contains("-unsloth-") || lower.contains("_unsloth_") {
+        return QuantFileType::UnslothDynamic;
+    }
+    // Mradermacher imatrix: i1- prefix or .i1- pattern
+    // e.g. "model.i1-Q4_K_M.gguf" or "model-i1-IQ3_S.gguf"
+    if lower.contains(".i1-") || lower.contains("-i1-") {
+        return QuantFileType::Imatrix;
+    }
+    // Generic imatrix hint
+    if lower.contains("imatrix") || lower.contains(".imat") {
+        return QuantFileType::Imatrix;
+    }
+    QuantFileType::Standard
+}
+
+// ── Model info structs ────────────────────────────────────────────────────────
+
+/// Model result from search or author browse.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct SimpleModelInfo {
+    pub id: String,
+    pub gated: bool,
+    pub tags: Vec<String>,
+    pub downloads: u64,
+    pub likes: u64,
+    /// ISO 8601 creation timestamp from HF.
+    pub created_at: String,
+    /// ISO 8601 last-modified timestamp from HF (more useful than created_at for quant repos).
+    pub last_modified: String,
+    /// Author/org username (the part before "/" in the repo id).
+    pub author: String,
+    /// Inferred from author username.
+    pub quant_provider: QuantProvider,
+    /// True if this is an imatrix or UD quant repo (detected from tags or name).
+    pub has_imatrix: bool,
+    /// Approximate parameter count inferred from model name (0 if unknown).
+    pub param_b: f64,
+    /// Base model the quantization derives from (from model card metadata).
+    pub base_model: String,
+}
+
+/// A GGUF file in an HF repo, with real file size and quant classification.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct HfGgufFile {
+    /// Repo that owns this file. Companion projectors may come from a linked
+    /// static-quant repo rather than the requested imatrix repo.
+    pub repo_id: String,
+    /// Path within the repo (e.g. "model-Q4_K_M.gguf").
+    pub path: String,
+    /// File size in bytes (0 if unknown). Fetched from HF tree API.
+    pub size: u64,
+    /// Short quant label (e.g. "Q4_K_M").
+    pub label: String,
+    /// Quant type classification.
+    pub quant_type: QuantFileType,
+    /// True if this is an importance-matrix calibrated file.
+    pub is_imatrix: bool,
+    /// mmproj companion hint: true if this looks like a vision projector.
+    pub is_mmproj: bool,
+    /// True when this projector's quant matches the preferred format for the model family.
+    pub is_recommended_mmproj: bool,
+    /// Short explanation for the family-specific projector recommendation.
+    pub mmproj_recommendation: String,
+    /// MTP assistant / draft model file: used with --model-draft for speculative decoding.
+    pub is_draft_assistant: bool,
+}
+
+/// High-level model info from HF (for the model info endpoint).
+#[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
+pub struct HfModelInfo {
+    pub repo_id: String,
+    pub gated: bool,
+    pub private: bool,
+    pub tags: Vec<String>,
+}
+
+/// A single file in an HF repo.
+#[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
+pub struct HfFileInfo {
+    pub r#type: String,
+    pub path: String,
+    pub size: Option<u64>,
+}
+
+// ── Known GGUF quantizer list ─────────────────────────────────────────────────
+
+/// Curated list of well-known GGUF quantizers shown as quick-picks in the wizard.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct KnownQuantizer {
+    pub username: String,
+    pub display_name: String,
+    pub description: String,
+    pub quant_style: &'static str, // "standard" | "imatrix" | "ud"
+    pub note: Option<String>,
+}
+
+/// User-editable version of KnownQuantizer (all owned strings, round-trips through JSON).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UserQuantizer {
+    pub username: String,
+    pub display_name: String,
+    pub description: String,
+    pub quant_style: String, // "standard" | "imatrix" | "ud"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+impl From<&KnownQuantizer> for UserQuantizer {
+    fn from(q: &KnownQuantizer) -> Self {
+        UserQuantizer {
+            username: q.username.clone(),
+            display_name: q.display_name.clone(),
+            description: q.description.clone(),
+            quant_style: q.quant_style.to_string(),
+            note: q.note.clone(),
+        }
+    }
+}
+
+/// Load user-customized quantizers from `config_dir/hf-quantizers.json`.
+/// Returns None if the file does not exist (caller should fall back to defaults).
+pub fn load_user_quantizers(config_dir: &std::path::Path) -> Option<Vec<UserQuantizer>> {
+    let path = config_dir.join("hf-quantizers.json");
+    let text = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// Persist user-customized quantizers to `config_dir/hf-quantizers.json`.
+pub fn save_user_quantizers(
+    config_dir: &std::path::Path,
+    quantizers: &[UserQuantizer],
+) -> Result<()> {
+    let path = config_dir.join("hf-quantizers.json");
+    let json =
+        serde_json::to_string_pretty(quantizers).context("Failed to serialize quantizers")?;
+    std::fs::write(&path, json).context("Failed to write hf-quantizers.json")?;
+    Ok(())
+}
+
+pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
+    vec![
+        KnownQuantizer {
+            username: "bartowski".into(),
+            display_name: "bartowski".into(),
+            description: "Standard GGUF quants — Q4_K_M through Q8_0. Most popular, extremely reliable.".into(),
+            quant_style: "standard",
+            note: None,
+        },
+        KnownQuantizer {
+            username: "mradermacher".into(),
+            display_name: "mradermacher".into(),
+            description: "imatrix specialist. i1-* files use importance calibration for better quality at same bpw. Validates quantizations.".into(),
+            quant_style: "imatrix",
+            note: Some("i1-* files are imatrix quants; others are standard".into()),
+        },
+        KnownQuantizer {
+            username: "unsloth".into(),
+            display_name: "Unsloth".into(),
+            description: "UD (Unsloth Dynamic) quants — mixed bpw per layer. Excellent quality/size. Also does fine-tuning and finetune-GGUF releases.".into(),
+            quant_style: "ud",
+            note: Some("UD-* files are dynamic quants; projector recommendations depend on the model family".into()),
+        },
+        KnownQuantizer {
+            username: "lmstudio-community".into(),
+            display_name: "LM Studio".into(),
+            description: "LM Studio community quants.".into(),
+            quant_style: "standard",
+            note: None,
+        },
+        KnownQuantizer {
+            username: "llmfan46".into(),
+            display_name: "llmfan46".into(),
+            description: "Community GGUF releases, wide model coverage.".into(),
+            quant_style: "standard",
+            note: None,
+        },
+        // Community finetune quantizers of interest
+        KnownQuantizer {
+            username: "DavidAU".into(),
+            display_name: "DavidAU".into(),
+            description: "Fine-tune and merge specialist, often heretic/abliterated and uncensored variants.".into(),
+            quant_style: "standard",
+            note: None,
+        },
+        KnownQuantizer {
+            username: "mudler".into(),
+            display_name: "mudler".into(),
+            description: "LocalAI author. Curated model selections and gguf releases.".into(),
+            quant_style: "standard",
+            note: None,
+        },
+        KnownQuantizer {
+            username: "Jackrong".into(),
+            display_name: "Jackrong".into(),
+            description: "GGUF releases, often larger models.".into(),
+            quant_style: "standard",
+            note: None,
+        },
+        KnownQuantizer {
+            username: "prithivMLmods".into(),
+            display_name: "prithivMLmods".into(),
+            description: "Wide coverage of recent models, high-quality GGUF quants.".into(),
+            quant_style: "standard",
+            note: None,
+        },
+    ]
+}
+
+// ── Core API functions ────────────────────────────────────────────────────────
+
+/// Get basic model info for a repo (async, uses configured HF token).
+#[allow(dead_code)]
+pub async fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
+    let token = hf_load_token();
+    let url = format!("https://huggingface.co/api/models/{repo_id}");
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(ref tok) = token {
+        req = req.bearer_auth(tok);
+    }
+
+    let resp = req.send().await.context("Failed to call HF models API")?;
+    if !resp.status().is_success() {
+        return Ok(HfModelInfo {
+            repo_id: repo_id.to_string(),
+            gated: false,
+            private: false,
+            tags: Vec::new(),
+        });
+    }
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .context("Failed to parse HF models API response")?;
+    Ok(HfModelInfo {
+        repo_id: repo_id.to_string(),
+        gated: body.get("gated").and_then(|v| v.as_bool()).unwrap_or(false),
+        private: body
+            .get("private")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        tags: body
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| t.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    })
+}
+
+/// List repo files; filters for GGUF if gguf_only=true.
+#[allow(dead_code)]
+pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileInfo>> {
+    let api = ApiBuilder::new()
+        .with_token(hf_load_token())
+        .build()
+        .context("Failed to build HF API client")?;
+    let info = api
+        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+        .info()
+        .context("Failed to list repo files")?;
+
+    Ok(info
+        .siblings
+        .iter()
+        .filter(|s| !gguf_only || s.rfilename.to_ascii_lowercase().ends_with(".gguf"))
+        .map(|s| HfFileInfo {
+            r#type: "file".into(),
+            path: s.rfilename.clone(),
+            size: None,
+        })
+        .collect())
+}
+
+/// Get info for a single file in a repo.
+#[allow(dead_code)]
+pub fn hf_get_file_info(repo_id: &str, path: &str) -> Result<HfFileInfo> {
+    let api = ApiBuilder::new()
+        .with_token(hf_load_token())
+        .build()
+        .context("Failed to build HF API client")?;
+    let info = api
+        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+        .info()
+        .context("Failed to list repo files")?;
+
+    info.siblings
+        .iter()
+        .find(|s| s.rfilename == path)
+        .map(|s| HfFileInfo {
+            r#type: "file".into(),
+            path: s.rfilename.clone(),
+            size: None,
+        })
+        .ok_or_else(|| anyhow::anyhow!("File not found: {path}"))
+}
+
+/// Stream-download a file from HF with optional resume.
+/// Returns total bytes written.
+#[allow(dead_code)]
+pub async fn hf_download_file_stream(
+    repo_id: &str,
+    path: &str,
+    token: Option<&str>,
+    local_path: &Path,
+    resume_from: u64,
+) -> Result<u64> {
+    let api = ApiBuilder::new()
+        .with_token(token.map(String::from))
+        .build()
+        .context("Failed to build HF API client")?;
+    let url = api
+        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+        .url(path);
+    if url.is_empty() {
+        anyhow::bail!("Failed to resolve HF URL for {path}");
+    }
+
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    if resume_from > 0 {
+        req = req.header("Range", format!("bytes={}-", resume_from));
+    }
+
+    let resp = req.send().await.context("Failed to start HF download")?;
+    if !resp.status().is_success() && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        anyhow::bail!(
+            "HF download failed: HTTP {} for {}/{}",
+            resp.status(),
+            repo_id,
+            path
+        );
+    }
+
+    if let Some(parent) = local_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .context("Failed to create download dir")?;
+    }
+
+    // No content-length: read all at once
+    if resp.content_length().is_none() {
+        let bytes = resp.bytes().await.context("Failed to read response body")?;
+        File::create(local_path)
+            .await
+            .context("Failed to create file")?
+            .write_all(&bytes)
+            .await?;
+        return Ok(bytes.len() as u64);
+    }
+
+    // Streaming with proper open mode (truncate on fresh, append on resume)
+    let mut file = if resume_from > 0 {
+        File::options()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(local_path)
+            .await
+            .context("Failed to open file for resume")?
+    } else {
+        File::create(local_path)
+            .await
+            .context("Failed to create file")?
+    };
+
+    use futures_util::StreamExt;
+    let mut stream = resp.bytes_stream();
+    let mut written = resume_from;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context("Stream error from HF")?;
+        file.write_all(&chunk).await?;
+        written += chunk.len() as u64;
+    }
+    Ok(written)
+}
+
+// ── Search and browse ─────────────────────────────────────────────────────────
+
+/// Full search request parameters.
+#[derive(Debug, Clone, Default)]
+pub struct HfSearchParams {
+    /// Keyword query. Can be empty when author is set.
+    pub query: String,
+    /// Filter to a specific author/org (e.g. "bartowski", "unsloth").
+    pub author: Option<String>,
+    pub sort: HfSort,
+    pub limit: usize,
+    /// Opaque cursor from the HF API `Link` response header for pagination.
+    pub cursor: Option<String>,
+}
+
+/// Parse the `cursor=` value out of a HF API `Link: <url>; rel="next"` header.
+fn parse_cursor_from_link(link: &str) -> Option<String> {
+    for part in link.split(',') {
+        let part = part.trim();
+        if !part.contains(r#"rel="next""#) {
+            continue;
+        }
+        if let (Some(s), Some(e)) = (part.find('<'), part.find('>')) {
+            let url_str = &part[s + 1..e];
+            for param in url_str.split('&') {
+                if let Some(val) = param.strip_prefix("cursor=") {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Search HuggingFace for GGUF models with keyword + optional author filter.
+///
+/// Returns (models, next_cursor) where next_cursor is Some when more pages exist.
+pub async fn hf_search_models(
+    params: &HfSearchParams,
+) -> Result<(Vec<SimpleModelInfo>, Option<String>), String> {
+    let limit = params.limit.clamp(1, 100);
+    let token = hf_load_token();
+
+    let mut url = reqwest::Url::parse("https://huggingface.co/api/models")
+        .map_err(|e| format!("Invalid HF API URL: {e}"))?;
+
+    {
+        let mut p = url.query_pairs_mut();
+        if !params.query.is_empty() {
+            p.append_pair("search", &params.query);
+        }
+        if let Some(ref author) = params.author {
+            p.append_pair("author", author);
+        }
+        p.append_pair("limit", &limit.to_string());
+        p.append_pair("sort", params.sort.as_api_str());
+        p.append_pair("direction", "-1");
+        if let Some(ref cursor) = params.cursor {
+            p.append_pair("cursor", cursor);
+        }
+        // Always filter for GGUF
+        p.append_pair("filter", "gguf");
+    }
+
+    let mut req = HF_HTTP_CLIENT.get(url);
+    if let Some(ref tok) = token {
+        req = req.bearer_auth(tok);
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HF search request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HF search failed: HTTP {}", resp.status()));
+    }
+
+    // Read the Link header BEFORE consuming the body.
+    let next_cursor = resp
+        .headers()
+        .get("link")
+        .and_then(|v| v.to_str().ok())
+        .and_then(parse_cursor_from_link);
+
+    let items: Vec<serde_json::Value> = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse HF response: {e}"))?;
+
+    Ok((
+        items.into_iter().filter_map(parse_model_item).collect(),
+        next_cursor,
+    ))
+}
+
+/// Browse all GGUF models from a specific HF author/org (convenience wrapper).
+/// Parse a single model JSON object from the HF API into SimpleModelInfo.
+fn parse_model_item(item: serde_json::Value) -> Option<SimpleModelInfo> {
+    let id = item
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())?
+        .to_string();
+
+    let author = id.split('/').next().unwrap_or("").to_string();
+    let quant_provider = QuantProvider::from_username(&author);
+
+    let tags: Vec<String> = item
+        .get("tags")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|t| t.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let has_imatrix = tags.iter().any(|t| t == "imatrix")
+        || id.to_ascii_lowercase().contains("imatrix")
+        || id.to_ascii_lowercase().contains("-i1-")
+        || matches!(quant_provider, QuantProvider::Mradermacher);
+
+    let base_model = item
+        .get("cardData")
+        .and_then(|cd| cd.get("base_model"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // Infer parameter count from repo name
+    let param_b = infer_param_b_from_name(&id);
+
+    Some(SimpleModelInfo {
+        id,
+        gated: item.get("gated").and_then(|v| v.as_bool()).unwrap_or(false),
+        tags,
+        downloads: item.get("downloads").and_then(|v| v.as_u64()).unwrap_or(0),
+        likes: item.get("likes").and_then(|v| v.as_u64()).unwrap_or(0),
+        created_at: item
+            .get("createdAt")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        last_modified: item
+            .get("lastModified")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        author,
+        quant_provider,
+        has_imatrix,
+        param_b,
+        base_model,
+    })
+}
+
+/// Infer parameter count in billions from a model name/repo id.
+fn infer_param_b_from_name(name: &str) -> f64 {
+    // Match all NB patterns, take the largest (total params, not active)
+    let matches: Vec<f64> = name
+        .split(|c: char| !c.is_alphanumeric() && c != '.')
+        .filter_map(|token| {
+            let lower = token.to_ascii_lowercase();
+            if lower.ends_with('b') {
+                lower[..lower.len() - 1].parse::<f64>().ok()
+            } else {
+                None
+            }
+        })
+        .filter(|&v| (0.5..=2000.0).contains(&v))
+        .collect();
+    matches.into_iter().fold(0.0_f64, f64::max)
+}
+
+// ── GGUF file listing with real sizes ────────────────────────────────────────
+
+/// List GGUF files for a repo, fetching real file sizes from the HF tree API.
+///
+/// Falls back to 0-size entries if the tree API is unavailable (e.g. private repos
+/// without a token, or rate limiting).
+pub async fn hf_list_gguf_files(repo_id: &str) -> Result<Vec<HfGgufFile>, String> {
+    let token = hf_load_token();
+    let mut result = list_repo_gguf_files(repo_id, token.clone()).await?;
+
+    if !result.iter().any(|file| file.is_mmproj)
+        && let Some(companion_repo) = find_mmproj_companion_repo(repo_id, token.as_deref()).await
+        && let Ok(companion_files) = list_repo_gguf_files(&companion_repo, token).await
+    {
+        result.extend(companion_files.into_iter().filter(|file| file.is_mmproj));
+        sort_gguf_files(&mut result);
+    }
+
+    Ok(result)
+}
+
+async fn list_repo_gguf_files(
+    repo_id: &str,
+    token: Option<String>,
+) -> Result<Vec<HfGgufFile>, String> {
+    let sizes = fetch_file_sizes(repo_id, token.as_deref())
+        .await
+        .unwrap_or_default();
+
+    let api = ApiBuilder::new()
+        .with_token(token)
+        .build()
+        .map_err(|e| format!("Failed to build HF API client: {e}"))?;
+    let info = api
+        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+        .info()
+        .map_err(|e| format!("Failed to list repo files: {e}"))?;
+
+    // Infer provider from repo owner
+    let repo_owner = repo_id.split('/').next().unwrap_or("");
+    let _provider = QuantProvider::from_username(repo_owner);
+
+    let family = {
+        let from_repo = infer_family_from_name(repo_id);
+        if from_repo.is_empty() {
+            info.siblings
+                .iter()
+                .map(|s| infer_family_from_name(&s.rfilename))
+                .find(|candidate| !candidate.is_empty())
+                .unwrap_or_default()
+        } else {
+            from_repo
+        }
+    };
+    let mmproj_preference = mmproj_preference_for_family(&family);
+    let mut result: Vec<HfGgufFile> = info
+        .siblings
+        .iter()
+        .map(|s| s.rfilename.as_str())
+        .filter(|name| name.to_ascii_lowercase().ends_with(".gguf"))
+        .map(|name| {
+            let quant_type = detect_quant_type(name);
+            let is_imatrix = matches!(quant_type, QuantFileType::Imatrix);
+            let name_lower = name.to_ascii_lowercase();
+            let is_mmproj = name_lower.contains("mmproj") || name_lower.contains("projector");
+            let label = infer_quant_label(name);
+            let is_recommended_mmproj =
+                is_mmproj && mmproj_preference.is_some_and(|preference| preference.label == label);
+            let is_draft_assistant =
+                is_draft_assistant_hf(&name_lower, sizes.get(name).copied().unwrap_or(0));
+            HfGgufFile {
+                repo_id: repo_id.to_string(),
+                path: name.to_string(),
+                size: sizes.get(name).copied().unwrap_or(0),
+                label,
+                quant_type,
+                is_imatrix,
+                is_mmproj,
+                is_recommended_mmproj,
+                mmproj_recommendation: if is_recommended_mmproj {
+                    mmproj_preference
+                        .map(|preference| preference.reason.to_string())
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                },
+                is_draft_assistant,
+            }
+        })
+        .collect();
+
+    sort_gguf_files(&mut result);
+    Ok(result)
+}
+
+fn sort_gguf_files(result: &mut [HfGgufFile]) {
+    // Group order: main models (0) → assistant/draft files (1) → mmproj (2).
+    // Within each group, apply the appropriate precision/quality ranking.
+    result.sort_by(|a, b| {
+        let a_group: u8 = if a.is_mmproj {
+            2
+        } else if a.is_draft_assistant {
+            1
+        } else {
+            0
+        };
+        let b_group: u8 = if b.is_mmproj {
+            2
+        } else if b.is_draft_assistant {
+            1
+        } else {
+            0
+        };
+        a_group
+            .cmp(&b_group)
+            .then_with(|| b.is_recommended_mmproj.cmp(&a.is_recommended_mmproj))
+            .then_with(|| {
+                let a_rank = if a.is_mmproj {
+                    sort_rank_mmproj_label(&a.label)
+                } else {
+                    sort_rank_quant_label(&a.label)
+                };
+                let b_rank = if b.is_mmproj {
+                    sort_rank_mmproj_label(&b.label)
+                } else {
+                    sort_rank_quant_label(&b.label)
+                };
+                a_rank.cmp(&b_rank)
+            })
+            .then_with(|| b.size.cmp(&a.size))
+    });
+}
+
+/// Conservative heuristic for HF file classification as MTP assistant / draft model.
+fn is_draft_assistant_hf(name_lower: &str, size_bytes: u64) -> bool {
+    // Unambiguous MTP keywords: safe to match even when size is unknown (0).
+    // Includes Unsloth's `-MTP.gguf` naming convention (e.g. "gemma-4-31B-it-Q8_0-MTP.gguf")
+    // and path segments like `/MTP/` in Unsloth repo trees.
+    let is_unambiguous = name_lower.contains("mtp-draft")
+        || name_lower.contains("mtp_small")
+        || name_lower.contains("mtp-heads")
+        || name_lower.starts_with("mtp-")
+        || name_lower.ends_with("-mtp.gguf")
+        || name_lower.ends_with("-mtp")
+        || name_lower.contains("/mtp/");
+
+    if is_unambiguous {
+        // Still reject if we know the file is a large main model.
+        return size_bytes == 0 || size_bytes <= 3_000_000_000;
+    }
+
+    // Broad keywords require a confirmed, non-zero size to avoid mis-tagging
+    // instruct-tuned main models (e.g. "Llama-3-8B-assistant-Q8_0.gguf") when
+    // the HF tree API fails and size falls back to 0.
+    let is_broad = name_lower.contains("assistant") || name_lower.contains("draft-model");
+    is_broad && size_bytes > 0 && size_bytes <= 3_000_000_000
+}
+
+async fn find_mmproj_companion_repo(repo_id: &str, token: Option<&str>) -> Option<String> {
+    let readme = fetch_repo_readme(repo_id, token).await.unwrap_or_default();
+    for candidate in extract_static_quant_repos(&readme, repo_id) {
+        if repo_contains_mmproj(&candidate, token).await {
+            return Some(candidate);
+        }
+    }
+
+    // mradermacher pairs weighted `-i1-GGUF` repositories with static
+    // `-GGUF` repositories. Verify the target before using this fallback.
+    if let Some(candidate) = mradermacher_static_repo(repo_id)
+        && repo_contains_mmproj(&candidate, token).await
+    {
+        return Some(candidate);
+    }
+
+    // Variant repos occasionally advertise a static sibling that does not
+    // actually contain the shared projector. For Qwen 3.5 variants, fall back
+    // to canonical same-architecture repos and verify each one.
+    for candidate in qwen35_arch_companion_repos(repo_id) {
+        if repo_contains_mmproj(&candidate, token).await {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+async fn fetch_repo_readme(repo_id: &str, token: Option<&str>) -> Result<String> {
+    let url = format!("https://huggingface.co/{repo_id}/raw/main/README.md");
+    let mut req = HF_HTTP_CLIENT.get(url);
+    if let Some(token) = token {
+        req = req.bearer_auth(token);
+    }
+    let resp = req.send().await.context("Failed to fetch HF model card")?;
+    if !resp.status().is_success() {
+        anyhow::bail!("HF model card returned {}", resp.status());
+    }
+    resp.text().await.context("Failed to read HF model card")
+}
+
+fn extract_static_quant_repos(readme: &str, current_repo: &str) -> Vec<String> {
+    let mut repos = Vec::new();
+
+    for line in readme.lines() {
+        let lower = line.to_ascii_lowercase();
+        if !lower.contains("static") || (!lower.contains("quant") && !lower.contains("mmproj")) {
+            continue;
+        }
+
+        for suffix in line.split("huggingface.co/").skip(1) {
+            let candidate: String = suffix
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+                .collect();
+            let candidate = candidate.trim_end_matches('/');
+            if candidate != current_repo
+                && is_valid_repo_id(candidate)
+                && !repos.iter().any(|repo| repo == candidate)
+            {
+                repos.push(candidate.to_string());
+            }
+        }
+    }
+
+    repos
+}
+
+fn is_valid_repo_id(repo_id: &str) -> bool {
+    let mut parts = repo_id.split('/');
+    matches!(
+        (parts.next(), parts.next(), parts.next()),
+        (Some(owner), Some(repo), None) if !owner.is_empty() && !repo.is_empty()
+    )
+}
+
+fn mradermacher_static_repo(repo_id: &str) -> Option<String> {
+    let (owner, name) = repo_id.split_once('/')?;
+    if !owner.eq_ignore_ascii_case("mradermacher") {
+        return None;
+    }
+    let static_name = name.strip_suffix("-i1-GGUF")?;
+    Some(format!("{owner}/{static_name}-GGUF"))
+}
+
+fn qwen35_arch_companion_repos(repo_id: &str) -> Vec<String> {
+    let Some((owner, name)) = repo_id.split_once('/') else {
+        return Vec::new();
+    };
+    if !owner.eq_ignore_ascii_case("mradermacher") {
+        return Vec::new();
+    }
+
+    let Some(name) = name
+        .strip_suffix("-i1-GGUF")
+        .or_else(|| name.strip_suffix("-GGUF"))
+    else {
+        return Vec::new();
+    };
+    let tokens: Vec<&str> = name.split('-').collect();
+    if !tokens
+        .first()
+        .is_some_and(|token| token.eq_ignore_ascii_case("Qwen3.5"))
+    {
+        return Vec::new();
+    }
+
+    let Some(total_index) = tokens.iter().position(|token| {
+        token
+            .strip_suffix('B')
+            .or_else(|| token.strip_suffix('b'))
+            .is_some_and(|value| value.parse::<u32>().is_ok())
+    }) else {
+        return Vec::new();
+    };
+    let mut end = total_index + 1;
+    if tokens.get(end).is_some_and(|token| {
+        token
+            .strip_prefix('A')
+            .or_else(|| token.strip_prefix('a'))
+            .and_then(|value| value.strip_suffix('B').or_else(|| value.strip_suffix('b')))
+            .is_some_and(|value| value.parse::<u32>().is_ok())
+    }) {
+        end += 1;
+    }
+
+    let architecture = tokens[..end].join("-");
+    vec![
+        format!("mradermacher/{architecture}-GGUF"),
+        format!("unsloth/{architecture}-GGUF"),
+    ]
+}
+
+async fn repo_contains_mmproj(repo_id: &str, token: Option<&str>) -> bool {
+    fetch_file_sizes(repo_id, token).await.is_ok_and(|files| {
+        files.keys().any(|path| {
+            let lower = path.to_ascii_lowercase();
+            lower.contains("mmproj") || lower.contains("projector")
+        })
+    })
+}
+
+#[derive(Clone, Copy)]
+struct MmprojPreference {
+    label: &'static str,
+    reason: &'static str,
+}
+
+fn mmproj_preference_for_family(family: &str) -> Option<MmprojPreference> {
+    match family {
+        "qwen3.5" => Some(MmprojPreference {
+            label: "F16",
+            reason: "F16 is the documented llama.cpp projector default for Qwen 3.5",
+        }),
+        "qwen3.6" => Some(MmprojPreference {
+            label: "F16",
+            reason: "F16 is the practical default; upstream publishes F16 and BF16 without an optimization claim",
+        }),
+        "gemma4" => Some(MmprojPreference {
+            label: "F16",
+            reason: "F16 is the documented llama.cpp projector default for Gemma 4",
+        }),
+        _ => None,
+    }
+}
+
+fn sort_rank_mmproj_label(label: &str) -> u8 {
+    match label.to_ascii_uppercase().as_str() {
+        "F16" => 0,
+        "BF16" => 1,
+        "Q8_0" => 2,
+        "F32" => 3,
+        _ => 4,
+    }
+}
+
+/// Fetch file sizes from the HF tree API.
+/// Returns a map of filename → size in bytes.
+async fn fetch_file_sizes(
+    repo_id: &str,
+    token: Option<&str>,
+) -> Result<std::collections::HashMap<String, u64>> {
+    let url = format!("https://huggingface.co/api/models/{repo_id}/tree/main");
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+
+    let resp = req.send().await.context("Failed to fetch HF tree")?;
+    if !resp.status().is_success() {
+        anyhow::bail!("HF tree API returned {}", resp.status());
+    }
+
+    let items: Vec<serde_json::Value> = resp.json().await.context("Failed to parse HF tree")?;
+    let mut map = std::collections::HashMap::new();
+
+    for item in items {
+        let path = item
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if !path.to_ascii_lowercase().ends_with(".gguf") {
+            continue;
+        }
+
+        // LFS files: size is in "lfs.size"; non-LFS: in "size"
+        let size = item
+            .get("lfs")
+            .and_then(|lfs| lfs.get("size"))
+            .and_then(|v| v.as_u64())
+            .or_else(|| item.get("size").and_then(|v| v.as_u64()))
+            .unwrap_or(0);
+
+        if size > 0 {
+            map.insert(path, size);
+        }
+    }
+
+    Ok(map)
+}
+
+/// Sort rank for quant labels (lower = higher quality / bigger file = shown first).
+fn sort_rank_quant_label(label: &str) -> u8 {
+    let lower = label.to_ascii_lowercase();
+    if lower.contains("f32") {
+        return 0;
+    }
+    if lower.contains("f16") || lower.contains("bf16") {
+        return 1;
+    }
+    if lower.contains("q8") {
+        return 2;
+    }
+    if lower.contains("q6") {
+        return 3;
+    }
+    if lower.contains("q5_k_m") || lower.contains("q5km") {
+        return 4;
+    }
+    if lower.contains("q5") {
+        return 5;
+    }
+    if lower.contains("q4_k_m") || lower.contains("q4km") {
+        return 6;
+    }
+    if lower.contains("iq4") {
+        return 7;
+    }
+    if lower.contains("q4") {
+        return 8;
+    }
+    if lower.contains("q3") {
+        return 10;
+    }
+    if lower.contains("iq3") {
+        return 11;
+    }
+    if lower.contains("q2") {
+        return 14;
+    }
+    if lower.contains("iq2") {
+        return 15;
+    }
+    if lower.contains("iq1") || lower.contains("q1") {
+        return 18;
+    }
+    19
+}
+
+/// Infer a human-readable quant label from a GGUF filename.
+#[allow(dead_code)]
+pub fn infer_quant_label(filename: &str) -> String {
+    let lower = filename.to_ascii_lowercase();
+
+    // IQ variants first (before plain Q matches)
+    if lower.contains("iq4_xs") || lower.contains("iq4xs") {
+        return "IQ4_XS".into();
+    }
+    if lower.contains("iq4_nl") || lower.contains("iq4nl") {
+        return "IQ4_NL".into();
+    }
+    if lower.contains("iq3_xxs") {
+        return "IQ3_XXS".into();
+    }
+    if lower.contains("iq3_xs") {
+        return "IQ3_XS".into();
+    }
+    if lower.contains("iq3_s") {
+        return "IQ3_S".into();
+    }
+    if lower.contains("iq3_m") {
+        return "IQ3_M".into();
+    }
+    if lower.contains("iq2_xxs") {
+        return "IQ2_XXS".into();
+    }
+    if lower.contains("iq2_xs") {
+        return "IQ2_XS".into();
+    }
+    if lower.contains("iq2_s") {
+        return "IQ2_S".into();
+    }
+    if lower.contains("iq2_m") {
+        return "IQ2_M".into();
+    }
+    if lower.contains("iq1_m") {
+        return "IQ1_M".into();
+    }
+    if lower.contains("iq1_s") {
+        return "IQ1_S".into();
+    }
+
+    // Standard quants
+    if lower.contains("q8_0") {
+        return "Q8_0".into();
+    }
+    if lower.contains("q6_k") {
+        return "Q6_K".into();
+    }
+    if lower.contains("q5_k_xl") {
+        return "Q5_K_XL".into();
+    } // Unsloth variant
+    if lower.contains("q5_k_m") {
+        return "Q5_K_M".into();
+    }
+    if lower.contains("q5_k_s") {
+        return "Q5_K_S".into();
+    }
+    if lower.contains("q5_0") {
+        return "Q5_0".into();
+    }
+    if lower.contains("q4_k_xl") {
+        return "Q4_K_XL".into();
+    } // Unsloth variant
+    if lower.contains("q4_k_m") {
+        return "Q4_K_M".into();
+    }
+    if lower.contains("q4_k_s") {
+        return "Q4_K_S".into();
+    }
+    if lower.contains("q4_0") {
+        return "Q4_0".into();
+    }
+    if lower.contains("q3_k_l") {
+        return "Q3_K_L".into();
+    }
+    if lower.contains("q3_k_m") {
+        return "Q3_K_M".into();
+    }
+    if lower.contains("q3_k_s") {
+        return "Q3_K_S".into();
+    }
+    if lower.contains("q2_k") {
+        return "Q2_K".into();
+    }
+    if lower.contains("bf16") {
+        return "BF16".into();
+    }
+    if lower.contains("f16") {
+        return "F16".into();
+    }
+    if lower.contains("f32") {
+        return "F32".into();
+    }
+
+    // Compact/APEX/etc. Unsloth special naming
+    if lower.contains("compact") || lower.contains("apex") {
+        return "UD (custom)".into();
+    }
+
+    "Unknown".into()
+}
+
+// ── Token management ──────────────────────────────────────────────────────────
+
+/// Load HF token: 1) HUGGING_FACE_HUB_TOKEN env var  2) ~/.config/llama-monitor/hf-token.
+/// If the file is encrypted, decrypt_value handles it; otherwise treated as plaintext.
+pub fn hf_load_token() -> Option<String> {
+    if let Ok(v) = std::env::var("HUGGING_FACE_HUB_TOKEN")
+        && !v.trim().is_empty()
+    {
+        return Some(v.trim().to_string());
+    }
+    dirs::home_dir().and_then(|home| {
+        let path = home.join(".config").join("llama-monitor").join("hf-token");
+        std::fs::read_to_string(&path)
+            .ok()
+            .map(|s| crate::config::decrypt_value(s.trim()))
+            .filter(|s| !s.is_empty())
+    })
+}
+
+/// Save HF token to ~/.config/llama-monitor/hf-token (encrypted if key available).
+pub fn hf_save_token(token: &str) -> Result<()> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
+    let dir = home.join(".config").join("llama-monitor");
+    std::fs::create_dir_all(&dir).context("Failed to create config dir")?;
+    let stored = crate::config::encrypt_value(token.trim());
+    std::fs::write(dir.join("hf-token"), &stored).context("Failed to write HF token")?;
+    Ok(())
+}
+
+/// Mask a token for safe logging: first4****last4.
+#[allow(dead_code)]
+pub fn mask_token(token: &str) -> String {
+    let t = token.trim();
+    if t.len() <= 8 {
+        return "****".to_string();
+    }
+    format!("{}****{}", &t[..4], &t[t.len() - 4..])
+}
+
+// ── Start a managed download ──────────────────────────────────────────────────
+
+/// Start a download via the model_download manager.
+/// `save_as` overrides the local filename (e.g. to rename a companion mmproj).
+pub fn hf_start_download(
+    repo_id: &str,
+    file_path: &str,
+    save_as: Option<&str>,
+    target_path: &Path,
+    _resume: bool,
+) -> Result<String, String> {
+    crate::model_download::start_download(repo_id, file_path, save_as, target_path, hf_load_token())
+        .map_err(|e| format!("Failed to start download: {e}"))
+}
+
+// ── Resolve HF origin from a local GGUF filename ─────────────────────────────
+
+/// Candidate returned by `hf_resolve_origin`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HfResolveCandidate {
+    /// HF repo ID (e.g. "bartowski/Llama-3.3-70B-Instruct-GGUF")
+    pub repo_id: String,
+    /// Confidence score 0.0–1.0
+    pub confidence: f64,
+    /// Brief reason for the score (for UI tooltips)
+    pub reason: String,
+    /// First few tags from the HF model card (empty if fetch failed)
+    pub preview_tags: Vec<String>,
+    /// Model card URL (always populated when repo_id is known)
+    pub card_url: String,
+    /// Detected model family slug (e.g. "qwen3.6", "llama3.3", "gemma4")
+    pub family: String,
+}
+
+/// Result of resolving a local model's HF origin.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HfResolveResult {
+    /// Whether the top candidate is confident enough to auto-attach
+    pub confident: bool,
+    /// Ranked candidates
+    pub candidates: Vec<HfResolveCandidate>,
+    /// The model stem used for resolution (for transparency)
+    pub model_stem: String,
+    /// Errors encountered (empty on full success)
+    pub errors: Vec<String>,
+}
+
+/// Extract the model stem from a GGUF filename, stripping quant suffix,
+/// Unsloth-distilled markers ("-UD"), and version/variant suffixes.
+/// E.g. "gemma-4-31B-it-qat-UD-Q4_K_XL.gguf" → "gemma-4-31B-it-qat"
+fn resolve_model_stem(filename: &str) -> String {
+    let mut stem = filename
+        .strip_suffix(".gguf")
+        .unwrap_or(filename)
+        .to_string();
+
+    // Strip quant suffix: handle two-token patterns like "-I-Quality", "-Q8-MTP"
+    // where a single-char quant indicator (I/Q/B/F) precedes a descriptor token.
+    // Also handles single-token suffixes like "-Q4_K_M".
+    let parts: Vec<&str> = stem.split('-').collect();
+    if parts.len() >= 3 {
+        let second_last = parts[parts.len() - 2];
+        let last = parts[parts.len() - 1];
+        let is_quant_indicator = matches!(second_last.chars().next(), Some('I' | 'Q' | 'B' | 'F'));
+        if is_quant_indicator
+            && second_last.len() == 1
+            && matches!(
+                last.chars().next(),
+                Some('Q' | 'I' | 'B' | 'U' | 'M' | 'F' | 'S')
+            )
+            && last.len() > 2
+        {
+            // Strip the two-token quant suffix (e.g. "-I-Quality", "-Q8-MTP")
+            let cutoff = stem.len() - second_last.len() - 1 - last.len();
+            stem = stem[..cutoff].to_string();
+        }
+    }
+    if stem.rfind('-').is_some_and(|pos| {
+        let suffix = &stem[pos + 1..];
+        matches!(suffix.chars().next(), Some('Q' | 'I' | 'B' | 'U')) && suffix.len() > 2
+    }) {
+        stem = stem[..stem.rfind('-').unwrap()].to_string();
+    }
+
+    // Strip Unsloth-distilled marker "-UD" or "-ud" if present
+    if let Some(pos) = stem.rfind("-UD") {
+        let after = &stem[pos + 3..];
+        if after.is_empty() || after.starts_with('-') {
+            stem = stem[..pos].to_string();
+        }
+    } else if let Some(pos) = stem.rfind("-ud") {
+        let after = &stem[pos + 3..];
+        if after.is_empty() || after.starts_with('-') {
+            stem = stem[..pos].to_string();
+        }
+    }
+
+    // Strip trailing -v1, -v2, -v1.1, -MTP, etc.
+    stem = stem.strip_suffix("-MTP").unwrap_or(&stem).to_string();
+    if let Some(pos) = stem.rfind("-v") {
+        let after = &stem[pos + 2..];
+        if after.is_empty() || after.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+            stem = stem[..pos].to_string();
+        }
+    }
+
+    stem
+}
+
+/// Attempt to resolve the HF origin of a local GGUF file from its filename.
+/// Searches HF for matching repos, scores them by filename/filename/param-match,
+/// and returns ranked candidates.  Sets `confident=true` only when the top
+/// candidate's score is >= 0.8.
+pub async fn hf_resolve_origin(filename: &str, size_bytes: u64) -> Result<HfResolveResult, String> {
+    let stem = resolve_model_stem(filename);
+    let mut errors = Vec::new();
+
+    // Build queries with stem variants. For models whose names include "-MTP"
+    // (e.g. Carnice-Qwen3.6-MoE-35B-A3B-APEX-MTP-GGUF), the stem has "-MTP"
+    // stripped, so we also try a query that re-adds it.
+    let stem_with_mtp = format!("{stem}-MTP");
+    let queries: Vec<String> = [
+        stem.clone(),
+        format!("{stem} GGUF"),
+        stem.replace("Instruct", ""), // broader variant
+        stem_with_mtp.clone(),
+        format!("{stem_with_mtp} GGUF"),
+    ]
+    .iter()
+    .filter(|q| q.len() >= 4)
+    .cloned()
+    .collect::<std::collections::BTreeSet<_>>()
+    .into_iter()
+    .collect();
+
+    // Search HF for matching repos
+    let mut candidates: Vec<(String, u64, Vec<String>)> = Vec::new();
+    let _token = hf_load_token();
+
+    for query in &queries {
+        if candidates.len() >= 40 {
+            break; // enough candidates
+        }
+        let params = HfSearchParams {
+            query: query.clone(),
+            author: None,
+            sort: HfSort::Downloads,
+            limit: 15,
+            cursor: None,
+        };
+        let result = hf_search_models(&params).await;
+        match result {
+            Ok((items, _)) => {
+                for item in items {
+                    if !item.id.contains("GGUF")
+                        && !item.tags.iter().any(|t| t.eq_ignore_ascii_case("gguf"))
+                    {
+                        continue;
+                    }
+                    if !candidates.iter().any(|(id, _, _)| id == &item.id) {
+                        candidates.push((item.id.clone(), item.downloads, item.tags));
+                    }
+                }
+            }
+            Err(e) => errors.push(e),
+        }
+    }
+
+    // If no candidates at all, return early
+    if candidates.is_empty() {
+        return Ok(HfResolveResult {
+            confident: false,
+            candidates: Vec::new(),
+            model_stem: stem.clone(),
+            errors,
+        });
+    }
+
+    // Score and rank candidates, validating that each candidate repo actually
+    // hosts a GGUF file matching the local file (name + size).
+    let mut scored: Vec<HfResolveCandidate> = Vec::new();
+    let token_for_file_check = _token.as_deref();
+
+    for (repo_id, downloads, raw_tags) in &candidates {
+        // Fetch repo files to see if the file exists there
+        let files = match fetch_file_sizes(repo_id, token_for_file_check).await {
+            Ok(f) => f,
+            Err(_) => {
+                // If we cannot list repo files, we can’t confirm existence;
+                // treat it as unknown but still score weakly.
+                let score = score_resolve_candidate(
+                    repo_id, &stem, filename, size_bytes, *downloads, raw_tags, false, None,
+                );
+                if score > 0.1 {
+                    let repo_name = repo_id.split('/').next_back().unwrap_or(repo_id);
+                    let (preview_tags, family) = match hf_get_model_info(repo_id).await {
+                        Ok(info) => {
+                            let preview_tags: Vec<String> =
+                                info.tags.iter().take(6).cloned().collect();
+                            let family = detect_model_family(&info, repo_name);
+                            (preview_tags, family)
+                        }
+                        Err(_) => (Vec::new(), infer_family_from_name(repo_name)),
+                    };
+                    scored.push(HfResolveCandidate {
+                        repo_id: repo_id.clone(),
+                        confidence: (score * 100.0).round() / 100.0,
+                        reason: derive_resolve_reason(&score),
+                        preview_tags,
+                        card_url: format!("https://huggingface.co/{repo_id}"),
+                        family,
+                    });
+                }
+                continue;
+            }
+        };
+
+        // Look for a file in this repo that matches the local file.
+        let (file_confirmed, matched_file) =
+            find_matching_file_in_repo(&files, &stem, filename, size_bytes);
+
+        let score = score_resolve_candidate(
+            repo_id,
+            &stem,
+            filename,
+            size_bytes,
+            *downloads,
+            raw_tags,
+            file_confirmed,
+            matched_file.as_deref(),
+        );
+
+        if score > 0.1 {
+            // Fetch model info for tags and family detection (non-blocking best-effort)
+            let repo_name = repo_id.split('/').next_back().unwrap_or(repo_id);
+            let (preview_tags, family) = match hf_get_model_info(repo_id).await {
+                Ok(info) => {
+                    let preview_tags: Vec<String> = info.tags.iter().take(6).cloned().collect();
+                    let family = detect_model_family(&info, repo_name);
+                    (preview_tags, family)
+                }
+                Err(_) => (Vec::new(), infer_family_from_name(repo_name)),
+            };
+            scored.push(HfResolveCandidate {
+                repo_id: repo_id.clone(),
+                confidence: (score * 100.0).round() / 100.0, // round to 2 decimals
+                reason: derive_resolve_reason(&score),
+                preview_tags,
+                card_url: format!("https://huggingface.co/{repo_id}"),
+                family,
+            });
+        }
+    }
+
+    scored.sort_by(|a, b| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Only auto-select when:
+    // - top candidate is very strong
+    // - there is a clear lead over others (or no close rival)
+    let confident = if let Some(top) = scored.first() {
+        let top_score = top.confidence;
+        if top_score < 0.90 {
+            false
+        } else {
+            match scored.get(1) {
+                Some(next) if next.confidence >= top_score - 0.06 => false, // too close
+                _ => true,
+            }
+        }
+    } else {
+        false
+    };
+
+    Ok(HfResolveResult {
+        confident,
+        candidates: scored,
+        model_stem: stem,
+        errors,
+    })
+}
+
+/// Try to find the best matching file in the repo that corresponds to the local GGUF.
+/// Returns (confirmed_exists, matched_filename).
+///
+/// Uses:
+/// - token coverage: how many local filename tokens appear in HF filename
+/// - token order: approximate order match to distinguish similar repos
+/// - quant match: required if present
+/// - size match: within ±5% if size known
+///
+/// Only returns confirmed if the match is strong on both token coverage and (when known) size.
+fn find_matching_file_in_repo(
+    files: &std::collections::HashMap<String, u64>,
+    _stem: &str,
+    filename: &str,
+    size_bytes: u64,
+) -> (bool, Option<String>) {
+    let filename_lower = filename.to_ascii_lowercase();
+
+    // Normalize filename into tokens (non-empty, not purely numeric)
+    let local_tokens: Vec<&str> = filename_lower
+        .split(['-', ' ', '_', '.', '/'])
+        .filter(|t| !t.is_empty() && !t.chars().all(|c| c.is_ascii_digit()))
+        .collect();
+
+    if local_tokens.is_empty() {
+        return (false, None);
+    }
+
+    // Extract quant token
+    let quant_tok: Option<String> = extract_quant_token(&filename_lower);
+
+    let mut best_match: Option<(String, f64)> = None;
+    // Higher required coverage for longer token sets (e.g., "gemma-4-31B-it-qat-UD-Q4_K_XL")
+    let min_coverage = if local_tokens.len() >= 6 { 0.9 } else { 0.8 };
+
+    for (path, file_size) in files {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        let base_lower = base.to_ascii_lowercase();
+
+        // Size check: within ±5% if size known
+        if size_bytes > 1_000_000 && *file_size > 0 {
+            let diff = (*file_size).abs_diff(size_bytes);
+            let rel_diff = diff as f64 / size_bytes as f64;
+            if rel_diff > 0.05 {
+                continue;
+            }
+        }
+
+        // Check quant token presence if we have one
+        if let Some(ref q) = quant_tok
+            && !base_lower.contains(q)
+        {
+            continue;
+        }
+
+        // Token coverage: fraction of local_tokens found in HF filename
+        let mut matched = 0usize;
+        for token in &local_tokens {
+            if base_lower.contains(token) {
+                matched += 1;
+            }
+        }
+        let coverage = matched as f64 / local_tokens.len() as f64;
+        if coverage < min_coverage {
+            continue;
+        }
+
+        // Order bonus: approximate order match of tokens.
+        // If multiple repos match by tokens, better order -> better match.
+        let order_score = token_order_score(&local_tokens, &base_lower);
+
+        let score = coverage * 0.7 + order_score * 0.3;
+
+        match &best_match {
+            Some((_, best_score)) if score > *best_score => {
+                best_match = Some((base.to_string(), score));
+            }
+            None => {
+                best_match = Some((base.to_string(), score));
+            }
+            _ => {}
+        }
+    }
+
+    match best_match {
+        Some((name, score)) if score >= 0.9 => (true, Some(name)),
+        _ => (false, None),
+    }
+}
+
+/// Compute a simple order-based score for token sequence in candidate filename.
+/// 0.0 = poor, 1.0 = nearly same order.
+fn token_order_score(local_tokens: &[&str], candidate: &str) -> f64 {
+    if local_tokens.len() <= 1 || candidate.is_empty() {
+        return 1.0;
+    }
+
+    // Normalize candidate into token sequence positions.
+    let candidate_tokens: Vec<&str> = candidate
+        .split(['-', ' ', '_', '.', '/'])
+        .filter(|t| !t.is_empty() && !t.chars().all(|c| c.is_ascii_digit()))
+        .collect();
+
+    // For each local token, find its index in candidate_tokens or use INF
+    let mut positions: Vec<usize> = Vec::new();
+    for t in local_tokens {
+        if let Some(pos) = candidate_tokens
+            .iter()
+            .position(|ct| *ct == *t || ct.contains(t))
+        {
+            positions.push(pos);
+        } else {
+            return 0.0;
+        }
+    }
+
+    if positions.is_empty() {
+        return 0.0;
+    }
+
+    // Measure how monotonic the positions are
+    let mut increasing = 0usize;
+    let mut total_pairs = 0usize;
+    let len = positions.len();
+    for i in 1..len {
+        for j in (i + 1)..len {
+            total_pairs += 1;
+            if positions[i] < positions[j] {
+                increasing += 1;
+            }
+        }
+    }
+
+    if total_pairs == 0 {
+        return 1.0;
+    }
+
+    increasing as f64 / total_pairs as f64
+}
+
+/// Extract a quant-like token from the filename for matching, e.g. "q4_k_m", "q8_0", "f16", "bf16".
+fn extract_quant_token(filename_lower: &str) -> Option<String> {
+    let parts: Vec<&str> = filename_lower.split(['-', '_', '.']).collect();
+    for (i, p) in parts.iter().enumerate() {
+        // Look for Q/I/B/F as first char and adjacent alphanumeric
+        if p.len() > 1
+            && matches!(p.chars().next(), Some('q' | 'i' | 'b' | 'f'))
+            && (p.chars().nth(1).is_some_and(|c| c.is_ascii_alphanumeric())
+                || p.chars().nth(1) == Some('_'))
+        {
+            // If next part is also related, merge (e.g. "Q4" + "K" + "M")
+            if i + 1 < parts.len()
+                && parts[i + 1].len() == 1
+                && parts[i + 1]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic())
+            {
+                if i + 2 < parts.len()
+                    && parts[i + 2].len() == 1
+                    && parts[i + 2]
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphabetic())
+                {
+                    return Some(format!("{}_{}-{}", p, parts[i + 1], parts[i + 2]));
+                }
+                return Some(format!("{}_{}", p, parts[i + 1]));
+            }
+            return Some(p.to_string());
+        }
+    }
+    None
+}
+
+#[allow(clippy::too_many_arguments)]
+fn score_resolve_candidate(
+    repo_id: &str,
+    stem: &str,
+    filename: &str,
+    size_bytes: u64,
+    downloads: u64,
+    raw_tags: &[String],
+    file_exists_in_repo: bool,
+    _matched_file: Option<&str>,
+) -> f64 {
+    let filename_lower = filename.to_ascii_lowercase();
+    let stem_lower = stem.to_ascii_lowercase();
+    let mut score = 0.0;
+
+    // If we can't confirm the file actually exists in this repo,
+    // heavily penalize unless the score is already trivially small (so it only appears as suggestion).
+    if !file_exists_in_repo {
+        // This repo is unlikely to be the true origin.
+        // We still allow it to appear as low-confidence suggestion (based on name similarity),
+        // but cap its score so it cannot become `confident:true`.
+        let base = base_resolve_score(repo_id, stem, &filename_lower, downloads, raw_tags);
+        return base.min(0.35); // never confident if file not found here
+    }
+
+    // Strong base for repos that actually host the matching file.
+    score += 0.45;
+
+    // Build reusable token lists.
+    let stem_parts: Vec<&str> = stem_lower.split('-').filter(|p| !p.is_empty()).collect();
+    let repo_name_lower = repo_id
+        .split('/')
+        .next_back()
+        .unwrap_or(repo_id)
+        .to_ascii_lowercase();
+
+    // 1. Stem match in repo name
+    let mut matched_parts = 0;
+    for part in &stem_parts {
+        if part.len() > 2 && repo_name_lower.contains(part) {
+            matched_parts += 1;
+        }
+    }
+    if matched_parts > 0 {
+        let ratio = matched_parts as f64 / stem_parts.len() as f64;
+        score += 0.20 * ratio;
+        if matched_parts == stem_parts.len() {
+            score += 0.05; // perfect stem match bonus
+        }
+    }
+
+    // 2. Filename token match (more important than stem for distinguishing variants)
+    let file_tokens: Vec<&str> = filename_lower
+        .split(['-', '.', '_'])
+        .filter(|t| t.len() >= 2 && !t.chars().all(|c| c.is_ascii_digit()))
+        .collect();
+
+    // Give extra weight to "rare" tokens: short, non-numeric tokens (e.g. "ud", "qat", "it", "mtp")
+    // that help differentiate similar repos.
+    let rare_token_chars: usize = file_tokens
+        .iter()
+        .filter(|t| t.len() <= 4 && !t.chars().all(|c| c.is_ascii_digit()))
+        .count()
+        .max(1);
+    let mut file_matches = 0;
+    let mut rare_matches = 0;
+
+    for token in &file_tokens {
+        if repo_name_lower.contains(token) {
+            file_matches += 1;
+            // Rare token if short and non-numeric; these are strong differentiators.
+            if token.len() <= 4 && !token.chars().all(|c| c.is_ascii_digit()) {
+                rare_matches += 1;
+            }
+        }
+    }
+
+    if file_matches > 0 {
+        // Base filename token match
+        score += 0.10 * (file_matches as f64 / file_tokens.len().max(1) as f64);
+        // Rare-token match bonus: heavily rewards repos that include key discriminators like "ud"
+        if rare_matches > 0 {
+            score += 0.06 * (rare_matches as f64 / rare_token_chars as f64);
+        }
+    }
+
+    // 3. Parameter count match
+    let param_b = infer_param_b_from_name(&filename_lower);
+    if param_b > 0.0 {
+        let param_str = format!("{}", param_b as u64);
+        for tag in raw_tags {
+            let tag_lower = tag.to_ascii_lowercase();
+            if tag_lower.starts_with("parameter_size:") && tag_lower.contains(&param_str) {
+                score += 0.08;
+                break;
+            }
+        }
+        if repo_name_lower.contains(&param_str) {
+            score += 0.05;
+        }
+    }
+
+    // 4. Size agreement bonus when file_exists is true and size is known
+    if file_exists_in_repo && size_bytes > 1_000_000 {
+        score += 0.04;
+    }
+
+    // 5. Popularity tiebreaker (keep very weak to avoid overshadowing semantic match)
+    if downloads > 1000 && score > 0.0 {
+        score += 0.02;
+    }
+
+    score.clamp(0.0, 1.0)
+}
+
+/// Minimal "name-only" score for repos that do not host the file,
+/// so we can still show them as weak suggestions.
+fn base_resolve_score(
+    repo_id: &str,
+    stem: &str,
+    filename_lower: &str,
+    downloads: u64,
+    raw_tags: &[String],
+) -> f64 {
+    let stem_lower = stem.to_ascii_lowercase();
+    let mut score = 0.0;
+
+    let stem_parts: Vec<&str> = stem_lower.split('-').filter(|p| !p.is_empty()).collect();
+    let repo_name_lower = repo_id
+        .split('/')
+        .next_back()
+        .unwrap_or(repo_id)
+        .to_ascii_lowercase();
+    let mut matched_parts = 0;
+    for part in &stem_parts {
+        if part.len() > 2 && repo_name_lower.contains(part) {
+            matched_parts += 1;
+        }
+    }
+    if matched_parts > 0 {
+        let ratio = matched_parts as f64 / stem_parts.len() as f64;
+        score += 0.35 * ratio;
+    }
+
+    // Filename token match
+    let file_tokens: Vec<&str> = filename_lower
+        .split(['-', '.', '_'])
+        .filter(|t| t.len() >= 2 && !t.chars().all(|c| c.is_ascii_digit()))
+        .collect();
+    let mut file_matches = 0;
+    for token in &file_tokens {
+        if repo_name_lower.contains(token) {
+            file_matches += 1;
+        }
+    }
+    if file_matches > 0 {
+        score += 0.15 * (file_matches as f64 / file_tokens.len().max(1) as f64);
+    }
+
+    // Parameter match
+    let param_b = infer_param_b_from_name(filename_lower);
+    if param_b > 0.0 {
+        let param_str = format!("{}", param_b as u64);
+        for tag in raw_tags {
+            let tag_lower = tag.to_ascii_lowercase();
+            if tag_lower.starts_with("parameter_size:") && tag_lower.contains(&param_str) {
+                score += 0.08;
+                break;
+            }
+        }
+        if repo_name_lower.contains(&param_str) {
+            score += 0.05;
+        }
+    }
+
+    // Popularity (very weak)
+    if downloads > 2000 && score > 0.0 {
+        score += 0.02;
+    }
+
+    score.clamp(0.0, 0.7)
+}
+
+fn derive_resolve_reason(score: &f64) -> String {
+    if *score >= 0.9 {
+        "Strong match — stem, params, and filename tokens all align".to_string()
+    } else if *score >= 0.8 {
+        "High confidence — stem and most tokens match".to_string()
+    } else if *score >= 0.6 {
+        "Likely match — stem aligns, some uncertainty".to_string()
+    } else if *score >= 0.4 {
+        "Possible match — partial stem alignment".to_string()
+    } else {
+        "Weak match — low confidence".to_string()
+    }
+}
+
+/// Detect the base model family from HF model info (tags + repo name).
+/// Returns a lowercase slug like "qwen3.6", "llama3.3", "gemma4", "mistral", etc.
+/// Empty string if family cannot be determined.
+fn detect_model_family(info: &HfModelInfo, repo_name: &str) -> String {
+    // 1. Check base_model tag from cardData
+    for tag in &info.tags {
+        let tag_lower = tag.to_ascii_lowercase();
+        if let Some(rest) = tag_lower.strip_prefix("base_model:") {
+            // e.g. "base_model:Qwen/Qwen3.6-27B" or "base_model:meta-llama/Llama-3.3-70B-Instruct"
+            return infer_family_from_name(rest);
+        }
+    }
+
+    // 2. Fall back to repo name heuristics
+    infer_family_from_name(repo_name)
+}
+
+/// Infer model family slug from a name string (repo ID, model name, etc.).
+fn infer_family_from_name(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+
+    // Check in order from most specific to most general
+    if lower.contains("qwen3.6") || lower.contains("qwen3_6") || lower.contains("qwen36") {
+        return "qwen3.6".to_string();
+    }
+    if lower.contains("qwen3.5") || lower.contains("qwen3_5") || lower.contains("qwen35") {
+        return "qwen3.5".to_string();
+    }
+    if lower.contains("qwen3") || lower.contains("qwen-3") || lower.contains("qwen_3") {
+        return "qwen3".to_string();
+    }
+    if lower.contains("qwen2.5") || lower.contains("qwen2_5") || lower.contains("qwen25") {
+        return "qwen2.5".to_string();
+    }
+    if lower.contains("qwen") {
+        return "qwen".to_string();
+    }
+    if lower.contains("gemma-4") || lower.contains("gemma_4") || lower.contains("gemma4") {
+        return "gemma4".to_string();
+    }
+    if lower.contains("gemma-3") || lower.contains("gemma_3") || lower.contains("gemma3") {
+        return "gemma3".to_string();
+    }
+    if lower.contains("gemma-2") || lower.contains("gemma_2") || lower.contains("gemma2") {
+        return "gemma2".to_string();
+    }
+    if lower.contains("gemma") {
+        return "gemma".to_string();
+    }
+    if lower.contains("llama-3.3") || lower.contains("llama3_3") || lower.contains("llama33") {
+        return "llama3.3".to_string();
+    }
+    if lower.contains("llama-3.1") || lower.contains("llama3_1") || lower.contains("llama31") {
+        return "llama3.1".to_string();
+    }
+    if lower.contains("llama-3") || lower.contains("llama3") {
+        return "llama3".to_string();
+    }
+    if lower.contains("llama") {
+        return "llama".to_string();
+    }
+    if lower.contains("mistral-large") {
+        return "mistral-large".to_string();
+    }
+    if lower.contains("mistral-nemo") || lower.contains("nemo") {
+        return "mistral-nemo".to_string();
+    }
+    if lower.contains("mistral") || lower.contains("mixtral") {
+        return "mistral".to_string();
+    }
+    if lower.contains("deepseek") {
+        return "deepseek".to_string();
+    }
+    if lower.contains("phi") {
+        return "phi".to_string();
+    }
+    if lower.contains("yi") && lower.contains("model") {
+        return "yi".to_string();
+    }
+
+    String::new()
+}
+
+// ── Gemma4 MTP Draft Resolution ──────────────────────────────────────────────
+
+/// Resolve the Unsloth MTP draft model repo and filename for a Gemma4 model.
+///
+/// Given the main model's repo_id (e.g. `unsloth/gemma-4-31B-it-qat-GGUF`) and
+/// quant label (e.g. `Q8_0`), constructs the HF path to the matching MTP draft
+/// model and a **local** filename that avoids QAT/non-QAT collisions.
+///
+/// Returns `(hf_repo_id, hf_filename, local_filename)`.
+///
+/// Example:
+/// ```text
+/// Input:  unsloth/gemma-4-31B-it-qat-GGUF, Q8_0
+/// HF:     unsloth/gemma-4-31B-it-qat-GGUF/MTP/gemma-4-31B-it-Q8_0-MTP.gguf
+/// Local:  gemma-4-31B-it-qat-Q8_0-MTP.gguf  (note: `-qat` inserted)
+/// ```
+pub fn resolve_gemma4_mtp_draft(
+    repo_id: &str,
+    quant_label: &str,
+) -> Option<(String, String, String)> {
+    let lower = repo_id.to_ascii_lowercase();
+
+    // Determine if this is a QAT repo
+    let is_qat = lower.contains("-qat");
+
+    // Extract the Gemma4 tier from the repo id
+    let tier = resolve_gemma4_tier(&lower);
+    let tier = tier.as_deref()?; // Returns None if not a recognized Gemma4 tier
+
+    // Construct the HF filename: gemma-4-{tier}-it-{quant}-MTP.gguf
+    let hf_filename = format!("gemma-4-{}-it-{}-MTP.gguf", tier, quant_label);
+
+    // Construct the local filename: insert -qat if needed to avoid collision
+    let local_filename = if is_qat {
+        format!("gemma-4-{}-it-qat-{}-MTP.gguf", tier, quant_label)
+    } else {
+        format!("gemma-4-{}-it-{}-MTP.gguf", tier, quant_label)
+    };
+
+    // The HF repo for MTP files is the same as the main repo, just /MTP/ subfolder
+    Some((repo_id.to_string(), hf_filename, local_filename))
+}
+
+/// Extract the Gemma4 tier slug from a repo id or model name.
+/// Returns lowercase tier: "e2b", "e4b", "12b", "26b-a4b", "31b", or "2b"
+pub fn resolve_gemma4_tier(name_lower: &str) -> Option<String> {
+    // Order matters: check more specific patterns first (26b-a4b before 26b)
+    if name_lower.contains("26b") || name_lower.contains("a4b") {
+        Some("26b-a4b".to_string())
+    } else if name_lower.contains("31b") {
+        Some("31b".to_string())
+    } else if name_lower.contains("12b") {
+        Some("12b".to_string())
+    } else if name_lower.contains("e4b") {
+        Some("e4b".to_string())
+    } else if name_lower.contains("e2b") {
+        Some("e2b".to_string())
+    } else if name_lower.contains("2b") {
+        Some("2b".to_string())
+    } else {
+        None
+    }
+}
+
+/// Check if a local draft model is compatible with the given Gemma4 main model tier.
+/// Returns true if the draft model's tier matches the main model's tier.
+fn is_draft_compatible_with_tier(draft_name_lower: &str, tier: &str) -> bool {
+    // Both the draft and main model should reference the same tier
+    match tier {
+        "26b-a4b" => draft_name_lower.contains("26b") || draft_name_lower.contains("a4b"),
+        "31b" => draft_name_lower.contains("31b"),
+        "12b" => draft_name_lower.contains("12b") && !draft_name_lower.contains("e12"),
+        "e4b" => draft_name_lower.contains("e4b"),
+        "e2b" => draft_name_lower.contains("e2b"),
+        "2b" => draft_name_lower.contains("2b") && !draft_name_lower.contains("e2b"),
+        _ => false,
+    }
+}
+
+/// Find a compatible local MTP draft model for a Gemma4 main model.
+///
+/// Scans the models directory for a `-MTP.gguf` file matching the same tier.
+/// Returns the full path of the best match, or None.
+pub fn find_compatible_gemma4_mtp_draft(
+    models_dir: &std::path::Path,
+    main_model_name: &str,
+) -> Option<std::path::PathBuf> {
+    let tier = resolve_gemma4_tier(&main_model_name.to_ascii_lowercase())?;
+
+    // Walk models dir for draft candidates
+    let entries = std::fs::read_dir(models_dir).ok()?;
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if is_draft_assistant_hf(&name, 0) && is_draft_compatible_with_tier(&name, &tier) {
+            candidates.push(entry.path());
+        }
+    }
+
+    // Prefer exact quant match (if main model is Q8_0, prefer Q8_0 draft)
+    let main_lower = main_model_name.to_ascii_lowercase();
+    let best = candidates.iter().find(|p| {
+        let name = p
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_lowercase();
+        // Check if the quant level in the draft name matches the main model
+        if main_lower.contains("q8_0") && name.contains("q8_0") {
+            return true;
+        }
+        if main_lower.contains("q4_k_m") && name.contains("q4_k_m") {
+            return true;
+        }
+        if main_lower.contains("q4_0") && name.contains("q4_0") {
+            return true;
+        }
+        if main_lower.contains("bf16") && name.contains("bf16") {
+            return true;
+        }
+        if main_lower.contains("f16") && name.contains("f16") {
+            return true;
+        }
+        false
+    });
+
+    best.cloned().or_else(|| candidates.into_iter().next())
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_hf_get_model_info_smoke() {
+        let _ = hf_get_model_info("gpt2").await;
+    }
+
+    #[test]
+    fn test_infer_quant_label() {
+        assert_eq!(infer_quant_label("model-Q4_K_M.gguf"), "Q4_K_M");
+        assert_eq!(infer_quant_label("model-Q8_0.gguf"), "Q8_0");
+        assert_eq!(infer_quant_label("model-bf16.gguf"), "BF16");
+        assert_eq!(infer_quant_label("model-random.gguf"), "Unknown");
+        assert_eq!(infer_quant_label("model.i1-IQ3_S.gguf"), "IQ3_S");
+        assert_eq!(infer_quant_label("Qwen3.6-27B-UD-Q4_K_M.gguf"), "Q4_K_M");
+        assert_eq!(infer_quant_label("model-Q5_K_XL.gguf"), "Q5_K_XL");
+        assert_eq!(infer_quant_label("model-IQ2_XXS.gguf"), "IQ2_XXS");
+    }
+
+    #[test]
+    fn test_infer_gemma4_family() {
+        assert_eq!(
+            infer_family_from_name("unsloth/gemma-4-31B-it-qat-GGUF"),
+            "gemma4"
+        );
+        assert_eq!(
+            infer_family_from_name("google/gemma_4_12B_it_qat_q4_0_gguf"),
+            "gemma4"
+        );
+    }
+
+    #[test]
+    fn test_mmproj_preferences_are_family_specific() {
+        let qwen = mmproj_preference_for_family("qwen3.6").expect("Qwen preference");
+        assert_eq!(qwen.label, "F16");
+
+        let gemma = mmproj_preference_for_family("gemma4").expect("Gemma preference");
+        assert_eq!(gemma.label, "F16");
+
+        assert!(mmproj_preference_for_family("llama3").is_none());
+    }
+
+    #[test]
+    fn test_detect_quant_type() {
+        // Mradermacher imatrix
+        assert_eq!(
+            detect_quant_type("model.i1-Q4_K_M.gguf"),
+            QuantFileType::Imatrix
+        );
+        assert_eq!(
+            detect_quant_type("model-i1-IQ3_S.gguf"),
+            QuantFileType::Imatrix
+        );
+        // Unsloth UD
+        assert_eq!(
+            detect_quant_type("Qwen3.6-27B-UD-Q4_K_S.gguf"),
+            QuantFileType::UnslothDynamic
+        );
+        assert_eq!(
+            detect_quant_type("model-UD-mmproj-BF16.gguf"),
+            QuantFileType::UnslothDynamic
+        );
+        // Standard
+        assert_eq!(
+            detect_quant_type("model-Q4_K_M.gguf"),
+            QuantFileType::Standard
+        );
+        assert_eq!(
+            detect_quant_type("bartowski-model-Q5_K_M.gguf"),
+            QuantFileType::Standard
+        );
+    }
+
+    #[test]
+    fn test_quant_provider_from_username() {
+        assert!(matches!(
+            QuantProvider::from_username("bartowski"),
+            QuantProvider::Bartowski
+        ));
+        assert!(matches!(
+            QuantProvider::from_username("mradermacher"),
+            QuantProvider::Mradermacher
+        ));
+        assert!(matches!(
+            QuantProvider::from_username("unsloth"),
+            QuantProvider::Unsloth
+        ));
+        assert!(matches!(
+            QuantProvider::from_username("DavidAU"),
+            QuantProvider::Community
+        ));
+        // llmfan46 replaced TheBloke in the known quantizers list
+        assert!(matches!(
+            QuantProvider::from_username("llmfan46"),
+            QuantProvider::Community
+        ));
+    }
+
+    #[test]
+    fn test_mask_token() {
+        assert_eq!(mask_token("1234567890"), "1234****7890");
+        assert_eq!(mask_token("1234"), "****");
+    }
+
+    #[test]
+    fn test_infer_param_b_from_name() {
+        assert_eq!(infer_param_b_from_name("bartowski/Qwen3.6-27B-GGUF"), 27.0);
+        assert_eq!(
+            infer_param_b_from_name("mradermacher/Qwen3.6-35B-A3B-Instruct-i1-GGUF"),
+            35.0
+        );
+        assert_eq!(
+            infer_param_b_from_name("unsloth/Llama-3.3-70B-Instruct-GGUF"),
+            70.0
+        );
+        // Should be > 0
+        assert!(infer_param_b_from_name("some-27b-model") > 0.0);
+    }
+
+    #[test]
+    fn test_has_imatrix_detection() {
+        let item = serde_json::json!({
+            "id": "mradermacher/Qwen3.6-27B-i1-GGUF",
+            "gated": false,
+            "tags": ["gguf", "imatrix"],
+            "downloads": 1000,
+            "likes": 50,
+        });
+        let info = parse_model_item(item).unwrap();
+        assert!(
+            info.has_imatrix,
+            "mradermacher repo should be flagged as imatrix"
+        );
+    }
+
+    #[test]
+    fn test_known_quantizers_has_expected_entries() {
+        let quantizers = known_gguf_quantizers();
+        let usernames: Vec<&str> = quantizers.iter().map(|q| q.username.as_str()).collect();
+        assert!(usernames.contains(&"bartowski"));
+        assert!(usernames.contains(&"mradermacher"));
+        assert!(usernames.contains(&"unsloth"));
+        assert!(usernames.contains(&"DavidAU"));
+        assert!(usernames.contains(&"mudler"));
+        assert!(usernames.contains(&"Jackrong"));
+        assert!(usernames.contains(&"llmfan46"));
+        assert!(usernames.contains(&"prithivMLmods"));
+    }
+
+    #[test]
+    fn test_sort_rank_quality_order() {
+        // Higher quality should sort before lower quality
+        assert!(sort_rank_quant_label("Q8_0") < sort_rank_quant_label("Q4_K_M"));
+        assert!(sort_rank_quant_label("Q4_K_M") < sort_rank_quant_label("Q3_K_M"));
+        assert!(sort_rank_quant_label("Q3_K_M") < sort_rank_quant_label("IQ2_XXS"));
+    }
+
+    #[test]
+    fn test_mmproj_sort_prefers_practical_precision_over_f32() {
+        assert!(sort_rank_mmproj_label("F16") < sort_rank_mmproj_label("BF16"));
+        assert!(sort_rank_mmproj_label("BF16") < sort_rank_mmproj_label("F32"));
+    }
+
+    #[test]
+    fn test_extract_static_quant_repo_from_mradermacher_card() {
+        let readme = r#"
+static quants are available at https://huggingface.co/mradermacher/Qwen3.5-122B-A10B-REAP-20-GGUF
+
+This is a vision model - mmproj files (if any) will be in the static repository.
+"#;
+        assert_eq!(
+            extract_static_quant_repos(readme, "mradermacher/Qwen3.5-122B-A10B-REAP-20-i1-GGUF"),
+            vec!["mradermacher/Qwen3.5-122B-A10B-REAP-20-GGUF"]
+        );
+    }
+
+    #[test]
+    fn test_mradermacher_static_repo_fallback() {
+        assert_eq!(
+            mradermacher_static_repo("mradermacher/Qwen3.5-122B-A10B-REAP-20-i1-GGUF").as_deref(),
+            Some("mradermacher/Qwen3.5-122B-A10B-REAP-20-GGUF")
+        );
+        assert!(mradermacher_static_repo("other/model-i1-GGUF").is_none());
+    }
+
+    #[test]
+    fn test_qwen35_arch_companion_repo_fallbacks() {
+        assert_eq!(
+            qwen35_arch_companion_repos("mradermacher/Qwen3.5-122B-A10B-REAP-20-i1-GGUF"),
+            vec![
+                "mradermacher/Qwen3.5-122B-A10B-GGUF",
+                "unsloth/Qwen3.5-122B-A10B-GGUF"
+            ]
+        );
+        assert_eq!(
+            qwen35_arch_companion_repos("mradermacher/Qwen3.5-27B-heretic-i1-GGUF"),
+            vec!["mradermacher/Qwen3.5-27B-GGUF", "unsloth/Qwen3.5-27B-GGUF"]
+        );
+        assert!(qwen35_arch_companion_repos("other/Qwen3.5-27B-i1-GGUF").is_empty());
+    }
+
+    #[test]
+    fn test_simple_model_info_serde_default() {
+        let json = r#"{"id":"test/model"}"#;
+        let info: SimpleModelInfo = serde_json::from_str(json).expect("should deserialize");
+        assert_eq!(info.id, "test/model");
+        assert!(!info.gated);
+        assert!(info.tags.is_empty());
+        assert_eq!(info.downloads, 0);
+    }
+
+    #[test]
+    fn test_hf_gguf_file_serde_default() {
+        let json = r#"{"path":"file.gguf"}"#;
+        let f: HfGgufFile = serde_json::from_str(json).expect("should deserialize");
+        assert_eq!(f.path, "file.gguf");
+        assert!(f.repo_id.is_empty());
+        assert_eq!(f.size, 0);
+    }
+}

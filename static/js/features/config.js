@@ -47,11 +47,11 @@ async function loadGpuEnv() {
         const infoEl = document.getElementById('gpu-detected-info');
         const summaryInfo = document.getElementById('gpu-env-info');
         if (detected) {
-            const source = detected.arch === 'apple' ? 'local macOS system profile' : detected.arch === 'nvidia' ? 'local nvidia-smi' : 'local rocminfo';
+            const source = detected.arch === 'apple' ? 'local system profile' : detected.arch === 'nvidia' ? 'local nvidia-smi' : 'local rocminfo';
             infoEl.textContent = 'Local detection: ' + detected.count + 'x ' + detected.arch + ' (' + detected.names.join(', ') + ') via ' + source;
             summaryInfo.textContent = '\u2014 ' + detected.count + 'x ' + detected.arch;
         } else {
-            infoEl.textContent = 'No local GPU detected via Apple Silicon, rocminfo, or nvidia-smi. Remote hosts need a remote agent.';
+            infoEl.textContent = 'No local GPU detected via Metal, rocminfo, or nvidia-smi. Remote hosts need a remote agent.';
             summaryInfo.textContent = '';
         }
     } catch (err) {
@@ -89,10 +89,10 @@ function saveConfig() {
     showToast('Configuration saved', 'success');
 }
 
-function usePathServerBinary() {
+function useDefaultServerBinary() {
     const input = document.getElementById('set-server-path');
     if (input) input.value = '';
-    showToast('llama-server will be resolved from PATH', 'info');
+    showToast('Using llama-monitor default binary location', 'info');
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ export function initConfig() {
     if (browseServerPath) browseServerPath.addEventListener('click', () => openDeferredFileBrowser('set-server-path', 'executable'));
 
     const usePathBtn = document.getElementById('config-use-path-btn');
-    if (usePathBtn) usePathBtn.addEventListener('click', usePathServerBinary);
+    if (usePathBtn) usePathBtn.addEventListener('click', useDefaultServerBinary);
 
     const browseCwd = document.getElementById('config-browse-cwd');
     if (browseCwd) browseCwd.addEventListener('click', () => openDeferredFileBrowser('set-server-cwd', 'dir'));

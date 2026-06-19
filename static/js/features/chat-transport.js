@@ -1,7 +1,7 @@
 // ── Chat Transport & Streaming ────────────────────────────────────────────────
 // /api/chat calls, streaming decode, abort controller, summarization requests.
 
-import { chat, lastLlamaMetrics } from '../core/app-state.js';
+import { chat, lastLlamaMetrics, contextCapacityTokens } from '../core/app-state.js';
 import {
     activeChatTab,
     substituteNames,
@@ -10,6 +10,7 @@ import {
     setTransportGetter,
     getChatViewBindings,
     getDefaultRoleBoundaryText,
+    normalizeGeneratedMessageContent,
 } from './chat-state.js';
 import {
     renderChatMessages,
@@ -273,7 +274,7 @@ export async function sendSuggestedPrompt(text) {
 
 // ── Send Chat ──────────────────────────────────────────────────────────────────
 
-export async function sendChatWithContent(text) {
+export async function sendChatWithContent(text, options = {}) {
     if (chat.busy || chat.compactionInProgress) return;
     const tab = activeChatTab();
     if (!tab) return;
@@ -291,7 +292,7 @@ export async function sendChatWithContent(text) {
 
     if (typeof renderChatMessages === 'function') renderChatMessages();
 
-    _doSendChat(tab);
+    _doSendChat(tab, options);
 }
 
 // Send a message that is already in tab.messages (for resend/regenerate — no duplicate push)
@@ -393,7 +394,7 @@ export async function sendOneShotGuideReply(instruction) {
             ? null
             : 'Apply the active guidance to the existing conversation and write the next assistant reply now. Continue naturally from the latest exchange. Write only the assistant reply. Do not write dialogue, actions, thoughts, or decisions for the user unless explicitly instructed.';
 
-        const result = await _doSendChat(tab, { transientUserPrompt });
+        const result = await _doSendChat(tab, { transientUserPrompt, guided: true });
         if (result) result.transientUserPrompt = transientUserPrompt;
         return result;
     } finally {
@@ -418,6 +419,7 @@ export async function regenerateQuickGuideReply(tab, msgIdx, quickGuideMeta, var
     try {
         const result = await _doSendChat(tab, {
             transientUserPrompt: quickGuideMeta.transientUserPrompt ?? null,
+            guided: true,
         });
         if (result) result.transientUserPrompt = quickGuideMeta.transientUserPrompt ?? null;
         return result;
@@ -428,15 +430,11 @@ export async function regenerateQuickGuideReply(tab, msgIdx, quickGuideMeta, var
 }
 
 export async function _doSendChat(tab, options = {}) {
-    const { transientUserPrompt = null } = options;
+    const { transientUserPrompt = null, guided = false } = options;
     // Pre-send overflow guard: estimate token usage against current model capacity.
-    // Uses the same formula as ctx%: cumulative output tokens + last input tokens.
-    const capacity = lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
+    const capacity = contextCapacityTokens || lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
     if (capacity > 0) {
-        const asstMsgs = (tab.messages || []).filter(m => m.role === 'assistant' && !m.compaction_marker);
-        const totalOutput = asstMsgs.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
-        const lastInput = asstMsgs.at(-1)?.input_tokens || 0;
-        const estimatedTokens = totalOutput + lastInput;
+        const estimatedTokens = (tab.total_input_tokens || 0) + (tab.total_output_tokens || 0);
         if (estimatedTokens > capacity) {
             const pct = Math.round((estimatedTokens / capacity) * 100);
             // Restore the user's message before showing the toast
@@ -606,11 +604,13 @@ export async function _doSendChat(tab, options = {}) {
     let tokenUsage = null;
     const streamTimeoutMs = (params.stream_timeout ?? 120) * 1000;
     let lastContentTime = Date.now();
+    let firstTokenReceived = false;
     let regenReverted = false;
     let regenRevertReason = '';
 
     try {
-        const chatResp = await fetch('/api/chat', {
+        const chatEndpoint = guided ? '/api/chat/guided' : '/api/chat';
+        const chatResp = await fetch(chatEndpoint, {
             method: 'POST',
             headers: window.authHeaders
                 ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
@@ -625,8 +625,8 @@ export async function _doSendChat(tab, options = {}) {
                 min_p: params.min_p,
                 repeat_penalty: params.repeat_penalty,
                 max_tokens: params.max_tokens || 4096,
-                thinking_budget_tokens: 2048,
-                chat_template_kwargs: { enable_thinking: true },
+                thinking_budget_tokens: guided ? 0 : 2048,
+                chat_template_kwargs: { enable_thinking: guided ? false : true },
             }),
         });
 
@@ -638,9 +638,23 @@ export async function _doSendChat(tab, options = {}) {
         const reader = chatResp.body.getReader();
         const decoder = new TextDecoder();
         let buf = '';
+        // Throttle markdown re-renders to ≤20 fps — parsing the full accumulated
+        // string on every token is O(n²) and freezes the browser on long responses.
+        let _chatRenderTimer = null;
+        const scheduleChatRender = () => {
+            if (_chatRenderTimer) return;
+            _chatRenderTimer = setTimeout(() => {
+                _chatRenderTimer = null;
+                if (msgEl) {
+                    // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context
+                    msgEl.querySelector('.chat-msg-body').innerHTML =
+                        typeof renderMdStreaming === 'function' ? renderMdStreaming(msgContent) : msgContent;
+                }
+            }, 50);
+        };
 
         while (true) {
-            if (streamTimeoutMs > 0 && Date.now() - lastContentTime > streamTimeoutMs) {
+            if (firstTokenReceived && streamTimeoutMs > 0 && Date.now() - lastContentTime > streamTimeoutMs) {
                 chat.abortController.abort();
                 if (!msgContent && tab._pendingVariants) {
                     regenReverted = true;
@@ -696,6 +710,8 @@ export async function _doSendChat(tab, options = {}) {
 
                     const rc = delta.reasoning_content ?? '';
                     if (rc) {
+                        firstTokenReceived = true;
+                        lastContentTime = Date.now();
                         thinkContent += rc;
                         if (!msgEl && typeof appendAssistantPlaceholder === 'function') {
                             msgEl = appendAssistantPlaceholder();
@@ -721,6 +737,7 @@ export async function _doSendChat(tab, options = {}) {
 
                     const c = delta.content ?? '';
                     if (c) {
+                        firstTokenReceived = true;
                         msgContent += c;
                         lastContentTime = Date.now();
                         const isFirstToken = !msgEl;
@@ -728,11 +745,7 @@ export async function _doSendChat(tab, options = {}) {
                             msgEl = appendAssistantPlaceholder();
                         }
                         if (msgEl) {
-                            // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context
-                            msgEl.querySelector('.chat-msg-body').innerHTML =
-                                typeof renderMdStreaming === 'function'
-                                    ? renderMdStreaming(msgContent)
-                                    : msgContent;
+                            scheduleChatRender();
                         }
                         // Increment once per response (not per token) so badge = unread message count
                         if (isFirstToken && typeof incrementUnreadCount === 'function') incrementUnreadCount();
@@ -743,6 +756,13 @@ export async function _doSendChat(tab, options = {}) {
                 } catch { /* malformed chunk — skip */ }
             }
             if (typeof chatScroll === 'function') chatScroll();
+        }
+        // Flush any pending throttled render now that streaming is done.
+        if (_chatRenderTimer) { clearTimeout(_chatRenderTimer); _chatRenderTimer = null; }
+        if (msgEl) {
+            // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context
+            msgEl.querySelector('.chat-msg-body').innerHTML =
+                typeof renderMdStreaming === 'function' ? renderMdStreaming(msgContent) : msgContent;
         }
 
     } catch (err) {
@@ -808,6 +828,7 @@ export async function _doSendChat(tab, options = {}) {
 
     let finalMessage = null;
     if (msgContent) {
+        msgContent = normalizeGeneratedMessageContent(msgContent, tab, 'assistant');
         const inp = tokenUsage ? (tokenUsage.prompt_tokens ?? 0) : 0;
         const out = tokenUsage ? (tokenUsage.completion_tokens ?? 0) : 0;
         tab.total_input_tokens = (tab.total_input_tokens || 0) + inp;

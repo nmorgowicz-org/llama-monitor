@@ -1,6 +1,10 @@
 # Build artifacts
 /target/
 /llama-monitor.app/
+
+# llama-server binary (downloaded by the app — not source code)
+/llama-server
+/llama-server.exe
 Cargo.lock
 debug/
 release/
@@ -54,4 +58,6 @@ scripts/*.sh
 !scripts/build-single-target.sh
 !scripts/release-preflight.sh
 !scripts/validate-js.sh
+!scripts/cfg-audit.sh
 .claude/
+.serena/

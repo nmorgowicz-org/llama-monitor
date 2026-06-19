@@ -5,7 +5,7 @@
 import { chat } from '../core/app-state.js';
 import { switchChatTab, closeChatTab, addChatTab, renameChatTab,
           togglePinTab, activeChatTab, archiveChatTab, hideChatTab, restoreChatTab, setChatTabVisibility,
-          duplicateChatTab } from './chat-state.js';
+          duplicateChatTab, deleteManyChatTabs, archiveManyChatTabs } from './chat-state.js';
 
 const CSP_COLLAPSED_KEY = 'csp-collapsed';
 
@@ -104,8 +104,60 @@ function _renderManagementPills() {
 
     const archivedCount = chat.tabs.filter(t => t.visibility === 'archived').length;
     const hiddenCount = chat.tabs.filter(t => t.visibility === 'hidden').length;
+    const selectedIds = chat.visibilityUi?.selectedIds || new Set();
 
     container.innerHTML = '';
+
+    // If items selected, show bulk actions.
+    if (selectedIds.size > 0) {
+        const bulkWrap = document.createElement('div');
+        bulkWrap.className = 'csp-bulk-row';
+
+        const countSpan = document.createElement('span');
+        countSpan.className = 'csp-bulk-count';
+        countSpan.textContent = selectedIds.size + ' selected';
+        bulkWrap.appendChild(countSpan);
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'csp-bulk-btn csp-bulk-btn-danger';
+        deleteBtn.type = 'button';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const ids = [...selectedIds];
+            selectedIds.clear();
+            deleteManyChatTabs(ids);
+            renderChatSessionsSidebar();
+        });
+        bulkWrap.appendChild(deleteBtn);
+
+        const archiveBtn = document.createElement('button');
+        archiveBtn.className = 'csp-bulk-btn';
+        archiveBtn.type = 'button';
+        archiveBtn.textContent = 'Archive';
+        archiveBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const ids = [...selectedIds];
+            selectedIds.clear();
+            archiveManyChatTabs(ids);
+            renderChatSessionsSidebar();
+        });
+        bulkWrap.appendChild(archiveBtn);
+
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'csp-bulk-btn';
+        clearBtn.type = 'button';
+        clearBtn.textContent = 'Clear';
+        clearBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectedIds.clear();
+            renderChatSessionsSidebar();
+        });
+        bulkWrap.appendChild(clearBtn);
+
+        container.appendChild(bulkWrap);
+        return;
+    }
 
     const archivePill = document.createElement('button');
     archivePill.className = 'csp-management-pill';
@@ -160,6 +212,13 @@ export function renderChatSessionsSidebar() {
     const list = document.getElementById('csp-list');
     if (!list) return;
 
+    const selectedIds = chat.visibilityUi.selectedIds || new Set();
+    // Clear selections for deleted tabs.
+    const tabIds = new Set(chat.tabs.map(t => t.id));
+    for (const id of selectedIds) {
+        if (!tabIds.has(id)) selectedIds.delete(id);
+    }
+
     const activeTabs = chat.tabs.filter(t => t.visibility === 'active');
     const groups = _groupTabsByRecency(activeTabs);
     const activeId = chat.activeTabId;
@@ -184,7 +243,7 @@ export function renderChatSessionsSidebar() {
         frag.appendChild(hdr);
 
         for (const tab of tabs) {
-            frag.appendChild(_buildSessionItem(tab, tab.id === activeId));
+            frag.appendChild(_buildSessionItem(tab, tab.id === activeId, selectedIds.has(tab.id)));
         }
     }
 
@@ -213,13 +272,15 @@ export function updateSessionItem(tabId) {
     if (!tab) { existing.remove(); return; }
 
     const isActive = tab.id === chat.activeTabId;
-    const fresh = _buildSessionItem(tab, isActive);
+    const selectedIds = chat.visibilityUi?.selectedIds;
+    const isSelected = selectedIds?.has(tabId) || false;
+    const fresh = _buildSessionItem(tab, isActive, isSelected);
     existing.replaceWith(fresh);
 }
 
 // Item builder
 
-function _buildSessionItem(tab, isActive) {
+function _buildSessionItem(tab, isActive, isSelected) {
     const el = document.createElement('div');
     const ctxPct = tab.lastCtxPct || 0;
     const ctxLevel = ctxPct >= 90 ? 'critical' : ctxPct >= 75 ? 'high' : ctxPct >= 50 ? 'medium' : 'low';
@@ -229,7 +290,7 @@ function _buildSessionItem(tab, isActive) {
     const initial = (tab.name || '?').charAt(0).toUpperCase();
     const hue = _avatarHue(tab.id);
 
-    el.className = 'csp-item' + (isActive ? ' active' : '');
+    el.className = 'csp-item' + (isActive ? ' active' : '') + (isSelected ? ' selected' : '');
     el.dataset.tabId = tab.id;
     el.dataset.ctx = ctxLevel;
     if (tab.pinned) el.dataset.pinned = 'true';
@@ -237,8 +298,8 @@ function _buildSessionItem(tab, isActive) {
     el.setAttribute('tabindex', '0');
     el.setAttribute('aria-current', isActive ? 'true' : 'false');
 
-    // Build inner HTML with fully static markup; dynamic values via DOM APIs.
     el.innerHTML =
+        `<button class="csp-item-checkbox" type="button" aria-label="Select chat"></button>` +
         `<div class="csp-item-avatar"><span></span></div>` +
         `<div class="csp-item-body">` +
             `<div class="csp-item-name"></div>` +
@@ -256,15 +317,12 @@ function _buildSessionItem(tab, isActive) {
             `<button class="csp-item-action-btn" data-action="more">\u22EF</button>` +
         `</div>`;
 
-    // Avatar initial
     const avatarSpan = el.querySelector('.csp-item-avatar span');
     if (avatarSpan) avatarSpan.textContent = initial;
 
-    // Name
     const nameEl = el.querySelector('.csp-item-name');
     if (nameEl) nameEl.textContent = tab.name || 'Untitled';
 
-    // Persona
     const personaEl = el.querySelector('.csp-item-persona');
     if (personaEl) {
         if (tab.active_template_id) {
@@ -275,13 +333,11 @@ function _buildSessionItem(tab, isActive) {
         }
     }
 
-    // Explicit level
     const explicitEl = el.querySelector('.csp-item-explicit');
     if (explicitEl) {
         explicitEl.dataset.level = String(tab.explicit_level || 0);
     }
 
-    // Message count
     const countEl = el.querySelector('.csp-item-count');
     if (countEl) {
         if (msgCount) {
@@ -291,14 +347,12 @@ function _buildSessionItem(tab, isActive) {
         }
     }
 
-    // Pin button
     const pinBtn = el.querySelector('button[data-action="pin"]');
     if (pinBtn) {
         pinBtn.textContent = tab.pinned ? '\u{1F4CC}' : '\u2299';
         pinBtn.title = tab.pinned ? 'Unpin' : 'Pin';
     }
 
-    // Set dynamic styles via DOM API to keep innerHTML safe
     const avatar = el.querySelector('.csp-item-avatar');
     if (avatar) {
         avatar.style.setProperty('--avatar-hue', String(hue));
@@ -306,14 +360,67 @@ function _buildSessionItem(tab, isActive) {
 
     const ctxFill = el.querySelector('.csp-item-ctx-fill');
     if (ctxFill) {
-        ctxFill.style.width = ctxPct.toFixed(1) + '%';
+        ctxFill.style.transform = 'scaleX(' + (ctxPct / 100) + ')';
+    }
+
+    const cb = el.querySelector('.csp-item-checkbox');
+    if (cb && isSelected) {
+        cb.classList.add('checked');
     }
 
     if (tab.active_template_id) {
         _resolvePersonaLabel(el, tab.active_template_id);
     }
 
+    // Selection helpers
+    const selectedIds = chat.visibilityUi?.selectedIds || new Set();
+
+    const toggleSelection = (id, addToExisting) => {
+        if (!selectedIds.has(id)) {
+            selectedIds.add(id);
+        } else if (!addToExisting) {
+            selectedIds.delete(id);
+        }
+    };
+
+    const selectTab = (id, e) => {
+        if (e && (e.ctrlKey || e.metaKey)) {
+            // Ctrl/Cmd+click: toggle this tab without clearing others.
+            if (selectedIds.has(id)) {
+                selectedIds.delete(id);
+            } else {
+                selectedIds.add(id);
+            }
+        } else if (selectedIds.size > 0 && !selectedIds.has(id)) {
+            // If selections exist and this tab is not selected:
+            // single-click selects only this tab and switches to it.
+            selectedIds.clear();
+            selectedIds.add(id);
+        } else if (selectedIds.size > 0 && selectedIds.has(id)) {
+            // Already selected and >0 selections: keep selections, switch tab.
+        } else {
+            // No selections: just switch tab.
+            selectedIds.clear();
+        }
+        switchChatTab(id);
+        renderChatSessionsSidebar();
+    };
+
+    // Checkbox click: toggle selection only.
+    cb?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (selectedIds.has(tab.id)) {
+            selectedIds.delete(tab.id);
+        } else {
+            selectedIds.add(tab.id);
+        }
+        renderChatSessionsSidebar();
+    });
+
     el.addEventListener('click', (e) => {
+        // If clicking checkbox, handled above.
+        if (e.target.closest('.csp-item-checkbox')) return;
+
         const actionBtn = e.target.closest('[data-action]');
         if (actionBtn) {
             e.stopPropagation();
@@ -326,15 +433,13 @@ function _buildSessionItem(tab, isActive) {
             }
             return;
         }
-        switchChatTab(tab.id);
-        renderChatSessionsSidebar();
+        selectTab(tab.id, e);
     });
 
     el.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            switchChatTab(tab.id);
-            renderChatSessionsSidebar();
+            selectTab(tab.id, e);
         }
     });
 
@@ -612,10 +717,21 @@ function _showContextMenu(tab, anchorEl) {
     _activeMenu = menu;
 
     const rect = anchorEl.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
     const menuW = 170;
     const left = Math.min(rect.right + 4, window.innerWidth - menuW - 8);
+    let top = rect.top;
+
+    // If menu would overflow the bottom, position above the anchor.
+    if (top + menuRect.height > window.innerHeight - 8) {
+        top = rect.bottom - menuRect.height - 4;
+    }
+
+    // Clamp top so it never goes off-screen.
+    if (top < 8) top = 8;
+
     menu.style.left = left + 'px';
-    menu.style.top  = rect.top + 'px';
+    menu.style.top  = top + 'px';
     menu.focus();
 }
 

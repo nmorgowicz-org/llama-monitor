@@ -1,12 +1,15 @@
 // ── Attach / Detach / Start / Stop ─────────────────────────────────────────────
 // LLM lifecycle: start, stop, attach, detach, kill.
 
-import { sessionState } from '../core/app-state.js';
+import { sessionState, setupViewState } from '../core/app-state.js';
 import { updateActiveSessionInfo } from './sessions.js';
-import { showToast } from './toast.js';
-import { hideConnectingState, saveLastSessionData, showConnectingState, switchView, restorePreviousPosition } from './setup-view.js';
+import { showToast, showToastWithActions } from './toast.js';
+import { saveSettings } from './settings.js';
+import { hideConnectingState, saveLastSessionData, showConnectingState, switchView, restorePreviousPosition, savePreviousPosition } from './setup-view.js';
+import { setTuneConfig, showTunePanel, hideTunePanel } from './tune-panel.js';
 import { hideDisconnectedBanner } from './chat-transport.js';
 import { monitorState } from '../core/app-state.js';
+import { waitForSpawnReadiness } from './spawn-readiness.js';
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -15,7 +18,9 @@ export function getConfig() {
     const p = sessionState.presets.find(pr => pr.id === id) || {};
 
     return {
+        preset_id: id,
         model_path: p.model_path || '',
+        hf_repo: p.hf_repo || null,
         context_size: p.context_size || 128000,
         ctk: p.ctk || 'q8_0',
         ctv: p.ctv || 'f16',
@@ -23,7 +28,7 @@ export function getConfig() {
         batch_size: p.batch_size || 2048,
         ubatch_size: p.ubatch_size || p.batch_size || 2048,
         no_mmap: !!p.no_mmap,
-        port: parseInt(document.getElementById('port').value) || 8001,
+        port: p.port || 8001,
         ngram_spec: !!p.ngram_spec,
         parallel_slots: p.parallel_slots || 1,
         // Generation
@@ -32,6 +37,12 @@ export function getConfig() {
         top_k: p.top_k,
         min_p: p.min_p,
         repeat_penalty: p.repeat_penalty,
+        presence_penalty: p.presence_penalty ?? null,
+        enable_thinking: p.enable_thinking ?? null,
+        preserve_thinking: p.preserve_thinking ?? null,
+        reasoning: p.reasoning || null,
+        reasoning_budget: p.reasoning_budget ?? null,
+        reasoning_budget_message: p.reasoning_budget_message || null,
         n_cpu_moe: p.n_cpu_moe,
         gpu_layers: p.gpu_layers ?? null,
         mlock: !!p.mlock,
@@ -43,48 +54,160 @@ export function getConfig() {
         rope_scaling: p.rope_scaling || '',
         rope_freq_base: p.rope_freq_base ?? null,
         rope_freq_scale: p.rope_freq_scale ?? null,
+        spec_type: p.spec_type || null,
+        kv_unified: p.kv_unified ?? null,
+        cache_ram_mib: p.cache_ram_mib ?? null,
         draft_model: p.draft_model || '',
         draft_min: p.draft_min ?? null,
         draft_max: p.draft_max ?? null,
         spec_ngram_size: p.spec_ngram_size ?? null,
+        spec_draft_n_max: p.spec_draft_n_max ?? null,
         seed: p.seed ?? null,
+        mmproj: p.mmproj || null,
+        chat_template_file: p.chat_template_file || null,
+        alias: p.alias || null,
+        max_tokens: p.max_tokens ?? null,
+        fit_enabled: p.fit_enabled ?? null,
+        fit_target: p.fit_target || null,
         system_prompt_file: p.system_prompt_file || '',
         extra_args: p.extra_args || '',
+        bind_host: p.bind_host || '127.0.0.1',
+        api_key: p.api_key || null,
     };
 }
 
 // ── Start / Stop ───────────────────────────────────────────────────────────────
 
-export async function doStart() {
+// Fetch the db-admin-token needed for V2 spawn endpoints.
+async function _fetchDbAdminToken() {
+    const tokenResp = await fetch('/api/db/admin-token', {
+        headers: window.authHeaders ? window.authHeaders() : {},
+    });
+    const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
+    return tokenData.token || null;
+}
+
+// Disable start buttons for N seconds, showing countdown.
+function applyCooldown(seconds, button) {
+    if (!seconds || seconds <= 0 || !button) return;
+    button.disabled = true;
+    const remaining = seconds;
+    const label = button.textContent || button.value || '';
+    const orig = label;
+    const interval = setInterval(() => {
+        if (seconds <= 0) {
+            clearInterval(interval);
+            button.disabled = false;
+            button.textContent = orig;
+            return;
+        }
+        button.textContent = `Wait ${seconds}s`;
+        seconds--;
+    }, 1000);
+}
+
+export async function doStart(cooldownBtn, options = {}) {
+    const buttonArg = cooldownBtn instanceof Event ? null : cooldownBtn;
     const config = getConfig();
-    if (!config.model_path) {
-        showToast('No model path set. Edit the preset to select a model.', 'error');
+    if (!config.model_path && !config.hf_repo) {
+        showToast('No model source set. Edit the preset to select a local model or HuggingFace repo.', 'error');
+        return;
+    }
+    return doStartWithConfig(config, options, buttonArg);
+}
+
+export async function doStartWithConfig(config, options = {}, buttonArg = null) {
+    const { skipRunningConfirm = false } = options;
+    if (!config.model_path && !config.hf_repo) {
+        showToast('No model source set.', 'error');
         return;
     }
 
     const btnStart = document.getElementById('btn-start');
     if (btnStart) btnStart.disabled = true;
 
-    await doKillLlamaInternal();
+    try {
+        if (!skipRunningConfirm) {
+            const activeResp = await fetch('/api/sessions/active', {
+                headers: window.authHeaders ? window.authHeaders() : {},
+            }).catch(() => null);
+            const active = activeResp?.ok ? await activeResp.json().catch(() => ({})) : {};
+            const activeStatus = String(active.status || '').toLowerCase();
+            const activePresetId = active.preset_id || '';
+            if (activeStatus === 'running' && activePresetId && activePresetId !== config.preset_id) {
+                if (!confirm('A different preset is already running. Stop it and start the selected preset?')) {
+                    return;
+                }
+            }
+        }
 
-    const resp = await fetch('/api/start', {
-        method: 'POST',
-        headers: window.authHeaders
-            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
-            : { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-    });
-    const data = await resp.json();
+        await doKillLlamaInternal();
 
-    if (!data.ok) {
-        showToast('Start failed: ' + (data.error || 'unknown'), 'error');
-        hideConnectingState();
-    } else {
+        const adminToken = await _fetchDbAdminToken();
+        if (!adminToken) {
+            showToast('Failed: authentication required', 'error');
+            hideConnectingState();
+            return;
+        }
+
+        const resp = await fetch('/api/sessions/spawn', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${adminToken}`,
+            },
+            body: JSON.stringify(config),
+        });
+
+        if (!resp.ok) {
+            if (resp.status === 429) {
+                try {
+                    const data = await resp.json().catch(() => null);
+                    const wait = data?.seconds_remaining || data?.error || '';
+                    if (typeof wait === 'number') {
+                        showToast('Start failed: Please wait ' + wait + 's', 'warning');
+                        applyCooldown(wait, buttonArg || btnStart);
+                    } else {
+                        showToast('Start failed: too soon; please wait', 'warning');
+                    }
+                } catch {
+                    showToast('Start failed: too soon; please wait', 'warning');
+                }
+                hideConnectingState();
+                return;
+            }
+
+            const text = await resp.text().catch(() => 'Request failed');
+            showToast('Start failed: ' + text, 'error');
+            hideConnectingState();
+            return;
+        }
+
+        const data = await resp.json().catch(() => ({}));
+
+        if (!data.ok) {
+            showToast('Start failed: ' + (data.error || 'server responded with an error'), 'error');
+            hideConnectingState();
+            return;
+        }
+
+        showToast('Starting llama-server…', 'info', 'Loading model on port ' + config.port, { duration: 12000 });
+        await waitForSpawnReadiness(config.port);
+
+        showToast('llama-server is running', 'success', '', { duration: 6000 });
+        setTuneConfig(config);
+        setHeaderMode('Spawn:' + config.port);
         switchView('monitor');
         hideConnectingState();
-        
-        // Restore previous position after view switch
+        showTunePanel();
+        saveSettings();
         setTimeout(() => restorePreviousPosition(), 600);
+    } catch (e) {
+        const msg = (e.message || 'network or server error').split('\n')[0].trim();
+        showToast('Start failed: ' + msg, 'error');
+        hideConnectingState();
+    } finally {
+        if (btnStart) btnStart.disabled = false;
     }
 }
 
@@ -92,11 +215,48 @@ export async function doStop() {
     const btnStop = document.getElementById('btn-stop');
     if (btnStop) btnStop.disabled = true;
 
-    await fetch('/api/stop', {
-            method: 'POST',
-            headers: window.authHeaders ? window.authHeaders() : {},
-        });
+    // Capture the preset that was running before killing so we can offer restart
+    const stoppedPresetId = sessionState.activeSessionPresetId || '';
+    const stoppedPreset = sessionState.presets?.find(p => p.id === stoppedPresetId);
+    const stoppedName = stoppedPreset?.name || 'server';
+
     await doKillLlamaInternal();
+    sessionState.activeSessionPresetId = '';
+    hideTunePanel();
+    setHeaderMode(null);
+    window.__presetUserSelected = false;
+
+    if (btnStop) btnStop.disabled = false;
+
+    const actions = [];
+
+    if (stoppedPresetId) {
+        actions.push({
+            id: 'restart',
+            label: 'Restart',
+            primary: true,
+            handler: async () => {
+                const { syncSelectedPresetSelection } = await import('./presets.js');
+                syncSelectedPresetSelection(stoppedPresetId, { userIntent: true, persist: true });
+                doStart(null, { skipRunningConfirm: true });
+            },
+        });
+    }
+
+    actions.push({
+        id: 'home',
+        label: '↩ Home',
+        primary: false,
+        handler: () => switchView('setup'),
+    });
+
+    showToastWithActions(
+        stoppedName + ' stopped',
+        'info',
+        stoppedPresetId ? 'Restart with the same preset, or return home.' : 'Return home to start a new session.',
+        actions,
+        { duration: 10000 },
+    );
 }
 
 // ── Kill ───────────────────────────────────────────────────────────────────────
@@ -108,7 +268,9 @@ export async function doKillLlama() {
     if (btnKill) btnKill.disabled = true;
 
     try {
-        const tokenResp = await fetch('/api/db/admin-token');
+        const tokenResp = await fetch('/api/db/admin-token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         const tokenData = await tokenResp.json();
         const token = tokenData.token;
         if (!token) {
@@ -129,12 +291,19 @@ export async function doKillLlama() {
 
         if (!data.ok) {
             if (resp.status === 429) {
-                showToast('Kill failed: too soon; please wait', 'error');
+                const wait = data?.seconds_remaining
+                    ? `Too soon; please wait ${data.seconds_remaining}s`
+                    : 'Too soon; please wait';
+                showToast('Kill failed: ' + wait, 'warning');
+                if (data?.seconds_remaining) {
+                    applyCooldown(data.seconds_remaining, btnKill);
+                }
             } else {
                 showToast('Kill failed: ' + (data.error || 'unknown'), 'error');
             }
         } else {
             showToast('llama-server killed', 'success');
+            hideTunePanel();
         }
     } catch (e) {
         showToast('Kill failed: ' + e.message, 'error');
@@ -145,7 +314,9 @@ export async function doKillLlama() {
 
 export async function doKillLlamaInternal() {
     try {
-        const tokenResp = await fetch('/api/db/admin-token');
+        const tokenResp = await fetch('/api/db/admin-token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         const tokenData = await tokenResp.json();
         const token = tokenData.token;
         if (!token) return;
@@ -198,14 +369,12 @@ export async function doAttach() {
             showToast(data.warning, 'warning');
         }
 
-        const serverHeader = document.getElementById('server-header');
-        if (serverHeader) serverHeader.style.display = 'none';
+        setHeaderMode('Attach:' + (document.getElementById('server-endpoint')?.value?.trim() || ''));
 
         monitorState.speedMax = { prompt: 0, generation: 0 };
         hideDisconnectedBanner();
         switchView('monitor');
-
-        // Restore previous position after view switch
+        showTunePanel();
         setTimeout(() => restorePreviousPosition(), 600);
     }
 
@@ -255,6 +424,7 @@ export async function doDetach() {
             if (historicBadge) historicBadge.style.display = 'inline-block';
 
             monitorState.speedMax = { prompt: 0, generation: 0 };
+            hideTunePanel();
             switchView('setup');
         }
 
@@ -266,16 +436,30 @@ export async function doDetach() {
 
 // ── Setup page helpers ─────────────────────────────────────────────────────────
 
-export function doAttachFromSetup() {
+export async function doAttachFromSetup() {
     const input = document.getElementById('setup-endpoint-url');
     const url = input ? input.value.trim() : '';
-    if (url) {
-        const serverEndpoint = document.getElementById('server-endpoint');
-        if (serverEndpoint) serverEndpoint.value = url;
-        localStorage.setItem('llama-monitor-last-endpoint', url);
+    if (!url) {
+        input?.focus();
+        return;
     }
+    const serverEndpoint = document.getElementById('server-endpoint');
+    if (serverEndpoint) serverEndpoint.value = url;
+    localStorage.setItem('llama-monitor-last-endpoint', url);
+
+    const btn = document.getElementById('setup-attach-btn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Connecting...';
+    }
+
     showConnectingState();
-    doAttach();
+    await doAttach();
+
+    if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Connect';
+    }
 }
 
 export function doStartFromSetup() {
@@ -285,10 +469,30 @@ export function doStartFromSetup() {
         if (presetSelect) presetSelect.value = select.value;
     }
     showConnectingState();
-    doStart();
+    doStart(document.getElementById('setup-start-btn'));
 }
 
 // ── Button init ────────────────────────────────────────────────────────────────
+
+// Update the server header visibility based on session mode.
+// Call this whenever session mode changes (spawn, attach, detach, init).
+export function setHeaderMode(mode) {
+    const serverHeader = document.getElementById('server-header');
+    const btnAttach = document.getElementById('btn-attach');
+    const btnDetach = document.getElementById('btn-detach');
+    if (!serverHeader) return;
+    if (mode && mode.startsWith('Spawn:')) {
+        serverHeader.style.display = 'none';
+    } else if (mode && mode.startsWith('Attach:')) {
+        serverHeader.style.display = '';
+        if (btnAttach) btnAttach.style.display = 'none';
+        if (btnDetach) btnDetach.style.display = 'inline-block';
+    } else {
+        serverHeader.style.display = '';
+        if (btnAttach) btnAttach.style.display = 'inline-block';
+        if (btnDetach) btnDetach.style.display = 'none';
+    }
+}
 
 export async function initAttachDetachButtons() {
     try {
@@ -299,14 +503,12 @@ export async function initAttachDetachButtons() {
             return;
         }
         const data = await resp.json();
-        const btnAttach = document.getElementById('btn-attach');
-        const btnDetach = document.getElementById('btn-detach');
-        if (data && data.mode && data.mode.startsWith('Attach:') && btnAttach && btnDetach) {
-            btnAttach.style.display = 'none';
-            btnDetach.style.display = 'inline-block';
-        } else if (btnAttach && btnDetach) {
-            btnAttach.style.display = 'inline-block';
-            btnDetach.style.display = 'none';
+        setHeaderMode(data?.mode ?? null);
+        // If a session is already running, restore the monitor view instead of
+        // leaving the user stranded on the welcome screen after a hard refresh.
+        if (data?.status === 'Running' && setupViewState.view === 'setup') {
+            switchView('monitor');
+            showTunePanel();
         }
     } catch (err) {
         console.error('Failed to initialize attach/detach buttons:', err);
@@ -324,6 +526,12 @@ export function initAttachDetach() {
     const setupAttach = document.getElementById('setup-attach-btn');
     if (setupAttach) setupAttach.addEventListener('click', doAttachFromSetup);
 
+    // Setup wizard button — opens the spawn wizard overlay from the welcome screen
+    const setupWizardBtn = document.getElementById('setup-spawn-wizard-btn');
+    if (setupWizardBtn) setupWizardBtn.addEventListener('click', () => {
+        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+    });
+
     const setupStart = document.getElementById('setup-start-btn');
     if (setupStart) setupStart.addEventListener('click', doStartFromSetup);
 
@@ -340,17 +548,22 @@ export function initAttachDetach() {
     const btnStop = document.getElementById('btn-stop');
     if (btnStop) btnStop.addEventListener('click', doStop);
 
-    // Bind logs empty state button
+    // Bind Switch Model button
+    const btnSwitchModel = document.getElementById('btn-switch-model');
+    if (btnSwitchModel) btnSwitchModel.addEventListener('click', () => {
+        import('./models.js').then(({ openModelsModal }) => openModelsModal());
+    });
+
+    // Bind control bar spawn button — opens wizard from monitor view
+    const btnControlSpawn = document.getElementById('btn-control-spawn');
+    if (btnControlSpawn) btnControlSpawn.addEventListener('click', () => {
+        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+    });
+
+    // Bind logs empty state button — opens wizard
     const btnSpawnFromLogs = document.getElementById('btn-spawn-server');
     if (btnSpawnFromLogs) btnSpawnFromLogs.addEventListener('click', () => {
-        // Copy preset from setup view to monitor view (same pattern as doStartFromSetup)
-        const setupSelect = document.getElementById('setup-preset-select');
-        const monitorSelect = document.getElementById('preset-select');
-        if (setupSelect && monitorSelect) {
-            monitorSelect.value = setupSelect.value;
-        }
-        showConnectingState();
-        doStart();
+        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
     });
 
     // Initialize button states

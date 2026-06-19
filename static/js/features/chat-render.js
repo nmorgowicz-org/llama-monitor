@@ -2,7 +2,7 @@
 // Rendering functions for chat tabs, messages, compaction markers, and actions.
 // Calls rendering functions via window.* to avoid circular imports.
 
-import { chat, lastLlamaMetrics, settingsState } from '../core/app-state.js';
+import { chat, lastLlamaMetrics, contextCapacityTokens, settingsState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import {
     activeChatTab,
@@ -777,12 +777,12 @@ function buildMessageElement(msg, idx, allMessages) {
         }
         const cumTotal = cumInput + cumOutput;
         if (cumTotal > 0) parts.push(`R${formatTokenCount(cumTotal)}`);
-        const capacity = lastLlamaMetrics?.context_capacity_tokens || 0;
+        const capacity = contextCapacityTokens || lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
         // ctx% = (cumulative output tokens up to this message + this message's input) / capacity.
         // KV cache means input_tokens is incremental; output tokens accumulate as the actual context content.
         const ctxTokens = cumOutput + (msg.input_tokens || 0);
         const ctxPct = capacity > 0 && ctxTokens > 0 ? Math.min(100, Math.round((ctxTokens / capacity) * 100)) : 0;
-        if (ctxPct > 0) parts.push(`${ctxPct}% ctx`);
+        if (ctxPct > 0) parts.push(`${ctxPct}% ctx · ${formatTokenCount(capacity)}`);
         const modelName = msg.model_name || lastLlamaMetrics?.model_name || '';
         if (modelName) parts.push(modelName);
         if (parts.length > 0) {
@@ -1067,12 +1067,10 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
         const totalInput = tab ? (tab.total_input_tokens || 0) : inp;
         const totalOutput = tab ? (tab.total_output_tokens || 0) : out;
         const total = totalInput + totalOutput;
-        const capacity = lastLlamaMetrics?.context_capacity_tokens || 0;
-        // ctx% = (all generated output tokens in this chat + current request's input tokens) / capacity.
-        // llama.cpp KV cache means each request only sends incremental new tokens, so summing
-        // input_tokens alone overcounts. Summing all output tokens gives the true accumulated
-        // context content, and adding this request's input covers the new prompt tokens.
-        const ctxTokens = totalOutput + inp;
+        const capacity = contextCapacityTokens || lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
+        // ctx% = (cumulative input + cumulative output) / capacity.
+        // total_input_tokens and total_output_tokens are running tab-level sums updated each turn.
+        const ctxTokens = total;
         const ctxPct = capacity > 0 && ctxTokens > 0 ? Math.min(100, Math.round((ctxTokens / capacity) * 100)) : 0;
 
         if (tab) tab.last_ctx_pct = ctxPct;
@@ -1081,7 +1079,7 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
         if (inp > 0) parts.push(`↓${formatTokenCount(inp)}`);
         if (out > 0) parts.push(`↑${formatTokenCount(out)}`);
         if (total > 0) parts.push(`R${formatTokenCount(total)}`);
-        if (ctxPct > 0) parts.push(`${ctxPct}% ctx`);
+        if (ctxPct > 0) parts.push(`${ctxPct}% ctx · ${formatTokenCount(capacity)}`);
         if (modelName) parts.push(modelName);
 
         const metaEl = footer.querySelector('.chat-msg-meta-model');

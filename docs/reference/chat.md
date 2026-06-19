@@ -35,6 +35,14 @@ The left conversation sidebar is the main organizer for chat sessions.
 - **Title filter** — The inline filter narrows the sidebar list by conversation names and visible persona labels only
 - **Message search entry point** — A dedicated `Search Messages` button sits under the title filter so full-text search is visible without hunting for a header icon
 - **Context menu** — Rename, pin/unpin, export JSON, export Markdown, duplicate, and delete are available from the `...` menu
+- **Multi-select and bulk actions** — Hovering or selecting a conversation reveals a checkbox:
+  - Left-click: selects only that conversation (clears others)
+  - Ctrl/Cmd+click: toggles that conversation without clearing others
+  - Checkboxes: toggle individual selection without changing the active tab
+  - While one or more conversations are selected, the sidebar shows a bulk toolbar with:
+    - **Delete** — deletes all selected conversations (with undo toast)
+    - **Archive** — archives all selected conversations
+    - **Clear** — clears the current selection
 
 ![Conversation Context Menu](../screenshots/chat-context-menu.png)
 
@@ -51,6 +59,18 @@ The sidebar's `Search Messages` button opens a larger flyout beside the conversa
 - **Collapse-safe** — If the sidebar was collapsed before search, closing search restores that state
 - **Jump to match** — Clicking a result switches to the matching tab, scrolls to the stored message row, and briefly highlights it
 - **Open via shortcut** — `Ctrl+Shift+F` opens the search flyout
+
+## Appearance and Chat Preferences
+
+Several appearance and chat behaviors are configurable via Settings and are applied globally (not per-tab).
+
+- **Theme and palette** — Switch between dark, light, or system color mode and choose one of the accent palettes. The selection applies across dashboard cards, chat chrome, sparklines, charts, and modal surfaces.
+- **Chat styles** — Visual styles for the chat view (e.g., standard, compact, bubbly, paper, terminal). Changes apply immediately.
+- **Timestamps** — Controls how message timestamps are shown: off, hover, or always.
+- **Message width** — Adjusts the horizontal width of the chat message area.
+- **Chat date format** — Controls how dates are displayed (e.g., `MM/DD/YY`, `DD/MM/YY`, ISO). This setting is synced via `/api/settings`.
+- **Enter to send** — Toggle whether Enter alone sends a message or if Shift+Enter / Ctrl+Enter is required. Synced via `/api/settings`.
+- **Context card view** — Controls how the context card is rendered (e.g., gauge or compact).
 
 ## Messaging
 
@@ -234,7 +254,7 @@ Each assistant message footer shows:
 - `↓N` — prompt tokens used for that request
 - `↑N` — tokens generated in that reply
 - `RN` — running total of all tokens in the conversation
-- `N% ctx` — estimated context-usage percentage at that point
+- `N%` — estimated context-usage percentage at that point
 - Model name (if known)
 
 These values are derived from the live llama.cpp metrics and the token counts reported per message.
@@ -274,6 +294,8 @@ Enter-to-send is stored in shared settings. When disabled, `Enter` inserts a new
 ## History Q&A
 
 The History Q&A panel lets you ask natural language questions about an active conversation without disturbing the live chat context.
+
+![History Q&A Panel](../screenshots/chat-history-qa-panel.png)
 
 ### Opening the Panel
 
@@ -515,7 +537,7 @@ Explicit mode is a three-level content filter layered on top of the active perso
 | Format | Behavior |
 |--------|----------|
 | **Markdown** | Appends parsed user/assistant blocks to the active tab with fresh import timestamps |
-| **JSON** | Creates a new tab from the first array element in the file |
+| **JSON** | Creates a new conversation from the first array element in the file |
 
 ### Reasoning / Thinking Content
 
@@ -523,7 +545,8 @@ Thinking blocks are currently a live-session UI feature, not a durable storage f
 
 - Assistant `thinking_content` can appear in the browser while a reply streams
 - JSON export can include `thinking_content` if it is still present in the in-memory tab object
-- The current SQLite tab/message schema does not store `thinking_content`, so those blocks are not restored after a reload from `chat.db`
+- By default, the app does not restore `thinking_content` from `chat.db`
+- **Settings → Chat → Saved Thinking History** enables opt-in persistence and restore for users who want durable reasoning traces in chat history
 
 ## Guided-Generation Settings Ownership
 

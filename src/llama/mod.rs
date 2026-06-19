@@ -1,3 +1,10 @@
+pub mod batch_import;
+pub mod bench_runner;
+pub mod gguf_meta;
+pub mod llama_cpp_downloader;
 pub mod metrics;
+pub mod model_defaults;
 pub mod poller;
 pub mod server;
+pub mod spawn_wizard;
+pub mod vram_estimator;

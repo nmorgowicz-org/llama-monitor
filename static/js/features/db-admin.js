@@ -4,11 +4,15 @@
 const dbAdminLog = [];
 let dbAdminOverlay = null;
 let dbAdminToken = null;
+let dbStatsInterval = null;
+let dbAdminInitializedData = false;
 
 async function ensureDbAdminToken() {
     if (dbAdminToken) return;
     try {
-        const res = await fetch('/api/db/admin-token');
+        const res = await fetch('/api/db/admin-token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         if (res.ok) {
             const data = await res.json();
             if (data.token) dbAdminToken = data.token;
@@ -22,12 +26,13 @@ export function initDbAdmin() {
     dbAdminOverlay = document.getElementById('db-admin-modal');
     if (!dbAdminOverlay) return;
 
-    // Load admin token and initial stats
-    ensureDbAdminToken();
-    loadDbStats();
-
     // Close handlers
     document.getElementById('db-admin-modal-close')?.addEventListener('click', closeDbAdminModal);
+
+    // Open from settings Chat tab
+    document.getElementById('settings-open-db-admin-btn')?.addEventListener('click', () => {
+        openDbAdminModal();
+    });
     dbAdminOverlay?.addEventListener('click', (e) => {
         if (e.target === dbAdminOverlay) closeDbAdminModal();
     });
@@ -93,12 +98,34 @@ export function initDbAdmin() {
         }
     });
 
-    // Auto-refresh stats every 30 seconds
-    setInterval(loadDbStats, 30000);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopDbStatsPolling();
+        } else if (dbAdminOverlay?.classList.contains('active')) {
+            startDbStatsPolling();
+            loadDbStats();
+        }
+    });
+}
+
+function openDbAdminModal() {
+    if (!dbAdminOverlay) return;
+    dbAdminOverlay.classList.add('active');
+
+    if (!dbAdminInitializedData) {
+        dbAdminInitializedData = true;
+        ensureDbAdminToken();
+    }
+
+    loadDbStats();
+    loadBackups();
+    loadIndexes();
+    startDbStatsPolling();
 }
 
 function closeDbAdminModal() {
     if (!dbAdminOverlay) return;
+    stopDbStatsPolling();
     const modal = dbAdminOverlay.querySelector('.db-admin-modal');
     if (modal) {
         modal.classList.add('closing');
@@ -109,6 +136,20 @@ function closeDbAdminModal() {
     } else {
         dbAdminOverlay.classList.remove('active');
     }
+}
+
+function startDbStatsPolling() {
+    if (dbStatsInterval || document.hidden) return;
+    dbStatsInterval = setInterval(() => {
+        if (!dbAdminOverlay?.classList.contains('active')) return;
+        loadDbStats();
+    }, 30000);
+}
+
+function stopDbStatsPolling() {
+    if (!dbStatsInterval) return;
+    clearInterval(dbStatsInterval);
+    dbStatsInterval = null;
 }
 
 function switchTab(tabName) {
@@ -149,28 +190,39 @@ async function loadDbStats() {
         const stats = await statsRes.json();
         const integrity = await integrityRes.json();
 
-        // Update stats display
-        document.getElementById('db-stat-tabs').textContent = stats.tab_count || '-';
-        document.getElementById('db-stat-messages').textContent = stats.message_count || '-';
-        document.getElementById('db-stat-size').textContent = formatBytes(stats.file_size_bytes || 0);
-        document.getElementById('db-stat-fts').textContent = stats.fts_index_count || '-';
+        const tabCount = stats.tab_count ?? '-';
+        const msgCount = stats.message_count ?? '-';
+        const sizeStr = formatBytes(stats.file_size_bytes || 0);
+        const ftsCount = stats.fts_index_count ?? '-';
 
-        // Update status indicator
+        // Update modal stats
+        document.getElementById('db-stat-tabs').textContent = tabCount;
+        document.getElementById('db-stat-messages').textContent = msgCount;
+        document.getElementById('db-stat-size').textContent = sizeStr;
+        document.getElementById('db-stat-fts').textContent = ftsCount;
+
+        // Update inline settings card stats
+        const sEl = (id) => document.getElementById(id);
+        if (sEl('settings-db-stat-tabs')) sEl('settings-db-stat-tabs').textContent = tabCount;
+        if (sEl('settings-db-stat-messages')) sEl('settings-db-stat-messages').textContent = msgCount;
+        if (sEl('settings-db-stat-size')) sEl('settings-db-stat-size').textContent = sizeStr;
+        if (sEl('settings-db-stat-fts')) sEl('settings-db-stat-fts').textContent = ftsCount;
+
+        // Update status indicator (modal + settings card)
+        const statusLabel = integrity.status === 'healthy' ? 'Healthy'
+            : integrity.status === 'warning' ? 'Issues Detected' : 'Errors Found';
+        const statusClass = integrity.status === 'healthy' ? 'db-status-dot healthy'
+            : integrity.status === 'warning' ? 'db-status-dot warning' : 'db-status-dot error';
+
         const dot = document.getElementById('db-status-dot');
         const text = document.getElementById('db-status-text');
+        if (dot) dot.className = statusClass;
+        if (text) text.textContent = statusLabel;
 
-        if (dot && text) {
-            if (integrity.status === 'healthy') {
-                dot.className = 'db-status-dot healthy';
-                text.textContent = 'Healthy';
-            } else if (integrity.status === 'warning') {
-                dot.className = 'db-status-dot warning';
-                text.textContent = 'Issues Detected';
-            } else {
-                dot.className = 'db-status-dot error';
-                text.textContent = 'Errors Found';
-            }
-        }
+        const sDot = document.getElementById('settings-db-status-dot');
+        const sText = document.getElementById('settings-db-status-text');
+        if (sDot) sDot.className = statusClass;
+        if (sText) sText.textContent = statusLabel;
     } catch (error) {
         console.error('[db-admin] Failed to load stats:', error);
         addLogEntry('error', 'Failed to load database statistics');

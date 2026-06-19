@@ -1,8 +1,20 @@
 /**
  * Consolidated screenshot and GIF capture harness for llama-monitor.
  *
+ * THIS SCRIPT MUST ONLY BE RUN SEQUENTIALLY.
+ * - Do not run multiple scenarios in parallel (no background tasks, no && chains, no &).
+ * - Each scenario launches its own llama-monitor instance, uses its own temp config,
+ *   and may attach to the remote llama-server. Running in parallel causes port conflicts,
+ *   attach-timeouts, and race conditions in the capture harness.
+ *
  * This is the single entrypoint for repo-owned visual capture automation.
  * Prefer adding new scenarios here instead of creating new one-off scripts.
+ *
+ * Output directories:
+ *   docs/screenshots/artifacts/  — ALL capture output lands here (auto-created).
+ *   docs/screenshots/            — ONLY files referenced by README / docs live here.
+ *                                  Do NOT copy from artifacts/ manually; promote
+ *                                  individual files by hand after reviewing them.
  *
  * Quick examples:
  *   node tests/ui/capture.mjs --list-scenarios
@@ -51,6 +63,10 @@ const SCREENSHOT_TAB_PREFIX = '[screenshot]';
 
 const DEFAULT_VIEWPORT = { width: 1440, height: 900, deviceScaleFactor: 1 };
 const DEFAULT_PORT = parseInt(process.env.SCREENSHOT_PORT || '8892', 10);
+// Set RUNNING_PORT to connect to an already-running llama-monitor (e.g. your production instance
+// with a remote agent connected). When set, no binary is spawned and no temp config is seeded.
+// Example: RUNNING_PORT=8080 node tests/ui/capture.mjs --scenario dashboard
+const RUNNING_PORT = process.env.RUNNING_PORT ? parseInt(process.env.RUNNING_PORT, 10) : null;
 const REMOTE_SERVER = process.env.REMOTE_SERVER || 'http://192.168.2.16:8001';
 const BINARY_PATH = join(ROOT_DIR, 'target/release/llama-monitor');
 const CAPTURE_FORM_AUTH = process.env.SCREENSHOT_FORM_AUTH || 'admin:secret123';
@@ -107,12 +123,17 @@ function printUsage() {
 
 Scenarios:
   Core
-    welcome          Welcome screen and auth shell (no attach required)
+    welcome          Welcome screen, auth shell, and setup wizard button (no attach required)
     chat             Chat, telemetry, logs
 
   Chat Features
     guided-gen       Suggestions, quick guide, director, surprise, explicit mode
     sidebar          Sidebar, FTS search flyout, context menu, title filter
+    chat-history-qa  History Q&A panel (ask questions about conversation)
+
+  Models and Presets
+    models-v2        Models modal: discovery summary, third-party scan, HF download panel
+    preset-editor    Preset editor: model/context, GPU, and advanced tabs
 
   Configuration
     settings         Settings modal, preferences, persona, models, shortcuts
@@ -121,10 +142,24 @@ Scenarios:
     panels           Chat config panels (behavior, model, style, debug)
     dashboard        Server tab, GPU section
 
+  Setup wizard
+     spawn-wizard           Steps 1–6: profiles, model, VRAM, parameters, summary, start/close
+     spawn-wizard-gif       Animated GIF walking through all setup wizard steps (1→2→3→4→5→6)
+     spawn-wizard-hf-download  HF download panel: idle options and simulated progress
+
+   Performance & Updates
+    tune-panel          Performance benchmark dropdown (pill + panel) on server tab
+    benchmark-results   Runs a real benchmark and captures the results view
+    llama-updater       Llama-server binary update pill and version modal with release notes
+
   Validation
     sparkline        Sparkline validation screenshots
     gifs             Inference/GPU animated GIF capture
     smoke            Startup smoke test
+
+  Appearance
+    appearance-palette Settings Appearance palette stills plus light-mode dashboard
+    navbar           Nav bar close-ups: idle-dark, low-power active, idle-light (requires --close-up)
 
 Options:
   --gpu-only         For gifs scenario, capture only GPU/system animation
@@ -140,16 +175,48 @@ Examples:
   SCREENSHOT_PORT=8893 node tests/ui/capture.mjs --scenario sidebar
   SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
   SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario settings --close-up
+  SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario spawn-wizard --no-attach
+  SCREENSHOT_PORT=8897 node tests/ui/capture.mjs --scenario spawn-wizard-gif --no-attach
+  SCREENSHOT_PORT=8900 node tests/ui/capture.mjs --scenario tune-panel
+  SCREENSHOT_PORT=8901 node tests/ui/capture.mjs --scenario llama-updater
+  SCREENSHOT_PORT=8902 node tests/ui/capture.mjs --scenario chat-history-qa
+  RUNNING_PORT=8080 node tests/ui/capture.mjs --scenario dashboard
+  RUNNING_PORT=8080 node tests/ui/capture.mjs --scenario gifs --gpu-only
+
+Note: RUNNING_PORT connects to an already-running llama-monitor (e.g. your production instance
+with a remote agent reporting GPU data). No binary is spawned; no temp config is seeded.
 `);
 }
 
 function seedConfig() {
-    const filesToCopy = ['ui-settings.json', 'presets.json', 'gpu-env.json'];
+    // Copy encryption-key first so encrypted values in ui-settings.json (e.g. remote_agent_token)
+    // can be decrypted — without it the ephemeral instance generates a new key and auth fails.
+    // Copy ssh-known-hosts.json so the agent SSH host key check passes (prevents enrollment block).
+    // Copy hf-token so HF API searches use auth (higher rate limits, better trending results).
+    const filesToCopy = ['encryption-key', 'ssh-known-hosts.json', 'hf-token', 'ui-settings.json', 'presets.json', 'gpu-env.json', 'community-picks.json'];
     for (const filename of filesToCopy) {
         const source = join(REAL_APP_CONFIG_DIR, filename);
         const destination = join(TEMP_APP_CONFIG_DIR, filename);
         if (fs.existsSync(source)) {
             fs.copyFileSync(source, destination);
+        }
+    }
+
+    // Copy the certs/ directory (including remote-cas/) so the remote agent https_client starts
+    // with the correct trust anchors. Without this it's built once at startup without the CA cert
+    // and the mTLS agent connection always fails in that session.
+    const sourceCerts = join(REAL_APP_CONFIG_DIR, 'certs');
+    const destCerts = join(TEMP_APP_CONFIG_DIR, 'certs');
+    if (fs.existsSync(sourceCerts)) {
+        fs.cpSync(sourceCerts, destCerts, { recursive: true });
+    }
+
+    // If no community-picks.json exists in real config, use the bundled example fixture.
+    const cpDest = join(TEMP_APP_CONFIG_DIR, 'community-picks.json');
+    if (!fs.existsSync(cpDest)) {
+        const cpExample = join(ROOT_DIR, 'docs/reference/community-picks-example.json');
+        if (fs.existsSync(cpExample)) {
+            fs.copyFileSync(cpExample, cpDest);
         }
     }
 }
@@ -194,6 +261,10 @@ async function spawnLlamaMonitor(port, extraArgs = []) {
             ...process.env,
             HOME: TEMP_HOME,
             XDG_CONFIG_HOME: TEMP_CONFIG_HOME,
+            // Suppress llama-monitor self-update checks during capture so the
+            // GitHub rate limit is not consumed before the llama-updater scenario
+            // needs it to fetch real llama.cpp release notes.
+            LLAMA_SKIP_RELEASE_CHECK: '1',
         },
     });
 
@@ -307,16 +378,73 @@ async function attachToServer(page, remoteServer = REMOTE_SERVER) {
         endpoint => document.getElementById('endpoint-url')?.textContent?.includes(endpoint),
         { timeout: 5000 }
     ).catch(() => {
-        console.log('[CAPTURE] Endpoint URL not confirmed in display (non-fatal)');
+        console.log('[CAPTURE] Server URL not confirmed in display (non-fatal)');
     });
 
     await sleep(1500);
     console.log('[CAPTURE] Attach successful.');
 }
 
-async function gotoApp(page, baseUrl) {
-    await page.goto(baseUrl, { waitUntil: 'networkidle0' });
+async function gotoApp(page, baseUrl, waitUntil = 'networkidle0') {
+    await page.goto(baseUrl, { waitUntil });
     await sleep(1500);
+}
+
+async function loadAppDocument(page, baseUrl) {
+    try {
+        await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+    } catch (error) {
+        console.log('[CAPTURE] app navigation fallback:', error.message);
+    }
+
+    const hasAppShell = await page.$('#page-server') !== null;
+    if (hasAppShell) {
+        await sleep(1500);
+        return;
+    }
+
+    const response = await fetch(baseUrl);
+    if (!response.ok) {
+        throw new Error(`Unable to fetch app document from ${baseUrl}: ${response.status}`);
+    }
+    let html = await response.text();
+    html = html.replace('<head>', `<head><base href="${baseUrl}/">`);
+    html = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(error => {
+        console.log('[CAPTURE] setContent fallback continuing:', error.message);
+    });
+    await page.waitForSelector('#page-server', { timeout: 10000 });
+    await page.evaluate(() => {
+        document.getElementById('auth-shell')?.classList.add('hidden');
+        document.body.classList.remove('auth-required');
+    });
+    await sleep(1500);
+}
+
+async function openAppearancePaneForCapture(page) {
+    await page.evaluate(() => {
+        if (typeof window.openSettingsModal === 'function') {
+            window.openSettingsModal();
+            return;
+        }
+        const modal = document.getElementById('settings-modal');
+        if (modal) {
+            modal.classList.add('open');
+            modal.removeAttribute('inert');
+            modal.setAttribute('aria-hidden', 'false');
+        }
+    });
+    await page.waitForSelector('#settings-modal.open', { timeout: 5000 });
+    await page.evaluate(() => {
+        document.querySelectorAll('.settings-tab').forEach(tab => {
+            const active = tab.dataset.tab === 'appearance';
+            tab.classList.toggle('active', active);
+            tab.setAttribute('aria-selected', String(active));
+        });
+        document.querySelectorAll('.settings-pane').forEach(pane => {
+            pane.classList.toggle('active', pane.id === 'settings-appearance');
+        });
+    });
 }
 
 async function captureAuthShell(port, viewport = DEFAULT_VIEWPORT) {
@@ -777,7 +905,7 @@ function framesToGif(prefix, output, fps) {
         '-y',
         '-framerate', String(fps),
         '-i', join(FRAME_DIR, `${prefix}_%03d.png`),
-        '-vf', 'split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5',
+        '-vf', 'scale=900:-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5',
         output,
     ], { stdio: 'inherit' });
 }
@@ -847,7 +975,40 @@ async function enableGuidedGeneration(page) {
 async function scenarioWelcome(ctx, options) {
     const { page, baseUrl } = ctx;
     await gotoApp(page, baseUrl);
+    // Shot 1: the arrival screen with both cards visible.
     await captureShot(page, 'welcome-welcome.png', { fullPage: true });
+
+    // Shot 2: Open setup wizard and capture step 0 so the
+    // two screenshots tell a clear before→after story.
+    const spawnBtn = await page.$('#setup-spawn-wizard-btn');
+    if (spawnBtn) {
+        try {
+            await spawnBtn.click();
+        } catch {
+            // Fallback click via DOM when Puppeteer thinks it’s not clickable.
+            await page.evaluate(() => {
+                (document.getElementById('setup-spawn-wizard-btn')
+                    || document.querySelector('#view-setup button:has-text("Setup wizard")'))
+                    ?.click();
+            });
+        }
+        await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 8000 }).catch(() => {
+            console.log('[CAPTURE] Wizard overlay did not open; falling back to welcome shot');
+        });
+        // Hide the binary prereq banner for a clean wizard shot.
+        await page.evaluate(() => {
+            const banner = document.getElementById('wizard-binary-prereq');
+            if (banner) banner.style.display = 'none';
+        });
+        await sleep(500);
+        await captureShot(page, 'welcome-spawn-wizard-btn.png', { fullPage: true });
+        // Close wizard before proceeding.
+        await page.keyboard.press('Escape');
+        await sleep(300);
+    } else {
+        console.log('[CAPTURE] #setup-spawn-wizard-btn not found; skipping wizard-open shot');
+    }
+
     const authPort = await findAvailablePort(DEFAULT_PORT + 1);
     await captureAuthShell(authPort, options.viewport);
 }
@@ -1035,9 +1196,13 @@ async function scenarioGuidedGen(ctx, options) {
     // Fresh chat to reduce context buildup
     await createFreshChat(page);
     await sleep(500);
-    // Use a short prompt to set context
+    // Use a short prompt to set context (best-effort; continue if server is slow)
     await sendChatPrompt(page, 'Brainstorm 3 product names for a CLI tool that monitors GPUs.');
-    await waitForChatComplete(page);
+    try {
+        await waitForChatComplete(page);
+    } catch (e) {
+        console.log(`[CAPTURE] guided-gen: chat complete timed out, continuing with UI captures... ${e.message}`);
+    }
     await sleep(2000);
 
     await page.evaluate(async () => {
@@ -1307,6 +1472,13 @@ async function scenarioSettings(ctx, options) {
         if (perfTab) {
             await perfTab.click();
             await sleep(500);
+            await page.evaluate(() => {
+                const hidden = document.getElementById('settings-sleep-mode-when-hidden');
+                const idle = document.getElementById('settings-sleep-mode-idle');
+                if (hidden) hidden.checked = true;
+                if (idle) idle.value = '600';
+            });
+            await sleep(100);
             await captureShot(page, 'settings-settings-performance.png', { fullPage: true });
             await captureCloseUp(page, '#settings-modal', 'settings-settings-performance.png', options);
         }
@@ -1323,27 +1495,6 @@ async function scenarioSettings(ctx, options) {
         await sleep(300);
     } catch (e) {
         console.log('[CAPTURE] Settings modal failed, skipping...');
-    }
-
-    // User preferences
-    const userBtn = await page.$('#nav-user-btn');
-    if (userBtn) {
-        try {
-            await userBtn.click();
-            await sleep(300);
-            const prefsBtn = await page.$('#user-menu-preferences');
-            if (prefsBtn) {
-                await prefsBtn.click();
-                await page.waitForSelector('#user-preferences-modal.open', { timeout: 5000 });
-                await sleep(500);
-                await captureShot(page, 'settings-user-preferences.png', { fullPage: true });
-                await captureCloseUp(page, '#user-preferences-modal', 'settings-user-preferences.png', options);
-                await page.keyboard.press('Escape');
-                await sleep(300);
-            }
-        } catch (e) {
-            console.log('[CAPTURE] User preferences modal failed, skipping...');
-        }
     }
 
     // Persona modal
@@ -1391,20 +1542,6 @@ async function scenarioSettings(ctx, options) {
         }
     }
 
-    // Models modal
-    try {
-        await page.evaluate(() => { window.openModelsModal?.(); });
-        await page.waitForSelector('#models-modal.open', { timeout: 5000 });
-        await sleep(700);
-        await captureShot(page, 'panels-models-modal.png', { fullPage: true });
-        await captureCloseUp(page, '#models-modal', 'panels-models-modal.png', options);
-        await page.click('#models-modal-close');
-        await page.waitForSelector('#models-modal.open', { hidden: true, timeout: 5000 });
-        await sleep(300);
-    } catch (e) {
-        console.log('[CAPTURE] Models modal failed, skipping...');
-    }
-
     // Keyboard shortcuts via Ctrl+/
     try {
         await page.keyboard.down('Control');
@@ -1424,6 +1561,116 @@ async function scenarioSettings(ctx, options) {
 
 // ── Chat Panels ─────────────────────────────────────────────────────────────────
 // Behavior, model params, style panels, debug prompt.
+
+// ── Models modal ─────────────────────────────────────────────────────────────
+// Seeds fake GGUF files so the models modal has real cards to show.
+
+// scenarioModels is called with a pre-seeded models dir passed via --models-dir
+// CLI flag. The runCli() path seeds fake .gguf files and passes the dir when
+// spawning the server — see the 'models' entry in SCENARIOS for the wrapper.
+async function scenarioModels(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    if (!options.noAttach) {
+        try { await attachToServer(page); } catch {}
+    }
+    // Open models modal via the global helper
+    await page.evaluate(() => window.openModelsModal?.());
+    await page.waitForSelector('#models-modal.open', { timeout: 8000 });
+    await sleep(1500);
+    await captureShot(page, 'panels-models-modal.png', { fullPage: true });
+}
+
+async function scenarioModelsV2(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    if (!options.noAttach) {
+        try { await attachToServer(page); } catch {}
+    }
+
+    // 1. Open models modal and capture initial discovery view.
+    await page.evaluate(() => window.openModelsModal?.());
+    await page.waitForSelector('#models-modal.open', { timeout: 8000 });
+    await sleep(1500);
+    await captureShot(page, 'models-discovery-overview.png', { fullPage: true });
+
+    // 2. Switch to Download tab and simulate a download in progress.
+    await page.evaluate(() => {
+        const downloadTab = document.querySelector('.mm-tab[data-tab="download"]');
+        if (downloadTab) downloadTab.click();
+    });
+    await sleep(800);
+
+    // Simulate a download in progress
+    await page.evaluate(() => {
+        const panel = document.getElementById('mm-hf-download-panel');
+        const idle = document.getElementById('mm-hf-dlp-idle');
+        const progress = document.getElementById('mm-hf-dlp-progress');
+        const fileName = document.getElementById('mm-hf-dlp-file-name');
+        const destPath = document.getElementById('mm-hf-dlp-dest-path');
+        const progressFile = document.getElementById('mm-hf-dlp-progress-file');
+        const progressBar = document.getElementById('mm-hf-dlp-bar');
+        const progressPct = document.getElementById('mm-hf-dlp-progress-pct');
+        const stats = document.getElementById('mm-hf-dlp-stats');
+
+        if (panel) panel.style.display = 'block';
+        if (panel) panel.style.maxHeight = 'none';
+        if (idle) idle.style.display = 'none';
+        if (progress) progress.style.display = 'block';
+        if (fileName) fileName.textContent = 'llama-3.1-8b-instruct-Q4_K_M.gguf';
+        if (destPath) destPath.textContent = '~/.config/llama-monitor/models/';
+        if (progressFile) progressFile.textContent = 'llama-3.1-8b-instruct-Q4_K_M.gguf';
+        if (progressBar) progressBar.style.width = '65%';
+        if (progressPct) progressPct.textContent = '65%';
+        if (stats) stats.textContent = '24.7 MB / 37.9 MB · 2.4 MB/s';
+    });
+    await sleep(800);
+    await captureShot(page, 'models-hf-download-panel.png', { fullPage: true });
+}
+
+async function scenarioPresetEditor(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    if (!options.noAttach) {
+        try { await attachToServer(page); } catch {}
+    }
+
+    // 1. Open preset editor via "New"
+    const newBtn = await page.$('#preset-new-btn');
+    if (!newBtn) {
+        console.log('[CAPTURE] #preset-new-btn not found; skipping preset-editor scenario');
+        return;
+    }
+    await newBtn.click();
+    await page.waitForSelector('#preset-modal', { timeout: 6000 });
+    await sleep(800);
+
+    // Capture Model+Context section (default active)
+    await captureShot(page, 'preset-editor-model-tab.png', { fullPage: true });
+
+    // 2. Capture GPU section
+    await page.evaluate(() => {
+        const gpuNav = document.querySelector('#preset-modal .preset-editor-nav [data-section="gpu"]');
+        if (gpuNav) gpuNav.click();
+    });
+    await sleep(500);
+    await captureShot(page, 'preset-editor-gpu-tab.png', { fullPage: true });
+
+    // 3. Capture Advanced section
+    await page.evaluate(() => {
+        const advNav = document.querySelector('#preset-modal .preset-editor-nav [data-section="advanced"]');
+        if (advNav) advNav.click();
+    });
+    await sleep(500);
+    await captureShot(page, 'preset-editor-advanced-tab.png', { fullPage: true });
+
+    // 4. Close preset modal
+    await page.evaluate(() => {
+        const close = document.getElementById('preset-modal-close');
+        if (close) close.click();
+    });
+    await sleep(300);
+}
 
 async function scenarioPanels(ctx, options) {
     const { page, baseUrl } = ctx;
@@ -1474,26 +1721,46 @@ async function scenarioPanels(ctx, options) {
     await waitForChatComplete(page);
     await sleep(1500);
 
-    const debugDropdownBtn = await page.$('#btn-debug-dropdown');
-    if (debugDropdownBtn) {
+    const debugDropdownExists = await page.evaluate(() =>
+        !!document.getElementById('btn-debug-dropdown')
+    );
+    if (debugDropdownExists) {
         try {
-            await debugDropdownBtn.click();
+            // Use evaluate to avoid Puppeteer click issues on dropdown button
+            await page.evaluate(() => {
+                const btn = document.getElementById('btn-debug-dropdown');
+                if (btn) btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            });
             await page.waitForFunction(() => {
                 const menu = document.getElementById('debug-dropdown-menu');
                 return !!menu && menu.classList.contains('open');
             }, { timeout: 5000 });
 
-            const debugBtn = await page.$('#btn-debug-prompt');
-            if (!debugBtn) {
-                throw new Error('Prompt Debug menu item not found after opening tools menu');
+            // Click the Prompt Debug menu item via evaluate
+            await page.evaluate(() => {
+                const btn = document.getElementById('btn-debug-prompt');
+                if (btn) btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+            });
+            await sleep(400);
+
+            // Wait for modal to open; accept either content or empty-state
+            await page.waitForFunction(() => {
+                const modal = document.getElementById('debug-prompt-modal');
+                return !!modal && modal.classList.contains('active');
+            }, { timeout: 5000 });
+
+            // Accept either: real debug content visible, or empty state visible
+            const hasContent = await page.evaluate(() => {
+                const content = document.getElementById('debug-content');
+                const empty = document.getElementById('debug-empty-state');
+                const hasReal = !!content && !content.classList.contains('hidden');
+                const hasEmpty = !!empty && !empty.classList.contains('hidden');
+                return hasReal || hasEmpty;
+            });
+            if (!hasContent) {
+                console.log('[CAPTURE] Debug modal open but no content/empty-state; treating as success anyway');
             }
 
-            await debugBtn.click();
-            await page.waitForSelector('#debug-prompt-modal.active', { timeout: 5000 });
-            await page.waitForFunction(() => {
-                const content = document.getElementById('debug-content');
-                return !!content && !content.classList.contains('hidden');
-            }, { timeout: 5000 });
             await sleep(500);
             await captureShot(page, 'panels-prompt-debug.png', { fullPage: true });
             await captureCloseUp(page, '#debug-prompt-modal', 'panels-prompt-debug.png', options);
@@ -1514,18 +1781,49 @@ async function scenarioDashboard(ctx, options) {
     await attachToServer(page);
 
     await switchTab(page, 'server');
-    await sleep(1000);
-    await captureShot(page, 'settings-server-tab.png', { fullPage: true });
+    // Wait for agent first poll (2s interval) + some render time.
+    await sleep(3500);
+    // Scroll to top, capture the control bar + inference section viewport.
     await page.evaluate(() => {
-        const gpu = document.getElementById('gpu-section') || document.getElementById('system-section');
-        gpu?.scrollIntoView({ behavior: 'instant', block: 'start' });
+        const pg = document.querySelector('.page.active');
+        if (pg) pg.scrollTop = 0;
     });
-    await sleep(500);
-    await captureShot(page, 'dashboard-gpu-section.png', { fullPage: true });
+    await sleep(300);
+    await captureShot(page, 'dashboard-performance-section.png');
+    await captureShot(page, 'settings-server-tab.png', { fullPage: true });
+
+    // Wait up to 6s for hardware data to arrive (remote agent dependent).
+    const gpuVisible = await page.evaluate(() => new Promise(resolve => {
+        const check = () => {
+            const gpu = document.getElementById('gpu-section');
+            const sys = document.getElementById('system-section');
+            if ((gpu && gpu.style.display !== 'none') || (sys && sys.style.display !== 'none')) {
+                resolve(true);
+            }
+        };
+        check();
+        const obs = new MutationObserver(check);
+        obs.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['style'] });
+        setTimeout(() => { obs.disconnect(); resolve(false); }, 6000);
+    }));
+
+    if (gpuVisible) {
+        await page.evaluate(() => {
+            const gpu = document.getElementById('gpu-section') || document.getElementById('system-section');
+            const page = gpu?.closest('.page') || document.querySelector('.page.active');
+            if (page) page.scrollTop = gpu.offsetTop - 8;
+        });
+        await sleep(600);
+    } else {
+        console.log('[CAPTURE] Hardware section not visible; capturing at current scroll position.');
+    }
+    await captureShot(page, 'dashboard-gpu-section.png');
 }
 
 // Validation pass for sparkline layouts and clipped section captures.
-async function scenarioSparkline(ctx) {
+// The individual SVG clip captures are only useful for debugging sparkline rendering;
+// require --close-up to generate them.
+async function scenarioSparkline(ctx, options) {
     const { page, baseUrl } = ctx;
     await gotoApp(page, baseUrl);
     await attachToServer(page);
@@ -1534,7 +1832,9 @@ async function scenarioSparkline(ctx) {
     await captureShot(page, 'sparkline-sparkline-validate-full.png', { fullPage: true });
     await captureElementScreenshot(page, '#gpu-section', 'sparkline-sparkline-validate-gpu-section.png', { padding: 24 });
     await captureElementScreenshot(page, '#system-section', 'sparkline-sparkline-validate-system-section.png', { padding: 24 });
-    await captureSparklineClips(page, 'svg.metric-sparkline, svg.hw-sparkline, svg.hw-metric-sparkline, svg.hw-clock-footer-spark');
+    if (options.closeUp) {
+        await captureSparklineClips(page, 'svg.metric-sparkline, svg.hw-sparkline, svg.hw-metric-sparkline, svg.hw-clock-footer-spark');
+    }
 }
 
 // Animated capture flow for inference and hardware metric GIFs.
@@ -1554,16 +1854,21 @@ async function scenarioGifs(ctx, options) {
         await sleep(1500);
         await captureFrames(page, 'inference', totalFrames, fps);
         await generationPromise;
-        framesToGif('inference', join(ARTIFACTS_DIR, 'inference-metrics.gif'), fps);
+        framesToGif('inference', join(ARTIFACTS_DIR, 'performance-metrics.gif'), fps);
         cleanupFrames();
     }
 
     if (!options.inferenceOnly) {
         console.log('[CAPTURE] Capturing GPU/system metrics GIF...');
         await switchTab(page, 'server');
+        // Wait for agent hardware data if we haven't already (gpuOnly path skips inference wait).
+        if (options.gpuOnly) await sleep(3500);
         await page.evaluate(() => {
             const target = document.getElementById('gpu-section') || document.getElementById('system-section');
-            target?.scrollIntoView({ behavior: 'instant', block: 'start' });
+            if (target) {
+                const pg = target.closest('.page') || document.querySelector('.page.active');
+                if (pg) pg.scrollTop = target.offsetTop - 8;
+            }
         });
         await sleep(1200);
         await captureFrames(page, 'gpu', totalFrames, fps);
@@ -2185,13 +2490,19 @@ async function scenarioFilebrowser(ctx, options) {
     try {
         await gotoApp(page, baseUrl);
 
-        // Open Settings modal
-        const settingsBtn = await page.$('#sidebar-btn-settings');
-        if (!settingsBtn) {
+        // Open Settings modal (use evaluate to avoid Puppeteer click failure)
+        const settingsBtnExists = await page.evaluate(() => {
+            const btn = document.getElementById('sidebar-btn-settings');
+            return !!btn;
+        });
+        if (!settingsBtnExists) {
             console.log('[CAPTURE] Settings button not found');
             return;
         }
-        await settingsBtn.click();
+        await page.evaluate(() => {
+            const btn = document.getElementById('sidebar-btn-settings');
+            if (btn) btn.click();
+        });
         await sleep(600);
 
         // Ensure Settings modal is visible
@@ -2202,21 +2513,24 @@ async function scenarioFilebrowser(ctx, options) {
         }
 
         // Switch to Advanced tab
-        const advancedTab = await page.$('.settings-tab[data-tab="advanced"]');
-        if (!advancedTab) {
-            console.log('[CAPTURE] Advanced tab not found');
-            return;
-        }
-        await advancedTab.click();
+        await page.evaluate(() => {
+            const tab = document.querySelector('.settings-tab[data-tab="advanced"]');
+            if (tab) tab.click();
+        });
         await sleep(600);
 
         // Open Config modal from Advanced tab
-        const openConfigBtn = await page.$('#settings-open-config-btn');
-        if (!openConfigBtn) {
+        const configBtnExists = await page.evaluate(() =>
+            !!document.getElementById('settings-open-config-btn')
+        );
+        if (!configBtnExists) {
             console.log('[CAPTURE] Open Config button not found');
             return;
         }
-        await openConfigBtn.click();
+        await page.evaluate(() => {
+            const btn = document.getElementById('settings-open-config-btn');
+            if (btn) btn.click();
+        });
         await sleep(800);
 
         // Ensure Config modal is visible
@@ -2293,6 +2607,278 @@ async function scenarioFilebrowser(ctx, options) {
     }
 }
 
+// ── Tune Panel ────────────────────────────────────────────────────────────────
+// Performance benchmark panel on the server tab.
+
+async function scenarioTunePanel(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    await attachToServer(page);
+
+    await switchTab(page, 'server');
+    await sleep(2000);
+
+    // Force show the benchmark pill and its parent group (workaround for display:none override).
+    await page.evaluate(() => {
+        const pill = document.getElementById('benchmark-pill');
+        const group = document.getElementById('inference-log-tail-group');
+        if (pill) pill.classList.add('show');
+        if (group) group.style.display = 'inline-flex';
+    });
+    await sleep(500);
+
+    // Click the pill to open the dropdown
+    await page.evaluate(() => {
+        const pill = document.getElementById('benchmark-pill');
+        if (pill) pill.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await sleep(800);
+
+    await captureShot(page, 'tune-panel-open.png', { fullPage: true });
+    await captureCloseUp(page, '#benchmark-dropdown-wrap', 'tune-panel-open.png', options);
+}
+
+// ── Benchmark Results ─────────────────────────────────────────────────────────
+// Runs a real benchmark via the tune panel and captures the results view.
+
+async function scenarioBenchmarkResults(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    await attachToServer(page);
+
+    await switchTab(page, 'server');
+    await sleep(2000);
+
+    // Force show the benchmark pill
+    await page.evaluate(() => {
+        const pill = document.getElementById('benchmark-pill');
+        const group = document.getElementById('inference-log-tail-group');
+        if (pill) pill.classList.add('show');
+        if (group) group.style.display = 'inline-flex';
+    });
+    await sleep(500);
+
+    // Open the dropdown
+    await page.evaluate(() => {
+        const pill = document.getElementById('benchmark-pill');
+        if (pill) pill.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await sleep(800);
+
+    // Click "Run" button inside the dropdown
+    const runBtn = await page.$('#tune-run-btn');
+    if (!runBtn) {
+        throw new Error('[CAPTURE] #tune-run-btn not found in benchmark dropdown');
+    }
+    await runBtn.click();
+
+    // Wait for the results view: #tune-results visible AND #tune-running gone
+    await page.waitForFunction(() => {
+        const results = document.getElementById('tune-results');
+        const running = document.getElementById('tune-running');
+        if (!results || !running) return false;
+        const rStyle = getComputedStyle(results);
+        const runStyle = getComputedStyle(running);
+        return (
+            rStyle.display !== 'none' &&
+            rStyle.visibility !== 'hidden' &&
+            runStyle.display === 'none'
+        );
+    }, { timeout: 90000 });
+
+    await sleep(2000);
+
+    // Capture full page then close-up of the dropdown with results
+    await captureShot(page, 'benchmark-results.png', { fullPage: true });
+    await captureCloseUp(page, '#benchmark-dropdown-wrap', 'benchmark-results.png', options);
+}
+
+// ── Llama Updater ─────────────────────────────────────────────────────────────
+// Llama-server binary update pill and version modal.
+
+async function scenarioLlamaUpdater(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    await attachToServer(page);
+
+    // Simulate an available llama.cpp binary update pill
+    await page.evaluate(() => {
+        const pill = document.getElementById('llama-pill');
+        const verSpan = document.getElementById('llama-pill-version');
+        if (pill && verSpan) {
+            verSpan.textContent = 'llama.cpp · ↑ b4620';
+            pill.classList.remove('llama-pill-idle');
+            pill.classList.add('llama-pill-update');
+            pill.style.display = 'flex';
+            pill.title = 'Update available: b4500 → b4620. Click to update.';
+        }
+    });
+    await sleep(600);
+    await captureShot(page, 'llama-updater-pill.png', { fullPage: true });
+
+    // Open the llama.cpp version modal — shows release list + notes panel
+    await page.evaluate(async () => {
+        const pill = document.getElementById('llama-pill');
+        if (pill) pill.click();
+    });
+    await page.waitForSelector('#llama-version-modal.open', { timeout: 8000 }).catch(() => {
+        console.warn('[CAPTURE] llama-version-modal did not open; may not have binary installed.');
+    });
+    // Wait for release list to populate (real GitHub API call)
+    await sleep(2000);
+
+    // Click on the second release row to show its notes (latest is auto-selected)
+    await page.evaluate(() => {
+        const rows = document.querySelectorAll('.llama-version-row');
+        if (rows.length > 1) {
+            rows[1].click();
+        }
+    });
+    await sleep(800);
+    await captureShot(page, 'llama-updater-version-modal.png', { fullPage: true });
+
+    // Close the modal so later captures aren't obscured
+    await page.evaluate(() => {
+        const closeBtn = document.getElementById('llama-version-modal-close');
+        if (closeBtn) closeBtn.click();
+    });
+    await sleep(300);
+}
+
+// ── Chat History Q&A Panel ────────────────────────────────────────────────────
+// Slide-in panel for asking questions about chat history.
+
+async function scenarioChatHistoryQA(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    await attachToServer(page);
+
+    await switchTab(page, 'chat');
+    await sleep(500);
+
+    // Create a chat with some content so the panel has context
+    await createFreshChat(page);
+    await page.evaluate(async () => {
+        const { chat } = await import('/js/core/app-state.js');
+        const { switchChatTab } = await import('/js/features/chat-state.js');
+        const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+        const tab = chat.tabs[chat.tabs.length - 1];
+        if (tab) {
+            tab.messages = [
+                { role: 'user', content: 'Start a detective story set in 1940s Chicago.' },
+                { role: 'assistant', content: 'The rain drummed against the window as Detective Malone stared at the case file. Another missing person, another dead end.' },
+                { role: 'user', content: 'Introduce a suspect with a hidden motive.' },
+                { role: 'assistant', content: 'Victor Crane stepped into the office, his trench coat dripping wet. He claimed he was looking for his sister, but Malone noticed the fear in his eyes.' },
+            ];
+            await switchChatTab(tab.id);
+            renderChatTabs();
+            renderChatMessages();
+        }
+    });
+    await sleep(600);
+
+    // Open the History Q&A panel by clicking its button
+    await page.evaluate(() => {
+        const btn = document.getElementById('chat-history-qa-btn');
+        if (btn) btn.click();
+    });
+    await page.waitForSelector('#chat-history-qa-panel.slide-panel-open', { timeout: 5000 }).catch(() => {
+        // Fallback: wait for panel to be visible via display/transform
+        page.waitForFunction(() => {
+            const panel = document.getElementById('chat-history-qa-panel');
+            if (!panel) return false;
+            const style = getComputedStyle(panel);
+            return style.display !== 'none' && (panel.classList.contains('slide-panel-open') || style.transform !== 'translateX(100%)');
+        }, { timeout: 5000 });
+    }).catch(() => {
+        console.log('[CAPTURE] History Q&A panel did not become visible; capturing anyway.');
+    });
+    await sleep(800);
+    await captureShot(page, 'chat-history-qa-panel.png', { fullPage: true });
+    await captureCloseUp(page, '#chat-history-qa-panel', 'chat-history-qa-panel.png', options);
+
+    // Close panel
+    await page.evaluate(() => {
+        const btn = document.getElementById('chqa-close-btn');
+        if (btn) btn.click();
+    });
+    await sleep(300);
+
+    await cleanupScreenshotTabs(page);
+}
+
+// ── Navbar: theme toggle and low-power pill ───────────────────────────────────
+// Captures the top nav bar in its key visual states:
+//   1. Connected / idle  — theme toggle visible, sleep pill with ambient amber
+//   2. Low-power active  — sleep pill fully lit
+//   3. Light theme       — theme toggle shows moon icon; pill is warm amber on light bg
+
+async function scenarioNavbar(ctx, options) {
+    if (!options.closeUp) {
+        console.log('[CAPTURE] navbar scenario gated to --close-up; skipping');
+        return;
+    }
+
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    if (!options.noAttach) {
+        try { await attachToServer(page); } catch (e) {
+            console.log('[CAPTURE] navbar: attach failed (non-fatal):', e.message);
+        }
+    }
+    await sleep(1500);
+
+    // 1. Connected / idle — navbar at rest (dark theme)
+    const navEl = await page.$('.top-nav-bar');
+    const navBox = await navEl.boundingBox();
+    await page.screenshot({
+        path: join(ARTIFACTS_DIR, 'navbar-idle-dark.png'),
+        clip: { x: 0, y: navBox.y, width: navBox.width, height: navBox.height },
+    });
+    console.log('[CAPTURE] Saved navbar-idle-dark.png');
+
+    if (options.closeUp) {
+        await captureElementScreenshot(page, '.nav-sleep-pill', 'navbar-sleep-pill-idle.png', { padding: 8 });
+        await captureElementScreenshot(page, '.nav-theme-toggle', 'navbar-theme-toggle.png', { padding: 8 });
+    }
+
+    // 2. Low-power active state
+    await page.evaluate(async () => {
+        const token = window.__API_TOKEN ? `Bearer ${window.__API_TOKEN}` : '';
+        await fetch('/api/sleep-mode/toggle', { method: 'POST', headers: { Authorization: token } });
+    });
+    await sleep(800);
+    await page.screenshot({
+        path: join(ARTIFACTS_DIR, 'navbar-low-power-active.png'),
+        clip: { x: 0, y: navBox.y, width: navBox.width, height: navBox.height },
+    });
+    console.log('[CAPTURE] Saved navbar-low-power-active.png');
+
+    if (options.closeUp) {
+        await captureElementScreenshot(page, '.nav-sleep-pill', 'navbar-sleep-pill-active.png', { padding: 8 });
+    }
+
+    // Restore to normal
+    await page.evaluate(async () => {
+        const token = window.__API_TOKEN ? `Bearer ${window.__API_TOKEN}` : '';
+        await fetch('/api/sleep-mode/toggle', { method: 'POST', headers: { Authorization: token } });
+    });
+    await sleep(600);
+
+    // 3. Light theme — click the theme toggle
+    await page.click('#nav-theme-toggle');
+    await sleep(400);
+    await page.screenshot({
+        path: join(ARTIFACTS_DIR, 'navbar-idle-light.png'),
+        clip: { x: 0, y: navBox.y, width: navBox.width, height: navBox.height },
+    });
+    console.log('[CAPTURE] Saved navbar-idle-light.png');
+
+    // Restore dark theme
+    await page.click('#nav-theme-toggle');
+    await sleep(300);
+}
+
 async function scenarioSmoke({ page, baseUrl }, options) {
     const criticalPatterns = [
         'import',
@@ -2352,6 +2938,756 @@ async function scenarioSmoke({ page, baseUrl }, options) {
     console.log('[SMOKE] PASS: no critical console errors on startup.');
 }
 
+// ── Setup wizard ────────────────────────────────────────────────────────────────
+// Step 1 profile selection, step 2 HF source with discover pills / community
+// picks / quant advisor, step 3 VRAM panel. Does not require a remote attach.
+
+async function scenarioSpawnWizard(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+
+    // Open setup wizard. Attach is not required; wizard works from the welcome screen.
+    await page.evaluate(async () => {
+        const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+        openSpawnWizard();
+    });
+    await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 10000 });
+    await sleep(600);
+
+    // Hide the binary prereq banner so it doesn't clutter every shot.
+    await page.evaluate(() => {
+        const banner = document.getElementById('wizard-binary-prereq');
+        if (banner) banner.style.display = 'none';
+    });
+    await sleep(200);
+
+    // ── Step 0: profile + use-case — capture AFTER selections so state is visible ─
+    await page.evaluate(() => {
+        (document.querySelector('.profile-card[data-profile="power"]')
+            || document.querySelector('.profile-card'))?.click();
+    });
+    await sleep(200);
+    await page.evaluate(() => {
+        (document.querySelector('.usecase-card[data-usecase="general"]')
+            || document.querySelector('.usecase-card'))?.click();
+    });
+    await sleep(300);
+    await captureShot(page, 'spawn-wizard-step1-profiles.png', { fullPage: true });
+
+    // ── Advance to Step 1: Model ──────────────────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => {});
+    await sleep(500);
+
+    // ── Step 1: model source cards — capture before selecting HF ─────────────
+    await captureShot(page, 'spawn-wizard-step2-source-cards.png', { fullPage: true });
+
+    // Select HuggingFace source.
+    await page.evaluate(() => {
+        document.querySelector('.model-source-card[data-source="hf"]')?.click();
+    });
+    await sleep(400);
+
+    // Capture the base HF panel: discover pills + quickpick row, no search started.
+    await captureShot(page, 'spawn-wizard-step2-hf-base.png', { fullPage: true });
+
+    // Helper: wait up to 20 s for real result cards; continues silently if none arrive.
+    const waitForResults = () => page.waitForFunction(() => {
+        const r = document.getElementById('hf-search-results');
+        return r && r.style.display !== 'none'
+            && !r.querySelector('.hf-search-loading')
+            && r.querySelector('.hf-search-result') !== null;
+    }, { timeout: 20000 }).catch(() => {});
+
+    // Helper: scroll wizard body so the search results area is visible.
+    const scrollToResults = () => page.evaluate(() => {
+        const results = document.getElementById('hf-search-results');
+        if (results && results.style.display !== 'none') {
+            results.scrollIntoView({ behavior: 'instant', block: 'start' });
+        } else {
+            const body = document.querySelector('.wizard-body');
+            if (body) body.scrollTop = 240;
+        }
+    });
+
+    // ── Discover pill: Trending ───────────────────────────────────────────────
+    const trendingPill = await page.$('.hf-discover-pill[data-cat-id="trending"]');
+    if (trendingPill) {
+        await trendingPill.click();
+        await waitForResults();
+        await sleep(400);
+        await scrollToResults();
+        await sleep(200);
+        await captureShot(page, 'spawn-wizard-step2-discover-trending.png', { fullPage: true });
+    }
+
+    // ── Discover pill: Qwen3 ─────────────────────────────────────────────────
+    const qwen3Pill = await page.$('.hf-discover-pill[data-cat-id="qwen3"]');
+    if (qwen3Pill) {
+        await qwen3Pill.click();
+        await waitForResults();
+        await sleep(400);
+        await scrollToResults();
+        await sleep(200);
+        await captureShot(page, 'spawn-wizard-step2-discover-qwen3.png', { fullPage: true });
+    }
+
+    // ── Quantizer quick-pick: bartowski ──────────────────────────────────────
+    const bartowskiBtn = await page.$('.hf-qp-btn[data-author="bartowski"]');
+    if (bartowskiBtn) {
+        await bartowskiBtn.click();
+        await waitForResults();
+        await sleep(400);
+        await scrollToResults();
+        await sleep(200);
+        await captureShot(page, 'spawn-wizard-step2-quantizer-bartowski.png', { fullPage: true });
+    }
+
+    // ── Community picks panel ─────────────────────────────────────────────────
+    await page.evaluate(() => {
+        const r = document.getElementById('hf-search-results');
+        if (r) { r.style.display = 'none'; r.innerHTML = ''; }
+        document.querySelectorAll('.hf-discover-pill, .hf-qp-btn')
+            .forEach(p => p.classList.remove('active'));
+        const body = document.querySelector('.wizard-body');
+        if (body) body.scrollTop = 0;
+    });
+    await sleep(300);
+
+    const cpToggle = await page.$('#hf-cp-toggle');
+    if (cpToggle) {
+        await cpToggle.click();
+        await page.waitForFunction(
+            () => document.getElementById('hf-cp-toggle')?.getAttribute('aria-expanded') === 'true',
+            { timeout: 3000 }
+        ).catch(() => {});
+        await sleep(500);
+        await page.evaluate(() => {
+            const picks = document.getElementById('hf-community-picks');
+            if (picks) picks.scrollIntoView({ behavior: 'instant', block: 'start' });
+        });
+        await sleep(300);
+        await captureShot(page, 'spawn-wizard-step2-community-picks.png', { fullPage: true });
+
+        // Second tab (MoE / Offload picks) if present.
+        await page.evaluate(() => {
+            const tabs = document.querySelectorAll('.hf-cp-tab');
+            if (tabs.length > 1) tabs[1].click();
+        });
+        await sleep(300);
+        await captureShot(page, 'spawn-wizard-step2-community-picks-moe.png', { fullPage: true });
+    }
+
+    // ── Quant advisor: type a known repo so file list populates reliably ──────
+    await page.evaluate(() => {
+        const cp = document.getElementById('hf-community-picks');
+        if (cp) cp.style.display = 'none';
+        const body = document.querySelector('.wizard-body');
+        if (body) body.scrollTop = 0;
+    });
+    await sleep(200);
+
+    const repoInput = await page.$('#spawn-hf-repo');
+    if (repoInput) {
+        await repoInput.click({ clickCount: 3 });
+        await repoInput.type('bartowski/Llama-3.2-1B-Instruct-GGUF', { delay: 20 });
+        await page.keyboard.press('Enter');
+        await page.waitForFunction(() => {
+            const fl = document.getElementById('spawn-hf-file-list');
+            return fl && fl.classList.contains('visible') && fl.querySelector('.hf-file-item') !== null;
+        }, { timeout: 20000 }).catch(() => {});
+        await sleep(500);
+        await captureShot(page, 'spawn-wizard-step2-quant-advisor.png', { fullPage: true });
+
+        // Select Q4_K_M so validation passes on Next.
+        await page.evaluate(() => {
+            const q4 = [...document.querySelectorAll('.hf-file-item')]
+                .find(el => el.textContent.includes('Q4_K_M') || el.textContent.includes('Q4'));
+            (q4 || document.querySelector('.hf-file-item'))?.click();
+        });
+        await sleep(300);
+    }
+
+    // ── Step 2: Hardware / VRAM ───────────────────────────────────────────────
+    // Inject missing model metadata so the VRAM bar renders correctly.
+    // Only fill in values that may not have been set by the UI interaction.
+    await page.evaluate(async () => {
+        const { wizardState } = await import('/js/features/spawn-wizard.js');
+        // Set VRAM fallback if API call failed
+        if (!wizardState.vram.available || wizardState.vram.available === 0) {
+            wizardState.vram.available = 64 * 1024 * 1024 * 1024;
+        }
+        // Set paramB from filename if inference failed
+        if (!wizardState.model.paramB || wizardState.model.paramB === 0) {
+            wizardState.model.paramB = 8; // default for 8B models
+        }
+        // Set modelBytes if not already set
+        if (!wizardState.model.modelBytes || wizardState.model.modelBytes === 0) {
+            wizardState.model.modelBytes = 4_920_000_000;
+        }
+    });
+
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
+        { timeout: 8000 }
+    ).catch(() => console.log('[CAPTURE] Step 2 (Hardware) wait timed out; continuing.'));
+    await sleep(600);
+
+    // Dismiss the HF download panel so the VRAM display is unobscured.
+    await page.evaluate(() => {
+        document.getElementById('hf-dlp-use-hf-btn')?.click();
+        const panel = document.getElementById('hf-download-panel');
+        if (panel) panel.style.display = 'none';
+    });
+
+    // Force a VRAM refresh so the bar renders with the injected state.
+    await page.evaluate(async () => {
+        const { scheduleVramUpdate } = await import('/js/features/spawn-wizard.js');
+        scheduleVramUpdate();
+    });
+    await page.waitForFunction(
+        () => parseFloat(document.getElementById('vseg-weights')?.style.width || '0') > 1,
+        { timeout: 6000 }
+    ).catch(() => {});
+    await sleep(500);
+    await captureShot(page, 'spawn-wizard-step3-vram.png', { fullPage: true });
+
+    // ── Step 4: Parameters ────────────────────────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-3')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 4 (Parameters) wait timed out; continuing.'));
+    await sleep(800);
+    // Scroll to the config list — the most informative part of the parameters step.
+    await page.evaluate(() => {
+        const list = document.getElementById('spawn-summary-list');
+        if (list) list.scrollIntoView({ behavior: 'instant', block: 'start' });
+    });
+    await sleep(300);
+    await captureShot(page, 'spawn-wizard-step4-parameters.png', { fullPage: true });
+
+    // ── Step 5: Summary ───────────────────────────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-4')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 5 (Summary) wait timed out; continuing.'));
+    await sleep(600);
+    // Scroll to the Save Preset row at the bottom of the summary step.
+    await page.evaluate(() => {
+        const row = document.getElementById('spawn-save-preset-row');
+        if (row) row.scrollIntoView({ behavior: 'instant', block: 'center' });
+    });
+    await sleep(300);
+    await captureShot(page, 'spawn-wizard-step5-summary.png', { fullPage: true });
+
+    // ── Step 6: Spawn ──────────────────────────────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-5')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 6 (Spawn) wait timed out; continuing.'));
+    await sleep(600);
+    await captureShot(page, 'spawn-wizard-step6-spawn.png', { fullPage: true });
+
+    // Close wizard.
+    await page.keyboard.press('Escape');
+    await sleep(400);
+}
+
+// Setup wizard HF download panel: idle options + simulated progress.
+async function scenarioSpawnWizardHfDownload(ctx, options) {
+    const { page, baseUrl } = ctx;
+
+    await gotoApp(page, baseUrl);
+    if (!options.noAttach) {
+        try { await attachToServer(page); } catch {}
+    }
+
+    // Open wizard via JS (safer than DOM click in headless).
+    await page.evaluate(async () => {
+        const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+        openSpawnWizard();
+    });
+    await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 8000 });
+    await sleep(400);
+
+    // Choose a profile quickly.
+    await page.evaluate(() => {
+        (document.querySelector('.profile-card[data-profile="power"]')
+            || document.querySelector('.profile-card'))?.click();
+    });
+    await sleep(200);
+    await page.evaluate(() => {
+        (document.querySelector('.usecase-card[data-usecase="general"]')
+            || document.querySelector('.usecase-card'))?.click();
+    });
+    await sleep(200);
+
+    // Next to step 1 (model), then directly jump to step 2 (VRAM) with injected HF model.
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
+        { timeout: 6000 }
+    ).catch(() => {
+        console.log('[CAPTURE] Step 1 (Model) wait timed out; continuing.');
+    });
+
+    // Inject model BEFORE clicking Next so validation passes.
+    await page.evaluate(async () => {
+        const { wizardState } = await import('/js/features/spawn-wizard.js');
+        wizardState.model.source   = 'hf';
+        wizardState.model.delivery = 'download';
+        wizardState.model.hfRepo   = 'bartowski/Meta-Llama-3.1-8B-Instruct-GGUF';
+        wizardState.model.hfFile   = 'Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf';
+        wizardState.model.paramB   = 8;
+        wizardState.model.modelBytes = 4_920_000_000;
+        wizardState.vram.available = 64 * 1024 * 1024 * 1024;
+    });
+
+    // Move to Hardware step — advance step state + trigger render.
+    await page.evaluate(async () => {
+        const mod = await import('/js/features/spawn-wizard.js');
+        mod.wizardState.currentStep = 2;
+        // Manually update step visibility
+        document.querySelectorAll('.wizard-step').forEach(s => s.classList.remove('active'));
+        document.getElementById('wizard-step-2')?.classList.add('active');
+        document.querySelectorAll('.step-badge').forEach(b => {
+            const s = Number(b.dataset.step);
+            b.classList.remove('active', 'completed');
+            if (s === 2) b.classList.add('active');
+            else if (s < 2) b.classList.add('completed');
+        });
+        document.getElementById('wizard-step-label').textContent = 'Hardware';
+        // Trigger VRAM update
+        mod.scheduleVramUpdate && mod.scheduleVramUpdate();
+    });
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
+        { timeout: 8000 }
+    ).catch(() => {
+        console.log('[CAPTURE] Step 2 (Hardware) wait timed out; continuing.');
+    });
+    await sleep(600);
+
+    // Ensure the HF download panel is visible in "idle" state.
+    await page.evaluate(() => {
+        const prereq = document.getElementById('wizard-binary-prereq');
+        const panel = document.getElementById('hf-download-panel');
+        const idle = document.getElementById('hf-dlp-idle');
+        const progress = document.getElementById('hf-dlp-progress');
+        const complete = document.getElementById('hf-dlp-complete');
+        if (prereq) {
+            prereq.style.display = 'none';
+        }
+        if (panel && idle) {
+            panel.style.display = 'block';
+            idle.style.display = 'block';
+            if (progress) progress.style.display = 'none';
+            if (complete) complete.style.display = 'none';
+            panel.scrollIntoView({ behavior: 'instant', block: 'center' });
+        }
+    });
+    await sleep(400);
+
+    // 1) Capture idle HF download panel.
+    await captureShot(page, 'spawn-wizard-hf-download-idle.png', { fullPage: true });
+
+    // 2) Simulate a progress state for a second shot.
+    await page.evaluate(() => {
+        const panel = document.getElementById('hf-download-panel');
+        const idle = document.getElementById('hf-dlp-idle');
+        const progress = document.getElementById('hf-dlp-progress');
+        const complete = document.getElementById('hf-dlp-complete');
+        const bar = document.getElementById('hf-dlp-bar');
+        const pct = document.getElementById('hf-dlp-progress-pct');
+        const fileEl = document.getElementById('hf-dlp-progress-file');
+        const stats = document.getElementById('hf-dlp-stats');
+
+        if (panel && progress) {
+            panel.style.display = 'block';
+            if (idle) idle.style.display = 'none';
+            progress.style.display = 'block';
+            if (complete) complete.style.display = 'none';
+            if (bar) bar.style.width = '64%';
+            if (pct) pct.textContent = '64%';
+            if (fileEl) fileEl.textContent = 'Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf';
+            if (stats) stats.textContent = '3.18 GB / 4.92 GB · 98 MiB/s · 17m left';
+            panel.scrollIntoView({ behavior: 'instant', block: 'center' });
+        }
+    });
+    await sleep(400);
+
+    // Capture simulated progress.
+    await captureShot(page, 'spawn-wizard-hf-download-progress.png', { fullPage: true });
+
+    // Close wizard.
+    await page.keyboard.press('Escape');
+    await sleep(400);
+}
+
+// Animated GIF walking through the setup wizard: welcome → profile → model → VRAM → summary.
+//
+// Design: fully sequential — each wizard state is fully reached before frames are captured.
+// This guarantees every frame reflects real UI state, with no race between capture and interaction.
+//
+// VRAM panel uses injected state so the bar renders reliably without a GPU or HF API.
+async function scenarioSpawnWizardGif(ctx, _options) {
+    const { page, baseUrl } = ctx;
+    const fps = 10;
+    let frameIdx = 0;
+
+    await gotoApp(page, baseUrl);
+    fs.mkdirSync(FRAME_DIR, { recursive: true });
+    console.log('[CAPTURE] Starting spawn-wizard-gif sequential capture...');
+
+    // Capture N milliseconds of the current page state.
+    const capture = async (durationMs) => {
+        const frameMs = 1000 / fps;
+        const n = Math.max(1, Math.round(durationMs / frameMs));
+        for (let i = 0; i < n; i++) {
+            const path = join(FRAME_DIR, `spawn-wizard-gif_${String(frameIdx).padStart(3, '0')}.png`);
+            await page.screenshot({ path });
+            frameIdx++;
+            if (i < n - 1) await sleep(frameMs);
+        }
+    };
+
+    // ── Welcome screen ────────────────────────────────────────────────────────
+    // Brief hold so viewer registers we are at the app entry point.
+    await capture(1500);
+
+    // ── Open wizard ───────────────────────────────────────────────────────────
+    await page.evaluate(async () => {
+        const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+        openSpawnWizard();
+    });
+    await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 8000 });
+    // Hide the binary prereq banner — it's expected info but clutters the GIF.
+    await page.evaluate(() => {
+        const banner = document.getElementById('wizard-binary-prereq');
+        if (banner) banner.style.display = 'none';
+    });
+    await sleep(400);
+    await capture(800);
+
+    // ── Step 0: Profile ───────────────────────────────────────────────────────
+    // Show the initial cards, then make selections with dwell time between.
+    await capture(600);
+
+    await page.evaluate(() => {
+        (document.querySelector('.profile-card[data-profile="power"]')
+            || document.querySelector('.profile-card'))?.click();
+    });
+    await sleep(200);
+    await capture(700);
+
+    await page.evaluate(() => {
+        (document.querySelector('.usecase-card[data-usecase="general"]')
+            || document.querySelector('.usecase-card'))?.click();
+    });
+    await sleep(200);
+    await capture(1000); // Dwell on selections before advancing.
+
+    // ── Step 0 → Step 1: Model ────────────────────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 1 wait timed out; continuing.'));
+    await sleep(300);
+    await capture(600);
+
+    // ── Step 1: Model source — select HuggingFace ─────────────────────────────
+    await page.evaluate(() => {
+        document.querySelector('.model-source-card[data-source="hf"]')?.click();
+    });
+    await sleep(300);
+    await capture(700); // HF panel opens.
+
+    // Show the discover pills row (static content, no network needed).
+    await capture(600);
+
+    // Show community picks if available (loaded from local community-picks.json).
+    const cpToggle = await page.$('#hf-cp-toggle');
+    if (cpToggle) {
+        await cpToggle.click();
+        await page.waitForFunction(
+            () => document.getElementById('hf-cp-toggle')?.getAttribute('aria-expanded') === 'true',
+            { timeout: 3000 }
+        ).catch(() => {});
+        await sleep(300);
+        // Scroll down to reveal community picks content.
+        await page.evaluate(() => {
+            const body = document.querySelector('.wizard-body');
+            if (body) body.scrollTop = 400;
+        });
+        await sleep(200);
+        await capture(1200);
+        // Scroll back to top for next steps.
+        await page.evaluate(() => {
+            const body = document.querySelector('.wizard-body');
+            if (body) body.scrollTop = 0;
+        });
+        // Collapse picks so the HF repo input is visible again.
+        await cpToggle.click();
+        await sleep(200);
+    }
+
+    // Inject the full model state now so validation passes on Next.
+    // Using Llama-3.3-70B Q4_K_M: weights ~39.6 GB fills the 64 GB VRAM bar at ~60%,
+    // which makes a visually impressive and realistic demo.
+    await page.evaluate(async () => {
+        const { wizardState } = await import('/js/features/spawn-wizard.js');
+        wizardState.model.source   = 'hf';
+        wizardState.model.delivery = 'stream_hf';
+        wizardState.model.hfRepo   = 'bartowski/Meta-Llama-3.3-70B-Instruct-GGUF';
+        wizardState.model.hfFile   = 'Meta-Llama-3.3-70B-Instruct-Q4_K_M.gguf';
+        wizardState.model.paramB   = 70;
+        wizardState.model.modelBytes = 39_600_000_000; // Q4_K_M ~39.6 GB
+        // Fallback VRAM if fetchGpuVram fails (matches a 64 GB M4 Max).
+        wizardState.vram.available = 64 * 1024 * 1024 * 1024;
+    });
+
+    // Show the repo input filled in for visual context.
+    await page.$eval('#spawn-hf-repo', el => {
+        el.value = 'bartowski/Meta-Llama-3.3-70B-Instruct-GGUF';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+    }).catch(() => {});
+    await sleep(200);
+    await capture(1000); // Dwell on filled-in HF panel.
+
+    // ── Step 1 → Step 2: Hardware / VRAM ─────────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 2 wait timed out; continuing.'));
+    await sleep(400);
+    await capture(500);
+
+    // The HF download panel may appear when entering step 2 with an HF file selected.
+    // Dismiss it so the VRAM display is unobscured.
+    const dlpUseBtn = await page.$('#hf-dlp-use-hf-btn');
+    if (dlpUseBtn) {
+        await dlpUseBtn.click();
+        await sleep(300);
+    }
+
+    // Ensure the VRAM display is triggered (scheduleVramUpdate is called by showStep, but
+    // vram.available is read from wizardState at display time so it may need a nudge).
+    await page.evaluate(async () => {
+        const { scheduleVramUpdate } = await import('/js/features/spawn-wizard.js');
+        scheduleVramUpdate();
+    });
+
+    // Wait for the weights bar to render (confirms VRAM math ran).
+    await page.waitForFunction(
+        () => parseFloat(document.getElementById('vseg-weights')?.style.width || '0') > 1,
+        { timeout: 6000 }
+    ).catch(() => console.log('[CAPTURE] VRAM weights bar not populated; continuing.'));
+    await sleep(300);
+
+    // ── VRAM panel — initial state (default 8 K ctx) ──────────────────────────
+    await capture(2500); // Dwell — this is the centrepiece of the GIF.
+
+    // ── VRAM panel — bump context to 32 K to show KV growing ─────────────────
+    await page.evaluate(() => {
+        const input = document.getElementById('spawn-context-size');
+        if (input) {
+            input.value = '32768';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    });
+    await sleep(350); // Let debounce fire and bar animate.
+    await capture(2000);
+
+    // ── VRAM panel — max GPU layers (all layers on GPU) ───────────────────────
+    await page.evaluate(() => {
+        const sel = document.getElementById('spawn-gpu-layers');
+        if (sel) {
+            sel.value = '-1';
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    });
+    await sleep(350);
+    await capture(1500);
+
+    // ── Step 2 → Step 3: Summary ──────────────────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-3')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 3 wait timed out; continuing.'));
+    // Wait for renderSummary() to populate the list (also applies sampling defaults).
+    await sleep(800);
+    // Capture the top of the summary step (sampling + network fields).
+    await capture(1000);
+    // Scroll down to show the config summary list.
+    await page.evaluate(() => {
+        const list = document.getElementById('spawn-summary-list');
+        if (list) list.scrollIntoView({ behavior: 'instant', block: 'start' });
+        else {
+            const body = document.querySelector('#wizard-step-3 .wizard-main');
+            if (body) body.scrollTop = body.scrollHeight;
+        }
+    });
+    await sleep(300);
+    await capture(2500); // Hold on the summary list so viewer can read key choices.
+
+    // ── Step 3 → Step 4: Preset Parameters ───────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-4')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 4 wait timed out; continuing.'));
+    // _renderPresetParamsStep() runs synchronously inside showStep; give the DOM a tick.
+    await sleep(400);
+    // Capture the top of the params page (Model + Hardware sections).
+    await capture(1500);
+    // Scroll to reveal Sampling and Network sections.
+    await page.evaluate(() => {
+        const main = document.querySelector('#wizard-step-4 .wizard-main');
+        if (main) main.scrollTop = 340;
+    });
+    await sleep(250);
+    await capture(1500);
+    // Scroll to the Save Preset row at the bottom.
+    await page.evaluate(() => {
+        const row = document.getElementById('spawn-save-preset-row');
+        if (row) row.scrollIntoView({ behavior: 'instant', block: 'center' });
+        else {
+            const main = document.querySelector('#wizard-step-4 .wizard-main');
+            if (main) main.scrollTop = main.scrollHeight;
+        }
+    });
+    await sleep(250);
+    await capture(2000); // Hold so viewer sees the preset name + Save button.
+
+    // ── Step 4 → Step 5: Ready to Launch ─────────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-5')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 5 wait timed out; continuing.'));
+    // Wait for _renderSpawnConfigCard() to populate the card.
+    await sleep(600);
+    await capture(2500); // Hold on the Spawn step — config card + Spawn Server button.
+
+    // ── Convert frames → GIF ──────────────────────────────────────────────────
+    // Scale to 900 px wide so the GIF fits GitHub README content width without
+    // clipping. Height is computed proportionally (-1).
+    console.log(`[CAPTURE] Converting ${frameIdx} frames to GIF at ${fps} fps (scaled to 900 px)...`);
+    execFileSync('ffmpeg', [
+        '-y',
+        '-framerate', String(fps),
+        '-i', join(FRAME_DIR, `spawn-wizard-gif_%03d.png`),
+        '-vf', 'scale=900:-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5',
+        join(ARTIFACTS_DIR, 'spawn-wizard-flow.gif'),
+    ], { stdio: 'inherit' });
+    cleanupFrames();
+    console.log('[CAPTURE] spawn-wizard-flow.gif complete.');
+}
+
+async function scenarioAppearancePalette(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await loadAppDocument(page, baseUrl);
+
+    if (!options.noAttach) {
+        try {
+            await attachToServer(page);
+        } catch (e) {
+            console.log('[CAPTURE] appearance-palette: attach failed (non-fatal):', e.message);
+        }
+    }
+    await sleep(500);
+
+    await openAppearancePaneForCapture(page);
+    await sleep(400);
+
+    const paletteGridInfo = await page.evaluate(() => {
+        const grid = document.getElementById('settings-palette-grid');
+        if (!grid) return 'grid NOT FOUND';
+        const btns = grid.querySelectorAll('.palette-swatch');
+        return `grid found, ${btns.length} swatches: ` + [...btns].map(b => b.dataset.palette || '(empty)').join(', ');
+    });
+    console.log('[CAPTURE] DOM check:', paletteGridInfo);
+
+    await captureShot(page, 'appearance-palette-carbon-mint.png', { fullPage: true });
+
+    const palettes = [
+        { value: 'cyber-rose', label: 'cyber-rose' },
+        { value: 'solar-violet', label: 'solar-violet' },
+        { value: 'lava-core', label: 'lava-core' },
+    ];
+    for (const { value, label } of palettes) {
+        await page.evaluate((palette) => {
+            const html = document.documentElement;
+            html.classList.add('palette-changing');
+            setTimeout(() => html.classList.remove('palette-changing'), 350);
+            if (palette) html.dataset.palette = palette;
+            else delete html.dataset.palette;
+            document.querySelectorAll('#settings-palette-grid .palette-swatch').forEach(btn => {
+                const active = (btn.dataset.palette || '') === palette;
+                btn.classList.toggle('active', active);
+                btn.setAttribute('aria-pressed', String(active));
+            });
+        }, value);
+        console.log(`[CAPTURE] Palette ${label}`);
+        await sleep(500);
+        await captureShot(page, `appearance-palette-${label}.png`, { fullPage: true });
+    }
+
+    await page.evaluate(() => {
+        delete document.documentElement.dataset.palette;
+        document.querySelectorAll('#settings-palette-grid .palette-swatch').forEach(btn => {
+            const active = (btn.dataset.palette || '') === '';
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-pressed', String(active));
+        });
+    });
+    await sleep(300);
+
+    await page.evaluate(() => {
+        document.getElementById('settings-modal-close')?.click();
+        document.getElementById('settings-modal')?.classList.remove('open');
+        const saved = JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}');
+        localStorage.setItem('llama-monitor-preferences', JSON.stringify({
+            ...saved,
+            theme: 'light',
+            palette: '',
+        }));
+        delete document.documentElement.dataset.palette;
+        document.documentElement.dataset.theme = 'light';
+        document.querySelectorAll('.sidebar-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === 'server');
+        });
+        document.querySelectorAll('.page').forEach(pageEl => {
+            pageEl.classList.toggle('active', pageEl.id === 'page-server');
+        });
+    });
+    await page.waitForSelector('#page-server.active', { timeout: 5000 });
+    await sleep(700);
+    await captureShot(page, 'appearance-light-dashboard.png', { fullPage: true });
+
+    await page.evaluate(() => {
+        const saved = JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}');
+        localStorage.setItem('llama-monitor-preferences', JSON.stringify({
+            ...saved,
+            theme: 'dark',
+            palette: '',
+        }));
+        document.documentElement.dataset.theme = 'dark';
+    });
+
+    console.log('[CAPTURE] Scenario "appearance-palette" complete.');
+}
+
 const SCENARIOS = {
     // Core
     welcome: scenarioWelcome,
@@ -2359,16 +3695,32 @@ const SCENARIOS = {
     // Chat features
     'guided-gen': scenarioGuidedGen,
     sidebar: scenarioSidebar,
+    // Models and presets
+    'models-v2': scenarioModelsV2,
+    'preset-editor': scenarioPresetEditor,
     // Configuration
     settings: scenarioSettings,
+    'appearance-palette': scenarioAppearancePalette,
     tls: scenarioTls,
     filebrowser: scenarioFilebrowser,
     panels: scenarioPanels,
+    models: scenarioModels,
     dashboard: scenarioDashboard,
+    // Setup wizard
+    'spawn-wizard': scenarioSpawnWizard,
+    'spawn-wizard-gif': scenarioSpawnWizardGif,
+    'spawn-wizard-hf-download': scenarioSpawnWizardHfDownload,
+    // New features (spawn-llama-server-v2)
+    'tune-panel': scenarioTunePanel,
+    'benchmark-results': scenarioBenchmarkResults,
+    'llama-updater': scenarioLlamaUpdater,
+    'chat-history-qa': scenarioChatHistoryQA,
     // Validation
     sparkline: scenarioSparkline,
     gifs: scenarioGifs,
     smoke: scenarioSmoke,
+    // Nav appearance
+    navbar: scenarioNavbar,
 };
 
 export async function runCli({ scenario: forcedScenario = null, argv = process.argv.slice(2) } = {}) {
@@ -2390,19 +3742,44 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
         throw new Error(`Unknown scenario "${scenarioName}". Use --list-scenarios.`);
     }
 
-    seedConfig();
-    const port = await findAvailablePort();
-    console.log(`[CAPTURE] Spawning llama-monitor on port ${port} for scenario "${scenarioName}"...`);
-
     let server = null;
     let browser = null;
+    let baseUrl;
+
+    if (RUNNING_PORT) {
+        baseUrl = `http://127.0.0.1:${RUNNING_PORT}`;
+        console.log(`[CAPTURE] Using running llama-monitor at ${baseUrl} for scenario "${scenarioName}"...`);
+    } else {
+        seedConfig();
+        const port = await findAvailablePort();
+        const extraArgs = [];
+
+        // For the models scenario: seed fake .gguf files and pass --models-dir.
+        if (scenarioName === 'models' || scenarioName === 'models-v2' || scenarioName === 'panels') {
+            const modelsDir = join(TEMP_APP_CONFIG_DIR, 'models');
+            fs.mkdirSync(modelsDir, { recursive: true });
+            const fakeFiles = [
+                'Llama-3.3-70B-Instruct-Q4_K_M.gguf',
+                'Qwen3-30B-A3B-Q5_K_M.gguf',
+                'mistral-nemo-instruct-2407-Q4_K_M.gguf',
+                'gemma-3-12b-it-Q8_0.gguf',
+                'Devstral-Small-2-24B-UD-Q4_K_S.gguf',
+                'Meta-Llama-3.1-8B-Instruct-i1-Q4_K_M.gguf',
+            ];
+            for (const f of fakeFiles) fs.writeFileSync(join(modelsDir, f), '');
+            extraArgs.push('--models-dir', modelsDir);
+        }
+
+        console.log(`[CAPTURE] Spawning llama-monitor on port ${port} for scenario "${scenarioName}"...`);
+        server = await spawnLlamaMonitor(port, extraArgs);
+        baseUrl = server.url;
+    }
 
     try {
-        server = await spawnLlamaMonitor(port);
         const launched = await launchBrowser(options.viewport);
         browser = launched.browser;
         const page = launched.page;
-        await scenario({ page, baseUrl: server.url, browser }, options);
+        await scenario({ page, baseUrl, browser }, options);
         console.log(`[CAPTURE] Scenario "${scenarioName}" complete.`);
     } catch (err) {
         console.error(err.stack || err.message);
@@ -2410,8 +3787,8 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
     } finally {
         cleanupFrames();
         if (browser) await browser.close();
-        await cleanupServer(server);
-        cleanupTempHome();
+        if (server) await cleanupServer(server);
+        if (!RUNNING_PORT) cleanupTempHome();
     }
 }
 

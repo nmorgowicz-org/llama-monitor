@@ -1,7 +1,7 @@
 // ── Chat State & Persistence ─────────────────────────────────────────────────
 // Tab collection, active tab, busy flags, persistence scheduling, tab CRUD.
 
-import { chat } from '../core/app-state.js';
+import { chat, settingsState } from '../core/app-state.js';
 import { refreshTopCockpit } from './nav.js';
 import { showToast, showToastWithActions } from './toast.js';
 
@@ -62,7 +62,7 @@ export function newChatTab(name = 'New Chat') {
             top_k: 40,
             min_p: 0.01,
             repeat_penalty: 1.0,
-            max_tokens: 4096,
+            max_tokens: 32768,
             stream_timeout: 120,
         },
         context_notes: [],
@@ -111,6 +111,14 @@ function normalizeChatTab(tab) {
         visibility: tab.visibility || 'active',
         composer_draft: tab.composer_draft ?? '',
     };
+}
+
+function sanitizeThinkingContent(messages) {
+    if (settingsState.persist_thinking_content) return messages || [];
+    return (messages || []).map(message => {
+        if (!message?.thinking_content) return message;
+        return { ...message, thinking_content: undefined };
+    });
 }
 
 // ── Tab Initialization ────────────────────────────────────────────────────────
@@ -207,6 +215,9 @@ async function _loadTabMessages(id) {
             headers: window.authHeaders ? window.authHeaders() : {},
         });
         const full = await resp.json();
+        if (Array.isArray(full?.messages)) {
+            full.messages = sanitizeThinkingContent(full.messages);
+        }
         Object.assign(tab, full);
         tab._loaded = true;
     } catch (e) {
@@ -292,6 +303,136 @@ export async function closeChatTab(id) {
             handler: () => restoreTabFromTrash(id),
         },
     ]);
+}
+
+export async function deleteManyChatTabs(ids) {
+    if (!ids || ids.length === 0) return;
+
+    const toDelete = ids.filter(id => chat.tabs.some(t => t.id === id));
+    if (toDelete.length === 0) return;
+
+    // Move each tab to trash.
+    const deletedIds = [];
+    for (const id of toDelete) {
+        const idx = chat.tabs.findIndex(t => t.id === id);
+        if (idx === -1) continue;
+        const [tab] = chat.tabs.splice(idx, 1);
+        chat.tabTrash.push({ tab, trashedAt: Date.now() });
+        deletedIds.push(id);
+
+        if (chat.activeTabId === id) {
+            if (chat.tabs.length) {
+                chat.activeTabId = chat.tabs[chat.tabs.length - 1].id;
+                await _loadTabMessages(chat.activeTabId);
+            } else {
+                chat.activeTabId = null;
+            }
+        }
+    }
+
+    if (deletedIds.length === 0) return;
+
+    // Fire API deletes in parallel.
+    const failures = await Promise.all(
+        deletedIds.map(async (id) => {
+            try {
+                const resp = await fetch(`/api/chat/tabs/${id}`, {
+                    method: 'DELETE',
+                    headers: window.authHeaders ? window.authHeaders() : {},
+                });
+                const body = await resp.json().catch(() => null);
+                if (!resp.ok || body?.ok === false) {
+                    throw new Error(body?.error || `Delete failed (${resp.status})`);
+                }
+            } catch (e) {
+                console.error('deleteManyChatTabs failed for', id, e);
+                return id;
+            }
+        })
+    ).then(arr => arr.filter(Boolean));
+
+    // Restore any failed deletions from trash.
+    for (const id of failures) {
+        restoreTabFromTrash(id);
+    }
+
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
+    chatViewBindings.renderChatMessages?.();
+    chatViewBindings.loadChatNames?.();
+    chatViewBindings.updateExplicitToggleUI?.();
+    chatViewBindings.syncMessageLimitInput?.();
+    chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
+    chatViewBindings.refreshChatTelemetry?.();
+    chatViewBindings.updatePersonaMenuName?.();
+    chatViewBindings.refreshChatHistoryQA?.();
+    refreshTopCockpit();
+
+    showToastWithActions(`${deletedIds.length} chat(s) deleted`, 'info', '', [
+        {
+            id: 'undo',
+            label: 'Undo',
+            primary: true,
+            handler: () => {
+                for (const id of deletedIds) {
+                    restoreTabFromTrash(id);
+                }
+            },
+        },
+    ]);
+}
+
+export function archiveManyChatTabs(ids) {
+    if (!ids || ids.length === 0) return;
+
+    const archived = [];
+    for (const id of ids) {
+        const tab = chat.tabs.find(t => t.id === id);
+        if (!tab || tab.visibility === 'archived') continue;
+        const prevVisibility = tab.visibility;
+        tab.visibility = 'archived';
+        archived.push({ id, prevVisibility });
+
+        if (chat.activeTabId === id) {
+            _selectFallbackTab(id);
+        }
+
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        fetch(`/api/chat/tabs/${id}/archive`, {
+            method: 'POST',
+            headers,
+        }).catch(e => {
+            const entry = archived.find(a => a.id === id);
+            if (entry) {
+                tab.visibility = entry.prevVisibility;
+            }
+            console.error('archiveManyChatTabs failed for', id, e);
+        });
+    }
+
+    if (archived.length > 0) {
+        chatViewBindings.renderChatTabs?.();
+        chatViewBindings.renderChatSessionsSidebar?.();
+        showToastWithActions(`${archived.length} chat(s) archived`, 'info', '', [
+            {
+                id: 'undo',
+                label: 'Undo',
+                primary: true,
+                handler: () => {
+                    for (const { id, prevVisibility } of archived) {
+                        const tab = chat.tabs.find(t => t.id === id);
+                        if (tab && tab.visibility === 'archived') {
+                            tab.visibility = prevVisibility;
+                        }
+                    }
+                    chatViewBindings.renderChatTabs?.();
+                    chatViewBindings.renderChatSessionsSidebar?.();
+                },
+            },
+        ]);
+    }
 }
 
 export function restoreTabFromTrash(id) {
@@ -522,6 +663,33 @@ export function substituteNames(prompt, aiName, userName, gender) {
     return p;
 }
 
+function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function normalizeGeneratedMessageContent(content, tab, role = 'assistant') {
+    if (!content) return content;
+
+    const names = role === 'user'
+        ? [tab?.user_name, 'You', 'User']
+        : [tab?.ai_name, 'AI', 'Assistant'];
+    const labels = names
+        .map(name => (name || '').trim())
+        .filter((name, index, arr) => name && arr.indexOf(name) === index)
+        .map(escapeRegExp);
+
+    let normalized = content;
+    if (labels.length > 0) {
+        const labelPattern = new RegExp(
+            `^\\s*(?:\\*\\*)?(?:${labels.join('|')})(?:\\*\\*)?\\s*[:：\\-–—]\\s*`,
+            'i'
+        );
+        normalized = normalized.replace(labelPattern, '');
+    }
+
+    return normalized.replace(/^\s*[:：]\s*(?:\n+)?/, '');
+}
+
 export function getDefaultRoleBoundaryText(tab) {
     const assistantName = (tab?.ai_name || '{{char}}').trim();
     const userName = (tab?.user_name || '{{user}}').trim();
@@ -549,9 +717,32 @@ export function normalizeTabForSave(tab) {
         const msg = { ...m };
         delete msg.cumulativeInputTokens;
         delete msg.cumulativeOutputTokens;
+        if (!settingsState.persist_thinking_content) {
+            delete msg.thinking_content;
+        }
         return msg;
     });
     return t;
+}
+
+function stripThinkingFromLoadedTabs() {
+    let changed = false;
+    for (const tab of chat.tabs || []) {
+        if (!Array.isArray(tab?.messages)) continue;
+        let tabChanged = false;
+        tab.messages = tab.messages.map(message => {
+            if (!message?.thinking_content) return message;
+            tabChanged = true;
+            return { ...message, thinking_content: undefined };
+        });
+        if (tabChanged) {
+            changed = true;
+            scheduleChatPersist(tab);
+        }
+    }
+    if (changed) {
+        chatViewBindings.renderChatMessages?.();
+    }
 }
 
 export function scheduleChatPersist(tab) {
@@ -686,6 +877,11 @@ export function autoResizeChatInput() {
 
   export function initChatState() {
     window.addEventListener('beforeunload', flushChatPersist);
+    window.addEventListener('settings-applied', event => {
+        if (event?.detail?.persist_thinking_content === false) {
+            stripThinkingFromLoadedTabs();
+        }
+    });
     chat.trashPurgeTimer = setInterval(purgeOldTrash, TRASH_PURGE_CHECK_INTERVAL_MS);
     purgeOldTrash();
 

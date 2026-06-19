@@ -20,6 +20,7 @@ fn local_spawn_has_all_metrics() {
         gpu_env_path: std::path::PathBuf::new(),
         ui_settings_path: std::path::PathBuf::new(),
         sessions_path: std::path::PathBuf::new(),
+        model_tags_path: std::path::PathBuf::new(),
     };
     let gpu_env = GpuEnv {
         arch: "auto".into(),
@@ -41,6 +42,8 @@ fn local_spawn_has_all_metrics() {
         "Spawn Test".to_string(),
         8001,
         String::new(),
+        None,
+        None,
     );
     state.add_session(session);
     state.set_active_session("spawn_test");
@@ -77,6 +80,7 @@ fn local_attach_has_full_metrics() {
         gpu_env_path: std::path::PathBuf::new(),
         ui_settings_path: std::path::PathBuf::new(),
         sessions_path: std::path::PathBuf::new(),
+        model_tags_path: std::path::PathBuf::new(),
     };
     let gpu_env = GpuEnv {
         arch: "auto".into(),
@@ -134,6 +138,7 @@ fn remote_attach_has_inference_only() {
         gpu_env_path: std::path::PathBuf::new(),
         ui_settings_path: std::path::PathBuf::new(),
         sessions_path: std::path::PathBuf::new(),
+        model_tags_path: std::path::PathBuf::new(),
     };
     let gpu_env = GpuEnv {
         arch: "auto".into(),
@@ -372,6 +377,7 @@ fn agent_health_reachable_defaults_false() {
         gpu_env_path: std::path::PathBuf::new(),
         ui_settings_path: std::path::PathBuf::new(),
         sessions_path: std::path::PathBuf::new(),
+        model_tags_path: std::path::PathBuf::new(),
     };
     let gpu_env = GpuEnv {
         arch: "auto".into(),

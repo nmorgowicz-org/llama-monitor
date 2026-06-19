@@ -1,6 +1,12 @@
 /* eslint-disable no-unsanitized/property */
 /* Reason: all content is server metrics; no user input flows into this page. */
-document.getElementById('compact-close').addEventListener('click', () => window.close());
+document.getElementById('compact-close').addEventListener('click', () => {
+    if (window.ipc?.postMessage) {
+        window.ipc.postMessage(JSON.stringify({ action: 'close' }));
+        return;
+    }
+    window.close();
+});
 
 const PORT = window.__COMPACT_PORT__;
 let ws = null;
@@ -38,7 +44,7 @@ function setBar(id, pct, maxVal) {
     const bar = document.getElementById(id);
     if (!bar) return;
     const p = Math.min(100, Math.max(0, (pct / maxVal) * 100));
-    bar.style.width = p + '%';
+    bar.style.transform = 'scaleX(' + (p / 100) + ')';
 }
 
 function updateStatus(running) {
@@ -108,7 +114,10 @@ window.getContentDimensions = function() {
 function reportPopoverSize() {
     if (!window.ipc || !window.ipc.postMessage) return;
     requestAnimationFrame(function() {
-        window.ipc.postMessage(JSON.stringify(window.getContentDimensions()));
+        window.ipc.postMessage(JSON.stringify({
+            action: 'resize',
+            ...window.getContentDimensions(),
+        }));
     });
 }
 
@@ -143,7 +152,7 @@ function clearLocalMetrics(reasons) {
     
     const reasonEl = document.getElementById('capability-note');
     if (reasons && (reasons.system || reasons.gpu || reasons.cpu_temp)) {
-        reasonEl.style.color = '#bf616a';
+        reasonEl.style.color = 'var(--color-error)';
         reasonEl.style.textAlign = 'center';
         reasonEl.style.fontStyle = 'italic';
         const reasonList = [];

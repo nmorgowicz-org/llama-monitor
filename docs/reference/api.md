@@ -58,7 +58,7 @@ All `Session` fields now use `#[serde(default)]` for backward compatibility. New
 | `last_error` | string or null | `null` |
 
 `mode` is serde's enum shape:
-- spawn session: `{ "Spawn": { "port": 8001 } }`
+- launched session: `{ "Spawn": { "port": 8001 } }`
 - attached session: `{ "Attach": { "endpoint": "http://192.168.1.50:8001" } }`
 
 `status` is one of:
@@ -163,7 +163,10 @@ Response:
 
 ### `POST /api/sessions/spawn`
 Auth: db-admin-token.
-Creates a spawn session, starts `llama-server` from a saved preset, and makes it active.
+Creates a launch session, starts `llama-server` from a saved preset, and makes it active.
+Used by:
+- Spawn wizard
+- Tuning panel "Apply" flow (to restart llama-server with adjusted configuration)
 
 This endpoint enforces a 15-second cooldown between calls. If called too soon, it returns 429 with:
 
@@ -226,7 +229,7 @@ Before attaching, the server checks that the endpoint is reachable by sending a 
 }
 ```
 
-If the server is reachable but `/health` is unavailable, attach still succeeds and `warning` explains that inference metrics will be missing.
+If the server is reachable but `/health` is unavailable, attach still succeeds and `warning` explains that Performance & metrics will be missing.
 
 ### `POST /api/detach`
 Auth: api-token.
@@ -303,6 +306,7 @@ Auth: api-token.
     "top_k": null,
     "min_p": null,
     "repeat_penalty": null,
+    "presence_penalty": null,
     "n_cpu_moe": null,
     "gpu_layers": null,
     "mlock": false,
@@ -319,15 +323,184 @@ Auth: api-token.
     "draft_max": null,
     "spec_ngram_size": null,
     "seed": null,
+    "enable_thinking": null,
+    "preserve_thinking": null,
+    "reasoning": null,
+    "reasoning_budget": null,
+    "reasoning_budget_message": null,
     "system_prompt_file": "",
     "extra_args": ""
   }
 ]
 ```
 
+### `POST /api/model-defaults`
+Auth: api-token.
+
+Returns model-family sampling recommendations used by the setup wizard and preset editor.
+
+```json
+{
+  "defaults": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "repeat_penalty": 1.0,
+    "presence_penalty": 0.0,
+    "enable_thinking": true,
+    "preserve_thinking": true,
+    "reasoning": true,
+    "reasoning_budget": 16384,
+    "reasoning_budget_message": "\nFinal Answer:"
+  },
+  "presets": [
+    {
+      "name": "Agentic / Coding (thinking)",
+      "description": "Recommended default for coding agents and tool-heavy work."
+    }
+  ]
+}
+```
+
 ### `POST /api/presets`
 Auth: api-token.
 Creates a preset from a full `ModelPreset` payload. If `id` is omitted, serde supplies one.
+
+Request body (full `ModelPreset` shape, all fields optional with defaults):
+
+```json
+{
+  "id": "default-1",
+  "name": "Example: Small Model 128K context",
+  "model_path": "",
+  "context_size": 128000,
+  "ctk": "f16",
+  "ctv": "f16",
+  "tensor_split": "",
+  "batch_size": 2048,
+  "ubatch_size": 2048,
+  "no_mmap": true,
+  "ngram_spec": true,
+  "parallel_slots": 1,
+  "temperature": null,
+  "top_p": null,
+  "top_k": null,
+  "min_p": null,
+  "repeat_penalty": null,
+  "presence_penalty": null,
+  "n_cpu_moe": null,
+  "gpu_layers": null,
+  "mlock": false,
+  "flash_attn": "",
+  "split_mode": "",
+  "main_gpu": null,
+  "threads": null,
+  "threads_batch": null,
+  "prio": null,
+  "prio_batch": null,
+  "rope_scaling": "",
+  "rope_freq_base": null,
+  "rope_freq_scale": null,
+  "draft_model": "",
+  "draft_min": null,
+  "draft_max": null,
+  "spec_ngram_size": null,
+  "spec_type": null,
+  "spec_default": false,
+  "seed": null,
+  "enable_thinking": null,
+  "preserve_thinking": null,
+  "reasoning": null,
+  "reasoning_budget": null,
+  "reasoning_budget_message": null,
+  "system_prompt_file": "",
+  "extra_args": "",
+  "bind_host": null,
+  "port": null,
+  "hf_repo": null,
+  "chat_template_file": null,
+  "mmproj": null,
+  "grammar": null,
+  "json_schema": null,
+  "cache_type_k": null,
+  "cache_type_v": null,
+  "max_tokens": null,
+  "api_key": null,
+  "alias": null,
+  "benchmark_mode": false,
+  "fit_enabled": null,
+  "fit_ctx": null,
+  "fit_target": null,
+  "fit_print": null,
+  "kv_unified": null,
+  "cache_idle_slots": null,
+  "cache_ram_mib": null
+}
+```
+
+All fields use `#[serde(default)]` for backward compatibility.
+
+**Spawn V2 extended fields** (added after initial preset schema):
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `hf_repo` | Option<String> | null | HF repo identifier for model download |
+| `chat_template_file` | Option<String> | null | Path to chat template file |
+| `mmproj` | Option<String> | null | Multimodal projector path |
+| `grammar` | Option<String> | null | Grammar constraint file |
+| `json_schema` | Option<String> | null | JSON schema constraint |
+| `cache_type_k` | Option<String> | null | KV cache type for keys |
+| `cache_type_v` | Option<String> | null | KV cache type for values |
+| `max_tokens` | Option<u64> | null | Max tokens limit |
+| `enable_thinking` | Option<bool> | null | Enable thinking mode |
+| `preserve_thinking` | Option<bool> | null | Preserve thinking content |
+| `reasoning` | Option<String> | null | Reasoning mode |
+| `reasoning_budget` | Option<i32> | null | Reasoning token budget |
+| `reasoning_budget_message` | Option<String> | null | Budget limit message |
+| `api_key` | Option<String> | null | API key for hosted endpoint |
+| `alias` | Option<String> | null | Display alias for the preset |
+| `benchmark_mode` | bool | false | Run in benchmark mode |
+| `fit_enabled` | Option<bool> | null | `null` leaves the server default unchanged, `true` emits `--fit on`, and `false` emits `--fit off` |
+| `fit_ctx` | Option<u32> | null | Legacy minimum context option; emitted only when fit is enabled and `fit_target` is unset |
+| `fit_target` | Option<String> | null | Fit memory margin in MB; the preferred fit option when fit is enabled |
+| `fit_print` | Option<bool> | null | Legacy persisted field; not emitted for current llama-server builds |
+| `kv_unified` | Option<bool> | null | `null` leaves the server default unchanged, `true` emits `--kv-unified`, and `false` emits `--no-kv-unified` |
+| `cache_idle_slots` | Option<bool> | null | Cache idle slots |
+| `cache_ram_mib` | Option<i32> | null | Max RAM for cache (MiB) |
+| `prio` | Option<i32> | null | Process priority |
+| `prio_batch` | Option<i32> | null | Batch process priority |
+| `bind_host` | Option<String> | null | Bind address override |
+| `port` | Option<u16> | null | Port override |
+
+Speculative decoding V2 fields:
+
+| Field | Type | Default | Notes |
+|-------|------|---------|-------|
+| `spec_type` | Option<String> | null | Speculative decoding type |
+| `spec_default` | bool | false | Use default spec settings |
+| `spec_draft_n_max` | Option<u32> | null | Max draft tokens |
+| `spec_draft_n_min` | Option<u32> | null | Min draft tokens |
+| `spec_draft_p_split` | Option<f32> | null | Draft split threshold |
+| `spec_draft_p_min` | Option<f32> | null | Draft min probability |
+| `spec_draft_ngl` | Option<i32> | null | Draft NGL layers |
+| `spec_draft_device` | Option<String> | null | Draft device |
+| `spec_draft_cpu_moe` | bool | false | CPU MoE for draft |
+| `spec_draft_n_cpu_moe` | Option<i32> | null | CPU MoE count for draft |
+| `spec_draft_type_k` | Option<String> | null | Draft key type |
+| `spec_draft_type_v` | Option<String> | null | Draft value type |
+| `spec_ngram_mod_n_min` | Option<u32> | null | Ngram mod min |
+| `spec_ngram_mod_n_max` | Option<u32> | null | Ngram mod max |
+| `spec_ngram_mod_n_match` | Option<u32> | null | Ngram mod match |
+| `spec_ngram_simple_size_n` | Option<u32> | null | Ngram simple size N |
+| `spec_ngram_simple_size_m` | Option<u32> | null | Ngram simple size M |
+| `spec_ngram_simple_min_hits` | Option<u32> | null | Ngram simple min hits |
+| `spec_ngram_map_k_size_n` | Option<u32> | null | Ngram map-k size N |
+| `spec_ngram_map_k_size_m` | Option<u32> | null | Ngram map-k size M |
+| `spec_ngram_map_k_min_hits` | Option<u32> | null | Ngram map-k min hits |
+| `spec_ngram_map_k4v_size_n` | Option<u32> | null | Ngram map-k4v size N |
+| `spec_ngram_map_k4v_size_m` | Option<u32> | null | Ngram map-k4v size M |
+| `spec_ngram_map_k4v_min_hits` | Option<u32> | null | Ngram map-k4v min hits |
 
 Response:
 
@@ -337,7 +510,7 @@ Response:
 
 ### `PUT /api/presets/{id}`
 Auth: api-token.
-Updates the preset matched by the path `id`.
+Updates the preset matched by the path `id`. Accepts the same `ModelPreset` shape as POST.
 
 ### `DELETE /api/presets/{id}`
 Auth: api-token.
@@ -449,6 +622,7 @@ Example:
   "llama_server_path": "",
   "llama_server_cwd": "",
   "models_dir": "",
+  "extra_models_dirs": [],
   "server_endpoint": "",
   "llama_poll_interval": 1,
   "remote_agent_url": "",
@@ -471,9 +645,18 @@ Example:
   "enter_to_send": true,
   "context_notes_sidebar_expanded": false,
   "context_notes_intro_hidden": false,
+  "persist_thinking_content": false,
   "custom_suggestion_categories": {}
 }
 ```
+
+New field:
+
+| Field | Type | Default |
+|-------|------|---------|
+| `extra_models_dirs` | array of strings | `[]` |
+
+`extra_models_dirs` is an array of additional directories to scan for models beyond the primary `models_dir`. Useful for models distributed across multiple drives or folders.
 
 ### `GET /api/settings/full`
 Returns the same `UiSettings` object, but with the real `remote_agent_token` value instead of a masked placeholder.
@@ -492,6 +675,7 @@ Example:
   "llama_server_path": "",
   "llama_server_cwd": "",
   "models_dir": "",
+  "extra_models_dirs": [],
   "server_endpoint": "",
   "llama_poll_interval": 1,
   "remote_agent_url": "",
@@ -1623,3 +1807,306 @@ Without a valid token, endpoints return 401 with `{ "ok": false, "error": "unaut
 - Returns mTLS certificate status (CA, server, client).
 
 For full details on the remote agent flow, see [Remote Agent](remote-agent.md).
+
+## Setup Wizard (V2)
+
+Endpoints supporting the setup wizard, VRAM estimation, and model discovery.
+
+All require `api-token` unless noted.
+
+### `POST /api/vram/estimate`
+Quick VRAM estimate for a given configuration.
+
+### `POST /api/vram/estimate-breakdown`
+Full VRAM breakdown: weights, KV cache, mmproj, MTP, overhead, free.
+
+### `POST /api/vram/auto-size`
+Compute an optimal configuration (context, KV quant, MoE tuning) for the given hardware.
+
+### `POST /api/vram/quant-compare`
+Pre-download quant comparison table (Quant Advisor).
+
+### `POST /api/model-defaults`
+Model-family sampling presets used by the setup wizard and preset editor.
+
+### `POST /api/moe-tune`
+Suggest MoE CPU expert offload settings for a model.
+
+### `POST /api/benchmark`
+Run a short inference benchmark against the currently running llama-server.
+
+- Requires: `api-token`.
+- Behavior:
+  - Sends a fixed prompt via streaming chat.
+  - Measures time to first token, generation speed, and overall latency.
+  - Classifies performance (e.g., Great / Tight / Slow) and returns tuning suggestions.
+- Cooldown: 15 seconds between calls (rate-limited with 429 if too soon).
+
+### `POST /api/model/introspect`
+Run `llama-server --print-model-metadata` on a local GGUF file (or use cache).
+
+- Requires: `api-token`.
+- Caches result in `model-cache/<sha256>.json`; cache hit returns `"cached": true`.
+- Timeout: 30 seconds.
+
+### `POST /api/third-party-models`
+Scan local model directories (Ollama, LM Studio, Jan, GPT4All, HF cache, etc.).
+
+- Requires: `api-token`.
+
+### `POST /api/spawn-wizard/import-launch-file`
+Parse a third-party launch script file and extract potential preset values.
+
+- Requires: `api-token`.
+
+### `GET /api/chat-template/fetch`
+Fetch a chat template URL and return its content.
+
+- Requires: `api-token`.
+- Query: `url` parameter.
+
+### `POST /api/chat-template/upload`
+Upload a local chat template file to be used by presets.
+
+- Requires: `api-token`.
+
+### `POST /api/chat-template/install-hf`
+Install a chat template from HF.
+
+- Requires: `api-token`.
+
+### `POST /api/chat-template/install-url`
+Install and cache a community chat template from an HTTPS
+`raw.githubusercontent.com` URL.
+
+- Requires: `api-token`.
+- Request fields: `url`, stable `name`, and optional `force`.
+- Redirects are rejected and template content is limited to 1 MiB.
+
+## HuggingFace Integration
+
+All endpoints require `api-token` unless noted.
+
+### `POST /api/hf/search`
+Search the HuggingFace Hub for GGUF models.
+
+- Rate limit: 10 requests per 60 seconds.
+- Sort options: `downloads` (default), `likes`, `trending`, `recent`.
+
+### `POST /api/hf/author-models`
+List GGUF models for a specific author.
+
+### `GET /api/hf/community-picks`
+Return the curated community picks list (used by the wizard’s discover panel).
+
+- Read: no auth (public).
+- Update: `api-token` via `PUT` (if configured).
+
+### `GET /api/hf/quantizers`
+Return the tracked list of quantizer authors.
+
+### `PUT /api/hf/quantizers`
+Update quantizer author list.
+
+### `POST /api/hf/files`
+List GGUF files in a repo with sizes and quant labels.
+
+### `POST /api/hf/download`
+Start a streaming HF model download.
+
+- Auth: `api-token`.
+- Limits:
+  - 10-second cooldown between starts.
+  - Max 5 concurrent downloads.
+  - Path traversal protection (reject `..`, leading `/`, leading `\`).
+  - `local_path` validated inside `models_dir`.
+
+Request:
+
+```json
+{
+  "repo_id": "unsloth/Qwen3.5-27B-Q4_K_M-GGUF",
+  "filename": "qwen3.5-27b-q4_k_m.gguf",
+  "local_path": "models/Qwen3.5-27B-Q4_K_M.gguf"
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "job_id": "abc123"
+}
+```
+
+### `GET /api/models/download/:id/status`
+Poll download progress.
+
+- Auth: `api-token`.
+- Query: path parameter `:id` is the job ID returned by the download start endpoint.
+
+Response (downloading):
+
+```json
+{
+  "job_id": "abc123",
+  "status": "downloading",
+  "progress": 0.45,
+  "bytes_downloaded": 1234567890,
+  "bytes_total": 2765432100,
+  "speed_bytes_per_sec": 5000000
+}
+```
+
+Response (complete):
+
+```json
+{
+  "job_id": "abc123",
+  "status": "complete",
+  "progress": 1.0,
+  "path": "/models/Qwen3.5-27B-Q4_K_M.gguf"
+}
+```
+
+Response (failed):
+
+```json
+{
+  "job_id": "abc123",
+  "status": "failed",
+  "error": "Connection timeout"
+}
+```
+
+### `POST /api/models/download/:id/cancel`
+Cancel an active download.
+
+- Auth: `api-token`.
+- Path parameter `:id` is the job ID.
+
+Response:
+
+```json
+{ "ok": true }
+```
+
+### `GET /api/hf/card`
+Fetch raw model card markdown by `repo` param.
+
+- Auth: no auth (public).
+- Query params: `repo` (e.g., `unsloth/Qwen3.5-27B-Q4_K_M-GGUF`).
+- Used for in-app model card display.
+
+### `GET /api/hf/token`
+Check if HF token is set (masked).
+
+- Auth: `api-token`.
+
+Response:
+
+```json
+{ "has_token": true }
+```
+
+### `PUT /api/hf/token`
+Set/update HF token (written to `hf-token` with mode 600).
+
+- Auth: `api-token`.
+
+Request:
+
+```json
+{ "token": "hf_..." }
+```
+
+Response:
+
+```json
+{ "ok": true }
+```
+
+### `DELETE /api/hf/token`
+Remove stored HF token.
+
+- Auth: `api-token`.
+
+Response:
+
+```json
+{ "ok": true }
+```
+
+### `GET /api/hf/download-dir`
+Return effective models download directory.
+
+- Auth: `api-token`.
+
+Response:
+
+```json
+{ "dir": "/Users/nick/.config/llama-monitor/models" }
+```
+
+## System and Hardware
+
+### `POST /api/system/set-metal-gpu-limit`
+( macOS only ) Adjust Metal GPU wired memory limit via `sysctl iogpu.wired_limit_mb`.
+
+- Auth: `db-admin-token` (elevated, system-level change).
+- Requires: macOS with administrator privileges (triggers a password prompt via `osascript`).
+- Request: `{ "limit_mb": 40960 }`
+- If not on macOS, returns:
+  `{ "ok": false, "error": "Metal GPU limit tuning is only available on macOS." }`
+
+## Llama.cpp Binary Management
+
+Endpoints to manage llama-server binary.
+
+### `GET /api/llama-binary/platform-info`
+Return current platform and backend information.
+
+- Auth: `api-token`.
+
+### `GET /api/llama-binary/latest`
+Return the latest available llama.cpp release.
+
+- Auth: `api-token`.
+
+### `GET /api/llama-binary/releases`
+Return a list of recent llama.cpp releases.
+
+- Auth: `api-token`.
+
+### `GET /api/llama-binary/version`
+Return the currently installed llama-server binary version.
+
+- Auth: `api-token`.
+
+### `POST /api/llama-binary/update`
+Download and install a specific llama.cpp release.
+
+- Auth: `api-token`.
+- Request: `{ "version": "b5700", "backend": "metal" }`
+- Behavior:
+  - Downloads release archive to `bin/`.
+  - Applies `chmod 755` on Unix.
+  - Copies all files (CUDA/Vulkan/SYCL builds require co-located libs).
+
+### `POST /api/llama/restart`
+Restart a locally running llama-server with the current binary (useful after installing a new version).
+
+- Auth: `api-token`.
+- Precondition:
+  - A local llama-server must be running (`local_server_running: true`).
+- Behavior:
+  - Captures the current `ServerConfig` from AppState.
+  - Calls `stop_server()` (kills process, clears child/metrics).
+  - Calls `start_server()` with the captured config.
+  - The restarted server uses the current `llama_server_path` (so after a binary update, it will use the new build).
+- Errors:
+  - 200 with `ok: false` if:
+    - No local server is running.
+    - No saved server config found.
+    - Stop or restart fails.

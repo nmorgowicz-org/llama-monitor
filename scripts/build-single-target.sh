@@ -5,15 +5,28 @@ set -euo pipefail
 
 TARGET="${1:?Usage: build-single-target.sh <target>}"
 
+# Auto-detect from the installed osxcross toolchain — no manual updates needed.
+DARWIN_VERSION=$(ls /opt/osxcross/target/bin/aarch64-apple-darwin*-clang 2>/dev/null \
+  | head -1 | grep -oP 'darwin[\d.]+')
+MACOS_SDK=$(ls -d /opt/osxcross/target/SDK/MacOSX*.sdk 2>/dev/null \
+  | sort -V | tail -1 | xargs basename)
+if [[ -z "$DARWIN_VERSION" || -z "$MACOS_SDK" ]]; then
+  echo "FAIL: could not detect osxcross toolchain in /opt/osxcross/target/"
+  echo "  clang binaries found: $(ls /opt/osxcross/target/bin/*-clang 2>/dev/null || echo none)"
+  echo "  SDKs found: $(ls -d /opt/osxcross/target/SDK/*.sdk 2>/dev/null || echo none)"
+  exit 1
+fi
+echo "osxcross: ${DARWIN_VERSION}, ${MACOS_SDK}"
+
 mkdir -p ~/.cargo
-cat > ~/.cargo/config.toml << 'CARGO_CONFIG'
+cat > ~/.cargo/config.toml << CARGO_CONFIG
 [target.aarch64-apple-darwin]
-linker = "/opt/osxcross/target/bin/aarch64-apple-darwin25.1-clang"
-ar     = "/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar"
+linker = "/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-clang"
+ar     = "/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-ar"
 rustflags = [
-  "-C", "link-arg=-fuse-ld=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ld",
+  "-C", "link-arg=-fuse-ld=/usr/bin/ld64.lld",
   "-C", "link-arg=-isysroot",
-  "-C", "link-arg=/opt/osxcross/target/SDK/MacOSX26.1.sdk",
+  "-C", "link-arg=/opt/osxcross/target/SDK/${MACOS_SDK}",
 ]
 
 [target.aarch64-unknown-linux-gnu]
@@ -38,15 +51,16 @@ case "$TARGET" in
   x86_64-pc-windows-gnu)
     CROSS_REMOTE=1 \
       CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=cc \
       cross build --release --target x86_64-pc-windows-gnu \
       --no-default-features --features native-tray
     ;;
   aarch64-apple-darwin)
-    SDKROOT=/opt/osxcross/target/SDK/MacOSX26.1.sdk \
-      CC_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-clang \
-      AR_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
-      AR=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
-      RANLIB=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ranlib \
+    SDKROOT="/opt/osxcross/target/SDK/${MACOS_SDK}" \
+      CC_aarch64_apple_darwin="/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-clang" \
+      AR_aarch64_apple_darwin="/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-ar" \
+      AR="/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-ar" \
+      RANLIB="/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-ranlib" \
       cargo build --release --target aarch64-apple-darwin
     ;;
   *)

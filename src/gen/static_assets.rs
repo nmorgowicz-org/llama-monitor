@@ -20,7 +20,9 @@ pub const CSS_LOGS: &str = include_str!("../../static/css/logs.css");
 pub const CSS_MODAL_PREMIUM: &str = include_str!("../../static/css/modal-premium.css");
 pub const CSS_SETTINGS_MODAL: &str = include_str!("../../static/css/settings-modal.css");
 pub const CSS_SETUP_VIEW: &str = include_str!("../../static/css/setup-view.css");
+pub const CSS_SPAWN_WIZARD: &str = include_str!("../../static/css/spawn-wizard.css");
 pub const CSS_TOKENS: &str = include_str!("../../static/css/tokens.css");
+pub const CSS_TUNE_PANEL: &str = include_str!("../../static/css/tune-panel.css");
 pub const ICON_SVG: &str = include_str!("../../static/icon.svg");
 pub const INDEX_HTML: &str = include_str!("../../static/index.html");
 pub const BOOTSTRAP_JS: &str = include_str!("../../static/js/bootstrap.js");
@@ -50,6 +52,8 @@ pub const FEATURES_CHAT_SESSIONS_SIDEBAR_JS: &str =
 pub const FEATURES_CHAT_STATE_JS: &str = include_str!("../../static/js/features/chat-state.js");
 pub const FEATURES_CHAT_SUGGESTIONS_JS: &str =
     include_str!("../../static/js/features/chat-suggestions.js");
+pub const FEATURES_CHAT_TEMPLATE_REGISTRY_JS: &str =
+    include_str!("../../static/js/features/chat-template-registry.js");
 pub const FEATURES_CHAT_TEMPLATES_JS: &str =
     include_str!("../../static/js/features/chat-templates.js");
 pub const FEATURES_CHAT_TRANSPORT_JS: &str =
@@ -65,7 +69,10 @@ pub const FEATURES_DB_ADMIN_JS: &str = include_str!("../../static/js/features/db
 pub const FEATURES_FILE_BROWSER_LAUNCHER_JS: &str =
     include_str!("../../static/js/features/file-browser-launcher.js");
 pub const FEATURES_FILE_BROWSER_JS: &str = include_str!("../../static/js/features/file-browser.js");
+pub const FEATURES_HF_BROWSE_JS: &str = include_str!("../../static/js/features/hf-browse.js");
 pub const FEATURES_LHM_JS: &str = include_str!("../../static/js/features/lhm.js");
+pub const FEATURES_LLAMA_UPDATER_JS: &str =
+    include_str!("../../static/js/features/llama-updater.js");
 pub const FEATURES_MODELS_JS: &str = include_str!("../../static/js/features/models.js");
 pub const FEATURES_NAV_JS: &str = include_str!("../../static/js/features/nav.js");
 pub const FEATURES_NETWORK_DETECTION_JS: &str =
@@ -78,9 +85,14 @@ pub const FEATURES_SESSIONS_JS: &str = include_str!("../../static/js/features/se
 pub const FEATURES_SETTINGS_JS: &str = include_str!("../../static/js/features/settings.js");
 pub const FEATURES_SETUP_VIEW_JS: &str = include_str!("../../static/js/features/setup-view.js");
 pub const FEATURES_SHORTCUTS_JS: &str = include_str!("../../static/js/features/shortcuts.js");
+pub const FEATURES_SPAWN_READINESS_JS: &str =
+    include_str!("../../static/js/features/spawn-readiness.js");
+pub const FEATURES_SPAWN_WIZARD_JS: &str = include_str!("../../static/js/features/spawn-wizard.js");
 pub const FEATURES_TELEMETRY_GRADE_JS: &str =
     include_str!("../../static/js/features/telemetry-grade.js");
 pub const FEATURES_TOAST_JS: &str = include_str!("../../static/js/features/toast.js");
+pub const FEATURES_TUNE_PANEL_JS: &str = include_str!("../../static/js/features/tune-panel.js");
+pub const FEATURES_TUNING_CARDS_JS: &str = include_str!("../../static/js/features/tuning-cards.js");
 pub const FEATURES_UPDATES_JS: &str = include_str!("../../static/js/features/updates.js");
 pub const FEATURES_USER_MENU_JS: &str = include_str!("../../static/js/features/user-menu.js");
 pub const FEATURES_WORKSPACE_COMMAND_PALETTE_JS: &str =

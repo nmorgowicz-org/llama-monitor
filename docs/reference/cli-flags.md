@@ -96,7 +96,7 @@ llama-monitor --no-tray
 
 ## Local llama.cpp launch defaults
 
-These flags seed the dashboard's local spawn/runtime defaults.
+These flags seed the dashboard's local launch/runtime defaults.
 
 ### `--llama-server-path`, `-s`
 

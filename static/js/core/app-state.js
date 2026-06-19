@@ -45,6 +45,9 @@ export let lastServerState = null;
 /** Last known llama metrics from WebSocket */
 export let lastLlamaMetrics = null;
 
+/** Normalized context capacity: actual loaded limit, not stale KV-only reports */
+export let contextCapacityTokens = null;
+
 /** Last known system metrics from WebSocket */
 export let lastSystemMetrics = null;
 
@@ -70,14 +73,22 @@ export const sessionState = {
     presets: [],
     /** Loaded sessions from backend */
     sessions: [],
+    /** Loaded preset collections from backend */
+    collections: [],
     /** Currently active session ID */
     activeSessionId: 'default',
+    /** Preset currently staged in the UI for edit/start actions */
+    selectedPresetId: '',
+    /** Preset attached to the active running spawn session, if any */
+    activeSessionPresetId: '',
     /** Currently active session port */
     activeSessionPort: 8080,
     /** Whether the local server is running */
     serverRunning: false,
     /** Previous log length for incremental rendering */
     prevLogLen: 0,
+    /** Previous backend log snapshot, used to detect fixed-size ring rotation */
+    prevLogs: [],
 };
 
 // ── Remote Agent ──────────────────────────────────────────────────────────────
@@ -99,6 +110,7 @@ export let wsData = null;
 export function setWsData(data) { wsData = data; }
 export function setLastServerState(v) { lastServerState = v; }
 export function setLastLlamaMetrics(v) { lastLlamaMetrics = v; }
+export function setContextCapacityTokens(v) { contextCapacityTokens = v; }
 export function setLastSystemMetrics(v) { lastSystemMetrics = v; }
 export function setLastGpuMetrics(v) { lastGpuMetrics = v; }
 export function setLastCapabilities(v) { lastCapabilities = v; }
@@ -136,6 +148,8 @@ export const settingsState = {
     context_notes_sidebar_expanded: false,
     /** Shared context notes intro visibility */
     context_notes_intro_hidden: false,
+    /** Whether assistant thinking blocks should be restored from saved chat history */
+    persist_thinking_content: false,
     /** Shared custom suggestion categories */
     custom_suggestion_categories: {},
 };
@@ -178,6 +192,7 @@ export const chat = {
         hiddenOpen: false,
         hiddenRevealed: false,
         activeSearchVisibility: ['active'],
+        selectedIds: new Set(),
     },
 };
 

@@ -1,0 +1,1076 @@
+/* ── Benchmark Dropdown + Tune Panel ──────────────────────────────────────────
+ * Dropdown panel sits above the "Inference Metrics" section header.
+ * Triggered by the "Benchmark" pill in the section title bar.
+ * Three states: idle → running → results.
+ */
+
+/* ── Dropdown wrapper ─────────────────────────────────────────────────────── */
+
+.benchmark-dropdown-wrap {
+  display: none;
+  position: fixed;
+  z-index: 500;
+  width: min(440px, 92vw);
+  max-height: min(520px, calc(100vh - 120px));
+  overflow-y: auto;
+  background:
+    radial-gradient(circle at 18% 18%, var(--surface-card-ambient-a), transparent 28%),
+    radial-gradient(circle at 82% 12%, var(--surface-card-ambient-b), transparent 24%),
+    linear-gradient(180deg, var(--surface-card-elevated), var(--surface-card-base));
+  border: 1px solid var(--surface-card-overlay-strong);
+  border-radius: var(--radius-card);
+  box-shadow:
+    0 20px 48px rgba(0, 0, 0, 0.36),
+    0 6px 18px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition: opacity 180ms ease, transform 180ms ease;
+  backdrop-filter: blur(18px) saturate(160%);
+}
+
+.benchmark-dropdown-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: var(--radius-card);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent 40%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 70%);
+}
+
+.benchmark-dropdown-wrap.open {
+  display: block;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+/* Hide pill when not connected */
+.benchmark-pill {
+  display: none;
+}
+
+.benchmark-pill.show {
+  display: inline-block;
+}
+
+/* Accent-tinted active pill (matches palette) */
+.benchmark-pill.is-active {
+  background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  color: var(--color-accent-light);
+  border-color: color-mix(in srgb, var(--color-accent) 36%, transparent);
+}
+
+/* ── Panel body ─────────────────────────────────────────────────────────────── */
+
+.benchmark-dropdown {
+  position: relative;
+  padding: 16px 18px 14px;
+}
+
+/* ── Idle ─────────────────────────────────────────────────────────────────── */
+
+.tune-idle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tune-idle-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tune-idle-icon {
+  flex-shrink: 0;
+  color: var(--color-primary-light);
+  opacity: 0.85;
+}
+
+.tune-idle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tune-idle-label {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  line-height: 1.2;
+}
+
+.tune-idle-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.tune-run-btn {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-soft-border);
+  background: var(--accent-soft-bg);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: 650;
+  font-family: var(--font-body);
+  color: var(--color-primary-light);
+  transition: filter 0.15s, transform 0.1s, background 0.15s;
+  letter-spacing: 0.01em;
+  box-shadow: 0 1px 4px var(--acc-15);
+}
+
+.tune-run-btn:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+  background: var(--accent-soft-bg-strong);
+  box-shadow: 0 2px 8px var(--acc-25);
+}
+
+.tune-run-btn:active {
+  transform: translateY(0);
+  filter: brightness(0.95);
+}
+
+.tune-run-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ── Running ──────────────────────────────────────────────────────────────── */
+
+.tune-running {
+  padding: 4px 0 2px;
+}
+
+.tune-running-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.tune-running-pulse {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-primary-light);
+  box-shadow: 0 0 10px var(--color-primary-light);
+  animation: dot-pulse 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.tune-running-label {
+  font-size: var(--text-sm);
+  font-weight: 650;
+  color: var(--color-text-primary);
+}
+
+.tune-running-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.tune-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  position: relative;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.tune-progress-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -40%;
+  width: 40%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent 0%, var(--color-accent-deep) 40%, var(--color-accent-light) 70%, transparent 100%);
+  animation: tune-sweep 2s ease-in-out infinite;
+}
+
+@keyframes tune-sweep {
+  0%   { transform: translateX(0); }
+  50%  { transform: translateX(70%); }
+  100% { transform: translateX(150%); }
+}
+
+/* ── Results ─────────────────────────────────────────────────────────────── */
+
+.tune-results {
+  padding: 4px 0 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Scorecard row: grade ring + metrics + re-run */
+.tune-scorecard {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* Grade wrap: ring + label stacked */
+.tune-grade-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.tune-grade-label {
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+/* Grade ring — conic-gradient circle matching temp gauge style */
+.tune-grade-ring {
+  --grade-pct: 72%;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(12, 15, 24, 0.98) 0 58%, transparent 61%),
+    conic-gradient(from -90deg, var(--grade-color, var(--color-accent)) calc(var(--grade-pct) * 1%), rgba(255, 255, 255, 0.06) 0);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 16px color-mix(in srgb, var(--grade-color, var(--color-accent)) 12%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  font-weight: 800;
+  font-family: var(--font-body);
+  color: var(--color-text-primary);
+  flex-shrink: 0;
+  letter-spacing: -0.01em;
+  transition: background 300ms ease;
+}
+
+.tune-grade-ring.tune-grade-s { --grade-pct: 100%; --grade-color: var(--color-accent-light); }
+.tune-grade-ring.tune-grade-a { --grade-pct: 78%;  --grade-color: var(--color-accent); }
+.tune-grade-ring.tune-grade-b { --grade-pct: 55%;  --grade-color: var(--color-warning); }
+.tune-grade-ring.tune-grade-c { --grade-pct: 35%;  --grade-color: var(--color-warning); }
+.tune-grade-ring.tune-grade-d { --grade-pct: 18%;  --grade-color: var(--color-error); }
+
+.tune-grade-ring.tune-grade-s,
+.tune-grade-ring.tune-grade-a {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 20px color-mix(in srgb, var(--grade-color) 30%, transparent);
+}
+
+.tune-grade-ring.tune-grade-c,
+.tune-grade-ring.tune-grade-d {
+  animation: gauge-breathe-warn 2.5s ease-in-out infinite;
+}
+
+@keyframes gauge-breathe-warn {
+  0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 12px color-mix(in srgb, var(--grade-color) 20%, transparent); }
+  50% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 0 24px color-mix(in srgb, var(--grade-color) 36%, transparent); }
+}
+
+/* Metrics row */
+.tune-metrics-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tune-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 48px;
+}
+
+.tune-metric-val {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 800;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.tune-metric-lbl {
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.tune-metric-sep {
+  width: 1px;
+  height: 32px;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.tune-rerun-btn {
+  margin-left: auto;
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tune-rerun-btn:hover {
+  background: var(--acc-10);
+  color: var(--color-primary-light);
+  border-color: var(--accent-soft-border);
+}
+
+.tune-rerun-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Suggestion cards ─────────────────────────────────────────────────────── */
+
+.tune-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tune-suggestion-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--border-subtle);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.012));
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.tune-suggestion-card:hover {
+  border-color: var(--surface-card-line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.018));
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.tune-suggestion-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tune-suggestion-label {
+  font-size: var(--text-sm);
+  font-weight: 650;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tune-suggestion-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
+}
+
+.tune-suggestion-apply {
+  flex-shrink: 0;
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-soft-border);
+  background: var(--accent-soft-bg);
+  color: var(--color-primary-light);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px var(--acc-12);
+}
+
+.tune-suggestion-apply:hover {
+  background: var(--accent-soft-bg-strong);
+  border-color: var(--acc-50);
+  transform: translateX(1px);
+}
+
+.tune-suggestion-apply:active {
+  transform: translateX(0);
+}
+
+.tune-suggestion-apply:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* "Already well-tuned" / no suggestions message */
+.tune-no-suggestions {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: 6px 0 2px;
+  font-style: italic;
+}
+
+/* ── Informational suggestion (no Apply button) ───────────────────────────── */
+
+.tune-suggestion-info {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--color-warning) 6%, transparent);
+}
+
+.tune-suggestion-info:hover {
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 9%, transparent);
+}
+
+/* ── Restarting overlay inside tune-results ──────────────────────────────── */
+
+.tune-restarting-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(10, 12, 20, 0.8);
+  backdrop-filter: blur(6px);
+  border-radius: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+/* ── Spawn Wizard / Preset Editor performance advisor ─────────────────────────── */
+
+.wizard-advisor {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, var(--acc-05), rgba(15, 23, 42, 0.02));
+}
+
+.wizard-advisor-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+
+.wizard-advisor-header svg { color: var(--color-primary-light); }
+
+/* Advisor cards allow multi-line descriptions (unlike the compact tune panel). */
+.wizard-advisor .tune-suggestion-card { align-items: flex-start; }
+.wizard-advisor .tune-suggestion-label { white-space: normal; }
+.wizard-advisor .tune-suggestion-desc { white-space: normal; overflow: visible; }
+
+/* ── MoE offload auto-tuner ────────────────────────────────────────────────── */
+
+.moe-autotune {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  margin-bottom: 4px;
+  min-width: 0;
+}
+
+.moe-autotune-btn,
+.moe-autotune-verify {
+  font-size: var(--text-xs);
+  font-weight: 650;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+}
+
+.moe-autotune-btn {
+  background: var(--accent-soft-bg);
+  color: var(--color-primary-light);
+  border-color: transparent;
+}
+
+.moe-autotune-btn:hover {
+  background: var(--accent-soft-bg-strong);
+}
+
+.moe-autotune-btn:active {
+  transform: translateY(1px);
+}
+
+.moe-autotune-verify {
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.moe-autotune-verify:hover {
+  border-color: var(--accent-soft-border);
+  color: var(--color-text-primary);
+}
+
+.moe-autotune-status {
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  display: inline-block;
+  padding-left: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.moe-autotune-status .moe-autotune-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--color-text-muted);
+  border-top-color: var(--color-info);
+  border-radius: 50%;
+  animation: moe-autotune-spin 0.8s linear infinite;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+@keyframes moe-autotune-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Depth sweep ───────────────────────────────────────────────────────────── */
+
+.depth-sweep {
+  margin-top: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+
+.depth-sweep-summary {
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: 650;
+  color: var(--color-text-secondary);
+  user-select: none;
+}
+
+.depth-sweep-hint {
+  font-weight: 400;
+  color: var(--color-text-muted);
+  margin-left: 6px;
+}
+
+.depth-sweep-body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.depth-sweep-btn {
+  align-self: flex-start;
+  font-size: var(--text-xs);
+  font-weight: 650;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-soft-border);
+  background: transparent;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.depth-sweep-btn:hover {
+  background: var(--acc-08);
+}
+
+.depth-sweep-status {
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+}
+
+.depth-sweep-spark {
+  width: 100%;
+  height: 40px;
+  color: var(--color-primary-light);
+  display: block;
+}
+
+.depth-sweep-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
+}
+
+.depth-sweep-table th,
+.depth-sweep-table td {
+  text-align: right;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.depth-sweep-table th:first-child,
+.depth-sweep-table td:first-child {
+  text-align: left;
+}
+
+.depth-sweep-table th {
+  color: var(--color-text-muted);
+  font-weight: 700;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 520px) {
+  .tune-idle {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .tune-run-btn {
+    align-self: flex-end;
+  }
+  .tune-scorecard {
+    flex-wrap: wrap;
+  }
+  .tune-rerun-btn {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Light theme ─────────────────────────────────────────────────────────── */
+
+[data-theme="light"] .benchmark-dropdown-wrap {
+  background:
+    radial-gradient(circle at 18% 18%, var(--surface-card-ambient-a), transparent 28%),
+    radial-gradient(circle at 82% 12%, var(--surface-card-ambient-b), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 248, 255, 0.96));
+  border-color: var(--border-subtle);
+  box-shadow:
+    0 20px 48px rgba(15, 23, 42, 0.2),
+    0 6px 18px rgba(15, 23, 42, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="light"] .tune-suggestion-card {
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.03), rgba(15, 23, 42, 0.015));
+  border-color: var(--border-subtle);
+  box-shadow:
+    0 4px 12px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+[data-theme="light"] .tune-suggestion-card:hover {
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.05), rgba(15, 23, 42, 0.025));
+  box-shadow:
+    0 6px 16px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="light"] .tune-restarting-overlay {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+[data-theme="light"] .tune-rerun-btn {
+  background: transparent;
+  color: var(--color-text-muted);
+  border-color: var(--border-subtle);
+}
+
+[data-theme="light"] .tune-run-btn {
+  background: var(--accent-soft-bg);
+  color: var(--color-accent-deep);
+  border-color: var(--accent-soft-border);
+}
+
+[data-theme="light"] .wizard-advisor {
+  background:
+    linear-gradient(180deg, var(--acc-05), rgba(255, 255, 255, 0.02));
+}
+
+[data-theme="light"] .depth-sweep {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* ── Tune tool card (shared container for MTP sweep and future tools) ─────── */
+
+.tune-tool-card {
+  margin-top: 14px;
+  padding: 12px 14px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.022), rgba(255, 255, 255, 0.01));
+}
+
+.tune-tool-card-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+}
+
+.tune-tool-card-title {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.tune-tool-card-badge {
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--acc-15);
+  color: var(--color-primary-light);
+  border: 1px solid var(--acc-25);
+}
+
+.tune-tool-card-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  margin: 0 0 10px;
+}
+
+.tune-tool-card-desc code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+/* ── MTP sweep controls ────────────────────────────────────────────────────── */
+
+.mtp-sweep-controls {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 6px;
+  margin-bottom: 10px;
+}
+
+.tune-tool-label {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tune-tool-select {
+  font-size: var(--text-xs);
+  font-family: var(--font-body);
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.tune-tool-select:focus {
+  border-color: var(--accent-soft-border);
+}
+
+/* Timer shown during sweep */
+.mtp-sweep-timer {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
+}
+
+/* Sweep results: bar chart */
+.mtp-sweep-chart {
+  margin: 8px 0;
+}
+
+.mtp-sweep-table {
+  width: 100%;
+}
+
+.mtp-sweep-table tr.mtp-sweep-recommended {
+  background: var(--acc-08);
+}
+
+.mtp-sweep-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mtp-sweep-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-accent-deep), var(--color-accent-light));
+  transition: width 0.4s ease;
+  min-width: 2px;
+}
+
+.mtp-sweep-bar-val {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.mtp-probe-error {
+  color: var(--color-error);
+  font-style: italic;
+}
+
+.mtp-sweep-rec-badge {
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  color: var(--color-primary-light);
+  background: var(--acc-15);
+  border: 1px solid var(--acc-25);
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+
+.mtp-sweep-rec {
+  font-size: var(--text-xs);
+  font-weight: 650;
+  color: var(--color-text-secondary);
+  margin: 8px 0 6px;
+}
+
+.mtp-sweep-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.mtp-sweep-apply-btn {
+  flex-shrink: 0;
+}
+
+/* Infinite-scroll animation for MTP sweep progress bar */
+.mtp-sweep-progress-anim {
+  background: linear-gradient(90deg, transparent 0%, var(--color-accent) 40%, var(--color-accent-light) 70%, transparent 100%);
+}
+
+[data-theme="light"] .mtp-sweep-progress-anim {
+  background: linear-gradient(90deg, transparent 0%, var(--color-accent) 40%, var(--color-accent-light) 70%, transparent 100%);
+}
+
+[data-theme="light"] .tune-tool-card-desc code {
+  background: rgba(15, 23, 42, 0.06);
+  color: #1e293b;
+}
+
+[data-theme="light"] .mtp-sweep-progress-anim {
+  background: linear-gradient(90deg, transparent 0%, var(--color-accent) 40%, var(--color-accent-light) 70%, transparent 100%);
+}
+
+[data-theme="light"] .tune-tool-card-desc code {
+  background: rgba(15, 23, 42, 0.06);
+  color: #1e293b;
+}
+
+[data-theme="light"] .tune-tool-card {
+  background: rgba(255, 255, 255, 0.96);
+}
+
+[data-theme="light"] .tune-tool-select {
+  background: #ffffff;
+  color: var(--color-text-primary);
+  border-color: var(--border-subtle);
+}
+
+/* Idle / Running / Results text */
+[data-theme="light"] .tune-idle-label,
+[data-theme="light"] .tune-running-label,
+[data-theme="light"] .tune-rerun-btn {
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .tune-idle-desc,
+[data-theme="light"] .tune-running-hint,
+[data-theme="light"] .tune-no-suggestions {
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .tune-run-btn {
+  background: #ffffff;
+  color: var(--color-accent-deep);
+  border-color: var(--color-accent-deep);
+}
+
+/* Grade ring / metrics labels */
+[data-theme="light"] .tune-grade-ring {
+  background:
+    radial-gradient(circle, #ffffff 0 58%, transparent 61%),
+    conic-gradient(from -90deg, var(--grade-color, var(--color-accent)) calc(var(--grade-pct) * 1%), rgba(15,23,42,0.08) 0);
+}
+
+[data-theme="light"] .tune-grade-label,
+[data-theme="light"] .tune-metric-lbl {
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .tune-metric-val {
+  color: var(--color-text-primary);
+}
+
+/* Suggestion cards text */
+[data-theme="light"] .tune-suggestion-label {
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .tune-suggestion-desc {
+  color: var(--color-text-muted);
+}
+
+/* Info suggestion */
+[data-theme="light"] .tune-suggestion-info {
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+}
+
+/* Restarting overlay */
+[data-theme="light"] .tune-restarting-overlay {
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--color-text-primary);
+}
+
+/* Progress track */
+[data-theme="light"] .tune-progress-track {
+  background: var(--border-subtle);
+}
+
+/* Wizard advisor (spawn) */
+[data-theme="light"] .wizard-advisor {
+  background:
+    linear-gradient(180deg, var(--acc-05), rgba(255,255,255,0.95));
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .wizard-advisor-header {
+  color: var(--color-text-muted);
+}
+
+/* MoE autotune */
+[data-theme="light"] .moe-autotune-btn {
+  background: #ffffff;
+  color: var(--color-accent-deep);
+  border-color: var(--color-accent-deep);
+}
+
+[data-theme="light"] .moe-autotune-verify {
+  color: var(--color-text-secondary);
+  border-color: var(--border-subtle);
+}
+
+[data-theme="light"] .moe-autotune-status {
+  color: var(--color-text-muted);
+}
+
+/* Depth sweep */
+[data-theme="light"] .depth-sweep {
+  background: #ffffff;
+  border-color: var(--border-subtle);
+}
+
+[data-theme="light"] .depth-sweep-summary,
+[data-theme="light"] .depth-sweep-btn {
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .depth-sweep-hint,
+[data-theme="light"] .depth-sweep-status {
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .depth-sweep-table th {
+  color: var(--color-text-muted);
+}
+
+/* MTP sweep chart area */
+[data-theme="light"] .mtp-sweep-bar-val,
+[data-theme="light"] .mtp-sweep-rec,
+[data-theme="light"] .mtp-sweep-timer {
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .mtp-probe-error {
+  color: var(--color-error);
+  font-style: italic;
+}

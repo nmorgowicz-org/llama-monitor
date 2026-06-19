@@ -1,10 +1,13 @@
 // ── Navigation ────────────────────────────────────────────────────────────────
 // Tab switching and sidebar collapse.
 
-import { chat, lastLlamaMetrics, metricSeries, wsData } from '../core/app-state.js';
+import { chat, contextCapacityTokens, lastLlamaMetrics, metricSeries, setWsData, wsData } from '../core/app-state.js';
 import { chatScroll } from './chat-render.js';
 import { showSessionPanel, hideSessionPanel } from './chat-sessions-sidebar.js';
 import { isFocusModeActive, exitFocusMode } from './chat-focus-mode.js';
+import { renderCapabilityPopover } from './dashboard-render.js';
+import { showToast } from './toast.js';
+import { switchView } from './setup-view.js';
 
 export function switchTab(name) {
     if (name !== 'chat' && isFocusModeActive()) exitFocusMode();
@@ -72,18 +75,33 @@ function restoreSidebarState() {
 function initEndpointStatus() {
     const endpointStatus = document.getElementById('endpoint-status');
     const endpointStatusWrap = endpointStatus?.closest('.endpoint-status-wrap');
-    if (!endpointStatus || !endpointStatusWrap) return;
+    const popover = document.getElementById('capability-popover');
+    if (!endpointStatus || !endpointStatusWrap || !popover) return;
+
+    function positionPopover() {
+        const rect = endpointStatusWrap.getBoundingClientRect();
+        popover.style.top = (rect.bottom + 8) + 'px';
+        popover.style.left = Math.min(rect.left, window.innerWidth - 370) + 'px';
+    }
 
     endpointStatus.addEventListener('click', event => {
         event.stopPropagation();
         const open = endpointStatusWrap.classList.toggle('open');
         endpointStatus.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) {
+            popover.classList.add('open');
+            renderCapabilityPopover(wsData, wsData?.llama);
+            positionPopover();
+        } else {
+            popover.classList.remove('open');
+        }
     });
 
     document.addEventListener('click', event => {
         if (!event.target.closest('.endpoint-status-wrap')) {
             endpointStatusWrap.classList.remove('open');
             endpointStatus.setAttribute('aria-expanded', 'false');
+            popover.classList.remove('open');
         }
     });
 }
@@ -92,9 +110,12 @@ function deriveTabCtxPct(tab, capacity) {
     if (!tab || !capacity) return 0;
     const asst = (tab.messages || []).filter(m => m.role === 'assistant' && !m.compaction_marker);
     if (!asst.length) return tab.last_ctx_pct || 0;
-    const totalOutput = asst.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
-    const lastInput = asst.at(-1)?.input_tokens || 0;
-    return Math.min(200, (totalOutput + lastInput) / capacity * 100);
+    // Use tab-level cumulative totals (most accurate); fall back to summing message fields.
+    const totalInput = tab.total_input_tokens
+        || asst.reduce((sum, m) => sum + (m.input_tokens || 0), 0);
+    const totalOutput = tab.total_output_tokens
+        || asst.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
+    return Math.min(200, (totalInput + totalOutput) / capacity * 100);
 }
 
 function buildCockpitSparkline(points) {
@@ -104,7 +125,7 @@ function buildCockpitSparkline(points) {
     const max = Math.max(...points, 1);
     const step = width / (points.length - 1);
     const currentValue = points[points.length - 1];
-    const currentX = width - 10;
+    const currentX = width;
     const currentY = height - ((currentValue / max) * (height - 6)) - 3;
     const path = points.map((value, index) => {
         const x = index * step;
@@ -114,7 +135,7 @@ function buildCockpitSparkline(points) {
     return [
         '<path class="sparkline-fill live-output" d="' + path + ' L 120 28 L 0 28 Z" fill="currentColor"></path>',
         '<path class="sparkline-line live-output" d="' + path + '"></path>',
-        '<line class="sparkline-current-trace live-output" x1="' + Math.max(currentX - 16, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>',
+        '<line class="sparkline-current-trace live-output" x1="' + Math.max(currentX - 8, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>',
         '<circle class="sparkline-current-halo live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="7.4"></circle>',
         '<circle class="sparkline-current live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="3.6"></circle>',
         '<circle class="sparkline-current-core live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.2"></circle>',
@@ -123,6 +144,38 @@ function buildCockpitSparkline(points) {
 
 function buildIdleCockpitPoints() {
     return [0.18, 0.42, 0.3, 0.54, 0.36, 0.62, 0.4, 0.5, 0.34, 0.46];
+}
+
+function refreshMonitoringChip(isSleeping, isManualSleep, hasActiveEndpoint) {
+    const chip = document.getElementById('nav-monitoring-chip');
+    if (!chip) return;
+
+    chip.style.display = hasActiveEndpoint ? 'inline-flex' : 'none';
+    if (!hasActiveEndpoint) return;
+
+    const dot = document.getElementById('nav-monitoring-dot');
+    const label = document.getElementById('nav-monitoring-label');
+
+    const unavailable = chip.getAttribute('data-unavailable') === 'true';
+    chip.classList.toggle('is-paused', isSleeping);
+    chip.setAttribute('aria-pressed', isSleeping ? 'true' : 'false');
+
+    if (dot) {
+        dot.className = 'status-dot ' + (isSleeping ? 'warning' : 'ok');
+    }
+    if (label) {
+        label.textContent = isSleeping ? 'Paused' : 'Monitoring';
+    }
+
+    if (unavailable) {
+        chip.setAttribute('title', 'Monitoring control is not available on this server.');
+    } else if (isManualSleep) {
+        chip.setAttribute('title', 'Monitoring paused (manual) — llama-server keeps running. Click to resume.');
+    } else if (isSleeping) {
+        chip.setAttribute('title', 'Monitoring paused (idle timeout) — llama-server keeps running. Click to resume.');
+    } else {
+        chip.setAttribute('title', 'Dashboard monitoring active — click to pause telemetry while server keeps running.');
+    }
 }
 
 export function refreshTopCockpit() {
@@ -144,9 +197,15 @@ export function refreshTopCockpit() {
     const genDisplayRate = genRate > 0 ? genRate : (l?.last_generation_tokens_per_sec || 0);
     const generationActive = !!l?.slot_generation_active || (l?.slots_processing || 0) > 0 || genRate > 0;
 
+    const isSleeping = wsData?.sleep_mode === true;
+    const isManualSleep = isSleeping && wsData?.sleep_mode_manual === true;
     let label = 'idle';
     let stateClass = 'idle';
-    if (!hasActiveEndpoint) {
+
+    if (isSleeping) {
+        label = 'paused';
+        stateClass = 'sleep';
+    } else if (!hasActiveEndpoint) {
         label = 'attach';
     } else if (promptRate > 0 && genRate <= 0) {
         label = 'prompting';
@@ -161,7 +220,11 @@ export function refreshTopCockpit() {
         stateEl.className = 'metric-live-chip nav-cockpit-state ' + stateClass;
     }
     cockpit.classList.toggle('is-live', stateClass === 'live');
-    cockpit.classList.toggle('is-idle', stateClass !== 'live');
+    cockpit.classList.toggle('is-idle', stateClass !== 'live' && stateClass !== 'sleep');
+    cockpit.classList.toggle('has-session', hasActiveEndpoint);
+
+    // Update monitoring chip in nav-right
+    refreshMonitoringChip(isSleeping, isManualSleep, hasActiveEndpoint);
 
     if (throughputEl) {
         throughputEl.textContent = 'P ' + (promptDisplayRate > 0 ? promptDisplayRate.toFixed(0) : '—') + ' · G ' + (genDisplayRate > 0 ? genDisplayRate.toFixed(0) : '—');
@@ -177,7 +240,7 @@ export function refreshTopCockpit() {
         }
     }
 
-    const capacity = hasActiveEndpoint ? (l?.context_capacity_tokens || l?.kv_cache_max || 0) : 0;
+    const capacity = hasActiveEndpoint ? (contextCapacityTokens || l?.context_capacity_tokens || l?.kv_cache_max || 0) : 0;
     let worstCtx = 0;
     if (capacity > 0) {
         worstCtx = (chat.tabs || []).reduce((max, tab) => Math.max(max, deriveTabCtxPct(tab, capacity)), 0);
@@ -278,15 +341,84 @@ export function initNav() {
         collapseBtn.addEventListener('click', toggleSidebarCollapse);
     }
 
-    // Bind nav logo (prevent default link navigation)
+    // Bind nav logo — returns to home (setup) view when in monitor view
     const navLogo = document.getElementById('nav-logo');
     if (navLogo) {
-        navLogo.addEventListener('click', event => event.preventDefault());
+        navLogo.addEventListener('click', event => {
+            event.preventDefault();
+            if (!document.body.classList.contains('setup-active')) {
+                switchView('setup');
+            }
+        });
     }
 
     const cockpit = document.getElementById('nav-cockpit');
     if (cockpit) {
         cockpit.addEventListener('click', () => switchTab('server'));
+        cockpit.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            switchTab('server');
+        });
+    }
+
+    const monitoringChip = document.getElementById('nav-monitoring-chip');
+    if (monitoringChip) {
+        monitoringChip.addEventListener('click', async (e) => {
+            e.stopPropagation();
+
+            if (monitoringChip.getAttribute('data-unavailable') === 'true') return;
+            if (monitoringChip.getAttribute('data-disabled') === 'true') return;
+            monitoringChip.setAttribute('data-disabled', 'true');
+
+            const wasSleeping = wsData?.sleep_mode === true;
+
+            try {
+                const auth = window.authHeaders ? window.authHeaders() : {};
+                const res = await fetch('/api/sleep-mode/toggle', {
+                    method: 'POST',
+                    headers: { ...auth, 'Content-Type': 'application/json' },
+                });
+
+                if (!res.ok) {
+                    if (res.status === 404) {
+                        showToast('Monitoring control is not available on this server.', 'info');
+                        monitoringChip.setAttribute('data-unavailable', 'true');
+                        monitoringChip.setAttribute('title', 'Monitoring control is not available on this server.');
+                    } else {
+                        showToast('Failed to toggle monitoring.', 'error');
+                    }
+                    return;
+                }
+
+                let nextSleeping = wasSleeping;
+                try {
+                    const data = await res.json();
+                    if (data != null && typeof data.sleep_mode === 'boolean') {
+                        nextSleeping = data.sleep_mode;
+                    } else if (data != null && typeof data.enabled === 'boolean') {
+                        nextSleeping = data.enabled;
+                    }
+                } catch (_) {
+                    nextSleeping = !wasSleeping;
+                }
+
+                setWsData({ ...(wsData || {}), sleep_mode: nextSleeping, sleep_mode_manual: nextSleeping });
+                refreshTopCockpit();
+
+                if (nextSleeping) {
+                    showToast('Monitoring paused — llama-server keeps running.', 'success');
+                } else {
+                    showToast('Monitoring resumed.', 'success');
+                }
+            } catch (_err) {
+                showToast('Monitoring toggle failed (network error).', 'error');
+            } finally {
+                if (monitoringChip.getAttribute('data-unavailable') !== 'true') {
+                    setTimeout(() => monitoringChip.removeAttribute('data-disabled'), 600);
+                }
+            }
+        });
     }
 
     restoreSidebarState();

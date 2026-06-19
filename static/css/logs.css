@@ -1,16 +1,209 @@
+/* ── Log toolbar ────────────────────────────────────────────────────────────── */
+
+.log-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    background: rgba(18, 18, 28, 0.75);
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    border-radius: 10px 10px 0 0;
+    gap: 12px;
+    flex-shrink: 0;
+}
+
+.log-toolbar-left,
+.log-toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.log-count-badge {
+    font-size: 0.75rem;
+    font-family: var(--font-mono, monospace);
+    color: var(--text-muted, #94a3b8);
+    padding: 2px 8px;
+    background: rgba(148, 163, 184, 0.08);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 999px;
+    min-width: 54px;
+    text-align: center;
+}
+
+.log-tool-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    font-size: 0.76rem;
+    font-weight: 500;
+    background: rgba(148, 163, 184, 0.08);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 6px;
+    color: var(--text-muted, #94a3b8);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.log-tool-btn:hover {
+    background: rgba(148, 163, 184, 0.15);
+    color: var(--text-primary, #e2e8f0);
+    border-color: rgba(148, 163, 184, 0.28);
+}
+
+/* When auto-scroll is paused */
+.log-tool-btn--locked {
+    color: var(--color-warning);
+    border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
+    background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+}
+.log-tool-btn--locked:hover {
+    background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+    border-color: color-mix(in srgb, var(--color-warning) 50%, transparent);
+}
+
+.log-tool-btn--active {
+    color: var(--color-accent);
+    border-color: var(--acc-40);
+    background: var(--acc-08);
+}
+
+.log-font-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.log-font-btn {
+    justify-content: center;
+    width: 28px;
+    padding: 4px;
+    font-size: 0.9rem;
+    line-height: 1;
+}
+
+.log-font-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.log-font-size {
+    min-width: 42px;
+    padding: 4px 5px;
+    border: 0;
+    background: transparent;
+    color: var(--color-text-muted);
+    font-family: var(--font-mono, monospace);
+    font-size: 0.7rem;
+    cursor: pointer;
+}
+
+.log-font-size:hover {
+    color: var(--text-primary, #e2e8f0);
+}
+
+/* ── Spawn command debug panel ─────────────────────────────────────────────── */
+
+.log-cmd-panel {
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 16px;
+    background: rgba(14, 14, 22, 0.92);
+    border: 1px solid var(--acc-25);
+    border-top: none;
+    position: relative;
+}
+
+.log-cmd-panel.open {
+    display: flex;
+}
+
+.log-cmd-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-accent);
+    opacity: 0.8;
+}
+
+.log-cmd-pre {
+    margin: 0;
+    font-family: var(--font-mono, "SFMono-Regular", Menlo, monospace);
+    font-size: 0.77rem;
+    line-height: 1.7;
+    color: rgba(203, 213, 225, 0.9);
+    white-space: pre-wrap;
+    word-break: break-all;
+    background: rgba(22, 22, 35, 0.65);
+    border: 1px solid rgba(148, 163, 184, 0.1);
+    border-radius: 6px;
+    padding: 10px 14px;
+    max-height: 260px;
+    overflow-y: auto;
+}
+
+.log-cmd-copy {
+    align-self: flex-start;
+    font-size: 0.73rem;
+}
+
+/* ── Log panel (line-by-line) ────────────────────────────────────────────────── */
+
+#page-logs .log-panel {
+    --log-font-size: 13px;
+    font-family: var(--font-mono, "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", Menlo, monospace);
+    font-size: var(--log-font-size);
+    line-height: 1.65;
+    color: rgba(203, 213, 225, 0.88);
+    background: rgba(12, 12, 18, 0.84);
+    border: 1px solid rgba(100, 116, 139, 0.16);
+    border-top: none;
+    border-radius: 0 0 10px 10px;
+    padding: 10px 0;
+    overflow: auto;
+}
+
+.log-line {
+    padding: 1px 14px;
+    white-space: pre;
+    border-left: 2px solid transparent;
+    transition: background 0.1s;
+}
+
+.log-line:hover {
+    background: rgba(75, 75, 95, 0.07);
+}
+
+.log-info  { color: rgba(203, 213, 225, 0.82); border-left-color: transparent; }
+.log-warn  { color: var(--color-warning); border-left-color: color-mix(in srgb, var(--color-warning) 35%, transparent); background: color-mix(in srgb, var(--color-warning) 4%, transparent); }
+.log-error { color: var(--color-error); border-left-color: color-mix(in srgb, var(--color-error) 40%, transparent);  background: color-mix(in srgb, var(--color-error) 5%, transparent); }
+.log-debug { color: rgba(148, 163, 184, 0.55); }
+
+/* Log token coloring (llama.cpp / llama-server logs) */
+.log-lev       { color: #e5e5e5; }
+.log-comp      { color: var(--color-accent); }
+.log-metric    { color: var(--color-success); }
+.log-important { color: var(--color-warning); }
+.log-size      { color: var(--color-accent-light); }
+
 /* ── Logs Empty State ──────────────────────────────────────────────────────── */
 
 #page-logs {
     position: relative;
     padding: 32px;
-    gap: 24px;
+    gap: 8px;
 }
 
 #page-logs .log-panel {
-    min-height: 100%;
+    flex: 1;
+    min-height: 0;
 }
 
-#page-logs.logs-empty-mode .log-panel {
+#page-logs.logs-empty-mode .log-panel,
+#page-logs.logs-empty-mode .log-toolbar {
     display: none;
 }
 
@@ -24,8 +217,8 @@
     pointer-events: none;
     z-index: 10;
     background:
-        radial-gradient(circle at 18% 24%, rgba(56, 189, 248, 0.12), transparent 32%),
-        radial-gradient(circle at 78% 20%, rgba(45, 212, 191, 0.10), transparent 28%),
+        radial-gradient(circle at top right, color-mix(in srgb, var(--color-accent) 10%, transparent), transparent 40%),
+        radial-gradient(circle at bottom left, color-mix(in srgb, var(--color-accent) 12%, transparent), transparent 45%),
         linear-gradient(180deg, rgba(10, 14, 24, 0.82), rgba(10, 14, 24, 0.94));
     backdrop-filter: blur(4px);
     overflow: visible;
@@ -68,7 +261,7 @@
     height: 220px;
     top: -70px;
     right: -40px;
-    background: radial-gradient(circle, rgba(56, 189, 248, 0.24), transparent 68%);
+    background: radial-gradient(circle, color-mix(in srgb, var(--color-accent) 24%, transparent), transparent 68%);
     animation: logs-orb-drift 8s ease-in-out infinite;
 }
 
@@ -77,7 +270,7 @@
     height: 260px;
     bottom: -120px;
     left: -70px;
-    background: radial-gradient(circle, rgba(45, 212, 191, 0.18), transparent 70%);
+    background: radial-gradient(circle, color-mix(in srgb, var(--color-accent) 18%, transparent), transparent 70%);
     animation: logs-orb-drift 10s ease-in-out infinite reverse;
 }
 
@@ -91,9 +284,9 @@
     font-size: 0.72rem;
     letter-spacing: 0.18em;
     font-weight: 700;
-    color: #c7f9ff;
-    background: rgba(34, 211, 238, 0.12);
-    border: 1px solid rgba(34, 211, 238, 0.2);
+    color: var(--color-accent-light);
+    background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
 }
 
 .logs-empty-console {
@@ -103,7 +296,7 @@
     border-radius: 20px;
     overflow: hidden;
     border: 1px solid rgba(148, 163, 184, 0.16);
-    background: rgba(2, 6, 23, 0.82);
+    background: rgba(10, 10, 18, 0.85);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
@@ -123,9 +316,9 @@
     background: rgba(226, 232, 240, 0.28);
 }
 
-.logs-console-topbar span:nth-child(1) { background: rgba(248, 113, 113, 0.75); }
-.logs-console-topbar span:nth-child(2) { background: rgba(250, 204, 21, 0.75); }
-.logs-console-topbar span:nth-child(3) { background: rgba(74, 222, 128, 0.75); }
+.logs-console-topbar span:nth-child(1) { background: color-mix(in srgb, var(--color-error) 75%, transparent); }
+.logs-console-topbar span:nth-child(2) { background: color-mix(in srgb, var(--color-warning) 75%, transparent); }
+.logs-console-topbar span:nth-child(3) { background: color-mix(in srgb, var(--color-success) 75%, transparent); }
 
 .logs-console-body {
     padding: 18px 18px 20px;
@@ -140,7 +333,7 @@
 }
 
 .logs-console-line span {
-    color: #67e8f9;
+    color: var(--color-accent-light);
     margin-right: 8px;
 }
 
@@ -149,7 +342,7 @@
 }
 
 .logs-console-caret {
-    color: #5eead4;
+    color: var(--color-accent);
 }
 
 .logs-console-caret::after {
@@ -214,18 +407,18 @@
     font-size: 0.9rem;
     font-weight: 600;
     border-radius: 999px;
-    border: 1px solid rgba(34, 211, 238, 0.28);
-    background: linear-gradient(180deg, rgba(34, 211, 238, 0.18), rgba(13, 148, 136, 0.18));
-    color: #ecfeff;
+    border: 1px solid color-mix(in srgb, var(--color-accent) 28%, transparent);
+    background: linear-gradient(180deg, var(--color-accent-deep), var(--color-accent));
+    color: var(--color-accent-light);
     cursor: pointer;
     transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-    box-shadow: 0 10px 24px rgba(8, 145, 178, 0.18);
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--color-accent-deep) 30%, transparent);
 }
 
 .logs-empty-actions .btn:hover {
-    border-color: rgba(103, 232, 249, 0.42);
+    border-color: color-mix(in srgb, var(--color-accent-light) 42%, transparent);
     transform: translateY(-1px);
-    box-shadow: 0 16px 30px rgba(8, 145, 178, 0.22);
+    box-shadow: 0 16px 30px color-mix(in srgb, var(--color-accent-deep) 30%, transparent);
 }
 
 .logs-empty-actions .btn svg {
@@ -271,7 +464,139 @@
 
 /* ── Reduced Motion ─────────────────────────────────────────────────────────── */
 
-@media (prefers-reduced-motion: reduce) {
+@media (max-width: 900px) {
+     #page-logs {
+         padding: 18px;
+     }
+
+     .logs-empty-state {
+         padding: 0 0 18px;
+     }
+
+     .logs-empty-content {
+         padding: 28px 20px 32px;
+         border-radius: 22px;
+     }
+
+     .logs-empty-capabilities {
+         justify-content: flex-start;
+     }
+
+     .logs-empty-actions {
+         justify-content: flex-start;
+     }
+ }
+
+/* ── Light theme: logs (full pass) ───────────────────────────────────── */
+
+[data-theme="light"] .logs-empty-state {
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--color-accent) 8%, transparent), transparent 40%),
+    radial-gradient(circle at bottom left, color-mix(in srgb, var(--color-accent) 6%, transparent), transparent 45%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(241, 245, 249, 0.98));
+}
+
+[data-theme="light"] .logs-empty-content {
+  border-color: rgba(15, 23, 42, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98)),
+    rgba(248, 250, 252, 0.9);
+  box-shadow:
+    0 32px 90px rgba(15, 23, 42, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+/* Ambient orbs (soften) */
+[data-theme="light"] .logs-empty-ambient-a {
+  background: radial-gradient(circle, color-mix(in srgb, var(--color-accent) 18%, transparent), transparent 68%);
+}
+
+[data-theme="light"] .logs-empty-ambient-b {
+  background: radial-gradient(circle, color-mix(in srgb, var(--color-accent) 14%, transparent), transparent 70%);
+}
+
+/* Badge */
+[data-theme="light"] .logs-empty-badge {
+  color: var(--color-accent-light);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+/* Console window */
+[data-theme="light"] .logs-empty-console {
+  background: rgba(15, 23, 42, 0.82);
+  border-color: rgba(15, 23, 42, 0.28);
+}
+
+[data-theme="light"] .logs-console-topbar {
+  background: rgba(15, 23, 42, 0.24);
+  border-bottom-color: rgba(15, 23, 42, 0.35);
+}
+
+/* Capabilities chips */
+[data-theme="light"] .logs-capability-chip {
+  background: rgba(15, 23, 42, 0.05);
+  border-color: rgba(15, 23, 42, 0.14);
+  color: var(--color-text-primary);
+}
+
+/* Action button */
+[data-theme="light"] .logs-empty-actions .btn {
+  background: linear-gradient(180deg, var(--color-accent-deep), var(--color-accent));
+  border-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--color-accent-deep) 20%, transparent);
+}
+
+/* ── Light theme: toolbar + log lines ───────────────────────────────────────── */
+
+[data-theme="light"] .log-toolbar {
+  background: rgba(241, 245, 249, 0.9);
+  border-color: rgba(15, 23, 42, 0.14);
+}
+
+[data-theme="light"] .log-count-badge {
+  background: rgba(15, 23, 42, 0.06);
+  border-color: rgba(15, 23, 42, 0.14);
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .log-tool-btn {
+  background: rgba(15, 23, 42, 0.05);
+  border-color: rgba(15, 23, 42, 0.14);
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .log-tool-btn:hover {
+  background: rgba(15, 23, 42, 0.1);
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] #page-logs .log-panel {
+  background: rgba(248, 250, 252, 0.96);
+  border-color: rgba(15, 23, 42, 0.14);
+  color: rgba(15, 23, 42, 0.92);
+}
+
+[data-theme="light"] .log-info  { color: rgba(30, 41, 59, 0.82); }
+[data-theme="light"] .log-warn  { color: var(--color-warning); background: color-mix(in srgb, var(--color-warning) 6%, transparent); }
+[data-theme="light"] .log-error { color: var(--color-error); background: color-mix(in srgb, var(--color-error) 5%, transparent); }
+[data-theme="light"] .log-debug { color: rgba(75, 85, 99, 0.95); }
+
+/* Log token coloring - light theme */
+[data-theme="light"] .log-lev    { color: #0f172a; }
+[data-theme="light"] .log-comp   { color: var(--color-accent-light); }
+[data-theme="light"] .log-metric    { color: var(--color-success); }
+[data-theme="light"] .log-important { color: var(--color-warning); }
+[data-theme="light"] .log-size      { color: var(--color-accent-deep); }
+
+/* log-line hover — slightly more visible on light background */
+[data-theme="light"] .log-line:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+
+/* ── Reduced Motion ─────────────────────────────────────────────────────────── */
+
+ @media (prefers-reduced-motion: reduce) {
   /* logs-orb-drift — transform translate3d+scale */
   .logs-empty-ambient-a,
   .logs-empty-ambient-b {

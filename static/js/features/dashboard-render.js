@@ -19,6 +19,12 @@ function setChipState(el, label, state) {
     el.className = 'metric-live-chip ' + (state || '');
 }
 
+/** Read a CSS custom property from :root, resolved at call time so palette changes are reflected immediately. */
+function getCSSVar(name, fallback = '') {
+    const val = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return val || fallback;
+}
+
 function lerpColor(a, b, t) {
     return [
         Math.round(a[0] + (b[0] - a[0]) * t),
@@ -72,10 +78,13 @@ function buildSparklineFillDefs(fillId, fillColor, topOpacity = 0.62, midOpacity
 }
 
 function getInferenceSparklineColor(className) {
-    if (className === 'prompt') return '#7dd3fc';
-    if (className === 'generation') return '#5eead4';
-    if (className === 'live-output') return '#2dd4bf';
-    return '#5eead4';
+    const accent = getCSSVar('--color-accent', '#2dd4bf');
+    const accentLight = getCSSVar('--color-accent-light', '#5eead4');
+    const clock = getCSSVar('--metric-clock', '#60a5fa');
+    if (className === 'prompt') return clock;
+    if (className === 'generation') return accentLight;
+    if (className === 'live-output') return accent;
+    return accentLight;
 }
 
 function setCardState(card, state) {
@@ -92,16 +101,28 @@ function pushSparklinePoint(name, value) {
     }
 }
 
+/** Last sparkline data snapshot for change detection */
+var lastSparklineSnapshots = {};
+
 function renderSparkline(id, points, className, isBlocked) {
     const svg = document.getElementById(id);
     if (!svg || !points || points.length < 2) return;
+
+    // POWER OPT: skip rebuild if data hasn't changed
+    const key = id + ':' + className;
+    const lastSnapshot = lastSparklineSnapshots[key];
+    if (lastSnapshot && lastSnapshot.length === points.length && lastSnapshot[lastSnapshot.length - 1] === points[points.length - 1]) {
+        return;
+    }
+    lastSparklineSnapshots[key] = [...points];
+
     svg.style.color = getInferenceSparklineColor(className);
     const width = 120;
     const height = 28;
     const max = Math.max(...points, 1);
     const step = width / (points.length - 1);
     const currentValue = points[points.length - 1];
-    const currentX = width - 10;
+    const currentX = width;
     const currentY = height - ((currentValue / max) * (height - 4)) - 2;
     const path = points.map((value, index) => {
         const x = index * step;
@@ -112,13 +133,14 @@ function renderSparkline(id, points, className, isBlocked) {
     const ratio = max > 0 ? currentValue / max : 0;
     const fillColor = getThemedSparklineFillColor(getInferenceSparklineColor(className), ratio);
     const fillId = nextSparklineGradientId(id);
-    const wallLine = isBlocked ? '<line x1="120" y1="0" x2="120" y2="28" stroke="#ebcb8b" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>' : '';
+    const wallLine = isBlocked ? '<line x1="120" y1="0" x2="120" y2="28" stroke="' + getCSSVar('--color-warning', '#f59e0b') + '" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>' : '';
     // eslint-disable-next-line no-unsanitized/property -- SVG path data from numeric array values; className is a hardcoded CSS class
     svg.innerHTML =
-        buildSparklineFillDefs(fillId, fillColor, 0.66, 0.22, 0.05) +
+        buildSparklineFillDefs(fillId, fillColor, 0.88, 0.18, 0.02) +
         '<path class="sparkline-fill ' + className + '" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + fillId + ')"></path>' +
+        '<line class="sparkline-grid" x1="0" y1="7" x2="120" y2="7"/><line class="sparkline-grid" x1="0" y1="14" x2="120" y2="14"/><line class="sparkline-grid" x1="0" y1="21" x2="120" y2="21"/>' +
         '<path class="sparkline-line ' + className + '" d="' + path + '"></path>' +
-        '<line class="sparkline-current-trace ' + className + '" x1="' + Math.max(currentX - 16, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>' +
+        '<line class="sparkline-current-trace ' + className + '" x1="' + Math.max(currentX - 8, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>' +
         '<circle class="sparkline-current-halo ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="7.4"></circle>' +
         '<circle class="sparkline-current ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="3.6"></circle>' +
         '<circle class="sparkline-current-core ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.2"></circle>' +
@@ -132,6 +154,14 @@ function renderLiveSparkline(id, points) {
         svg.innerHTML = '';
         return;
     }
+
+    // POWER OPT: skip rebuild if data hasn't changed
+    const key = id + ':live';
+    const lastSnap = lastSparklineSnapshots[key];
+    if (lastSnap && lastSnap.length === points.length && lastSnap[lastSnap.length - 1] === points[points.length - 1]) {
+        return;
+    }
+    lastSparklineSnapshots[key] = [...points];
     svg.style.color = getInferenceSparklineColor('live-output');
     const width = 120;
     const height = 28;
@@ -145,21 +175,22 @@ function renderLiveSparkline(id, points) {
         return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
     }).join(' ');
     const currentValue = points[points.length - 1];
-    const currentX = width - 10;
+    const currentX = width;
     const currentY = height - ((currentValue / max) * (height - 6)) - 3;
     const ratio = max > 0 ? currentValue / max : 0;
     const fillColor = getThemedSparklineFillColor(getInferenceSparklineColor('live-output'), ratio);
     const fillId = nextSparklineGradientId(id);
     // eslint-disable-next-line no-unsanitized/property -- SVG path data built from numeric array values only
     svg.innerHTML = [
-        buildSparklineFillDefs(fillId, fillColor, 0.68, 0.24, 0.05),
+        buildSparklineFillDefs(fillId, fillColor, 0.90, 0.20, 0.02),
         '<path class="sparkline-fill live-output" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + fillId + ')"></path>',
+        '<line class="sparkline-grid" x1="0" y1="7" x2="120" y2="7"/><line class="sparkline-grid" x1="0" y1="14" x2="120" y2="14"/><line class="sparkline-grid" x1="0" y1="21" x2="120" y2="21"/>',
         '<path class="sparkline-line live-output" d="' + path + '"></path>',
-        '<line class="sparkline-current-trace live-output" x1="' + Math.max(currentX - 16, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>',
+        '<line class="sparkline-current-trace live-output" x1="' + Math.max(currentX - 8, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>',
         '<circle class="sparkline-peak live-output" cx="' + peak.x.toFixed(2) + '" cy="' + peak.y.toFixed(2) + '" r="2.6"></circle>',
-        '<circle class="sparkline-current-halo live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="7.4"></circle>',
-        '<circle class="sparkline-current live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="3.6"></circle>',
-        '<circle class="sparkline-current-core live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.2"></circle>'
+        '<circle class="sparkline-current-halo live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="5"></circle>',
+        '<circle class="sparkline-current live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="2.8"></circle>',
+        '<circle class="sparkline-current-core live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1"></circle>'
     ].join('');
 }
 
@@ -414,7 +445,7 @@ function renderSlotUtilization(l) {
     const utilBar = document.getElementById('m-slot-util-bar');
     const utilValue = document.getElementById('m-slot-util');
     if (!l || !l.slots_processing !== undefined && l.slots_idle !== undefined) {
-        if (utilBar) utilBar.style.width = '0%';
+        if (utilBar) utilBar.style.transform = 'scaleX(0)';
         if (utilValue) utilValue.textContent = '\u2014';
         return;
     }
@@ -422,12 +453,12 @@ function renderSlotUtilization(l) {
     const idle = l.slots_idle || 0;
     const total = processing + idle;
     if (total === 0) {
-        if (utilBar) utilBar.style.width = '0%';
+        if (utilBar) utilBar.style.transform = 'scaleX(0)';
         if (utilValue) utilValue.textContent = '\u2014';
         return;
     }
     const utilPct = Math.round((processing / total) * 100);
-    if (utilBar) utilBar.style.width = utilPct + '%';
+    if (utilBar) utilBar.style.transform = 'scaleX(' + (utilPct / 100) + ')';
     if (utilValue) utilValue.textContent = utilPct + '%';
 }
 
@@ -575,29 +606,44 @@ function chatDerivedContextAvailable() {
 function renderCapabilityPopover(d, l, generationAvailable, contextLiveAvailable) {
     const popover = document.getElementById('capability-popover');
     if (!popover) return;
-    const hasInference = !!d.capabilities?.inference;
-    const slotsAvailable = !!l && ((l.slots_processing || 0) + (l.slots_idle || 0) > 0);
-    const metricsAvailable = !!l && (
-        (l.prompt_tokens_total || 0) > 0 ||
-        (l.generation_tokens_total || 0) > 0 ||
-        (l.context_high_water_tokens || 0) > 0 ||
-        (l.last_generation_throughput_unix_ms || 0) > 0 ||
-        (l.last_prompt_throughput_unix_ms || 0) > 0
+
+    // No-op when called with no explicit data and no live wsData — preserves existing content
+    if (d === undefined && l === undefined && !wsData) return;
+    const data = d || wsData || {};
+    const lama = l || (wsData ? wsData.llama : null);
+    const genAvail = generationAvailable !== undefined ? generationAvailable : (lama ? !!lama.slots_processing : false);
+    const ctxLive = contextLiveAvailable !== undefined ? contextLiveAvailable : (lama ? !!lama.context_live_tokens_available : false);
+
+    const hasInference = !!data.capabilities?.inference;
+    const slotsAvailable = !!lama && ((lama.slots_processing || 0) + (lama.slots_idle || 0) > 0);
+    const metricsAvailable = !!lama && (
+        (lama.prompt_tokens_total || 0) > 0 ||
+        (lama.generation_tokens_total || 0) > 0 ||
+        (lama.context_high_water_tokens || 0) > 0 ||
+        (lama.last_generation_throughput_unix_ms || 0) > 0 ||
+        (lama.last_prompt_throughput_unix_ms || 0) > 0
     );
     const rows = [
         ['Inference', hasInference ? 'live' : 'unavailable', hasInference],
         ['Slots', slotsAvailable ? 'live' : 'waiting', slotsAvailable],
         ['Metrics', metricsAvailable ? 'live' : 'waiting', metricsAvailable],
-        ['Generation progress', generationAvailable ? 'live' : 'not exposed', generationAvailable],
+        ['Generation progress', genAvail ? 'live' : 'not exposed', genAvail],
         ['Throughput', metricsAvailable ? 'retained avg + live estimate' : 'waiting', metricsAvailable],
-        ['Context capacity', (l?.context_capacity_tokens || 0) > 0 ? 'live' : 'waiting', (l?.context_capacity_tokens || 0) > 0],
-        ['Context usage', contextLiveAvailable ? 'live' : chatDerivedContextAvailable() ? 'derived from chat' : 'not exposed', contextLiveAvailable || chatDerivedContextAvailable()],
-        ['Host metrics', d.host_metrics_available ? 'live' : 'unavailable', !!d.host_metrics_available],
-        ['Remote agent', d.remote_agent_connected ? 'connected' : 'disconnected', !!d.remote_agent_connected]
+        ['Context capacity', (lama?.context_capacity_tokens || 0) > 0 ? 'live' : 'waiting', (lama?.context_capacity_tokens || 0) > 0],
+        ['Context usage', ctxLive ? 'live' : chatDerivedContextAvailable() ? 'derived from chat' : 'not exposed', ctxLive || chatDerivedContextAvailable()],
+        ['Host metrics', data.host_metrics_available ? 'live' : 'unavailable', !!data.host_metrics_available],
+        ['Remote agent', data.remote_agent_connected ? 'connected' : 'disconnected', !!data.remote_agent_connected]
     ];
+
+    if (!data.active_session_id && !hasInference && !slotsAvailable) {
+        popover.innerHTML = '<div class="capability-empty">No endpoint attached</div>';
+        return;
+    }
+
     // eslint-disable-next-line no-unsanitized/property -- label and value are all hardcoded string literals from the rows array above; ok is boolean
-    popover.innerHTML = rows.map(([label, value, ok]) => {
-        return '<span class="capability-row"><span class="capability-led ' + (ok ? 'ok' : 'muted') + '"></span><span>' + label + '</span><strong>' + value + '</strong></span>';
+    popover.innerHTML = '<div class="capability-title">Telemetry sources</div>' + rows.map(([label, value, ok]) => {
+        const tone = ok ? 'live' : (value === 'waiting' ? 'waiting' : 'absent');
+        return '<span class="capability-row"><span class="capability-led ' + (ok ? 'ok' : 'muted') + '"></span><span class="capability-label">' + label + '</span><strong class="capability-val" data-tone="' + tone + '">' + value + '</strong></span>';
     }).join('');
 }
 
@@ -642,34 +688,35 @@ function hardwareEmptyStateCopy(kind, grade) {
 }
 
 function getMetricTone(kind) {
+    const load   = getCSSVar('--metric-load',   '#34d399');
+    const power  = getCSSVar('--metric-power',  '#2dd4bf');
+    const mem    = getCSSVar('--metric-memory', '#22d3ee');
+    const clock  = getCSSVar('--metric-clock',  '#60a5fa');
+    const accent = getCSSVar('--color-accent',  '#2dd4bf');
+    const light  = getCSSVar('--color-accent-light', '#5eead4');
     switch (kind) {
-    case 'load':
-        return { start: '#34d399', end: '#2dd4bf', line: '#2dd4bf' };
-    case 'power':
-        return { start: '#2dd4bf', end: '#67e8f9', line: '#2dd4bf' };
-    case 'memory':
-        return { start: '#14b8a6', end: '#67e8f9', line: '#22d3ee' };
-    case 'clock':
-        return { start: '#60a5fa', end: '#7dd3fc', line: '#60a5fa' };
-    default:
-        return { start: '#34d399', end: '#67e8f9', line: '#5eead4' };
+    case 'load':   return { start: load,  end: accent, line: load };
+    case 'power':  return { start: power, end: mem,    line: power };
+    case 'memory': return { start: mem,   end: light,  line: mem };
+    case 'clock':  return { start: clock, end: light,  line: clock };
+    default:       return { start: load,  end: light,  line: accent };
     }
 }
 
 function getClockTone(kind) {
+    const clock  = getCSSVar('--metric-clock',  '#60a5fa');
+    const accent = getCSSVar('--color-accent',  '#2dd4bf');
+    const light  = getCSSVar('--color-accent-light', '#5eead4');
     switch (kind) {
-    case 'memory':
-        return { start: '#60a5fa', end: '#7dd3fc', line: '#60a5fa' };
-    case 'core':
-    default:
-        return { start: '#5eead4', end: '#99f6e4', line: '#8fbcbb' };
+    case 'memory': return { start: clock,  end: light, line: clock };
+    default:       return { start: accent, end: light, line: accent };
     }
 }
 
 function getTempSeverityColor(temp) {
-    if (temp >= 90) return '#f43f5e';
-    if (temp >= 75) return '#f59e0b';
-    return '#8fbcbb';
+    if (temp >= 90) return getCSSVar('--color-error',   '#f43f5e');
+    if (temp >= 75) return getCSSVar('--color-warning', '#f59e0b');
+    return getCSSVar('--color-success', '#10b981');
 }
 
 function setVizContent(container, html) {
@@ -682,9 +729,10 @@ function setVizContent(container, html) {
 function renderHwBar(container, pct, tone, isAlert) {
     if (!container) return;
     const bgCls = isAlert ? 'hw-bar-bg is-hot' : 'hw-bar-bg';
+    const scale = (pct / 100).toFixed(4);
     setVizContent(container,
         '<div class="' + bgCls + '" style="--pct:' + pct.toFixed(1) + '%;--bar-start:' + tone.start + ';--bar-end:' + tone.end + ';">' +
-          '<div class="hw-bar-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + tone.start + ';--bar-end:' + tone.end + '"></div>' +
+          '<div class="hw-bar-fill" style="transform:scaleX(' + scale + ');--bar-start:' + tone.start + ';--bar-end:' + tone.end + '"></div>' +
           '<div class="hw-bar-cap"></div>' +
         '</div>');
 }
@@ -695,14 +743,17 @@ function renderHwRing(container, pct, tone, isAlert) {
     setVizContent(container, '<div class="' + cls + '" style="--pct:' + pct.toFixed(1) + ';--gauge-color:' + tone.line + '"></div>');
 }
 
-function renderHwSparkline(container, history) {
+function renderHwSparkline(container, history, color) {
     if (!container || !history || history.length < 2) {
         setVizContent(container, '');
         return;
     }
-    const svg = buildSparklineSVG(history, 'hw-sparkline', '#8fbcbb');
+    const svg = buildSparklineSVG(history, 'hw-sparkline', color || '#8fbcbb');
     setVizContent(container, svg);
 }
+
+/** Last hardware sparkline data snapshot for change detection */
+var lastHwSparklineSnapshots = {};
 
 function renderHwMetricSparkline(svgId, history, color, show) {
     const svg = document.getElementById(svgId);
@@ -711,6 +762,14 @@ function renderHwMetricSparkline(svgId, history, color, show) {
         svg.style.visibility = (show && history && history.length >= 2) ? '' : 'hidden';
         return;
     }
+
+    // POWER OPT: skip rebuild if data hasn't changed
+    const lastHwSnap = lastHwSparklineSnapshots[svgId];
+    if (lastHwSnap && lastHwSnap.length === history.length && lastHwSnap[lastHwSnap.length - 1] === history[history.length - 1]) {
+        return;
+    }
+    lastHwSparklineSnapshots[svgId] = [...history];
+
     svg.style.visibility = '';
     svg.style.color = color;
     const width = 120;
@@ -719,16 +778,12 @@ function renderHwMetricSparkline(svgId, history, color, show) {
     const min = Math.min(...history, 0);
     const range = Math.max(max - min, 1);
     const step = width / (history.length - 1);
-    const peakValue = Math.max(...history);
-    const peakIndex = history.lastIndexOf(peakValue);
-    const peakX = peakIndex * step;
-    const peakY = height - (((peakValue - min) / range) * (height - 4)) - 2;
     const currentValue = history[history.length - 1];
-    const currentX = width - 10;
-    const currentY = height - (((currentValue - min) / range) * (height - 4)) - 2;
+    const currentX = width - 2;
+    const currentY = height - (((currentValue - min) / range) * (height - 10)) - 5;
     const path = history.map((value, index) => {
         const x = index * step;
-        const y = height - (((value - min) / range) * (height - 4)) - 2;
+        const y = height - (((value - min) / range) * (height - 10)) - 5;
         return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
     }).join(' ');
     var ratio = range > 0 ? (currentValue - min) / range : 0;
@@ -736,22 +791,23 @@ function renderHwMetricSparkline(svgId, history, color, show) {
     var fillId = nextSparklineGradientId(svgId);
     // eslint-disable-next-line no-unsanitized/property -- SVG path from numeric values; svgId/color from getSeverityColor()
     svg.innerHTML =
-        buildSparklineFillDefs(fillId, fillColor, 0.58, 0.18, 0.04) +
+        buildSparklineFillDefs(fillId, fillColor, 0.82, 0.14, 0.02) +
         '<path class="sparkline-fill" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + fillId + ')"></path>' +
+        '<line class="sparkline-grid" x1="0" y1="7" x2="120" y2="7"/><line class="sparkline-grid" x1="0" y1="14" x2="120" y2="14"/><line class="sparkline-grid" x1="0" y1="21" x2="120" y2="21"/>' +
         '<path class="sparkline-line" d="' + path + '" stroke="' + color + '" fill="none" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" filter="drop-shadow(0 0 5px ' + color + ')"></path>' +
-        '<circle class="sparkline-peak" cx="' + peakX.toFixed(2) + '" cy="' + peakY.toFixed(2) + '" r="2.1" fill="' + color + '" opacity="0.78"></circle>' +
-        '<circle class="sparkline-current-halo" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="5.8"></circle>' +
-        '<circle class="sparkline-current" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="2.9"></circle>' +
-        '<circle class="sparkline-current-core" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.1"></circle>';
+        '<circle class="sparkline-current-halo" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="4.2"></circle>' +
+        '<circle class="sparkline-current" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="2.1"></circle>' +
+        '<circle class="sparkline-current-core" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="0.9"></circle>';
 }
 
 function renderHwStacked(container, pct, tone, isAlert) {
     if (!container) return;
     const bgCls = isAlert ? 'hw-stacked-bg is-hot' : 'hw-stacked-bg';
+    const scale = (pct / 100).toFixed(4);
     setVizContent(container,
         '<div class="' + bgCls + '" style="--pct:' + pct.toFixed(1) + '%;--bar-start:' + tone.start + ';--bar-end:' + tone.end + ';">' +
-          '<div class="hw-stacked-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + tone.start + ';--bar-end:' + tone.end + '"></div>' +
-          '<div class="hw-stacked-free" style="width:' + (100 - pct).toFixed(1) + '%"></div>' +
+          '<div class="hw-stacked-fill" style="transform:scaleX(' + scale + ');--bar-start:' + tone.start + ';--bar-end:' + tone.end + '"></div>' +
+          '<div class="hw-stacked-free"></div>' +
           '<div class="hw-bar-cap"></div>' +
         '</div>');
 }
@@ -892,7 +948,7 @@ function renderHwClockRing(container, clock) {
 function buildSparklineSVG(points, cssClass, color) {
     var len = points.length;
     if (len < 2) return '';
-    var w = 120, h = 24, pad = 2;
+    var w = 120, h = 24, pad = 5;
     var max = Math.max.apply(null, points);
     var min = Math.min.apply(null, points);
     var range = max - min || 1;
@@ -900,26 +956,26 @@ function buildSparklineSVG(points, cssClass, color) {
     var pts = points.map(function(v, i) { return i * step + ',' + (h - pad - ((v - min) / range) * (h - pad * 2)); });
     var linePath = 'M' + pts.join(' L');
     var fillPath = linePath + ' L' + (len - 1) * step + ',' + h + ' L0,' + h + ' Z';
-    var peakIdx = points.indexOf(max);
-    var peakX = peakIdx * step;
-    var peakY = h - pad - ((max - min) / range) * (h - pad * 2);
     var currentVal = points[len - 1];
-    var currentX = Math.max(pad, Math.min(w - 10, (len - 1) * step));
+    var currentX = w - 2;
     var currentY = h - pad - ((currentVal - min) / range) * (h - pad * 2);
     var ratio = range > 0 ? (currentVal - min) / range : 0;
     var fillColor = getThemedSparklineFillColor(color, ratio);
     var fillId = nextSparklineGradientId(cssClass);
-    return '<svg class="metric-sparkline ' + cssClass + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true" style="color:' + color + ';">' +
-        buildSparklineFillDefs(fillId, fillColor, 0.56, 0.16, 0.03) +
+    return '<svg class="metric-sparkline ' + cssClass + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="color:' + color + ';">' +
+        buildSparklineFillDefs(fillId, fillColor, 0.80, 0.12, 0.02) +
         '<path class="sparkline-fill" d="' + fillPath + '" fill="url(#' + fillId + ')"/>' +
+        '<line class="sparkline-grid" x1="0" y1="6" x2="' + w + '" y2="6"/><line class="sparkline-grid" x1="0" y1="12" x2="' + w + '" y2="12"/><line class="sparkline-grid" x1="0" y1="18" x2="' + w + '" y2="18"/>' +
         '<path class="sparkline-line" d="' + linePath + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
-        (len > 3 ? '<circle class="sparkline-peak" cx="' + peakX.toFixed(1) + '" cy="' + peakY.toFixed(1) + '" r="2" fill="' + color + '" opacity="0.8"/>' : '') +
-        '<line class="sparkline-current-trace" x1="' + Math.max(currentX - 12, 0).toFixed(1) + '" y1="' + currentY.toFixed(1) + '" x2="' + currentX.toFixed(1) + '" y2="' + currentY.toFixed(1) + '" stroke="' + color + '"></line>' +
-        '<circle class="sparkline-current-halo" cx="' + currentX.toFixed(1) + '" cy="' + currentY.toFixed(1) + '" r="4.8"></circle>' +
-        '<circle class="sparkline-current" cx="' + currentX.toFixed(1) + '" cy="' + currentY.toFixed(1) + '" r="2.5"></circle>' +
-        '<circle class="sparkline-current-core" cx="' + currentX.toFixed(1) + '" cy="' + currentY.toFixed(1) + '" r="0.95"></circle>' +
+        '<line class="sparkline-current-trace" x1="' + (w - 12).toFixed(1) + '" y1="' + currentY.toFixed(1) + '" x2="' + currentX.toFixed(1) + '" y2="' + currentY.toFixed(1) + '" stroke="' + color + '"></line>' +
+        '<circle class="sparkline-current-halo" cx="' + currentX.toFixed(1) + '" cy="' + currentY.toFixed(1) + '" r="3.4"></circle>' +
+        '<circle class="sparkline-current" cx="' + currentX.toFixed(1) + '" cy="' + currentY.toFixed(1) + '" r="2.0"></circle>' +
+        '<circle class="sparkline-current-core" cx="' + currentX.toFixed(1) + '" cy="' + currentY.toFixed(1) + '" r="0.9"></circle>' +
         '</svg>';
 }
+
+/** Last GPU metric snapshot for change detection — skip full card rebuild when metrics are stable */
+var lastGpuSnapshot = null;
 
 var gpuHistory = { load: [], power: [], vramPct: [], sclk: [], mclk: [] };
 function pushGpuHistory(key, value) {
@@ -929,7 +985,7 @@ function pushGpuHistory(key, value) {
     if (gpuHistory[key].length > limit) gpuHistory[key].shift();
 }
 
-var sysHistory = { cpuLoad: [], ramPct: [], cpuClock: [] };
+var sysHistory = { cpuLoad: [], ramPct: [], cpuClock: [], power: [], pCluster: [], sCluster: [], eCluster: [] };
 function pushSysHistory(key, value) {
     if (!Number.isFinite(value)) return;
     sysHistory[key].push(value);
@@ -939,7 +995,7 @@ function pushSysHistory(key, value) {
 
 var vizPrefs = {
     gpu: { load: 'bar', power: 'bar', vram: 'bar', clocks: 'ring' },
-    system: { load: 'bar', ram: 'bar', clock: 'ring' }
+    system: { load: 'bar', ram: 'bar', clock: 'ring', power: 'bar' }
 };
 
 
@@ -1064,6 +1120,11 @@ function renderGpuCard(gpuMap, visible, grade) {
 
     // Use first GPU (most common case)
     var _loop = entries[0];
+    // POWER OPT: skip full rebuild when GPU values AND viz prefs haven't changed
+    var gpuKey = _loop[0];
+    var gpuSnap = JSON.stringify([gpuKey, _loop[1].load, _loop[1].power_consumption, _loop[1].vram_used, _loop[1].temp, _loop[1].sclk_mhz, _loop[1].mclk_mhz, _loop[1].metal_gpu_limit_mb, vizPrefs.gpu.load, vizPrefs.gpu.power, vizPrefs.gpu.vram, vizPrefs.gpu.clocks]);
+    if (gpuSnap === lastGpuSnapshot) return;
+    lastGpuSnapshot = gpuSnap;
     var name = _loop[0];
     var m = _loop[1];
 
@@ -1085,10 +1146,14 @@ function renderGpuCard(gpuMap, visible, grade) {
     }
     if (tempValue) tempValue.textContent = temp + '\u00B0';
 
+    var hasMetalCap = Number(m.metal_gpu_limit_mb || 0) > 0;
+    var effectiveVramTotalMb = hasMetalCap ? Number(m.metal_gpu_limit_mb) : m.vram_total;
+    var totalUnifiedGb = m.vram_total > 0 ? (m.vram_total / 1024).toFixed(0) : '0';
+
     // Push history
     pushGpuHistory('load', m.load);
     pushGpuHistory('power', m.power_consumption);
-    var vramPct = m.vram_total > 0 ? (m.vram_used / m.vram_total) * 100 : 0;
+    var vramPct = effectiveVramTotalMb > 0 ? (m.vram_used / effectiveVramTotalMb) * 100 : 0;
     pushGpuHistory('vramPct', vramPct);
     pushGpuHistory('sclk', m.sclk_mhz);
     pushGpuHistory('mclk', m.mclk_mhz);
@@ -1100,7 +1165,7 @@ function renderGpuCard(gpuMap, visible, grade) {
     var loadTone = getMetricTone('load');
     var loadColor = loadTone.line;
     if (loadStyle === 'ring') renderHwRing(loadViz, m.load, loadTone, false);
-    else if (loadStyle === 'sparkline') renderHwSparkline(loadViz, gpuHistory.load);
+    else if (loadStyle === 'sparkline') renderHwSparkline(loadViz, gpuHistory.load, loadColor);
     else renderHwBar(loadViz, m.load, loadTone, false);
     renderHwMetricSparkline('gpu-load-spark', gpuHistory.load, loadColor, loadStyle !== 'sparkline');
     if (loadVal) loadVal.textContent = m.load + '%';
@@ -1109,32 +1174,56 @@ function renderGpuCard(gpuMap, visible, grade) {
     var powerViz = document.getElementById('gpu-power-viz');
     var powerVal = document.getElementById('gpu-power-value');
     var powerBlock = document.getElementById('gpu-power-block');
-    var powerPct = m.power_limit > 0 ? (m.power_consumption / m.power_limit) * 100 : 0;
+    var powerLabelEl = powerBlock ? powerBlock.querySelector('.hw-metric-label') : null;
+    var isAppleUnified = Number(m.metal_gpu_limit_mb || 0) > 0 || m.power_limit === 0;
+    var powerPct = m.power_limit > 0 ? (m.power_consumption / m.power_limit) * 100 : Math.min(100, (m.power_consumption / 150) * 100);
     var isCapped = m.power_consumption >= m.power_limit && m.power_limit > 0;
     var powerStyle = vizPrefs.gpu.power;
     var powerTone = getMetricTone('power');
     var powerColor = isCapped ? '#f43f5e' : powerTone.line;
     if (powerBlock) powerBlock.classList.toggle('hw-power-capped', isCapped);
     if (powerStyle === 'ring') renderHwRing(powerViz, powerPct, isCapped ? { line: '#f43f5e' } : powerTone, isCapped);
-    else if (powerStyle === 'sparkline') renderHwSparkline(powerViz, gpuHistory.power);
+    else if (powerStyle === 'sparkline') renderHwSparkline(powerViz, gpuHistory.power, powerColor);
     else renderHwBar(powerViz, powerPct, isCapped ? { start: '#fb7185', end: '#f43f5e' } : powerTone, isCapped);
     renderHwMetricSparkline('gpu-power-spark', gpuHistory.power, powerColor, powerStyle !== 'sparkline');
-    if (powerVal) powerVal.textContent = m.power_consumption.toFixed(1) + 'W' + (isCapped ? '!' : '') + ' / ' + m.power_limit + 'W';
+    if (powerVal) {
+        if (isAppleUnified) {
+            powerVal.textContent = m.power_consumption.toFixed(1) + 'W';
+            if (powerLabelEl) powerLabelEl.textContent = 'SoC Power';
+        } else {
+            powerVal.textContent = m.power_consumption.toFixed(1) + 'W' + (isCapped ? '!' : '') + ' / ' + m.power_limit + 'W';
+            if (powerLabelEl) powerLabelEl.textContent = 'Power';
+        }
+    }
 
-    // VRAM
+    // VRAM / Memory
     var vramViz = document.getElementById('gpu-vram-viz');
     var vramVal = document.getElementById('gpu-vram-value');
+    var vramBlock = document.getElementById('gpu-vram-block');
+    var vramLabelEl = vramBlock ? vramBlock.querySelector('.hw-metric-label') : null;
     var vramStyle = vizPrefs.gpu.vram;
-    var vramGb = m.vram_total > 0 ? (m.vram_used / 1024).toFixed(1) : '0';
-    var vramTotalGb = m.vram_total > 0 ? (m.vram_total / 1024).toFixed(0) : '0';
+    var vramGb = effectiveVramTotalMb > 0 ? (m.vram_used / 1024).toFixed(1) : '0';
+    var vramTotalGb = effectiveVramTotalMb > 0 ? (effectiveVramTotalMb / 1024).toFixed(0) : '0';
     var vramTone = getMetricTone('memory');
     var vramColor = vramTone.line;
     if (vramStyle === 'ring') renderHwRing(vramViz, vramPct, vramTone, false);
-    else if (vramStyle === 'sparkline') renderHwSparkline(vramViz, gpuHistory.vramPct);
+    else if (vramStyle === 'sparkline') renderHwSparkline(vramViz, gpuHistory.vramPct, vramColor);
     else if (vramStyle === 'stacked') renderHwStacked(vramViz, vramPct, vramTone, false);
     else renderHwBar(vramViz, vramPct, vramTone, false);
     renderHwMetricSparkline('gpu-vram-spark', gpuHistory.vramPct, vramColor, vramStyle !== 'sparkline');
-    if (vramVal) vramVal.textContent = vramGb + ' / ' + vramTotalGb + ' GB';
+    if (vramVal) {
+        if (isAppleUnified) {
+            vramVal.textContent = vramGb + ' / ' + totalUnifiedGb + ' GB';
+            vramVal.title = hasMetalCap
+                ? 'Metal GPU memory cap ' + vramTotalGb + ' GB (of ' + totalUnifiedGb + ' GB unified memory total)'
+                : '';
+            if (vramLabelEl) vramLabelEl.textContent = 'Memory';
+        } else {
+            vramVal.textContent = vramGb + ' / ' + vramTotalGb + ' GB';
+            vramVal.title = '';
+            if (vramLabelEl) vramLabelEl.textContent = 'VRAM';
+        }
+    }
 
     // Clocks
     var clocksViz = document.getElementById('gpu-clocks-viz');
@@ -1232,7 +1321,7 @@ function renderSystemCard(sys, visible, grade) {
     var loadTone = getMetricTone('load');
     var loadColor = loadTone.line;
     if (loadStyle === 'ring') renderHwRing(loadViz, cpuLoad, loadTone, false);
-    else if (loadStyle === 'sparkline') renderHwSparkline(loadViz, sysHistory.cpuLoad);
+    else if (loadStyle === 'sparkline') renderHwSparkline(loadViz, sysHistory.cpuLoad, loadColor);
     else renderHwBar(loadViz, cpuLoad, loadTone, false);
     renderHwMetricSparkline('sys-load-spark', sysHistory.cpuLoad, loadColor, loadStyle !== 'sparkline');
     if (loadVal) loadVal.textContent = cpuLoad > 0 ? cpuLoad + '%' : '\u2014';
@@ -1244,7 +1333,7 @@ function renderSystemCard(sys, visible, grade) {
     var ramTone = getMetricTone('memory');
     var ramColor = ramTone.line;
     if (ramStyle === 'ring') renderHwRing(ramViz, ramPct, ramTone, false);
-    else if (ramStyle === 'sparkline') renderHwSparkline(ramViz, sysHistory.ramPct);
+    else if (ramStyle === 'sparkline') renderHwSparkline(ramViz, sysHistory.ramPct, ramColor);
     else if (ramStyle === 'stacked') renderHwStacked(ramViz, ramPct, ramTone, false);
     else renderHwBar(ramViz, ramPct, ramTone, false);
     renderHwMetricSparkline('sys-ram-spark', sysHistory.ramPct, ramColor, ramStyle !== 'sparkline');
@@ -1266,6 +1355,82 @@ function renderSystemCard(sys, visible, grade) {
     } else {
         if (clockViz) clockViz.innerHTML = '';
         if (clockVal) clockVal.textContent = clockMhz > 0 ? clockMhz + ' MHz' : '\u2014';
+    }
+
+    // Power (Apple Silicon only)
+    var powerBlock = document.getElementById('sys-power-block');
+    var powerTotal = sys.power_total_w || 0;
+    if (powerBlock && powerTotal > 0) {
+        powerBlock.style.display = '';
+        var powerVizEl = document.getElementById('sys-power-viz');
+        var powerValEl = document.getElementById('sys-power-value');
+        var powerPctSys = Math.min(100, (powerTotal / 150) * 100);
+        pushSysHistory('power', powerTotal);
+        var powerStyle = vizPrefs.system.power || 'bar';
+        var powerTone = getMetricTone('power');
+        if (powerStyle === 'ring') renderHwRing(powerVizEl, powerPctSys, powerTone, false);
+        else if (powerStyle === 'sparkline') renderHwSparkline(powerVizEl, sysHistory.power, powerTone.line);
+        else renderHwBar(powerVizEl, powerPctSys, powerTone, false);
+        renderHwMetricSparkline('sys-power-spark', sysHistory.power, powerTone.line, powerStyle !== 'sparkline');
+        if (powerValEl) powerValEl.textContent = powerTotal.toFixed(1) + 'W';
+    } else if (powerBlock) {
+        powerBlock.style.display = 'none';
+    }
+
+    // CPU Clusters (Apple Silicon only)
+    var clustersBlock = document.getElementById('sys-clusters-block');
+    var pActive = sys.p_cluster_active || 0;
+    var sActive = sys.s_cluster_active || 0;
+    var eActive = sys.e_cluster_active || 0;
+    var hasClusters = (pActive > 0 || sActive > 0 || eActive > 0);
+
+    if (clustersBlock && hasClusters) {
+        clustersBlock.style.display = '';
+
+        // Push history for each cluster
+        if (pActive > 0) pushSysHistory('pCluster', pActive);
+        if (sActive > 0) pushSysHistory('sCluster', sActive);
+        if (eActive > 0) pushSysHistory('eCluster', eActive);
+
+        // P-cores row
+        var pRow = document.getElementById('sys-cluster-p-row');
+        var pBar = document.getElementById('sys-cluster-p-bar');
+        var pVal = document.getElementById('sys-cluster-p-value');
+        if (pRow && pBar && pVal) {
+            pRow.style.display = '';
+            var pTone = getMetricTone('load');
+            renderHwBar(pBar, Math.min(100, pActive), pTone, false);
+            pVal.textContent = Math.round(pActive) + '%';
+            renderHwMetricSparkline('sys-cluster-p-spark', sysHistory.pCluster, pTone.line, true);
+        }
+
+        // S-cores row (show only if present)
+        var sRow = document.getElementById('sys-cluster-s-row');
+        var sBar = document.getElementById('sys-cluster-s-bar');
+        var sVal = document.getElementById('sys-cluster-s-value');
+        if (sActive > 0 && sRow && sBar && sVal) {
+            sRow.style.display = '';
+            var sTone = getMetricTone('load');
+            renderHwBar(sBar, Math.min(100, sActive), sTone, false);
+            sVal.textContent = Math.round(sActive) + '%';
+            renderHwMetricSparkline('sys-cluster-s-spark', sysHistory.sCluster, sTone.line, true);
+        } else if (sRow) {
+            sRow.style.display = 'none';
+        }
+
+        // E-cores row
+        var eRow = document.getElementById('sys-cluster-e-row');
+        var eBar = document.getElementById('sys-cluster-e-bar');
+        var eVal = document.getElementById('sys-cluster-e-value');
+        if (eRow && eBar && eVal) {
+            eRow.style.display = '';
+            var eTone = getMetricTone('load');
+            renderHwBar(eBar, Math.min(100, eActive), eTone, false);
+            eVal.textContent = Math.round(eActive) + '%';
+            renderHwMetricSparkline('sys-cluster-e-spark', sysHistory.eCluster, eTone.line, true);
+        }
+    } else if (clustersBlock) {
+        clustersBlock.style.display = 'none';
     }
 }
 

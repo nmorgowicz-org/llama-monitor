@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS messages (
     tab_id                    TEXT    NOT NULL REFERENCES tabs(id) ON DELETE CASCADE,
     role                      TEXT    NOT NULL CHECK(role IN ('user','assistant','system')),
     content                   TEXT    NOT NULL,
+    thinking_content          TEXT,
     timestamp_ms              INTEGER NOT NULL DEFAULT 0,
     input_tokens              INTEGER,
     output_tokens             INTEGER,
@@ -181,6 +182,8 @@ pub struct MessageRow {
     pub role: String,
     pub content: String,
     #[serde(default)]
+    pub thinking_content: Option<String>,
+    #[serde(default)]
     pub timestamp_ms: i64,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
@@ -306,13 +309,14 @@ impl ChatStorage {
             if let Some(msgs) = tab["messages"].as_array() {
                 for (seq, msg) in msgs.iter().enumerate() {
                     tx.execute(
-                        "INSERT OR IGNORE INTO messages (tab_id, role, content, timestamp_ms,
+                        "INSERT OR IGNORE INTO messages (tab_id, role, content, thinking_content, timestamp_ms,
                              input_tokens, output_tokens, compaction_marker, seq)
-                          VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
                         params![
                             id,
                             msg["role"].as_str().unwrap_or("user"),
                             msg["content"].as_str().unwrap_or(""),
+                            msg["thinking_content"].as_str(),
                             msg["timestamp_ms"].as_i64().unwrap_or(0),
                             msg["input_tokens"].as_i64(),
                             msg["output_tokens"].as_i64(),
@@ -646,7 +650,7 @@ impl ChatStorage {
 
     fn _load_messages_locked(&self, conn: &Connection, tab_id: &str) -> Result<Vec<MessageRow>> {
         let mut stmt = conn.prepare(
-            "SELECT id, tab_id, role, content, timestamp_ms,
+            "SELECT id, tab_id, role, content, thinking_content, timestamp_ms,
                     input_tokens, output_tokens,
                     cumulative_input_tokens, cumulative_output_tokens,
                     compaction_marker, variants, variant_index, seq
@@ -658,17 +662,18 @@ impl ChatStorage {
                 tab_id: row.get(1)?,
                 role: row.get(2)?,
                 content: row.get(3)?,
-                timestamp_ms: row.get(4)?,
-                input_tokens: row.get(5)?,
-                output_tokens: row.get(6)?,
-                cumulative_input_tokens: row.get(7)?,
-                cumulative_output_tokens: row.get(8)?,
-                compaction_marker: row.get::<_, i64>(9)? != 0,
+                thinking_content: row.get(4)?,
+                timestamp_ms: row.get(5)?,
+                input_tokens: row.get(6)?,
+                output_tokens: row.get(7)?,
+                cumulative_input_tokens: row.get(8)?,
+                cumulative_output_tokens: row.get(9)?,
+                compaction_marker: row.get::<_, i64>(10)? != 0,
                 variants: row
-                    .get::<_, Option<String>>(10)?
+                    .get::<_, Option<String>>(11)?
                     .and_then(|s| serde_json::from_str(&s).ok()),
-                variant_index: row.get(11)?,
-                seq: row.get(12)?,
+                variant_index: row.get(12)?,
+                seq: row.get(13)?,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -679,16 +684,17 @@ impl ChatStorage {
         let guard = self.conn.lock().unwrap();
         let conn = guard.as_ref().expect("db open");
         conn.execute(
-            "INSERT INTO messages (tab_id, role, content, timestamp_ms,
+            "INSERT INTO messages (tab_id, role, content, thinking_content, timestamp_ms,
                  input_tokens, output_tokens,
                  cumulative_input_tokens, cumulative_output_tokens,
                  compaction_marker, variants, variant_index, seq)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,
                  COALESCE((SELECT MAX(seq)+1 FROM messages WHERE tab_id=?1), 0))",
             params![
                 msg.tab_id,
                 msg.role,
                 msg.content,
+                msg.thinking_content,
                 msg.timestamp_ms,
                 msg.input_tokens,
                 msg.output_tokens,
@@ -709,15 +715,16 @@ impl ChatStorage {
         tx.execute("DELETE FROM messages WHERE tab_id = ?1", params![tab_id])?;
         for (seq, msg) in messages.iter().enumerate() {
             tx.execute(
-                "INSERT INTO messages (tab_id, role, content, timestamp_ms,
+                "INSERT INTO messages (tab_id, role, content, thinking_content, timestamp_ms,
                      input_tokens, output_tokens,
                      cumulative_input_tokens, cumulative_output_tokens,
                      compaction_marker, variants, variant_index, seq)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
                 params![
                     tab_id,
                     msg.role,
                     msg.content,
+                    msg.thinking_content,
                     msg.timestamp_ms,
                     msg.input_tokens,
                     msg.output_tokens,
@@ -886,10 +893,15 @@ impl ChatStorage {
         let fts_count: i64 =
             conn.query_row("SELECT COUNT(*) FROM messages_fts", [], |row| row.get(0))?;
 
+        let file_size_bytes = std::fs::metadata(&self.db_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
         Ok(serde_json::json!({
             "tab_count": tab_count,
             "message_count": msg_count,
             "fts_index_count": fts_count,
+            "file_size_bytes": file_size_bytes,
         }))
     }
 
@@ -984,6 +996,11 @@ impl ChatStorage {
         let trimmed = sql.trim();
         let upper = trimmed.to_uppercase();
 
+        // Reject multi-statement queries — defense-in-depth against semicolon injection.
+        if trimmed.contains(';') {
+            return Err(anyhow::anyhow!("Multi-statement queries are not allowed"));
+        }
+
         // Blocklist: disallow dangerous operations
         let dangerous_keywords = [
             "ATTACH DATABASE",
@@ -1014,9 +1031,6 @@ impl ChatStorage {
             "PRAGMA temp_store",
             "PRAGMA mmap_size",
             "PRAGMA locking_mode",
-            "PRAGMA wal_checkpoint(PASSIVE)",
-            "PRAGMA wal_checkpoint(FULL)",
-            "PRAGMA wal_checkpoint(TRUNCATE)",
             "PRAGMA wal_checkpoint(PASSIVE)",
             "PRAGMA wal_checkpoint(FULL)",
             "PRAGMA wal_checkpoint(TRUNCATE)",
@@ -1227,6 +1241,14 @@ fn run_schema_migrations(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
+    let has_thinking_content: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('messages') WHERE name = 'thinking_content'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_thinking_content {
+        conn.execute("ALTER TABLE messages ADD COLUMN thinking_content TEXT", [])?;
+    }
     Ok(())
 }
 
@@ -1345,6 +1367,7 @@ mod tests {
                 tab_id TEXT NOT NULL,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
+                thinking_content TEXT,
                 timestamp_ms INTEGER NOT NULL DEFAULT 0,
                 input_tokens INTEGER,
                 output_tokens INTEGER,
@@ -1374,12 +1397,80 @@ mod tests {
         assert_eq!(columns, 1);
     }
 
+    #[test]
+    fn schema_migration_adds_thinking_content_for_existing_databases() {
+        let dir = tempdir().expect("temp dir");
+        let db_path = dir.path().join("chat.db");
+
+        let conn = Connection::open(&db_path).expect("open raw db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tabs (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                system_prompt TEXT NOT NULL DEFAULT '',
+                ai_name TEXT,
+                user_name TEXT,
+                explicit_level INTEGER NOT NULL DEFAULT 0,
+                active_template_id TEXT,
+                auto_compact INTEGER NOT NULL DEFAULT 1,
+                auto_compact_summarize INTEGER NOT NULL DEFAULT 0,
+                compact_mode TEXT NOT NULL DEFAULT 'percent',
+                compact_threshold REAL NOT NULL DEFAULT 0.8,
+                model_params TEXT NOT NULL DEFAULT '{}',
+                context_notes TEXT NOT NULL DEFAULT '[]',
+                sidebar_width INTEGER NOT NULL DEFAULT 280,
+                tab_order INTEGER NOT NULL DEFAULT 0,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                last_ctx_pct REAL,
+                total_input_tokens INTEGER NOT NULL DEFAULT 0,
+                total_output_tokens INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                visibility TEXT NOT NULL DEFAULT 'active',
+                composer_draft TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tab_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp_ms INTEGER NOT NULL DEFAULT 0,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                cumulative_input_tokens INTEGER,
+                cumulative_output_tokens INTEGER,
+                compaction_marker INTEGER NOT NULL DEFAULT 0,
+                variants TEXT,
+                variant_index INTEGER,
+                seq INTEGER NOT NULL
+            );
+            "#,
+        )
+        .expect("create legacy schema");
+        drop(conn);
+
+        let store = ChatStorage::open(&db_path).expect("open migrated storage");
+        let columns: i64 = {
+            let guard = store.conn.lock().expect("lock db");
+            let conn = guard.as_ref().expect("db open");
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'thinking_content'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query columns")
+        };
+        assert_eq!(columns, 1);
+    }
+
     fn make_message(tab_id: &str, role: &str, content: &str) -> MessageRow {
         MessageRow {
             id: 0,
             tab_id: tab_id.to_string(),
             role: role.to_string(),
             content: content.to_string(),
+            thinking_content: None,
             timestamp_ms: 1,
             input_tokens: None,
             output_tokens: None,
@@ -1390,6 +1481,27 @@ mod tests {
             variant_index: None,
             seq: 0,
         }
+    }
+
+    #[test]
+    fn thinking_content_round_trips_through_storage() {
+        let dir = tempdir().expect("temp dir");
+        let db_path = dir.path().join("chat.db");
+        let store = ChatStorage::open(&db_path).expect("open storage");
+
+        let tab = make_tab("tab-1", "Thinking");
+        store.create_tab(&tab).expect("create tab");
+
+        let mut msg = make_message("tab-1", "assistant", "hello");
+        msg.thinking_content = Some("step 1 -> step 2".to_string());
+        store.append_message(&msg).expect("append message");
+
+        let loaded = store.get_tab("tab-1").expect("load tab");
+        assert_eq!(loaded.messages.len(), 1);
+        assert_eq!(
+            loaded.messages[0].thinking_content.as_deref(),
+            Some("step 1 -> step 2")
+        );
     }
 
     #[test]

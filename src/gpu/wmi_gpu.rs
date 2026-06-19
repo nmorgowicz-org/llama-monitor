@@ -50,6 +50,8 @@ impl GpuBackend for WmiGpuBackend {
                     vram_total,
                     sclk_mhz: 0,
                     mclk_mhz: 0,
+                    // Metal's unified-memory limit is specific to Apple GPUs.
+                    metal_gpu_limit_mb: None,
                 },
             );
             idx += 1;
