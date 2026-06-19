@@ -40,7 +40,7 @@ The popover is populated in real time from WebSocket data; each row shows a gree
 
 The Server tab is the main monitoring dashboard. It combines llama.cpp inference data from `/metrics` and `/slots` with host telemetry when available.
 
-![Inference Section](../screenshots/dashboard-inference-section.png)
+![Inference Section](../screenshots/dashboard-performance-section.png)
 
 | Card | What it shows |
 |------|----------------|
