@@ -83,7 +83,7 @@ async fn acquire_inference_permit(
     .map_err(|_| warp::reject::custom(ApiError::internal("Inference gate was closed.")))
 }
 
-pub(super) async fn prepare_inference_request(
+pub(crate) async fn prepare_inference_request(
     state: &AppState,
 ) -> Result<(String, tokio::sync::OwnedSemaphorePermit), warp::Rejection> {
     let url = active_chat_completions_url(state)?;
@@ -92,7 +92,7 @@ pub(super) async fn prepare_inference_request(
     Ok((url, permit))
 }
 
-pub(super) fn build_upstream_client(timeout: Duration) -> Result<reqwest::Client, warp::Rejection> {
+pub(crate) fn build_upstream_client(timeout: Duration) -> Result<reqwest::Client, warp::Rejection> {
     reqwest::Client::builder()
         .timeout(timeout)
         .build()
@@ -110,7 +110,7 @@ fn should_retry_send_error(err: &reqwest::Error) -> bool {
         || err.to_string().contains("connection reset")
 }
 
-pub(super) async fn send_upstream_request_with_retry<F>(
+pub(crate) async fn send_upstream_request_with_retry<F>(
     mut make_request: F,
 ) -> Result<reqwest::Response, warp::Rejection>
 where

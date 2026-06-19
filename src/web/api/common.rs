@@ -9,18 +9,14 @@ use crate::config::AppConfig;
 use crate::state::AppState;
 use crate::web::auth::AuthManager;
 
-#[allow(dead_code)]
 pub(crate) type ApiReply = Box<dyn warp::reply::Reply>;
-#[allow(dead_code)]
 pub(crate) type ApiRoute = warp::filters::BoxedFilter<(ApiReply,)>;
 
-#[allow(dead_code)]
 #[derive(Clone)]
 pub(crate) struct ApiCtx {
     pub(crate) state: AppState,
     pub(crate) config: Arc<AppConfig>,
     pub(crate) auth: AuthManager,
-    pub(crate) bind_host: String,
 }
 
 #[derive(Debug)]
@@ -205,4 +201,27 @@ pub(crate) fn with_app_config(
     cfg: Arc<AppConfig>,
 ) -> impl Filter<Extract = (Arc<AppConfig>,), Error = std::convert::Infallible> + Clone {
     warp::any().map(move || cfg.clone())
+}
+
+/// Helper: record activity timestamp and wake from auto-sleep if needed.
+/// Manual sleep (user-toggled) is not interrupted here — only auto-sleep is.
+pub(crate) fn record_activity(state: &AppState) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    state
+        .last_activity_at
+        .store(now, std::sync::atomic::Ordering::Relaxed);
+
+    // Wake-on-activity: only wake auto-sleep, not manual sleep (T-051)
+    let is_manual = state
+        .sleep_mode_manual
+        .load(std::sync::atomic::Ordering::Relaxed);
+    if !is_manual && state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed) {
+        state
+            .sleep_mode
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        state.sleep_notify.notify_waiters();
+    }
 }
