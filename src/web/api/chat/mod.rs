@@ -11,6 +11,7 @@ use warp::Filter;
 use crate::chat_storage::ChatStorage;
 use crate::web::api::common::{ApiCtx, ApiRoute};
 
+#[cfg(test)]
 pub(crate) use tabs::legacy_chat_types;
 
 pub(crate) fn routes(ctx: ApiCtx, chat_storage: Arc<ChatStorage>) -> ApiRoute {

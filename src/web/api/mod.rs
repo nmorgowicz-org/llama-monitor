@@ -6,7 +6,7 @@ mod auth;
 mod benchmark;
 mod browse;
 mod chat;
-#[allow(unused_imports)]
+#[cfg(test)]
 pub(crate) use chat::legacy_chat_types;
 mod common;
 mod config;
@@ -34,7 +34,7 @@ mod vram;
 pub(crate) use common::ApiError;
 pub use common::check_api_token;
 pub(crate) use common::{ApiCtx, ApiReply, ApiRoute, record_activity};
-use common::{
+pub(crate) use common::{
     bearer_matches_api_token, bearer_matches_db_admin_token, extract_bearer,
     unauthorized_api_token, unauthorized_db_admin_token, with_app_config,
 };
@@ -45,135 +45,6 @@ use tokens::token_bootstrap_allowed;
 use crate::config::AppConfig;
 use crate::state::AppState;
 use crate::web::auth::AuthManager;
-
-// ========================
-// Phase 0: Spawn Llama-Server v2 endpoints
-// ========================
-
-// 1) POST /api/spawn-wizard/mtp-draft-check
-
-// 2) POST /api/spawn-wizard/import-launch-file
-
-// 2) POST /api/chat-template/fetch
-
-// 3) POST /api/chat-template/upload
-
-// 4) GET /api/chat-template/dir
-
-// 5) POST /api/chat-template/install-hf
-// Downloads a Jinja template from HuggingFace and saves it with a stable name.
-// Returns the cached path immediately if the file already exists.
-
-// 6) POST /api/chat-template/install-url
-// Downloads a community template from raw.githubusercontent.com and saves it
-// with a stable name. The host allowlist keeps this separate from arbitrary
-// URL fetching and prevents redirects to untrusted hosts.
-
-// 7) POST /api/vram-estimate (architecture-aware breakdown)
-
-// 4b) POST /api/vram/estimate (legacy)
-
-// 5) POST /api/models/download/start
-
-// 6) GET /api/models/download/:id/status
-
-// 7) POST /api/models/download/:id/cancel
-
-// ── POST /api/vram/quant-compare ─────────────────────────────────────────────
-// Pre-download quant advisor: returns a comparison table of all quants for a
-// given model (identified by param count + optional name) and available VRAM.
-
-// ── POST /api/vram/auto-size ──────────────────────────────────────────────────
-// Given model metadata + available VRAM + use case, return recommended settings
-// plus a set of alternative scenarios for the scenario cards.
-
-// ── Phase 2: POST /api/benchmark (with 15-second cooldown) ────────────────────
-
-// ── Phase 2: POST /api/model-defaults ────────────────────────────────────────
-
-// ── Phase 2: POST /api/moe-tune ──────────────────────────────────────────────
-
-// ── Config-time performance advisor ───────────────────────────────────────────
-// Predictive hints (dense-vs-MoE, KV type, MTP) for the Spawn Wizard / Preset
-// Editor, computed from the model architecture before any benchmark is run.
-
-// ── n_cpu_moe auto-tuner (estimate + optional empirical verify) ────────────────
-
-// ── Offline depth sweep via llama-bench ───────────────────────────────────────
-
-// ── Offline batch/ubatch sweep ───────────────────────────────────────────────
-//
-// Tries common (batch_size, ubatch_size) pairs via llama-bench measuring
-// PP throughput only (no decode). Returns all probe results plus the pair
-// with the highest PP t/s. Requires the server to be stopped (GPU free).
-
-// ── Online MTP n-max sweep ────────────────────────────────────────────────────
-//
-// Probes each requested spec-draft-n-max value by stop → modify config →
-// start → wait for health → stream a chat completion → measure gen t/s.
-// Returns all probe results plus the recommended n_max.
-// Expected duration: 1–3 min per probe (model load + inference), so 4–12 min
-// total for a [1,2,3,4] sweep. The HTTP call is synchronous; the client should
-// display an elapsed timer while waiting.
-
-// ── Apple Silicon: set Metal GPU wired memory limit ───────────────────────────
-// Uses osascript to invoke `sysctl iogpu.wired_limit_mb=N` with administrator
-// privileges via the macOS native password dialog. No password touches the app.
-// Only compiled on macOS; on other platforms returns a not-supported error.
-
-// ── P3.1: HF Search (with rate limiting) ─────────────────────────────────────
-// Rate limit: 10 requests per 60 seconds (global; per-instance).
-
-// ── P3.1: HF Files ───────────────────────────────────────────────────────────
-
-// ── GET /api/hf/community-picks ───────────────────────────────────────────────
-// Reads ~/.config/llama-monitor/community-picks.json if present.
-// Produced externally (e.g. by a Hermes cron scraping r/LocalLLaMA).
-
-// ── GET /api/hf/quantizers ────────────────────────────────────────────────────
-// Returns the active quantizer list for the wizard quick-picks.
-// If hf-quantizers.json exists in config_dir, that list is returned (is_custom=true).
-// Otherwise the built-in defaults are returned (is_custom=false).
-
-// ── PUT /api/hf/quantizers ────────────────────────────────────────────────────
-// Saves a user-customized quantizer list to hf-quantizers.json.
-// Send an empty array to reset to defaults (deletes the file).
-
-// ── GET /api/hf/download-dir ─────────────────────────────────────────────────
-// Returns the directory where HF downloads will be saved (effective models dir).
-
-// ── GET /api/hf/card?repo=owner/model ─────────────────────────────────────────
-// Fetches the raw README.md for a HuggingFace repo and returns it as markdown text.
-// Uses the stored HF token if present (required for gated models).
-
-// ── GET /api/hf/meta?repo=owner/model ────────────────────────────────────────
-// Returns tags and gated status for a HF repo.  Used by the tag-suggestion UI
-// in the wizard hardware step and the models library.
-
-// ── POST /api/hf/resolve-origin ───────────────────────────────────────────────
-// Resolves the HF origin of a local GGUF file from its filename.
-// Searches HF, scores candidates, returns ranked list with family + card URL.
-
-// ── GET /api/hf/token ─────────────────────────────────────────────────────────
-// Returns whether an HF token is saved; never returns the token itself.
-
-// ── PUT /api/hf/token ─────────────────────────────────────────────────────────
-// Saves an HF token to ~/.config/llama-monitor/hf-token.
-
-// ── DELETE /api/hf/token ──────────────────────────────────────────────────────
-// Removes the saved HF token file.
-
-// ── P3.1: HF Download (with concurrency + cooldown) ──────────────────────────
-// - Max 5 concurrent downloads.
-// - 10-second cooldown between download starts.
-
-// ── P3.2: Third-Party Models ─────────────────────────────────────────────────
-
-// ── P3.3: Model Introspection ────────────────────────────────────────────────
-
-// ── POST /api/models/gguf-meta ─────────────────────────────────────────────
-// Reads GGUF header metadata for a local file and returns the architecture.
-// Lightweight — only reads the KV header, never touches tensor data.
 
 pub fn api_routes(
     state: AppState,
