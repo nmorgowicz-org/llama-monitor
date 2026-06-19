@@ -416,12 +416,12 @@ For each module:
 
 Move medium-coupling groups:
 
-- [ ] `config.rs`
-- [ ] `models.rs`
-- [ ] `hf.rs`
-- [ ] `spawn_wizard.rs`
-- [ ] `vram.rs`
-- [ ] `benchmark.rs`
+- [x] `config.rs`
+- [x] `models.rs`
+- [x] `hf.rs`
+- [x] `spawn_wizard.rs`
+- [x] `vram.rs`
+- [x] `benchmark.rs`
 
 Guardrails:
 

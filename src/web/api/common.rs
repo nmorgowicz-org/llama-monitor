@@ -108,12 +108,12 @@ impl std::error::Error for ApiError {}
 impl Reject for ApiError {}
 
 /// Extract bearer token from the Authorization header.
-pub(super) fn extract_bearer(auth: Option<String>) -> Option<String> {
+pub(crate) fn extract_bearer(auth: Option<String>) -> Option<String> {
     auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string))
 }
 
 /// 401 JSON reply for a missing api-token.
-pub(super) fn unauthorized_api_token() -> Box<dyn warp::reply::Reply> {
+pub(crate) fn unauthorized_api_token() -> Box<dyn warp::reply::Reply> {
     Box::new(warp::reply::with_status(
         warp::reply::json(&serde_json::json!({
             "ok": false,
@@ -124,7 +124,7 @@ pub(super) fn unauthorized_api_token() -> Box<dyn warp::reply::Reply> {
 }
 
 /// 401 JSON reply for a missing db-admin-token.
-pub(super) fn unauthorized_db_admin_token() -> Box<dyn warp::reply::Reply> {
+pub(crate) fn unauthorized_db_admin_token() -> Box<dyn warp::reply::Reply> {
     Box::new(warp::reply::with_status(
         warp::reply::json(&serde_json::json!({
             "ok": false,
@@ -141,7 +141,7 @@ pub fn check_api_token(auth: &Option<String>, cfg: &AppConfig) -> bool {
 }
 
 /// Check if the Authorization header matches the configured db-admin-token.
-pub(super) fn check_db_admin_token(auth: &Option<String>, cfg: &AppConfig) -> bool {
+pub(crate) fn check_db_admin_token(auth: &Option<String>, cfg: &AppConfig) -> bool {
     let bearer = auth.as_ref().and_then(|v| v.strip_prefix("Bearer "));
     bearer_matches_db_admin_token(bearer, cfg)
 }
@@ -149,7 +149,7 @@ pub(super) fn check_db_admin_token(auth: &Option<String>, cfg: &AppConfig) -> bo
 /// Compare an already-extracted bearer token against the live api-token (constant-time).
 /// If no api-token is configured, allow the request (local-first mode).
 /// If api-token is configured but no bearer is provided, reject.
-pub(super) fn bearer_matches_api_token(bearer: Option<&str>, cfg: &AppConfig) -> bool {
+pub(crate) fn bearer_matches_api_token(bearer: Option<&str>, cfg: &AppConfig) -> bool {
     use subtle::ConstantTimeEq;
 
     let live = cfg.live_api_token();
@@ -167,7 +167,7 @@ pub(super) fn bearer_matches_api_token(bearer: Option<&str>, cfg: &AppConfig) ->
 /// Compare an already-extracted bearer token against the live db-admin-token (constant-time).
 /// If no db-admin-token is configured, allow the request (local-first mode).
 /// If db-admin-token is configured but no bearer is provided, reject.
-pub(super) fn bearer_matches_db_admin_token(bearer: Option<&str>, cfg: &AppConfig) -> bool {
+pub(crate) fn bearer_matches_db_admin_token(bearer: Option<&str>, cfg: &AppConfig) -> bool {
     use subtle::ConstantTimeEq;
 
     let live = cfg.live_db_admin_token();
@@ -182,7 +182,26 @@ pub(super) fn bearer_matches_db_admin_token(bearer: Option<&str>, cfg: &AppConfi
     }
 }
 
-pub(super) fn with_app_config(
+/// Atomic cooldown helper. Returns `(ok, seconds_remaining)`.
+/// `ok` is true if the cooldown has elapsed and the timestamp was successfully CAS'd.
+pub(crate) fn try_cooldown(
+    last: &std::sync::atomic::AtomicU64,
+    now: u64,
+    cooldown_secs: u64,
+) -> (bool, u64) {
+    use std::sync::atomic::Ordering;
+    let prev = last.load(Ordering::Acquire);
+    let elapsed = now.saturating_sub(prev);
+    if elapsed < cooldown_secs {
+        return (false, cooldown_secs - elapsed);
+    }
+    let ok = last
+        .compare_exchange(prev, now, Ordering::AcqRel, Ordering::Relaxed)
+        .is_ok();
+    (ok, 0)
+}
+
+pub(crate) fn with_app_config(
     cfg: Arc<AppConfig>,
 ) -> impl Filter<Extract = (Arc<AppConfig>,), Error = std::convert::Infallible> + Clone {
     warp::any().map(move || cfg.clone())
