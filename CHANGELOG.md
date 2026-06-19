@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.0.0...v1.0.1) (2026-06-19)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate zip to v8 ([#239](https://github.com/nmorgowicz-org/llama-monitor/issues/239)) ([07a82fc](https://github.com/nmorgowicz-org/llama-monitor/commit/07a82fc98418ba638107abd3936d65f5d7818bb2))
+
 ## [1.0.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.23.0...v1.0.0) (2026-06-19)
 
 
