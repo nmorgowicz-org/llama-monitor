@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.23.0...v0.24.0) (2026-06-19)
+
+
+### Features
+
+* **api:** new endpoints for MTP-draft check, HF token, streaming download, VRAM breakdown, chat-templates, and session readiness. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **api:** restore 27 spawn-wizard handler functions to prevent mass 404s on wizard/HF/tuning endpoints. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **chat:** multi-select in conversations sidebar with bulk Delete/Archive and Undo toasts. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **chat:** new chat preferences (date format, Enter-to-send, context view, persist-thinking-content, etc.). ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **chat:** raised new-tab max_tokens default from 8192 to 32768 for longer conversations. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **chat:** streaming render throttled to ≤20 fps to prevent main-thread freezes on long responses. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **hf:** discover-pills for major families (Qwen3, Llama3, Mistral/MoE, Gemma, EXAONE, etc.) and per-author browsing. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **hf:** full HuggingFace integration with keyword search, sort (trending/downloads/likes/newest), and load-more. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **hf:** GGUF file listing with real sizes, mmproj/draft-model detection, and provider/quant-type labels. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **hf:** HF token integration (store/show/remove) for gated repos; token never echoed in responses. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **hf:** streaming downloads with resume, ETA, cancel, and partial-file rename safety. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **models:** library tag system: attach/click-remove tags per model; filter by tags (coding, roleplay, etc.). ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **models:** model-library view with card/list modes, search, filters (quant, size, tag, mmproj, split, draft), and persisted prefs. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **models:** per-model VRAM bar and estimate, plus related-presets linking on each model card. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **perf:** 80%+ battery-drain reduction via Page Visibility API, 70+ paused CSS animations, and transform-based animations. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **perf:** Low Power Mode with configurable auto-sleep, slower pollers, and reduced WebSocket broadcast in idle/battery-saver. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **security:** login brute-force resistance: cooldown increased from 2s to 10s. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **security:** metrics and GPU/system endpoints now require api_token; Host header spoofing protection. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **security:** multi-statement SQL rejection in DB query endpoint; tightened body-size and repo_id validations. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **security:** path-traversal guards for HF downloads, model browse, and resolve-origin with unit tests. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **spawn:** always-on flags for long conversations: --no-context-shift, --ctx-checkpoints, --keep now default. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **spawn:** bind host (loopback vs 0.0.0.0) and per-session API key configuration for safer local use. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **spawn:** echo llama-server logs to terminal and attach last lines on spawn failure for clearer diagnostics. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **spawn:** pre-spawn health check (run llama-server --help) with captured stderr; fail fast on bad binary. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **spawn:** race-safe restart-after-update with server_stopping flag, MTP port-sweep cleanup, and improved timeouts. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **spawn:** unified V2 spawn architecture using -m or -hf model source with validation and clear errors. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **tuning:** MTP n-max sweep with bar chart and one-click apply; MoE auto-tune and depth sweep via llama-bench. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **tuning:** new tuning panel with performance benchmark (A/B/C/D grades) and auto-tuning suggestions. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **ui:** control bar redesign with two-zone layout and context-aware buttons (Running→Stop+Switch / Stopped→Start+Spawn). ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **ui:** full light theme pass with contrast-safe colors; reduced-motion queries disable transitions for accessibility. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **ui:** logs panel overhaul with token coloring, font size controls, incremental rendering, and live log tail viewer. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **ui:** post-stop choice modal: “Go to Welcome” or “Stay on Dashboard”. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **ui:** teal accent retheme across hardware cards, inference widgets, logs, and navigation. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **ui:** welcome screen redesign: preset launch grid, recent-launch timestamps, unified memory bar, and drop-zone. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **vram:** architecture-aware VRAM estimator rewrite with direct GGUF metadata read, no subprocess needed. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **vram:** DeltaNet/hybrid-attention support for Qwen3.6, Qwen3.5, Qwen3-Coder-Next, davidau 40B. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **vram:** EXAONE 4.5 family support including hybrid attention, MTP depth, and vision encoder sizing. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **vram:** Gemma 3/4 sliding-window and Gemma 4 global head_dim modeling for accurate KV cache estimates. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **vram:** MoE support with VRAM/RAM split based on n_cpu_moe, expert_fraction, and MoE auto-tune suggestions. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **vram:** VRAM fit legend, inline context-size warnings, and “approx.” labeling on launch cards. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **wizard:** animated VRAM breakdown panel with MoE expert offload slider and per-component tooltips. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **wizard:** Apple Silicon P/E core detection, unified memory budget model, and Metal GPU limit control. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **wizard:** auto-advance with toast after HF download completes; quick-edit chips open preset modal on context. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **wizard:** auto-resolve HF origin for local models with model card panel and markdown-rendered details. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **wizard:** chat template auto-install, cache_ram_mib, and full preset field wiring to spawn. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **wizard:** context quick-picks up to 256k with free manual input and minimum-context warnings. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **wizard:** five-step Spawn Wizard (Profile → Model → Hardware & Tuning → Summary → Spawn) with guided, VRAM-aware defaults and hardware presets. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **wizard:** integrated HuggingFace search/browse/download into the spawn flow—browse, pick, and launch from one wizard. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **wizard:** Profile segmented control (Quick/Balanced/Advanced) and use-case selection persisted in localStorage. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **wizard:** quant swap step with VRAM-aware advisor, provider presets, and in-place quant changes without recreating presets. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **wizard:** server alias and extra args in Summary; modernized footer and Close button. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **wizard:** speculative decoding, MTP/assistant model support, and draft-model auto-detection for Gemma4/Qwen3.6. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **wizard:** thinking/reasoning controls, Qwen3.5/3.6 reasoning presets, and reasoning budget options. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+
+
+### Bug Fixes
+
+* **security:** fix token leak and header-spoofing issue in bootstrap-token and setup checks. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **spawn:** enable flash attention by default for eligible models; preset editor reflects new standard. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **spawn:** prevent locally spawned servers from leaking into remote endpoints list. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **spawn:** remove 30s cooldown from kill-llama; unify stop/kill for faster session cycling and safer restart loops. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **vram:** correct Gemma4 and Qwen DeltaNet heuristics (n_ctx_train integration, expert semantics) for accurate estimates. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+* **wizard:** correct -ngl 99 to -ngl all; ensure wizard maps “All” to -1 safely across llama.cpp versions. ([7880625](https://github.com/nmorgowicz-org/llama-monitor/commit/78806253c2aee231c91adcfd08d3bad7a17bd7ba))
+
 ## [0.23.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.22.5...v0.23.0) (2026-05-27)
 
 
