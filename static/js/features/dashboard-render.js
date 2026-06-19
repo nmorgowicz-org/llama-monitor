@@ -1180,7 +1180,7 @@ function renderGpuCard(gpuMap, visible, grade) {
     var powerVal = document.getElementById('gpu-power-value');
     var powerBlock = document.getElementById('gpu-power-block');
     var powerLabelEl = powerBlock ? powerBlock.querySelector('.hw-metric-label') : null;
-    var isAppleUnified = Number(m.metal_gpu_limit_mb || 0) > 0 || m.power_limit === 0;
+    var isAppleUnified = hasMetalCap;
     var powerPct = m.power_limit > 0 ? (m.power_consumption / m.power_limit) * 100 : Math.min(100, (m.power_consumption / 150) * 100);
     var isCapped = m.power_consumption >= m.power_limit && m.power_limit > 0;
     var powerStyle = vizPrefs.gpu.power;
@@ -1194,9 +1194,12 @@ function renderGpuCard(gpuMap, visible, grade) {
     if (powerVal) {
         if (isAppleUnified) {
             powerVal.textContent = m.power_consumption.toFixed(1) + 'W';
-            if (powerLabelEl) powerLabelEl.textContent = 'SoC Power';
-        } else {
+            if (powerLabelEl) powerLabelEl.textContent = 'GPU Power';
+        } else if (m.power_limit > 0) {
             powerVal.textContent = m.power_consumption.toFixed(1) + 'W' + (isCapped ? '!' : '') + ' / ' + m.power_limit + 'W';
+            if (powerLabelEl) powerLabelEl.textContent = 'Power';
+        } else {
+            powerVal.textContent = m.power_consumption.toFixed(1) + 'W';
             if (powerLabelEl) powerLabelEl.textContent = 'Power';
         }
     }
