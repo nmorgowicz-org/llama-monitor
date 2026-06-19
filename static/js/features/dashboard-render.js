@@ -774,16 +774,21 @@ function renderHwMetricSparkline(svgId, history, color, show) {
     svg.style.color = color;
     const width = 120;
     const height = 28;
+    const plotLeft = 5;
+    const plotRight = width - 5;
+    const plotTop = 5;
+    const plotBottom = height - 5;
+    const fillBottom = height - 2;
     const max = Math.max(...history, 1);
     const min = Math.min(...history, 0);
     const range = Math.max(max - min, 1);
-    const step = width / (history.length - 1);
+    const step = (plotRight - plotLeft) / (history.length - 1);
     const currentValue = history[history.length - 1];
-    const currentX = width - 2;
-    const currentY = height - (((currentValue - min) / range) * (height - 10)) - 5;
+    const currentX = plotRight;
+    const currentY = plotBottom - (((currentValue - min) / range) * (plotBottom - plotTop));
     const path = history.map((value, index) => {
-        const x = index * step;
-        const y = height - (((value - min) / range) * (height - 10)) - 5;
+        const x = plotLeft + (index * step);
+        const y = plotBottom - (((value - min) / range) * (plotBottom - plotTop));
         return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
     }).join(' ');
     var ratio = range > 0 ? (currentValue - min) / range : 0;
@@ -792,8 +797,8 @@ function renderHwMetricSparkline(svgId, history, color, show) {
     // eslint-disable-next-line no-unsanitized/property -- SVG path from numeric values; svgId/color from getSeverityColor()
     svg.innerHTML =
         buildSparklineFillDefs(fillId, fillColor, 0.82, 0.14, 0.02) +
-        '<path class="sparkline-fill" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + fillId + ')"></path>' +
-        '<line class="sparkline-grid" x1="0" y1="7" x2="120" y2="7"/><line class="sparkline-grid" x1="0" y1="14" x2="120" y2="14"/><line class="sparkline-grid" x1="0" y1="21" x2="120" y2="21"/>' +
+        '<path class="sparkline-fill" d="' + path + ' L ' + plotRight + ' ' + fillBottom + ' L ' + plotLeft + ' ' + fillBottom + ' Z" fill="url(#' + fillId + ')"></path>' +
+        '<line class="sparkline-grid" x1="' + plotLeft + '" y1="7" x2="' + plotRight + '" y2="7"/><line class="sparkline-grid" x1="' + plotLeft + '" y1="14" x2="' + plotRight + '" y2="14"/><line class="sparkline-grid" x1="' + plotLeft + '" y1="21" x2="' + plotRight + '" y2="21"/>' +
         '<path class="sparkline-line" d="' + path + '" stroke="' + color + '" fill="none" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" filter="drop-shadow(0 0 5px ' + color + ')"></path>' +
         '<circle class="sparkline-current-halo" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="4.2"></circle>' +
         '<circle class="sparkline-current" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="2.1"></circle>' +
@@ -1175,7 +1180,7 @@ function renderGpuCard(gpuMap, visible, grade) {
     var powerVal = document.getElementById('gpu-power-value');
     var powerBlock = document.getElementById('gpu-power-block');
     var powerLabelEl = powerBlock ? powerBlock.querySelector('.hw-metric-label') : null;
-    var isAppleUnified = Number(m.metal_gpu_limit_mb || 0) > 0 || m.power_limit === 0;
+    var isAppleUnified = hasMetalCap;
     var powerPct = m.power_limit > 0 ? (m.power_consumption / m.power_limit) * 100 : Math.min(100, (m.power_consumption / 150) * 100);
     var isCapped = m.power_consumption >= m.power_limit && m.power_limit > 0;
     var powerStyle = vizPrefs.gpu.power;
@@ -1189,9 +1194,12 @@ function renderGpuCard(gpuMap, visible, grade) {
     if (powerVal) {
         if (isAppleUnified) {
             powerVal.textContent = m.power_consumption.toFixed(1) + 'W';
-            if (powerLabelEl) powerLabelEl.textContent = 'SoC Power';
-        } else {
+            if (powerLabelEl) powerLabelEl.textContent = 'GPU Power';
+        } else if (m.power_limit > 0) {
             powerVal.textContent = m.power_consumption.toFixed(1) + 'W' + (isCapped ? '!' : '') + ' / ' + m.power_limit + 'W';
+            if (powerLabelEl) powerLabelEl.textContent = 'Power';
+        } else {
+            powerVal.textContent = m.power_consumption.toFixed(1) + 'W';
             if (powerLabelEl) powerLabelEl.textContent = 'Power';
         }
     }

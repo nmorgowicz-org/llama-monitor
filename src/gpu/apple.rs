@@ -130,8 +130,7 @@ impl GpuBackend for AppleBackend {
         let metrics = GpuMetrics {
             temp: soc.gpu_temp as f32,
             load: soc.gpu_active as u32,
-            // Use total SoC power — on Apple Silicon there's no separate GPU power
-            power_consumption: soc.total_power as f32,
+            power_consumption: soc.gpu_power as f32,
             power_limit: 0, // Not available from mactop
             vram_used: vram_used_mb as u64,
             vram_total: vram_total_mb as u64,

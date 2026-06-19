@@ -386,6 +386,8 @@ async function installRelease(btn, release) {
     }
     // Refresh the list so badges update
     closeVersionModal();
+    // Trigger immediate version check to refresh badge state
+    checkVersion();
   } catch (err) {
     clearInterval(timer);
     showToast('Install failed', 'error', err.message || String(err));
