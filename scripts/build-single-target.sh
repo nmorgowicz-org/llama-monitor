@@ -24,7 +24,7 @@ cat > ~/.cargo/config.toml << CARGO_CONFIG
 linker = "/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-clang"
 ar     = "/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-ar"
 rustflags = [
-  "-C", "link-arg=-fuse-ld=/opt/osxcross/target/bin/aarch64-apple-${DARWIN_VERSION}-ld",
+  "-C", "link-arg=-fuse-ld=/usr/bin/ld64.lld",
   "-C", "link-arg=-isysroot",
   "-C", "link-arg=/opt/osxcross/target/SDK/${MACOS_SDK}",
 ]
