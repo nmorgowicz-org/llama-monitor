@@ -397,20 +397,20 @@ cargo check
 
 Start with route groups that have limited coupling:
 
-- [ ] `presets.rs`
-- [ ] `templates.rs`
-- [ ] `lhm.rs`
-- [ ] `sensor_bridge.rs`
-- [ ] `metrics.rs`
-- [ ] `debug.rs`
+- [x] `presets.rs`
+- [x] `templates.rs`
+- [x] `lhm.rs`
+- [x] `sensor_bridge.rs`
+- [x] `metrics.rs`
+- [x] `debug.rs`
 
 For each module:
 
-- [ ] Move handlers and directly related helpers.
-- [ ] Add `pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute`.
-- [ ] Box the module route group.
-- [ ] Wire the group from `api/mod.rs`.
-- [ ] Run `cargo check`.
+- [x] Move handlers and directly related helpers.
+- [x] Add `pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute`.
+- [x] Box the module route group.
+- [x] Wire the group from `api/mod.rs`.
+- [x] Run `cargo check`.
 
 ### Phase 3: Move Config, Models, HF, VRAM, Benchmark
 
