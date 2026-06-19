@@ -1,0 +1,189 @@
+use std::fmt;
+use std::sync::Arc;
+
+use warp::Filter;
+use warp::http::StatusCode;
+use warp::reject::Reject;
+
+use crate::config::AppConfig;
+use crate::state::AppState;
+use crate::web::auth::AuthManager;
+
+#[allow(dead_code)]
+pub(crate) type ApiReply = Box<dyn warp::reply::Reply>;
+#[allow(dead_code)]
+pub(crate) type ApiRoute = warp::filters::BoxedFilter<(ApiReply,)>;
+
+#[allow(dead_code)]
+#[derive(Clone)]
+pub(crate) struct ApiCtx {
+    pub(crate) state: AppState,
+    pub(crate) config: Arc<AppConfig>,
+    pub(crate) auth: AuthManager,
+    pub(crate) bind_host: String,
+}
+
+#[derive(Debug)]
+pub(crate) struct ApiError {
+    pub(crate) status: StatusCode,
+    pub(crate) message: String,
+}
+
+impl ApiError {
+    pub(crate) fn new(status: StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn internal(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, message)
+    }
+
+    pub(crate) fn busy(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::TOO_MANY_REQUESTS, message)
+    }
+
+    pub(crate) fn gateway(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_GATEWAY, message)
+    }
+
+    pub(crate) fn gateway_timeout(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::GATEWAY_TIMEOUT, message)
+    }
+
+    pub(crate) fn from_reqwest(err: reqwest::Error) -> Self {
+        if err.is_timeout() {
+            return Self::gateway_timeout("Timed out waiting for the active llama-server.");
+        }
+
+        if err.is_connect() {
+            return Self::gateway("Cannot connect to the active llama-server.");
+        }
+
+        let detail = err.to_string();
+        if detail.contains("error sending request") || detail.contains("connection reset") {
+            return Self::gateway(
+                "The active llama-server dropped the request before streaming started.",
+            );
+        }
+
+        Self::gateway(format!("Upstream request failed: {detail}"))
+    }
+
+    pub(crate) fn from_upstream_status(status: StatusCode, body: String) -> Self {
+        let detail = body.trim();
+        let lower = detail.to_ascii_lowercase();
+        if status == StatusCode::TOO_MANY_REQUESTS
+            || lower.contains("busy")
+            || lower.contains("no slot")
+            || lower.contains("no available slot")
+        {
+            let message = if detail.is_empty() {
+                "The active llama-server is busy with another request."
+            } else {
+                detail
+            };
+            return Self::busy(message.to_string());
+        }
+
+        let message = if detail.is_empty() {
+            format!("Upstream llama-server returned HTTP {}.", status.as_u16())
+        } else {
+            format!("Upstream HTTP {}: {detail}", status.as_u16())
+        };
+        Self::new(status, message)
+    }
+}
+
+impl fmt::Display for ApiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for ApiError {}
+
+impl Reject for ApiError {}
+
+/// Extract bearer token from the Authorization header.
+pub(super) fn extract_bearer(auth: Option<String>) -> Option<String> {
+    auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string))
+}
+
+/// 401 JSON reply for a missing api-token.
+pub(super) fn unauthorized_api_token() -> Box<dyn warp::reply::Reply> {
+    Box::new(warp::reply::with_status(
+        warp::reply::json(&serde_json::json!({
+            "ok": false,
+            "error": "unauthorized; api-token required"
+        })),
+        StatusCode::UNAUTHORIZED,
+    ))
+}
+
+/// 401 JSON reply for a missing db-admin-token.
+pub(super) fn unauthorized_db_admin_token() -> Box<dyn warp::reply::Reply> {
+    Box::new(warp::reply::with_status(
+        warp::reply::json(&serde_json::json!({
+            "ok": false,
+            "error": "unauthorized; db-admin-token required"
+        })),
+        StatusCode::UNAUTHORIZED,
+    ))
+}
+
+/// Check if the Authorization header matches the configured api-token.
+pub fn check_api_token(auth: &Option<String>, cfg: &AppConfig) -> bool {
+    let bearer = auth.as_ref().and_then(|v| v.strip_prefix("Bearer "));
+    bearer_matches_api_token(bearer, cfg)
+}
+
+/// Check if the Authorization header matches the configured db-admin-token.
+pub(super) fn check_db_admin_token(auth: &Option<String>, cfg: &AppConfig) -> bool {
+    let bearer = auth.as_ref().and_then(|v| v.strip_prefix("Bearer "));
+    bearer_matches_db_admin_token(bearer, cfg)
+}
+
+/// Compare an already-extracted bearer token against the live api-token (constant-time).
+/// If no api-token is configured, allow the request (local-first mode).
+/// If api-token is configured but no bearer is provided, reject.
+pub(super) fn bearer_matches_api_token(bearer: Option<&str>, cfg: &AppConfig) -> bool {
+    use subtle::ConstantTimeEq;
+
+    let live = cfg.live_api_token();
+    match (bearer, live.as_deref()) {
+        (Some(got), Some(expected)) if !expected.is_empty() => {
+            got.as_bytes().ct_eq(expected.as_bytes()).into()
+        }
+        // Token is configured but no bearer provided -> reject.
+        (None, Some(expected)) if !expected.is_empty() => false,
+        // No token configured -> allow (local-first mode).
+        _ => true,
+    }
+}
+
+/// Compare an already-extracted bearer token against the live db-admin-token (constant-time).
+/// If no db-admin-token is configured, allow the request (local-first mode).
+/// If db-admin-token is configured but no bearer is provided, reject.
+pub(super) fn bearer_matches_db_admin_token(bearer: Option<&str>, cfg: &AppConfig) -> bool {
+    use subtle::ConstantTimeEq;
+
+    let live = cfg.live_db_admin_token();
+    match (bearer, live.as_deref()) {
+        (Some(got), Some(expected)) if !expected.is_empty() => {
+            got.as_bytes().ct_eq(expected.as_bytes()).into()
+        }
+        // Token is configured but no bearer provided -> reject.
+        (None, Some(expected)) if !expected.is_empty() => false,
+        // No token configured -> allow (local-first mode).
+        _ => true,
+    }
+}
+
+pub(super) fn with_app_config(
+    cfg: Arc<AppConfig>,
+) -> impl Filter<Extract = (Arc<AppConfig>,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || cfg.clone())
+}

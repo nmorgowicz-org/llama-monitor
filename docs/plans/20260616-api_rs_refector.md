@@ -378,14 +378,14 @@ Keep restart auth and cooldown behavior unchanged.
 
 ### Phase 1: Create API Module Skeleton
 
-- [ ] Convert `src/web/api.rs` into `src/web/api/mod.rs`.
-- [ ] Add empty or minimal domain modules.
-- [ ] Move `ApiError`, reply types, auth helpers, and shared filters into `common.rs`.
-- [ ] Re-export only what `src/web/mod.rs` needs:
+- [x] Convert `src/web/api.rs` into `src/web/api/mod.rs`.
+- [x] Add empty or minimal domain modules.
+- [x] Move `ApiError`, reply types, auth helpers, and shared filters into `common.rs`.
+- [x] Re-export only what `src/web/mod.rs` needs:
   - `ApiError`
   - `check_api_token`
   - route entry points
-- [ ] Keep `src/web/mod.rs` call sites unchanged except module paths if required.
+- [x] Keep `src/web/mod.rs` call sites unchanged except module paths if required.
 
 Expected validation:
 

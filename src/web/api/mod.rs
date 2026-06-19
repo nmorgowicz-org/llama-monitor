@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -9,7 +8,25 @@ use once_cell::sync::Lazy;
 use sha2::{Digest, Sha256};
 use warp::Filter;
 use warp::http::StatusCode;
-use warp::reject::Reject;
+
+mod common;
+mod tokens;
+mod upstream;
+
+pub(crate) use common::ApiError;
+pub use common::check_api_token;
+#[allow(unused_imports)]
+pub(crate) use common::{ApiCtx, ApiReply, ApiRoute};
+use common::{
+    bearer_matches_api_token, bearer_matches_db_admin_token, check_db_admin_token, extract_bearer,
+    unauthorized_api_token, unauthorized_db_admin_token, with_app_config,
+};
+pub use tokens::public_tokens_routes;
+#[cfg(test)]
+use tokens::token_bootstrap_allowed;
+use upstream::{
+    build_upstream_client, prepare_inference_request, send_upstream_request_with_retry,
+};
 
 static HF_REPO_RE: Lazy<regex::Regex> =
     Lazy::new(|| regex::Regex::new(r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9._-]+$").unwrap());
@@ -70,307 +87,6 @@ fn resolve_hf_target_dir(models_dir: &Path, target_path: Option<&str>) -> Result
     }
 
     Ok(candidate_canon)
-}
-
-#[derive(Debug)]
-pub(crate) struct ApiError {
-    pub(crate) status: StatusCode,
-    pub(crate) message: String,
-}
-
-impl ApiError {
-    fn new(status: StatusCode, message: impl Into<String>) -> Self {
-        Self {
-            status,
-            message: message.into(),
-        }
-    }
-
-    fn internal(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::INTERNAL_SERVER_ERROR, message)
-    }
-
-    fn busy(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::TOO_MANY_REQUESTS, message)
-    }
-
-    fn gateway(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::BAD_GATEWAY, message)
-    }
-
-    fn gateway_timeout(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::GATEWAY_TIMEOUT, message)
-    }
-
-    fn from_reqwest(err: reqwest::Error) -> Self {
-        if err.is_timeout() {
-            return Self::gateway_timeout("Timed out waiting for the active llama-server.");
-        }
-
-        if err.is_connect() {
-            return Self::gateway("Cannot connect to the active llama-server.");
-        }
-
-        let detail = err.to_string();
-        if detail.contains("error sending request") || detail.contains("connection reset") {
-            return Self::gateway(
-                "The active llama-server dropped the request before streaming started.",
-            );
-        }
-
-        Self::gateway(format!("Upstream request failed: {detail}"))
-    }
-
-    fn from_upstream_status(status: StatusCode, body: String) -> Self {
-        let detail = body.trim();
-        let lower = detail.to_ascii_lowercase();
-        if status == StatusCode::TOO_MANY_REQUESTS
-            || lower.contains("busy")
-            || lower.contains("no slot")
-            || lower.contains("no available slot")
-        {
-            let message = if detail.is_empty() {
-                "The active llama-server is busy with another request."
-            } else {
-                detail
-            };
-            return Self::busy(message.to_string());
-        }
-
-        let message = if detail.is_empty() {
-            format!("Upstream llama-server returned HTTP {}.", status.as_u16())
-        } else {
-            format!("Upstream HTTP {}: {detail}", status.as_u16())
-        };
-        Self::new(status, message)
-    }
-}
-
-impl fmt::Display for ApiError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)
-    }
-}
-
-impl std::error::Error for ApiError {}
-
-impl Reject for ApiError {}
-
-const MONITOR_INFERENCE_QUEUE_TIMEOUT: Duration = Duration::from_secs(330);
-const UPSTREAM_BUSY_WAIT_TIMEOUT: Duration = Duration::from_secs(300);
-const UPSTREAM_BUSY_POLL_INTERVAL: Duration = Duration::from_millis(500);
-const UPSTREAM_SEND_RETRIES: usize = 3;
-const UPSTREAM_SEND_RETRY_BACKOFF_MS: u64 = 250;
-
-fn active_chat_completions_url(state: &AppState) -> Result<String, warp::Rejection> {
-    let session = state
-        .get_active_session()
-        .ok_or(warp::reject::not_found())?;
-    Ok(match &session.mode {
-        crate::state::SessionMode::Spawn { port, .. } => {
-            format!("http://127.0.0.1:{port}/v1/chat/completions")
-        }
-        crate::state::SessionMode::Attach { endpoint, .. } => {
-            format!("{endpoint}/v1/chat/completions")
-        }
-    })
-}
-
-fn upstream_has_capacity(state: &AppState) -> Result<bool, warp::Rejection> {
-    let server_running = *state.server_running.lock().map_err(|e| {
-        warp::reject::custom(ApiError::internal(format!(
-            "Failed to read server state: {e}"
-        )))
-    })?;
-    if !server_running {
-        return Err(warp::reject::custom(ApiError::gateway(
-            "Cannot reach the active llama-server.",
-        )));
-    }
-
-    let metrics = state.llama_metrics.lock().map_err(|e| {
-        warp::reject::custom(ApiError::internal(format!(
-            "Failed to read llama metrics: {e}"
-        )))
-    })?;
-    let total_slots = metrics.slots_idle.saturating_add(metrics.slots_processing);
-    if total_slots > 0 {
-        return Ok(metrics.slots_idle > 0 || metrics.slots_processing == 0);
-    }
-
-    Ok(metrics.requests_processing == 0)
-}
-
-async fn wait_for_upstream_capacity(state: &AppState) -> Result<(), warp::Rejection> {
-    let deadline = tokio::time::Instant::now() + UPSTREAM_BUSY_WAIT_TIMEOUT;
-
-    loop {
-        if upstream_has_capacity(state)? {
-            return Ok(());
-        }
-
-        if tokio::time::Instant::now() >= deadline {
-            return Err(warp::reject::custom(ApiError::busy(
-                "The active llama-server has been busy for too long. The server may be running a very large inference. Wait for it to finish and retry.",
-            )));
-        }
-
-        tokio::time::sleep(UPSTREAM_BUSY_POLL_INTERVAL).await;
-    }
-}
-
-async fn acquire_inference_permit(
-    state: &AppState,
-) -> Result<tokio::sync::OwnedSemaphorePermit, warp::Rejection> {
-    tokio::time::timeout(
-        MONITOR_INFERENCE_QUEUE_TIMEOUT,
-        state.monitor_inference_gate.clone().acquire_owned(),
-    )
-    .await
-    .map_err(|_| {
-        warp::reject::custom(ApiError::busy(
-            "Another llama-monitor inference request has been queued for too long. Retry in a moment.",
-        ))
-    })?
-    .map_err(|_| warp::reject::custom(ApiError::internal("Inference gate was closed.")))
-}
-
-async fn prepare_inference_request(
-    state: &AppState,
-) -> Result<(String, tokio::sync::OwnedSemaphorePermit), warp::Rejection> {
-    let url = active_chat_completions_url(state)?;
-    let permit = acquire_inference_permit(state).await?;
-    wait_for_upstream_capacity(state).await?;
-    Ok((url, permit))
-}
-
-fn build_upstream_client(timeout: Duration) -> Result<reqwest::Client, warp::Rejection> {
-    reqwest::Client::builder()
-        .timeout(timeout)
-        .build()
-        .map_err(|e| {
-            warp::reject::custom(ApiError::internal(format!(
-                "Failed to create HTTP client: {e}"
-            )))
-        })
-}
-
-fn should_retry_send_error(err: &reqwest::Error) -> bool {
-    err.is_timeout()
-        || err.is_connect()
-        || err.to_string().contains("error sending request")
-        || err.to_string().contains("connection reset")
-}
-
-async fn send_upstream_request_with_retry<F>(
-    mut make_request: F,
-) -> Result<reqwest::Response, warp::Rejection>
-where
-    F: FnMut() -> reqwest::RequestBuilder,
-{
-    let mut attempt = 0usize;
-    let mut backoff_ms = UPSTREAM_SEND_RETRY_BACKOFF_MS;
-
-    loop {
-        attempt += 1;
-
-        match make_request().send().await {
-            Ok(resp) if resp.status().is_success() => return Ok(resp),
-            Ok(resp) => {
-                let status = resp.status();
-                let err_body = resp.text().await.unwrap_or_default();
-                let mapped = ApiError::from_upstream_status(status, err_body);
-                if attempt < UPSTREAM_SEND_RETRIES && mapped.status == StatusCode::TOO_MANY_REQUESTS
-                {
-                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-                    backoff_ms *= 2;
-                    continue;
-                }
-                return Err(warp::reject::custom(mapped));
-            }
-            Err(err) => {
-                if attempt < UPSTREAM_SEND_RETRIES && should_retry_send_error(&err) {
-                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-                    backoff_ms *= 2;
-                    continue;
-                }
-                return Err(warp::reject::custom(ApiError::from_reqwest(err)));
-            }
-        }
-    }
-}
-
-/// Extract bearer token from Authorization header.
-fn extract_bearer(auth: Option<String>) -> Option<String> {
-    auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string))
-}
-
-/// 401 JSON reply for missing api-token.
-fn unauthorized_api_token() -> Box<dyn warp::reply::Reply> {
-    Box::new(warp::reply::with_status(
-        warp::reply::json(&serde_json::json!({
-            "ok": false,
-            "error": "unauthorized; api-token required"
-        })),
-        warp::http::StatusCode::UNAUTHORIZED,
-    ))
-}
-
-/// 401 JSON reply for missing db-admin-token.
-fn unauthorized_db_admin_token() -> Box<dyn warp::reply::Reply> {
-    Box::new(warp::reply::with_status(
-        warp::reply::json(&serde_json::json!({
-            "ok": false,
-            "error": "unauthorized; db-admin-token required"
-        })),
-        warp::http::StatusCode::UNAUTHORIZED,
-    ))
-}
-
-/// Check if the Authorization header matches the configured api-token.
-pub fn check_api_token(auth: &Option<String>, cfg: &AppConfig) -> bool {
-    let bearer = auth.as_ref().and_then(|v| v.strip_prefix("Bearer "));
-    bearer_matches_api_token(bearer, cfg)
-}
-
-/// Check if the Authorization header matches the configured db-admin-token.
-fn check_db_admin_token(auth: &Option<String>, cfg: &AppConfig) -> bool {
-    let bearer = auth.as_ref().and_then(|v| v.strip_prefix("Bearer "));
-    bearer_matches_db_admin_token(bearer, cfg)
-}
-
-/// Compare an already-extracted bearer token against the live api-token (constant-time).
-/// If no api-token is configured, allow the request (local-first mode).
-/// If api-token is configured but no bearer is provided, reject.
-fn bearer_matches_api_token(bearer: Option<&str>, cfg: &AppConfig) -> bool {
-    use subtle::ConstantTimeEq;
-    let live = cfg.live_api_token();
-    match (bearer, live.as_deref()) {
-        (Some(got), Some(expected)) if !expected.is_empty() => {
-            got.as_bytes().ct_eq(expected.as_bytes()).into()
-        }
-        // Token is configured but no bearer provided → reject.
-        (None, Some(expected)) if !expected.is_empty() => false,
-        // No token configured → allow (local-first mode).
-        _ => true,
-    }
-}
-
-/// Compare an already-extracted bearer token against the live db-admin-token (constant-time).
-/// If no db-admin-token is configured, allow the request (local-first mode).
-/// If db-admin-token is configured but no bearer is provided, reject.
-fn bearer_matches_db_admin_token(bearer: Option<&str>, cfg: &AppConfig) -> bool {
-    use subtle::ConstantTimeEq;
-    let live = cfg.live_db_admin_token();
-    match (bearer, live.as_deref()) {
-        (Some(got), Some(expected)) if !expected.is_empty() => {
-            got.as_bytes().ct_eq(expected.as_bytes()).into()
-        }
-        // Token is configured but no bearer provided → reject.
-        (None, Some(expected)) if !expected.is_empty() => false,
-        // No token configured → allow (local-first mode).
-        _ => true,
-    }
 }
 
 use crate::config::{AppConfig, DashboardAuthConfig, TlsMode, clear_auth_config, save_auth_config};
@@ -5771,20 +5487,6 @@ pub fn auth_api_routes(
         .or(api_auth_logout(auth_manager))
 }
 
-/// Public token bootstrap routes.
-///
-/// Exposed before auth_guard so the frontend can retrieve api-token / db-admin-token
-/// without needing to be logged in via form/basic auth. Access is still constrained
-/// by token_bootstrap_allowed (loopback or no auth) and the caller's Origin.
-pub fn public_tokens_routes(
-    app_config: Arc<AppConfig>,
-    auth_manager: AuthManager,
-    bind_host: String,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    api_internal_token(app_config.clone(), auth_manager.clone(), bind_host.clone())
-        .or(api_db_admin_token(app_config, auth_manager, bind_host))
-}
-
 fn api_auth_status(
     auth_manager: AuthManager,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -9382,12 +9084,6 @@ fn with_chat_storage(
     warp::any().map(move || storage.clone())
 }
 
-fn with_app_config(
-    cfg: Arc<AppConfig>,
-) -> impl Filter<Extract = (Arc<AppConfig>,), Error = std::convert::Infallible> + Clone {
-    warp::any().map(move || cfg.clone())
-}
-
 fn now_ts() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -10234,83 +9930,6 @@ fn api_db_indexes(
                         ))
                     }
                 }
-            },
-        )
-}
-
-/// Token bootstrap policy:
-/// - When any auth mode is configured, the surrounding auth guard already
-///   authenticated the request, so bootstrap is allowed.
-/// - With no auth configured, bootstrap is restricted to loopback binds.
-fn bind_host_is_loopback(bind_host: &str) -> bool {
-    let host = bind_host.trim().trim_matches(['[', ']']);
-    matches!(host, "localhost" | "127.0.0.1" | "::1")
-}
-
-fn token_bootstrap_allowed(auth_manager: &AuthManager, bind_host: &str) -> bool {
-    // No Auth mode: fully open (local-first).
-    if !auth_manager.has_any() {
-        return true;
-    }
-    // Auth configured: only allow bootstrap when bound to loopback.
-    // Do NOT trust the Host header — it is attacker-controlled.
-    bind_host_is_loopback(bind_host)
-}
-
-// GET /api/internal/api-token - Return internal API token for UI use
-fn api_internal_token(
-    app_config: Arc<AppConfig>,
-    auth_manager: AuthManager,
-    bind_host: String,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("api" / "internal" / "api-token")
-        .and(warp::get())
-        .and(warp::header::optional::<String>("authorization"))
-        .and(warp::header::optional::<String>("cookie"))
-        .and(with_app_config(app_config))
-        .map(
-            move |auth: Option<String>, cookie: Option<String>, cfg: Arc<AppConfig>| {
-                let already_authenticated = auth_manager
-                    .authenticate_request(auth.as_deref(), cookie.as_deref())
-                    || check_api_token(&auth, &cfg);
-                if !already_authenticated && !token_bootstrap_allowed(&auth_manager, &bind_host) {
-                    return Box::new(warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({ "error": "forbidden" })),
-                        warp::http::StatusCode::FORBIDDEN,
-                    )) as Box<dyn warp::reply::Reply>;
-                }
-                let live = cfg.live_api_token();
-                let token = live.as_deref().unwrap_or("");
-                Box::new(warp::reply::json(&serde_json::json!({ "token": token })))
-            },
-        )
-}
-
-// GET /api/db/admin-token - Return DB admin token for authenticated UI use
-fn api_db_admin_token(
-    app_config: Arc<AppConfig>,
-    auth_manager: AuthManager,
-    bind_host: String,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("api" / "db" / "admin-token")
-        .and(warp::get())
-        .and(warp::header::optional::<String>("authorization"))
-        .and(warp::header::optional::<String>("cookie"))
-        .and(with_app_config(app_config))
-        .map(
-            move |auth: Option<String>, cookie: Option<String>, cfg: Arc<AppConfig>| {
-                let already_authenticated = auth_manager
-                    .authenticate_request(auth.as_deref(), cookie.as_deref())
-                    || check_api_token(&auth, &cfg);
-                if !already_authenticated && !token_bootstrap_allowed(&auth_manager, &bind_host) {
-                    return Box::new(warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({ "error": "forbidden" })),
-                        warp::http::StatusCode::FORBIDDEN,
-                    )) as Box<dyn warp::reply::Reply>;
-                }
-                let live = cfg.live_db_admin_token();
-                let token = live.as_deref().unwrap_or("");
-                Box::new(warp::reply::json(&serde_json::json!({ "token": token })))
             },
         )
 }
