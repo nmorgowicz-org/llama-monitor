@@ -138,6 +138,19 @@ SCREENSHOT_PORT=8899 node tests/ui/capture.mjs --scenario smoke
 
 The harness now writes its outputs to `docs/screenshots/artifacts/`. Promote selected stills or GIFs into `docs/screenshots/` only when you intentionally want a README-facing hero asset.
 
+## Dashboard-related scenarios
+
+When you change dashboard / metrics / server tab visuals, use this subset instead of the full suite:
+
+- `dashboard` — primary Server tab + GPU section (produces `dashboard-performance-section.png`, `settings-server-tab.png`, `dashboard-gpu-section.png`)
+- `gifs` — animated metric graphs
+  - `--gpu-only` — only GPU/system metrics GIF
+  - `--inference-only` — only inference metrics GIF
+- `tune-panel` — tuning panel on Server tab
+- `benchmark-results` — benchmark results view
+- `llama-updater` — updater pill + version modal
+- `appearance-palette` — includes light-mode dashboard screenshot
+
 ## Updating the harness
 
 When adding or changing screenshot coverage:
