@@ -25,6 +25,14 @@ Scope: `api`, `ui`, `chat`, `gpu`, `nav`, `settings`, `models`, `sessions`, `wiz
 PR title MUST be `feat:` or `fix:` if it contains those commits (release-please requirement).
 NEVER put `BEGIN_COMMIT_OVERRIDE`/`END_COMMIT_OVERRIDE` in git commit messages — only in PR bodies.
 
+We use squash-merge; release-please evaluates each PR individually (not all inner commits):
+- `feat:` in PR title → minor
+- `fix:` in PR title → patch
+- `feat!:` in PR title OR `BREAKING CHANGE:` in PR body → major
+  - Example: `feat(wizard)!: redesign spawn flow`
+  - Or include at bottom of PR body:
+    - `BREAKING CHANGE: spawn wizard now requires explicit profile selection`
+
 For PRs with multiple user-facing items, add override block to PR body:
 ```text
 BEGIN_COMMIT_OVERRIDE
