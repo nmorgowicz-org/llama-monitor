@@ -547,13 +547,12 @@
   .hw-sparkline {
     width: 100%;
     height: clamp(72px, 11vh, 110px);
-    overflow: visible;
+    overflow: hidden;
     border-radius: 12px;
     position: relative;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
       repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.03) 0 1px, transparent 1px 16px);
-    animation: hw-sparkline-glow 3s ease-in-out infinite;
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.05),
       inset 0 -1px 0 rgba(0, 0, 0, 0.14),
@@ -613,13 +612,15 @@
     min-height: clamp(46px, 8vh, 82px);
     height: clamp(46px, 8vh, 82px);
     margin-top: 2px;
-    overflow: visible;
+    overflow: hidden;
     border-radius: 12px;
     position: relative;
     background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.016), rgba(255, 255, 255, 0.004)),
-      repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.028) 0 1px, transparent 1px 16px);
-    animation: hw-sparkline-glow 3s ease-in-out infinite;
+      linear-gradient(180deg, rgba(255, 255, 255, 0.026), rgba(255, 255, 255, 0.006)),
+      repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.024) 0 1px, transparent 1px 16px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.04),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.14);
   }
 
   .hw-metric-sparkline .sparkline-line {
@@ -631,7 +632,7 @@
   }
 
   .hw-metric-sparkline .sparkline-fill {
-    opacity: 0.68;
+    opacity: 0.58;
     filter: saturate(1.08) brightness(1.02);
   }
 
@@ -651,11 +652,9 @@
   }
 
   .hw-metric-sparkline .sparkline-current-core {
-    display: none;
-  }
-
-  .hw-metric-sparkline {
-    animation: hw-sparkline-glow 3s ease-in-out infinite;
+    display: block;
+    fill: currentColor;
+    opacity: 0.86;
   }
 
   @keyframes hw-current-halo {
@@ -1648,10 +1647,6 @@
   @keyframes hw-sparkline-glow {
     0%, 100% { filter: drop-shadow(0 0 2px var(--acc-15)); }
     50% { filter: drop-shadow(0 0 6px var(--acc-40)); }
-  }
-
-  .hw-sparkline {
-    animation: hw-sparkline-glow 3s ease-in-out infinite;
   }
 
   /* Ring breathe (matches inference card) */
