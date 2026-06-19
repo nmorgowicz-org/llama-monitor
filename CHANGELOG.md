@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.23.0...v1.0.0) (2026-06-19)
+
+
+### Features
+
+* **wizard:** five-step Spawn Wizard (Profile → Model → Hardware & Tuning → Summary → Spawn) with guided, VRAM-aware defaults and hardware presets
+* **wizard:** Profile segmented control (Quick/Balanced/Advanced) and use-case selection persisted in localStorage
+* **wizard:** integrated HuggingFace search/browse/download into the spawn flow—browse, pick, and launch from one wizard
+* **wizard:** auto-resolve HF origin for local models with model card panel and markdown-rendered details
+* **wizard:** quant swap step with VRAM-aware advisor, provider presets, and in-place quant changes without recreating presets
+* **wizard:** Apple Silicon P/E core detection, unified memory budget model, and Metal GPU limit control
+* **wizard:** animated VRAM breakdown panel with MoE expert offload slider and per-component tooltips
+* **wizard:** speculative decoding, MTP/assistant model support, and draft-model auto-detection for Gemma4/Qwen3.6
+* **wizard:** chat template auto-install, cache_ram_mib, and full preset field wiring to spawn
+* **wizard:** thinking/reasoning controls, Qwen3.5/3.6 reasoning presets, and reasoning budget options
+* **wizard:** context quick-picks up to 256k with free manual input and minimum-context warnings
+* **wizard:** server alias and extra args in Summary; modernized footer and Close button
+* **wizard:** auto-advance with toast after HF download completes; quick-edit chips open preset modal on context
+* **vram:** architecture-aware VRAM estimator rewrite with direct GGUF metadata read, no subprocess needed
+* **vram:** DeltaNet/hybrid-attention support for Qwen3.6, Qwen3.5, Qwen3-Coder-Next, davidau 40B
+* **vram:** Gemma 3/4 sliding-window and Gemma 4 global head_dim modeling for accurate KV cache estimates
+* **vram:** MoE support with VRAM/RAM split based on n_cpu_moe, expert_fraction, and MoE auto-tune suggestions
+* **vram:** EXAONE 4.5 family support including hybrid attention, MTP depth, and vision encoder sizing
+* **vram:** VRAM fit legend, inline context-size warnings, and "approx." labeling on launch cards
+* **spawn:** unified V2 spawn architecture using -m or -hf model source with validation and clear errors
+* **spawn:** pre-spawn health check (run llama-server --help) with captured stderr; fail fast on bad binary
+* **spawn:** race-safe restart-after-update with server_stopping flag, MTP port-sweep cleanup, and improved timeouts
+* **spawn:** always-on flags for long conversations: --no-context-shift, --ctx-checkpoints, --keep now default
+* **spawn:** bind host (loopback vs 0.0.0.0) and per-session API key configuration for safer local use
+* **spawn:** echo llama-server logs to terminal and attach last lines on spawn failure for clearer diagnostics
+* **hf:** full HuggingFace integration with keyword search, sort (trending/downloads/likes/newest), and load-more
+* **hf:** discover-pills for major families (Qwen3, Llama3, Mistral/MoE, Gemma, EXAONE, etc.) and per-author browsing
+* **hf:** GGUF file listing with real sizes, mmproj/draft-model detection, and provider/quant-type labels
+* **hf:** streaming downloads with resume, ETA, cancel, and partial-file rename safety
+* **hf:** HF token integration (store/show/remove) for gated repos; token never echoed in responses
+* **models:** model-library view with card/list modes, search, filters (quant, size, tag, mmproj, split, draft), and persisted prefs
+* **models:** library tag system: attach/click-remove tags per model; filter by tags (coding, roleplay, etc.)
+* **models:** per-model VRAM bar and estimate, plus related-presets linking on each model card
+* **ui:** welcome screen redesign: preset launch grid, recent-launch timestamps, unified memory bar, and drop-zone
+* **ui:** control bar redesign with two-zone layout and context-aware buttons (Running→Stop+Switch / Stopped→Start+Spawn)
+* **ui:** post-stop choice modal: "Go to Welcome" or "Stay on Dashboard"
+* **ui:** logs panel overhaul with token coloring, font size controls, incremental rendering, and live log tail viewer
+* **ui:** teal accent retheme across hardware cards, inference widgets, logs, and navigation
+* **ui:** full light theme pass with contrast-safe colors; reduced-motion queries disable transitions for accessibility
+* **chat:** multi-select in conversations sidebar with bulk Delete/Archive and Undo toasts
+* **chat:** streaming render throttled to ≤20 fps to prevent main-thread freezes on long responses
+* **chat:** new chat preferences (date format, Enter-to-send, context view, persist-thinking-content, etc.)
+* **chat:** raised new-tab max_tokens default from 8192 to 32768 for longer conversations
+* **tuning:** new tuning panel with performance benchmark (A/B/C/D grades) and auto-tuning suggestions
+* **tuning:** MTP n-max sweep with bar chart and one-click apply; MoE auto-tune and depth sweep via llama-bench
+* **perf:** 80%+ battery-drain reduction via Page Visibility API, 70+ paused CSS animations, and transform-based animations
+* **perf:** Low Power Mode with configurable auto-sleep, slower pollers, and reduced WebSocket broadcast in idle/battery-saver
+* **api:** restore 27 spawn-wizard handler functions to prevent mass 404s on wizard/HF/tuning endpoints
+* **api:** new endpoints for MTP-draft check, HF token, streaming download, VRAM breakdown, chat-templates, and session readiness
+* **security:** path-traversal guards for HF downloads, model browse, and resolve-origin with unit tests
+* **security:** multi-statement SQL rejection in DB query endpoint; tightened body-size and repo_id validations
+* **security:** metrics and GPU/system endpoints now require api_token; Host header spoofing protection
+* **security:** login brute-force resistance: cooldown increased from 2s to 10s
+
+
+### Bug Fixes
+
+* **wizard:** correct -ngl 99 to -ngl all; ensure wizard maps "All" to -1 safely across llama.cpp versions
+* **spawn:** enable flash attention by default for eligible models; preset editor reflects new standard
+* **spawn:** remove 30s cooldown from kill-llama; unify stop/kill for faster session cycling and safer restart loops
+* **spawn:** prevent locally spawned servers from leaking into remote endpoints list
+* **vram:** correct Gemma4 and Qwen DeltaNet heuristics (n_ctx_train integration, expert semantics) for accurate estimates
+* **security:** fix token leak and header-spoofing issue in bootstrap-token and setup checks
+
 ## [0.23.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.22.5...v0.23.0) (2026-05-27)
 
 
