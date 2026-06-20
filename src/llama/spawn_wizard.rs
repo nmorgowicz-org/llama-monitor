@@ -983,6 +983,8 @@ impl ModelMetadata {
             mtp_depth: self.mtp_depth.unwrap_or(heuristic.mtp_depth),
             global_head_dim: heuristic.global_head_dim,
             mmproj_bytes: 0, // filled in separately when mmproj path is known
+            // GGUF embedding_length overrides heuristic when present (exact value)
+            n_embd: self.n_embd.unwrap_or(heuristic.n_embd),
             param_b,
         }
     }
@@ -1093,7 +1095,9 @@ pub async fn introspect_model(
 #[allow(dead_code)]
 fn gguf_arch_to_heuristic_name(gguf_arch: &str) -> &str {
     match gguf_arch {
-        "qwen3_6" | "qwen3.6" | "qwen35moe" => "qwen3.6-model",
+        // "qwen35" is llama.cpp's arch tag for Qwen3.5/3.6 hybrid DeltaNet models
+        // (e.g. Qwen3.6-27B GGUFs often report this tag).
+        "qwen3_6" | "qwen3.6" | "qwen35" | "qwen35moe" => "qwen3.6-model",
         "qwen3_5" | "qwen3.5" => "qwen3.5-model",
         "qwen3_coder_next" | "qwen3-coder-next" => "qwen3-coder-next",
         "gemma4" | "gemma-4" => "gemma4-model",
