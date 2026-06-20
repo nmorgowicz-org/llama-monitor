@@ -5,6 +5,11 @@
 //! - get_download_status(id)
 //! - cancel_download(id)
 //!
+//! Features:
+//! - Duplicate guard: prevents starting a second task for the same (repo, file).
+//! - Existing-file guard: refuses to re-download if the target file already exists.
+//! - Concurrency limit: max 2 simultaneous running downloads.
+//!
 //! Downloads stream in a spawned tokio task. Cancellation is immediate via
 //! a shared Notify; progress is tracked via Arc<AtomicU64> so the status
 //! endpoint reads live bytes without holding the task mutex.
@@ -16,7 +21,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use anyhow::Result;
 use futures_util::StreamExt;
 use hf_hub::api::sync::ApiBuilder;
 use hf_hub::{Repo, RepoType};
@@ -24,6 +28,9 @@ use serde::Serialize;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Notify;
+
+/// Max number of concurrent running downloads.
+const MAX_CONCURRENT_DOWNLOADS: usize = 2;
 
 #[derive(Debug, Serialize)]
 pub struct DownloadStatus {
@@ -38,6 +45,48 @@ pub struct DownloadStatus {
     pub local_path: String,
 }
 
+/// Specific reasons why `start_download` refused to begin.
+/// Returned via the `"error"` field in JSON; intentionally plain strings
+/// so the frontend can do simple substring checks.
+pub enum DownloadStartError {
+    AlreadyDownloading(String), // same (repo, file) in progress
+    AlreadyExists(String),      // target file already on disk
+    TooManyDownloads,           // concurrency limit reached
+    Generic(String),
+}
+
+impl std::fmt::Display for DownloadStartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DownloadStartError::AlreadyDownloading(name) => {
+                write!(
+                    f,
+                    "Already downloading: {name}. Please wait until it completes."
+                )
+            }
+            DownloadStartError::AlreadyExists(path) => {
+                write!(
+                    f,
+                    "File already exists at: {path}. It may be available in your library."
+                )
+            }
+            DownloadStartError::TooManyDownloads => {
+                write!(
+                    f,
+                    "Too many downloads in progress. Please wait for one to finish."
+                )
+            }
+            DownloadStartError::Generic(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl From<DownloadStartError> for String {
+    fn from(e: DownloadStartError) -> String {
+        e.to_string()
+    }
+}
+
 #[derive(Debug)]
 struct DownloadTask {
     status: String,
@@ -45,6 +94,9 @@ struct DownloadTask {
     start_time: std::time::Instant,
     /// Absolute path on disk where the file is/will be written.
     local_path: std::path::PathBuf,
+    /// Source repo and file path (for duplicate detection).
+    repo_id: String,
+    file_path: String,
     /// Live bytes written; updated by the streaming loop without holding the Mutex.
     bytes_downloaded: Arc<AtomicU64>,
     /// Total expected bytes from Content-Length; set once response headers arrive.
@@ -90,7 +142,11 @@ pub fn start_download(
     save_as: Option<&str>,
     target_dir: &Path,
     hf_token: Option<String>,
-) -> Result<String> {
+) -> std::result::Result<String, DownloadStartError> {
+    let repo_id_owned = repo_id.to_string();
+    let file_path_owned = file_path.to_string();
+    let local_path = target_dir.join(save_as.unwrap_or(&file_path_owned));
+
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -98,12 +154,53 @@ pub fn start_download(
     let rand_part: u32 = rand::random();
     let download_id = format!("md-{}-{:x}", ts, rand_part);
 
-    let repo_id = repo_id.to_string();
-    let file_path = file_path.to_string();
-    let local_path = target_dir.join(save_as.unwrap_or(&file_path));
+    // Evict stale tasks and run pre-flight checks.
+    {
+        let mut mgr = MODEL_DOWNLOAD_MANAGER
+            .lock()
+            .expect("MODEL_DOWNLOAD_MANAGER lock poisoned");
+        mgr.evict_stale();
+
+        // Duplicate guard: reject if a running task exists for same (repo, file).
+        for t in mgr.tasks.values() {
+            let guard = match t.lock() {
+                Ok(g) => g,
+                Err(_) => continue,
+            };
+            if guard.status != "running" {
+                continue;
+            }
+            if guard.repo_id == repo_id_owned && guard.file_path == file_path_owned {
+                return Err(DownloadStartError::AlreadyDownloading(display_file_name(
+                    &file_path_owned,
+                )));
+            }
+        }
+
+        // Existing-file guard: if the target already exists and is not a .part,
+        // assume the user already has this download.
+        if local_path.exists() && local_path.extension().is_none_or(|ext| ext != "part") {
+            return Err(DownloadStartError::AlreadyExists(
+                local_path.to_string_lossy().into_owned(),
+            ));
+        }
+
+        // Concurrency limit.
+        let running = mgr
+            .tasks
+            .values()
+            .filter_map(|t| t.lock().ok())
+            .filter(|t| t.status == "running")
+            .count();
+        if running >= MAX_CONCURRENT_DOWNLOADS {
+            return Err(DownloadStartError::TooManyDownloads);
+        }
+    }
 
     if let Err(e) = std::fs::create_dir_all(target_dir) {
-        anyhow::bail!("Failed to create model directory: {}", e);
+        return Err(DownloadStartError::Generic(format!(
+            "Failed to create model directory: {e}"
+        )));
     }
 
     let bytes_downloaded = Arc::new(AtomicU64::new(0));
@@ -115,6 +212,8 @@ pub fn start_download(
         message: "Starting download...".into(),
         start_time: std::time::Instant::now(),
         local_path: local_path.clone(),
+        repo_id: repo_id_owned.clone(),
+        file_path: file_path_owned.clone(),
         bytes_downloaded: bytes_downloaded.clone(),
         total_bytes: total_bytes.clone(),
         cancel: cancel.clone(),
@@ -124,20 +223,19 @@ pub fn start_download(
         let mut mgr = MODEL_DOWNLOAD_MANAGER
             .lock()
             .expect("MODEL_DOWNLOAD_MANAGER lock poisoned");
-        mgr.evict_stale();
         mgr.tasks.insert(download_id.clone(), task.clone());
     }
 
     eprintln!(
-        "[info] download started  id={download_id}  repo={repo_id}  file={file_path}  dest={}",
+        "[info] download started  id={download_id}  repo={repo_id_owned}  file={file_path_owned}  dest={}",
         local_path.display()
     );
 
     tokio::spawn(async move {
         run_download(
             task,
-            repo_id,
-            file_path,
+            repo_id_owned,
+            file_path_owned,
             local_path,
             hf_token,
             bytes_downloaded,
@@ -148,6 +246,14 @@ pub fn start_download(
     });
 
     Ok(download_id)
+}
+
+fn display_file_name(file_path: &str) -> String {
+    file_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(file_path)
+        .to_string()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -328,11 +434,12 @@ async fn run_download(
                 }
             }
             Some(Err(e)) => {
+                let msg = classify_stream_error(&e);
                 if is_tty {
                     eprint!("\r\x1b[K");
                 }
-                eprintln!("[error] download stream error  file={file_path}  error={e}");
-                set_failed(&task, format!("Stream error: {e}"));
+                eprintln!("[error] download stream error  file={file_path}  error={msg}");
+                set_failed(&task, msg);
                 return;
             }
             None => break,
@@ -382,6 +489,7 @@ fn set_failed(task: &Arc<Mutex<DownloadTask>>, msg: String) {
     }
 
     // Rename partial file to .part so it is not mistaken for a complete download.
+    // The partial can be resumed later if the error looks transient.
     let path = t.local_path.clone();
     if path.exists() {
         let part_path = path.with_extension("part");
@@ -392,6 +500,38 @@ fn set_failed(task: &Arc<Mutex<DownloadTask>>, msg: String) {
         );
         let _ = std::fs::rename(&path, &part_path);
     }
+}
+
+/// Give a clearer, actionable message for stream errors.
+fn classify_stream_error(err: &reqwest::Error) -> String {
+    let s = err.to_string().to_ascii_lowercase();
+
+    // Known transient / load-related issues
+    if s.contains("error decoding response body")
+        || s.contains("connection reset")
+        || s.contains("eof while reading")
+        || s.contains("broken pipe")
+    {
+        return "Connection dropped. You can retry to resume from where it left off.".into();
+    }
+
+    // Timeout or too many retries
+    if s.contains("timed out") || s.contains("timeout") {
+        return "Request timed out. You can retry to resume.".into();
+    }
+
+    // Auth / gating
+    if s.contains("401") || s.contains("403") {
+        return "Access denied (check HF token or model access).".into();
+    }
+
+    // Not found
+    if s.contains("404") {
+        return "File not found on HuggingFace.".into();
+    }
+
+    // Generic fallback (still useful to know it can be retried)
+    format!("Download error: {err}. You may be able to retry to resume.")
 }
 
 pub fn get_download_status(download_id: &str) -> Option<DownloadStatus> {

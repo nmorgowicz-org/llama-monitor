@@ -245,6 +245,7 @@ export async function hfSearch({
       cardLink.addEventListener('click', e => {
         e.stopPropagation();
         if (onOpenCardPanel) onOpenCardPanel(m.id);
+        else window.open(`https://huggingface.co/${escHtml(m.id)}`, '_blank', 'noopener');
       });
 
       row.appendChild(nameEl);
@@ -484,7 +485,11 @@ export async function hfStartDownload({
   if (!panelEl) return;
 
   const btn = panelEl.querySelector('#hf-dlp-download-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Starting\u2026'; }
+  const shortName = filePath.split('/').pop() || filePath;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Starting\u2026';
+  }
 
   try {
     const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
@@ -493,25 +498,70 @@ export async function hfStartDownload({
       headers,
       body: JSON.stringify({ repo_id: repoId, file_path: filePath, resume: true }),
     });
-    if (btn) { btn.disabled = false; btn.textContent = 'Download to models folder'; }
     const data = await res.json().catch(() => ({}));
+
     if (!res.ok || !data.ok) {
-      if (onValidationError) onValidationError(data.error || 'Download failed to start.');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Download to models folder';
+      }
+      const err = data.error || 'Download failed to start.';
+      _handleDownloadError(err, shortName, onValidationError);
       return null;
     }
+
+    // Download started: toast + progress UI.
+    showToast('Download started: ' + shortName, 'info');
 
     const downloadId = data.download_id;
 
     const fileEl = panelEl.querySelector('#hf-dlp-progress-file');
-    if (fileEl) fileEl.textContent = filePath.split('/').pop();
+    if (fileEl) fileEl.textContent = shortName;
     _dlSetState(panelEl, 'progress');
     hfPollDownload(downloadId, panelEl, { onComplete, onValidationError, onClearValidationError });
     return data;
   } catch (err) {
-    if (btn) { btn.disabled = false; }
-    if (onValidationError) onValidationError(err.message || 'Download request failed.');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Download to models folder';
+    }
+    if (onValidationError) onValidationError('Download request failed: ' + (err.message || err));
     return null;
   }
+}
+
+/**
+ * Centralized handler for download-start errors from the backend.
+ * Shows user-friendly toasts and keeps onValidationError in sync.
+ */
+function _handleDownloadError(err, shortName, onValidationError) {
+  const e = (err || '').toLowerCase();
+
+  if (e.includes('already downloading')) {
+    const msg = 'Already downloading: ' + shortName + '. Waiting for it to complete.';
+    showToast(msg, 'warning');
+    if (onValidationError) onValidationError(err || msg);
+    return;
+  }
+
+  if (e.includes('already exists')) {
+    const msg = 'File already exists. It may already be in your library.';
+    showToast(msg, 'warning');
+    if (onValidationError) onValidationError(err || msg);
+    return;
+  }
+
+  if (e.includes('too many downloads')) {
+    const msg = 'Too many downloads in progress. Please wait for one to finish.';
+    showToast(msg, 'warning');
+    if (onValidationError) onValidationError(err || msg);
+    return;
+  }
+
+  // Generic backend error.
+  const userMsg = 'Download failed: ' + (err || 'unknown error');
+  showToast(userMsg, 'error');
+  if (onValidationError) onValidationError(err || userMsg);
 }
 
 export async function hfStartCompanionDownload({ repoId, filePath, saveAs }) {
@@ -530,7 +580,16 @@ export async function hfStartCompanionDownload({ repoId, filePath, saveAs }) {
       }),
     });
     const data = await res.json().catch(() => ({}));
-    return res.ok && data.ok ? data : null;
+    if (res.ok && data.ok) {
+      const shortName = (saveAs || filePath.split('/').pop()) || filePath;
+      showToast('Also downloading: ' + shortName, 'info');
+      return data;
+    }
+    // Log error quietly for companion; primary handler will surface main message.
+    if (data.error) {
+      console.warn('[hf] companion download failed:', data.error);
+    }
+    return null;
   } catch {
     return null;
   }
@@ -591,7 +650,18 @@ export function hfPollDownload(downloadId, panelEl, { onComplete, onValidationEr
       if (status === 'failed') {
         _dlCancelPoll(panelEl);
         _dlSetState(panelEl, 'idle');
-        if (onValidationError) onValidationError(s.message || 'Download failed.');
+        const reason = s.message || 'Download failed.';
+        // Extract short name from status or file path
+        const shortName = data.status?.local_path
+            ? (data.status.local_path.split('/').pop() || reason)
+            : null;
+        // Show a toast if the failure looks transient or network-related
+        if (reason.toLowerCase().includes('connection') ||
+            reason.toLowerCase().includes('timed out') ||
+            reason.toLowerCase().includes('error')) {
+            showToast('Download failed: ' + (shortName ? shortName + ' — ' : '') + reason + ' You can retry.', 'error');
+        }
+        if (onValidationError) onValidationError(reason);
         return;
       }
       if (status === 'cancelled') {
