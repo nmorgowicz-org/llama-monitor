@@ -6,7 +6,7 @@ use crate::config::AppConfig;
 #[cfg(target_os = "windows")]
 use crate::lhm;
 
-use super::{ApiCtx, ApiReply, ApiRoute, check_api_token, unauthorized_api_token};
+use super::{ApiCtx, ApiRoute, box_reply, check_api_token, unauthorized_api_token};
 
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let config = ctx.config;
@@ -18,13 +18,6 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .or(api_sensor_bridge_uninstall(config).map(box_reply))
         .unify()
         .boxed()
-}
-
-fn box_reply<R>(reply: R) -> ApiReply
-where
-    R: warp::Reply + 'static,
-{
-    Box::new(reply)
 }
 
 fn api_sensor_bridge_status(

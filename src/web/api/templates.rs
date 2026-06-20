@@ -6,7 +6,7 @@ use crate::config::AppConfig;
 use crate::presets;
 use crate::state::AppState;
 
-use super::{ApiCtx, ApiReply, ApiRoute, check_api_token, unauthorized_api_token, with_app_config};
+use super::{ApiCtx, ApiRoute, box_reply, check_api_token, unauthorized_api_token, with_app_config};
 
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let state = ctx.state;
@@ -21,13 +21,6 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .or(api_delete_template(state, config).map(box_reply))
         .unify()
         .boxed()
-}
-
-fn box_reply<R>(reply: R) -> ApiReply
-where
-    R: warp::Reply + 'static,
-{
-    Box::new(reply)
 }
 
 fn api_get_templates(

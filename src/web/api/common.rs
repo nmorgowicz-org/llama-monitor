@@ -5,6 +5,7 @@ use warp::Filter;
 use warp::http::StatusCode;
 use warp::reject::Reject;
 
+use crate::chat_storage::ChatStorage;
 use crate::config::AppConfig;
 use crate::state::AppState;
 use crate::web::auth::AuthManager;
@@ -224,4 +225,16 @@ pub(crate) fn record_activity(state: &AppState) {
             .store(false, std::sync::atomic::Ordering::Relaxed);
         state.sleep_notify.notify_waiters();
     }
+}
+
+/// Box a reply into the API envelope type.
+pub(crate) fn box_reply<R: warp::Reply + 'static>(reply: R) -> ApiReply {
+    Box::new(reply)
+}
+
+/// Warp filter that provides Arc<ChatStorage> to API routes.
+pub(crate) fn with_chat_storage(
+    cs: Arc<ChatStorage>,
+) -> impl Filter<Extract = (Arc<ChatStorage>,), Error = std::convert::Infallible> + Clone + Unpin {
+    warp::any().map(move || cs.clone())
 }

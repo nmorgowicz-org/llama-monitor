@@ -33,7 +33,7 @@ mod vram;
 
 pub(crate) use common::ApiError;
 pub use common::check_api_token;
-pub(crate) use common::{ApiCtx, ApiReply, ApiRoute, record_activity};
+pub(crate) use common::{ApiCtx, ApiReply, ApiRoute, box_reply, record_activity};
 pub(crate) use common::{
     bearer_matches_api_token, bearer_matches_db_admin_token, extract_bearer,
     unauthorized_api_token, unauthorized_db_admin_token, with_app_config,

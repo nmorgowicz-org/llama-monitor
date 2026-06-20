@@ -6,14 +6,7 @@ use warp::Filter;
 use crate::config::AppConfig;
 use crate::state::AppState;
 
-use super::common::{ApiCtx, ApiReply, ApiRoute, check_api_token, unauthorized_api_token};
-
-fn box_reply<R>(reply: R) -> ApiReply
-where
-    R: warp::Reply + 'static,
-{
-    Box::new(reply)
-}
+use super::common::{ApiCtx, ApiRoute, box_reply, check_api_token, unauthorized_api_token};
 
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let state = ctx.state;

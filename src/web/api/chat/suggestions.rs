@@ -9,7 +9,7 @@ use crate::chat_storage::ChatStorage;
 use crate::config::AppConfig;
 use crate::state::AppState;
 
-use super::super::common::{ApiCtx, ApiError, ApiRoute, check_api_token, unauthorized_api_token};
+use super::super::common::{ApiCtx, ApiError, ApiRoute, box_reply, check_api_token, unauthorized_api_token};
 use super::super::upstream::{
     build_upstream_client, prepare_inference_request, send_upstream_request_with_retry,
 };
@@ -92,13 +92,6 @@ pub(crate) fn routes(ctx: ApiCtx, chat_storage: Arc<ChatStorage>) -> ApiRoute {
         .or(chat_suggestions.map(box_reply))
         .unify()
         .boxed()
-}
-
-fn box_reply<R>(reply: R) -> Box<dyn warp::reply::Reply>
-where
-    R: warp::Reply + 'static,
-{
-    Box::new(reply)
 }
 
 fn default_suggestions_output_contract(count: u32) -> String {

@@ -5,7 +5,7 @@ use warp::Filter;
 use crate::config::AppConfig;
 use crate::state::AppState;
 
-use super::super::common::{ApiCtx, ApiError, ApiRoute, check_api_token, unauthorized_api_token};
+use super::super::common::{ApiCtx, ApiError, ApiRoute, box_reply, check_api_token, unauthorized_api_token};
 use super::super::upstream::{
     build_upstream_client, prepare_inference_request, send_upstream_request_with_retry,
 };
@@ -42,13 +42,6 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     api_analyze_context_notes(ctx.state, ctx.config)
         .map(box_reply)
         .boxed()
-}
-
-fn box_reply<R>(reply: R) -> Box<dyn warp::reply::Reply>
-where
-    R: warp::Reply + 'static,
-{
-    Box::new(reply)
 }
 
 fn api_analyze_context_notes(

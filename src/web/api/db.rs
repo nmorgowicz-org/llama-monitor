@@ -9,6 +9,7 @@ use crate::config::AppConfig;
 
 use super::common::{
     bearer_matches_api_token, bearer_matches_db_admin_token, try_cooldown, with_app_config,
+    with_chat_storage,
 };
 use super::{ApiCtx, ApiRoute};
 
@@ -35,12 +36,6 @@ pub(crate) fn routes(ctx: ApiCtx, chat_storage: Arc<ChatStorage>) -> ApiRoute {
         .or(api_db_delete_backup(config))
         .unify()
         .boxed()
-}
-
-fn with_chat_storage(
-    storage: Arc<ChatStorage>,
-) -> impl Filter<Extract = (Arc<ChatStorage>,), Error = std::convert::Infallible> + Clone {
-    warp::any().map(move || storage.clone())
 }
 
 fn api_db_stats(storage: Arc<ChatStorage>, app_config: Arc<AppConfig>) -> ApiRoute {

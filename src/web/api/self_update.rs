@@ -6,15 +6,8 @@ use warp::Filter;
 
 use crate::config::AppConfig;
 
-use super::common::{ApiCtx, ApiReply, ApiRoute, bearer_matches_db_admin_token, try_cooldown};
+use super::common::{ApiCtx, ApiRoute, box_reply, bearer_matches_db_admin_token, try_cooldown};
 use super::with_app_config;
-
-fn box_reply<R>(reply: R) -> ApiReply
-where
-    R: warp::Reply + 'static,
-{
-    Box::new(reply)
-}
 
 static LAST_UPDATE: AtomicU64 = AtomicU64::new(0);
 

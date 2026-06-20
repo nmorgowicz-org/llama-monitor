@@ -8,18 +8,11 @@ use crate::config::AppConfig;
 use crate::llama::server::{ServerConfig, start_server, stop_server};
 use crate::state::{self as app_state, AppState, SessionMode, SessionStatus};
 
-use super::common::{ApiCtx, ApiError, ApiReply, ApiRoute};
+use super::common::{ApiCtx, ApiError, ApiRoute, box_reply};
 use super::common::{
     bearer_matches_api_token, bearer_matches_db_admin_token, check_api_token, check_db_admin_token,
     unauthorized_api_token, unauthorized_db_admin_token, with_app_config,
 };
-
-fn box_reply<R>(reply: R) -> ApiReply
-where
-    R: warp::Reply + 'static,
-{
-    Box::new(reply)
-}
 
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let state = ctx.state;

@@ -8,7 +8,7 @@ use crate::chat_storage::{ChatStorage, TabVisibility};
 use crate::config::AppConfig;
 use crate::state::AppState;
 
-use super::super::common::{ApiCtx, ApiRoute, check_api_token, unauthorized_api_token};
+use super::super::common::{ApiCtx, ApiRoute, check_api_token, unauthorized_api_token, with_chat_storage};
 use super::suggestions::ContextNote;
 
 #[allow(dead_code)]
@@ -246,12 +246,6 @@ fn parse_visibility_param(param: &str) -> Vec<TabVisibility> {
             .map(|s| s.trim().parse().unwrap_or(TabVisibility::Active))
             .collect()
     }
-}
-
-fn with_chat_storage(
-    storage: Arc<ChatStorage>,
-) -> impl Filter<Extract = (Arc<ChatStorage>,), Error = std::convert::Infallible> + Clone {
-    warp::any().map(move || storage.clone())
 }
 
 fn now_ts() -> i64 {

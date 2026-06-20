@@ -5,14 +5,7 @@ use warp::Filter;
 use crate::config::AppConfig;
 use crate::state::AppState;
 
-use super::{ApiCtx, ApiReply, ApiRoute, check_api_token, unauthorized_api_token, with_app_config};
-
-fn box_reply<R>(reply: R) -> ApiReply
-where
-    R: warp::Reply + 'static,
-{
-    Box::new(reply)
-}
+use super::{ApiCtx, ApiRoute, box_reply, check_api_token, unauthorized_api_token, with_app_config};
 
 fn touch_activity(state: &AppState) {
     let now = std::time::SystemTime::now()
