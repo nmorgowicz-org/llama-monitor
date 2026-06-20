@@ -215,10 +215,10 @@ fn main() -> Result<()> {
                         }
                     };
                     let base = (settings.ws_push_interval_ms.max(200) / 2).max(200);
-                    let asleep = s.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
-                    if asleep {
+                    let mode = s.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
+                    if mode >= 1 {
+                        // T-045: use slow GPU interval while in low-power mode
                         if let Ok(cfg) = s.sleep_mode_config.lock() {
-                            // T-045: use slow GPU interval while asleep
                             let slow_ms = cfg.sleep_gpu_interval_secs.max(1) * 1000;
                             slow_ms.max(base)
                         } else {
@@ -252,9 +252,9 @@ fn main() -> Result<()> {
                         eprintln!("[error] Failed to acquire system_metrics lock");
                     }
                 }
-                // T-046: when asleep, slow system-metrics polling using config interval
-                let asleep = s.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
-                let interval = if asleep {
+                // T-046: when in low-power mode, slow system-metrics polling using config interval
+                let mode = s.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
+                let interval = if mode >= 1 {
                     if let Ok(cfg) = s.sleep_mode_config.lock() {
                         let slow_secs = cfg.sleep_sys_interval_secs.max(1);
                         Duration::from_secs(slow_secs)
@@ -377,8 +377,9 @@ fn main() -> Result<()> {
                 // Check every 30 seconds
                 tokio::time::sleep(Duration::from_secs(30)).await;
 
-                // Skip if already asleep
-                if s.sleep_mode.load(std::sync::atomic::Ordering::Relaxed) {
+                // Skip if already in low-power mode
+                let mode = s.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
+                if mode > 0 {
                     continue;
                 }
 
@@ -417,8 +418,7 @@ fn main() -> Result<()> {
                         // Auto-sleep due to inactivity (not user-triggered)
                         s.sleep_mode_manual
                             .store(false, std::sync::atomic::Ordering::Relaxed);
-                        s.sleep_mode
-                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                        s.sleep_mode.store(2, std::sync::atomic::Ordering::Relaxed);
                         s.sleep_notify.notify_waiters();
                         drop(cfg);
                         continue;

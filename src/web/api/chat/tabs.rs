@@ -8,7 +8,9 @@ use crate::chat_storage::{ChatStorage, TabVisibility};
 use crate::config::AppConfig;
 use crate::state::AppState;
 
-use super::super::common::{ApiCtx, ApiRoute, check_api_token, unauthorized_api_token, with_chat_storage};
+use super::super::common::{
+    ApiCtx, ApiRoute, check_api_token, unauthorized_api_token, with_chat_storage,
+};
 use super::suggestions::ContextNote;
 
 #[allow(dead_code)]

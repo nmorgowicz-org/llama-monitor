@@ -5,7 +5,9 @@ use warp::Filter;
 use crate::config::AppConfig;
 use crate::state::AppState;
 
-use super::super::common::{ApiCtx, ApiError, ApiRoute, box_reply, check_api_token, unauthorized_api_token};
+use super::super::common::{
+    ApiCtx, ApiError, ApiRoute, box_reply, check_api_token, unauthorized_api_token,
+};
 use super::super::upstream::{
     build_upstream_client, prepare_inference_request, send_upstream_request_with_retry,
 };

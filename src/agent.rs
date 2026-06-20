@@ -1432,9 +1432,9 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
             enabled = false;
         }
 
-        // T-048: slow poll when asleep
-        let asleep = state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
-        let interval = if asleep {
+        // T-048: slow poll when in low-power mode
+        let mode = state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
+        let interval = if mode >= 1 {
             if let Ok(cfg) = state.sleep_mode_config.lock() {
                 Duration::from_secs(cfg.sleep_llama_interval_secs.max(1))
             } else {

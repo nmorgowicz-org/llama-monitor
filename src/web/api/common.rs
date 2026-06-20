@@ -219,10 +219,11 @@ pub(crate) fn record_activity(state: &AppState) {
     let is_manual = state
         .sleep_mode_manual
         .load(std::sync::atomic::Ordering::Relaxed);
-    if !is_manual && state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed) {
+    let mode = state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
+    if !is_manual && mode > 0 {
         state
             .sleep_mode
-            .store(false, std::sync::atomic::Ordering::Relaxed);
+            .store(0, std::sync::atomic::Ordering::Relaxed);
         state.sleep_notify.notify_waiters();
     }
 }

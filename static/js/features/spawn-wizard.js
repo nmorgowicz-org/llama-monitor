@@ -978,11 +978,6 @@ function bindEvents() {
     // from candidates if not already set.
     if (isDraftMtp) {
       renderMtpSection();
-      // Default p-min to 0.75 for draft-mtp if not already set.
-      if (dom.specDraftPMinInput && !dom.specDraftPMinInput.value) {
-        dom.specDraftPMinInput.value = '0.75';
-        wizardState.hardware.mtpDraftPMin = 0.75;
-      }
       // Also auto-populate the draft model input from candidates
       const candidates = wizardState.model.draftCandidates || [];
       const existing = (dom.draftModelInput?.value || '').trim();
@@ -6560,12 +6555,6 @@ function renderMtpSection() {
   }
 
   section.style.display = '';
-
-  // Default p-min to 0.75 on first render (recommended starting point).
-  if (wizardState.hardware.mtpDraftPMin == null && dom.specDraftPMinInput && !dom.specDraftPMinInput.value) {
-    wizardState.hardware.mtpDraftPMin = 0.75;
-    dom.specDraftPMinInput.value = '0.75';
-  }
 
   const infoNote = document.getElementById('hw-mtp-info-note');
   if (infoNote && hasBuiltInMtp) { infoNote.style.display = ''; }

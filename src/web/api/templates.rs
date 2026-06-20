@@ -6,7 +6,9 @@ use crate::config::AppConfig;
 use crate::presets;
 use crate::state::AppState;
 
-use super::{ApiCtx, ApiRoute, box_reply, check_api_token, unauthorized_api_token, with_app_config};
+use super::{
+    ApiCtx, ApiRoute, box_reply, check_api_token, unauthorized_api_token, with_app_config,
+};
 
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let state = ctx.state;

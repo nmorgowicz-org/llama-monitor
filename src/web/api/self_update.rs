@@ -6,7 +6,7 @@ use warp::Filter;
 
 use crate::config::AppConfig;
 
-use super::common::{ApiCtx, ApiRoute, box_reply, bearer_matches_db_admin_token, try_cooldown};
+use super::common::{ApiCtx, ApiRoute, bearer_matches_db_admin_token, box_reply, try_cooldown};
 use super::with_app_config;
 
 static LAST_UPDATE: AtomicU64 = AtomicU64::new(0);

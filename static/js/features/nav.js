@@ -146,9 +146,13 @@ function buildIdleCockpitPoints() {
     return [0.18, 0.42, 0.3, 0.54, 0.36, 0.62, 0.4, 0.5, 0.34, 0.46];
 }
 
-function refreshMonitoringChip(isSleeping, isManualSleep, hasActiveEndpoint) {
+function refreshMonitoringChip(mode, isManual, hasActiveEndpoint) {
     const chip = document.getElementById('nav-monitoring-chip');
     if (!chip) return;
+
+    const effectiveMode = mode ?? (wsData?.sleep_mode ? 'sleep' : 'off');
+    const isSleeping = effectiveMode === 'sleep';
+    const isLogsOnly = effectiveMode === 'logs-only';
 
     chip.style.display = hasActiveEndpoint ? 'inline-flex' : 'none';
     if (!hasActiveEndpoint) return;
@@ -157,24 +161,38 @@ function refreshMonitoringChip(isSleeping, isManualSleep, hasActiveEndpoint) {
     const label = document.getElementById('nav-monitoring-label');
 
     const unavailable = chip.getAttribute('data-unavailable') === 'true';
-    chip.classList.toggle('is-paused', isSleeping);
-    chip.setAttribute('aria-pressed', isSleeping ? 'true' : 'false');
+    chip.classList.toggle('is-paused', isSleeping || isLogsOnly);
+    chip.setAttribute('aria-pressed', (isSleeping || isLogsOnly) ? 'true' : 'false');
 
     if (dot) {
-        dot.className = 'status-dot ' + (isSleeping ? 'warning' : 'ok');
+        if (isSleeping) {
+            dot.className = 'status-dot warning';
+        } else if (isLogsOnly) {
+            dot.className = 'status-dot info';
+        } else {
+            dot.className = 'status-dot ok';
+        }
     }
     if (label) {
-        label.textContent = isSleeping ? 'Paused' : 'Monitoring';
+        if (isSleeping) {
+            label.textContent = 'Paused';
+        } else if (isLogsOnly) {
+            label.textContent = 'Logs only';
+        } else {
+            label.textContent = 'Monitoring';
+        }
     }
 
     if (unavailable) {
         chip.setAttribute('title', 'Monitoring control is not available on this server.');
-    } else if (isManualSleep) {
-        chip.setAttribute('title', 'Monitoring paused (manual) — llama-server keeps running. Click to resume.');
+    } else if (isLogsOnly) {
+        chip.setAttribute('title', 'Logs-only mode — only live logs active. Click to change mode.');
+    } else if (isSleeping && isManual) {
+        chip.setAttribute('title', 'Monitoring paused (manual) — llama-server keeps running. Click to change mode.');
     } else if (isSleeping) {
         chip.setAttribute('title', 'Monitoring paused (idle timeout) — llama-server keeps running. Click to resume.');
     } else {
-        chip.setAttribute('title', 'Dashboard monitoring active — click to pause telemetry while server keeps running.');
+        chip.setAttribute('title', 'Dashboard monitoring active — click to cycle modes.');
     }
 }
 
@@ -197,14 +215,19 @@ export function refreshTopCockpit() {
     const genDisplayRate = genRate > 0 ? genRate : (l?.last_generation_tokens_per_sec || 0);
     const generationActive = !!l?.slot_generation_active || (l?.slots_processing || 0) > 0 || genRate > 0;
 
-    const isSleeping = wsData?.sleep_mode === true;
+    const wsMode = wsData?.mode ?? (wsData?.sleep_mode ? 'sleep' : 'off');
+    const isSleeping = wsMode === 'sleep';
     const isManualSleep = isSleeping && wsData?.sleep_mode_manual === true;
+    const isLogsOnly = wsMode === 'logs-only';
     let label = 'idle';
     let stateClass = 'idle';
 
     if (isSleeping) {
         label = 'paused';
         stateClass = 'sleep';
+    } else if (isLogsOnly) {
+        label = 'logs';
+        stateClass = 'logs-only';
     } else if (!hasActiveEndpoint) {
         label = 'attach';
     } else if (promptRate > 0 && genRate <= 0) {
@@ -220,11 +243,11 @@ export function refreshTopCockpit() {
         stateEl.className = 'metric-live-chip nav-cockpit-state ' + stateClass;
     }
     cockpit.classList.toggle('is-live', stateClass === 'live');
-    cockpit.classList.toggle('is-idle', stateClass !== 'live' && stateClass !== 'sleep');
+    cockpit.classList.toggle('is-idle', stateClass !== 'live' && stateClass !== 'sleep' && stateClass !== 'logs-only');
     cockpit.classList.toggle('has-session', hasActiveEndpoint);
 
     // Update monitoring chip in nav-right
-    refreshMonitoringChip(isSleeping, isManualSleep, hasActiveEndpoint);
+    refreshMonitoringChip(wsMode, wsData?.sleep_mode_manual, hasActiveEndpoint);
 
     if (throughputEl) {
         throughputEl.textContent = 'P ' + (promptDisplayRate > 0 ? promptDisplayRate.toFixed(0) : '—') + ' · G ' + (genDisplayRate > 0 ? genDisplayRate.toFixed(0) : '—');
@@ -371,8 +394,6 @@ export function initNav() {
             if (monitoringChip.getAttribute('data-disabled') === 'true') return;
             monitoringChip.setAttribute('data-disabled', 'true');
 
-            const wasSleeping = wsData?.sleep_mode === true;
-
             try {
                 const auth = window.authHeaders ? window.authHeaders() : {};
                 const res = await fetch('/api/sleep-mode/toggle', {
@@ -391,26 +412,30 @@ export function initNav() {
                     return;
                 }
 
-                let nextSleeping = wasSleeping;
+                let nextMode = 'off';
+                let nextSleepModeManual = false;
                 try {
                     const data = await res.json();
-                    if (data != null && typeof data.sleep_mode === 'boolean') {
-                        nextSleeping = data.sleep_mode;
-                    } else if (data != null && typeof data.enabled === 'boolean') {
-                        nextSleeping = data.enabled;
-                    }
+                    nextMode = data.mode || (data.sleep_mode ? 'sleep' : 'off');
+                    nextSleepModeManual = data.sleep_mode_manual ?? !!data.enabled;
                 } catch (_) {
-                    nextSleeping = !wasSleeping;
+                    nextMode = 'sleep';
                 }
 
-                setWsData({ ...(wsData || {}), sleep_mode: nextSleeping, sleep_mode_manual: nextSleeping });
+                setWsData({
+                    ...(wsData || {}),
+                    mode: nextMode,
+                    sleep_mode: nextMode !== 'off',
+                    sleep_mode_manual: nextSleepModeManual,
+                });
                 refreshTopCockpit();
 
-                if (nextSleeping) {
-                    showToast('Monitoring paused — llama-server keeps running.', 'success');
-                } else {
-                    showToast('Monitoring resumed.', 'success');
-                }
+                const messages = {
+                    'off': 'Monitoring resumed.',
+                    'logs-only': 'Logs-only mode — only live logs active.',
+                    'sleep': 'Monitoring paused — llama-server keeps running.',
+                };
+                showToast(messages[nextMode] || ('Mode: ' + nextMode), 'success');
             } catch (_err) {
                 showToast('Monitoring toggle failed (network error).', 'error');
             } finally {

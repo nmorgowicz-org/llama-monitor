@@ -5,7 +5,9 @@ use warp::Filter;
 use crate::config::AppConfig;
 use crate::state::AppState;
 
-use super::{ApiCtx, ApiRoute, box_reply, check_api_token, unauthorized_api_token, with_app_config};
+use super::{
+    ApiCtx, ApiRoute, box_reply, check_api_token, unauthorized_api_token, with_app_config,
+};
 
 fn touch_activity(state: &AppState) {
     let now = std::time::SystemTime::now()
@@ -42,9 +44,11 @@ fn api_sleep_mode_get(
             if !check_api_token(&auth, &cfg) {
                 return unauthorized_api_token();
             }
-            let enabled = state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
             let config = state.sleep_mode_config.lock().unwrap().clone();
+            let mode_str = state.sleep_mode_str();
+            let enabled = mode_str != "off";
             Box::new(warp::reply::json(&serde_json::json!({
+                "mode": mode_str,
                 "enabled": enabled,
                 "config": config
             }))) as Box<dyn warp::reply::Reply>
@@ -64,23 +68,51 @@ fn api_sleep_mode_toggle(
                 return unauthorized_api_token();
             }
             touch_activity(&state);
-            let enabled = state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
-            let next = !enabled;
+
+            let is_manual = state
+                .sleep_mode_manual
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let current = state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
+
+            // Auto-sleep cycle: off <-> sleep (skip logs-only)
+            // Manual cycle: off -> logs-only -> sleep -> off
+            let next = if is_manual {
+                // Full 3-way cycle
+                match current {
+                    0 => 1u8, // off -> logs-only
+                    1 => 2u8, // logs-only -> sleep
+                    _ => 0u8, // sleep -> off
+                }
+            } else {
+                // Binary: off <-> sleep
+                if current == 0 {
+                    2u8 // off -> sleep
+                } else {
+                    0u8 // sleep -> off
+                }
+            };
+
+            // When user manually cycles (including to logs-only), mark as manual.
             state
                 .sleep_mode_manual
-                .store(next, std::sync::atomic::Ordering::Relaxed);
+                .store(next != 0, std::sync::atomic::Ordering::Relaxed);
             state
                 .sleep_mode
                 .store(next, std::sync::atomic::Ordering::Relaxed);
             state.sleep_notify.notify_waiters();
+
             eprintln!(
-                "[monitoring] manual toggle: monitoring={} (manual={})",
-                !next, next
+                "[monitoring] manual toggle: sleep_mode={} (manual={})",
+                state.sleep_mode_str(),
+                next != 0
             );
+
+            let mode_str = state.sleep_mode_str();
             Box::new(warp::reply::json(&serde_json::json!({
                 "ok": true,
-                "enabled": next,
-                "sleep_mode": next
+                "mode": mode_str,
+                "enabled": mode_str != "off",
+                "sleep_mode": mode_str != "off"
             }))) as Box<dyn warp::reply::Reply>
         })
 }
@@ -100,21 +132,43 @@ fn api_sleep_mode_set(
                     return unauthorized_api_token();
                 }
                 touch_activity(&state);
-                let enabled = body
-                    .get("enabled")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true);
+
+                // Prefer explicit "mode" field; fall back to "enabled" for backward compat.
+                let mode_val = body.get("mode").and_then(|v| v.as_str()).unwrap_or("off");
+
+                let next: u8 = match mode_val {
+                    "off" => 0,
+                    "logs-only" => 1,
+                    "sleep" => 2,
+                    _ => {
+                        // Fallback for legacy boolean "enabled"
+                        let enabled = body
+                            .get("enabled")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true);
+                        if enabled {
+                            2 // sleep
+                        } else {
+                            0 // off
+                        }
+                    }
+                };
+
+                // Any explicit set is considered manual
                 state
                     .sleep_mode_manual
-                    .store(enabled, std::sync::atomic::Ordering::Relaxed);
+                    .store(next != 0, std::sync::atomic::Ordering::Relaxed);
                 state
                     .sleep_mode
-                    .store(enabled, std::sync::atomic::Ordering::Relaxed);
+                    .store(next, std::sync::atomic::Ordering::Relaxed);
                 state.sleep_notify.notify_waiters();
+
+                let mode_str = state.sleep_mode_str();
                 Box::new(warp::reply::json(&serde_json::json!({
                     "ok": true,
-                    "enabled": enabled,
-                    "sleep_mode": enabled
+                    "mode": mode_str,
+                    "enabled": mode_str != "off",
+                    "sleep_mode": mode_str != "off"
                 }))) as Box<dyn warp::reply::Reply>
             },
         )
