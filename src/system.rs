@@ -28,6 +28,28 @@ pub struct SystemMetrics {
     pub memory_compressor_gb: f64,
     #[serde(default)]
     pub memory_compressed_gb: f64,
+    /// S-core count. On Apple Silicon this is derived from the first L2-group size of
+    /// perflevel1 when the chip has two sub-clusters inside the secondary perf level.
+    /// Returns 0 on non-macOS or when only one perf-level cluster exists.
+    #[serde(default)]
+    pub s_cores: u32,
+    /// Human-readable name for the P-core cluster from `hw.perflevel0.name` (e.g. "Super").
+    #[serde(default)]
+    pub p_cluster_name: String,
+    /// Human-readable name for the secondary cluster from `hw.perflevel1.name` (e.g. "Performance").
+    #[serde(default)]
+    pub secondary_cluster_name: String,
+    /// Wired (kernel-locked) memory in GB. Non-compressible; includes GPU framebuffers
+    /// and kernel allocations. On Apple Silicon this is the Metal iogpu budget floor.
+    #[serde(default)]
+    pub memory_wired_gb: f64,
+    /// Purgeable memory in GB (macOS only). File-backed pages the kernel can drop
+    /// instantly without writing to disk — effectively free on demand.
+    #[serde(default)]
+    pub memory_purgeable_gb: f64,
+    /// Inactive memory in GB (macOS only). Candidate pages for compression or eviction.
+    #[serde(default)]
+    pub memory_inactive_gb: f64,
     #[serde(default)]
     pub swapins: u64,
     #[serde(default)]
@@ -85,6 +107,12 @@ impl Default for SystemMetrics {
             memory_free_gb: 0.0,
             memory_compressor_gb: 0.0,
             memory_compressed_gb: 0.0,
+            s_cores: 0,
+            p_cluster_name: String::new(),
+            secondary_cluster_name: String::new(),
+            memory_wired_gb: 0.0,
+            memory_purgeable_gb: 0.0,
+            memory_inactive_gb: 0.0,
             swapins: 0,
             swapouts: 0,
             motherboard: String::new(),
@@ -129,7 +157,12 @@ pub fn get_system_metrics() -> SystemMetrics {
         {
             if let Some(cache) = mactop_cache::get_cache() {
                 // Weighted average of cluster utilization based on core counts
-                let (p_cores, s_cores) = get_core_counts();
+                let (p_cores, s_cores_raw, _e_cores_raw, _, _) = get_core_counts();
+                let s_cores = if s_cores_raw > 0 {
+                    s_cores_raw
+                } else {
+                    p_cores
+                };
                 let total_cores = p_cores + s_cores;
                 if total_cores > 0 {
                     let weighted_load = (cache.p_cluster_active * p_cores as f32
@@ -210,7 +243,7 @@ pub fn get_system_metrics() -> SystemMetrics {
     let (ram_total_gb, ram_used_gb, ram_available_gb) = get_ram_info(&sys);
     let memory_pressure = get_memory_pressure(ram_total_gb);
     let motherboard = get_motherboard();
-    let (p_cores, e_cores) = get_core_counts();
+    let (p_cores, s_cores, e_cores, p_cluster_name, secondary_cluster_name) = get_core_counts();
 
     SystemMetrics {
         cpu_name,
@@ -225,11 +258,17 @@ pub fn get_system_metrics() -> SystemMetrics {
         memory_free_gb: memory_pressure.free_gb,
         memory_compressor_gb: memory_pressure.compressor_gb,
         memory_compressed_gb: memory_pressure.compressed_gb,
+        memory_wired_gb: memory_pressure.wired_gb,
+        memory_purgeable_gb: memory_pressure.purgeable_gb,
+        memory_inactive_gb: memory_pressure.inactive_gb,
         swapins: memory_pressure.swapins,
         swapouts: memory_pressure.swapouts,
         motherboard,
         p_cores,
+        s_cores,
         e_cores,
+        p_cluster_name,
+        secondary_cluster_name,
         power_total_w,
         power_cpu_w,
         power_gpu_w,
@@ -243,7 +282,7 @@ pub fn get_system_metrics() -> SystemMetrics {
 }
 
 #[cfg(target_os = "macos")]
-fn get_core_counts() -> (u32, u32) {
+fn get_core_counts() -> (u32, u32, u32, String, String) {
     fn sysctl_u32(key: &str) -> u32 {
         std::process::Command::new("sysctl")
             .args(["-n", key])
@@ -253,14 +292,31 @@ fn get_core_counts() -> (u32, u32) {
             .and_then(|s| s.trim().parse().ok())
             .unwrap_or(0)
     }
+    fn sysctl_str(key: &str) -> String {
+        std::process::Command::new("sysctl")
+            .args(["-n", key])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    }
     let p = sysctl_u32("hw.perflevel0.physicalcpu");
-    let e = sysctl_u32("hw.perflevel1.physicalcpu");
-    (p, e)
+    let secondary = sysctl_u32("hw.perflevel1.physicalcpu");
+    let per_l2 = sysctl_u32("hw.perflevel1.cpusperl2");
+    let p_name = sysctl_str("hw.perflevel0.name");
+    let sec_name = sysctl_str("hw.perflevel1.name");
+    let (s, e) = if per_l2 > 0 && per_l2 < secondary {
+        (per_l2, secondary - per_l2)
+    } else {
+        (0, secondary)
+    };
+    (p, s, e, p_name, sec_name)
 }
 
 #[cfg(not(target_os = "macos"))]
-fn get_core_counts() -> (u32, u32) {
-    (0, 0)
+fn get_core_counts() -> (u32, u32, u32, String, String) {
+    (0, 0, 0, String::new(), String::new())
 }
 
 #[cfg(target_os = "windows")]
@@ -544,6 +600,9 @@ struct MemoryPressure {
     free_gb: f64,
     compressor_gb: f64,
     compressed_gb: f64,
+    wired_gb: f64,
+    purgeable_gb: f64,
+    inactive_gb: f64,
     swapins: u64,
     swapouts: u64,
 }
@@ -567,8 +626,11 @@ fn get_memory_pressure(_total_ram_gb: f64) -> MemoryPressure {
 fn parse_macos_vm_stat(text: &str, total_ram_gb: f64) -> MemoryPressure {
     let mut page_size = 16_384_u64;
     let mut free_pages = 0_u64;
+    let mut wired_pages = 0_u64;
     let mut compressor_pages = 0_u64;
     let mut compressed_pages = 0_u64;
+    let mut purgeable_pages = 0_u64;
+    let mut inactive_pages = 0_u64;
     let mut swapins = 0_u64;
     let mut swapouts = 0_u64;
 
@@ -593,8 +655,11 @@ fn parse_macos_vm_stat(text: &str, total_ram_gb: f64) -> MemoryPressure {
             .unwrap_or(0);
         match key.trim() {
             "Pages free" => free_pages = value,
+            "Pages wired down" => wired_pages = value,
             "Pages occupied by compressor" => compressor_pages = value,
             "Pages stored in compressor" => compressed_pages = value,
+            "Pages purgeable" => purgeable_pages = value,
+            "Pages inactive" => inactive_pages = value,
             "Swapins" => swapins = value,
             "Swapouts" => swapouts = value,
             _ => {}
@@ -603,8 +668,11 @@ fn parse_macos_vm_stat(text: &str, total_ram_gb: f64) -> MemoryPressure {
 
     let page_gb = page_size as f64 / 1024.0 / 1024.0 / 1024.0;
     let free_gb = free_pages as f64 * page_gb;
+    let wired_gb = wired_pages as f64 * page_gb;
     let compressor_gb = compressor_pages as f64 * page_gb;
     let compressed_gb = compressed_pages as f64 * page_gb;
+    let purgeable_gb = purgeable_pages as f64 * page_gb;
+    let inactive_gb = inactive_pages as f64 * page_gb;
     let compressor_ratio = if total_ram_gb > 0.0 {
         compressor_gb / total_ram_gb
     } else {
@@ -622,8 +690,11 @@ fn parse_macos_vm_stat(text: &str, total_ram_gb: f64) -> MemoryPressure {
     MemoryPressure {
         level,
         free_gb,
+        wired_gb,
         compressor_gb,
         compressed_gb,
+        purgeable_gb,
+        inactive_gb,
         swapins,
         swapouts,
     }

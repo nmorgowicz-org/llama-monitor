@@ -6,6 +6,7 @@ mod auth;
 mod benchmark;
 mod browse;
 mod chat;
+mod system_tools;
 #[cfg(test)]
 pub(crate) use chat::legacy_chat_types;
 mod common;
@@ -79,6 +80,7 @@ pub fn api_routes(
     let vram_routes = vram::routes(ctx.clone());
     let benchmark_routes = benchmark::routes(ctx.clone());
     let hf_routes = hf::routes(ctx.clone());
+    let system_tools_routes = system_tools::routes(ctx.clone());
 
     let browse_with_chat = browse_routes.or(chat_routes);
 
@@ -99,6 +101,7 @@ pub fn api_routes(
         .or(vram_routes)
         .or(benchmark_routes)
         .or(hf_routes)
+        .or(system_tools_routes)
         .or(sleep::routes(ctx.clone()))
         .or(debug::routes(ctx.clone()))
         .or(self_update::routes(ctx.clone()))
