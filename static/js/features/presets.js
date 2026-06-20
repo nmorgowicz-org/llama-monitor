@@ -601,10 +601,37 @@ function updatePresetMlockWarning(estimate = null) {
     const ratio = avail > 0 ? total / avail : 0;
     const pressure = rec === 'risk' || rec === 'tight' || ratio >= 0.82;
     const platform = _presetIsUnified === true ? 'On unified-memory Macs, ' : '';
-    const tail = pressure
-        ? ' This estimate is already tight, so pinned memory can push macOS into compression or swap and make the desktop unresponsive.'
-        : ' Leave enough free system memory for macOS, browsers, downloads, and build tools.';
+    const sys = lastSystemMetrics;
+    const wiredGb = (sys?.memory_wired_gb || 0);
+    const modelGib = total / (1024 ** 3);
+    const wiredAfter = wiredGb + modelGib;
+
+    // Check if loading this model with mlock would push total system RAM above 90%.
+    // Above that threshold macOS cannot compress model pages and gets starved of headroom.
+    const totalRamGb = sys?.ram_total_gb || 0;
+    const usedRamGb = sys?.ram_used_gb || 0;
+    const projectedPct = totalRamGb > 0
+        ? Math.round(((usedRamGb + modelGib) / totalRamGb) * 100)
+        : 0;
+    const wiredOverload = _presetIsUnified && totalRamGb > 0 && projectedPct >= 90;
+
+    const wiredNote = _presetIsUnified && wiredGb > 0 && modelGib > 0
+        ? ` System wired: ${wiredGb.toFixed(1)} GB now → ~${wiredAfter.toFixed(1)} GB after loading (wired = non-compressible).`
+        : '';
+
+    let tail;
+    if (wiredOverload) {
+        // Strong suggestion: mlock at this RAM level is counterproductive
+        tail = ` Loading this model will use ~${projectedPct}% of system RAM.`
+            + ` With mlock on, all of that is non-compressible — macOS cannot relieve pressure and the desktop may become unresponsive.`
+            + ` Consider disabling mlock: on Apple Silicon, Metal keeps model memory resident while the server is running.${wiredNote}`;
+    } else if (pressure) {
+        tail = ` This estimate is already tight — pinned memory can push macOS into compression or swap and make the desktop unresponsive.${wiredNote}`;
+    } else {
+        tail = ` Leave enough free system memory for macOS, browsers, and background tasks.${wiredNote}`;
+    }
     el.textContent = `${platform}mlock pins model memory instead of letting the OS reclaim it.${tail}`;
+    el.className = wiredOverload ? 'preset-mlock-warning preset-mlock-warning--suggest-off' : 'preset-mlock-warning';
     el.style.display = '';
 }
 
@@ -686,6 +713,7 @@ export function updatePresetVram() {
         const parallelSlots = parseInt(document.getElementById('modal-parallel-slots')?.value) || 1;
         const ubatch = parseInt(document.getElementById('modal-ubatch-size')?.value) || 512;
         const nCpuMoe = parseInt(document.getElementById('modal-n-cpu-moe')?.value) || 0;
+        const mmprojPath = document.getElementById('modal-mmproj')?.value?.trim() || '';
         const available_vram_bytes = _presetAvailBytes();
         const body = {
             model_path: modelVal,
@@ -696,6 +724,7 @@ export function updatePresetVram() {
             n_cpu_moe: nCpuMoe,
             available_vram_bytes,
             is_unified_memory: !!isUnified,
+            ...(mmprojPath ? { mmproj_path: mmprojPath } : {}),
         };
         const seq = ++_presetVramSeq;
         try {
@@ -742,7 +771,33 @@ function _renderPresetVram(el, data) {
     if (mmproj > 0) parts.push(`mmproj ${fmt(mmproj)}`);
     if (mtp > 0) parts.push(`MTP ${fmt(mtp)}`);
     if (overhead > 0) parts.push(`overhead ${fmt(overhead)}`);
-    if (avail > 0 && free > 0) parts.push(`${fmt(free)} free of ${fmt(avail)}`);
+    if (avail > 0 && free > 0) parts.push(`${fmt(free)} budget headroom`);
+
+    // Show post-load system RAM projection when we have live metrics
+    const sys = lastSystemMetrics;
+    let systemLine = '';
+    if (sys && sys.ram_total_gb > 0 && sys.ram_used_gb > 0 && used > 0 && _presetIsUnified) {
+        const usedGib = used / (1024 ** 3);
+        const sysGib = sys.ram_used_gb;
+        const totalGib = sys.ram_total_gb;
+        const afterGib = sysGib + usedGib;
+        const pctAfter = Math.round((afterGib / totalGib) * 100);
+        const isTight = pctAfter >= 90;
+        const wiredGib = sys.memory_wired_gb || 0;
+        const mlockOn = document.getElementById('modal-mlock')?.checked;
+        const wiredAfter = wiredGib + (mlockOn ? usedGib : 0);
+        const wiredNote = mlockOn && wiredAfter > 0
+            ? ` · ${wiredAfter.toFixed(1)} GiB wired (mlock)`
+            : '';
+        // When mlock is on and the projected load would exceed 90% of RAM, append a
+        // direct suggestion to disable it so the user sees it without expanding the warning.
+        const mlockHint = mlockOn && isTight && _presetIsUnified
+            ? ' — disable mlock to avoid wiring all model memory'
+            : '';
+        systemLine = `<div class="preset-vram-sysram${isTight ? ' preset-vram-sysram--warn' : ''}">` +
+            `System RAM: ${sysGib.toFixed(1)} GiB now → ~${afterGib.toFixed(1)} GiB after loading (${pctAfter}% of ${totalGib.toFixed(0)} GiB${wiredNote})${mlockHint}` +
+            `</div>`;
+    }
 
     // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes the VRAM bar HTML
     el.innerHTML = window.DOMPurify.sanitize(`
@@ -753,12 +808,13 @@ function _renderPresetVram(el, data) {
                 <div class="vram-segment seg-mmproj" style="width:${pct(mmproj)}" title="Vision Projector"></div>
                 <div class="vram-segment seg-mtp" style="width:${pct(mtp)}" title="MTP Heads"></div>
                 <div class="vram-segment seg-overhead" style="width:${pct(overhead)}" title="Overhead"></div>
-                <div class="vram-segment seg-free" style="width:${pct(free)}" title="Free Headroom"></div>
+                <div class="vram-segment seg-free" style="width:${pct(free)}" title="Budget Headroom"></div>
             </div>
             <span class="launch-card-vram-total">~${fmt(used)}</span>
             <span class="preset-vram-badge preset-vram-badge--${recClass}">${recLabel}</span>
         </div>
         ${parts.length ? `<div class="preset-vram-breakdown">${parts.join(' · ')}</div>` : ''}
+        ${systemLine}
     `);
     el.style.display = '';
 }

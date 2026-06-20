@@ -3233,12 +3233,108 @@ button:disabled {
   opacity: 0.75;
 }
 
+.preset-vram-sysram {
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+  opacity: 0.65;
+}
+
+.preset-vram-sysram--warn {
+  color: #f59e0b;
+  opacity: 0.9;
+}
+
 .preset-vram-loading {
   font-size: 11.5px;
   color: var(--color-text-muted);
   opacity: 0.45;
 }
 
+
+/* ── Memory pressure dashboard card breakdown ── */
+
+.mem-pressure-breakdown {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  margin-top: 6px;
+}
+.mem-pressure-row { display: contents; }
+.mem-pressure-key {
+  font-size: 10.5px;
+  color: var(--color-text-secondary);
+  opacity: 0.7;
+  white-space: nowrap;
+}
+.mem-pressure-val {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary, #e2e8f0);
+  text-align: right;
+}
+.mem-pressure-val--warn { color: #f59e0b; }
+
+.mem-pressure-purge-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 5px 0;
+  border-radius: 7px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+  color: #f59e0b;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.mem-pressure-purge-btn:hover { background: rgba(245, 158, 11, 0.18); }
+
+.mem-pressure-purge-status {
+  margin-top: 4px;
+  font-size: 10px;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+.mem-pressure-purge-status--ok { color: #4ade80; }
+.mem-pressure-purge-status--err { color: #f87171; }
+
+.mem-pressure-proc-title {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+  opacity: 0.6;
+  margin-bottom: 4px;
+}
+.mem-pressure-proc-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 1px 0;
+}
+.mem-pressure-proc-name {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 70%;
+}
+.mem-pressure-proc-mb {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary, #e2e8f0);
+  white-space: nowrap;
+}
+.mem-pressure-proc-loading,
+.mem-pressure-proc-empty {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  opacity: 0.5;
+}
 
 /* ── Preset context pills ── */
 .preset-context-pills {

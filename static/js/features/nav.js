@@ -213,14 +213,74 @@ function refreshMemoryPressureChip() {
     if (label) label.textContent = level === 'critical' ? 'Memory critical' : 'Memory pressure';
 
     const free = Number(sys.memory_free_gb || 0).toFixed(1);
+    const wired = Number(sys.memory_wired_gb || 0);
     const compressed = Number(sys.memory_compressor_gb || 0).toFixed(1);
     const isCritical = level === 'critical';
 
     const hcTitle = document.getElementById('nav-memory-pressure-hovercard-title');
+    const hcStats = document.getElementById('nav-memory-pressure-hovercard-stats');
     const hcBody = document.getElementById('nav-memory-pressure-hovercard-body');
     if (hcTitle) hcTitle.textContent = isCritical ? 'Memory Critical' : 'Memory Pressure';
+
+    if (hcStats) {
+        const purgeableGb = Number(sys.memory_purgeable_gb || 0);
+        const inactiveGb = Number(sys.memory_inactive_gb || 0);
+        const entries = [
+            ['Free', `${free} GB`],
+            ['Wired', wired > 0 ? `${wired.toFixed(1)} GB` : '—'],
+            ['Compressed', Number(compressed) > 0 ? `${compressed} GB` : '—'],
+            ['Purgeable', purgeableGb > 0 ? `${purgeableGb.toFixed(1)} GB` : '—'],
+            ['Inactive', inactiveGb > 0 ? `${inactiveGb.toFixed(1)} GB` : '—'],
+        ];
+        hcStats.textContent = '';
+        entries.forEach(([k, v]) => {
+            const row = document.createElement('div');
+            row.className = 'mem-hc-row';
+            const key = document.createElement('span');
+            key.className = 'mem-hc-key';
+            key.textContent = k;
+            const val = document.createElement('span');
+            val.className = 'mem-hc-val';
+            val.textContent = v;
+            row.appendChild(key);
+            row.appendChild(val);
+            hcStats.appendChild(row);
+        });
+    }
+
     if (hcBody) {
-        hcBody.textContent = `${free} GB free · ${compressed} GB compressed. Reduce context, pause downloads, or disable mlock in your preset to relieve pressure.`;
+        const advice = isCritical
+            ? 'Disable mlock in your preset or reduce context to free wired memory. Use "Free Memory" to reclaim inactive pages.'
+            : 'Reduce context, pause downloads, or disable mlock in your preset to relieve pressure.';
+        hcBody.textContent = advice;
+    }
+
+    // Wire purge button once
+    const navPurgeBtn = document.getElementById('nav-pressure-purge-btn');
+    if (navPurgeBtn && !navPurgeBtn._wired) {
+        navPurgeBtn._wired = true;
+        navPurgeBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (navPurgeBtn._purging) return;
+            navPurgeBtn._purging = true;
+            const statusEl = document.getElementById('nav-pressure-purge-status');
+            navPurgeBtn.textContent = 'Requesting…';
+            if (statusEl) { statusEl.style.display = ''; statusEl.textContent = 'Waiting for macOS admin dialog…'; }
+            try {
+                const res = await fetch('/system/purge', { method: 'POST' });
+                const data = await res.json();
+                if (statusEl) {
+                    statusEl.textContent = data.message || (data.ok ? 'Done.' : 'Failed.');
+                    statusEl.className = 'mem-pressure-hovercard-purge-status' + (data.ok ? ' purge-ok' : ' purge-err');
+                }
+            } catch {
+                if (statusEl) { statusEl.textContent = 'Request failed.'; statusEl.className = 'mem-pressure-hovercard-purge-status purge-err'; }
+            } finally {
+                navPurgeBtn._purging = false;
+                navPurgeBtn.textContent = 'Free Memory';
+                setTimeout(() => { if (statusEl) statusEl.style.display = 'none'; }, 6000);
+            }
+        });
     }
 }
 
@@ -393,6 +453,21 @@ export function initNav() {
         collapseBtn.addEventListener('click', toggleSidebarCollapse);
     }
 
+    // Memory pressure chip: click to pin/unpin the hovercard open
+    const memChip = document.getElementById('nav-memory-pressure-chip');
+    const memHovercard = document.getElementById('nav-memory-pressure-hovercard');
+    if (memChip && memHovercard) {
+        memChip.addEventListener('click', (e) => {
+            e.stopPropagation();
+            memHovercard.classList.toggle('mem-pressure-hovercard--open');
+        });
+        document.addEventListener('click', (e) => {
+            if (!memChip.contains(e.target) && !memHovercard.contains(e.target)) {
+                memHovercard.classList.remove('mem-pressure-hovercard--open');
+            }
+        });
+    }
+
     // Bind nav logo — returns to home (setup) view when in monitor view
     const navLogo = document.getElementById('nav-logo');
     if (navLogo) {
@@ -402,6 +477,20 @@ export function initNav() {
                 switchView('setup');
             }
         });
+    }
+
+    const navHomeBtn = document.getElementById('nav-home-btn');
+    if (navHomeBtn) {
+        navHomeBtn.addEventListener('click', () => {
+            switchView('setup');
+        });
+        // Hide on welcome screen, show on dashboard
+        const observer = new MutationObserver(() => {
+            navHomeBtn.style.display = document.body.classList.contains('setup-active') ? 'none' : '';
+        });
+        observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+        // Set initial state
+        navHomeBtn.style.display = document.body.classList.contains('setup-active') ? 'none' : '';
     }
 
     const cockpit = document.getElementById('nav-cockpit');

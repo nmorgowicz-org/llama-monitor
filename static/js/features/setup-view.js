@@ -752,6 +752,14 @@ export function updateRunningCardHighlight() {
         const badge = card.querySelector('.launch-card-running-badge');
         if (badge) badge.style.display = isRunning ? '' : 'none';
     });
+
+    // Show the "Dashboard" toolbar button whenever a server is live or a remote endpoint is attached
+    const dashBtn = document.getElementById('setup-dashboard-btn');
+    if (dashBtn) {
+        // Only show when server is confirmed running — activeSessionId defaults to 'default'
+        // so it can't be used as a live-session signal.
+        dashBtn.style.display = sessionState.serverRunning ? '' : 'none';
+    }
 }
 
 // ── Recent Sessions ───────────────────────────────────────────────────────────
@@ -1224,6 +1232,12 @@ export function initViewState() {
     document.getElementById('setup-models-btn')?.addEventListener('click', () => {
         import('./models.js').then(({ openModelsModal }) => openModelsModal());
     });
+
+    // Dashboard button: visible when a server is running or remote endpoint attached
+    const dashBtn = document.getElementById('setup-dashboard-btn');
+    if (dashBtn) {
+        dashBtn.addEventListener('click', () => switchView('monitor'));
+    }
 
     // Init filter bar after presets are loaded
     initLaunchFilters();

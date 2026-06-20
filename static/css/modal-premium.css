@@ -2113,6 +2113,14 @@
     line-height: 1.45;
 }
 
+/* When mlock would wire >90% of RAM: elevate to an orange-red actionable suggestion */
+.preset-mlock-warning--suggest-off {
+    border-color: rgba(239, 100, 60, 0.5);
+    background: rgba(239, 100, 60, 0.1);
+    color: #ef6433;
+    font-weight: 500;
+}
+
 .preset-editor-layout {
   display: flex;
   flex: 1;

@@ -128,7 +128,11 @@
                     </button>
                     <div class="mem-pressure-hovercard" id="nav-memory-pressure-hovercard">
                         <div class="mem-pressure-hovercard-title" id="nav-memory-pressure-hovercard-title">Memory Pressure</div>
-                        <div class="mem-pressure-hovercard-body" id="nav-memory-pressure-hovercard-body"></div>
+                        <div class="mem-pressure-hovercard-stats" id="nav-memory-pressure-hovercard-stats"></div>
+                        <div class="mem-pressure-hovercard-advice" id="nav-memory-pressure-hovercard-body"></div>
+                        <div class="mem-pressure-hovercard-processes" id="nav-pressure-processes" style="display:none;"></div>
+                        <button class="mem-pressure-hovercard-purge-btn" id="nav-pressure-purge-btn" type="button">Free Memory</button>
+                        <div class="mem-pressure-hovercard-purge-status" id="nav-pressure-purge-status" style="display:none;"></div>
                     </div>
                 </div>
                 <span class="status-dot" id="status-dot"></span>
@@ -159,6 +163,9 @@
             </div>
         </div>
         <div class="nav-right">
+            <button class="nav-home-btn" id="nav-home-btn" type="button" title="Home — return to welcome screen" aria-label="Home">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </button>
             <div id="session-controls">
                 <button class="nav-btn" id="nav-new-session-btn" title="New Session" style="display:none;">+ New Session</button>
             </div>
@@ -283,6 +290,10 @@
                         </div>
                     </div>
                     <div class="setup-toolbar">
+                        <button class="setup-toolbar-btn setup-toolbar-btn--dashboard" id="setup-dashboard-btn" title="Return to dashboard" style="display:none;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                            Dashboard
+                        </button>
                         <button class="setup-toolbar-btn" id="setup-models-btn" title="Browse and download models">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                             Models
@@ -934,9 +945,17 @@
                             </div>
                             <div class="hw-metric-block" id="sys-pressure-block" style="display:none;">
                                 <div class="hw-metric-label">Memory Pressure</div>
-                                <div class="hw-metric-viz" id="sys-pressure-viz"></div>
                                 <svg class="hw-metric-sparkline" id="sys-pressure-spark" viewBox="0 0 120 28" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
-                                <div class="hw-metric-value" id="sys-pressure-value">&mdash;</div>
+                                <div class="mem-pressure-breakdown" id="sys-pressure-breakdown">
+                                    <div class="mem-pressure-row"><span class="mem-pressure-key">Free</span><span class="mem-pressure-val" id="sys-pressure-free">&mdash;</span></div>
+                                    <div class="mem-pressure-row"><span class="mem-pressure-key">Wired</span><span class="mem-pressure-val" id="sys-pressure-wired">&mdash;</span></div>
+                                    <div class="mem-pressure-row"><span class="mem-pressure-key">Compressed</span><span class="mem-pressure-val" id="sys-pressure-compressed">&mdash;</span></div>
+                                    <div class="mem-pressure-row"><span class="mem-pressure-key">Purgeable</span><span class="mem-pressure-val" id="sys-pressure-purgeable">&mdash;</span></div>
+                                </div>
+                                <button class="mem-pressure-purge-btn" id="sys-pressure-purge-btn" type="button" title="Runs 'purge' via macOS admin dialog to reclaim inactive memory">
+                                    <span id="sys-pressure-purge-label">Free Memory</span>
+                                </button>
+                                <div class="mem-pressure-purge-status" id="sys-pressure-purge-status" style="display:none;"></div>
                             </div>
                             <div class="hw-metric-block" id="sys-clock-block">
                                 <div class="hw-metric-label">Clock</div>
@@ -954,7 +973,7 @@
 
                                  <div class="hw-cluster-row" id="sys-cluster-p-row">
                                      <div class="hw-cluster-meta">
-                                         <div class="hw-cluster-name">P-Cores</div>
+                                         <div class="hw-cluster-name" id="sys-cluster-p-name" title="Performance (Super) cores — highest clock speed. Handle GPU command dispatch and CPU-side sampling during inference. High utilization here is normal and expected while a model is running.">P-Cores</div>
                                          <div class="hw-cluster-value" id="sys-cluster-p-value">&mdash;</div>
                                      </div>
                                      <div class="hw-cluster-bar" id="sys-cluster-p-bar"></div>
@@ -963,7 +982,7 @@
 
                                  <div class="hw-cluster-row" id="sys-cluster-s-row" style="display:none;">
                                      <div class="hw-cluster-meta">
-                                         <div class="hw-cluster-name">S-Cores</div>
+                                         <div class="hw-cluster-name" id="sys-cluster-s-name" title="Secondary Performance cores — lower clock than P-cores but still high-power. Handle prefill batching and parallel thread workloads. High utilization during heavy batch processing is expected.">S-Cores</div>
                                          <div class="hw-cluster-value" id="sys-cluster-s-value">&mdash;</div>
                                      </div>
                                      <div class="hw-cluster-bar" id="sys-cluster-s-bar"></div>
@@ -972,7 +991,7 @@
 
                                  <div class="hw-cluster-row" id="sys-cluster-e-row">
                                      <div class="hw-cluster-meta">
-                                         <div class="hw-cluster-name">E-Cores</div>
+                                         <div class="hw-cluster-name" id="sys-cluster-e-name" title="Efficiency cores — optimized for low power, handle background OS tasks and browser activity. Should stay low during inference; high E-core utilization suggests other apps competing for CPU time.">E-Cores</div>
                                          <div class="hw-cluster-value" id="sys-cluster-e-value">&mdash;</div>
                                      </div>
                                      <div class="hw-cluster-bar" id="sys-cluster-e-bar"></div>

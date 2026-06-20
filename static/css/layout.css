@@ -1185,9 +1185,12 @@ body:not(.setup-active) .nav-logo:active {
   z-index: 2100;
 }
 
-.mem-pressure-wrap:hover .mem-pressure-hovercard {
+/* Show on hover OR when pinned open via click */
+.mem-pressure-wrap:hover .mem-pressure-hovercard,
+.mem-pressure-hovercard.mem-pressure-hovercard--open {
   opacity: 1;
   transform: translateY(0);
+  pointer-events: auto;
 }
 
 .mem-pressure-hovercard-title {
@@ -1215,6 +1218,69 @@ body:not(.setup-active) .nav-logo:active {
 
 [data-theme="light"] .mem-pressure-hovercard-body {
   color: var(--color-text-secondary);
+}
+
+/* Hovercard structured stats grid */
+.mem-pressure-hovercard-stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  margin-bottom: 8px;
+}
+.mem-hc-row { display: contents; }
+.mem-hc-key {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  opacity: 0.8;
+}
+.mem-hc-val {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary, #e2e8f0);
+  text-align: right;
+}
+.mem-pressure-hovercard-advice {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+  margin-bottom: 10px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding-top: 8px;
+}
+
+/* Hovercard purge button */
+.mem-pressure-hovercard-purge-btn {
+  display: block;
+  width: 100%;
+  padding: 6px 0;
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  pointer-events: auto;
+}
+.mem-pressure-hovercard-purge-btn:hover {
+  background: rgba(245, 158, 11, 0.2);
+}
+.mem-pressure-hovercard-purge-status {
+  margin-top: 6px;
+  font-size: 10px;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+.mem-pressure-hovercard-purge-status.purge-ok { color: #4ade80; }
+.mem-pressure-hovercard-purge-status.purge-err { color: #f87171; }
+
+/* Hovercard process list */
+.mem-pressure-hovercard-processes {
+  margin-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding-top: 6px;
+  margin-bottom: 8px;
 }
 
 .nav-cockpit-spark {
@@ -2375,6 +2441,34 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 }
 
 /* ── Nav right area ──────────────────────────────────────────────────────── */
+
+/* Home button in nav — icon-only, subtle, hidden on welcome screen */
+.nav-home-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.nav-home-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--color-text-primary, #e2e8f0);
+}
+[data-theme="light"] .nav-home-btn {
+  border-color: rgba(0,0,0,0.08);
+  color: var(--color-text-secondary);
+}
+[data-theme="light"] .nav-home-btn:hover {
+  background: rgba(0,0,0,0.05);
+  color: var(--color-text-primary);
+}
 
 [data-theme="light"] .nav-btn {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(241, 245, 249, 0.9));

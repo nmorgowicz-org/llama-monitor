@@ -2251,6 +2251,19 @@ body.setup-active .sidebar-nav {
   color: var(--color-accent-light);
 }
 
+/* Dashboard return button — green tinted to signal "something's live" */
+.setup-toolbar-btn--dashboard {
+  border-color: rgba(74, 222, 128, 0.4);
+  background: rgba(74, 222, 128, 0.08);
+  color: #4ade80;
+  box-shadow: 0 2px 8px rgba(74, 222, 128, 0.12);
+}
+.setup-toolbar-btn--dashboard:hover {
+  background: rgba(74, 222, 128, 0.16);
+  border-color: rgba(74, 222, 128, 0.6);
+  color: #86efac;
+}
+
 .setup-toolbar-btn-ghost {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.1);
