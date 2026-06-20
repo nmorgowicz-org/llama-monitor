@@ -459,7 +459,17 @@ export function initNav() {
     if (memChip && memHovercard) {
         let _pinned = false;
 
-        function _openHovercard() { memHovercard.classList.add('mem-pressure-hovercard--open'); }
+        function _positionHovercard() {
+            const rect = memChip.getBoundingClientRect();
+            memHovercard.style.top = (rect.bottom + 8) + 'px';
+            const right = window.innerWidth - rect.right;
+            memHovercard.style.right = Math.max(8, right) + 'px';
+        }
+
+        function _openHovercard() {
+            _positionHovercard();
+            memHovercard.classList.add('mem-pressure-hovercard--open');
+        }
         function _closeHovercard() { if (!_pinned) memHovercard.classList.remove('mem-pressure-hovercard--open'); }
 
         memChip.addEventListener('mouseenter', _openHovercard);

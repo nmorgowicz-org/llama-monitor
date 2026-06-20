@@ -1166,9 +1166,7 @@ body:not(.setup-active) .nav-logo:active {
 }
 
 .mem-pressure-hovercard {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
+  position: fixed;
   width: 260px;
   padding: 12px 14px;
   border-radius: 14px;
@@ -2442,32 +2440,51 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 
 /* ── Nav right area ──────────────────────────────────────────────────────── */
 
-/* Home button in nav — icon-only, subtle, hidden on welcome screen */
+/* Home button in nav — more visible with subtle glow */
 .nav-home-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: transparent;
-  color: var(--color-text-secondary);
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: radial-gradient(circle at center, rgba(148, 163, 253, 0.06), transparent 70%);
+  color: var(--color-text-primary);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  font-size: 16px;
   flex-shrink: 0;
+  box-shadow:
+    0 0 10px rgba(148, 163, 253, 0.14),
+    0 0 18px rgba(148, 163, 253, 0.07);
+  transition:
+    transform 0.16s ease-out,
+    box-shadow 0.16s ease-out,
+    background 0.16s ease-out;
 }
 .nav-home-btn:hover {
-  background: rgba(255, 255, 255, 0.07);
-  color: var(--color-text-primary, #e2e8f0);
+  transform: scale(1.04);
+  background: radial-gradient(circle at center, rgba(148, 163, 253, 0.1), transparent 80%);
+  color: var(--color-text-primary);
+  box-shadow:
+    0 0 14px rgba(148, 163, 253, 0.25),
+    0 0 24px rgba(148, 163, 253, 0.12);
 }
 [data-theme="light"] .nav-home-btn {
-  border-color: rgba(0,0,0,0.08);
-  color: var(--color-text-secondary);
+  border-color: rgba(79, 70, 229, 0.18);
+  background: radial-gradient(circle at center, rgba(79, 70, 229, 0.05), transparent 70%);
+  color: var(--color-text-primary);
+  box-shadow:
+    0 0 10px rgba(79, 70, 229, 0.14),
+    0 0 18px rgba(79, 70, 229, 0.07);
 }
 [data-theme="light"] .nav-home-btn:hover {
-  background: rgba(0,0,0,0.05);
+  background: radial-gradient(circle at center, rgba(79, 70, 229, 0.1), transparent 80%);
+  transform: scale(1.04);
   color: var(--color-text-primary);
+  box-shadow:
+    0 0 14px rgba(79, 70, 229, 0.25),
+    0 0 24px rgba(79, 70, 229, 0.12);
 }
 
 [data-theme="light"] .nav-btn {

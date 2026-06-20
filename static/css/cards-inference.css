@@ -558,7 +558,7 @@
   background:
     radial-gradient(circle at 84% 16%, var(--surface-card-ambient-a), transparent 22%),
     radial-gradient(circle at 12% 88%, var(--surface-card-ambient-b), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.012));
+    linear-gradient(180deg, var(--surface-card-elevated), var(--surface-card-base));
 }
 
 .widget-card::after {
@@ -2620,12 +2620,15 @@
   color: var(--color-accent);
 }
 
-/* inference-config-panel / sampler-params-inline / config-kv */
-[data-theme="light"] .inference-config-panel,
+/* inference-config-panel: border only — background inherits gradient from inference-mini-panel rule */
+[data-theme="light"] .inference-config-panel {
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+/* sampler-params-inline: nested sub-panel stays near-white for contrast */
 [data-theme="light"] .sampler-params-inline {
   border-color: rgba(15, 23, 42, 0.12);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.95));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.95));
 }
 
 [data-theme="light"] .config-kv .config-key {
