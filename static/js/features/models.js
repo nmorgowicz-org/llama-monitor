@@ -62,7 +62,7 @@ function loadPrefs() {
         showMmproj: true,
         showMain: true,
         showSplit: true,
-        showDraftModels: true,
+        showDraftModels: false,
         sizeMaxGb: 0,
         quantFilters: {},
         tagFilter: '',

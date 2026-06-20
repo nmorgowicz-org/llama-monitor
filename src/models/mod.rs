@@ -67,12 +67,18 @@ pub fn scan_models_dir(dir: &Path) -> Result<Vec<DiscoveredModel>> {
         let (model_name, quant_type) = parse_gguf_filename(&filename);
         let param_b = model_name.as_deref().and_then(infer_param_b);
         let quant_style = quant_type.as_deref().map(infer_quant_style);
-        let vram_est_gb = param_b
-            .zip(quant_type.as_deref())
-            .map(|(pb, qt)| estimate_vram_gb(pb, qt));
+        let mm_lower = filename.to_ascii_lowercase();
+        let is_draft = is_draft_assistant_filename(&mm_lower, size_bytes);
 
-        let mm = filename.to_ascii_lowercase();
-        let is_mmproj = mm.contains("mmproj") || mm.contains("projector");
+        let vram_est_gb = {
+            if size_bytes == 0 {
+                None
+            } else {
+                Some((size_bytes as f32 * 1.5 / 1_073_741_824.0).ceil())
+            }
+        };
+
+        let is_mmproj = mm_lower.contains("mmproj") || mm_lower.contains("projector");
 
         models.push(DiscoveredModel {
             path: path.clone(),
@@ -87,7 +93,7 @@ pub fn scan_models_dir(dir: &Path) -> Result<Vec<DiscoveredModel>> {
             quant_style,
             last_modified,
             is_mmproj,
-            is_draft_assistant: is_draft_assistant_filename(&mm, size_bytes),
+            is_draft_assistant: is_draft,
         });
     }
 
@@ -245,24 +251,6 @@ fn infer_quant_style(quant_type: &str) -> &'static str {
     } else {
         "standard"
     }
-}
-
-/// Rough VRAM estimate in GB: model weights + ~1 GB overhead.
-/// Uses bits-per-weight lookup for the given quant type.
-fn estimate_vram_gb(param_b: f32, quant_type: &str) -> f32 {
-    let bpw: f32 = match quant_type.to_uppercase().as_str() {
-        q if q.contains("Q2") => 2.5,
-        q if q.contains("Q3") => 3.5,
-        q if q.contains("Q4") => 4.5,
-        q if q.contains("Q5") => 5.5,
-        q if q.contains("Q6") => 6.5,
-        q if q.contains("Q8") => 8.5,
-        q if q.contains("F16") || q.contains("BF16") => 16.0,
-        q if q.contains("F32") => 32.0,
-        _ => 4.5, // default Q4 equivalent
-    };
-    let weights_gb = param_b * 1e9 * bpw / 8.0 / 1_073_741_824.0;
-    (weights_gb + 1.0).ceil() // +1 GB overhead, round up
 }
 
 fn format_size(bytes: u64) -> String {
