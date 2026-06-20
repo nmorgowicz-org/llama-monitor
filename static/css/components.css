@@ -22,8 +22,7 @@
 .btn-preset,
 .btn-preset-reset,
 .btn-firewall-fix,
-.btn-lhm-inline,
-.btn-session-new {
+.btn-lhm-inline {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -547,11 +546,10 @@ button:disabled {
   .nav-user-btn,
   .btn-modal-save,
   .btn-modal-cancel,
-  .btn-preset,
-  .btn-preset-reset,
-  .btn-firewall-fix,
-  .btn-lhm-inline,
-  .btn-session-new {
+.btn-preset,
+.btn-preset-reset,
+.btn-firewall-fix,
+.btn-lhm-inline {
     transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease !important;
   }
 
@@ -1298,6 +1296,12 @@ button:disabled {
   color: var(--color-warning);
 }
 
+.mm-mtp-badge {
+  background: color-mix(in srgb, #6366f1 14%, transparent);
+  border-color: color-mix(in srgb, #6366f1 28%, transparent);
+  color: #a5b4fc;
+}
+
 .mm-card-meta {
   font-size: 0.7rem;
   font-family: var(--font-mono, monospace);
@@ -2035,8 +2039,7 @@ button:disabled {
 [data-theme="light"] .btn-preset,
 [data-theme="light"] .btn-preset-reset,
 [data-theme="light"] .btn-firewall-fix,
-[data-theme="light"] .btn-lhm-inline,
-[data-theme="light"] .btn-session-new {
+[data-theme="light"] .btn-lhm-inline {
   background:
     radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.9), transparent 30%),
     linear-gradient(180deg, rgba(241, 245, 249, 0.8), rgba(248, 250, 252, 0.9));
