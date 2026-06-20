@@ -1,7 +1,7 @@
 // ── Navigation ────────────────────────────────────────────────────────────────
 // Tab switching and sidebar collapse.
 
-import { chat, contextCapacityTokens, lastLlamaMetrics, metricSeries, setWsData, wsData } from '../core/app-state.js';
+import { chat, contextCapacityTokens, lastLlamaMetrics, lastSystemMetrics, metricSeries, setWsData, wsData } from '../core/app-state.js';
 import { chatScroll } from './chat-render.js';
 import { showSessionPanel, hideSessionPanel } from './chat-sessions-sidebar.js';
 import { isFocusModeActive, exitFocusMode } from './chat-focus-mode.js';
@@ -196,6 +196,25 @@ function refreshMonitoringChip(mode, isManual, hasActiveEndpoint) {
     }
 }
 
+function refreshMemoryPressureChip() {
+    const chip = document.getElementById('nav-memory-pressure-chip');
+    if (!chip) return;
+    const sys = lastSystemMetrics || {};
+    const level = sys.memory_pressure_level || '';
+    const visible = level === 'warning' || level === 'critical';
+    chip.style.display = visible ? 'inline-flex' : 'none';
+    if (!visible) return;
+
+    const dot = document.getElementById('nav-memory-pressure-dot');
+    const label = document.getElementById('nav-memory-pressure-label');
+    if (dot) dot.className = 'status-dot ' + (level === 'critical' ? 'error' : 'warning');
+    if (label) label.textContent = level === 'critical' ? 'Memory critical' : 'Memory pressure';
+
+    const free = Number(sys.memory_free_gb || 0).toFixed(1);
+    const compressed = Number(sys.memory_compressor_gb || 0).toFixed(1);
+    chip.setAttribute('title', `${free} GB free · ${compressed} GB compressed. Reduce context, stop downloads, or disable mlock if macOS feels unresponsive.`);
+}
+
 export function refreshTopCockpit() {
     const cockpit = document.getElementById('nav-cockpit');
     if (!cockpit) return;
@@ -248,6 +267,7 @@ export function refreshTopCockpit() {
 
     // Update monitoring chip in nav-right
     refreshMonitoringChip(wsMode, wsData?.sleep_mode_manual, hasActiveEndpoint);
+    refreshMemoryPressureChip();
 
     if (throughputEl) {
         throughputEl.textContent = 'P ' + (promptDisplayRate > 0 ? promptDisplayRate.toFixed(0) : '—') + ' · G ' + (genDisplayRate > 0 ? genDisplayRate.toFixed(0) : '—');

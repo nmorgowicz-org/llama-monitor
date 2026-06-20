@@ -585,6 +585,29 @@ export function updatePresetAdvisor() {
     }, 250);
 }
 
+function updatePresetMlockWarning(estimate = null) {
+    const el = document.getElementById('preset-mlock-warning');
+    const checked = document.getElementById('modal-mlock')?.checked;
+    if (!el) return;
+    if (!checked) {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+    }
+
+    const rec = estimate?.recommendation || '';
+    const total = estimate?.total_bytes || 0;
+    const avail = estimate?.available_vram_bytes || 0;
+    const ratio = avail > 0 ? total / avail : 0;
+    const pressure = rec === 'risk' || rec === 'tight' || ratio >= 0.82;
+    const platform = _presetIsUnified === true ? 'On unified-memory Macs, ' : '';
+    const tail = pressure
+        ? ' This estimate is already tight, so pinned memory can push macOS into compression or swap and make the desktop unresponsive.'
+        : ' Leave enough free system memory for macOS, browsers, downloads, and build tools.';
+    el.textContent = `${platform}mlock pins model memory instead of letting the OS reclaim it.${tail}`;
+    el.style.display = '';
+}
+
 // ── VRAM live estimate for preset editor ─────────────────────────────────────
 
 async function autoSizePreset() {
@@ -649,6 +672,7 @@ export function updatePresetVram() {
     const box = document.getElementById('preset-vram-display');
     const strip = document.getElementById('preset-vram-strip');
     if (!box) return;
+    updatePresetMlockWarning();
     const modelVal = document.getElementById('modal-model-path')?.value.trim() || '';
     if (!modelVal) { if (strip) strip.style.display = 'none'; return; }
     if (strip) strip.style.display = '';
@@ -685,6 +709,7 @@ export function updatePresetVram() {
             const data = await r.json();
             if (data.error) { hideStrip(); return; }
             _renderPresetVram(box, data);
+            updatePresetMlockWarning(data);
         } catch { if (seq === _presetVramSeq && strip) strip.style.display = 'none'; }
     }, 350);
 }

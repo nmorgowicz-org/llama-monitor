@@ -19,6 +19,20 @@ pub struct SystemMetrics {
     #[serde(default)]
     pub ram_used_gb: f64,
     #[serde(default)]
+    pub ram_available_gb: f64,
+    #[serde(default)]
+    pub memory_pressure_level: String,
+    #[serde(default)]
+    pub memory_free_gb: f64,
+    #[serde(default)]
+    pub memory_compressor_gb: f64,
+    #[serde(default)]
+    pub memory_compressed_gb: f64,
+    #[serde(default)]
+    pub swapins: u64,
+    #[serde(default)]
+    pub swapouts: u64,
+    #[serde(default)]
     pub motherboard: String,
     /// Performance-core count (Apple Silicon only; 0 = unknown/not applicable).
     #[serde(default)]
@@ -66,6 +80,13 @@ impl Default for SystemMetrics {
             cpu_clock_mhz: 0,
             ram_total_gb: 0.0,
             ram_used_gb: 0.0,
+            ram_available_gb: 0.0,
+            memory_pressure_level: String::new(),
+            memory_free_gb: 0.0,
+            memory_compressor_gb: 0.0,
+            memory_compressed_gb: 0.0,
+            swapins: 0,
+            swapouts: 0,
             motherboard: String::new(),
             p_cores: 0,
             e_cores: 0,
@@ -186,7 +207,8 @@ pub fn get_system_metrics() -> SystemMetrics {
         }
     };
 
-    let (ram_total_gb, ram_used_gb) = get_ram_info(&sys);
+    let (ram_total_gb, ram_used_gb, ram_available_gb) = get_ram_info(&sys);
+    let memory_pressure = get_memory_pressure(ram_total_gb);
     let motherboard = get_motherboard();
     let (p_cores, e_cores) = get_core_counts();
 
@@ -198,6 +220,13 @@ pub fn get_system_metrics() -> SystemMetrics {
         cpu_clock_mhz,
         ram_total_gb,
         ram_used_gb,
+        ram_available_gb,
+        memory_pressure_level: memory_pressure.level,
+        memory_free_gb: memory_pressure.free_gb,
+        memory_compressor_gb: memory_pressure.compressor_gb,
+        memory_compressed_gb: memory_pressure.compressed_gb,
+        swapins: memory_pressure.swapins,
+        swapouts: memory_pressure.swapouts,
         motherboard,
         p_cores,
         e_cores,
@@ -502,10 +531,102 @@ fn get_cpu_clock(sys: &System) -> u32 {
     sys.cpus().iter().map(|c| c.frequency()).max().unwrap_or(0) as u32
 }
 
-fn get_ram_info(sys: &System) -> (f64, f64) {
+fn get_ram_info(sys: &System) -> (f64, f64, f64) {
     let total_gb = sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
     let used_gb = sys.used_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
-    (total_gb, used_gb)
+    let available_gb = sys.available_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
+    (total_gb, used_gb, available_gb)
+}
+
+#[derive(Default)]
+struct MemoryPressure {
+    level: String,
+    free_gb: f64,
+    compressor_gb: f64,
+    compressed_gb: f64,
+    swapins: u64,
+    swapouts: u64,
+}
+
+#[cfg(target_os = "macos")]
+fn get_memory_pressure(total_ram_gb: f64) -> MemoryPressure {
+    let output = std::process::Command::new("vm_stat").output();
+    let Ok(output) = output else {
+        return MemoryPressure::default();
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    parse_macos_vm_stat(&text, total_ram_gb)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn get_memory_pressure(_total_ram_gb: f64) -> MemoryPressure {
+    MemoryPressure::default()
+}
+
+#[cfg(target_os = "macos")]
+fn parse_macos_vm_stat(text: &str, total_ram_gb: f64) -> MemoryPressure {
+    let mut page_size = 16_384_u64;
+    let mut free_pages = 0_u64;
+    let mut compressor_pages = 0_u64;
+    let mut compressed_pages = 0_u64;
+    let mut swapins = 0_u64;
+    let mut swapouts = 0_u64;
+
+    for line in text.lines() {
+        if let Some(size) = line
+            .strip_prefix("Mach Virtual Memory Statistics: (page size of ")
+            .and_then(|rest| rest.split_whitespace().next())
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            page_size = size;
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = value
+            .trim()
+            .trim_end_matches('.')
+            .replace(',', "")
+            .parse::<u64>()
+            .unwrap_or(0);
+        match key.trim() {
+            "Pages free" => free_pages = value,
+            "Pages occupied by compressor" => compressor_pages = value,
+            "Pages stored in compressor" => compressed_pages = value,
+            "Swapins" => swapins = value,
+            "Swapouts" => swapouts = value,
+            _ => {}
+        }
+    }
+
+    let page_gb = page_size as f64 / 1024.0 / 1024.0 / 1024.0;
+    let free_gb = free_pages as f64 * page_gb;
+    let compressor_gb = compressor_pages as f64 * page_gb;
+    let compressed_gb = compressed_pages as f64 * page_gb;
+    let compressor_ratio = if total_ram_gb > 0.0 {
+        compressor_gb / total_ram_gb
+    } else {
+        0.0
+    };
+    let level = if free_gb < 0.5 || compressor_ratio >= 0.30 {
+        "critical"
+    } else if free_gb < 1.5 || compressor_ratio >= 0.18 {
+        "warning"
+    } else {
+        "ok"
+    }
+    .to_string();
+
+    MemoryPressure {
+        level,
+        free_gb,
+        compressor_gb,
+        compressed_gb,
+        swapins,
+        swapouts,
+    }
 }
 
 #[cfg(target_os = "windows")]

@@ -4253,6 +4253,25 @@ function updateAdvisor() {
   }, 250);
 }
 
+function updateMlockWarning(availBytes = 0, freeBytes = null) {
+  const el = document.getElementById('spawn-mlock-warning');
+  if (!el) return;
+  if (!dom.mlockCheck?.checked) {
+    el.style.display = 'none';
+    el.textContent = '';
+    return;
+  }
+
+  const tight = freeBytes != null && availBytes > 0 && freeBytes < availBytes * 0.18;
+  const platform = isUnifiedMemory() ? 'On unified-memory Macs, ' : '';
+  const tail = tight
+    ? ' This configuration is already close to the memory budget, so pinned memory can push macOS into compression or swap and make the desktop unresponsive.'
+    : ' Leave enough free system memory for macOS, browsers, downloads, and build tools.';
+  el.textContent = `${platform}mlock pins model memory instead of letting the OS reclaim it.${tail}`;
+  el.className = tight ? 'ctx-fit-warning ctx-fit-error' : 'ctx-fit-warning';
+  el.style.display = '';
+}
+
 function updateVramDisplay() {
   const availVram = effectiveAvailBytes();
   if (!dom.vramPanel) return;
@@ -4271,6 +4290,7 @@ function updateVramDisplay() {
   const oh          = gpuOverheadBytes(hw.ubatchSize);
   const total       = weightVram + kv + linearState + mmproj + mtp + oh;
   const free = availVram - total;
+  updateMlockWarning(availVram, free);
 
   // Update total label
   if (dom.vramPanelTotal) {

@@ -994,7 +994,7 @@ function pushGpuHistory(key, value) {
     if (gpuHistory[key].length > limit) gpuHistory[key].shift();
 }
 
-var sysHistory = { cpuLoad: [], ramPct: [], cpuClock: [], power: [], pCluster: [], sCluster: [], eCluster: [] };
+var sysHistory = { cpuLoad: [], ramPct: [], memoryPressure: [], cpuClock: [], power: [], pCluster: [], sCluster: [], eCluster: [] };
 function pushSysHistory(key, value) {
     if (!Number.isFinite(value)) return;
     sysHistory[key].push(value);
@@ -1350,6 +1350,32 @@ function renderSystemCard(sys, visible, grade) {
     else renderHwBar(ramViz, ramPct, ramTone, false);
     renderHwMetricSparkline('sys-ram-spark', sysHistory.ramPct, ramColor, ramStyle !== 'sparkline');
     if (ramVal) ramVal.textContent = sys.ram_total_gb > 0 ? sys.ram_used_gb.toFixed(1) + ' / ' + sys.ram_total_gb.toFixed(0) + ' GB' : '\u2014';
+
+    // Memory pressure (macOS vm_stat; hidden on platforms without pressure fields)
+    var pressureBlock = document.getElementById('sys-pressure-block');
+    var pressureViz = document.getElementById('sys-pressure-viz');
+    var pressureVal = document.getElementById('sys-pressure-value');
+    var pressureLevel = sys.memory_pressure_level || '';
+    var hasPressure = pressureLevel || sys.memory_compressor_gb > 0 || sys.memory_free_gb > 0;
+    if (pressureBlock) pressureBlock.style.display = hasPressure ? '' : 'none';
+    if (hasPressure) {
+        var compressorRatio = sys.ram_total_gb > 0 ? (sys.memory_compressor_gb / sys.ram_total_gb) * 100 : 0;
+        var pressurePct = pressureLevel === 'critical' ? 96 : pressureLevel === 'warning' ? 72 : Math.min(55, Math.max(5, compressorRatio * 2));
+        pushSysHistory('memoryPressure', pressurePct);
+        var pressureTone = pressureLevel === 'critical'
+            ? { line: '#f87171', fill: 'rgba(248,113,113,0.18)', glow: 'rgba(248,113,113,0.35)' }
+            : pressureLevel === 'warning'
+                ? { line: '#f59e0b', fill: 'rgba(245,158,11,0.18)', glow: 'rgba(245,158,11,0.35)' }
+                : getMetricTone('memory');
+        renderHwBar(pressureViz, pressurePct, pressureTone, false);
+        renderHwMetricSparkline('sys-pressure-spark', sysHistory.memoryPressure, pressureTone.line, true);
+        if (pressureVal) {
+            var freeLabel = sys.memory_free_gb > 0 ? sys.memory_free_gb.toFixed(1) + ' GB free' : 'free unknown';
+            var compLabel = sys.memory_compressor_gb > 0 ? sys.memory_compressor_gb.toFixed(1) + ' GB compressed' : 'compression low';
+            pressureVal.textContent = freeLabel + ' · ' + compLabel;
+            pressureVal.title = 'Logical compressed pages: ' + (sys.memory_compressed_gb || 0).toFixed(1) + ' GB · swapouts: ' + (sys.swapouts || 0);
+        }
+    }
 
     // Clock
     var clockViz = document.getElementById('sys-clock-viz');
