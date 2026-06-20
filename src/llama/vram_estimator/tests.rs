@@ -31,6 +31,7 @@ fn kv_calibration_qwen3_27b() {
         1024,
         0.05,
         None,
+        false, // discrete GPU (RTX 5090)
     );
     // Should be in the 180K–240K range
     assert!(

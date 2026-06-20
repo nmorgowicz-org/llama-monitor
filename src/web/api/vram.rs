@@ -36,6 +36,10 @@ fn api_vram_estimate_breakdown(
                 let n_cpu_moe = body["n_cpu_moe"].as_i64().map(|v| v as i32).unwrap_or(0);
                 let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
                 let is_unified_memory = body["is_unified_memory"].as_bool().unwrap_or(false);
+                // mmproj_path: path to the vision projector GGUF; size read from disk.
+                // mmproj_bytes: explicit size override (used when path is unavailable).
+                let mmproj_path = body["mmproj_path"].as_str().unwrap_or("").to_string();
+                let mmproj_bytes_override = body["mmproj_bytes"].as_u64();
 
                 if model_path.is_empty() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
@@ -58,7 +62,7 @@ fn api_vram_estimate_breakdown(
                     }
                 };
 
-                let arch = match crate::llama::gguf_meta::read_gguf_metadata(
+                let mut arch = match crate::llama::gguf_meta::read_gguf_metadata(
                     std::path::Path::new(&model_path),
                 ) {
                     Ok(meta) => {
@@ -71,6 +75,13 @@ fn api_vram_estimate_breakdown(
                         (model_size_bytes as f64) / 1e9 / 4.85,
                     ),
                 };
+
+                // Override mmproj_bytes from explicit path or body field.
+                if let Some(explicit) = mmproj_bytes_override {
+                    arch.mmproj_bytes = explicit;
+                } else if !mmproj_path.is_empty() {
+                    arch.mmproj_bytes = std::fs::metadata(&mmproj_path).map(|m| m.len()).unwrap_or(0);
+                }
 
                 let breakdown = crate::llama::vram_estimator::full_estimate(
                     model_size_bytes,
@@ -499,6 +510,11 @@ pub(crate) fn build_arch_from_body(
         global_head_dim,
         mtp_depth,
         mmproj_bytes,
+        // n_embd comes from GGUF or heuristic; body can override via "n_embd" field
+        n_embd: body["n_embd"]
+            .as_u64()
+            .map(|v| v as u32)
+            .unwrap_or(heuristic.n_embd),
         param_b,
     }
 }
