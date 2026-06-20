@@ -1172,58 +1172,6 @@ fn api_llama_restart(
 mod tests {
     use crate::chat_storage::ChatStorage;
     use crate::config::AppConfig;
-    use crate::config::TlsMode;
-    use crate::gpu::env::GpuEnv;
-    use crate::state::{AppPaths, AppState, UiSettings};
-    use crate::web::auth::AuthManager;
-    use std::path::PathBuf;
-    use std::sync::Arc;
-    use warp::Filter;
-
-    fn make_test_app_state() -> (AppState, Arc<AppConfig>) {
-        let paths = AppPaths {
-            presets_path: PathBuf::new(),
-            templates_path: PathBuf::new(),
-            models_dir: None,
-            gpu_env_path: PathBuf::new(),
-            ui_settings_path: PathBuf::new(),
-            sessions_path: PathBuf::new(),
-            model_tags_path: PathBuf::new(),
-        };
-        let cs = Arc::new(
-            ChatStorage::open(&PathBuf::from(":memory:")).expect("open in-memory chat storage"),
-        );
-        let state = AppState::new(
-            vec![],
-            paths,
-            GpuEnv::default(),
-            UiSettings::default(),
-            cs,
-            crate::config::TLSConfig::default(),
-        );
-        let app_config = Arc::new(AppConfig::for_test(
-            Some("test-token".to_string()),
-            Some("db-admin-token".to_string()),
-        ));
-        (state, app_config)
-    }
-
-    // This route exists, but constructing the full api_routes filter in tests
-    // can blow the stack on some platforms due to warp's .or() recursion.
-    // We keep a targeted smoke test for the route's presence via a simpler filter.
-    #[tokio::test]
-    #[ignore = "stack overflow on some platforms due to warp filter recursion"]
-    async fn api_llama_restart() {
-        let (state, app_config) = make_test_app_state();
-        let _auth = AuthManager::new(None, None, &TlsMode::None);
-
-        let _routes = warp::path!("api" / "llama" / "restart")
-            .and(warp::post())
-            .and(warp::any().map(move || state.clone()))
-            .and(warp::any().map(move || app_config.clone()));
-
-        // Presence of /api/llama/restart and 401 behavior is validated via
-        // the main integration path; this test primarily confirms the handler
-        // can be wired without compile errors.
-    }
+    // Route presence and auth guard for llama_binary endpoints is covered
+    // by the full-tree smoke tests in api::tests::route_smoke_tests!.
 }

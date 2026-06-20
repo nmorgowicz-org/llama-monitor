@@ -2,6 +2,7 @@ use warp::Filter;
 
 use crate::web::auth::{AuthManager, AuthMethod, AuthSource};
 
+#[cfg(not(test))]
 use super::common::try_cooldown;
 use super::{ApiReply, ApiRoute};
 

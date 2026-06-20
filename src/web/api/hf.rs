@@ -56,7 +56,7 @@ pub(crate) fn resolve_hf_target_dir(
         return Err("target_path escapes models_dir".to_string());
     }
 
-    Ok(candidate)
+    Ok(candidate_canon)
 }
 
 fn api_hf_search(

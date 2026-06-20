@@ -798,7 +798,6 @@ mod tests {
     macro_rules! route_smoke_tests {
         ( $( ($test_name:ident, $method:expr, $path:expr, $body:expr) ),* $(,)? ) => {
             $(
-                #[ignore = "stack overflow risk: deep warp .or() recursion in api_routes"]
                 #[tokio::test]
                 async fn $test_name() {
                     let routes = make_all_routes();
