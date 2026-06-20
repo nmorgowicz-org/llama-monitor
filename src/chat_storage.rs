@@ -1040,12 +1040,70 @@ impl ChatStorage {
             return Err(anyhow::anyhow!("Query contains a disallowed operation"));
         }
 
-        // Allowlist: only allow SELECT, PRAGMA, VACUUM, ANALYZE
-        if !upper.starts_with("SELECT")
-            && !upper.starts_with("PRAGMA")
-            && !upper.starts_with("VACUUM")
-            && !upper.starts_with("ANALYZE")
+        // Allowlist: only allow SELECT, VACUUM, ANALYZE, and a restricted PRAGMA subset.
+        // Arbitrary PRAGMA is dangerous (e.g. writable_schema).
+        if upper.starts_with("SELECT")
+            || upper.starts_with("VACUUM")
+            || upper.starts_with("ANALYZE")
         {
+            // allowed
+        } else if upper.starts_with("PRAGMA") {
+            let allowed_pragmas = [
+                "PRAGMA INTEGRITY_CHECK",
+                "PRAGMA QUICK_CHECK",
+                "PRAGMA INTEGRITY",
+                "PRAGMA PAGE_COUNT",
+                "PRAGMA FREELIST_COUNT",
+                "PRAGMA FREE_LIST",
+                "PRAGMA SCHEMA_VERSION",
+                "PRAGMA USER_VERSION",
+                "PRAGMA MUTEX_STATUS",
+                "PRAGMA INDEX_LIST",
+                "PRAGMA INDEX_INFO",
+                "PRAGMA TABLE_INFO",
+                "PRAGMA TABLE_XINFO",
+                "PRAGMA FOREIGN_KEY_LIST",
+                "PRAGMA LOCK_LIST",
+                "PRAGMA DATABASE_LIST",
+                "PRAGMA JOURNAL_MODE",
+                "PRAGMA SYNCRONOUS",
+                "PRAGMA CACHE_SIZE",
+                "PRAGMA CACHE_SPILL",
+                "PRAGMA DEFAULT_JOURNAL_SIZE_LIMIT",
+                "PRAGMA MAX_PAGE_COUNT",
+                "PRAGMA HARD_HEAP_LIMIT",
+                "PRAGMA SOFT_HEAP_LIMIT",
+                "PRAGMA DATA_JOURNALING_MODE",
+                "PRAGMA FULL_COLUMN_NAMES",
+                "PRAGMA IGNORE_CHECK_CONSTRAINTS",
+                "PRAGMA CASE_SENSITIVE_LIKE",
+                "PRAGMA RECURSIVE_TRIGGERS",
+                "PRAGMA SECURE_DELETE",
+                "PRAGMA WAL_AUTOCHECKPOINT",
+                "PRAGMA AUTOVACUUM",
+                "PRAGMA INCREMENTAL_VACUUM",
+                "PRAGMA TEMP_STORE",
+                "PRAGMA MMAP_SIZE",
+                "PRAGMA QUERY_ONLY",
+                "PRAGMA DEFAULT_CACHE_SIZE",
+                "PRAGMA DOUBLE_QUOTED_STRING",
+                "PRAGMA LEGACY_FILE_FORMAT",
+                "PRAGMA ENCODING",
+                "PRAGMA PAGE_SIZE",
+                "PRAGMA COUNT_CHANGES",
+                "PRAGMA EPOCHMS",
+                "PRAGMA FUNCTION_LIST",
+                "PRAGMA MODULE_LIST",
+                "PRAGMA VDBE_TRACE",
+                "PRAGMA WALK_STACK",
+                "PRAGMA TRIGGER_LIST",
+            ];
+            if allowed_pragmas.iter().any(|p| upper.starts_with(p)) {
+                // allowed (exact-name + prefix-safe; no writable_schema in this list)
+            } else {
+                return Err(anyhow::anyhow!("PRAGMA not allowed"));
+            }
+        } else {
             return Err(anyhow::anyhow!(
                 "Only SELECT, PRAGMA, VACUUM, and ANALYZE queries are allowed"
             ));

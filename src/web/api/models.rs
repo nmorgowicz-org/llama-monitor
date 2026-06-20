@@ -538,7 +538,49 @@ fn api_delete_model_file(
                 }
 
                 let path = std::path::Path::new(&path_str);
-                match std::fs::remove_file(path) {
+                // Containment check: must be inside allowed model directories.
+                let models_dir = get_effective_models_dir(&st)
+                    .unwrap_or_else(|| cfg.default_models_dir.clone());
+                let canon = match path.canonicalize() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": format!("invalid path: {e}")}),
+                            ),
+                        ));
+                    }
+                };
+                let in_models_dir = models_dir
+                    .canonicalize()
+                    .map(|d| canon.starts_with(&d))
+                    .unwrap_or(false);
+                let in_home = dirs::home_dir()
+                    .and_then(|h| h.canonicalize().ok())
+                    .map(|h| canon.starts_with(&h))
+                    .unwrap_or(false);
+                let in_extra = st
+                    .ui_settings
+                    .lock()
+                    .map(|s| {
+                        s.extra_models_dirs.iter().any(|d| {
+                            std::path::Path::new(d)
+                                .canonicalize()
+                                .map(|cd| canon.starts_with(&cd))
+                                .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false);
+
+                if !in_models_dir && !in_home && !in_extra {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": "file is outside allowed model directories"}),
+                        ),
+                    ));
+                }
+
+                match std::fs::remove_file(&canon) {
                     Ok(_) => {
                         let mut models = st.discovered_models.lock().unwrap();
                         models.retain(|m| m.path.to_str() != Some(&path_str));
