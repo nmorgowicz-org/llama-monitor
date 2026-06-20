@@ -121,6 +121,10 @@
                     <span class="status-dot ok" id="nav-monitoring-dot"></span>
                     <span id="nav-monitoring-label">Monitoring</span>
                 </button>
+                <button class="nav-monitoring-chip memory-pressure-chip" id="nav-memory-pressure-chip" type="button" title="System memory pressure" style="display:none;">
+                    <span class="status-dot warning" id="nav-memory-pressure-dot"></span>
+                    <span id="nav-memory-pressure-label">Memory</span>
+                </button>
                 <span class="status-dot" id="status-dot"></span>
                 <span class="status-text" id="status-text"></span>
                 <span class="badge-server" id="badge-server"></span>
@@ -294,7 +298,6 @@
                         <div id="setup-recent-endpoints" style="display:none;">
                             <div class="setup-section-header">
                                 <span class="setup-section-title">Recent servers</span>
-                                <a id="setup-browse-sessions-link" class="setup-link">Manage →</a>
                             </div>
                             <div class="setup-endpoint-list" id="setup-endpoint-list"></div>
                         </div>
@@ -922,6 +925,12 @@
                                 <div class="hw-metric-viz" id="sys-ram-viz"></div>
                                 <svg class="hw-metric-sparkline" id="sys-ram-spark" viewBox="0 0 120 28" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
                                 <div class="hw-metric-value" id="sys-ram-value">&mdash;</div>
+                            </div>
+                            <div class="hw-metric-block" id="sys-pressure-block" style="display:none;">
+                                <div class="hw-metric-label">Memory Pressure</div>
+                                <div class="hw-metric-viz" id="sys-pressure-viz"></div>
+                                <svg class="hw-metric-sparkline" id="sys-pressure-spark" viewBox="0 0 120 28" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
+                                <div class="hw-metric-value" id="sys-pressure-value">&mdash;</div>
                             </div>
                             <div class="hw-metric-block" id="sys-clock-block">
                                 <div class="hw-metric-label">Clock</div>
@@ -2409,80 +2418,6 @@
     </div>
 </div>
 
-<!-- Session Modal -->
-<div class="modal-overlay" id="session-modal">
-    <div class="modal" style="width: 560px;">
-        <div class="modal-header">
-            <h2 id="session-modal-title">Sessions</h2>
-            <button type="button" class="modal-close" id="session-modal-close" aria-label="Close">&times;</button>
-        </div>
-        <div class="modal-body">
-            <div class="sessions-header">
-                <button type="button" class="btn btn-sm" id="btn-new-session">+ New Session</button>
-            </div>
-            <div id="sessions-list-view">
-                <div id="sessions-list"></div>
-                <div id="sessions-empty" style="display:none; text-align:center; padding: 40px 20px; color: var(--color-text-muted);">
-                    <p>No saved sessions yet</p>
-                    <button type="button" class="btn btn-sm" id="session-create-first">Create your first session</button>
-                </div>
-            </div>
-            <div id="sessions-new-form" style="display:none;">
-                <form id="session-form">
-                    <input type="hidden" id="modal-session-id">
-                    <label class="modal-field" title="Display name for this session">
-                        Session Name
-                        <input type="text" id="modal-session-name" required>
-                        <span class="field-error-msg" role="alert">Session name is required</span>
-                    </label>
-                    <label class="modal-field" title="Session mode">
-                        Session Mode
-                        <select id="modal-session-mode">
-                            <option value="spawn">Spawn</option>
-                            <option value="attach">Attach</option>
-                        </select>
-                    </label>
-                    <label class="modal-field" title="Port for spawned server or endpoint for attached server">
-                         <span id="modal-session-port-label">Port</span>
-                         <input type="text" id="modal-session-port" placeholder="8001">
-                     </label>
-                    <div id="spawn-session-fields" style="display:none;">
-                        <label class="modal-field" title="Choose a model preset to use for this session">
-                            Model Preset
-                            <select id="modal-session-preset"></select>
-                        </label>
-                        <label class="modal-field" title="Absolute path to the .gguf model file on disk">
-                            Model Path
-                            <div style="display:flex;gap:6px;">
-                                <input type="text" id="modal-session-model-path" style="flex:1;" placeholder="/path/to/model.gguf">
-                                <button type="button" class="btn-sm btn-preset" id="session-browse-model-btn">Browse</button>
-                            </div>
-                        </label>
-                        <div class="modal-row">
-                            <label class="modal-field" title="Number of layers to offload to GPU. 99 = all layers.">
-                                GPU Layers
-                                <input type="number" id="modal-session-gpu-layers" placeholder="99">
-                            </label>
-                            <label class="modal-field" title="Maximum context length in tokens.">
-                                Context Size
-                                <input type="number" id="modal-session-context-size" value="128000">
-                            </label>
-                        </div>
-                        <div class="modal-row modal-checks">
-                            <label class="chk" title="Disable memory-mapped I/O. Required for models >16GB."><input type="checkbox" id="modal-session-no-mmap"> no-mmap</label>
-                            <label class="chk" title="Lock model in RAM, preventing swap."><input type="checkbox" id="modal-session-mlock"> mlock</label>
-                        </div>
-                    </div>
-                    <div class="modal-buttons" style="margin-top:16px;">
-                        <button type="button" class="btn btn-modal-cancel" id="session-modal-cancel">Cancel</button>
-                        <button type="submit" class="btn btn-modal-save" id="btn-session-save">Save</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-</div>
-
 <!-- Preset Modal -->
 <div class="modal-overlay" id="preset-modal" role="dialog" aria-modal="true" aria-label="Preset editor">
     <div class="preset-editor-shell">
@@ -2618,14 +2553,15 @@
                                     <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
                                     <span class="pe-toggle-label">no-mmap</span>
                                 </label>
-                                <label class="pe-toggle-item" title="Lock model in RAM, preventing OS from swapping it to disk. Improves performance but requires enough physical RAM.">
-                                    <input type="checkbox" id="modal-mlock">
-                                    <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
-                                    <span class="pe-toggle-label">mlock</span>
-                                </label>
-                            </div>
+                            <label class="pe-toggle-item" title="Lock model in RAM, preventing OS from swapping it to disk. Improves performance but requires enough physical RAM.">
+                                <input type="checkbox" id="modal-mlock">
+                                <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
+                                <span class="pe-toggle-label">mlock</span>
+                            </label>
                         </div>
+                        <div class="preset-memory-warning" id="preset-mlock-warning" style="display:none;"></div>
                     </div>
+                </div>
 
                     <!-- 2: Context & KV Cache -->
                     <div class="preset-editor-section" data-section="context">
@@ -3837,6 +3773,7 @@
                             <div class="kv-inline-field" style="flex:999 1 320px;">
                                 <div class="field-hint" style="margin:0;">Pins model in RAM and helps avoid swap pressure evicting it mid-run.</div>
                             </div>
+                            <div class="ctx-fit-warning" id="spawn-mlock-warning" style="display:none;"></div>
                         </div>
 
                         <!-- Speculative decoding mode selector -->

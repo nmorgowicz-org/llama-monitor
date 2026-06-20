@@ -4,7 +4,6 @@
 import { setupViewState, chat, sessionState } from '../core/app-state.js';
 import { doAttachFromSetup } from './attach-detach.js';
 import { escapeHtml } from '../core/format.js';
-import { quickStartSession } from './sessions.js';
 import { showToast } from './toast.js';
 
 // ── Model / preset classification (mirrors backend) ───────────────────────────

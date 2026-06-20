@@ -2095,11 +2095,22 @@
 }
 
 .preset-vram-strip .preset-vram-display {
-  background: none;
-  border: none;
-  border-radius: 0;
-  padding: 0;
-  margin-bottom: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    margin-bottom: 0;
+}
+
+.preset-memory-warning {
+    margin-top: 10px;
+    padding: 9px 11px;
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: 8px;
+    background: rgba(245, 158, 11, 0.08);
+    color: var(--color-warning, #f59e0b);
+    font-size: 0.78rem;
+    line-height: 1.45;
 }
 
 .preset-editor-layout {

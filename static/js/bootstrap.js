@@ -7,7 +7,6 @@ import './compat/globals.js'; // Set window.escapeHtml, window.formatMetricNumbe
 import { initDashboardRender } from './features/dashboard-render.js';
 import { initWebSocket } from './features/dashboard-ws.js';
 import { initPresets } from './features/presets.js';
-import { initSessions } from './features/sessions.js';
 import { activeChatTab, addChatTab, autoResizeChatInput, initChatState, initChatTabs, restoreTabFromTrash } from './features/chat-state.js';
 import { chatScroll, initChatRender } from './features/chat-render.js';
 import { initChatSessionsSidebar, renderChatSessionsSidebar } from './features/chat-sessions-sidebar.js';
@@ -101,7 +100,6 @@ async function initializeApp() {
 
     // Phase 4: Initialize extracted features.
     initPresets();
-    initSessions();
     initAttachDetach();
     initRemoteAgent();
 
