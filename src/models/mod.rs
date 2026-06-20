@@ -120,7 +120,8 @@ pub fn parse_gguf_filename(filename: &str) -> (Option<String>, Option<String>) {
             let sep_len = pattern.len() - 1; // length of separator before Q
             let quant_start = pos + 1 + sep_len; // skip separator, include Q
             let model_name = &stem[..pos];
-            let quant_str = if pattern.starts_with("-UD-") || *pattern == "-IQ" || *pattern == "_IQ" {
+            let quant_str = if pattern.starts_with("-UD-") || *pattern == "-IQ" || *pattern == "_IQ"
+            {
                 // Include full prefix ("UD-...", "IQ...") in quant type
                 &stem[pos + 1..]
             } else {
