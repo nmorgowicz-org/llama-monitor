@@ -178,6 +178,15 @@ Shown automatically when the model has `mtp_depth > 0` (detected from GGUF metad
 - **Enable MTP (experimental)** checkbox — adds `--spec-type draft-mtp,ngram-mod`. It defaults off on Apple Metal because current llama.cpp builds can lose throughput there; other backends keep the opt-out default.
 - **Draft tokens/step** (`hw-mtp-depth`) — sets `--spec-draft-n-max` and forces `--parallel 1`. Benchmark enabled versus disabled because results vary by model, backend, context length, and acceptance rate.
 
+#### mlock Warning (macOS)
+
+When mlock is checked and the VRAM estimate is Tight or Risk, a warning appears:
+- mlock pins model memory so macOS cannot page it out.
+- On unified-memory Macs, with a tight estimate, this can push macOS into compression or swap and make the desktop unresponsive.
+- If the warning is shown, either disable mlock, reduce context size, or choose a smaller quant.
+
+This guidance is also shown in the preset editor.
+
 #### Advanced Options Grid
 
 | Control | ID | Default | Notes |
@@ -478,10 +487,13 @@ Start a streaming download. Returns immediately with a download ID; poll `/statu
 
 - Requires: `api-token`
 - Rate limit: 10-second cooldown between starts
-- Max 5 concurrent downloads
+- Max 2 concurrent downloads (to avoid overwhelming the connection and HF rate limits).
+- Duplicate guard: rejects starting a second download for the same (repo, file) while the first is running.
+- Existing-file guard: refuses to re-download if the target file already exists on disk (not a `.part` file).
 - Path traversal guard: rejects `..`, leading `/`, leading `\`
-- Uses `connect_timeout(30s)` only — no total timeout (large files stream indefinitely)
-- On failure: partial file renamed to `.part`; terminal logs record reason
+- Uses `connect_timeout(30s)` only — no total timeout (large files stream indefinitely).
+- On failure: partial file renamed to `.part`; terminal logs record reason.
+- Error handling: stream errors are classified (transient, timeout, auth, not-found) and surfaced as human-readable toasts; the frontend shows start, conflict, and failure toasts so the user always knows the state.
 
 #### GET /api/models/download/:id/status
 Poll download progress.
@@ -514,6 +526,12 @@ When the download starts, the model card displays an indeterminate progress bar 
 
 ![HuggingFace Download Idle](../screenshots/spawn-wizard-hf-download-idle.png)
 ![HuggingFace Download Progress](../screenshots/spawn-wizard-hf-download-progress.png)
+
+### MTP and IQ Quant Detection
+
+The model browser and library recognize and label:
+- MTP (Multi-Token Prediction) / draft models: detected via filename patterns including `-mtp.gguf` (Unsloth convention). These models are shown with an MTP badge (indigo pill) in the model cards.
+- IQ quantizations: filenames with `-IQ` or `_IQ` (e.g., `IQ2_XXS`, `IQ3_M`, `IQ4_XL`) are correctly parsed, including the full `IQ` prefix in the quant label.
 
 ### Model Card
 
@@ -932,7 +950,7 @@ Returns model-family sampling recommendations for the Step 4 wizard review form 
 - HF token never appears in logs; masked in the GET response.
 - Download `file_path` rejects `..`, leading `/`, leading `\` (path traversal guard).
 - `target_path` for downloads is canonicalized and verified to remain within `models_dir`.
-- Download rate-limited: 10-second cooldown between starts, max 5 concurrent.
+- Download rate-limited: 10-second cooldown between starts, max 2 concurrent. Includes duplicate and existing-file guards.
 - Model introspection runs `llama-server` as a subprocess with a 30-second timeout; never passes unsanitized user input as shell arguments.
 - Benchmark is rate-limited with a 15-second cooldown to prevent repeated heavy loads on the running llama-server.
 
@@ -947,7 +965,10 @@ Returns model-family sampling recommendations for the Step 4 wizard review form 
 | `src/model_download.rs` | Streaming download manager with resume support |
 | `src/llama/gguf_meta.rs` | GGUF metadata reader (binary header parsing) |
 | `src/hf/mod.rs` | HuggingFace API client, file listing, token management, resolve origin, quantizers |
-| `src/web/api.rs` | All wizard-related route handlers |
+| `src/web/api/spawn_wizard.rs` | Wizard-related route handlers |
+| `src/web/api/vram.rs` | VRAM estimation route handlers |
+| `src/web/api/models.rs` | Model library and GGUF metadata routes |
+| `src/web/api/mod.rs` | API module registry (31 route modules) |
 | `static/js/features/spawn-wizard.js` | Wizard frontend (all 5 steps) |
 | `static/css/spawn-wizard.css` | Wizard styles |
 | `docs/reference/vram-estimator.md` | VRAM estimation formulas and heuristics reference |

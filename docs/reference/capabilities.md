@@ -1,6 +1,6 @@
 # Capabilities
 
-The capabilities object describes what metrics and features are available for the current session. It is included in every WebSocket push (`capabilities` field) and is also available via `GET /api/capabilities`.
+The capabilities object describes what metrics and features are available for the current session. It is included in every WebSocket push (`capabilities` field) and is also available via `GET /api/capabilities` (in `src/web/api/sessions.rs`).
 
 The `/api/capabilities` endpoint adds a `tray_mode` field not present in WebSocket messages.
 
@@ -24,7 +24,7 @@ The `/api/capabilities` endpoint adds a `tray_mode` field not present in WebSock
 | Field | Type | Description |
 |-------|------|-------------|
 | `inference` | `bool` | llama.cpp server is reachable and responding |
-| `system` | `bool` | CPU/RAM system metrics are available |
+| `system` | `bool` | CPU/RAM system metrics are available (includes macOS memory-pressure telemetry) |
 | `gpu` | `bool` | GPU metrics are available |
 | `cpu_temperature` | `bool` | CPU temperature sensor is readable |
 | `memory` | `bool` | RAM metrics are available |

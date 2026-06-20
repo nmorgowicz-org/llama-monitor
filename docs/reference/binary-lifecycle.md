@@ -10,7 +10,8 @@ names this system as the quality baseline that all future backends must match.
 | File | Responsibility |
 |---|---|
 | `src/llama/llama_cpp_downloader.rs` | Release fetching, asset selection, download/extract, artifact cleanup |
-| `src/web/api.rs` (`api_llama_binary_*`) | HTTP endpoints: version, latest, releases, release, platform-info, update |
+| `src/web/api/llama_binary.rs` | HTTP endpoints: version, latest, releases, release, platform-info, update, restart |
+| `src/model_download.rs` | Model-file download manager: dedup guard, existing-file check, concurrency limit |
 
 ## Binary path
 
@@ -233,6 +234,38 @@ live path.
 On Linux and Windows, the updater copies into the configured binary directory,
 normalizes the configured binary name, cleans old artifacts, and health-checks
 the installed binary before reporting success.
+
+## Model-file download stability
+
+Model-file downloads (Hugging Face, etc.) are managed in `src/model_download.rs` with three
+safety guards to reduce conflicts, wasted bandwidth, and runaway concurrency.
+
+### Duplicate guard
+
+A single in-memory `HashMap` keyed by `(repo_id, file_path)` tracks active download tasks.
+If the API receives a second request for the same file while an existing task is running,
+it returns a 409 error with the message:
+
+> Already downloading: {name}. Please wait until it completes.
+
+### Existing-file guard
+
+Before starting a download, the handler checks whether the target file already exists at
+its final path with a reasonable size. If so, it returns a 409 error:
+
+> File already exists at: {path}. It may be available in your library.
+
+This prevents re-downloading large models that are already on disk.
+
+### Concurrency limit
+
+A hard limit of 2 simultaneous running downloads is enforced. A third request is rejected
+immediately with:
+
+> Too many downloads in progress. Please wait for one to finish.
+
+The frontend (hf-browse.js, models.js) listens for these responses and shows toast messages
+instead of silently queuing extra tasks.
 
 ## Server stop/restart around updates
 

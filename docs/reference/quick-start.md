@@ -53,10 +53,22 @@ On the **Server** page (Performance & metrics), watch:
 - **Requests** – how many requests you’ve sent.
 - **Model info** – current model, quant, and speculative decoding status.
 - **GPU / System** – memory and load if you have a remote agent (optional but recommended).
+- **Memory pressure** (macOS) – shows free memory, compressed memory, and swap activity. A warning or critical indicator means macOS is struggling; reduce context, stop heavy downloads, or disable mlock.
 
 If you see:
 
 - Steady tokens/sec and no red warnings: your setup is healthy.
 - Very low tokens/sec or memory warnings: return to the preset and reduce GPU layers or context size.
+- Memory pressure at warning or critical: macOS is under pressure; lower context size or free memory before your system becomes unresponsive.
 
 That’s it—you’re running your local AI model with full visibility.
+
+## 7. Use sleep modes when the server is running
+
+The monitoring chip in the top nav lets you cycle through three modes:
+
+- **Monitoring** – full telemetry, GPU reads, system metrics, and live logs.
+- **Logs only** – only the live log stream is active; GPU, system, and sparkline updates are paused to save resources.
+- **Paused** – all telemetry and logs are paused; llama-server keeps running.
+
+Click the chip to cycle modes, or use it when you want the server running but need lower overhead on your system.

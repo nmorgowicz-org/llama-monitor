@@ -5,6 +5,9 @@ It is intended for:
 - Operators configuring TLS or ACME.
 - Developers extending or debugging TLS behavior.
 
+TLS and ACME endpoints are implemented in `src/web/api/tls.rs` and wired into the
+main router in `src/web/api/mod.rs`.
+
 High-level principles:
 - TLS is optional and never forced.
 - llama-monitor can run:
@@ -173,7 +176,7 @@ Integration notes:
 - Secrets are never logged in plaintext; UI masks them.
 
 Provider-agnostic design:
-- acme.rs:
+- TLS/ACME endpoints (`src/web/api/tls.rs`):
   - Treats providers via:
     - A lego DNS provider code (e.g., "cloudflare", "route53", "namecheap").
     - A map of environment variables (dns_config).

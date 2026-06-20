@@ -3,6 +3,18 @@
 This document covers dashboard-side authentication, token handling, local recovery, and where
 security-related configuration is stored on disk.
 
+## Architecture Note
+
+All API security behavior is implemented in the modular API layer under `src/web/api/`, primarily:
+
+- `src/web/api/common.rs` — token checks, auth helpers, shared response utilities.
+- `src/web/api/auth.rs` — dashboard auth routes (`/api/auth/status`, `/api/auth/login`, etc.).
+- `src/web/api/tokens.rs` — token rotation and internal bootstrap.
+- Domain modules (e.g., `db.rs`, `remote_agent.rs`, `self_update.rs`, `sleep.rs`) — per-endpoint auth enforcement.
+
+No public HTTP endpoints have changed as a result of the modular refactor; only internal file
+locations have.
+
 ## Dashboard Access Modes
 
 Llama Monitor supports four dashboard access states:
@@ -10,7 +22,7 @@ Llama Monitor supports four dashboard access states:
 - `No Auth`
   - Default behavior.
   - Intended for local-only use on `127.0.0.1` or trusted LAN.
-  - When “No Auth” is configured:
+  - When "No Auth" is configured:
     - No endpoints are gated behind a login.
     - The api-token is still auto-generated and used internally for protected endpoints.
     - Token bootstrap (`/api/internal/api-token`) is fully allowed, even for non-loopback llama-server endpoints.
@@ -18,7 +30,7 @@ Llama Monitor supports four dashboard access states:
   - Shows the in-app sign-in shell before protected routes are available.
   - Uses an HttpOnly session cookie after a successful login.
 - `Basic Auth`
-  - Uses the browser’s native username/password challenge.
+  - Uses the browser's native username/password challenge.
 - `Both`
   - Accepts either HTTP Basic credentials or a valid in-app form session.
 
@@ -82,7 +94,7 @@ Behavior:
 
 ## Locked-Out Recovery
 
-There is intentionally no unauthenticated “forgot password” web endpoint.
+There is intentionally no unauthenticated "forgot password" web endpoint.
 
 If a user is locked out of config-managed dashboard auth:
 
@@ -115,6 +127,7 @@ into `auth-config.json` because the persisted dashboard-access UI uses a single 
 ## Token Rotation
 
 Three endpoints rotate tokens at runtime. All require a valid `api-token` (Bearer).
+Implemented in `src/web/api/tokens.rs`.
 
 - `POST /api/rotate-agent-token`
   - Rotates the remote-agent token.
@@ -173,7 +186,7 @@ For `/api/*` routes, there is an Origin validation filter:
 
 - Applies only to mutating methods: POST, PUT, PATCH, DELETE.
 - Behavior:
-  - If the `Origin` header is present and does not match the server’s origin, the request is rejected with 403.
+  - If the `Origin` header is present and does not match the server's origin, the request is rejected with 403.
   - If `Origin` is absent, the request is allowed (to support curl and non-browser clients).
   - GET requests are always allowed.
 - When bound to `0.0.0.0`:

@@ -2,7 +2,12 @@
 
 Llama Monitor serves its REST API on the same port as the web UI, typically `http://localhost:7778`.
 
-This page documents the live handlers in [`src/web/api.rs`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/src/web/api.rs) and the persisted data shapes in [`src/state.rs`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/src/state.rs), [`src/presets/mod.rs`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/src/presets/mod.rs), and [`src/chat_storage.rs`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/src/chat_storage.rs).
+This page documents the HTTP endpoints exposed by llama-monitor and the data shapes returned.
+
+Internally, the API is implemented as a modular warp router in `src/web/api/mod.rs` delegating to
+domain-specific modules (`chat/`, `models`, `hf`, `sessions`, `sleep`, etc.). These modules define
+route handlers but do not change any public endpoint paths or authentication rules compared to
+previous monolithic `api.rs` implementations.
 
 ## Base URL
 
@@ -27,6 +32,8 @@ http://localhost:7778
 All session endpoints require authentication via `Authorization: Bearer <token>`.
 Most require the `api-token`; a few elevated operations require the `db-admin-token`.
 Without a valid token, the endpoint returns 401.
+
+Handlers live in: `src/web/api/sessions.rs`.
 
 ### `GET /api/sessions`
 Auth: api-token.
@@ -282,6 +289,7 @@ Emergency process kill for `llama-server`.
 ## Presets
 
 Presets are stored in `presets.json` and use the `ModelPreset` struct.
+Route handlers: `src/web/api/presets.rs`.
 
 ### `GET /api/presets`
 Auth: api-token.
@@ -530,6 +538,7 @@ Replaces the in-memory and on-disk preset list with factory defaults.
 ## Templates
 
 Templates are stored in `templates.json`. Built-in personas live in the frontend and are merged client-side; this API only returns user-stored entries.
+Route handlers: `src/web/api/templates.rs`.
 
 ### `GET /api/templates`
 Auth: api-token.
@@ -571,8 +580,13 @@ Auth: api-token.
 
 ## Models
 
+Route handlers: `src/web/api/models.rs`.
+
 ### `GET /api/models`
+Auth: api-token.
 Returns the current scan result for the configured `models_dir`.
+
+The response now includes per-model `tags` and `classification` fields (derived from filename heuristics):
 
 ```json
 [
@@ -583,10 +597,16 @@ Returns the current scan result for the configured `models_dir`.
     "size_display": "4.4 GB",
     "quant_type": "Q4_0",
     "model_name": "Qwen3.5-27B",
-    "is_split": false
+    "is_split": false,
+    "tags": [],
+    "classification": { "is_mtp": false, "is_moe": false, "is_vision": false }
   }
 ]
 ```
+
+Improved quant detection (branch-specific):
+- Now recognizes `-IQ` and `_IQ` patterns (e.g., IQ2_XXS, IQ3_M).
+- MTP models: files ending in `-mtp.gguf` (Unsloth naming) are marked as MTP and shown with a badge in the UI.
 
 ### `POST /api/models/refresh`
 Auth: api-token.
@@ -604,7 +624,175 @@ Failure when no model directory is configured:
 { "ok": false, "error": "no models directory configured (use --models-dir)" }
 ```
 
+### `POST /api/models/download/start`
+Start a new model download (currently HuggingFace only).
+
+- Auth: api-token (or db-admin-token).
+- Route handler: `models.rs` delegating to `src/model_download.rs`.
+
+New behaviors (branch-specific):
+
+- Duplicate guard: if a download for the same (repo, file) is already running, the endpoint
+  rejects with `Already downloading: ...`.
+- Existing-file guard: if the target file already exists and is not partial, the endpoint
+  rejects with `File already exists at: ...`.
+- Concurrency limit: max 2 simultaneous running downloads; further starts are rejected with
+  `Too many downloads in progress`.
+- On failure, error messages are human-readable and may include retry hints.
+
+Request:
+
+```json
+{
+  "model": "unsloth/Qwen3.5-27B-Q4_K_M-GGUF/qwen3.5-27b-q4_k_m.gguf",
+  "source": "hf"
+}
+```
+
+Success:
+
+```json
+{
+  "ok": true,
+  "download_id": "abc123"
+}
+```
+
+Failure examples:
+
+```json
+{ "ok": false, "error": "Already downloading: unsloth/Qwen3.5-27B-Q4_K_M-GGUF/qwen3.5-27b-q4_k_m.gguf. Please wait until it completes." }
+```
+
+```json
+{ "ok": false, "error": "File already exists at: /models/Qwen3.5-27B-Q4_K_M.gguf. It may be available in your library." }
+```
+
+```json
+{ "ok": false, "error": "Too many downloads in progress. Please wait for one to finish." }
+```
+
+### `GET /api/models/download/{id}/status`
+Poll download progress for a given `download_id`.
+
+- Auth: api-token.
+
+Response (running):
+
+```json
+{
+  "ok": true,
+  "status": {
+    "download_id": "abc123",
+    "status": "running",
+    "bytes_downloaded": 1234567890,
+    "total_bytes": 2765432100,
+    "speed": 5000000,
+    "eta": 500,
+    "message": "",
+    "local_path": "/models/Qwen3.5-27B-Q4_K_M.gguf"
+  }
+}
+```
+
+Response (completed):
+
+```json
+{
+  "ok": true,
+  "status": {
+    "download_id": "abc123",
+    "status": "completed",
+    "bytes_downloaded": 2765432100,
+    "total_bytes": 2765432100,
+    "speed": 0,
+    "eta": 0,
+    "message": "",
+    "local_path": "/models/Qwen3.5-27B-Q4_K_M.gguf"
+  }
+}
+```
+
+Response (failed):
+
+```json
+{
+  "ok": true,
+  "status": {
+    "download_id": "abc123",
+    "status": "failed",
+    "bytes_downloaded": 1000000,
+    "total_bytes": 2765432100,
+    "speed": 0,
+    "eta": 0,
+    "message": "Connection timeout; you can retry.",
+    "local_path": "/models/Qwen3.5-27B-Q4_K_M.gguf"
+  }
+}
+```
+
+If not found:
+
+```json
+{ "ok": false, "error": "Download not found" }
+```
+
+(404 status code)
+
+### `POST /api/models/download/{id}/cancel`
+Cancel an active download.
+
+- Auth: api-token.
+
+Response:
+
+```json
+{ "ok": true }
+```
+
+Or:
+
+```json
+{ "ok": false, "error": "Download not found or already finished" }
+```
+
+### `POST /api/models/gguf-meta`
+Read GGUF metadata directly from a local model file (no llama-server spawn).
+
+- Auth: api-token.
+- Returns architecture, param_count, block_count, head counts, etc.
+- For hybrid DeltaNet models (e.g., Qwen3.5, Qwen3.6), also returns `n_attn_layers` derived from the VRAM estimator heuristic.
+
+Request:
+
+```json
+{ "model_path": "/models/Qwen3.5-27B-Q4_K_M.gguf" }
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "architecture": "qwen35",
+  "param_count": 27000000000,
+  "block_count": 48,
+  "head_count": 48,
+  "head_count_kv": 8,
+  "key_length": 128,
+  "context_length": 131072,
+  "embedding_length": 5120,
+  "feed_forward_length": 27392,
+  "expert_count": null,
+  "expert_used_count": null,
+  "mtp_depth": null,
+  "n_attn_layers": 24
+}
+```
+
 ## Settings
+
+Route handlers: `src/web/api/config.rs`.
 
 ### `GET /api/settings`
 Auth: api-token.
@@ -763,6 +951,8 @@ Response:
 
 ## File Browser
 
+Route handlers: `src/web/api/browse.rs`.
+
 ### `GET /api/browse`
 Auth: api-token.
 Browses a local directory.
@@ -802,6 +992,9 @@ On invalid input the API returns a JSON error payload such as:
 ```
 
 ## Chat Transport
+
+Route handlers: `src/web/api/chat/stream.rs`, `src/web/api/chat/suggestions.rs`,
+`src/web/api/chat/notes.rs`, `src/web/api/chat/guided.rs`.
 
 ### `POST /api/chat`
 Auth: api-token.
@@ -927,6 +1120,8 @@ Response:
 `status` is `new`, `current`, or `stale`.
 
 ## Chat Persistence API
+
+Route handlers: `src/web/api/chat/tabs.rs`.
 
 The live chat persistence layer is SQLite-backed and centered on `chat.db`. Chat tabs are no longer stored as one big JSON array.
 
@@ -1147,7 +1342,68 @@ Search notes:
 - prefix matching is used internally
 - empty or unparseable queries return an empty paged result object
 
+## Sleep Mode
+
+Route handlers: `src/web/api/sleep.rs`.
+
+Sleep mode is a 3-state system: off, logs-only, sleep.
+
+- `off` — normal monitoring.
+- `logs-only` — live log tail and console output enabled, but heavy metrics, GPU/CPU temp probes, and most network calls are disabled. Pollers slow to sleep-like intervals.
+- `sleep` — full sleep; only minimal background (log tail if configured).
+
+All sleep-mode endpoints require `api-token`.
+
+### `GET /api/sleep-mode`
+Returns current sleep-mode status.
+
+```json
+{
+  "mode": "off",
+  "enabled": false,
+  "config": {
+    "auto_sleep_enabled": true,
+    "idle_threshold_secs": 120
+  }
+}
+```
+
+- `mode` is one of: `"off"`, `"logs-only"`, `"sleep"`.
+- `enabled` is `true` when `mode != "off"`.
+
+### `POST /api/sleep-mode/toggle`
+Cycles the mode. Behavior depends on how the current mode was set:
+
+- If set by the user (manual), cycles: `off` → `logs-only` → `sleep` → `off`.
+- If set automatically (auto-sleep), cycles: `off` ↔ `sleep` (skips `logs-only`).
+
+Response:
+
+```json
+{
+  "ok": true,
+  "mode": "logs-only",
+  "enabled": true,
+  "sleep_mode": true
+}
+```
+
+### `POST /api/sleep-mode/set`
+Explicitly set the mode.
+
+- Supports new `"mode"` field:
+  - `{ "mode": "off" }`
+  - `{ "mode": "logs-only" }`
+  - `{ "mode": "sleep" }`
+- For backward compatibility, the legacy `{ "enabled": true/false }` shape maps:
+  - `true` → `"sleep"`
+  - `false` → `"off"`
+
+Response same as GET, with updated values.
+
 ## Database Admin
+
+Route handlers: `src/web/api/db.rs`.
 
 All `/api/db/*` routes operate on the SQLite chat database.
 
@@ -1384,6 +1640,8 @@ Response:
 
 ## TLS / ACME
 
+Route handlers: `src/web/api/tls.rs`.
+
 Endpoints for managing TLS and ACME-based certificate provisioning.
 
 Authentication:
@@ -1480,260 +1738,95 @@ Response:
 { "status": "renewed" }
 ```
 
-## Legacy Chat Fields
+## System and Hardware
 
-The project previously used a flat-file chat format. The live SQLite-backed API no longer persists several legacy fields that still appear in old docs, old exports, or migration code.
+### `POST /api/system/set-metal-gpu-limit`
+( macOS only ) Adjust Metal GPU wired memory limit via `sysctl iogpu.wired_limit_mb`.
 
-Not part of the live `ChatTabRow` API:
-- `ai_gender`
-- `role_boundary_custom`
-- `quick_guide_active`
-- `armed_story_beats`
-- `context_custom_sections`
-- `quick_guide_draft`
+- Auth: `db-admin-token` (elevated, system-level change).
+- Requires: macOS with administrator privileges (triggers a password prompt via `osascript`).
+- Request: `{ "limit_mb": 40960 }`
+- If not on macOS, returns:
+  `{ "ok": false, "error": "Metal GPU limit tuning is only available on macOS." }`
 
-Not part of the live `MessageRow` API:
-- `thinking_content`
-- `summarized`
-- `dropped_count`
-- `dropped_preview`
-- `tokens_freed_estimate`
-- `ctx_pct_before`
-- `memory_version`
-- `memory_domain`
-- `summary_kind`
-- `compacted_at`
-- `compacted_message_count_total`
-- `recent_tail_kept`
+### Memory-pressure telemetry (macOS)
 
-Compatibility note:
-- startup migration from legacy `chat-tabs.json` still reads some of those older fields
-- the live REST persistence API does not return or preserve them
+Branch-specific addition.
 
-## Errors
-
-Most handlers return JSON error payloads rather than relying on HTTP status alone. Common shapes are:
-
-```json
-{ "ok": false, "error": "Preset not found" }
-```
-
-```json
-{ "error": "No active session" }
-```
-
-## WebSocket
-
-For realtime metrics and capability pushes, use:
-
-```text
-ws://localhost:7778/ws
-```
-
-Limits:
-- Maximum 50 concurrent connections.
-- Excess connections are rejected with 429 Too Many Requests.
-
-The WebSocket payload includes the following remote-agent fields:
+On macOS, `SystemMetrics` (reported via WebSocket telemetry and used internally for monitoring) now includes additional memory-pressure fields derived from `vm_stat`:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `remote_agent_connected` | boolean | Agent process is reachable |
-| `remote_agent_health_reachable` | boolean | `/metrics` HTTP call succeeds; independent from `remote_agent_connected` |
-| `remote_agent_protocol_too_old` | boolean | True when agent protocol version is below minimum enforced version |
-| `remote_agent_protocol_version` | string or null | Agent's reported protocol version string |
+| `ram_available_gb` | float | Available RAM in GB |
+| `memory_pressure_level` | string | `"ok"`, `"warning"`, or `"critical"` |
+| `memory_free_gb` | float | Free pages in GB |
+| `memory_compressor_gb` | float | Compressor in-use GB |
+| `memory_compressed_gb` | float | Total compressed data GB |
+| `swapins` | integer | Cumulative swap-ins |
+| `swapouts` | integer | Cumulative swap-outs |
 
-`remote_agent_health_reachable` is set to true when the `/metrics` HTTP call succeeds and reset to false on disconnect. It is used to detect the firewall-blocked state (agent connected but health unreachable).
+The UI uses this data for:
+- A Memory Pressure sparkline and metric in the system card.
+- A memory-pressure pill in the top navigation bar (shown when warning/critical).
 
-See `docs/reference/realtime-communication.md` and `docs/reference/capabilities.md`.
+On non-macOS platforms, these fields are present but set to safe defaults.
 
-## Self-Update
+## Llama.cpp Binary Management
 
-POST /api/self-update:
-- Requires db-admin-token (elevated operation).
-- Requires explicit confirmation: { "confirm": "update" }.
-- Cooldown: 5 minutes between calls; returns 429 with seconds_remaining if too soon.
-- On success, schedules exit(0); OS/user must relaunch.
-- Example request:
-    { "confirm": "update" }
-- Example success:
-    { "ok": true, "tag_name": "v0.3.0", "restart_required": true }
+Route handlers: `src/web/api/llama_binary.rs`.
 
-## Kill-Llama
+Endpoints to manage llama-server binary.
 
-POST /api/kill-llama:
-- Emergency kill for llama-server.
-- Requires db-admin-token (elevated operation).
-- Requires confirmation field: { "confirm": "kill" }.
-- Cooldown: 30 seconds between calls; returns 429 with seconds_remaining if too soon.
-- Example:
-    Request:  { "confirm": "kill" }
-    Success:  { "ok": true }
-    Too soon: { "error": "too soon; please wait", "seconds_remaining": 12 }
+### `GET /api/llama-binary/platform-info`
+Return current platform and backend information.
 
-## Token Rotation
+- Auth: `api-token`.
 
-All three endpoints require `api-token` and return a 401 if the token is missing or invalid.
+### `GET /api/llama-binary/latest`
+Return the latest available llama.cpp release.
 
-### `POST /api/rotate-agent-token`
-Rotates the remote-agent token stored in `UiSettings`. Updates both on-disk and in-memory state, and notifies the agent-poll loop.
+- Auth: `api-token`.
 
-Response:
-```json
-{ "ok": true, "message": "Agent token rotated" }
-```
+### `GET /api/llama-binary/releases`
+Return a list of recent llama.cpp releases.
 
-### `POST /api/rotate-api-token`
-Generates a new api-token, writes it to disk (encrypted if configured), and updates the live in-memory value atomically.
+- Auth: `api-token`.
 
-Response:
-```json
-{ "ok": true, "message": "API token rotated successfully." }
-```
+### `GET /api/llama-binary/version`
+Return the currently installed llama-server binary version.
 
-### `POST /api/rotate-db-admin-token`
-Generates a new db-admin-token, writes it to disk (encrypted if configured), and updates the live in-memory value atomically.
+- Auth: `api-token`.
 
-Response:
-```json
-{ "ok": true, "message": "DB admin token rotated successfully." }
-```
+### `POST /api/llama-binary/update`
+Download and install a specific llama.cpp release.
 
-## Internal Token Bootstrap
+- Auth: `api-token`.
+- Request: `{ "version": "b5700", "backend": "metal" }`
+- Behavior:
+  - Downloads release archive to `bin/`.
+  - Applies `chmod 755` on Unix.
+  - Copies all files (CUDA/Vulkan/SYCL builds require co-located libs).
 
-### `GET /api/internal/api-token`
-No authentication header is required.
+### `POST /api/llama/restart`
+Restart a locally running llama-server with the current binary (useful after installing a new version).
 
-Returns the api-token for use by the in-browser UI. Access is governed by a bootstrap policy:
-
-- If “No Auth” is configured:
-  - Always allowed (local-first mode).
-- If any auth mode (basic or form) is configured:
-  - Allowed only from:
-    - Same-origin browser requests (via Origin checks), or
-    - Loopback clients (127.0.0.1, localhost, ::1).
-  - Otherwise returns 403.
-
-Response:
-```json
-{ "token": "<api-token>" }
-```
-
-## LibreHardwareMonitor (LHM) (Windows-only)
-
-These endpoints manage LibreHardwareMonitor on Windows. On non-Windows platforms they return a “Not supported on this platform” error.
-
-### `GET /api/lhm/check`
-No authentication required.
-Returns whether LHM is installed and currently running.
-
-Response:
-```json
-{ "running": true, "installed": true, "available": true }
-```
-
-On non-Windows:
-```json
-{ "running": false, "installed": false, "available": false, "error": "Not supported on this platform" }
-```
-
-### `POST /api/lhm/start`
-Auth: api-token.
-Starts LHM if installed.
-
-Response:
-```json
-{ "success": true }
-```
-
-### `GET /api/lhm/progress`
-No authentication required.
-Returns the current LHM installation progress string (e.g. "not_started", "downloading", "installing", "completed").
-
-Response:
-```json
-{ "progress": "completed" }
-```
-
-### `GET /api/lhm/status`
-No authentication required.
-Returns whether LHM is disabled via the persisted flag.
-
-Response:
-```json
-{ "disabled": false }
-```
-
-### `POST /api/lhm/install`
-Auth: api-token.
-Downloads and installs LHM.
-
-Response:
-```json
-{ "success": true }
-```
-
-### `POST /api/lhm/uninstall`
-Auth: api-token.
-Uninstalls LHM.
-
-Response:
-```json
-{ "success": true }
-```
-
-### `POST /api/lhm/disable`
-Auth: api-token.
-Sets the LHM disabled flag.
-
-Request:
-```json
-{ "disabled": true }
-```
-
-Response:
-```json
-{ "ok": true }
-```
-
-## Sensor Bridge (Windows-only)
-
-Manages the local sensor-bridge service on Windows. On non-Windows platforms these endpoints return a “Not supported on this platform” error.
-
-### `GET /api/sensor-bridge/status`
-Auth: api-token.
-Returns whether the sensor-bridge service is installed, running, and available.
-
-Response:
-```json
-{ "installed": true, "running": true, "available": true }
-```
-
-### `POST /api/sensor-bridge/install`
-Auth: api-token.
-Installs the sensor-bridge service via UAC prompt.
-
-Response:
-```json
-{
-  "started": true,
-  "message": "UAC prompt launched — approve it on your desktop to install the sensor service"
-}
-```
-
-### `POST /api/sensor-bridge/uninstall`
-Auth: api-token.
-Uninstalls the sensor-bridge service via UAC prompt.
-
-Response:
-```json
-{
-  "started": true,
-  "message": "UAC prompt launched — approve it on your desktop to remove the sensor service"
-}
-```
+- Auth: `api-token`.
+- Precondition:
+  - A local llama-server must be running (`local_server_running: true`).
+- Behavior:
+  - Captures the current `ServerConfig` from AppState.
+  - Calls `stop_server()` (kills process, clears child/metrics).
+  - Calls `start_server()` with the captured config.
+  - The restarted server uses the current `llama_server_path` (so after a binary update, it will use the new build).
+- Errors:
+  - 200 with `ok: false` if:
+    - No local server is running.
+    - No saved server config found.
+    - Stop or restart fails.
 
 ## Remote Agent
+
+Route handlers: `src/web/api/remote_agent.rs`.
 
 All `/api/remote-agent/*` endpoints require a bearer token.
 
@@ -1810,6 +1903,8 @@ For full details on the remote agent flow, see [Remote Agent](remote-agent.md).
 
 ## Setup Wizard (V2)
 
+Route handlers: `src/web/api/spawn_wizard.rs`, `src/web/api/vram.rs`, `src/web/api/benchmark.rs`.
+
 Endpoints supporting the setup wizard, VRAM estimation, and model discovery.
 
 All require `api-token` unless noted.
@@ -1885,6 +1980,8 @@ Install and cache a community chat template from an HTTPS
 
 ## HuggingFace Integration
 
+Route handlers: `src/web/api/hf.rs`.
+
 All endpoints require `api-token` unless noted.
 
 ### `POST /api/hf/search`
@@ -1897,7 +1994,7 @@ Search the HuggingFace Hub for GGUF models.
 List GGUF models for a specific author.
 
 ### `GET /api/hf/community-picks`
-Return the curated community picks list (used by the wizard’s discover panel).
+Return the curated community picks list (used by the wizard's discover panel).
 
 - Read: no auth (public).
 - Update: `api-token` via `PUT` (if configured).
@@ -1910,87 +2007,6 @@ Update quantizer author list.
 
 ### `POST /api/hf/files`
 List GGUF files in a repo with sizes and quant labels.
-
-### `POST /api/hf/download`
-Start a streaming HF model download.
-
-- Auth: `api-token`.
-- Limits:
-  - 10-second cooldown between starts.
-  - Max 5 concurrent downloads.
-  - Path traversal protection (reject `..`, leading `/`, leading `\`).
-  - `local_path` validated inside `models_dir`.
-
-Request:
-
-```json
-{
-  "repo_id": "unsloth/Qwen3.5-27B-Q4_K_M-GGUF",
-  "filename": "qwen3.5-27b-q4_k_m.gguf",
-  "local_path": "models/Qwen3.5-27B-Q4_K_M.gguf"
-}
-```
-
-Response:
-
-```json
-{
-  "ok": true,
-  "job_id": "abc123"
-}
-```
-
-### `GET /api/models/download/:id/status`
-Poll download progress.
-
-- Auth: `api-token`.
-- Query: path parameter `:id` is the job ID returned by the download start endpoint.
-
-Response (downloading):
-
-```json
-{
-  "job_id": "abc123",
-  "status": "downloading",
-  "progress": 0.45,
-  "bytes_downloaded": 1234567890,
-  "bytes_total": 2765432100,
-  "speed_bytes_per_sec": 5000000
-}
-```
-
-Response (complete):
-
-```json
-{
-  "job_id": "abc123",
-  "status": "complete",
-  "progress": 1.0,
-  "path": "/models/Qwen3.5-27B-Q4_K_M.gguf"
-}
-```
-
-Response (failed):
-
-```json
-{
-  "job_id": "abc123",
-  "status": "failed",
-  "error": "Connection timeout"
-}
-```
-
-### `POST /api/models/download/:id/cancel`
-Cancel an active download.
-
-- Auth: `api-token`.
-- Path parameter `:id` is the job ID.
-
-Response:
-
-```json
-{ "ok": true }
-```
 
 ### `GET /api/hf/card`
 Fetch raw model card markdown by `repo` param.
@@ -2049,64 +2065,274 @@ Response:
 { "dir": "/Users/nick/.config/llama-monitor/models" }
 ```
 
-## System and Hardware
+## mlock Warnings (macOS)
 
-### `POST /api/system/set-metal-gpu-limit`
-( macOS only ) Adjust Metal GPU wired memory limit via `sysctl iogpu.wired_limit_mb`.
+Branch-specific addition (UI + preset editor only; no new endpoint).
 
-- Auth: `db-admin-token` (elevated, system-level change).
-- Requires: macOS with administrator privileges (triggers a password prompt via `osascript`).
-- Request: `{ "limit_mb": 40960 }`
-- If not on macOS, returns:
-  `{ "ok": false, "error": "Metal GPU limit tuning is only available on macOS." }`
+When editing or creating a preset on macOS, if:
+- `mlock` is enabled,
+- and the VRAM estimate indicates the model is large relative to available memory,
 
-## Llama.cpp Binary Management
+the preset editor and spawn wizard display a warning that mlock pins model memory instead of letting the OS reclaim it, which can cause system unresponsiveness under pressure. This is client-side behavior triggered by existing VRAM and preset endpoints.
 
-Endpoints to manage llama-server binary.
+## LibreHardwareMonitor (LHM) (Windows-only)
 
-### `GET /api/llama-binary/platform-info`
-Return current platform and backend information.
+These endpoints manage LibreHardwareMonitor on Windows. On non-Windows platforms they return a "Not supported on this platform" error.
 
-- Auth: `api-token`.
+### `GET /api/lhm/check`
+No authentication required.
+Returns whether LHM is installed and currently running.
 
-### `GET /api/llama-binary/latest`
-Return the latest available llama.cpp release.
+Response:
+```json
+{ "running": true, "installed": true, "available": true }
+```
 
-- Auth: `api-token`.
+On non-Windows:
+```json
+{ "running": false, "installed": false, "available": false, "error": "Not supported on this platform" }
+```
 
-### `GET /api/llama-binary/releases`
-Return a list of recent llama.cpp releases.
+### `POST /api/lhm/start`
+Auth: api-token.
+Starts LHM if installed.
 
-- Auth: `api-token`.
+Response:
+```json
+{ "success": true }
+```
 
-### `GET /api/llama-binary/version`
-Return the currently installed llama-server binary version.
+### `GET /api/lhm/progress`
+No authentication required.
+Returns the current LHM installation progress string (e.g. "not_started", "downloading", "installing", "completed").
 
-- Auth: `api-token`.
+Response:
+```json
+{ "progress": "completed" }
+```
 
-### `POST /api/llama-binary/update`
-Download and install a specific llama.cpp release.
+### `GET /api/lhm/status`
+No authentication required.
+Returns whether LHM is disabled via the persisted flag.
 
-- Auth: `api-token`.
-- Request: `{ "version": "b5700", "backend": "metal" }`
-- Behavior:
-  - Downloads release archive to `bin/`.
-  - Applies `chmod 755` on Unix.
-  - Copies all files (CUDA/Vulkan/SYCL builds require co-located libs).
+Response:
+```json
+{ "disabled": false }
+```
 
-### `POST /api/llama/restart`
-Restart a locally running llama-server with the current binary (useful after installing a new version).
+### `POST /api/lhm/install`
+Auth: api-token.
+Downloads and installs LHM.
 
-- Auth: `api-token`.
-- Precondition:
-  - A local llama-server must be running (`local_server_running: true`).
-- Behavior:
-  - Captures the current `ServerConfig` from AppState.
-  - Calls `stop_server()` (kills process, clears child/metrics).
-  - Calls `start_server()` with the captured config.
-  - The restarted server uses the current `llama_server_path` (so after a binary update, it will use the new build).
-- Errors:
-  - 200 with `ok: false` if:
-    - No local server is running.
-    - No saved server config found.
-    - Stop or restart fails.
+Response:
+```json
+{ "success": true }
+```
+
+### `POST /api/lhm/uninstall`
+Auth: api-token.
+Uninstalls LHM.
+
+Response:
+```json
+{ "success": true }
+```
+
+### `POST /api/lhm/disable`
+Auth: api-token.
+Sets the LHM disabled flag.
+
+Request:
+```json
+{ "disabled": true }
+```
+
+Response:
+```json
+{ "ok": true }
+```
+
+## Sensor Bridge (Windows-only)
+
+Route handlers: `src/web/api/sensor_bridge.rs`.
+
+Manages the local sensor-bridge service on Windows. On non-Windows platforms these endpoints return a "Not supported on this platform" error.
+
+### `GET /api/sensor-bridge/status`
+Auth: api-token.
+Returns whether the sensor-bridge service is installed, running, and available.
+
+Response:
+```json
+{ "installed": true, "running": true, "available": true }
+```
+
+### `POST /api/sensor-bridge/install`
+Auth: api-token.
+Installs the sensor-bridge service via UAC prompt.
+
+Response:
+```json
+{
+  "started": true,
+  "message": "UAC prompt launched — approve it on your desktop to install the sensor service"
+}
+```
+
+### `POST /api/sensor-bridge/uninstall`
+Auth: api-token.
+Uninstalls the sensor-bridge service via UAC prompt.
+
+Response:
+```json
+{
+  "started": true,
+  "message": "UAC prompt launched — approve it on your desktop to remove the sensor service"
+}
+```
+
+## Self-Update
+
+Route handlers: `src/web/api/self_update.rs`.
+
+POST /api/self-update:
+- Requires db-admin-token (elevated operation).
+- Requires explicit confirmation: { "confirm": "update" }.
+- Cooldown: 5 minutes between calls; returns 429 with seconds_remaining if too soon.
+- On success, schedules exit(0); OS/user must relaunch.
+- Example request:
+    { "confirm": "update" }
+- Example success:
+    { "ok": true, "tag_name": "v0.3.0", "restart_required": true }
+
+## Kill-Llama
+
+POST /api/kill-llama:
+- Emergency kill for llama-server.
+- Requires db-admin-token (elevated operation).
+- Requires confirmation field: { "confirm": "kill" }.
+- Cooldown: 30 seconds between calls; returns 429 with seconds_remaining if too soon.
+- Example:
+    Request:  { "confirm": "kill" }
+    Success:  { "ok": true }
+    Too soon: { "error": "too soon; please wait", "seconds_remaining": 12 }
+
+## Token Rotation
+
+Route handlers: `src/web/api/tokens.rs`.
+
+All three endpoints require `api-token` and return a 401 if the token is missing or invalid.
+
+### `POST /api/rotate-agent-token`
+Rotates the remote-agent token stored in `UiSettings`. Updates both on-disk and in-memory state, and notifies the agent-poll loop.
+
+Response:
+```json
+{ "ok": true, "message": "Agent token rotated" }
+```
+
+### `POST /api/rotate-api-token`
+Generates a new api-token, writes it to disk (encrypted if configured), and updates the live in-memory value atomically.
+
+Response:
+```json
+{ "ok": true, "message": "API token rotated successfully." }
+```
+
+### `POST /api/rotate-db-admin-token`
+Generates a new db-admin-token, writes it to disk (encrypted if configured), and updates the live in-memory value atomically.
+
+Response:
+```json
+{ "ok": true, "message": "DB admin token rotated successfully." }
+```
+
+## Internal Token Bootstrap
+
+### `GET /api/internal/api-token`
+No authentication header is required.
+
+Returns the api-token for use by the in-browser UI. Access is governed by a bootstrap policy:
+
+- If "No Auth" is configured:
+  - Always allowed (local-first mode).
+- If any auth mode (basic or form) is configured:
+  - Allowed only from:
+    - Same-origin browser requests (via Origin checks), or
+    - Loopback clients (127.0.0.1, localhost, ::1).
+  - Otherwise returns 403.
+
+Response:
+```json
+{ "token": "<api-token>" }
+```
+
+## WebSocket
+
+For realtime metrics and capability pushes, use:
+
+```text
+ws://localhost:7778/ws
+```
+
+Limits:
+- Maximum 50 concurrent connections.
+- Excess connections are rejected with 429 Too Many Requests.
+
+The WebSocket payload includes the following remote-agent fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `remote_agent_connected` | boolean | Agent process is reachable |
+| `remote_agent_health_reachable` | boolean | `/metrics` HTTP call succeeds; independent from `remote_agent_connected` |
+| `remote_agent_protocol_too_old` | boolean | True when agent protocol version is below minimum enforced version |
+| `remote_agent_protocol_version` | string or null | Agent's reported protocol version string |
+
+`remote_agent_health_reachable` is set to true when the `/metrics` HTTP call succeeds and reset to false on disconnect. It is used to detect the firewall-blocked state (agent connected but health unreachable).
+
+On macOS, memory-pressure fields are also emitted when present:
+- `memory_pressure_level`, `memory_free_gb`, `memory_compressor_gb`, `memory_compressed_gb`.
+
+See `docs/reference/realtime-communication.md` and `docs/reference/capabilities.md`.
+
+## Legacy Chat Fields
+
+The project previously used a flat-file chat format. The live SQLite-backed API no longer persists several legacy fields that still appear in old docs, old exports, or migration code.
+
+Not part of the live `ChatTabRow` API:
+- `ai_gender`
+- `role_boundary_custom`
+- `quick_guide_active`
+- `armed_story_beats`
+- `context_custom_sections`
+- `quick_guide_draft`
+
+Not part of the live `MessageRow` API:
+- `thinking_content`
+- `summarized`
+- `dropped_count`
+- `dropped_preview`
+- `tokens_freed_estimate`
+- `ctx_pct_before`
+- `memory_version`
+- `memory_domain`
+- `summary_kind`
+- `compacted_at`
+- `compacted_message_count_total`
+- `recent_tail_kept`
+
+Compatibility note:
+- startup migration from legacy `chat-tabs.json` still reads some of those older fields
+- the live REST persistence API does not return or preserve them
+
+## Errors
+
+Most handlers return JSON error payloads rather than relying on HTTP status alone. Common shapes are:
+
+```json
+{ "ok": false, "error": "Preset not found" }
+```
+
+```json
+{ "error": "No active session" }
+```

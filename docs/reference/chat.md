@@ -554,11 +554,23 @@ Guided-generation settings (`enabled_context_notes`, `enabled_suggestions`, `ena
 
 Purely device-specific presentation choices such as chat style and font scale remain browser-local.
 
+## Backend Layout
+
+Chat-related routes are implemented in `src/web/api/chat/`:
+
+- `stream.rs` — `api_chat`, `api_chat_abort` (SSE relay to `/v1/chat/completions`)
+- `guided.rs` — guided-generation handler and thinking-content stripping
+- `suggestions.rs` — suggestion generation, director cards, keyword extraction
+- `notes.rs` — context-notes analysis and persistence
+- `tabs.rs` — tab CRUD, search, archive/hide/restore helpers
+
+Public API paths are unchanged by internal refactors; only module boundaries moved.
+
 ## Data Flow
 
 ```text
 User message -> /v1/chat/completions (SSE stream) -> Browser renders tokens live
-                                                    -> Chat telemetry updates from live metrics
+                                                     -> Chat telemetry updates from live metrics
 ```
 
 ## Persistence

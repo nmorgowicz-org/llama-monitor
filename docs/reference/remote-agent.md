@@ -2,6 +2,8 @@
 
 The remote agent adds host-level telemetry to remote llama.cpp endpoints. Without it, Llama Monitor can still attach to a remote server and read performance metrics, but GPU, CPU, RAM, and host-health data remain unavailable.
 
+Implementation lives in `src/web/api/remote_agent.rs` (API endpoints) and the agent binary's own codebase. The endpoints are composed into the main router in `src/web/api/mod.rs`.
+
 ## What it adds
 
 When a remote agent is installed and reachable, the dashboard can show:

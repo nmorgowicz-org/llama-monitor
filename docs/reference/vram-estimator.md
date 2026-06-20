@@ -2,6 +2,8 @@
 
 The VRAM estimator (`src/llama/vram_estimator.rs`) predicts GPU memory usage for a given model, quantization, context size, and hardware configuration. It powers the animated VRAM breakdown bar, the auto-size wizard, and the pre-download quant advisor.
 
+Internal routing has been modularized into dedicated API modules (`src/web/api/vram.rs`, etc.), but the estimator's public interface, estimation behavior, and all formulas below remain unchanged.
+
 ![VRAM breakdown bar in the Hardware step](../screenshots/spawn-wizard-step3-vram.png)
 
 ---
@@ -233,6 +235,8 @@ Recommendation thresholds:
 | `Risk` | total ≤ 120% of available VRAM |
 | `WontFit` | total > 120% of available VRAM |
 
+Note: When the result is Tight or Risk and you're on a unified-memory Mac, the preset editor and spawn wizard show an mlock warning. mlock pins model memory so macOS cannot reclaim it; with an already tight estimate, this can push the OS into compression or swap and make the desktop unresponsive.
+
 ### `max_context`
 
 Binary search (sliding-window models) or direct formula (standard):
@@ -367,5 +371,5 @@ When a new architecture is released:
 | `src/llama/vram_estimator.rs` | All estimation logic, `ModelArch`, quant table |
 | `src/llama/spawn_wizard.rs` | `auto_size` orchestration wrapper |
 | `src/llama/gguf_meta.rs` | GGUF metadata reader (feeds ground-truth arch values) |
-| `src/web/api.rs` | `/api/vram/*` route handlers |
+| `src/web/api/vram.rs` | `/api/vram/*` route handlers |
 | `docs/reference/setup-wizard.md` | Wizard UI and API reference; links here for estimation details |

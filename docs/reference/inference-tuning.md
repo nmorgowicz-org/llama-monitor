@@ -446,3 +446,41 @@ Gemma 4 QAT:
 - [Gemma 4 QAT guide (Unsloth)](https://unsloth.ai/docs/models/gemma-4/qat)
 
 Related internal docs: [vram-estimator.md](vram-estimator.md) · [cli-flags.md](cli-flags.md) · [setup-wizard.md](setup-wizard.md)
+
+---
+
+## Monitoring your system under load
+
+### Memory pressure (macOS)
+
+The dashboard includes macOS memory-pressure telemetry (via `vm_stat`):
+
+- **Memory Pressure** sparkline and metric in the system card show:
+  - Free GB, compressor GB, swap activity.
+- A **nav-pill** appears (warning or critical) when:
+  - Free memory < 1.5 GB, or compressor uses ≥ 18% of total RAM → warning
+  - Free memory < 0.5 GB, or compressor uses ≥ 30% of total RAM → critical
+
+If you see memory pressure while running a large model:
+- Reduce context size.
+- Stop active downloads.
+- Disable mlock if enabled so macOS can reclaim model memory instead of compressing/ swapping the entire system.
+- Consider MoE over dense for the same "smartness" with far less decode-time pressure.
+
+### mlock and system responsiveness (macOS)
+
+The preset editor and spawn wizard warn when mlock is enabled and the VRAM estimate is tight.
+
+- mlock pins model memory so the OS cannot page it out. On unified-memory Macs, that removes it from the general pool.
+- If the estimated VRAM usage is already close to your available memory, mlock can push macOS into heavy compression and swap, making the desktop feel unresponsive.
+- Rule of thumb: if the VRAM estimator says Tight/Risk, prefer **no mlock** unless you're doing long, memory-intensive runs and know your system has headroom.
+
+### Sleep modes
+
+The monitoring chip in the top nav supports three modes:
+
+- **Monitoring** – full telemetry active.
+- **Logs only** – only the live log tail is active; GPU, system, and sparkline updates are paused to save resources.
+- **Paused** – all telemetry and logs paused; llama-server keeps running.
+
+Use **Logs only** when you're watching a long generation and want to minimize overhead without losing visibility into the log stream.
