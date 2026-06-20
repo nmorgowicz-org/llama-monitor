@@ -26,7 +26,7 @@ Quick start:
 
 Top nav and Server tab show Speed (throughput), context pressure, connection details, active sessions, and model/runtime details in real time. Local sessions read host telemetry directly; remote sessions gain the same depth via the remote agent.
 
-![Performance & metrics](docs/screenshots/inference-metrics.gif)
+![Performance & metrics](docs/screenshots/performance-metrics.gif)
 
 ### GPU & System Telemetry
 
