@@ -109,9 +109,10 @@ pub fn parse_gguf_filename(filename: &str) -> (Option<String>, Option<String>) {
 
     // Try to find a quant type pattern: Q followed by digits, underscores, and letters
     // Common patterns: Q4_0, Q4_1, Q8_0, Q4_K_M, Q4_K_XL, Q2_K_XL, UD-Q8_K_XL
+    // IQ* patterns: IQ2_XXS, IQ3_M, IQ1_XXS, etc. (llama.cpp importance-matrix quants)
     // Look for the last occurrence of a quant pattern
     let quant_patterns = [
-        "-UD-Q", "-Q", "_Q", // with separator
+        "-UD-Q", "-IQ", "_IQ", "-Q", "_Q", // with separator
     ];
 
     for pattern in &quant_patterns {
@@ -119,8 +120,8 @@ pub fn parse_gguf_filename(filename: &str) -> (Option<String>, Option<String>) {
             let sep_len = pattern.len() - 1; // length of separator before Q
             let quant_start = pos + 1 + sep_len; // skip separator, include Q
             let model_name = &stem[..pos];
-            let quant_str = if pattern.starts_with("-UD-") {
-                // Include "UD-" prefix in quant type
+            let quant_str = if pattern.starts_with("-UD-") || *pattern == "-IQ" || *pattern == "_IQ" {
+                // Include full prefix ("UD-...", "IQ...") in quant type
                 &stem[pos + 1..]
             } else {
                 &stem[quant_start - 1..] // include the Q
@@ -250,7 +251,8 @@ fn is_draft_assistant_filename(name: &str, size_bytes: u64) -> bool {
     let is_unambiguous = name.contains("mtp-draft")
         || name.contains("mtp_small")
         || name.contains("mtp-heads")
-        || name.starts_with("mtp-");
+        || name.starts_with("mtp-")
+        || name.ends_with("-mtp.gguf"); // Unsloth convention
 
     if is_unambiguous {
         // Still reject if the file is clearly a large main model.
@@ -424,6 +426,21 @@ mod tests {
         let (name, quant) = parse_gguf_filename("Qwen3.5-122B-A10B-UD-Q2_K_XL.gguf");
         assert_eq!(name.as_deref(), Some("Qwen3.5-122B-A10B"));
         assert_eq!(quant.as_deref(), Some("UD-Q2_K_XL"));
+    }
+
+    #[test]
+    fn test_parse_iq_quant_variants() {
+        let (name, quant) = parse_gguf_filename("Qwen3-32B-A3B-IQ2_XXS.gguf");
+        assert_eq!(name.as_deref(), Some("Qwen3-32B-A3B"));
+        assert_eq!(quant.as_deref(), Some("IQ2_XXS"));
+
+        let (name2, quant2) = parse_gguf_filename("Llama-3.1-70B-IQ3_M.gguf");
+        assert_eq!(name2.as_deref(), Some("Llama-3.1-70B"));
+        assert_eq!(quant2.as_deref(), Some("IQ3_M"));
+
+        let (name3, quant3) = parse_gguf_filename("Gemma-2-27B-IQ4_XL.gguf");
+        assert_eq!(name3.as_deref(), Some("Gemma-2-27B"));
+        assert_eq!(quant3.as_deref(), Some("IQ4_XL"));
     }
 
     #[test]
