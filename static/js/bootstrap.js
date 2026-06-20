@@ -42,6 +42,7 @@ import { initSpawnWizard } from './features/spawn-wizard.js';
 import { initTunePanel } from './features/tune-panel.js';
 import { initLlamaUpdater } from './features/llama-updater.js';
 import { HF_DISCOVER_CATEGORIES } from './features/hf-browse.js';
+import { initGlobalTooltip } from './core/tooltip.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
@@ -93,6 +94,8 @@ async function initializeApp() {
     } catch {
         // Non-critical: continue without token if fetch fails.
     }
+
+    initGlobalTooltip();
 
     // Phase 1: Initialize rendering functions, then WebSocket.
     initDashboardRender();

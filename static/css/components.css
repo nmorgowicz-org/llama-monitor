@@ -3315,3 +3315,38 @@ button:disabled {
   color: var(--color-error);
   border: 1px solid color-mix(in srgb, var(--color-error) 30%, transparent);
 }
+
+/* ── Global styled tooltip ───────────────────────────────────────────────────
+   Intercepts [title] attrs across the app to show a hovercard matching the
+   guided-hovercard pattern (SUGGESTIONS button, memory pressure chip, etc.).  */
+
+#global-tooltip {
+  position: fixed;
+  z-index: 9100;
+  max-width: 300px;
+  padding: 10px 13px;
+  border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at top left, var(--acc-18, rgba(168, 85, 247, 0.1)), transparent 40%),
+    linear-gradient(180deg, rgba(18, 21, 29, 0.97), rgba(17, 20, 28, 0.94));
+  box-shadow: 0 20px 44px rgba(2, 6, 23, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+[data-theme="light"] #global-tooltip {
+  background:
+    radial-gradient(circle at top left, rgba(124, 58, 237, 0.06), transparent 40%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
+  border-color: rgba(0, 0, 0, 0.09);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  color: var(--color-text-secondary);
+}
