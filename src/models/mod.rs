@@ -108,7 +108,11 @@ pub fn parse_gguf_filename(filename: &str) -> (Option<String>, Option<String>) {
     let stem = strip_split_suffix(stem);
 
     // Normalize spaces before quant-like tokens so "- Q4_K_M" -> "-Q4_K_M"
-    let stem_norm = stem.replace("- ", "-").replace(" -", "-").trim().to_string();
+    let stem_norm = stem
+        .replace("- ", "-")
+        .replace(" -", "-")
+        .trim()
+        .to_string();
     let stem = stem_norm.as_str();
 
     // Try to find a quant type pattern: Q followed by digits, underscores, and letters
@@ -273,13 +277,12 @@ fn format_size(bytes: u64) -> String {
 
 /// Conservative heuristic to detect MTP assistant / draft model files.
 fn is_draft_assistant_filename(name: &str, size_bytes: u64) -> bool {
-    const SMALL_MB: u64 = 3_000_000_000;   // ≤ 3 GB
+    const SMALL_MB: u64 = 3_000_000_000; // ≤ 3 GB
     const MEDIUM_GB: u64 = 5_000_000_000; // ≤ 5 GB
 
     // Unambiguous MTP keywords: larger threshold allowed.
-    let is_unambiguous = name.contains("mtp-draft")
-        || name.contains("mtp_small")
-        || name.contains("mtp-heads");
+    let is_unambiguous =
+        name.contains("mtp-draft") || name.contains("mtp_small") || name.contains("mtp-heads");
     if is_unambiguous && size_bytes <= MEDIUM_GB {
         return true;
     }
@@ -337,8 +340,7 @@ pub fn classify_model(m: &DiscoveredModel) -> ModelClassification {
     // Only mark has_mtp for small-ish models or when is_draft_assistant is set;
     // large models with "mtp" in the name (e.g. Ornstein3.6-27B-MTP) are not MTP assistants.
     let has_mtp = m.is_draft_assistant
-        || ((lower.contains("mtp") || lower.contains("draft"))
-            && m.size_bytes <= 5_000_000_000);
+        || ((lower.contains("mtp") || lower.contains("draft")) && m.size_bytes <= 5_000_000_000);
     let primary_use = detect_primary_use(&lower, is_moe);
 
     ModelClassification {
@@ -701,6 +703,9 @@ mod tests {
             is_draft_assistant: false,
         };
         let c = classify_model(&m);
-        assert!(!c.has_mtp, "large MTP-named model should not be classified as MTP");
+        assert!(
+            !c.has_mtp,
+            "large MTP-named model should not be classified as MTP"
+        );
     }
 }
