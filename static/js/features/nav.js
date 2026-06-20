@@ -267,7 +267,7 @@ function refreshMemoryPressureChip() {
             navPurgeBtn.textContent = 'Requesting…';
             if (statusEl) { statusEl.style.display = ''; statusEl.textContent = 'Waiting for macOS admin dialog…'; }
             try {
-                const res = await fetch('/system/purge', { method: 'POST' });
+                const res = await fetch('/system/purge', { method: 'POST', headers: window.authHeaders ? window.authHeaders() : {} });
                 const data = await res.json();
                 if (statusEl) {
                     statusEl.textContent = data.message || (data.ok ? 'Done.' : 'Failed.');
@@ -453,17 +453,33 @@ export function initNav() {
         collapseBtn.addEventListener('click', toggleSidebarCollapse);
     }
 
-    // Memory pressure chip: click to pin/unpin the hovercard open
+    // Memory pressure chip: hover to preview, click to pin open
     const memChip = document.getElementById('nav-memory-pressure-chip');
     const memHovercard = document.getElementById('nav-memory-pressure-hovercard');
     if (memChip && memHovercard) {
+        let _pinned = false;
+
+        function _openHovercard() { memHovercard.classList.add('mem-pressure-hovercard--open'); }
+        function _closeHovercard() { if (!_pinned) memHovercard.classList.remove('mem-pressure-hovercard--open'); }
+
+        memChip.addEventListener('mouseenter', _openHovercard);
+        memChip.addEventListener('mouseleave', () => { if (!_pinned) setTimeout(() => {
+            if (!memHovercard.matches(':hover')) _closeHovercard();
+        }, 80); });
+
+        memHovercard.addEventListener('mouseenter', _openHovercard);
+        memHovercard.addEventListener('mouseleave', () => { if (!_pinned) _closeHovercard(); });
+
         memChip.addEventListener('click', (e) => {
             e.stopPropagation();
-            memHovercard.classList.toggle('mem-pressure-hovercard--open');
+            _pinned = !_pinned;
+            if (_pinned) _openHovercard();
+            else _closeHovercard();
         });
         document.addEventListener('click', (e) => {
             if (!memChip.contains(e.target) && !memHovercard.contains(e.target)) {
-                memHovercard.classList.remove('mem-pressure-hovercard--open');
+                _pinned = false;
+                _closeHovercard();
             }
         });
     }

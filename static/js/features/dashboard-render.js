@@ -1540,7 +1540,7 @@ async function _triggerMemoryPurge(btnId, statusId, labelId) {
     if (statusEl) { statusEl.style.display = ''; statusEl.textContent = 'Waiting for macOS admin dialog…'; statusEl.className = 'mem-pressure-purge-status'; }
 
     try {
-        const res = await fetch('/system/purge', { method: 'POST' });
+        const res = await fetch('/system/purge', { method: 'POST', headers: window.authHeaders ? window.authHeaders() : {} });
         const data = await res.json();
         const msg = data.message || data.error || (data.ok ? 'Done.' : `Request failed (${res.status}).`);
         if (statusEl) {
@@ -1568,7 +1568,7 @@ async function _renderTopProcesses(containerId) {
     el.textContent = 'Loading…';
     el.className = 'mem-pressure-proc-loading';
     try {
-        const res = await fetch('/system/top-processes');
+        const res = await fetch('/system/top-processes', { headers: window.authHeaders ? window.authHeaders() : {} });
         const procs = await res.json();
         el.textContent = '';
         el.className = '';
