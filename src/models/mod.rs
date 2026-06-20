@@ -107,27 +107,52 @@ pub fn parse_gguf_filename(filename: &str) -> (Option<String>, Option<String>) {
     // Strip split suffix like -00001-of-00003
     let stem = strip_split_suffix(stem);
 
+    // Normalize spaces before quant-like tokens so "- Q4_K_M" -> "-Q4_K_M"
+    let stem_norm = stem.replace("- ", "-").replace(" -", "-").trim().to_string();
+    let stem = stem_norm.as_str();
+
     // Try to find a quant type pattern: Q followed by digits, underscores, and letters
     // Common patterns: Q4_0, Q4_1, Q8_0, Q4_K_M, Q4_K_XL, Q2_K_XL, UD-Q8_K_XL
     // IQ* patterns: IQ2_XXS, IQ3_M, IQ1_XXS, etc. (llama.cpp importance-matrix quants)
+    // Float/full-precision: F16, BF16, F32 (possibly with suffixes like -MTP)
     // Look for the last occurrence of a quant pattern
-    let quant_patterns = [
-        "-UD-Q", "-IQ", "_IQ", "-Q", "_Q", // with separator
-    ];
 
-    for pattern in &quant_patterns {
+    // 1) UD-Q prefix (highest priority)
+    if let Some(pos) = stem.rfind("-UD-Q") {
+        let model_name = &stem[..pos];
+        let quant_str = &stem[pos + 1..]; // includes "UD-Q..."
+        if !model_name.is_empty() && quant_str.len() >= 3 {
+            return (Some(model_name.to_string()), Some(quant_str.to_string()));
+        }
+    }
+
+    // 2) IQ* patterns
+    for pattern in &["-IQ", "_IQ"] {
         if let Some(pos) = stem.rfind(pattern) {
-            let sep_len = pattern.len() - 1; // length of separator before Q
-            let quant_start = pos + 1 + sep_len; // skip separator, include Q
             let model_name = &stem[..pos];
-            let quant_str = if pattern.starts_with("-UD-") || *pattern == "-IQ" || *pattern == "_IQ"
-            {
-                // Include full prefix ("UD-...", "IQ...") in quant type
-                &stem[pos + 1..]
-            } else {
-                &stem[quant_start - 1..] // include the Q
-            };
+            let quant_str = &stem[pos + 1..]; // includes "IQ..."
+            if !model_name.is_empty() && quant_str.len() >= 3 {
+                return (Some(model_name.to_string()), Some(quant_str.to_string()));
+            }
+        }
+    }
 
+    // 3) Q* patterns with separator (-Q or _Q)
+    for pattern in &["-Q", "_Q"] {
+        if let Some(pos) = stem.rfind(pattern) {
+            let model_name = &stem[..pos];
+            let quant_str = &stem[pos + 1..]; // includes "Q..."
+            if !model_name.is_empty() && quant_str.len() >= 3 {
+                return (Some(model_name.to_string()), Some(quant_str.to_string()));
+            }
+        }
+    }
+
+    // 4) F16 / BF16 / F32 (with separator)
+    for pattern in &["-F16", "_F16", "-BF16", "_BF16", "-F32", "_F32"] {
+        if let Some(pos) = stem.rfind(pattern) {
+            let model_name = &stem[..pos];
+            let quant_str = &stem[pos + 1..]; // includes e.g. "F16-MTP"
             if !model_name.is_empty() && quant_str.len() >= 3 {
                 return (Some(model_name.to_string()), Some(quant_str.to_string()));
             }
@@ -248,22 +273,33 @@ fn format_size(bytes: u64) -> String {
 
 /// Conservative heuristic to detect MTP assistant / draft model files.
 fn is_draft_assistant_filename(name: &str, size_bytes: u64) -> bool {
-    // Unambiguous MTP keywords: safe to match even when size is unknown (0).
+    const SMALL_MB: u64 = 3_000_000_000;   // ≤ 3 GB
+    const MEDIUM_GB: u64 = 5_000_000_000; // ≤ 5 GB
+
+    // Unambiguous MTP keywords: larger threshold allowed.
     let is_unambiguous = name.contains("mtp-draft")
         || name.contains("mtp_small")
-        || name.contains("mtp-heads")
-        || name.starts_with("mtp-")
-        || name.ends_with("-mtp.gguf"); // Unsloth convention
-
-    if is_unambiguous {
-        // Still reject if the file is clearly a large main model.
-        return size_bytes == 0 || size_bytes <= 3_000_000_000;
+        || name.contains("mtp-heads");
+    if is_unambiguous && size_bytes <= MEDIUM_GB {
+        return true;
     }
 
-    // Broad keywords require a confirmed, non-zero size to avoid mis-tagging
-    // instruct-tuned main models (e.g. "mistral-7b-assistant-Q2_K.gguf").
-    let is_broad = name.contains("assistant") || name.contains("draft-model");
-    is_broad && size_bytes > 0 && size_bytes <= 3_000_000_000
+    // "mtp-" prefix: only if modest size (avoid tagging large models)
+    if name.starts_with("mtp-") && size_bytes <= MEDIUM_GB {
+        return true;
+    }
+
+    // Unsloth "-mtp.gguf" suffix: small threshold only
+    if name.ends_with("-mtp.gguf") && size_bytes <= SMALL_MB {
+        return true;
+    }
+
+    // Broad keywords require confirmed, non-zero size and small file.
+    let is_broad = name.contains("mtp")
+        || name.contains("draft")
+        || name.contains("assistant")
+        || name.contains("draft-model");
+    is_broad && size_bytes > 0 && size_bytes <= SMALL_MB
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -298,7 +334,11 @@ pub fn classify_model(m: &DiscoveredModel) -> ModelClassification {
         || lower.contains("qwen3.6")
         || lower.contains("qwen35")
         || lower.contains("qwen36");
-    let has_mtp = lower.contains("mtp") || lower.contains("draft");
+    // Only mark has_mtp for small-ish models or when is_draft_assistant is set;
+    // large models with "mtp" in the name (e.g. Ornstein3.6-27B-MTP) are not MTP assistants.
+    let has_mtp = m.is_draft_assistant
+        || ((lower.contains("mtp") || lower.contains("draft"))
+            && m.size_bytes <= 5_000_000_000);
     let primary_use = detect_primary_use(&lower, is_moe);
 
     ModelClassification {
@@ -573,5 +613,94 @@ mod tests {
     fn test_classify_primary_use_vision() {
         let c = classify_model(&make_model("VisionModel-VL-7B-Q4_0", 7.0));
         assert!(c.primary_use.contains(&"vision".to_string()));
+    }
+
+    #[test]
+    fn test_parse_f16_quant() {
+        let (name, quant) = parse_gguf_filename("gemma-4-26B-A4B-it-F16-MTP.gguf");
+        assert_eq!(name.as_deref(), Some("gemma-4-26B-A4B-it"));
+        assert_eq!(quant.as_deref(), Some("F16-MTP"));
+    }
+
+    #[test]
+    fn test_parse_bf16_quant() {
+        let (name, quant) = parse_gguf_filename("model-BF16.gguf");
+        assert_eq!(name.as_deref(), Some("model"));
+        assert_eq!(quant.as_deref(), Some("BF16"));
+    }
+
+    #[test]
+    fn test_parse_f32_quant() {
+        let (name, quant) = parse_gguf_filename("model-F32.gguf");
+        assert_eq!(name.as_deref(), Some("model"));
+        assert_eq!(quant.as_deref(), Some("F32"));
+    }
+
+    #[test]
+    fn test_parse_underscore_f16_quant() {
+        let (name, quant) = parse_gguf_filename("model_F16.gguf");
+        assert_eq!(name.as_deref(), Some("model"));
+        assert_eq!(quant.as_deref(), Some("F16"));
+    }
+
+    #[test]
+    fn test_parse_space_before_quant() {
+        // Ornstein-style: "MTP- Q4_K_M" with space before quant
+        let (name, quant) =
+            parse_gguf_filename("Ornstein3.6-27B-MTP-NSC-ACE-SABER-MTP- Q4_K_M.gguf");
+        assert_eq!(
+            name.as_deref(),
+            Some("Ornstein3.6-27B-MTP-NSC-ACE-SABER-MTP")
+        );
+        assert_eq!(quant.as_deref(), Some("Q4_K_M"));
+    }
+
+    #[test]
+    fn test_draft_assistant_large_mtp_model() {
+        // 15.7 GB with MTP in name should NOT be labeled as MTP/draft
+        assert!(!is_draft_assistant_filename(
+            "ornstein3.6-27b-mtp-nsc-ace-saber-mtp-q4_k_m.gguf",
+            15_700_000_000
+        ));
+    }
+
+    #[test]
+    fn test_draft_assistant_small_mtp_model() {
+        // 815 MB with MTP should be labeled MTP
+        assert!(is_draft_assistant_filename(
+            "mtp-draft-3b-q4_k_m.gguf",
+            815_000_000
+        ));
+    }
+
+    #[test]
+    fn test_draft_assistant_unsloth_mtp() {
+        // Unsloth convention: "-mtp.gguf" suffix, small model
+        assert!(is_draft_assistant_filename(
+            "qwen3-8b-instruct-mtp.gguf",
+            2_500_000_000
+        ));
+    }
+
+    #[test]
+    fn test_classify_large_model_no_mtp() {
+        // Large model with MTP in name should not get has_mtp
+        let m = DiscoveredModel {
+            path: std::path::PathBuf::from("/tmp/test.gguf"),
+            filename: "Ornstein3.6-27B-MTP-Q4_K_M.gguf".into(),
+            size_bytes: 15_700_000_000,
+            size_display: "14.6 GB".into(),
+            quant_type: Some("Q4_K_M".into()),
+            model_name: Some("Ornstein3.6-27B-MTP".into()),
+            is_split: false,
+            param_b: Some(27.0),
+            vram_est_gb: Some(16.0),
+            quant_style: Some("standard"),
+            last_modified: 0,
+            is_mmproj: false,
+            is_draft_assistant: false,
+        };
+        let c = classify_model(&m);
+        assert!(!c.has_mtp, "large MTP-named model should not be classified as MTP");
     }
 }

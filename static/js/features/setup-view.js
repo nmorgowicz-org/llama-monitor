@@ -99,6 +99,7 @@ export async function fetchAndRenderMemoryBar() {
         ]);
 
         let totalBytes = 0;
+        let ramUsedBytes = 0;
         let metalGpuLimitMb = 0;
         let isUnified = false;
         let vramUsedBytes = 0;
@@ -106,6 +107,7 @@ export async function fetchAndRenderMemoryBar() {
         if (sysResp.ok) {
             const d = await sysResp.json();
             totalBytes = (d.ram_total_gb || 0) * 1024 ** 3;
+            ramUsedBytes = (d.ram_used_gb || 0) * 1024 ** 3;
         }
 
         if (gpuResp.ok) {
@@ -142,17 +144,23 @@ export async function fetchAndRenderMemoryBar() {
 
         let availBytes, fillPct, availLabel, totalLabel;
 
+        let vramEstimateBytes;
         if (isUnified) {
             const cap = _metalCap(totalBytes, metalGpuLimitMb);
             availBytes = Math.max(0, Math.min(cap, totalBytes) - _MEM_OS_RESERVE);
             fillPct = Math.round((availBytes / totalBytes) * 100);
             availLabel = _fmtGb(availBytes) + ' GB available for inference';
             totalLabel = _fmtGb(totalBytes) + ' GB unified';
+            // Card estimates use current free RAM so high system load shows as risk
+            vramEstimateBytes = ramUsedBytes > 0
+                ? Math.max(0, Math.min(cap, totalBytes - ramUsedBytes) - _MEM_OS_RESERVE)
+                : availBytes;
         } else {
             availBytes = Math.max(0, totalBytes - vramUsedBytes);
             fillPct = Math.round((availBytes / totalBytes) * 100);
             availLabel = _fmtGb(availBytes) + ' GB VRAM free';
             totalLabel = _fmtGb(totalBytes) + ' GB total';
+            vramEstimateBytes = availBytes;
         }
 
         const fill = document.getElementById('setup-mem-bar-fill');
@@ -164,7 +172,7 @@ export async function fetchAndRenderMemoryBar() {
         bar.style.display = '';
 
         _memState = { availBytes, isUnified };
-        _fetchCardVramEstimates(availBytes, isUnified);
+        _fetchCardVramEstimates(vramEstimateBytes, isUnified);
     } catch {
         // leave bar hidden if metrics unavailable
     }

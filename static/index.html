@@ -121,10 +121,16 @@
                     <span class="status-dot ok" id="nav-monitoring-dot"></span>
                     <span id="nav-monitoring-label">Monitoring</span>
                 </button>
-                <button class="nav-monitoring-chip memory-pressure-chip" id="nav-memory-pressure-chip" type="button" title="System memory pressure" style="display:none;">
-                    <span class="status-dot warning" id="nav-memory-pressure-dot"></span>
-                    <span id="nav-memory-pressure-label">Memory</span>
-                </button>
+                <div class="mem-pressure-wrap" id="nav-memory-pressure-wrap" style="display:none;">
+                    <button class="nav-monitoring-chip memory-pressure-chip" id="nav-memory-pressure-chip" type="button">
+                        <span class="status-dot warning" id="nav-memory-pressure-dot"></span>
+                        <span id="nav-memory-pressure-label">Memory</span>
+                    </button>
+                    <div class="mem-pressure-hovercard" id="nav-memory-pressure-hovercard">
+                        <div class="mem-pressure-hovercard-title" id="nav-memory-pressure-hovercard-title">Memory Pressure</div>
+                        <div class="mem-pressure-hovercard-body" id="nav-memory-pressure-hovercard-body"></div>
+                    </div>
+                </div>
                 <span class="status-dot" id="status-dot"></span>
                 <span class="status-text" id="status-text"></span>
                 <span class="badge-server" id="badge-server"></span>
@@ -2861,7 +2867,7 @@
                         <div class="pe-section-body">
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
-<label class="pe-label" for="modal-threads" title="CPU threads for token generation. On Apple Silicon use P-core count (e.g. 6 on M5 Max) — using all cores includes slow E-cores. On discrete GPUs the GPU does matrix ops so a low value (4–8) is usually enough. Use -1 or leave blank for llama-server default.">Threads (-t)</label>
+<label class="pe-label" for="modal-threads" title="CPU threads for token generation. On Apple Silicon use 1 — Metal GPU handles matrix ops so extra threads add contention without benefit. On discrete GPUs a low value (4–8) is usually enough. Use -1 or leave blank for llama-server default.">Threads (-t)</label>
                                      <input type="number" class="pe-input" id="modal-threads" placeholder="auto (-1 or blank)">
                                 </div>
                                 <div class="pe-field">

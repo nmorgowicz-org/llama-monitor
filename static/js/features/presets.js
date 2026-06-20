@@ -2044,13 +2044,13 @@ function _refreshPresetThreadsHints() {
   const hintEl = document.getElementById('preset-threads-hint');
   if (pCores > 0 && metricsReady) {
     if (threadsInput && !threadsInput.value) {
-      threadsInput.placeholder = `${pCores} recommended`;
+      threadsInput.placeholder = '1 recommended';
     }
     if (batchThreadsInput && !batchThreadsInput.value) {
       batchThreadsInput.placeholder = `${pCores} recommended`;
     }
     if (hintEl && _presetIsUnified) {
-      hintEl.textContent = `Apple Silicon: set both to your P-core count (${pCores}). GPU handles matrix ops; threads affect prefill speed and sampling overhead.`;
+      hintEl.textContent = `Apple Silicon: threads = 1 (Metal GPU handles inference), threads-batch = ${pCores} (P-cores for faster prefill).`;
       hintEl.style.display = '';
     }
   } else {

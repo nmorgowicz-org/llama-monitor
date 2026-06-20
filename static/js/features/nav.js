@@ -197,12 +197,14 @@ function refreshMonitoringChip(mode, isManual, hasActiveEndpoint) {
 }
 
 function refreshMemoryPressureChip() {
+    const wrap = document.getElementById('nav-memory-pressure-wrap');
     const chip = document.getElementById('nav-memory-pressure-chip');
     if (!chip) return;
     const sys = lastSystemMetrics || {};
     const level = sys.memory_pressure_level || '';
     const visible = level === 'warning' || level === 'critical';
-    chip.style.display = visible ? 'inline-flex' : 'none';
+    if (wrap) wrap.style.display = visible ? 'inline-flex' : 'none';
+    else chip.style.display = visible ? 'inline-flex' : 'none';
     if (!visible) return;
 
     const dot = document.getElementById('nav-memory-pressure-dot');
@@ -212,7 +214,14 @@ function refreshMemoryPressureChip() {
 
     const free = Number(sys.memory_free_gb || 0).toFixed(1);
     const compressed = Number(sys.memory_compressor_gb || 0).toFixed(1);
-    chip.setAttribute('title', `${free} GB free · ${compressed} GB compressed. Reduce context, stop downloads, or disable mlock if macOS feels unresponsive.`);
+    const isCritical = level === 'critical';
+
+    const hcTitle = document.getElementById('nav-memory-pressure-hovercard-title');
+    const hcBody = document.getElementById('nav-memory-pressure-hovercard-body');
+    if (hcTitle) hcTitle.textContent = isCritical ? 'Memory Critical' : 'Memory Pressure';
+    if (hcBody) {
+        hcBody.textContent = `${free} GB free · ${compressed} GB compressed. Reduce context, pause downloads, or disable mlock in your preset to relieve pressure.`;
+    }
 }
 
 export function refreshTopCockpit() {

@@ -189,20 +189,30 @@ function isMmproj(m) {
 }
 
 function isDraftModel(m) {
+    // Trust the backend's is_draft_assistant (size-guarded).
+    // Fallback: quick client-side check using same logic as backend.
+    if (m.is_draft_assistant !== undefined) return m.is_draft_assistant;
     const f = (m.filename || '').toLowerCase();
-    // Explicit draft model keywords — includes Unsloth's `-MTP.gguf` naming convention
     const hasKeyword =
-        f.includes('assistant') ||
         f.includes('mtp-draft') ||
-        f.includes('draft-model') ||
         f.includes('mtp_small') ||
         f.includes('mtp-heads') ||
         f.startsWith('mtp-') ||
         f.endsWith('-mtp.gguf') ||
-        f.includes('/mtp/');
-    // Exclude huge files that are likely main models
+        f.includes('mtp') ||
+        f.includes('draft') ||
+        f.includes('assistant') ||
+        f.includes('draft-model');
     const size = m.size_bytes || 0;
-    return hasKeyword && size <= 3_000_000_000;
+    // Same tiered thresholds as backend:
+    const isUnambiguous =
+        f.includes('mtp-draft') ||
+        f.includes('mtp_small') ||
+        f.includes('mtp-heads') ||
+        (f.startsWith('mtp-') && size <= 5_000_000_000);
+    if (isUnambiguous && size <= 5_000_000_000) return true;
+    if (hasKeyword && size > 0 && size <= 3_000_000_000) return true;
+    return false;
 }
 
 function applyFilters(models) {
@@ -366,8 +376,8 @@ function buildModelCard(m) {
     if (metaText) meta.title = metaText;
     card.appendChild(meta);
 
-    // Stats row: size, VRAM, and tag pills all in one row
-    if (size || vramEst || tags.length > 0) {
+    // Stats row: size, tag pills (always include if any)
+    if (size || tags.length > 0) {
         const stats = document.createElement('div');
         stats.className = 'mm-card-stats';
         if (size) {
@@ -375,12 +385,6 @@ function buildModelCard(m) {
             sizeEl.className = 'mm-stat';
             sizeEl.textContent = size;
             stats.appendChild(sizeEl);
-        }
-        if (vramEst) {
-            const vramEl = document.createElement('span');
-            vramEl.className = 'mm-stat mm-stat-vram';
-            vramEl.textContent = 'VRAM ~' + vramEst;
-            stats.appendChild(vramEl);
         }
         tags.forEach(tag => {
             const pill = document.createElement('span');
@@ -396,7 +400,18 @@ function buildModelCard(m) {
         card.appendChild(stats);
     }
 
-    // VRAM bar
+    // VRAM estimate: always show when available, regardless of presets.
+    if (vramEst) {
+        const vramEl = document.createElement('div');
+        vramEl.className = 'mm-card-stats';
+        const vramSpan = document.createElement('span');
+        vramSpan.className = 'mm-stat mm-stat-vram';
+        vramSpan.textContent = 'VRAM ~' + vramEst;
+        vramEl.appendChild(vramSpan);
+        card.appendChild(vramEl);
+    }
+
+    // VRAM bar: always show when available, regardless of presets.
     if (vramPct !== null) {
         const barWrap = document.createElement('div');
         barWrap.className = 'mm-vram-bar';
