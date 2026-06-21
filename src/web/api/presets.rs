@@ -122,7 +122,24 @@ fn api_update_preset(
                 }
                 updated.id = id.clone();
 
-                // Populate GGUF metadata if model_path changed/exists
+                // If model_path changed, reset GGUF-derived fields so we refresh from new file.
+                let previous_model_path = {
+                    let presets_guard = state.presets.lock().unwrap();
+                    presets_guard
+                        .iter()
+                        .find(|p| p.id == id)
+                        .map(|p| p.model_path.clone())
+                };
+
+                // Reset GGUF metadata if model_path changed so we refresh from new file
+                if Some(updated.model_path.trim().to_string()) != previous_model_path {
+                    updated.gguf_architecture = None;
+                    updated.param_count = None;
+                    updated.family = None;
+                    updated.size_class = None;
+                }
+
+                // Populate/refresh GGUF metadata if model_path is set and fields incomplete.
                 presets::ensure_gguf_metadata(&mut updated);
 
                 let mut presets = state.presets.lock().unwrap();
