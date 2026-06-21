@@ -192,6 +192,16 @@ Response on failure:
 
 The endpoint refuses to overwrite the binary while a local llama-server is running. After a successful install the frontend attempts to restart the server automatically.
 
+### Llama-monitor Updates
+
+Llama Monitor can also update itself (separate from llama.cpp) via an in-app mechanism.
+
+- On startup the app checks for a newer llama-monitor release and shows an in-app prompt if one is available.
+- **Update & Restart** is handled in-app; no manual download is required.
+- **Windows**: seamless in-place update followed by automatic restart.
+- **macOS (Apple Silicon) / Linux**: the app shuts down, applies the update, and restarts via a helper process. If it does not restart automatically, relaunch once.
+- **Intel Mac (x86_64)**: no in-app update; you must fetch the new binary manually from GitHub Releases.
+
 ## Benchmark
 
 The Benchmark feature runs a live throughput test against the active llama-server, grades the result, and returns actionable tuning suggestions. Access it through the **Tune** button in the Server tab header.

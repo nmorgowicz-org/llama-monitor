@@ -97,6 +97,9 @@ function _resetUpdateBtn(btn) {
     btn.disabled = false;
     btn.dataset.state = '';
     btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg> Update & Restart`;
+    // Clear any prior error/status banner when reopening release notes
+    const banner = document.getElementById('release-notes-error-banner');
+    if (banner) banner.remove();
 }
 
 function closeReleaseNotes() {
@@ -188,10 +191,10 @@ async function triggerSelfUpdate() {
         if (isAuthError) {
             banner.textContent =
                 'The update was blocked (likely a permission issue). You may need to run llama-monitor as administrator once.';
-            btn.innerHTML = `${msgPlain} — retry?`;
+            btn.textContent = `${msgPlain} — retry?`;
         } else {
             banner.textContent = msgPlain;
-            btn.innerHTML = 'Retry update';
+            btn.textContent = 'Retry update';
         }
     }
 }

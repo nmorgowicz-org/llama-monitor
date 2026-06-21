@@ -122,6 +122,14 @@ cd llama-monitor
 cargo build --release
 ```
 
+## Updating
+
+Llama Monitor includes in-app updates via the dashboard (Settings or header update prompt). No manual download is required.
+
+- On Windows, the update is seamless: the app restarts automatically with the new version.
+- On macOS (Apple Silicon) and Linux, the app briefly shuts down and restarts; if it does not restart on its own, relaunch once.
+- On Intel Mac (x86_64), in-app updates are not available; download the latest binary manually from GitHub Releases.
+
 ## Documentation
 
 - [Dashboard Capabilities](docs/reference/dashboard.md) — Monitoring, telemetry, refresh behavior

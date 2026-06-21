@@ -2327,13 +2327,27 @@ Response:
 
 ## Self-Update
 
-Route handlers: `src/web/api/self_update.rs`.
+Route handlers: `src/web/api/self_update.rs`, `src/agent.rs` (`self_update_binary`).
 
-POST /api/self-update:
-- Requires db-admin-token (elevated operation).
-- Requires explicit confirmation: { "confirm": "update" }.
-- Cooldown: 5 minutes between calls; returns 429 with seconds_remaining if too soon.
-- On success, schedules exit(0); OS/user must relaunch.
+### `POST /api/self-update`
+
+- Auth: requires `db-admin-token` (elevated operation).
+- Body: { "confirm": "update" }.
+- Cooldown: 5 minutes between calls; returns 429 with `seconds_remaining` if too soon.
+- Behavior:
+  - Fetches the latest release from GitHub and downloads the matching platform asset.
+  - Replaces the running binary in-place.
+  - Schedules exit(0) after a short delay, then performs an auto-restart using:
+    - On Windows: a detached batch helper that waits for the old process to exit, copies the new binary into place, and relaunches it.
+    - On Unix (macOS Apple Silicon, Linux): a detached shell launcher that restarts the new binary shortly after the old process exits.
+  - If auto-restart fails for any reason, the user must manually relaunch.
+- No signature or integrity check is performed; trust relies on HTTPS transport and the db-admin-token.
+- Supported self-update targets:
+  - macOS aarch64 (Apple Silicon only)
+  - Linux x86_64
+  - Linux aarch64
+  - Windows x86_64
+
 - Example request:
     { "confirm": "update" }
 - Example success:

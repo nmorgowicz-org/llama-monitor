@@ -106,6 +106,24 @@ jobs:
           merge-multiple: true
           path: .
 
+      - name: Generate SHA-256 checksums
+        run: |
+          VERSION="${{ github.event_name == 'release' && github.ref_name || github.event.inputs.tag_name }}"
+          JSON='{"version":"'${VERSION}'","checksums":{}}'
+          for f in \
+            llama-monitor-linux-x86_64 \
+            llama-monitor-linux-aarch64 \
+            llama-monitor-windows-x86_64.zip \
+            llama-monitor-macos-aarch64.tar.gz; do
+            if [ -f "$f" ]; then
+              H=$(sha256sum "$f" | awk '{print $1}')
+              JSON=$(echo "$JSON" | jq --arg n "$f" --arg h "$H" \
+                '.checksums[$n] = $h')
+            fi
+          done
+          echo "$JSON" | jq . > checksums.json
+          cat checksums.json
+
       - name: Update published release with artifacts
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
@@ -117,6 +135,7 @@ jobs:
             llama-monitor-linux-aarch64
             llama-monitor-windows-x86_64.zip
             llama-monitor-macos-aarch64.tar.gz
+            checksums.json
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
@@ -131,5 +150,6 @@ jobs:
             llama-monitor-linux-aarch64
             llama-monitor-windows-x86_64.zip
             llama-monitor-macos-aarch64.tar.gz
+            checksums.json
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
