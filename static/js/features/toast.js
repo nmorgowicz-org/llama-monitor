@@ -179,3 +179,198 @@ export function initToast() {
         }
     });
 }
+
+/**
+ * Minimal confirmation dialog matching app style.
+ * Returns true if user confirmed.
+ */
+export async function showConfirmDialog(title, message, confirmLabel = 'Confirm') {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '2000';
+    overlay.style.display = 'grid';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'modal';
+    dialog.style.width = '420px';
+    dialog.style.padding = '14px 16px';
+
+    const titleEl = document.createElement('div');
+    titleEl.style.fontSize = '15px';
+    titleEl.style.fontWeight = '600';
+    titleEl.style.marginBottom = '8px';
+    titleEl.textContent = title;
+
+    const msgEl = document.createElement('div');
+    msgEl.style.fontSize = '13px';
+    msgEl.style.color = 'var(--color-text-muted)';
+    msgEl.style.marginBottom = '12px';
+    msgEl.textContent = message;
+
+    const actions = document.createElement('div');
+    actions.style.display = 'flex';
+    actions.style.justifyContent = 'flex-end';
+    actions.style.gap = '8px';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn btn-modal-cancel';
+    cancelBtn.textContent = 'Cancel';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'btn btn-modal-save';
+    confirmBtn.textContent = confirmLabel;
+
+    return new Promise(resolve => {
+        let decided = false;
+
+        function cleanup() {
+            if (overlay.parentElement) overlay.remove();
+        }
+
+        cancelBtn.addEventListener('click', () => {
+            if (decided) return;
+            decided = true;
+            cleanup();
+            resolve(false);
+        });
+
+        confirmBtn.addEventListener('click', () => {
+            if (decided) return;
+            decided = true;
+            cleanup();
+            resolve(true);
+        });
+
+        overlay.addEventListener('click', (e) => {
+            if (decided) return;
+            if (e.target === overlay) {
+                decided = true;
+                cleanup();
+                resolve(false);
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !decided) {
+                decided = true;
+                cleanup();
+                resolve(false);
+            }
+        });
+
+        actions.appendChild(cancelBtn);
+        actions.appendChild(confirmBtn);
+        dialog.appendChild(titleEl);
+        dialog.appendChild(msgEl);
+        dialog.appendChild(actions);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        confirmBtn.focus();
+    });
+}
+
+/**
+ * Minimal text prompt dialog matching app style.
+ * Returns user text or null if cancelled.
+ */
+export async function showPromptDialog(title, message, defaultValue = '') {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '2000';
+    overlay.style.display = 'grid';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'modal';
+    dialog.style.width = '420px';
+    dialog.style.padding = '14px 16px';
+
+    const titleEl = document.createElement('div');
+    titleEl.style.fontSize = '15px';
+    titleEl.style.fontWeight = '600';
+    titleEl.style.marginBottom = '8px';
+    titleEl.textContent = title;
+
+    const msgEl = document.createElement('div');
+    msgEl.style.fontSize = '13px';
+    msgEl.style.color = 'var(--color-text-muted)';
+    msgEl.style.marginBottom = '10px';
+    msgEl.textContent = message;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = defaultValue;
+    input.style.width = '100%';
+    input.style.boxSizing = 'border-box';
+    input.style.padding = '8px 10px';
+    input.style.marginBottom = '12px';
+    input.style.borderRadius = '999px';
+    input.style.border = '1px solid var(--border-subtle)';
+    input.style.background = 'var(--color-bg-surface)';
+    input.style.color = 'var(--color-text-primary)';
+    input.style.fontSize = '14px';
+    input.style.outline = 'none';
+
+    const actions = document.createElement('div');
+    actions.style.display = 'flex';
+    actions.style.justifyContent = 'flex-end';
+    actions.style.gap = '8px';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn btn-modal-cancel';
+    cancelBtn.textContent = 'Cancel';
+
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.className = 'btn btn-modal-save';
+    okBtn.textContent = 'OK';
+
+    return new Promise(resolve => {
+        let decided = false;
+
+        function cleanup() {
+            if (overlay.parentElement) overlay.remove();
+        }
+
+        function handleCancel() {
+            if (decided) return;
+            decided = true;
+            cleanup();
+            resolve(null);
+        }
+
+        function handleOk() {
+            if (decided) return;
+            decided = true;
+            cleanup();
+            resolve(input.value === '' ? null : input.value);
+        }
+
+        cancelBtn.addEventListener('click', handleCancel);
+        okBtn.addEventListener('click', handleOk);
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') handleOk();
+        });
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) handleCancel();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') handleCancel();
+        });
+
+        actions.appendChild(cancelBtn);
+        actions.appendChild(okBtn);
+        dialog.appendChild(titleEl);
+        dialog.appendChild(msgEl);
+        dialog.appendChild(input);
+        dialog.appendChild(actions);
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        input.focus();
+        input.select();
+    });
+}

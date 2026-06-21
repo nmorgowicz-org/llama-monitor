@@ -4,7 +4,7 @@
 import { setupViewState, chat, sessionState } from '../core/app-state.js';
 import { doAttachFromSetup } from './attach-detach.js';
 import { escapeHtml } from '../core/format.js';
-import { showToast } from './toast.js';
+import { showToast, showConfirmDialog } from './toast.js';
 
 // ── Model / preset classification (mirrors backend) ───────────────────────────
 
@@ -619,7 +619,12 @@ function _buildLaunchCard(preset, activePresetId) {
 
         card.querySelector('.launch-card-btn-trash').addEventListener('click', async (e) => {
             e.stopPropagation();
-            if (!confirm(`Delete preset "${escapeHtml(preset.name)}"? This cannot be undone.`)) return;
+            const ok = await showConfirmDialog(
+                'Delete preset',
+                `Delete preset "${escapeHtml(preset.name)}"? This cannot be undone.`,
+                'Delete'
+            );
+            if (!ok) return;
             try {
                 const headers = window.authHeaders ? window.authHeaders() : {};
                 const resp = await fetch(`/api/presets/${preset.id}`, { method: 'DELETE', headers });

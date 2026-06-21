@@ -2,6 +2,7 @@
 // Renders and manages the left session panel inside #page-chat.
 // Activated when the Chat nav item is selected; hidden otherwise.
 
+import { showPromptDialog } from './toast.js';
 import { chat } from '../core/app-state.js';
 import { switchChatTab, closeChatTab, addChatTab, renameChatTab,
           togglePinTab, activeChatTab, archiveChatTab, hideChatTab, restoreChatTab, setChatTabVisibility,
@@ -705,10 +706,10 @@ function _showContextMenu(tab, anchorEl) {
         el.className = 'csp-context-menu-item' + (item.danger ? ' danger' : '');
         el.textContent = item.label;
         el.setAttribute('role', 'menuitem');
-        el.addEventListener('click', (e) => {
+        el.addEventListener('click', async (e) => {
             e.stopPropagation();
             _dismissContextMenu();
-            _handleContextAction(tab, item.action);
+            await _handleContextAction(tab, item.action);
         });
         menu.appendChild(el);
     }
@@ -740,7 +741,7 @@ function _dismissContextMenu() {
     _activeMenu = null;
 }
 
-function _handleContextAction(tab, action) {
+async function _handleContextAction(tab, action) {
     switch (action) {
         case 'restore':
             restoreChatTab(tab.id);
@@ -759,7 +760,7 @@ function _handleContextAction(tab, action) {
             renderChatSessionsSidebar();
             break;
         case 'rename': {
-            const newName = prompt('Rename conversation:', tab.name);
+            const newName = await showPromptDialog('Rename conversation', 'Enter a new name:', tab.name);
             if (newName && newName.trim()) {
                 renameChatTab(tab.id, newName.trim());
                 renderChatSessionsSidebar();

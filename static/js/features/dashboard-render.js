@@ -1373,8 +1373,10 @@ function renderSystemCard(sys, visible, grade) {
         var bkWired = document.getElementById('sys-pressure-wired');
         var bkComp = document.getElementById('sys-pressure-compressed');
         var bkPurg = document.getElementById('sys-pressure-purgeable');
+        var bkInact = document.getElementById('sys-pressure-inactive');
         var wiredGb = sys.memory_wired_gb || 0;
         var purgeableGb = sys.memory_purgeable_gb || 0;
+        var inactiveGb = sys.memory_inactive_gb || 0;
         if (bkFree) bkFree.textContent = sys.memory_free_gb > 0 ? sys.memory_free_gb.toFixed(1) + ' GB' : '—';
         if (bkWired) {
             bkWired.textContent = wiredGb > 0 ? wiredGb.toFixed(1) + ' GB' : '—';
@@ -1385,6 +1387,9 @@ function renderSystemCard(sys, visible, grade) {
             : '—';
         if (bkPurg) bkPurg.textContent = purgeableGb > 0
             ? purgeableGb.toFixed(1) + ' GB'
+            : '—';
+        if (bkInact) bkInact.textContent = inactiveGb > 0
+            ? inactiveGb.toFixed(1) + ' GB'
             : '—';
 
         // Keep the old pressureVal for tooltip accessibility but hide the element

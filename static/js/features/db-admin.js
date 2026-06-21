@@ -1,6 +1,8 @@
 // Database Administration Panel
 // Premium modal with tabs for maintenance, backups, indexes, repair, and query
 
+import { showConfirmDialog } from './toast.js';
+
 const dbAdminLog = [];
 let dbAdminOverlay = null;
 let dbAdminToken = null;
@@ -459,7 +461,12 @@ async function handleRebuildAllIndexes() {
 
 // Repair operations
 async function handleRepairIndexes() {
-    if (!confirm('This will drop and recreate all indexes. Continue?')) return;
+    const ok1 = await showConfirmDialog(
+        'Rebuild indexes',
+        'This will drop and recreate all indexes. Continue?',
+        'Rebuild'
+    );
+    if (!ok1) return;
 
     addLogEntry('info', 'Repairing indexes...');
     setButtonLoading('db-btn-repair-indexes', true);
@@ -509,7 +516,12 @@ async function handleRepairIndexes() {
 }
 
 async function handleRepairCompact() {
-    if (!confirm('This will compact the database. The app may be unresponsive during this operation. Continue?')) return;
+    const ok1 = await showConfirmDialog(
+        'Compact database',
+        'This will compact the database. The app may be unresponsive during this operation. Continue?',
+        'Compact'
+    );
+    if (!ok1) return;
 
     addLogEntry('info', 'Compacting database...');
     setButtonLoading('db-btn-repair-compact', true);
@@ -559,7 +571,12 @@ async function handleRepairCompact() {
 }
 
 async function handleRepairEmergency() {
-    if (!confirm('EMERGENCY RECOVERY: This attempts to recover data from a corrupted database. A backup will be created first. Continue?')) return;
+    const ok1 = await showConfirmDialog(
+        'Emergency recovery',
+        'EMERGENCY RECOVERY: This attempts to recover data from a corrupted database. A backup will be created first. Continue?',
+        'Recover'
+    );
+    if (!ok1) return;
 
     addLogEntry('warning', 'Starting emergency recovery...');
     setButtonLoading('db-btn-repair-emergency', true);
@@ -661,7 +678,12 @@ async function handleQuery() {
 
 // Global functions for inline handlers
 window.restoreBackup = async function(name) {
-    if (!confirm(`Restore from backup "${name}"? Current data will be replaced.`)) return;
+    const ok1 = await showConfirmDialog(
+        'Restore from backup',
+        `Restore from backup "${name}"? Current data will be replaced.`,
+        'Restore'
+    );
+    if (!ok1) return;
 
     addLogEntry('warning', `Restoring from ${name}...`);
     try {
@@ -691,7 +713,12 @@ window.restoreBackup = async function(name) {
 };
 
 window.deleteBackup = async function(name) {
-    if (!confirm(`Delete backup "${name}"?`)) return;
+    const ok1 = await showConfirmDialog(
+        'Delete backup',
+        `Delete backup "${name}"?`,
+        'Delete'
+    );
+    if (!ok1) return;
 
     try {
         await ensureDbAdminToken();

@@ -6,7 +6,7 @@ import { sessionState, lastSystemMetrics } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { openModelFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
 import { applySettings, saveSettings } from './settings.js';
-import { showToast, showToastWithActions } from './toast.js';
+import { showToast, showToastWithActions, showConfirmDialog } from './toast.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune } from './tuning-cards.js';
 import {
     COMMUNITY_TEMPLATES,
@@ -1125,17 +1125,31 @@ function _renderPresetsPanel() {
         delBtn.textContent = '✕';
         delBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            if (!confirm(`Delete preset "${preset.name}"?`)) return;
-            try {
-                const headers = window.authHeaders ? { ...window.authHeaders() } : {};
-                const resp = await fetch(`/api/presets/${preset.id}`, { method: 'DELETE', headers });
-                if (resp.ok) {
-                    await loadPresets();
-                    _renderPresetsPanel();
-                }
-            } catch (err) {
-                console.error('Delete preset failed:', err);
-            }
+            showToastWithActions(
+                'Delete preset',
+                'warning',
+                `Delete "${preset.name}"? This cannot be undone.`,
+                [
+                    { id: 'cancel', label: 'Cancel', primary: false },
+                    {
+                        id: 'delete',
+                        label: 'Delete',
+                        primary: true,
+                        handler: async () => {
+                            try {
+                                const headers = window.authHeaders ? { ...window.authHeaders() } : {};
+                                const resp = await fetch(`/api/presets/${preset.id}`, { method: 'DELETE', headers });
+                                if (resp.ok) {
+                                    await loadPresets();
+                                    _renderPresetsPanel();
+                                }
+                            } catch (err) {
+                                console.error('Delete preset failed:', err);
+                            }
+                        }
+                    }
+                ]
+            );
         });
         actions.appendChild(delBtn);
 
@@ -1155,17 +1169,31 @@ function _renderPresetsPanel() {
             '</svg>';
         trashBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            if (!confirm(`Delete preset "${preset.name}"? This cannot be undone.`)) return;
-            try {
-                const headers = window.authHeaders ? { ...window.authHeaders() } : {};
-                const resp = await fetch(`/api/presets/${preset.id}`, { method: 'DELETE', headers });
-                if (resp.ok) {
-                    await loadPresets();
-                    _renderPresetsPanel();
-                }
-            } catch (err) {
-                console.error('Delete preset failed:', err);
-            }
+            showToastWithActions(
+                'Delete preset',
+                'warning',
+                `Delete "${preset.name}"? This cannot be undone.`,
+                [
+                    { id: 'cancel', label: 'Cancel', primary: false },
+                    {
+                        id: 'delete',
+                        label: 'Delete',
+                        primary: true,
+                        handler: async () => {
+                            try {
+                                const headers = window.authHeaders ? { ...window.authHeaders() } : {};
+                                const resp = await fetch(`/api/presets/${preset.id}`, { method: 'DELETE', headers });
+                                if (resp.ok) {
+                                    await loadPresets();
+                                    _renderPresetsPanel();
+                                }
+                            } catch (err) {
+                                console.error('Delete preset failed:', err);
+                            }
+                        }
+                    }
+                ]
+            );
         });
         card.appendChild(trashBtn);
 
@@ -1617,7 +1645,12 @@ export async function deletePreset() {
 }
 
 export async function resetPresets() {
-    if (!confirm('Reset all presets to built-in defaults? Custom presets will be removed.')) return;
+    const ok = await showConfirmDialog(
+        'Reset presets',
+        'Reset all presets to built-in defaults? Custom presets will be removed.',
+        'Reset all'
+    );
+    if (!ok) return;
     try {
         const resp = await fetch('/api/presets/reset', {
             method: 'POST',
@@ -1970,7 +2003,12 @@ export function initPresets() {
         const id = document.getElementById('modal-preset-id').value;
         const p = sessionState.presets.find(pr => pr.id === id);
         if (!p) { showToast('No preset selected', 'warn'); return; }
-        if (!confirm(`Delete preset "${p.name}"? This cannot be undone.`)) return;
+        const ok = await showConfirmDialog(
+            'Delete preset',
+            `Delete preset "${p.name}"? This cannot be undone.`,
+            'Delete'
+        );
+        if (!ok) return;
         try {
             const resp = await fetch('/api/presets/' + encodeURIComponent(id), {
                 method: 'DELETE',

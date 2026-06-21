@@ -3,7 +3,7 @@
 
 import { activeChatTab, getChatViewBindings, getDefaultRoleBoundaryText, registerChatViewBindings, scheduleChatPersist } from './chat-state.js';
 import { escapeHtml } from '../core/format.js';
-import { showToast } from './toast.js';
+import { showToast, showConfirmDialog } from './toast.js';
 
 // ── Built-in system prompt templates ──────────────────────────────────────────
 
@@ -1162,11 +1162,13 @@ async function saveTemplate() {
 }
 
 async function deleteTemplate(id) {
-    if (!confirm('Delete this template?')) return;
     if (id.startsWith('default:')) {
         showToast('Cannot delete default templates', 'error');
         return;
     }
+    const ok = await showConfirmDialog('Delete template', 'Delete this template?');
+    if (!ok) return;
+
     try {
         const res = await fetch(`/api/templates/${id}`, {
             method: 'DELETE',
@@ -1195,7 +1197,12 @@ async function resetTemplateToDefault(id) {
         showToast('No built-in default found for this template', 'error');
         return;
     }
-    if (!confirm(`Reset "${t.name}" to the built-in default? This cannot be undone.`)) return;
+    const ok = await showConfirmDialog(
+        'Reset template',
+        `Reset "${t.name}" to the built-in default? This cannot be undone.`,
+        'Reset to default'
+    );
+    if (!ok) return;
 
     if (t._isDefault) {
         // No user copy — nothing to reset, it's already the default

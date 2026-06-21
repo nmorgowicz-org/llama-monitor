@@ -18,7 +18,7 @@ import {
     togglePinTab,
     restoreTabFromTrash,
 } from './chat-state.js';
-import { showToast, showToastWithActions } from './toast.js';
+import { showToast, showToastWithActions, showConfirmDialog } from './toast.js';
 import { openTemplateManager } from './chat-templates.js';
 import { renderChatSessionsSidebar } from './chat-sessions-sidebar.js';
 
@@ -1278,17 +1278,22 @@ function cancelMessageEdit(btn) {
 }
 
 function deleteMessage(btn) {
-    if (!confirm('Delete this message?')) return;
     const msgEl = btn.closest('.chat-message');
     const msgIdx = parseInt(msgEl.dataset.msgIdx);
     const tab = activeChatTab();
     if (!tab || isNaN(msgIdx) || msgIdx < 0 || msgIdx >= tab.messages.length) return;
 
-    tab.messages.splice(msgIdx, 1);
-    tab.updated_at = Date.now();
-    scheduleChatPersist();
-    // Do not re-render if AI is busy (would wipe streaming message from DOM)
-    if (!chat.busy) renderChatMessages();
+    showConfirmDialog(
+        'Delete message',
+        'This will remove this message from the conversation.'
+    ).then((ok) => {
+        if (!ok) return;
+        tab.messages.splice(msgIdx, 1);
+        tab.updated_at = Date.now();
+        scheduleChatPersist();
+        // Do not re-render if AI is busy (would wipe streaming message from DOM)
+        if (!chat.busy) renderChatMessages();
+    });
 }
 
 function openTimeoutSetting() {

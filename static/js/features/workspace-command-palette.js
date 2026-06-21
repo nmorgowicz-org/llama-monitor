@@ -1,6 +1,7 @@
 // workspace-command-palette.js — Unified command palette (Cmd+K / Ctrl+K)
 // Keyboard-first search across conversations, messages, and quick actions.
 
+import { showPromptDialog } from './toast.js';
 import { chat } from '../core/app-state.js';
 import {
     switchChatTab,
@@ -401,7 +402,7 @@ function activateItem(item) {
     }
 }
 
-function handleTabAction(item) {
+async function handleTabAction(item) {
     const tab = getTabById(item.tabId);
     if (!tab) return;
     switch (item.action) {
@@ -421,7 +422,7 @@ function handleTabAction(item) {
             duplicateChatTab(tab.id);
             break;
         case 'rename': {
-            const newName = prompt('Rename conversation:', tab.name);
+            const newName = await showPromptDialog('Rename conversation', 'Enter a new name:', tab.name);
             if (newName && newName.trim()) renameChatTab(tab.id, newName.trim());
             break;
         }
