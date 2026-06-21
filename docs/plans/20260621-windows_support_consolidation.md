@@ -317,13 +317,25 @@ So the PawnIO dependency is **confirmed real**; the only open question is delive
 matters.
 
 **Decide during implementation (the runtime half is settled; this is the driver half):**
-  1. **Deliver PawnIO with the sensor bridge.** PawnIO is a small signed driver with a silent
-     installer (`pawnio.eu`). Options: (a) bundle the PawnIO installer in the Windows zip and run
-     it (UAC-elevated) as part of the existing sensor-bridge install flow in `src/lhm.rs`
-     (`install_local_sensor_bridge`), alongside the scheduled-task registration; or (b) document
-     PawnIO as a prerequisite the user installs once. Option (a) preserves the "zero-setup" goal
-     and fits the existing elevated-PowerShell install path; prefer it. Verify PawnIO's
-     license/redistribution terms before bundling its installer.
+  1. **Deliver PawnIO via `winget`, do not bundle its installer (license, researched 2026-06-21).**
+     PawnIO's **core driver is GPLv2-or-later** (with a linking exception that lets independent
+     programs talk to it through the device IOCTL interface — so *using* it does **not** make our
+     bridge GPL; LHM communicates via that IOCTL interface). The catch is **redistribution**:
+     shipping the PawnIO driver/installer inside our zip means distributing a GPLv2 work, which
+     pulls in GPLv2 obligations (license text, written offer of source, etc.), and the official
+     installer is separately labeled "Proprietary (Freeware)" with **custom/commercial licensing
+     offered** (`admin@namazso.eu`) — i.e. the installer's own terms may differ from the source
+     license. That ambiguity makes bundling the riskier path.
+     - **Preferred:** install at sensor-bridge-setup time via the official package — no
+       redistribution, always official, always current:
+       `winget install -e --id namazso.PawnIO` (publisher: namazso; also on Chocolatey as
+       `pawnio`). Invoke it from the existing UAC-elevated install flow in `src/lhm.rs`
+       (`install_local_sensor_bridge`), next to the scheduled-task registration. Detect winget
+       (App Installer is present on modern Win10/11); if absent or offline, fall back to (b).
+     - **Fallback (b):** document PawnIO as a one-time prerequisite the user installs from
+       `pawnio.eu`, and surface the missing-driver state in the UI (see item 2).
+     - **Only bundle the installer** if you first get the redistribution terms cleared (contact
+       `admin@namazso.eu` / legal review). Don't assume "freeware" means "redistributable."
   2. **Surface the missing-driver state in the UI.** Today `is_sensor_bridge_available()` only
      checks the exe exists. Add a check (e.g. PawnIO service present/running) so the sensor-bridge
      UI can say "driver not installed" instead of silently showing no temperature.
