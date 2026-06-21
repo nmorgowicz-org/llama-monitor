@@ -1163,8 +1163,6 @@ fn api_llama_restart(
 
 #[cfg(test)]
 mod tests {
-    use crate::chat_storage::ChatStorage;
-    use crate::config::AppConfig;
     // Route presence and auth guard for llama_binary endpoints is covered
     // by the full-tree smoke tests in api::tests::route_smoke_tests!.
 }
