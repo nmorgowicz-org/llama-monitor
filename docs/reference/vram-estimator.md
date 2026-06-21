@@ -7,7 +7,7 @@ The VRAM estimator (`src/llama/vram_estimator/`) predicts GPU memory usage for a
 - The preset-editor VRAM strip
 - Launch-card VRAM estimates
 
-The animated VRAM breakdown bar in the UI is a client-side replica that uses the same architecture data (from GGUF introspection) but applies a simplified overhead model for speed.
+All VRAM bars in the UI (Spawn Wizard, Preset Editor, Setup view, and the Models-modal HF-browse preview) are driven by the backend `/api/vram-estimate` — there is no client-side VRAM/KV formula. Pre-download, the backend range-fetches the GGUF header from HuggingFace so even the browse preview uses the model's real architecture.
 
 Estimation is primarily based on GGUF introspection, not name matching. Filename-based heuristics are used only when GGUF metadata is unavailable (e.g., pre-download estimates or incomplete headers).
 
@@ -499,10 +499,13 @@ If both are provided, `mmproj_bytes` takes precedence. The path is resolved rela
 Architecture-aware VRAM breakdown endpoint.
 
 - Requires: `api-token` (Authorization header)
-- Requires (body): `model_path`
+- Requires (body): **either** `model_path` (local file) **or** `hf_repo_id` + `hf_file_path` + `model_size_bytes` (pre-download HuggingFace introspection)
 - Optional (body): `n_ctx`, `gpu_layers`, `parallel_slots`, `ubatch_size`, `ctk`, `ctv`, `n_cpu_moe`, `available_vram_bytes`, `is_unified_memory`, `mmproj_path`, `mmproj_bytes`
-- Behavior: reads GGUF metadata from `model_path` as primary source; falls back to `ModelArch::from_name_and_params()` on parse failure
+- Behavior:
+  - **Local path**: reads GGUF metadata from `model_path` (primary); falls back to `from_name_and_params()` on parse failure.
+  - **HuggingFace (no local file yet)**: `crate::hf::fetch_gguf_header_metadata()` issues an HTTP **Range** request for the first few MB of the `.gguf` (the KV header sits at the file start), parses it with `read_gguf_metadata_from_bytes()`, and uses the caller-supplied `model_size_bytes` (from the HF file listing) for weights. This gives the model's **real** architecture before downloading 16 GB. Requires HTTP 206 (partial content); on any failure (gated repo, offline, no range support) it falls back to the name heuristic so the caller still gets a rough estimate.
 - Output fields: `weights_bytes`, `kv_cache_bytes`, `linear_attn_state_bytes`, `mmproj_bytes`, `mtp_bytes`, `overhead_bytes`, `total_bytes`, `available_bytes`, `headroom_bytes`, `ram_bytes`, `recommendation`, `note`
+- Consumers: Spawn Wizard, Preset Editor, Setup view, **and the Models modal HF-browse preview bar** (`updateVramDisplay` in `static/js/features/models.js`) — all share this one endpoint, so they all get identical, GGUF-accurate numbers. There is no client-side VRAM/KV formula anymore.
 
 ### API helpers (`build_arch_from_body`)
 
@@ -514,7 +517,7 @@ Used by `quant-compare` and `auto-size` endpoints when GGUF is not present or fo
 
 ### VRAM bar (UI)
 
-The animated VRAM breakdown bar in the UI is architecture-aware via GGUF introspection, but uses a simplified overhead model (not the full discrete-overhead pipeline) for performance. It consumes the same arch from GGUF but with a lighter-weight overhead formula, so its numbers may differ slightly from `/api/vram-estimate`.
+The VRAM bars consume `/api/vram-estimate` directly (single source of truth) — they are not independent client-side reimplementations, so their numbers always match the backend estimator. The Models-modal HF-browse preview (`updateVramDisplay` in `static/js/features/models.js`) estimates at a fixed preview context (16K) using HF range-fetch introspection; once a model is on disk, the Spawn Wizard / Preset Editor introspect the local file and estimate at the real configured context.
 
 ---
 
@@ -643,6 +646,44 @@ The GGUF arch string `"qwen35"` is mapped via `gguf_arch_to_heuristic_name()` (l
 | `expert_fraction` default 0.65 is a rough average | All MoE models | Overridden per-family; calibrate when architecture is public |
 | `discrete_overhead_base_bytes` uses 256 MB fallback when n_embd unknown | Any model without GGUF `embedding_length` | Conservative; may over-reserve vs actual CUDA usage |
 | Name heuristics are heuristic-only fallback | All pre-download / no-GGUF estimates | Do not rely on them when a GGUF file is present — GGUF is authoritative |
+
+---
+
+## Recalibrating the discrete overhead (measurement methodology)
+
+The `discrete_overhead_*` constants in `estimate.rs` were fit to **direct VRAM measurements on an RTX 5090 32 GB** (Windows). If you ever need to re-measure (new llama.cpp build, new arch, or a discrepancy report), this is the exact procedure — it is not obvious and has several traps.
+
+**How to measure total VRAM for a config:**
+1. Kill any running `llama-server`, then read a clean baseline: `nvidia-smi --query-gpu=memory.used --format=csv,noheader` (desktop apps only).
+2. Launch the model fully on GPU with the config under test:
+   `llama-server -m MODEL -c CTX -ub UB -b 4096 -fa on -ctk q8_0 -ctv q8_0 -ngl 99 -fit off --parallel 1 --kv-unified --no-warmup --no-mmap`
+3. After "server is listening", read `memory.used` again.
+4. `server_total = used − baseline`. Then `overhead = server_total − model_file_bytes − KV(ctx)`, where `KV(ctx)` is `kv_cache_bytes()` for the introspected arch.
+
+**Traps (all cost real debugging time):**
+- **Windows/WDDM reports per-process VRAM as `[N/A]`** in `nvidia-smi --query-compute-apps`. You MUST use the *total* `memory.used` delta against a clean baseline; there is no per-process number.
+- **`--parallel` defaults to 4** ("n_parallel auto"). That inflates buffers ~2×. Always pass `--parallel 1` to match the estimator's 1-slot assumption.
+- **`-fit off`** — newer builds auto-fit (`-fit on`) and may silently reduce `-ngl` or suppress the per-buffer allocation log lines. Use `-fit off` and `-ngl 99` for a deterministic full-GPU load.
+- **`llama-cli` was merged into `llama-server`** (recent betas). There is no `llama-cli.exe`; use `llama-server` and read the load log / `nvidia-smi`.
+- Recent builds **do not print** `CUDA0 compute buffer size` lines at all — the `nvidia-smi` delta is the only ground truth.
+
+**Calibration dataset (parallel=1, fa on, q8_0 KV, ngl 99, no mmproj), measured overhead in MiB:**
+
+| Model | n_layers | head_dim(max) | n_embd | MoE | SWA | ctx | ub | overhead |
+|-------|----------|---------------|--------|-----|-----|-----|-----|----------|
+| Qwen3.6-27B | 64 | 256 | 5120 | no | no | 4k | 1024 | 215 |
+| Qwen3.6-27B | 64 | 256 | 5120 | no | no | 131k | 1024 | 1139 |
+| Qwen3.6-27B | 64 | 256 | 5120 | no | no | 213k | 1024 | 1779 |
+| Qwen3.6-27B | 64 | 256 | 5120 | no | no | 4k | 2048 | 467 |
+| Qwen3.6-27B | 64 | 256 | 5120 | no | no | 213k | 2048 | 2355 |
+| Qwen3.6-35B-A3B | 41 | 256 | 2048 | yes | no | 4k | 1024 | 425 |
+| Qwen3.6-35B-A3B | 41 | 256 | 2048 | yes | no | 213k | 1024 | 1343 |
+| Gemma-4-31B | 60 | 512 | 5376 | no | yes | 4k | 1024 | 1310 |
+| Gemma-4-31B | 60 | 512 | 5376 | no | yes | 213k | 1024 | 3704 |
+| Gemma-4-26B-A4B | 30 | 512 | 2816 | yes | yes | 4k | 1024 | 803 |
+| Gemma-4-26B-A4B | 30 | 512 | 2816 | yes | yes | 213k | 1024 | 2091 |
+
+Key findings that shaped the model: overhead is **linear in context** (the attention mask / per-layer prefill scratch), scales with `n_layers × head_dim` (not KV footprint), grows with ubatch (graph scratch), gets a fixed bump for MoE (expert gather ~260 MiB), and a large per-layer base for Gemma SWA (per-layer-input embeddings ~20 MiB/layer). The current formula reproduces Qwen within tens of MiB and over-reserves Gemma modestly (worst under-prediction across the set: −67 MiB — i.e. essentially never under-reserves). No Metal/Apple measurements were taken, so the unified-memory path still uses the lighter `gpu_overhead_bytes` + headroom reserve — **do not apply these CUDA constants to Metal without separate Apple Silicon measurements.**
 
 ---
 

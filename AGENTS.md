@@ -182,11 +182,13 @@ Before marking PR ready, verify:
 
 ## VRAM Estimator (Key Pitfalls)
 
-When updating `src/llama/vram_estimator.rs`:
-- "A3B"/"A4B"/"A10B" suffixes are active parameter counts, NOT expert counts.
-- Hybrid DeltaNet (Qwen3.5, Qwen3.6): set `n_attn_layers` or KV cache inflates 4×.
-- Gemma4: `global_head_dim = 512`, 1024-token sliding window; use separate heuristics from Gemma3.
-- Sliding window vs DeltaNet: never set `local_attn_window` on DeltaNet.
+When updating `src/llama/vram_estimator/` (a module dir, not a flat file):
+- **GGUF is the source of truth.** `gguf_meta.rs` reads real arch (layer counts, `full_attention_interval`, `ssm.*`, sliding-window pattern, expert counts, MTP) and `to_arch` overrides the name heuristic. Name parsing (`from_name_and_params`) is fallback-only. Don't "fix" a model by editing the heuristic if a GGUF exists — verify against the file.
+- Pre-download estimates introspect too: `/api/vram-estimate` accepts `hf_repo_id`+`hf_file_path`+`model_size_bytes` and range-fetches the GGUF header (`crate::hf::fetch_gguf_header_metadata`). All UI VRAM bars use this endpoint; there is no client-side VRAM formula.
+- Discrete-GPU overhead (`discrete_overhead_*`) is **calibrated to real RTX 5090 measurements** — do NOT revert to a context-independent `n_layers × n_embd` formula. To re-measure, follow "Recalibrating the discrete overhead" in the reference doc (Windows WDDM has no per-process VRAM → use total `nvidia-smi` delta; pass `--parallel 1 -fit off`).
+- "A3B"/"A4B"/"A10B" suffixes are active parameter counts, NOT expert counts (heuristic fallback only).
+- Hybrid DeltaNet (Qwen3.5/3.6): `n_attn_layers` (= `block_count / full_attention_interval`) drives KV; wrong value inflates KV ~4×.
+- Gemma4: `global_head_dim = 512`, 1024-token sliding window; never set `local_attn_window` on DeltaNet.
 - Every new `_arch()`/`_heuristic()` requires a `#[test]` with source URL.
 Full reference: `docs/reference/vram-estimator.md`
 

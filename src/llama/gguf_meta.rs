@@ -237,17 +237,27 @@ impl GgufMetadata {
 /// is not a valid GGUF file, or uses an unsupported version.
 pub fn read_gguf_metadata(path: &Path) -> Result<GgufMetadata, String> {
     let file = File::open(path).map_err(|e| format!("Cannot open '{}': {e}", path.display()))?;
-    let mut r = BufReader::with_capacity(64 * 1024, file);
+    read_gguf_metadata_reader(BufReader::with_capacity(64 * 1024, file))
+}
 
+/// Parse GGUF metadata from an in-memory buffer — e.g. the first few MB of a remote file
+/// fetched with an HTTP range request. Only the KV header is read; tensor data is never
+/// touched, so a prefix of the file is sufficient. Returns an error (typically an
+/// unexpected-EOF) if the buffer is shorter than the full KV header, so callers can retry
+/// with a larger prefix.
+pub fn read_gguf_metadata_from_bytes(buf: &[u8]) -> Result<GgufMetadata, String> {
+    read_gguf_metadata_reader(std::io::Cursor::new(buf))
+}
+
+/// Core parser shared by the file- and buffer-based entry points. Works over any
+/// seekable reader; reads only the KV-metadata header.
+pub fn read_gguf_metadata_reader<R: Read + Seek>(mut r: R) -> Result<GgufMetadata, String> {
     // Magic
     let mut magic = [0u8; 4];
     r.read_exact(&mut magic)
         .map_err(|e| format!("Cannot read GGUF magic: {e}"))?;
     if &magic != GGUF_MAGIC {
-        return Err(format!(
-            "'{}' is not a GGUF file (magic: {magic:02x?})",
-            path.display()
-        ));
+        return Err(format!("Data is not a GGUF file (magic: {magic:02x?})"));
     }
 
     // Version
