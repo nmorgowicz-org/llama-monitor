@@ -69,30 +69,18 @@ fn api_sleep_mode_toggle(
             }
             touch_activity(&state);
 
-            let is_manual = state
-                .sleep_mode_manual
-                .load(std::sync::atomic::Ordering::Relaxed);
+            // Treat this click as user-triggered so the full 3-way cycle is used.
+            // Auto-sleep (non-interactive) is handled elsewhere; this endpoint
+            // is called from the UI by a human, so it should expose all modes.
             let current = state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
 
-            // Auto-sleep cycle: off <-> sleep (skip logs-only)
-            // Manual cycle: off -> logs-only -> sleep -> off
-            let next = if is_manual {
-                // Full 3-way cycle
-                match current {
-                    0 => 1u8, // off -> logs-only
-                    1 => 2u8, // logs-only -> sleep
-                    _ => 0u8, // sleep -> off
-                }
-            } else {
-                // Binary: off <-> sleep
-                if current == 0 {
-                    2u8 // off -> sleep
-                } else {
-                    0u8 // sleep -> off
-                }
+            // 3-way cycle: off -> logs-only -> sleep -> off
+            let next = match current {
+                0 => 1u8, // off -> logs-only
+                1 => 2u8, // logs-only -> sleep
+                _ => 0u8, // sleep -> off
             };
 
-            // When user manually cycles (including to logs-only), mark as manual.
             state
                 .sleep_mode_manual
                 .store(next != 0, std::sync::atomic::Ordering::Relaxed);

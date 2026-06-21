@@ -301,17 +301,51 @@ fn get_core_counts() -> (u32, u32, u32, String, String) {
             .map(|s| s.trim().to_string())
             .unwrap_or_default()
     }
-    let p = sysctl_u32("hw.perflevel0.physicalcpu");
-    let secondary = sysctl_u32("hw.perflevel1.physicalcpu");
-    let per_l2 = sysctl_u32("hw.perflevel1.cpusperl2");
-    let p_name = sysctl_str("hw.perflevel0.name");
-    let sec_name = sysctl_str("hw.perflevel1.name");
-    let (s, e) = if per_l2 > 0 && per_l2 < secondary {
-        (per_l2, secondary - per_l2)
-    } else {
-        (0, secondary)
-    };
-    (p, s, e, p_name, sec_name)
+
+    let level_count = sysctl_u32("hw.perflevelcount");
+    let level_count = if level_count > 0 { level_count } else { 2 };
+
+    let mut total_p = 0u32;
+    let mut total_s = 0u32;
+    let mut total_e = 0u32;
+    let mut first_name = String::new();
+    let mut second_name = String::new();
+
+    for i in 0..level_count {
+        let cores = sysctl_u32(&format!("hw.perflevel{i}.physicalcpu"));
+        let name = sysctl_str(&format!("hw.perflevel{i}.name"));
+        let name_lower = name.to_lowercase();
+
+        if first_name.is_empty() {
+            first_name = name.clone();
+        } else if second_name.is_empty() {
+            second_name = name.clone();
+        }
+
+        if name_lower.contains("super") {
+            total_p += cores;
+        } else if name_lower.contains("performance") {
+            total_s += cores;
+        } else if name_lower.contains("efficiency") || name_lower.contains("e-core") {
+            total_e += cores;
+        } else {
+            // Fallback: treat unrecognized as efficiency
+            total_e += cores;
+        }
+    }
+
+    // Backward compatibility: if "s" is nonzero (secondary/performance cluster),
+    // it is used for the S-row in the dashboard; p_cores includes all top-tier
+    // (Super or performance-only on older chips).
+    // On older 2-level chips (e.g. M3 Max), names are typically
+    // "Performance" (perflevel0) and "Efficiency" (perflevel1), so
+    // total_p = 0 and total_s will hold the P-cores; adjust for that case:
+    if total_p == 0 && total_s > 0 && total_e > 0 {
+        total_p = total_s;
+        total_s = 0;
+    }
+
+    (total_p, total_s, total_e, first_name, second_name)
 }
 
 #[cfg(not(target_os = "macos"))]

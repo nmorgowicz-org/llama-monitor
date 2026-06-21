@@ -554,16 +554,15 @@ The nav monitoring chip supports three modes, cycled by clicking:
 Details:
 
 - **Cycling**: click the monitoring chip to rotate: Monitoring → Logs only → Paused → Monitoring.
-- **Auto-sleep vs manual**:
-  - Auto-sleep (idle timeout) skips "Logs only" and cycles directly between Off and Sleep.
-  - Any manual cycle (user click) marks the mode as manual and includes the full three steps.
+- **Auto-sleep**:
+  - Auto-sleep (idle timeout) uses a separate internal path and bypasses the toggle endpoint; it activates Sleep directly when needed.
 - **WebSocket reconnect**:
-  - Auto-sleep (mode=Sleep, not manual) is cleared when a WebSocket connection opens.
-  - Manual sleep persists across WebSocket reconnects.
+  - Auto-sleep (non-manual) is cleared when a WebSocket connection opens.
+  - Manual sleep (set via UI or API) persists across WebSocket reconnects.
 - **Chat streaming override**:
   - While chat generation is active, the backend preserves the normal push interval even in low-power modes to avoid stalling the chat.
 - **API**:
-  - `POST /api/sleep-mode/toggle` cycles the mode.
+  - `POST /api/sleep-mode/toggle` cycles the mode through all three states.
   - `POST /api/sleep-mode/set` with `{"mode": "off" | "logs-only" | "sleep"}` sets explicitly.
   - Legacy `{"enabled": true/false}` still supported; maps to sleep/off.
 

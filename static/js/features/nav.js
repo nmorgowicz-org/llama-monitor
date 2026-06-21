@@ -459,11 +459,15 @@ export function initNav() {
     if (memChip && memHovercard) {
         let _pinned = false;
 
+        // Move hovercard into body so its fixed positioning is truly viewport-relative
+        // (prevents being clipped by nav strip overflow / containing-block issues)
+        document.body.appendChild(memHovercard);
+
         function _positionHovercard() {
             const rect = memChip.getBoundingClientRect();
             memHovercard.style.top = (rect.bottom + 8) + 'px';
-            const right = window.innerWidth - rect.right;
-            memHovercard.style.right = Math.max(8, right) + 'px';
+            const rightEdge = window.innerWidth - rect.right;
+            memHovercard.style.right = Math.max(8, rightEdge) + 'px';
         }
 
         function _openHovercard() {
@@ -473,9 +477,11 @@ export function initNav() {
         function _closeHovercard() { if (!_pinned) memHovercard.classList.remove('mem-pressure-hovercard--open'); }
 
         memChip.addEventListener('mouseenter', _openHovercard);
-        memChip.addEventListener('mouseleave', () => { if (!_pinned) setTimeout(() => {
-            if (!memHovercard.matches(':hover')) _closeHovercard();
-        }, 80); });
+        memChip.addEventListener('mouseleave', () => {
+            if (!_pinned) setTimeout(() => {
+                if (!memHovercard.matches(':hover')) _closeHovercard();
+            }, 80);
+        });
 
         memHovercard.addEventListener('mouseenter', _openHovercard);
         memHovercard.addEventListener('mouseleave', () => { if (!_pinned) _closeHovercard(); });
