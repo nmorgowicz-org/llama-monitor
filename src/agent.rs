@@ -3907,23 +3907,83 @@ Start-Sleep -Seconds 2\""
 
         let _ = fs::remove_file(&binary_path);
 
-        // On Unix/macOS: spawn a detached delayed launcher so the app restarts
-        // after the current process exits, instead of leaving the user with a dead page.
-        // This runs independently; the existing 600ms exit(0) in api_self_update
-        // gives this process time to close, after which the launcher starts the new binary.
+        // On Unix/macOS: spawn a detached launcher so the app restarts after update.
+        // Features:
+        //  - Crash-loop guard: won’t restart if the last launch died within 3s.
+        //  - Port-check: waits briefly for the listen port to be released.
+        //  - Logging: writes to a small temp log file so failures are inspectable.
         #[cfg(unix)]
         {
+            use std::time::{SystemTime, UNIX_EPOCH};
+
+            let home = std::env::var("HOME").unwrap_or_default();
+            let data_dir = if !home.is_empty() {
+                &home
+            } else {
+                // Fallback; not ideal but keeps us safe
+                "/tmp"
+            };
+            let marker_file = format!("{data_dir}/.llama-monitor-restart-at");
+            let log_file = format!("{data_dir}/.llama-monitor-restart.log");
+
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            // Write a restart-at marker so the launcher can detect rapid loops.
+            let _ = fs::write(&marker_file, now.to_string());
+
             let binary_path = current_exe.to_string_lossy().to_string();
-            // Shell-quote via single quotes; escape any embedded single quotes.
             let safe = binary_path.replace('\'', "'\\''");
-            let launcher_cmd = format!("sleep 1 && exec '{}'", safe);
-            let _ = std::process::Command::new("sh")
+
+            let launcher_script = format!(
+                r#"
+                LAST=$(cat '{marker_file}' 2>/dev/null || echo 0)
+                NOW=$(date +%s)
+                DIFF=$(( NOW - LAST ))
+                if [ "$DIFF" -gt 2 ] && [ "$DIFF" -lt 3 ]; then
+                    echo "$NOW CRASH_LOOP: last restart was within 3s; aborting" >> '{log_file}'
+                    exit 0
+                fi
+
+                # Wait briefly for the port to become free.
+                for i in $(seq 1 6); do
+                    if ! ss -tlnp 2>/dev/null | grep -q ':7778 ' && \
+                       ! ss -tlnp 2>/dev/null | grep -q ':7779 '; then
+                        break
+                    fi
+                    sleep 0.2
+                done
+
+                rm -f '{marker_file}'
+                exec '{safe}'
+                "#
+            );
+
+            match std::process::Command::new("sh")
                 .arg("-c")
-                .arg(&launcher_cmd)
+                .arg(&launcher_script)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
-                .spawn();
+                .spawn()
+            {
+                Ok(_) => {
+                    // Best-effort log that we started the launcher
+                    let _ = fs::write(
+                        &log_file,
+                        format!("{} LAUNCHER_START\n", now),
+                    );
+                }
+                Err(e) => {
+                    // Log spawn failure for debugging
+                    let _ = fs::write(
+                        &log_file,
+                        format!("{} LAUNCHER_SPAWN_FAIL: {}\n", now, e),
+                    );
+                }
+            }
         }
 
         Ok(SelfUpdateResult {
