@@ -103,36 +103,77 @@ pub fn mtp_overhead_bytes(model_size_bytes: u64, mtp_depth: u32) -> u64 {
     (model_size_bytes as f64 * 0.015 * mtp_depth as f64) as u64
 }
 
-/// Fixed GPU context + compute-buffer overhead (CUDA/Metal/ROCm).
-/// Scales slightly with ubatch_size.
+/// Metal (unified-memory) GPU context + transient compute-buffer overhead.
+/// Scales slightly with ubatch_size. Used only on Apple Silicon; discrete GPUs use
+/// [`discrete_overhead_bytes`] (which is calibrated separately against real VRAM).
 pub fn gpu_overhead_bytes(ubatch_size: u32) -> u64 {
-    // 300 MB base (CUDA context, KV allocator metadata, etc.)
+    // 300 MB base (Metal context, allocator metadata, etc.)
     // + approx 0.15 MB per ubatch unit above 512
     let base = 300 * 1024 * 1024;
     let ubatch_extra = ((ubatch_size.saturating_sub(512)) as u64) * 150 * 1024;
     base + ubatch_extra
 }
 
-/// CUDA-specific persistent compute buffer overhead.
+/// Per-head K/V dimension that drives the context-scaling compute buffer. Gemma's global
+/// (full-context) layers use a wider dimension than local layers, so take the max. All
+/// fields are read from the GGUF (`attention.key_length` / `key_length_swa`).
+fn overhead_head_dim(arch: &ModelArch) -> u64 {
+    (arch.head_dim.max(arch.global_head_dim)).max(1) as u64
+}
+
+/// Context-INDEPENDENT part of the discrete-GPU (CUDA/ROCm) overhead, in bytes.
 ///
-/// On Metal (unified memory), compute buffers are small and transient — `gpu_overhead_bytes`
-/// covers them. On CUDA/ROCm, llama.cpp allocates persistent scratch tensors for the full
-/// compute graph (Q/K/V projections, FFN intermediates, RMS norm buffers) that scale with
-/// model width × ubatch.
-///
-/// Calibrated on RTX 5090 32 GB (WDDM), Qwen3.6-27B-NEO-CODE Q4_K_M, 212k ctx, ubatch=1024,
-/// flash_attn=on:
-///   Total VRAM 28,101 MiB − model 16,511 MB − mmproj 888 MB − KV q8_0@212k 6,656 MB
-///   − WDDM desktop apps ~1,536 MB = ~2,510 MB compute buffers.
-///   Formula: 65 layers × 1024 ubatch × 5120 n_embd × 2 bytes × 4 passes = 2,600 MB → close.
-///
-/// Returns 0 for unified memory (Metal) or when n_embd is unknown (0).
-pub fn cuda_compute_buffer_bytes(arch: &ModelArch, ubatch_size: u32) -> u64 {
+/// Covers the graph compute scratch (∝ ubatch × model width), MoE expert gather/scatter
+/// buffers, and — for Gemma — the per-layer-input embedding tables that are resident beyond
+/// the reported weights. All inputs are GGUF-derived (`embedding_length`, `expert_count`,
+/// `block_count`, sliding-window pattern), never name-parsed.
+pub fn discrete_overhead_base_bytes(arch: &ModelArch, ubatch_size: u32) -> u64 {
     if arch.n_embd == 0 || arch.n_layers == 0 {
-        return 0;
+        return 256 * 1024 * 1024; // unknown arch: flat 256 MB safety reserve
     }
-    // n_layers × ubatch × n_embd × sizeof(f16) × 4 compute-graph passes
-    (arch.n_layers as u64) * (ubatch_size as u64) * (arch.n_embd as u64) * 2 * 4
+    let mib = 1024.0 * 1024.0;
+    // Graph compute scratch: ~0.22 MiB per ubatch unit at n_embd=5120, scaled by width.
+    let scratch = 0.22 * ubatch_size as f64 * (arch.n_embd as f64 / 5120.0);
+    // MoE expert gather/scatter working buffers (~260 MiB measured on 35B-A3B / Gemma-MoE).
+    let moe = if arch.is_moe() { 260.0 } else { 0.0 };
+    // Gemma alternating-attention models carry sizeable per-layer-input embeddings (~20 MiB/layer).
+    let gemma = if arch.has_local_attn() {
+        20.0 * arch.n_layers as f64
+    } else {
+        0.0
+    };
+    let total_mib = (scratch + moe + gemma).max(200.0); // 200 MiB floor (CUDA context)
+    (total_mib * mib) as u64
+}
+
+/// Context-SCALING part of the discrete overhead: bytes of compute buffer per token of
+/// context. The attention mask plus per-layer prefill scratch grow linearly with context
+/// and with `n_layers × per-head-dim`; a mild ubatch factor captures the larger mask at
+/// higher ubatch. ≈ 0.46 bytes per (token × layer × head-dim-unit).
+pub fn discrete_overhead_ctx_bytes_per_token(arch: &ModelArch, ubatch_size: u32) -> f64 {
+    if arch.n_layers == 0 {
+        return 0.0;
+    }
+    let ub_factor = 0.8 + 0.2 * (ubatch_size as f64 / 1024.0);
+    0.46 * arch.n_layers as f64 * overhead_head_dim(arch) as f64 * ub_factor
+}
+
+/// Total discrete-GPU (CUDA/ROCm) overhead beyond weights + KV + mmproj + MTP, in bytes.
+///
+/// **Calibrated against direct RTX 5090 32 GB VRAM measurements** (llama.cpp b9728,
+/// `--parallel 1 --kv-unified -fa on`, q8_0 KV, full GPU offload), across Qwen3.6-27B
+/// (dense-hybrid), Qwen3.6-35B-A3B (MoE-hybrid), Gemma-4-31B (dense SWA) and Gemma-4-26B-A4B
+/// (MoE SWA), at 4k–213k context and ubatch 1024/2048. Predictions land within tens of MiB
+/// for the Qwen family and over-reserve Gemma modestly (the safe direction). The overhead is
+/// roughly **independent of model depth's KV footprint** — it grows with ubatch (scratch) and
+/// context (attention mask), so the old `n_layers × n_embd × ubatch` model (context-independent)
+/// was wrong in both directions. Returns the Metal estimate's analogue only for discrete GPUs;
+/// unified memory uses [`gpu_overhead_bytes`] in `full_estimate`.
+pub fn discrete_overhead_bytes(arch: &ModelArch, ubatch_size: u32, context_size: u64) -> u64 {
+    let base = discrete_overhead_base_bytes(arch, ubatch_size);
+    let ctx =
+        (discrete_overhead_ctx_bytes_per_token(arch, ubatch_size) * context_size as f64) as u64;
+    base + ctx
 }
 
 /// Compute the headroom fraction to reserve when sizing context or evaluating fit.
@@ -226,12 +267,15 @@ pub fn full_estimate(
     let linear_state = arch.linear_attn_state_bytes;
     let mmproj = arch.mmproj_bytes;
     let mtp = mtp_overhead_bytes(model_size_bytes, arch.mtp_depth);
-    let cuda_buf = if is_unified_memory {
-        0
+    // Platform-specific overhead. Discrete GPUs use the RTX-5090-calibrated model (scratch +
+    // MoE/Gemma base + context-scaling attention buffers). Unified memory (Metal) keeps the
+    // lighter, context-independent estimate — transient Metal buffers are covered there plus
+    // by the headroom reserve in `compute_headroom`.
+    let overhead = if is_unified_memory {
+        gpu_overhead_bytes(ubatch_size)
     } else {
-        cuda_compute_buffer_bytes(arch, ubatch_size)
+        discrete_overhead_bytes(arch, ubatch_size, context_size)
     };
-    let overhead = gpu_overhead_bytes(ubatch_size) + cuda_buf;
     let total = weight_vram + kv + linear_state + mmproj + mtp + overhead;
     let headroom = available_vram_bytes as i64 - total as i64;
 
@@ -324,13 +368,17 @@ pub fn max_context(
     let mmproj = arch.mmproj_bytes;
     let mtp = mtp_overhead_bytes(model_size_bytes, arch.mtp_depth);
     let linear_state = arch.linear_attn_state_bytes; // constant; doesn't scale with context
-    let cuda_buf = if is_unified_memory {
-        0
+    // Context-INDEPENDENT overhead goes into the fixed budget; the context-SCALING part
+    // (discrete attention buffers) is charged per-token alongside the KV cache below.
+    let (base_overhead, overhead_slope) = if is_unified_memory {
+        (gpu_overhead_bytes(ubatch_size), 0.0)
     } else {
-        cuda_compute_buffer_bytes(arch, ubatch_size)
+        (
+            discrete_overhead_base_bytes(arch, ubatch_size),
+            discrete_overhead_ctx_bytes_per_token(arch, ubatch_size),
+        )
     };
-    let overhead = gpu_overhead_bytes(ubatch_size) + cuda_buf;
-    let fixed = weight_vram + mmproj + mtp + linear_state + overhead;
+    let fixed = weight_vram + mmproj + mtp + linear_state + base_overhead;
 
     let usable = (available_vram_bytes as f64 * (1.0 - headroom_fraction)) as u64;
     if fixed >= usable {
@@ -338,12 +386,12 @@ pub fn max_context(
     }
     let kv_budget = usable - fixed;
 
-    // Binary search for context such that kv_cache_bytes(ctx) ≤ kv_budget
+    // Binary search for context such that kv_cache_bytes(ctx) + overhead(ctx) ≤ kv_budget.
     // For non-sliding-window models we can solve directly; for Gemma we binary-search.
     let mut ctx = if arch.has_local_attn() {
-        binary_search_context(arch, ctk, ctv, parallel_slots, kv_budget)
+        binary_search_context(arch, ctk, ctv, parallel_slots, kv_budget, overhead_slope)
     } else {
-        direct_max_context(arch, ctk, ctv, parallel_slots, kv_budget)
+        direct_max_context(arch, ctk, ctv, parallel_slots, kv_budget, overhead_slope)
     };
 
     // Cap at training context (unless user has extended via RoPE/YaRN).
@@ -364,6 +412,7 @@ fn direct_max_context(
     ctv: &str,
     parallel_slots: u32,
     kv_budget: u64,
+    overhead_slope: f64,
 ) -> u64 {
     let slots = parallel_slots.max(1) as f64;
     // Hybrid DeltaNet models (Qwen3.6, Qwen3.5): only n_attn_layers grow the KV cache.
@@ -377,7 +426,9 @@ fn direct_max_context(
     let hd = arch.head_dim.max(1) as f64;
     let k_bpe = kv_elem_bytes(ctk);
     let v_bpe = kv_elem_bytes(ctv);
-    let bytes_per_token = n_layers * n_kv * hd * slots * (k_bpe + v_bpe);
+    let mut bytes_per_token = n_layers * n_kv * hd * slots * (k_bpe + v_bpe);
+    // Add the discrete-GPU per-token overhead (attention mask + context-scaling buffers).
+    bytes_per_token += overhead_slope;
     if bytes_per_token <= 0.0 {
         return 0;
     }
@@ -390,16 +441,20 @@ fn binary_search_context(
     ctv: &str,
     parallel_slots: u32,
     kv_budget: u64,
+    overhead_slope: f64,
 ) -> u64 {
     let mut lo = 512u64;
     // If even the minimum context doesn't fit, report zero rather than returning 512 and OOMing.
-    if kv_cache_bytes(arch, lo, parallel_slots, ctk, ctv) > kv_budget {
+    let min_cost =
+        kv_cache_bytes(arch, lo, parallel_slots, ctk, ctv) + (overhead_slope * lo as f64) as u64;
+    if min_cost > kv_budget {
         return 0;
     }
     let mut hi = 2_097_152u64; // 2M upper bound
     while lo + 1 < hi {
         let mid = lo + (hi - lo) / 2;
-        let cost = kv_cache_bytes(arch, mid, parallel_slots, ctk, ctv);
+        let cost = kv_cache_bytes(arch, mid, parallel_slots, ctk, ctv)
+            + (overhead_slope * mid as f64) as u64;
         if cost <= kv_budget {
             lo = mid;
         } else {

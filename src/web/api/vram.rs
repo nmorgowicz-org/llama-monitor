@@ -356,7 +356,14 @@ fn api_vram_auto_size(
                 // Also cap auto-size at the model's training context length
                 let context_cap = gguf_context_length.map(|c| c as u64);
 
-                let arch = build_arch_from_body(&enriched_body, &model_name, param_b);
+                // When the GGUF file is present, build the arch straight from its real
+                // metadata (full_attention_interval, ssm.*, per-layer head_count_kv,
+                // sliding_window, …) — the authoritative source. Only fall back to the
+                // body/name heuristic for the pre-download advisor where no file exists.
+                let arch = match &gguf_read {
+                    Some(meta) => meta.to_model_metadata().to_arch(&model_name, param_b),
+                    None => build_arch_from_body(&enriched_body, &model_name, param_b),
+                };
 
                 // If model_size_bytes is not given, estimate from param_b + quant
                 let quant_hint = body["quant"].as_str().unwrap_or("q4_k_m");
@@ -384,27 +391,7 @@ fn api_vram_auto_size(
         })
 }
 
-/// Map a GGUF architecture string (e.g. "qwen3_6") to a heuristic name for
-/// `from_name_and_params`. This ensures that renamed finetunes (e.g. "Qwopus3.6"
-/// or "Pantheon-27B") get the correct hybrid-DeltaNet / sliding-window heuristic
-/// regardless of filename.
-pub(crate) fn gguf_arch_to_heuristic_name(gguf_arch: &str) -> String {
-    let a = gguf_arch.to_ascii_lowercase();
-    match a.as_str() {
-        "qwen3_6" | "qwen3.6" => "qwen3.6-model".into(),
-        "qwen3_5" | "qwen3.5" => "qwen3.5-model".into(),
-        // "qwen35" is shared by Qwen3.5 and Qwen3.6 in llama.cpp GGUF.
-        // Without block_count we can't distinguish them. Default to qwen3.6
-        // since renamed 27B finetunes (Pantheon, Qwopus) are qwen3.6 derivatives.
-        "qwen35" | "qwen35moe" => "qwen3.6-model".into(),
-        "qwen3_coder_next" | "qwen3-coder-next" => "qwen3-coder-next-model".into(),
-        "gemma4" | "gemma-4" => "gemma4-model".into(),
-        "gemma3" | "gemma-3" => "gemma3-27b".into(),
-        // For all other architectures, pass through — from_name_and_params
-        // falls through to standard_heuristic which is correct for llama, mistral, etc.
-        other => other.to_string(),
-    }
-}
+use crate::llama::vram_estimator::gguf_arch_to_heuristic_name;
 
 /// Build a `ModelArch` from a JSON request body, falling back to heuristics
 /// when introspection fields are absent.

@@ -7,8 +7,7 @@ use super::static_assets;
 use warp::Filter;
 
 /// Returns a warp Filter that serves all static assets.
-pub fn static_routes()
--> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+pub fn static_routes() -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     // Helper: serve static JS with no-cache (force browser to reload on every request)
     fn js_reply(content: &'static str) -> impl warp::Reply {
         warp::reply::with_header(
@@ -384,84 +383,89 @@ pub fn static_routes()
         .map(|| js_reply(static_assets::FEATURES_USER_MENU_JS));
     let route_73 = warp::path("js")
         .and(warp::path("features"))
+        .and(warp::path("vram-estimate.js"))
+        .and(warp::get())
+        .map(|| js_reply(static_assets::FEATURES_VRAM_ESTIMATE_JS));
+    let route_74 = warp::path("js")
+        .and(warp::path("features"))
         .and(warp::path("workspace-command-palette.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_WORKSPACE_COMMAND_PALETTE_JS));
-    let route_74 = warp::path("manifest.json")
+    let route_75 = warp::path("manifest.json")
         .and(warp::get())
         .map(|| other_reply(static_assets::MANIFEST_JSON, "application/json"));
-    let route_75 = warp::path("prompts")
+    let route_76 = warp::path("prompts")
         .and(warp::path("action.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::ACTION_MD, "application/octet-stream"));
-    let route_76 = warp::path("prompts")
+    let route_77 = warp::path("prompts")
         .and(warp::path("character.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::CHARACTER_MD, "application/octet-stream"));
-    let route_77 = warp::path("prompts")
+    let route_78 = warp::path("prompts")
         .and(warp::path("comedy.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::COMEDY_MD, "application/octet-stream"));
-    let route_78 = warp::path("prompts")
+    let route_79 = warp::path("prompts")
         .and(warp::path("context.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::CONTEXT_MD, "application/octet-stream"));
-    let route_79 = warp::path("prompts")
+    let route_80 = warp::path("prompts")
         .and(warp::path("director.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::DIRECTOR_MD, "application/octet-stream"));
-    let route_80 = warp::path("prompts")
+    let route_81 = warp::path("prompts")
         .and(warp::path("explicit.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::EXPLICIT_MD, "application/octet-stream"));
-    let route_81 = warp::path("prompts")
+    let route_82 = warp::path("prompts")
         .and(warp::path("fantasy.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::FANTASY_MD, "application/octet-stream"));
-    let route_82 = warp::path("prompts")
+    let route_83 = warp::path("prompts")
         .and(warp::path("general.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::GENERAL_MD, "application/octet-stream"));
-    let route_83 = warp::path("prompts")
+    let route_84 = warp::path("prompts")
         .and(warp::path("horror.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::HORROR_MD, "application/octet-stream"));
-    let route_84 = warp::path("prompts")
+    let route_85 = warp::path("prompts")
         .and(warp::path("mystery.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::MYSTERY_MD, "application/octet-stream"));
-    let route_85 = warp::path("prompts")
+    let route_86 = warp::path("prompts")
         .and(warp::path("new-character.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::NEW_CHARACTER_MD, "application/octet-stream"));
-    let route_86 = warp::path("prompts")
+    let route_87 = warp::path("prompts")
         .and(warp::path("noir.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::NOIR_MD, "application/octet-stream"));
-    let route_87 = warp::path("prompts")
+    let route_88 = warp::path("prompts")
         .and(warp::path("plot-twist.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::PLOT_TWIST_MD, "application/octet-stream"));
-    let route_88 = warp::path("prompts")
+    let route_89 = warp::path("prompts")
         .and(warp::path("romance.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::ROMANCE_MD, "application/octet-stream"));
-    let route_89 = warp::path("prompts")
+    let route_90 = warp::path("prompts")
         .and(warp::path("sci-fi.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::SCI_FI_MD, "application/octet-stream"));
-    let route_90 = warp::path("prompts")
+    let route_91 = warp::path("prompts")
         .and(warp::path("template.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::TEMPLATE_MD, "application/octet-stream"));
-    let route_91 = warp::path("prompts")
+    let route_92 = warp::path("prompts")
         .and(warp::path("thriller.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::THRILLER_MD, "application/octet-stream"));
-    let route_92 = warp::path("sw.js")
+    let route_93 = warp::path("sw.js")
         .and(warp::get())
         .map(|| js_reply(static_assets::SW_JS));
 
     // Chain all routes using balanced tree structure
-    ((((((route_0).or(route_1)).or((route_2).or((route_3).or(route_4)))).or(((route_5).or((route_6).or(route_7))).or((route_8).or((route_9).or(route_10))))).or((((route_11).or((route_12).or(route_13))).or((route_14).or((route_15).or(route_16)))).or(((route_17).or((route_18).or(route_19))).or((route_20).or((route_21).or(route_22)))))).or(((((route_23).or(route_24)).or((route_25).or((route_26).or(route_27)))).or(((route_28).or((route_29).or(route_30))).or((route_31).or((route_32).or(route_33))))).or((((route_34).or((route_35).or(route_36))).or((route_37).or((route_38).or(route_39)))).or(((route_40).or((route_41).or(route_42))).or((route_43).or((route_44).or(route_45))))))).or((((((route_46).or(route_47)).or((route_48).or((route_49).or(route_50)))).or(((route_51).or((route_52).or(route_53))).or((route_54).or((route_55).or(route_56))))).or((((route_57).or((route_58).or(route_59))).or((route_60).or((route_61).or(route_62)))).or(((route_63).or((route_64).or(route_65))).or((route_66).or((route_67).or(route_68)))))).or(((((route_69).or((route_70).or(route_71))).or((route_72).or((route_73).or(route_74)))).or(((route_75).or((route_76).or(route_77))).or((route_78).or((route_79).or(route_80))))).or((((route_81).or((route_82).or(route_83))).or((route_84).or((route_85).or(route_86)))).or(((route_87).or((route_88).or(route_89))).or((route_90).or((route_91).or(route_92)))))))
+    ((((((route_0).or(route_1)).or((route_2).or((route_3).or(route_4)))).or(((route_5).or((route_6).or(route_7))).or((route_8).or((route_9).or(route_10))))).or((((route_11).or((route_12).or(route_13))).or((route_14).or((route_15).or(route_16)))).or(((route_17).or((route_18).or(route_19))).or((route_20).or((route_21).or(route_22)))))).or(((((route_23).or((route_24).or(route_25))).or((route_26).or((route_27).or(route_28)))).or(((route_29).or((route_30).or(route_31))).or((route_32).or((route_33).or(route_34))))).or((((route_35).or((route_36).or(route_37))).or((route_38).or((route_39).or(route_40)))).or(((route_41).or((route_42).or(route_43))).or((route_44).or((route_45).or(route_46))))))).or((((((route_47).or(route_48)).or((route_49).or((route_50).or(route_51)))).or(((route_52).or((route_53).or(route_54))).or((route_55).or((route_56).or(route_57))))).or((((route_58).or((route_59).or(route_60))).or((route_61).or((route_62).or(route_63)))).or(((route_64).or((route_65).or(route_66))).or((route_67).or((route_68).or(route_69)))))).or(((((route_70).or((route_71).or(route_72))).or((route_73).or((route_74).or(route_75)))).or(((route_76).or((route_77).or(route_78))).or((route_79).or((route_80).or(route_81))))).or((((route_82).or((route_83).or(route_84))).or((route_85).or((route_86).or(route_87)))).or(((route_88).or((route_89).or(route_90))).or((route_91).or((route_92).or(route_93)))))))
 }

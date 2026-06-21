@@ -1,6 +1,15 @@
 # VRAM Estimator Reference
 
-The VRAM estimator (`src/llama/vram_estimator/`) predicts GPU memory usage for a given model, quantization, context size, and hardware configuration. It powers the animated VRAM breakdown bar, the auto-size wizard, and the pre-download quant advisor.
+The VRAM estimator (`src/llama/vram_estimator/`) predicts GPU memory usage for a given model, quantization, context size, and hardware configuration. It powers:
+
+- The auto-size wizard
+- The pre-download quant advisor
+- The preset-editor VRAM strip
+- Launch-card VRAM estimates
+
+The animated VRAM breakdown bar in the UI is a client-side replica that uses the same architecture data (from GGUF introspection) but applies a simplified overhead model for speed.
+
+Estimation is primarily based on GGUF introspection, not name matching. Filename-based heuristics are used only when GGUF metadata is unavailable (e.g., pre-download estimates or incomplete headers).
 
 ![VRAM breakdown bar in the Hardware step](../screenshots/spawn-wizard-step3-vram.png)
 
@@ -8,9 +17,17 @@ The VRAM estimator (`src/llama/vram_estimator/`) predicts GPU memory usage for a
 
 ## ModelArch
 
-`ModelArch` is the central struct. Every estimation function takes a `&ModelArch`. It is populated in two ways:
-- **Pre-download / filename-only**: `ModelArch::from_name_and_params(name, param_b)` builds a heuristic from the name and parameter count.
-- **From a local GGUF file**: `ModelMetadata::to_arch()` in `spawn_wizard.rs` maps the GGUF metadata keys to `ModelArch` fields; these values override any heuristic. The GGUF `general.architecture` string also selects the family heuristic via `gguf_arch_to_heuristic_name()`.
+`ModelArch` is the central struct. Every estimation function takes a `&ModelArch`.
+
+**All fields are concrete integers or floats (0 = unknown).** Upstream `ModelMetadata` uses `Option<T>` fields; `ModelMetadata::to_arch()` (in `src/llama/spawn_wizard.rs`) resolves or falls back for each field, and uses 0 when unknown.
+
+It is populated via `to_arch()` in two primary ways:
+
+- **From a local GGUF file (primary)**:
+  `GgufMetadata::to_model_metadata()` reads the file, producing a `ModelMetadata`, which is then converted via `ModelMetadata::to_arch()` into `ModelArch`. Structural fields (layer counts, attention config, hybrid attention interval, MTP depth, etc.) come from the GGUF header and override any name-based guess. This is authoritative for all downloaded models, including finetunes with unusual names.
+
+- **From name + param count (fallback only)**:
+  `ModelArch::from_name_and_params(name, param_b)` builds a coarse heuristic when GGUF introspection is not possible (e.g., before download). Even when a GGUF file exists, `to_arch()` always runs `from_name_and_params()` first as an initial scaffold; then overrides fields from GGUF data; and — if the name heuristic produced only weak defaults and a known GGUF architecture is present — may re-run the heuristic using the GGUF-derived family name to get the correct shape. This is intentionally minimal and should not be relied on for correctness when GGUF metadata is available.
 
 ```rust
 pub struct ModelArch {
@@ -43,7 +60,7 @@ pub struct ModelArch {
     // Sizing / overhead
     pub param_b: f64,           // Approximate param count in billions
     pub n_embd: u32,            // Hidden/embedding dimension (for CUDA overhead estimate)
-                                // 0 = unknown; set from GGUF embedding_length when available
+                                 // 0 = unknown; set from GGUF embedding_length when available
 }
 ```
 
@@ -57,9 +74,11 @@ pub struct ModelArch {
 
 ---
 
-## Architecture Heuristics
+## Architecture Heuristics (Name-Based Fallback)
 
-`ModelArch::from_name_and_params(name, param_b)` returns a best-effort arch from the model filename and parameter count. This is used when the GGUF file has not yet been introspected. Ground-truth values from GGUF metadata override these when available.
+Used only when GGUF introspection is not available, or as an initial scaffold that is then overridden by GGUF values.
+
+`ModelArch::from_name_and_params(name, param_b)` returns a best-effort arch from the model filename and parameter count. For any GGUF file on disk, the per-family tables below are NOT directly used for VRAM estimation — the GGUF is authoritative. These heuristics shape only pre-download or missing-field estimates.
 
 ### Priority order (first match wins)
 
@@ -75,6 +94,8 @@ pub struct ModelArch {
 7. Fallback → `standard_heuristic(param_b)` with MoE suffix parsing and MTP detection if present
 
 ### Per-family heuristics
+
+These are initial defaults for `from_name_and_params()`; GGUF introspection overrides them when present.
 
 #### Dense / Qwen3 standard (`standard_heuristic`)
 
@@ -96,8 +117,8 @@ KV cache only grows for `n_attn_layers` — the DeltaNet layers contribute nothi
 
 | param_b | n_layers | n_attn_layers | n_kv_heads | head_dim | n_embd | DeltaNet state |
 |---------|----------|--------------|------------|----------|--------|----------------|
-| ≤ 35 (27B) | 64 | 16 | 4 | 256 | 5120 | 48 × 48 × 128² × 2 B ≈ 720 MB |
-| > 35 (davidau 40B) | 96 | 24 | 4 | 256 | 5120 | 48 × 72 × 128² × 2 B ≈ 1.1 GB |
+| ≤ 35 (27B) | 64 | 16 | 4 | 256 | 5120 | 48 layers × 48 V-heads × 128² × 2 B ≈ 75 MB |
+| > 35 (davidau 40B) | 96 | 24 | 4 | 256 | 5120 | 72 layers × 48 V-heads × 128² × 2 B ≈ 113 MB |
 
 **Calibrated on**: Qwen3.6-27B-NEO-CODE Q4_K_M GGUF (GGUF arch tag: `qwen35`). n_embd=5120 confirmed from `embedding_length` in GGUF metadata.
 
@@ -115,7 +136,7 @@ KV cache only grows for `n_attn_layers` — the DeltaNet layers contribute nothi
 | n_experts | 256 |
 | n_experts_used | 9 (8 routed + 1 shared) |
 | expert_fraction | 0.85 |
-| DeltaNet state | 32 × 30 × 128² × 2 B ≈ 300 MB |
+| DeltaNet state | 30 layers × 32 V-heads × 128² × 2 B ≈ 31 MB |
 
 #### Qwen3.5 (hybrid DeltaNet + MoE)
 
@@ -142,11 +163,13 @@ DeltaNet V-heads: 64 for 122B (confirmed), 32 assumed for smaller.
 | n_experts | 512 |
 | n_experts_used | 11 (10 routed + 1 shared) |
 | expert_fraction | 0.92 |
-| DeltaNet state | 36 × 32 × 128² × 2 B ≈ 1.2 GB |
+| DeltaNet state | 36 layers × 32 V-heads × 128² × 2 B ≈ 38 MB |
 
 #### Gemma 3 (alternating local/global attention)
 
 1-in-6 layers use full global attention; remaining layers use a 512-token sliding window with MQA (`local_kv_heads = 1`).
+
+The `sliding_window_pattern` bool array in the GGUF determines each layer's role: `false` = global (full context), `true` = local (sliding window). `n_global_attn_layers` is the count of global layers.
 
 | param_b | n_layers | global_layers | n_kv_heads (global) | head_dim | local_kv_heads | window |
 |---------|----------|---------------|---------------------|----------|----------------|--------|
@@ -160,6 +183,8 @@ DeltaNet V-heads: 64 for 122B (confirmed), 32 assumed for smaller.
 
 5:1 local:global pattern — every 6th layer attends the full context; the rest use a sliding window.
 
+Global layers use `global_head_dim = 512`, local layers use `head_dim = 256`. Gemma4-26B-A4B has `n_experts_used = 9` (8 routed + 1 always-loaded shared expert).
+
 | Tier | n_layers | global_layers | n_kv_heads (global) | local_kv_heads | n_experts | window | n_embd |
 |------|----------|---------------|---------------------|----------------|-----------|--------|--------|
 | E2B | 35 | 7 | 1 | 1 | 0 | 512 | 1152 |
@@ -168,25 +193,29 @@ DeltaNet V-heads: 64 for 122B (confirmed), 32 assumed for smaller.
 | 26B-A4B MoE | 30 | 5 | 2 | 8 | 128 | 1024 | 2048 |
 | 31B dense | 60 | 10 | 4 | 16 | 0 | 1024 | 5120 |
 
-- Global layers use `global_head_dim = 512`, local layers use `head_dim = 256`
-- "A4B" = 4B active parameters, **not** 4 active experts (9 active: 8 routed + 1 shared)
-- n_embd values for E2B/E4B/12B/26B-A4B are estimated; GGUF embedding_length overrides when present
+- n_embd values for E2B/E4B/12B/26B-A4B are estimated; GGUF `embedding_length` overrides when present
+- Auto-size uses `block_count ≥ 75` → Qwen3.5; `< 75` → Qwen3.6 to disambiguate the shared `"qwen35"` arch tag when the GGUF is present
+- Gemma4-31B is identified via `n_layers=60`; `param_b` is overridden to 31B to ensure the correct heuristic tier
 
 #### EXAONE 4.5
 
+All known EXAONE 4.5 sizes unconditionally set `mtp_depth = 1`.
+
 | param_b | n_layers | global_layers | n_kv_heads | head_dim | window | mtp_depth | mmproj |
 |---------|----------|---------------|------------|----------|--------|-----------|--------|
-| ≤ 15 | 32 | 8 | 8 | 128 | 4096 | 0 | 0 |
+| ≤ 15 | 32 | 8 | 8 | 128 | 4096 | 1 | 0 |
 | > 20 (33B) | 64 | 16 | 8 | 128 | 4096 | 1 | 2.58 GB |
 
 ### Generic MoE suffix parsing
 
 For names not matched by the above, `parse_moe_suffix()` scans for `"NB-AMB"` or `"NB_AMB"` patterns (e.g. `"26B-A4B"`, `"122B-A10B"`). It:
+
 - Uses the last valid pattern in the name (rightmost match) to avoid false positives.
 - Enforces `total_b >= 7.0` to reject tokens like `"llama-3-a4b"`.
 - Enforces `active_b <= total_b`.
 
 For matched suffixes:
+
 - `n_experts` inferred from sparsity (`active_b / total_b`):
   - < 5% → 512 (extremely sparse, Coder-Next style)
   - total > 100B → 128
@@ -197,7 +226,7 @@ For matched suffixes:
   - < 5% → 11
   - ≤ 15% → 9
   - else → 8
-- `expert_fraction` left at default 0.65
+- `expert_fraction` defaults to 0.65; family-specific constructors override this (0.85 for Qwen3.5/3.6, 0.92 for Coder-Next)
 
 ---
 
@@ -210,6 +239,7 @@ kv_cache_bytes(arch, context_size, parallel_slots, ctk, ctv) → u64
 ```
 
 Standard (dense / hybrid, no local attention):
+
 ```
 effective_layers = n_attn_layers if n_attn_layers > 0 else n_layers
 K = effective_layers × n_kv_heads × head_dim × context × slots × k_bpe
@@ -220,6 +250,7 @@ total = K + V
 For DeltaNet hybrid models (Qwen3.5/3.6): `effective_layers = n_attn_layers` (e.g. 16 out of 64 for 27B). KV grows at 1/4 the rate of a standard dense model with the same layer count.
 
 Sliding-window (for any `has_local_attn()` model, e.g. Gemma 3/4, EXAONE 4.5):
+
 ```
 global_layers = min(n_global_attn_layers, effective_layers)
 local_layers  = max(effective_layers - n_global_attn_layers, 0)
@@ -240,6 +271,7 @@ moe_weight_split(model_size_bytes, arch, n_cpu_moe) → (vram_bytes, ram_bytes)
 ```
 
 For `n_cpu_moe > 0` on a MoE model:
+
 ```
 moe_layers   = max(n_layers, 1)
 cpu_layers   = min(n_cpu_moe, moe_layers)
@@ -248,6 +280,7 @@ expert_frac  = expert_fraction.clamp(0.3, 0.99)
 cpu_bytes    = model_size_bytes × expert_frac × cpu_ratio
 vram_bytes   = model_size_bytes − cpu_bytes
 ```
+
 `--n-cpu-moe N` treats N as the number of transformer layers whose experts are kept on CPU — not as a count of individual experts.
 
 For dense models or `n_cpu_moe ≤ 0`: all weights in VRAM.
@@ -268,34 +301,35 @@ gpu_overhead_bytes(ubatch_size) → u64
   = 300 MB + max(0, ubatch_size − 512) × 150 KB
 ```
 
-Covers Metal/CUDA context, KV allocator metadata. **This alone is sufficient for Metal (Apple Silicon unified memory)** — Metal compute buffers are small and transient. For CUDA, also call `cuda_compute_buffer_bytes`.
+Covers Metal (Apple Silicon) context, KV allocator metadata, and transient Metal compute buffers. On unified memory, this is the only overhead function used; discrete GPUs use `discrete_overhead_bytes` instead.
 
-### `cuda_compute_buffer_bytes`
+### Discrete-GPU overhead (CUDA/ROCm)
 
-```
-cuda_compute_buffer_bytes(arch, ubatch_size) → u64
-  = n_layers × ubatch_size × n_embd × 2 bytes × 4 passes
-  = 0 if n_embd == 0 or n_layers == 0
-```
+The discrete overhead model has three parts. All inputs are GGUF-derived (`embedding_length`, `expert_count`, `block_count`, sliding-window pattern), never from name parsing.
 
-CUDA/ROCm persistent compute buffer for Q/K/V projections, FFN intermediates, and normalization scratch tensors. These are allocated at model load and do not change with context length. The function itself does **not** check `is_unified_memory`; callers (`full_estimate`, `max_context`) set `cuda_buf = 0` for unified-memory systems before calling it.
+- `discrete_overhead_base_bytes(arch, ubatch_size)`:
+  - Context-independent: graph compute scratch (∝ ubatch × model width), MoE expert gather/scatter buffers, and (for Gemma with sliding-window) per-layer-input embedding tables.
+  - If `n_embd == 0` or `n_layers == 0` (unknown architecture): flat 256 MB fallback.
+  - 200 MiB floor in `base_bytes` (CUDA context minimum).
 
-**Calibrated on RTX 5090 32 GB (WDDM), Qwen3.6-27B-NEO-CODE Q4_K_M, 212,992-token context, ubatch=1024, flash_attn=on:**
+- `discrete_overhead_ctx_bytes_per_token(arch, ubatch_size)`:
+  - Context-dependent: attention mask and per-layer prefill scratch that grow linearly with context, `n_layers`, and per-head dimension.
+  - Uses `max(head_dim, global_head_dim)` for Gemma-style models with wider global heads.
+  - Formula: `0.46 × n_layers × max(head_dim, global_head_dim) × (0.8 + 0.2 × ubatch/1024)`.
 
-| Component | Measured |
-|-----------|----------|
-| Model weights (Q4_K_M, 16,511 MB) | 16.12 GiB |
-| mmproj BF16 (888 MB) | 0.87 GiB |
-| KV q8_0 @ 212k (16 attn layers × 4 heads × 256 dim) | 6.50 GiB |
-| WDDM desktop apps (DWM, Discord, NVIDIA App, etc.) | ~1.50 GiB |
-| **CUDA compute buffers (residual)** | **~2.45 GiB** |
-| **Total nvidia-smi** | **27.44 GiB (28,101 MiB)** |
+- `discrete_overhead_bytes(arch, ubatch_size, context_size)`:
+  - Total discrete overhead = base + (per_token × context_size).
 
-Formula check: 65 × 1024 × 5120 × 2 × 4 = 2.54 GiB → matches within 4%.
+**Calibrated on RTX 5090 32 GB (WDDM), llama.cpp b9728, `--parallel 1 --kv-unified -fa on`, q8_0 KV, full GPU offload**, across:
 
-Note: WDDM display apps are **already accounted for** in `available_vram_bytes` (the caller subtracts current VRAM used before calling the estimator). The compute buffer formula only covers llama.cpp's persistent scratch allocations.
+- Qwen3.6-27B (dense-hybrid)
+- Qwen3.6-35B-A3B (MoE-hybrid)
+- Gemma-4-31B (dense SWA)
+- Gemma-4-26B-A4B (MoE SWA)
 
-Returns 0 when `n_embd == 0` or `n_layers == 0`. When `n_embd = 0`, the estimate falls back to `gpu_overhead_bytes` alone — still accurate for Metal, but will underestimate by ~2–3 GiB for CUDA at large context.
+at 4k–213k context, ubatch 1024/2048. For Qwen-family models, predictions land within tens of MiB; Gemma models are over-estimated modestly (the safe direction). The overhead is roughly **independent of model depth's KV footprint** — it grows with ubatch (scratch) and context (attention mask), so the prior `n_layers × n_embd × ubatch` formula (context-independent) was wrong in both directions.
+
+On unified memory (Metal), none of these functions are used — `gpu_overhead_bytes` plus the headroom reserve is sufficient.
 
 ### `full_estimate`
 
@@ -304,13 +338,21 @@ Sums all components:
 ```
 weight_vram, ram = moe_weight_split(model_size, arch, n_cpu_moe)
 kv              = kv_cache_bytes(arch, context, slots, ctk, ctv)
-linear_state    = arch.linear_attn_state_bytes    (fixed; not context-dependent)
-mmproj          = arch.mmproj_bytes               (set from mmproj_path stat in API)
+linear_state    = arch.linear_attn_state_bytes             (fixed; not context-dependent)
+mmproj          = arch.mmproj_bytes                        (set from mmproj_path stat in API)
 mtp             = mtp_overhead_bytes(model_size, arch.mtp_depth)
-cuda_buf        = 0 if is_unified else cuda_compute_buffer_bytes(arch, ubatch)
-overhead        = gpu_overhead_bytes(ubatch) + cuda_buf
-total           = weight_vram + kv + linear_state + mmproj + mtp + overhead
+
+overhead:
+  if is_unified_memory:
+      gpu_overhead_bytes(ubatch)
+  else:
+      discrete_overhead_bytes(arch, ubatch, context)
+        (base + per_token × context)
+
+total = weight_vram + kv + linear_state + mmproj + mtp + overhead
 ```
+
+When `available_vram_bytes == 0`, recommendation is always `Risk` with note "Memory size unknown; estimate is best-effort."
 
 Recommendation thresholds:
 
@@ -334,30 +376,54 @@ max_context(model_size, arch, ctk, ctv, parallel_slots, ubatch,
             n_cpu_moe, available_vram, fit_granularity,
             headroom_fraction, n_ctx_train, is_unified_memory) → u64
 
-usable   = available_vram × (1 − headroom_fraction)
-cuda_buf = 0 if is_unified else cuda_compute_buffer_bytes(arch, ubatch)
-overhead = gpu_overhead_bytes(ubatch) + cuda_buf
-fixed    = weight_vram + mmproj + mtp + linear_state + overhead
-kv_budget = usable − fixed
+usable = available_vram × (1 − headroom_fraction)
+
+# base overhead (context-independent) and slope (per-token)
+if is_unified_memory:
+    base_overhead = gpu_overhead_bytes(ubatch)
+    overhead_slope = 0
+else:
+    base_overhead = discrete_overhead_base_bytes(arch, ubatch)
+    overhead_slope = discrete_overhead_ctx_bytes_per_token(arch, ubatch)
+
+fixed       = weight_vram + mmproj + mtp + linear_state + base_overhead
+kv_budget   = usable − fixed
+
+# Binary search (sliding-window) or direct solve (standard/hybrid).
+# The per-token cost is:
+#   (kv_bytes_per_token) + overhead_slope
+# so the overhead slope is charged alongside the KV cache.
 ```
 
 Direct (standard / hybrid):
+
 ```
-max_ctx = kv_budget / (effective_layers × n_kv_heads × head_dim × slots × (k_bpe + v_bpe))
+max_ctx = kv_budget / (kv_bytes_per_token + overhead_slope)
 ```
 
 Binary search bounds: lo = 512, hi = 2,097,152. For sliding-window models, binary-search is used to find the largest context; for standard/hybrid, the direct formula is used.
 
 Zero-guard: returns 0 when:
+
 - `available_vram_bytes == 0`, or
 - fixed costs alone (weights in VRAM + mmproj + MTP + linear-state + overhead) exceed `usable` (available VRAM after headroom is reserved), or
 - for sliding-window models, `kv_cache_bytes(512) > kv_budget` (minimum context doesn't fit).
 
 **Important**: `is_unified_memory` is threaded from the caller. For Mac/Metal: always true. For Windows/Linux CUDA: always false. The auto_size and quant advisor both pass this flag correctly.
 
-### MTP filename detection
+### MTP detection
 
-When any heuristic path (Qwen3.6, Qwen3.5, Gemma 4, or generic fallback) encounters `"mtp"` or `"multi-token"` in the filename, it sets `mtp_depth = 1`. This triggers the MTP overhead calculation (`model_size_bytes × 1.5%`) in `full_estimate` and `max_context`.
+Primary: GGUF fields (`nextn_predict_layers`, `next_n_token_count`, `num_nextn_predict_layers`, `multi_token_prediction_depth`). When present, these set `mtp_depth` directly via introspection.
+
+Fallback: When any heuristic path (Qwen3.6, Qwen3.5, Gemma 3/4, or generic) encounters `"mtp"` or `"multi-token"` in the filename, it sets `mtp_depth = 1` via `from_name_and_params()`. This value is then used by `full_estimate` (for MTP overhead in the breakdown) and `max_context` (for budgeting fixed costs). EXAONE 4.5 unconditionally uses MTP (all sizes).
+
+### `find_min_cpu_moe_to_fit_weights`
+
+Binary search over `[0, n_layers]` to find the smallest `n_cpu_moe` whose weight footprint fits in VRAM.
+
+Uses the unified-memory overhead function `gpu_overhead_bytes(ubatch)` (not discrete overhead) as its overhead estimate, then checks whether `moe_weight_split` yields a VRAM footprint that fits in 80% of available VRAM minus overhead, mmproj, and MTP overhead.
+
+If even with all experts on CPU it still doesn't fit, returns `n_layers`.
 
 ### `auto_size`
 
@@ -368,10 +434,7 @@ Orchestrates all of the above to produce `AutoSizeResult`:
    - **Unified memory**: 10% base, capped at 2 GB.
    - **Discrete GPU**: 5% base, capped at 1.5 GB.
    On large budgets (>>30 GB) the cap takes effect; on smaller systems the percentage applies.
-3. Find minimum `n_cpu_moe` to fit model weights via `find_min_cpu_moe_to_fit_weights`:
-   - Binary search over [0, n_layers].
-   - For each candidate, calls `moe_weight_split` and checks whether resulting VRAM weight footprint fits in 80% of available VRAM minus overhead, mmproj, and MTP overhead.
-   - Returns the smallest `n_cpu_moe` that fits; if even all experts on CPU still won't fit, returns `n_layers`.
+3. Find minimum `n_cpu_moe` to fit model weights via `find_min_cpu_moe_to_fit_weights`
 4. For each KV quant × context combination (q8_0, q4_0, f16):
    - Call `max_context(…, is_unified_memory)` to find the largest context that fits
    - Call `full_estimate` at that context to get the full breakdown
@@ -379,7 +442,13 @@ Orchestrates all of the above to produce `AutoSizeResult`:
 6. Emit warnings for: agentic + low KV quant, context > n_ctx_train, MoE offload speed penalty
 7. Emit notes for: MoE offload ratio, MTP overhead, mmproj presence
 
+`n_ctx_train` is a hard cap: even if more context fits in VRAM, the auto-size function will not recommend exceeding the model's training context length.
+
+Auto-size ignores client-provided `n_ctx`, `ctk`, `ctv`, `n_cpu_moe` and chooses its own values.
+
 For MoE models, `build_scenarios` adds an "extended" scenario with aggressive CPU offload (~75% of layers on CPU) to show a higher-context, slower option.
+
+When `gguf_arch == "qwen35"`, auto-size disambiguates: `block_count ≥ 75` → Qwen3.5; `< 75` → Qwen3.6.
 
 ### `estimate_model_size_bytes`
 
@@ -392,23 +461,30 @@ Used for pre-download estimates where the actual file size is not yet known.
 ### Quant advisor (`quant_comparison_table`)
 
 For each candidate quantization, it:
+
 - Estimates file size from `param_b` and the quant's BPW.
 - Checks "fits" only if the model plus a minimal KV cache (8 K tokens at q8_0) is under available VRAM.
 - Scores each quant as `min(max_ctx_q8, 128K) × quality_weight` if it fits.
 
 Gemma 4 QAT:
+
 - If the model name contains both `"gemma-4"` (or `"gemma4"`) and `"qat"`, then Q4_0 is treated as Excellent quality.
 - When Q4_0 fits, it is chosen as the recommended quant instead of higher-bit defaults.
+
+When called by the UI after introspection, the quant-compare endpoint can receive explicit arch fields (`n_layers`, `n_kv_heads`, `head_dim`, `global_head_dim`, `n_experts`, `mtp_depth`, etc.) that override the name heuristic, improving accuracy for renamed finetunes.
 
 ### Legacy `estimate_vram` wrapper
 
 Backward-compat wrapper kept for existing `/api/vram/estimate` callers. Uses a legacy KV heuristic (`context × effective_batch × 64 × kv_bpe`) and no per-layer formula. Always builds a default `ModelArch` with all zeros; `new` code should use `full_estimate`.
+
+If `speculative_decoding` is true, adds `model_size_bytes / 8` to the total.
 
 ---
 
 ## API: mmproj Path Support
 
 The `/api/vram-estimate` (breakdown) endpoint accepts either:
+
 - `mmproj_bytes` (u64): explicit byte count
 - `mmproj_path` (string): filesystem path; the server stats the file to get the size
 
@@ -416,20 +492,50 @@ If both are provided, `mmproj_bytes` takes precedence. The path is resolved rela
 
 ---
 
+## API Endpoints
+
+### POST /api/vram-estimate
+
+Architecture-aware VRAM breakdown endpoint.
+
+- Requires: `api-token` (Authorization header)
+- Requires (body): `model_path`
+- Optional (body): `n_ctx`, `gpu_layers`, `parallel_slots`, `ubatch_size`, `ctk`, `ctv`, `n_cpu_moe`, `available_vram_bytes`, `is_unified_memory`, `mmproj_path`, `mmproj_bytes`
+- Behavior: reads GGUF metadata from `model_path` as primary source; falls back to `ModelArch::from_name_and_params()` on parse failure
+- Output fields: `weights_bytes`, `kv_cache_bytes`, `linear_attn_state_bytes`, `mmproj_bytes`, `mtp_bytes`, `overhead_bytes`, `total_bytes`, `available_bytes`, `headroom_bytes`, `ram_bytes`, `recommendation`, `note`
+
+### API helpers (`build_arch_from_body`)
+
+Used by `quant-compare` and `auto-size` endpoints when GGUF is not present or for fields not in the GGUF.
+
+- Role: merges a name-based heuristic `ModelArch` with explicit architecture fields from the request body.
+- Priority: explicit body fields take precedence; fallback to heuristic defaults.
+- When `gguf_arch` is present, uses `gguf_arch_to_heuristic_name()` to pick the correct family.
+
+### VRAM bar (UI)
+
+The animated VRAM breakdown bar in the UI is architecture-aware via GGUF introspection, but uses a simplified overhead model (not the full discrete-overhead pipeline) for performance. It consumes the same arch from GGUF but with a lighter-weight overhead formula, so its numbers may differ slightly from `/api/vram-estimate`.
+
+---
+
 ## Backend-Specific Accuracy
 
-| Backend | Model size | KV cache | CUDA compute buf | Total accuracy |
+| Backend | Model size | KV cache | Discrete overhead | Total accuracy |
 |---------|-----------|----------|-----------------|----------------|
-| Metal (Apple Silicon) | ✓ exact from file | ✓ formula | N/A (0) | ±0.3 GiB |
-| CUDA (Windows/Linux) | ✓ exact from file | ✓ formula | ✓ when n_embd known | ±0.5 GiB |
-| CUDA, n_embd unknown | ✓ exact from file | ✓ formula | 0 (fallback) | ~2–3 GiB low |
+| Metal (Apple Silicon) | ✓ exact from file | ✓ formula | N/A (uses gpu_overhead_bytes) | ±0.3 GiB |
+| CUDA (Windows/Linux) | ✓ exact from file | ✓ formula | ✓ calibrated when n_embd known | ±0.5 GiB |
+| CUDA, n_embd unknown | ✓ exact from file | ✓ formula | 256 MB fallback | ~2–3 GiB low |
+
+Discrete overhead (CUDA/ROCm) is calibrated on RTX 5090 32 GB using measurement-grounded formulas. When `n_embd` is unknown (no GGUF or missing `embedding_length`), it falls back to a 256 MB flat reserve and underestimates overhead.
 
 **Mac M5 Max calibration** (Q5_K_S, 262k ctx, q8_0 KV):
+
 - Estimated: 18.11 + 0.87 + 8.00 + 0.30 = 27.27 GiB
 - Actual: ~27 GiB observed (model loaded, memory pressure spike to ~60 GB = 33 GB baseline + 27 GB model)
 
 **Windows RTX 5090 calibration** (Q4_K_M, 212k ctx, q8_0 KV, ubatch=1024, flash_attn=on):
-- Estimated: 16.12 + 0.87 + 6.50 + 0.38 (base) + 2.54 (CUDA buf) = 26.41 GiB
+
+- Estimated: 16.12 + 0.87 + 6.50 + 0.38 (base) + 2.54 (ctx overhead) = 26.41 GiB
 - Actual nvidia-smi: 28.10 GiB (includes ~1.5 GiB WDDM display apps already in available_vram)
 - Net llama-only: ~26.6 GiB → within ~0.2 GiB of estimate
 
@@ -479,21 +585,48 @@ KV BPE is used only for KV cache estimation (`kv_cache_bytes`). The `ctk` / `ctv
 
 ## GGUF Metadata Integration
 
-When a GGUF file is introspected via `POST /api/model/introspect`, the following metadata keys map to `ModelArch` fields. These override heuristic values.
+When a GGUF file is present, `gguf_meta.rs` reads the model's real KV header and `ModelMetadata::to_model_metadata()` (in `gguf_meta.rs`) builds the metadata struct. `ModelMetadata::to_arch()` (in `spawn_wizard.rs`) then converts it into `ModelArch`.
+
+**Structural fields come from the file, not from name guesses** — the name heuristic is always run first as a scaffold, but is then overridden field-by-field with GGUF data. For "weak" heuristic results (no MoE, no hybrid, no sliding-window) with a known GGUF architecture, it may re-run the heuristic using the GGUF-derived family name. The breakdown endpoint (`/api/vram-estimate`) and `auto_size` (`/api/vram/auto-size`) both build their arch through this real-data path when `model_path` points at an on-disk GGUF.
+
+### Key mapping
 
 | GGUF key | ModelArch field | Notes |
 |----------|----------------|-------|
 | `{arch}.block_count` | `n_layers` | |
-| `{arch}.attention.head_count_kv` | `n_kv_heads` | |
-| `{arch}.attention.key_length` | `head_dim` | Ignored for Gemma4 (uses heuristic) |
-| `{arch}.embedding_length` | `n_embd` | Used for CUDA compute buffer formula |
+| `{arch}.attention.head_count` | (used as n_head) | Used to derive head_dim = n_embd / n_head when key_length missing |
+| `{arch}.attention.head_count_kv` | `n_kv_heads` | Scalar, or per-layer array on Gemma 3/4 (see below) |
+| `{arch}.attention.key_length` | `head_dim` / `global_head_dim` | Global K/V dim; on Gemma it's the wide (512) global value |
+| `{arch}.attention.key_length_swa` | `head_dim` (local) | Narrow (256) local sliding-window dim on Gemma 4 |
+| `{arch}.attention.sliding_window` | `local_attn_window` | e.g. Gemma 4 = 1024 |
+| `{arch}.attention.sliding_window_pattern` | `n_global_attn_layers` | Per-layer bool array; count of `false` = global layers |
+| `{arch}.full_attention_interval` | `n_attn_layers` | Hybrid DeltaNet: `n_attn_layers = block_count / interval` |
+| `{arch}.ssm.{inner_size,state_size,conv_kernel}` | `linear_attn_state_bytes` | DeltaNet recurrent-state size |
+| `{arch}.embedding_length` | `n_embd` | Used for discrete overhead formula |
 | `{arch}.expert_count` | `n_experts` | |
-| `{arch}.expert_used_count` | `n_experts_used` | |
-| `{arch}.attention.sliding_window` | `local_attn_window` | |
-| `{arch}.context_length` | `n_ctx_train` | Hard cap warning in auto_size |
-| `general.architecture` | (selects family heuristic) | Overrides filename matching; catches renamed finetunes |
+| `{arch}.expert_used_count` | `n_experts_used` | Routed experts (shared expert counted separately) |
+| `{arch}.feed_forward_length` | `n_ff` | Available for downstream; not used directly in VRAM formulas |
+| `{arch}.nextn_predict_layers` (and `next_n_token_count`, `num_nextn_predict_layers`) | `mtp_depth` | MTP head count |
+| `{arch}.context_length` | `n_ctx_train` | Hard cap passed to `auto_size`/`max_context` |
+| `general.architecture` | (selects family heuristic) | Central for choosing correct family when filename is ambiguous (e.g. Pantheon-27B as qwen35). See `gguf_arch_to_heuristic_name()` |
+| `general.parameter_count` | (used for param_b) | Sanity checks and param_b(); not in VRAM formulas but important for ID/MoE |
 
-The GGUF arch string `"qwen35"` is mapped to the Qwen3.6 DeltaNet heuristic via `gguf_arch_to_heuristic_name()`. This is llama.cpp's internal tag for both Qwen3.5 and Qwen3.6 hybrid DeltaNet models.
+`gguf_arch_to_heuristic_name()` maps arch tags to heuristic names (e.g., `qwen35`/`qwen35moe` → Qwen3.6 by default; `qwen3_coder_next` → Coder-Next; `gemma4` → Gemma 4).
+
+### Hybrid attention (Qwen3-Next / DeltaNet)
+
+Only `block_count / full_attention_interval` layers carry a KV cache; the rest hold a fixed (context-independent) DeltaNet state sized from SSM fields: `ssm_inner_size × (ssm_state_size + ssm_conv_kernel) × 2 B` per linear layer, multiplied by the linear layers count. Both are read from the file, so a finetune with a non-standard layer count (e.g. the 35B-A3B's real `block_count` is **41**, not the 40 the name heuristic assumes) is handled correctly.
+
+### Gemma 3/4 alternating attention
+
+`attention.head_count_kv` is a per-layer array; the global-layer KV head count (smaller, e.g. 2/4) and local-layer count (larger, e.g. 8/16) are read at the positions marked global/local by `sliding_window_pattern`. The global layers use `key_length` (512) over the full context; the local layers use `key_length_swa` (256) capped at `sliding_window` (1024).
+
+The GGUF arch string `"qwen35"` is mapped via `gguf_arch_to_heuristic_name()` (llama.cpp's shared tag for Qwen3.5/3.6); since `n_layers` and `n_attn_layers` now come straight from the file, the Qwen3.5-vs-3.6 distinction no longer affects the KV math.
+
+### Implementation details
+
+- **Introspection cache**: results are cached in `~/.config/llama-monitor/model-cache/<sha256>.json`, keyed by file path + size + mtime.
+- **Fallback**: if the direct GGUF read fails (corrupt/partial file), the system falls back to running `llama-server --print-model-metadata` and parsing its output.
 
 ---
 
@@ -508,7 +641,8 @@ The GGUF arch string `"qwen35"` is mapped to the Qwen3.6 DeltaNet heuristic via 
 | Qwen3.5 expert counts (256/9) only confirmed for 122B-A10B | Qwen3.5 < 122B | Applied to smaller sizes; update when those release |
 | Generic MoE suffix `n_experts_used` is heuristic (11/9/8) based on sparsity | Non-Qwen/Gemma MoE | Approximation; exact values from GGUF introspection take precedence |
 | `expert_fraction` default 0.65 is a rough average | All MoE models | Overridden per-family; calibrate when architecture is public |
-| CUDA compute buffer formula uses `n_embd=0` fallback for unknown models | Any model without GGUF introspection | Underestimates by ~2–3 GiB on discrete GPU at large context |
+| `discrete_overhead_base_bytes` uses 256 MB fallback when n_embd unknown | Any model without GGUF `embedding_length` | Conservative; may over-reserve vs actual CUDA usage |
+| Name heuristics are heuristic-only fallback | All pre-download / no-GGUF estimates | Do not rely on them when a GGUF file is present — GGUF is authoritative |
 
 ---
 
@@ -517,10 +651,10 @@ The GGUF arch string `"qwen35"` is mapped to the Qwen3.6 DeltaNet heuristic via 
 When a new architecture is released:
 
 1. Add a named constructor to `ModelArch` (e.g. `fn new_family_heuristic(param_b: f64) -> Self`)
-2. Add a match arm in `from_name_and_params()` before the generic MoE suffix fallback
+2. Add a match arm in `from_name_and_params()` before the generic MoE suffix fallback to use as a heuristic for missing metadata
 3. Set `n_attn_layers` + `linear_attn_state_bytes` if hybrid (DeltaNet/SSM)
 4. Set `n_global_attn_layers` + `local_attn_window` + `local_kv_heads` + `global_head_dim` if sliding-window
-5. Set `n_embd` from the architecture spec (GGUF `embedding_length` or model card `hidden_size`). This is required for accurate CUDA overhead estimates on Windows/Linux.
+5. Set `n_embd` from the architecture spec (GGUF `embedding_length` or model card `hidden_size`). This is required for accurate discrete overhead estimates on Windows/Linux.
 6. Set `expert_fraction` from published parameter breakdown; leave at 0.65 if unknown
 7. Add `"arch-tag"` → `"family-heuristic-name"` mapping to `gguf_arch_to_heuristic_name()` if the GGUF uses a non-obvious arch string
 8. Add a unit test with exact arithmetic for at least one known context size
@@ -533,10 +667,10 @@ When a new architecture is released:
 | File | Purpose |
 |------|---------|
 | `src/llama/vram_estimator/estimate.rs` | Estimation logic (`full_estimate`, `max_context`, `kv_cache_bytes`, overhead functions) |
-| `src/llama/vram_estimator/arch_heuristics.rs` | `ModelArch` struct + per-family heuristics |
+| `src/llama/vram_estimator/arch_heuristics.rs` | `ModelArch` struct + per-family heuristics + `gguf_arch_to_heuristic_name()` |
 | `src/llama/vram_estimator/quant_table.rs` | BPW and KV BPE table |
 | `src/llama/vram_estimator/tests.rs` | Unit tests including calibration assertions |
-| `src/llama/spawn_wizard.rs` | `auto_size` orchestration wrapper; `ModelMetadata::to_arch()` (GGUF → ModelArch) |
-| `src/llama/gguf_meta.rs` | GGUF metadata reader (feeds ground-truth arch values) |
-| `src/web/api/vram.rs` | `/api/vram/*` route handlers; `mmproj_path` → `mmproj_bytes` stat |
+| `src/llama/spawn_wizard.rs` | `ModelMetadata::to_arch()` (GGUF → ModelArch); auto_size orchestration wrapper |
+| `src/llama/gguf_meta.rs` | GGUF metadata reader; `GgufMetadata::to_model_metadata()` (feeds ground-truth arch values) |
+| `src/web/api/vram.rs` | `/api/vram/*` route handlers; `mmproj_path` → `mmproj_bytes` stat; `build_arch_from_body()` |
 | `docs/reference/setup-wizard.md` | Wizard UI and API reference; links here for estimation details |

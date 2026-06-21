@@ -498,10 +498,10 @@ impl ModelArch {
     /// Hybrid DeltaNet + MoE: 48 total layers, 12 standard softmax-attention
     /// layers and 36 DeltaNet (linear attention) layers. Only the 12 attention
     /// layers need a traditional KV cache; the DeltaNet layers use a fixed
-    /// ~1.3 GB recurrent state regardless of context length.
+    /// ~38 MB recurrent state regardless of context length.
     fn qwen3_coder_next_arch() -> Self {
         // Standard attention: 16 Q heads, 2 KV heads, head_dim 256
-        // DeltaNet recurrent state: 36 layers × 32 V-heads × 128² × 2 bytes ≈ 1.2 GB
+        // DeltaNet recurrent state (per sequence): 36 layers × 32 V-heads × 128² × 2 bytes ≈ 38 MB
         let deltanet_state = 36u64 * 32 * 128 * 128 * 2;
         // n_embd = 7168 (235B-class model, same base hidden dim as Qwen3-235B-A22B)
         Self {
@@ -530,5 +530,35 @@ impl ModelArch {
     /// where only n_attn_layers of n_layers use traditional KV cache.
     pub fn is_hybrid_attn(&self) -> bool {
         self.n_attn_layers > 0 && self.n_attn_layers < self.n_layers
+    }
+}
+
+/// Map a GGUF `general.architecture` value to a synthetic model name that
+/// [`ModelArch::from_name_and_params`] can pattern-match against.
+///
+/// This ensures renamed finetunes (e.g. "Pantheon-27B" or "Qwopus3.6" from a
+/// Qwen3.6 base) get the correct hybrid-DeltaNet / sliding-window heuristic
+/// regardless of what the user named the file. Matching is case-insensitive.
+///
+/// Canonical entry point — both the spawn-wizard introspection path
+/// (`ModelMetadata::to_arch`) and the web VRAM endpoints route through here so
+/// the same GGUF arch tag always resolves to the same heuristic.
+pub fn gguf_arch_to_heuristic_name(gguf_arch: &str) -> String {
+    match gguf_arch.to_ascii_lowercase().as_str() {
+        "qwen3_6" | "qwen3.6" => "qwen3.6-model".into(),
+        "qwen3_5" | "qwen3.5" => "qwen3.5-model".into(),
+        // "qwen35" / "qwen35moe" is shared by Qwen3.5 and Qwen3.6 in llama.cpp's
+        // GGUF arch tag. Without block_count we can't tell them apart here, so
+        // default to qwen3.6 — the common renamed 27B finetunes (Pantheon,
+        // Qwopus) are qwen3.6 derivatives. Callers with block_count available
+        // (e.g. /api/models introspection) disambiguate further.
+        "qwen35" | "qwen35moe" => "qwen3.6-model".into(),
+        "qwen3_coder_next" | "qwen3-coder-next" => "qwen3-coder-next-model".into(),
+        "gemma4" | "gemma-4" => "gemma4-model".into(),
+        "gemma3" | "gemma-3" => "gemma3-model".into(),
+        // For all other architectures, pass through (normalised to lowercase) —
+        // from_name_and_params falls through to standard_heuristic, which is
+        // correct for llama, mistral, etc.
+        other => other.to_string(),
     }
 }

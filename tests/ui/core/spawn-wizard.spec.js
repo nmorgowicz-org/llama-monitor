@@ -332,7 +332,8 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         await page.locator('#wizard-next-btn').click();
         await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
         await expect(page.locator('.vsc-section-label')).toContainText('Context fit modes');
-        await expect(page.locator('#vram-scenarios')).toContainText('Reliable agents');
+        // Scenario cards are rendered via async backend calls; wait for them.
+        await expect(page.locator('#vram-scenarios')).toContainText('Reliable agents', { timeout: 8000 });
         await expect(page.locator('#spawn-cache-type-k')).toHaveValue('q8_0');
         await expect(page.locator('#spawn-cache-type-v')).toHaveValue('q8_0');
 
@@ -340,6 +341,7 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
 
         // Enable fit — should auto-populate '2048' and keep next enabled
         await page.selectOption('#spawn-fit-enable', 'true');
+        await expect(page.locator('#vram-scenarios')).toContainText('Reliable agents', { timeout: 8000 });
         await expect(nextBtn).toBeEnabled();
         await expect(page.locator('#spawn-fit-target')).toHaveValue('2048');
 
@@ -416,7 +418,8 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         await page.locator('#wizard-next-btn').click();
         await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
         await expect(page.locator('.vsc-section-label')).toContainText('Context fit modes');
-        await expect(page.locator('#vram-scenarios')).toContainText('Reliable agents');
+        // Scenario cards are rendered via async backend calls; wait for them.
+        await expect(page.locator('#vram-scenarios')).toContainText('Reliable agents', { timeout: 8000 });
         await expect(page.locator('#spawn-cache-type-k')).toHaveValue('q8_0');
         await expect(page.locator('#spawn-cache-type-v')).toHaveValue('q8_0');
 

@@ -402,50 +402,95 @@ fn detect_size_class(param_b: f32) -> String {
 pub fn infer_family_from_architecture(arch: &str) -> Option<String> {
     let a = arch.to_ascii_lowercase();
 
-    // llama: only llama3 family is currently recognized by name-based rules;
-    // we keep it conservative to avoid mislabeling.
-    if a.contains("llama") {
+    // Llama family
+    if a.starts_with("llama") {
         return Some("llama3".into());
     }
 
-    // Qwen3.6 / Qwen3.5 shared via "qwen35" in GGUF; disambiguated by block_count in practice.
-    // For now treat both as their family (consumer is spawn wizard, caller can refine).
+    // Qwen family (dense/MoE/VL variants grouped by generation)
     if a == "qwen3_6" || a == "qwen36" || a == "qwopus" {
         return Some("qwen36".into());
     }
-    if a == "qwen3_5" || a == "qwen35" {
+    if a == "qwen3_5" || a == "qwen35" || a == "qwen3_5moe" {
         return Some("qwen35".into());
     }
-    if a == "qwen3" || a == "qwen3next" || a.starts_with("qwen3") {
+    if a.starts_with("qwen3") {
         return Some("qwen3".into());
     }
-
-    // Gemma series
-    if a == "gemma4" || a == "gemma_4" {
-        return Some("gemma4".into());
+    if a.starts_with("qwen2") {
+        return Some("qwen2".into());
     }
-    if a == "gemma3" || a == "gemma_3" || a == "gemma2" || a == "gemma_2" || a == "gemma" {
+    if a == "qwen" {
+        return Some("qwen".into());
+    }
+
+    // Gemma family (all generations)
+    if a.starts_with("gemma") {
+        // gemma4 / gemma_4 → distinct; others → gemma
+        if a.starts_with("gemma4") || a == "gemma_4" {
+            return Some("gemma4".into());
+        }
         return Some("gemma".into());
     }
 
-    // Mistral family
-    if a.starts_with("mistral") || a == "mixtral" {
+    // Mistral family (Mistral + Mixtral)
+    if a.starts_with("mistral") || a.starts_with("mixtral") {
         return Some("mistral".into());
     }
 
-    // EXAONE
-    if a.contains("exaone") {
-        return Some("exaone".into());
-    }
-
-    // DeepSeek
+    // DeepSeek family
     if a.starts_with("deepseek") {
         return Some("deepseek".into());
     }
 
-    // Phi
+    // Phi family (phi2/phi3/phimoe)
     if a.starts_with("phi") {
         return Some("phi".into());
+    }
+
+    // Falcon family
+    if a.starts_with("falcon") {
+        return Some("falcon".into());
+    }
+
+    // EXAONE family
+    if a.starts_with("exaone") {
+        return Some("exaone".into());
+    }
+
+    // Grok (xAI)
+    if a.starts_with("grok") {
+        return Some("grok".into());
+    }
+
+    // Mamba / SSM family
+    if a.starts_with("mamba") || a == "jamba" {
+        return Some("mamba".into());
+    }
+
+    // RWKV family
+    if a.starts_with("rwkv") {
+        return Some("rwkv".into());
+    }
+
+    // OLMo family
+    if a.starts_with("olmo") {
+        return Some("olmo".into());
+    }
+
+    // StableLM
+    if a.starts_with("stablelm") {
+        return Some("stablelm".into());
+    }
+
+    // Granite (IBM)
+    if a.starts_with("granite") {
+        return Some("granite".into());
+    }
+
+    // StarCoder family
+    if a.starts_with("starcoder") {
+        return Some("starcoder".into());
     }
 
     None

@@ -116,6 +116,42 @@ pub struct GgufMetadata {
 
     /// MTP prediction depth (`{arch}.next_n_token_count` or similar).
     pub mtp_depth: Option<u32>,
+
+    // ── Hybrid linear-attention (Qwen3-Next / DeltaNet: qwen35, qwen35moe, qwen3next) ──
+    /// `{arch}.full_attention_interval` — every Nth layer is full attention; the rest
+    /// are linear (Gated DeltaNet) layers. Authoritative source for `n_attn_layers`:
+    /// `n_attn_layers = block_count / full_attention_interval`.
+    pub full_attention_interval: Option<u32>,
+
+    /// `{arch}.ssm.inner_size` — width of the linear-attention recurrent state
+    /// (num_v_heads × head_v_dim). Used to size the fixed DeltaNet state.
+    pub ssm_inner_size: Option<u32>,
+
+    /// `{arch}.ssm.state_size` — per-head linear-attention state dimension (head_k_dim).
+    pub ssm_state_size: Option<u32>,
+
+    /// `{arch}.ssm.conv_kernel` — short-conv kernel width (adds a small conv state).
+    pub ssm_conv_kernel: Option<u32>,
+
+    // ── Sliding-window / alternating attention (Gemma 3/4) ────────────────────────
+    /// `{arch}.attention.sliding_window` — local-attention window size in tokens.
+    pub sliding_window: Option<u32>,
+
+    /// `{arch}.attention.key_length_swa` — per-head K/V dimension on local (SWA) layers.
+    /// Gemma 4 uses a wider `key_length` (512) on global layers and this (256) locally.
+    pub key_length_swa: Option<u32>,
+
+    /// Number of global (full-context) attention layers, derived from
+    /// `{arch}.attention.sliding_window_pattern` (count of `false` entries).
+    pub n_global_attn_layers: Option<u32>,
+
+    /// KV head count on global (full-context) layers, read from the per-layer
+    /// `{arch}.attention.head_count_kv` array at a global position.
+    pub global_kv_heads: Option<u32>,
+
+    /// KV head count on local (sliding-window) layers, read from the per-layer
+    /// `{arch}.attention.head_count_kv` array at a local position.
+    pub local_kv_heads: Option<u32>,
 }
 
 impl GgufMetadata {
@@ -125,23 +161,66 @@ impl GgufMetadata {
         self.param_count.map(|p| p as f64 / 1e9)
     }
 
+    /// Number of full-attention (KV-bearing) layers for hybrid linear-attention
+    /// models, computed from real GGUF data: `block_count / full_attention_interval`.
+    /// (llama.cpp marks every Nth layer as full attention; the rest are DeltaNet.)
+    /// Returns `None` for non-hybrid models (no `full_attention_interval` key).
+    pub fn n_attn_layers(&self) -> Option<u32> {
+        let interval = self.full_attention_interval?;
+        let blocks = self.block_count?;
+        if interval <= 1 {
+            return None; // interval 1 ⇒ all layers full attention (not hybrid)
+        }
+        Some(blocks / interval)
+    }
+
+    /// Fixed recurrent-state size (bytes) for the linear-attention (DeltaNet) layers,
+    /// computed from the real `ssm.*` GGUF fields. This does NOT grow with context.
+    ///
+    /// Per linear layer the state is `inner_size × state_size` (the delta matrix)
+    /// plus a small `conv_kernel × inner_size` short-conv state, held at ~2 B/elem.
+    /// Returns `None` when the model is not hybrid or lacks SSM metadata.
+    pub fn linear_attn_state_bytes(&self) -> Option<u64> {
+        let n_attn = self.n_attn_layers()?;
+        let blocks = self.block_count?;
+        let inner = self.ssm_inner_size? as u64;
+        let state = self.ssm_state_size? as u64;
+        let conv = self.ssm_conv_kernel.unwrap_or(0) as u64;
+        let n_linear = blocks.saturating_sub(n_attn) as u64;
+        let per_layer_elems = inner * (state + conv);
+        Some(n_linear * per_layer_elems * 2)
+    }
+
     /// Convert to the `ModelMetadata` type used by the spawn wizard / VRAM estimator.
     ///
     /// Sets `gguf_arch` so that renamed finetunes (e.g. "Pantheon-27B" from a
     /// Qwen3.6 base) get the correct hybrid-DeltaNet heuristic regardless of filename.
+    /// Structural fields that llama.cpp records per-layer (hybrid attention interval,
+    /// SSM state, Gemma global/local split, sliding window) are read from the GGUF so
+    /// the VRAM math uses ground truth rather than name-based assumptions.
     pub fn to_model_metadata(&self) -> crate::llama::spawn_wizard::ModelMetadata {
+        // For Gemma alternating attention, `n_kv_heads` (the global-layer KV head
+        // count) comes from the per-layer array; fall back to the scalar otherwise.
+        let n_kv_heads = self.global_kv_heads.or(self.head_count_kv);
         crate::llama::spawn_wizard::ModelMetadata {
             n_layers: self.block_count,
             n_ctx_train: self.context_length,
             n_embd: self.embedding_length,
             n_ff: self.feed_forward_length,
             n_head: self.head_count,
-            n_kv_heads: self.head_count_kv,
+            n_kv_heads,
             head_dim: self.key_length,
             gguf_arch: self.architecture.clone(),
             n_experts: self.expert_count,
             n_experts_used: self.expert_used_count,
             mtp_depth: self.mtp_depth,
+            n_attn_layers: self.n_attn_layers(),
+            linear_attn_state_bytes: self.linear_attn_state_bytes(),
+            n_global_attn_layers: self.n_global_attn_layers,
+            local_kv_heads: self.local_kv_heads,
+            global_head_dim: self.key_length, // wide global K/V dim (e.g. Gemma4 = 512)
+            local_head_dim: self.key_length_swa, // narrow local K/V dim (e.g. Gemma4 = 256)
+            sliding_window: self.sliding_window,
             mmproj_required: false,
             cached: false,
         }
@@ -225,21 +304,55 @@ pub fn read_gguf_metadata(path: &Path) -> Result<GgufMetadata, String> {
 
         meta.block_count = get_u32!("block_count");
         meta.head_count = get_u32!("attention.head_count");
-        meta.head_count_kv = get_u32!("attention.head_count_kv");
         meta.key_length = get_u32!("attention.key_length");
+        meta.key_length_swa = get_u32!("attention.key_length_swa");
         meta.context_length = get_u32!("context_length");
         meta.embedding_length = get_u32!("embedding_length");
         meta.feed_forward_length = get_u32!("feed_forward_length");
         meta.expert_count = get_u32!("expert_count");
         meta.expert_used_count = get_u32!("expert_used_count");
 
-        // MTP depth — key name varies across llama.cpp versions
+        // Hybrid linear-attention (Qwen3-Next / DeltaNet) and SSM state sizing.
+        meta.full_attention_interval = get_u32!("full_attention_interval");
+        meta.ssm_inner_size = get_u32!("ssm.inner_size");
+        meta.ssm_state_size = get_u32!("ssm.state_size");
+        meta.ssm_conv_kernel = get_u32!("ssm.conv_kernel");
+        meta.sliding_window = get_u32!("attention.sliding_window");
+
+        // MTP depth — key name varies across llama.cpp versions. Newer Qwen3.5/3.6
+        // MoE GGUFs emit `{arch}.nextn_predict_layers`.
         meta.mtp_depth = get_u32!(
+            "nextn_predict_layers",
             "next_n_token_count",
             "num_nextn_predict_layers",
             "multi_token_prediction_depth"
         )
         .or_else(|| get_u32_bare!("general.next_n_token_count"));
+
+        // `attention.head_count_kv` is a scalar on uniform models but a per-layer
+        // array on Gemma 3/4 (alternating global/local layers with different GQA).
+        let kv_key = format!("{a}.attention.head_count_kv");
+        let kv_val = kv.get(&kv_key);
+        meta.head_count_kv = kv_val.and_then(KvValue::as_u32);
+
+        // `attention.sliding_window_pattern`: per-layer bool array — `false` marks a
+        // global (full-context) layer, `true` a local sliding-window layer. The count
+        // of `false` entries is the authoritative `n_global_attn_layers`.
+        let swa_pattern = kv
+            .get(&format!("{a}.attention.sliding_window_pattern"))
+            .and_then(KvValue::as_bool_arr);
+        if let Some(pat) = swa_pattern {
+            meta.n_global_attn_layers =
+                Some(pat.iter().filter(|&&is_local| !is_local).count() as u32);
+
+            // Read the global/local KV head split from the per-layer head_count_kv
+            // array, indexed by the same pattern (global = !is_local position).
+            if let Some(kv_arr) = kv_val.and_then(KvValue::as_u32_arr) {
+                let n = pat.len().min(kv_arr.len());
+                meta.global_kv_heads = (0..n).find(|&i| !pat[i]).map(|i| kv_arr[i]);
+                meta.local_kv_heads = (0..n).find(|&i| pat[i]).map(|i| kv_arr[i]);
+            }
+        }
     }
 
     Ok(meta)
@@ -254,8 +367,18 @@ enum KvValue {
     I32(i32),
     I64(i64),
     Str(String),
-    Other, // bool, floats, arrays — skipped/irrelevant for architecture metadata
+    /// Small integer array (e.g. per-layer `head_count_kv`). Large arrays
+    /// (token vocab, etc.) are not captured — see `MAX_CAPTURED_ARRAY`.
+    ArrU32(Vec<u32>),
+    /// Small boolean array (e.g. `sliding_window_pattern`).
+    ArrBool(Vec<bool>),
+    Other, // floats, big/other arrays — skipped/irrelevant for architecture metadata
 }
+
+/// Integer/bool arrays longer than this are skipped rather than captured, so we
+/// never buffer token-vocabulary-sized arrays. Per-layer arrays (head_count_kv,
+/// sliding_window_pattern) are at most `block_count` (~hundreds) entries.
+const MAX_CAPTURED_ARRAY: u64 = 8192;
 
 impl KvValue {
     fn as_u32(&self) -> Option<u32> {
@@ -264,6 +387,22 @@ impl KvValue {
             KvValue::U64(v) => u32::try_from(*v).ok(),
             KvValue::I32(v) => u32::try_from(*v).ok(),
             KvValue::I64(v) => u32::try_from(*v).ok(),
+            _ => None,
+        }
+    }
+
+    /// Borrow a captured integer array, if this value is one.
+    fn as_u32_arr(&self) -> Option<&[u32]> {
+        match self {
+            KvValue::ArrU32(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// Borrow a captured boolean array, if this value is one.
+    fn as_bool_arr(&self) -> Option<&[bool]> {
+        match self {
+            KvValue::ArrBool(v) => Some(v),
             _ => None,
         }
     }
@@ -356,12 +495,67 @@ fn read_value<R: Read + Seek>(r: &mut R, vtype: u32, version: u32) -> Result<KvV
                 .map_err(|e| format!("seek f64: {e}"))?;
             Ok(KvValue::Other)
         }
-        Some(GgufType::Array) => {
-            skip_array(r, version)?;
-            Ok(KvValue::Other)
-        }
+        Some(GgufType::Array) => read_array(r, version),
         None => Err(format!("Unknown GGUF value type {vtype}")),
     }
+}
+
+/// Read an array value. Small integer/bool arrays are captured (per-layer config
+/// like `head_count_kv` / `sliding_window_pattern`); everything else (strings,
+/// floats, oversized arrays) is skipped, leaving the reader positioned correctly.
+fn read_array<R: Read + Seek>(r: &mut R, version: u32) -> Result<KvValue, String> {
+    let elem_type = read_u32(r)?;
+    let n = if version == 1 {
+        read_u32(r)? as u64
+    } else {
+        read_u64(r)?
+    };
+
+    let et = GgufType::from_u32(elem_type);
+    let capture_int = matches!(
+        et,
+        Some(
+            GgufType::Uint8
+                | GgufType::Int8
+                | GgufType::Uint16
+                | GgufType::Int16
+                | GgufType::Uint32
+                | GgufType::Int32
+                | GgufType::Uint64
+                | GgufType::Int64
+        )
+    );
+
+    if n <= MAX_CAPTURED_ARRAY && capture_int {
+        let mut out = Vec::with_capacity(n as usize);
+        for _ in 0..n {
+            // Reuse the scalar reader so every element advances the offset correctly.
+            if let Some(v) = read_value(r, elem_type, version)?.as_u32() {
+                out.push(v);
+            }
+        }
+        return Ok(KvValue::ArrU32(out));
+    }
+    if n <= MAX_CAPTURED_ARRAY && matches!(et, Some(GgufType::Bool)) {
+        let mut out = Vec::with_capacity(n as usize);
+        for _ in 0..n {
+            out.push(read_u8(r)? != 0);
+        }
+        return Ok(KvValue::ArrBool(out));
+    }
+
+    // Oversized or non-capturable element type: skip past the remaining elements.
+    let fixed_size: Option<u64> = et.and_then(GgufType::fixed_size);
+    if let Some(stride) = fixed_size {
+        let total = n.saturating_mul(stride);
+        r.seek(SeekFrom::Current(total as i64))
+            .map_err(|e| format!("seek array: {e}"))?;
+    } else {
+        for _ in 0..n {
+            skip_value_type(r, elem_type, version)?;
+        }
+    }
+    Ok(KvValue::Other)
 }
 
 /// Skip an array value: read the element type and count, then seek/read past all elements.

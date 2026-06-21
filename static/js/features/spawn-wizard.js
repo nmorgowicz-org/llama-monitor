@@ -18,6 +18,7 @@ import {
   detectCommunityTemplateFamily,
 } from './chat-template-registry.js';
 import { switchView } from './setup-view.js';
+import { scheduleEstimate, cancelEstimate } from './vram-estimate.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune, requestDepthSweep, renderDepthSweep, requestBatchSweep, renderBatchSweep } from './tuning-cards.js';
 import { setHeaderMode } from './attach-detach.js';
@@ -48,84 +49,9 @@ const KV_BPE = {
 };
 function kvBpe(quant) { return KV_BPE[quant] ?? 1.0; }
 
-// Compute KV cache bytes for standard full-attention models.
-// For Gemma-style models with local attention we simplify:
-//   global_frac = n_global_layers / n_layers
-//   effective_ctx = global_frac * ctx + (1-global_frac) * min(ctx, window)
-function kvBytes(arch, ctx, slots, ctk, ctv) {
-  const s = Math.max(slots, 1);
-  const k = kvBpe(ctk), v = kvBpe(ctv);
-  // For hybrid DeltaNet models: only nAttnLayers use KV cache (not all nLayers).
-  const effectiveLayers = (arch.nAttnLayers && arch.nAttnLayers < arch.nLayers)
-    ? arch.nAttnLayers : arch.nLayers;
-  if (arch.localAttnWindow > 0 && arch.nGlobalAttnLayers < arch.nLayers) {
-    const globalL = arch.nGlobalAttnLayers;
-    const localL  = arch.nLayers - globalL;
-    const localHd = arch.headDim;
-    const globalHd = arch.globalHeadDim || localHd;
-    const window = arch.localAttnWindow;
-    const gkv = arch.nKvHeads, lkv = arch.localKvHeads || 1;
-    const gCtx = ctx * s;
-    const lCtx = Math.min(ctx, window) * s;
-    return (globalL * gkv * globalHd * gCtx * (k + v)) +
-           (localL  * lkv * localHd * lCtx * (k + v));
-  }
-  return effectiveLayers * arch.nKvHeads * arch.headDim * ctx * s * (k + v);
-}
-
-function moeWeightSplit(modelBytes, arch, nCpuMoe) {
-  // --n-cpu-moe N offloads the experts of N transformer layers, so the offload
-  // fraction is N / (layer count) — not N / (experts per layer). Mirrors
-  // moe_weight_split() in vram_estimator.rs.
-  const moeLayers = arch.nLayers || 0;
-  if (!arch.nExperts || moeLayers <= 0 || nCpuMoe <= 0) return { vram: modelBytes, ram: 0 };
-  const cpuRatio = Math.min(nCpuMoe, moeLayers) / moeLayers;
-  const expertFrac = arch.expertFraction ?? 0.65;
-  const ram = Math.round(modelBytes * expertFrac * cpuRatio);
-  return { vram: modelBytes - ram, ram };
-}
-
-function mtpBytes(modelBytes, mtp) { return mtp > 0 ? Math.round(modelBytes * 0.015 * mtp) : 0; }
-function gpuOverheadBytes(ubatch) { return (300 + Math.max(0, (ubatch - 512)) * 0.15) * 1024 * 1024; }
-
-function maxContext(modelBytes, arch, ctk, ctv, slots, ubatch, nCpuMoe, availVram, fitGran, headroom) {
-  if (!availVram) return 0;
-  const { vram: wv } = moeWeightSplit(modelBytes, arch, nCpuMoe);
-  const mmproj      = arch.mmprojBytes || 0;
-  const mtp         = mtpBytes(modelBytes, arch.mtpDepth || 0);
-  const linearState = arch.linearAttnStateBytes || 0; // constant; doesn't scale with context
-  const oh          = gpuOverheadBytes(ubatch);
-  const fixed       = wv + mmproj + mtp + linearState + oh;
-  const usable = availVram * (1 - headroom);
-  if (fixed >= usable) return 0;
-  const kvBudget = usable - fixed;
-
-  // Hybrid DeltaNet: only nAttnLayers use KV cache (not all nLayers).
-  // kvBytes() already does this; mirror the same logic here so maxContext
-  // and the VRAM bar agree on how many layers store KV.
-  const effectiveLayers = (arch.nAttnLayers && arch.nAttnLayers < arch.nLayers)
-    ? arch.nAttnLayers : arch.nLayers;
-
-  // Standard full-attention: solve directly
-  if (!arch.localAttnWindow) {
-    const s  = Math.max(slots, 1);
-    const kv = effectiveLayers * arch.nKvHeads * arch.headDim * s * (kvBpe(ctk) + kvBpe(ctv));
-    if (kv <= 0) return 0;
-    const ctx = Math.floor(kvBudget / kv);
-    const g   = fitGran || 1024;
-    return Math.floor(ctx / g) * g;
-  }
-
-  // Sliding-window (Gemma): binary search
-  let lo = 512, hi = 2_097_152;
-  while (lo + 1 < hi) {
-    const mid = lo + Math.floor((hi - lo) / 2);
-    if (kvBytes(arch, mid, slots, ctk, ctv) <= kvBudget) lo = mid;
-    else hi = mid;
-  }
-  const g = fitGran || 1024;
-  return Math.floor(lo / g) * g;
-}
+// VRAM math is now centralized in the Rust backend (vram_estimator).
+// The spawn wizard uses scheduleEstimate from vram-estimate.js to call
+// /api/vram-estimate as the single source of truth. No local VRAM formulas.
 
 function formatCtx(n) {
   if (!n) return '—';
@@ -3871,40 +3797,88 @@ function getSizingArch() {
   return arch;
 }
 
-function clampAutoSizeResultToSizingMath(result, arch, modelBytes, availVram) {
+async function clampAutoSizeResultToSizingMath(result, arch, modelBytes, availVram) {
   if (!result || !modelBytes || !availVram) return { result, adjusted: false };
 
-  const fitGran = 1024;
-  const slots = wizardState.hardware.parallelSlots || 1;
-  const headroom = computeHeadroom(availVram);
-  const nCpuMoe = result.n_cpu_moe ?? wizardState.hardware.nCpuMoe ?? 0;
-  const maxCtx = maxContext(
-    modelBytes,
-    arch,
-    result.kv_quant_k || 'q8_0',
-    result.kv_quant_v || 'q8_0',
-    slots,
-    result.ubatch_size || wizardState.hardware.ubatchSize || 2048,
-    nCpuMoe,
-    availVram,
-    fitGran,
-    headroom,
-  );
   const modelCap = wizardState.model.nCtxTrain || 0;
-  const safeCap = modelCap > 0 ? Math.min(maxCtx, modelCap) : maxCtx;
-  if (!safeCap || result.context_size <= safeCap) return { result, adjusted: false };
+  const r = { ...result };
 
-  return {
-    result: {
-      ...result,
-      context_size: safeCap,
-      warnings: [
-        ...(result.warnings || []),
-        `Adjusted to ${formatCtx(safeCap)} so auto-size matches the hardware-step fit math.`,
-      ],
-    },
-    adjusted: true,
+  // First, cap to model's training context if known.
+  if (modelCap > 0 && r.context_size > modelCap) {
+    r.context_size = modelCap;
+  }
+
+  // Use /api/vram-estimate to validate the proposed config.
+  // If it doesn't fit, reduce context_size until it does.
+  const hw = wizardState.hardware;
+  let adjusted = false;
+
+  const tryEstimate = (ctx) => {
+    const body = {
+      model_path: wizardState.model.path || '',
+      n_ctx: ctx,
+      parallel_slots: hw.parallelSlots || 1,
+      ubatch_size: r.ubatch_size || hw.ubatchSize || 2048,
+      ctk: r.kv_quant_k || 'q8_0',
+      ctv: r.kv_quant_v || 'q8_0',
+      n_cpu_moe: r.n_cpu_moe ?? hw.nCpuMoe ?? 0,
+      available_vram_bytes: availVram,
+      is_unified_memory: isUnifiedMemory(),
+      mmproj_path: wizardState.model.mmprojPath || '',
+      mmproj_bytes: wizardState.arch.mmprojBytes || 0,
+    };
+
+    return (async () => {
+      try {
+        const headers = (window.authHeaders ? window.authHeaders() : {});
+        const res = await fetch('/api/vram-estimate', {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) return null;
+        const d = await res.json();
+        if (!d.ok || !d.headroom_bytes) return null;
+        return d;
+      } catch {
+        return null;
+      }
+    })();
   };
+
+  // Initial check.
+  let est = await tryEstimate(r.context_size);
+  if (est && est.headroom_bytes >= 0) {
+    // Already fits according to backend.
+    return { result: r, adjusted: adjusted || (r.context_size !== result.context_size) };
+  }
+
+  // Reduce context_size until it fits (binary search).
+  let lo = 1024, hi = r.context_size;
+  let bestFit = 0;
+
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const e = await tryEstimate(mid);
+    if (!e) { hi = mid - 1; continue; }
+    if (e.headroom_bytes >= 0) {
+      bestFit = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+
+  if (bestFit > 0 && bestFit !== result.context_size) {
+    r.context_size = bestFit;
+    r.warnings = [
+      ...(r.warnings || []),
+      `Adjusted to ${formatCtx(bestFit)} so auto-size matches the hardware-step fit math.`,
+    ];
+    adjusted = true;
+  }
+
+  return { result: r, adjusted };
 }
 
 function buildHeuristicArch(name, paramB) {
@@ -4321,195 +4295,211 @@ function updateVramDisplay() {
   const hw = wizardState.hardware;
   const arch = getSizingArch();
   const modelBytes = getModelBytes();
-
-  // Compute breakdown (layer-based MoE offload — see moeWeightSplit)
   const nCpuMoe = hw.nCpuMoe || 0;
-  const { vram: weightVram, ram: ramBytes } = moeWeightSplit(modelBytes, arch, nCpuMoe);
-  const kv          = kvBytes(arch, hw.contextSize, hw.parallelSlots, hw.cacheTypeK, hw.cacheTypeV);
-  const mmproj      = arch.mmprojBytes || 0;
-  const mtp         = mtpBytes(modelBytes, arch.mtpDepth || 0);
-  const linearState = arch.linearAttnStateBytes || 0;
-  const oh          = gpuOverheadBytes(hw.ubatchSize);
-  const total       = weightVram + kv + linearState + mmproj + mtp + oh;
-  const free = availVram - total;
-  updateMlockWarning(availVram, free);
 
-  // Update total label
-  if (dom.vramPanelTotal) {
-    if (availVram > 0) {
-      if (isUnifiedMemory() && cachedRamTotal > 0) {
-        // Show "X GB Metal cap (of Y GB total)" — budget is the configured Metal cap, not free RAM
-        dom.vramPanelTotal.textContent =
-          formatVramTotal(availVram) + ' Metal cap (of ' + formatVramTotal(cachedRamTotal) + ' total)';
-      } else {
-        dom.vramPanelTotal.textContent = formatVramTotal(availVram) + ' total';
-      }
-    } else {
-      dom.vramPanelTotal.textContent = isUnifiedMemory() ? 'Unified memory unknown' : 'GPU VRAM unknown';
-    }
-  }
+  // Ensure vram-estimate uses accurate effective values
+  wizardState.vram.available = availVram;
+  wizardState.vram.isUnifiedMemory = isUnifiedMemory();
 
-  // Update bar segments (width as % of availVram or total, whichever is larger)
-  const denom = availVram > 0 ? availVram : total;
-  if (denom > 0) {
-    setSegWidth(dom.vSegWeights,  weightVram / denom);
-    setSegWidth(dom.vSegKv,       kv / denom);
-    setSegWidth(dom.vSegMmproj,   mmproj / denom);
-    setSegWidth(dom.vSegMtp,      mtp / denom);
-    setSegWidth(dom.vSegOverhead, oh / denom);
-    setSegWidth(dom.vSegFree,     Math.max(0, free) / denom);
-    if (dom.vSegFree) dom.vSegFree.classList.toggle('over-budget', free < 0);
-  }
-
-  // Bar state class
-  if (dom.vramBar) {
-    const ratio = availVram > 0 ? total / availVram : 0;
-    dom.vramBar.classList.toggle('tight', ratio >= 0.88 && ratio < 1.0);
-    dom.vramBar.classList.toggle('over', ratio >= 1.0);
-    dom.vramBar.classList.toggle('has-data', total > 0);
-  }
-
-  // Update legend labels
-  if (dom.vLegWeightsLabel) dom.vLegWeightsLabel.textContent = `Weights ${formatGB(weightVram)}`;
-  if (dom.vLegKvLabel)       dom.vLegKvLabel.textContent       = `KV ${formatGB(kv)}`;
-  if (mmproj > 0) {
-    if (dom.vLegMmprojItem)  dom.vLegMmprojItem.style.display = '';
-    if (dom.vLegMmprojLabel) dom.vLegMmprojLabel.textContent  = `mmproj ${formatGB(mmproj)}`;
-  } else {
-    if (dom.vLegMmprojItem) dom.vLegMmprojItem.style.display = 'none';
-  }
-  if (mtp > 0) {
-    if (dom.vLegMtpItem)  dom.vLegMtpItem.style.display = '';
-    if (dom.vLegMtpLabel) dom.vLegMtpLabel.textContent  = `MTP ${formatGB(mtp)}`;
-  } else {
-    if (dom.vLegMtpItem) dom.vLegMtpItem.style.display = 'none';
-  }
-  if (dom.vLegOverheadLabel) dom.vLegOverheadLabel.textContent = `OH ${formatGB(oh)}`;
-  if (dom.vLegFreeLabel) {
-    const freeAbs = Math.abs(free);
-    dom.vLegFreeLabel.textContent = free >= 0 ? `Free ${formatGB(free)}` : `Over ${formatGB(freeAbs)}`;
-    if (dom.vLegFreeDot) dom.vLegFreeDot.style.background = free >= 0 ? '' : 'var(--color-error)';
-  }
-
-  // Show/hide MoE panel
-  if (arch.nExperts > 1) {
-    if (dom.moeOffloadPanel) dom.moeOffloadPanel.style.display = '';
-    if (dom.moeOffloadSlider) {
-      dom.moeOffloadSlider.max = arch.nLayers || arch.nExperts;
-      dom.moeOffloadSlider.value = nCpuMoe;
-    }
-    updateMoeSliderVisuals();
-  } else {
-    if (dom.moeOffloadPanel) dom.moeOffloadPanel.style.display = 'none';
-  }
-
-  // Render scenario cards
+  // Always render scenario cards so the UI doesn't go blank when the backend is unavailable.
+  // renderScenarioCards will degrade gracefully if individual estimates fail.
   renderScenarioCards(modelBytes, arch, availVram);
 
-  // Config-time performance advisor (dense-vs-MoE, KV type, MTP)
-  updateAdvisor();
+  scheduleEstimate(wizardState, (est) => {
+    if (!est || !est.total_bytes) {
+      // Fallback: clear or dim the panel; don't show misleading numbers.
+      if (dom.vramBar) dom.vramBar.classList.remove('has-data', 'tight', 'over');
+      return;
+    }
 
-  // Legacy VRAM pill (backward compat)
-  if (dom.vramPill || dom.vramEstimateText) {
-    updateLegacyVramPill(total, availVram);
-  }
+    const total = est.total_bytes;
+    const headroom = est.headroom_bytes || 0;
+    const free = headroom; // backend headroom_bytes = available - total
+    const weightVram = est.weights_bytes || 0;
+    const kv = est.kv_cache_bytes || 0;
+    const mmproj = est.mmproj_bytes || 0;
+    const mtp = est.mtp_bytes || 0;
+    const linearState = est.linear_attn_state_bytes || 0;
+    const oh = est.overhead_bytes || 0;
+    const ramBytes = est.ram_bytes || 0;
+    const recommendation = est.recommendation || 'risk';
+    const note = est.note || '';
 
-  // Unified memory label (Apple Silicon / DGX Spark — VRAM and RAM are the same pool)
-  const isUnified = _platformInfo?.auto_backend === 'metal';
-  if (dom.vramPanelLabel) {
-    dom.vramPanelLabel.textContent = isUnified ? 'Unified Memory' : 'VRAM budget';
-  }
+    updateMlockWarning(availVram, free);
 
-  // Metal GPU limit row — Apple Silicon only
-  if (dom.metalLimitRow) {
-    if (isUnified && cachedRamTotal > 0) {
-      dom.metalLimitRow.style.display = '';
-      const currentCapMb = Math.round(metalCap(cachedRamTotal) / (1024 * 1024));
-      const isCustom = cachedMetalGpuLimitMb > 0;
-      const capGb = (currentCapMb / 1024).toFixed(0);
-      const totalGb = (cachedRamTotal / (1024 ** 3)).toFixed(0);
-      const label = isCustom
-        ? `Metal GPU cap: ${capGb} GB (custom) — of ${totalGb} GB total`
-        : `Metal GPU cap: ${capGb} GB (default) — of ${totalGb} GB total`;
-      if (dom.metalLimitText) dom.metalLimitText.textContent = label;
-
-      // Show "Increase" button if a meaningfully larger cap is achievable
-      const suggested = suggestedMetalLimitMb(cachedRamTotal);
-      if (dom.metalLimitBtn) {
-        if (suggested > 0) {
-          const suggestedGb = Math.round(suggested / 1024);
-          dom.metalLimitBtn.disabled = false; // clear disabled from any previous attempt
-          dom.metalLimitBtn.style.display = '';
-          dom.metalLimitBtn.textContent = `Increase to ${suggestedGb} GB`;
-          dom.metalLimitBtn.onclick = () => applyMetalGpuLimit(suggested);
-          // Remove any stale fallback panel from a previous failed attempt
-          dom.metalLimitRow?.querySelector('.metal-limit-fallback')?.remove();
+    // Update total label
+    if (dom.vramPanelTotal) {
+      if (availVram > 0) {
+        if (isUnifiedMemory() && cachedRamTotal > 0) {
+          dom.vramPanelTotal.textContent =
+            formatVramTotal(availVram) + ' Metal cap (of ' + formatVramTotal(cachedRamTotal) + ' total)';
         } else {
-          dom.metalLimitBtn.style.display = 'none';
+          dom.vramPanelTotal.textContent = formatVramTotal(availVram) + ' total';
         }
-      }
-    } else {
-      dom.metalLimitRow.style.display = 'none';
-    }
-  }
-
-  // RAM bar — only shown on discrete GPU systems; on unified the VRAM bar already covers it
-  if (dom.ramPanel) {
-    if (isUnified || cachedRamTotal === 0) {
-      dom.ramPanel.style.display = 'none';
-    } else {
-      dom.ramPanel.style.display = '';
-      const cramMib = (hw.cacheRam !== null && hw.cacheRam !== undefined) ? hw.cacheRam : 8192;
-      const cramBytes = cramMib < 0 ? 0 : cramMib * 1024 * 1024;
-      const ramDenom = cachedRamTotal;
-      const inUsePct   = cachedRamUsed / ramDenom;
-      const moePct     = ramBytes / ramDenom;
-      const cramPct    = cramBytes / ramDenom;
-      const freePct    = Math.max(0, (cachedRamTotal - cachedRamUsed - ramBytes - cramBytes) / ramDenom);
-      setSegWidth(dom.rSegUsed, inUsePct);
-      setSegWidth(dom.rSegMoe,  moePct);
-      setSegWidth(dom.rSegCram, cramPct);
-      setSegWidth(dom.rSegFree, freePct);
-      const totalNeeded = cachedRamUsed + ramBytes + cramBytes;
-      const isOver = totalNeeded > cachedRamTotal;
-      if (dom.ramPanelTotal) {
-        dom.ramPanelTotal.textContent = formatVramTotal(cachedRamTotal) + ' total';
-      }
-      if (dom.rLegUsed)  dom.rLegUsed.textContent  = `In use ${formatGB(cachedRamUsed)}`;
-      if (dom.rLegCram) {
-        const cramLabel = cramMib < 0 ? 'no limit' : `${formatGB(cramBytes)}`;
-        dom.rLegCram.textContent = `Cache ${cramLabel}`;
-      }
-      if (ramBytes > 0) {
-        if (dom.rLegMoeItem) dom.rLegMoeItem.style.display = '';
-        if (dom.rLegMoe) dom.rLegMoe.textContent = `MoE ${formatGB(ramBytes)}`;
       } else {
-        if (dom.rLegMoeItem) dom.rLegMoeItem.style.display = 'none';
+        dom.vramPanelTotal.textContent = isUnifiedMemory() ? 'Unified memory unknown' : 'GPU VRAM unknown';
       }
-      const freeBytes = cachedRamTotal - totalNeeded;
-      if (dom.rLegFree) {
-        dom.rLegFree.textContent = isOver
-          ? `Over ${formatGB(Math.abs(freeBytes))}`
-          : `Free ${formatGB(freeBytes)}`;
-      }
-      if (dom.ramPanel) dom.ramPanel.classList.toggle('over-budget', isOver);
     }
-  }
 
-  maybeResetHardwareStepScroll();
-  maybeRestoreHardwareStepScroll();
+    // Update bar segments (width as % of availVram or total, whichever is larger)
+    const denom = availVram > 0 ? availVram : total;
+    if (denom > 0) {
+      setSegWidth(dom.vSegWeights,  weightVram / denom);
+      setSegWidth(dom.vSegKv,       kv / denom);
+      setSegWidth(dom.vSegMmproj,   mmproj / denom);
+      setSegWidth(dom.vSegMtp,      mtp / denom);
+      setSegWidth(dom.vSegOverhead, oh / denom);
+      setSegWidth(dom.vSegFree,     Math.max(0, free) / denom);
+      if (dom.vSegFree) dom.vSegFree.classList.toggle('over-budget', free < 0);
+    }
 
-  // Inline VRAM exceeded warning (red feedback under context input)
-  const ctxVramEl = document.getElementById('ctx-vram-warning');
-  if (ctxVramEl) {
-    if (free < 0) {
-      ctxVramEl.textContent = `VRAM exceeded by ${formatGB(Math.abs(free))}. Reduce context size or use KV quantization.`;
-      ctxVramEl.className = 'ctx-fit-warning ctx-fit-error';
-      ctxVramEl.style.display = '';
+    // Bar state class
+    if (dom.vramBar) {
+      const ratio = availVram > 0 ? total / availVram : 0;
+      dom.vramBar.classList.toggle('tight', ratio >= 0.88 && ratio < 1.0);
+      dom.vramBar.classList.toggle('over', ratio >= 1.0);
+      dom.vramBar.classList.toggle('has-data', total > 0);
+    }
+
+    // Update legend labels
+    if (dom.vLegWeightsLabel) dom.vLegWeightsLabel.textContent = `Weights ${formatGB(weightVram)}`;
+    if (dom.vLegKvLabel)       dom.vLegKvLabel.textContent       = `KV ${formatGB(kv)}`;
+    if (mmproj > 0) {
+      if (dom.vLegMmprojItem)  dom.vLegMmprojItem.style.display = '';
+      if (dom.vLegMmprojLabel) dom.vLegMmprojLabel.textContent  = `mmproj ${formatGB(mmproj)}`;
     } else {
-      ctxVramEl.style.display = 'none';
+      if (dom.vLegMmprojItem) dom.vLegMmprojItem.style.display = 'none';
     }
-  }
+    if (mtp > 0) {
+      if (dom.vLegMtpItem)  dom.vLegMtpItem.style.display = '';
+      if (dom.vLegMtpLabel) dom.vLegMtpLabel.textContent  = `MTP ${formatGB(mtp)}`;
+    } else {
+      if (dom.vLegMtpItem) dom.vLegMtpItem.style.display = 'none';
+    }
+    if (dom.vLegOverheadLabel) dom.vLegOverheadLabel.textContent = `OH ${formatGB(oh)}`;
+    if (dom.vLegFreeLabel) {
+      const freeAbs = Math.abs(free);
+      dom.vLegFreeLabel.textContent = free >= 0 ? `Free ${formatGB(free)}` : `Over ${formatGB(freeAbs)}`;
+      if (dom.vLegFreeDot) dom.vLegFreeDot.style.background = free >= 0 ? '' : 'var(--color-error)';
+    }
+
+    // Show/hide MoE panel
+    if (arch.nExperts > 1) {
+      if (dom.moeOffloadPanel) dom.moeOffloadPanel.style.display = '';
+      if (dom.moeOffloadSlider) {
+        dom.moeOffloadSlider.max = arch.nLayers || arch.nExperts;
+        dom.moeOffloadSlider.value = nCpuMoe;
+      }
+      updateMoeSliderVisuals();
+    } else {
+      if (dom.moeOffloadPanel) dom.moeOffloadPanel.style.display = 'none';
+    }
+
+    // Config-time performance advisor (dense-vs-MoE, KV type, MTP)
+    updateAdvisor();
+
+    // Legacy VRAM pill (backward compat)
+    if (dom.vramPill || dom.vramEstimateText) {
+      updateLegacyVramPill(total, availVram);
+    }
+
+    // Unified memory label (Apple Silicon / DGX Spark — VRAM and RAM are the same pool)
+    const isUnified = _platformInfo?.auto_backend === 'metal';
+    if (dom.vramPanelLabel) {
+      dom.vramPanelLabel.textContent = isUnified ? 'Unified Memory' : 'VRAM budget';
+    }
+
+    // Metal GPU limit row — Apple Silicon only
+    if (dom.metalLimitRow) {
+      if (isUnified && cachedRamTotal > 0) {
+        dom.metalLimitRow.style.display = '';
+        const currentCapMb = Math.round(metalCap(cachedRamTotal) / (1024 * 1024));
+        const isCustom = cachedMetalGpuLimitMb > 0;
+        const capGb = (currentCapMb / 1024).toFixed(0);
+        const totalGb = (cachedRamTotal / (1024 ** 3)).toFixed(0);
+        const label = isCustom
+          ? `Metal GPU cap: ${capGb} GB (custom) — of ${totalGb} GB total`
+          : `Metal GPU cap: ${capGb} GB (default) — of ${totalGb} GB total`;
+        if (dom.metalLimitText) dom.metalLimitText.textContent = label;
+
+        // Show "Increase" button if a meaningfully larger cap is achievable
+        const suggested = suggestedMetalLimitMb(cachedRamTotal);
+        if (dom.metalLimitBtn) {
+          if (suggested > 0) {
+            const suggestedGb = Math.round(suggested / 1024);
+            dom.metalLimitBtn.disabled = false; // clear disabled from any previous attempt
+            dom.metalLimitBtn.style.display = '';
+            dom.metalLimitBtn.textContent = `Increase to ${suggestedGb} GB`;
+            dom.metalLimitBtn.onclick = () => applyMetalGpuLimit(suggested);
+            // Remove any stale fallback panel from a previous failed attempt
+            dom.metalLimitRow?.querySelector('.metal-limit-fallback')?.remove();
+          } else {
+            dom.metalLimitBtn.style.display = 'none';
+          }
+        }
+      } else {
+        dom.metalLimitRow.style.display = 'none';
+      }
+    }
+
+    // RAM bar — only shown on discrete GPU systems; on unified the VRAM bar already covers it
+    if (dom.ramPanel) {
+      if (isUnified || cachedRamTotal === 0) {
+        dom.ramPanel.style.display = 'none';
+      } else {
+        dom.ramPanel.style.display = '';
+        const cramMib = (hw.cacheRam !== null && hw.cacheRam !== undefined) ? hw.cacheRam : 8192;
+        const cramBytes = cramMib < 0 ? 0 : cramMib * 1024 * 1024;
+        const ramDenom = cachedRamTotal;
+        const inUsePct   = cachedRamUsed / ramDenom;
+        const moePct     = (est.ram_bytes || 0) / ramDenom;
+        const cramPct    = cramBytes / ramDenom;
+        const freePct    = Math.max(0, (cachedRamTotal - cachedRamUsed - (est.ram_bytes || 0) - cramBytes) / ramDenom);
+        setSegWidth(dom.rSegUsed, inUsePct);
+        setSegWidth(dom.rSegMoe,  moePct);
+        setSegWidth(dom.rSegCram, cramPct);
+        setSegWidth(dom.rSegFree, freePct);
+        const totalNeeded = cachedRamUsed + (est.ram_bytes || 0) + cramBytes;
+        const isOver = totalNeeded > cachedRamTotal;
+        if (dom.ramPanelTotal) {
+          dom.ramPanelTotal.textContent = formatVramTotal(cachedRamTotal) + ' total';
+        }
+        if (dom.rLegUsed)  dom.rLegUsed.textContent  = `In use ${formatGB(cachedRamUsed)}`;
+        if (dom.rLegCram) {
+          const cramLabel = cramMib < 0 ? 'no limit' : `${formatGB(cramBytes)}`;
+          dom.rLegCram.textContent = `Cache ${cramLabel}`;
+        }
+        if (est.ram_bytes > 0) {
+          if (dom.rLegMoeItem) dom.rLegMoeItem.style.display = '';
+          if (dom.rLegMoe) dom.rLegMoe.textContent = `MoE ${formatGB(est.ram_bytes)}`;
+        } else {
+          if (dom.rLegMoeItem) dom.rLegMoeItem.style.display = 'none';
+        }
+        const freeBytes = cachedRamTotal - totalNeeded;
+        if (dom.rLegFree) {
+          dom.rLegFree.textContent = isOver
+            ? `Over ${formatGB(Math.abs(freeBytes))}`
+            : `Free ${formatGB(freeBytes)}`;
+        }
+        if (dom.ramPanel) dom.ramPanel.classList.toggle('over-budget', isOver);
+      }
+    }
+
+    maybeResetHardwareStepScroll();
+    maybeRestoreHardwareStepScroll();
+
+    // Inline VRAM exceeded warning (red feedback under context input)
+    const ctxVramEl = document.getElementById('ctx-vram-warning');
+    if (ctxVramEl) {
+      if (free < 0) {
+        ctxVramEl.textContent = `VRAM exceeded by ${formatGB(Math.abs(free))}. Reduce context size or use KV quantization.`;
+        ctxVramEl.className = 'ctx-fit-warning ctx-fit-error';
+        ctxVramEl.style.display = '';
+      } else {
+        ctxVramEl.style.display = 'none';
+      }
+    }
+  });
 }
 
 function setSegWidth(el, frac) {
@@ -4586,23 +4576,15 @@ function updateContextRailSummary() {
     : 'Larger contexts use more KV memory. Stay conservative unless you know the model’s training limit.';
 }
 
-function renderScenarioCards(modelBytes, arch, availVram) {
+async function renderScenarioCards(modelBytes, arch, availVram) {
   if (!dom.vramScenarios || !availVram || !modelBytes) return;
 
   const hw = wizardState.hardware;
-  const fitGran = 1024;
-  const slots = hw.parallelSlots || 1;
-  const ubatch = hw.ubatchSize || 512;
-  const nCpuMoe = hw.nCpuMoe || 0;
   const uc = wizardState.useCase;
-  const headroom = computeHeadroom(availVram);
   const nCtxTrain = wizardState.model.nCtxTrain || 0;
   const currentCtx = hw.contextSize || 8192;
 
   updateContextRailSummary();
-
-  const q8Max = maxContext(modelBytes, arch, 'q8_0', 'q8_0', slots, ubatch, nCpuMoe, availVram, fitGran, headroom);
-  const q4Max = maxContext(modelBytes, arch, 'q4_0', 'q4_0', slots, ubatch, nCpuMoe, availVram, fitGran, headroom);
 
   const scenarios = [
     {
@@ -4638,30 +4620,72 @@ function renderScenarioCards(modelBytes, arch, availVram) {
   dom.vramScenarios.innerHTML = '';
   const activeQuant = hw.cacheTypeK === '' ? 'f16' : (hw.cacheTypeK || 'q8_0');
 
-  for (const s of scenarios) {
-    const vramCtx = s.kk === 'q8_0' ? q8Max : s.kk === 'q4_0' ? q4Max
-      : maxContext(modelBytes, arch, s.kk, s.kv, slots, ubatch, nCpuMoe, availVram, fitGran, headroom);
-    const cappedByModel = nCtxTrain > 0 && vramCtx > nCtxTrain;
-    const ctx = cappedByModel ? nCtxTrain : vramCtx;
-    const selectable = ctx > 0;
+  // For each scenario, ask the backend if current context fits with that KV quant.
+  const fitResults = await Promise.all(
+    scenarios.map(async (s) => {
+      try {
+        const headers = (window.authHeaders ? window.authHeaders() : {});
+        const body = {
+          model_path: wizardState.model.path || '',
+          n_ctx: currentCtx,
+          parallel_slots: hw.parallelSlots || 1,
+          ubatch_size: hw.ubatchSize || 2048,
+          ctk: s.kk,
+          ctv: s.kv,
+          n_cpu_moe: hw.nCpuMoe || 0,
+          available_vram_bytes: availVram,
+          is_unified_memory: isUnifiedMemory(),
+          mmproj_path: wizardState.model.mmprojPath || '',
+          mmproj_bytes: wizardState.arch.mmprojBytes || 0,
+        };
+        const res = await fetch('/api/vram-estimate', {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) return null;
+        const d = await res.json();
+        if (!d.ok || d.total_bytes == null) return null;
+        return d;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  for (let i = 0; i < scenarios.length; i++) {
+    const s = scenarios[i];
+    const est = fitResults[i];
+    const headroom = est ? (est.headroom_bytes ?? 0) : 0;
+    const rec = est ? (est.recommendation || 'risk') : 'risk';
+
+    const fits = headroom >= 0;
+    const isTight = rec === 'tight';
+    const over = !fits || rec === 'wont_fit';
+
+    const ctx = over ? null : currentCtx;
+    const cappedByModel = nCtxTrain > 0 && currentCtx >= nCtxTrain;
+    const selectable = !!ctx && !over;
 
     const card = document.createElement('div');
     const isActive = s.key === activeQuant;
     card.className = 'vram-scenario-card' + (s.rec ? ' scenario-rec' : '') + (isActive ? ' selected' : '');
     card.setAttribute('tabindex', '0');
     card.setAttribute('role', 'button');
-    card.setAttribute('aria-label', `${s.mode}: ${formatCtx(ctx)} tokens — ${s.desc}`);
+    card.setAttribute('aria-label', `${s.mode}${selectable ? ': ' + formatCtx(ctx) + ' tokens' : ' — may not fit current context'} — ${s.desc}`);
 
     let desc = s.desc;
-    if (cappedByModel) {
+    if (!selectable) {
+      desc = 'At your current context, this may not fit VRAM. Lower context or use a more efficient KV cache.';
+    } else if (cappedByModel) {
       if (s.key === 'q8_0') desc = 'Best long-context quality. VRAM is no longer the limit.';
       else if (s.key === 'q4_0') desc = 'More headroom, but the model max is already the real ceiling.';
       else if (s.key === 'f16') desc = 'Full precision cache. Context is capped by the model, not VRAM.';
+    } else if (isTight) {
+      desc = 'Fits, but leaves little headroom. Watch GPU memory or reduce context.';
     }
 
-    const limitNote = cappedByModel ? '<span class="vsc-limit-note">model max</span>' : '';
-    const ctxWontFit = selectable && !cappedByModel && ctx < currentCtx;
-    const ctxWarnNote = ctxWontFit ? `<span class="vsc-warn">⚠ won't fit your ${formatCtx(currentCtx)} ctx</span>` : '';
+    const limitNote = cappedByModel && selectable ? '<span class="vsc-limit-note">model max</span>' : '';
 
     // All values are internal constants — no user input reaches this template.
     // eslint-disable-next-line no-unsanitized/property
@@ -4677,7 +4701,7 @@ function renderScenarioCards(modelBytes, arch, availVram) {
       ${s.rec ? '<span class="vsc-rec-badge">★ Recommended</span>' : ''}
       ${isActive ? '<span class="vsc-active-badge">✓ Active</span>' : ''}
       ${s.warnAgentic ? '<span class="vsc-warn">⚠ Not ideal for tool-heavy agents</span>' : ''}
-      ${ctxWarnNote}
+      ${over ? '<span class="vsc-warn">⚠ may not fit current context</span>' : ''}
       <span class="vsc-footnote">KV cache: ${s.kk}/${s.kv}</span>
     `;
 
@@ -4685,6 +4709,7 @@ function renderScenarioCards(modelBytes, arch, availVram) {
       const applyScenario = () => {
         wizardState.hardware.cacheTypeK = s.kk;
         wizardState.hardware.cacheTypeV = s.kv;
+        // Keep current context (already validated to fit).
         wizardState.hardware.contextSize = ctx;
 
         if (dom.cacheTypeKSelect) dom.cacheTypeKSelect.value = s.kk;
@@ -6962,7 +6987,7 @@ async function triggerAutoSize() {
     const data = await resp.json();
     if (!data.ok || !data.result) { showToast('Auto-size: no result', 'warning'); return; }
 
-    const { result: r, adjusted } = clampAutoSizeResultToSizingMath(data.result, arch, modelBytes, availVram);
+    const { result: r, adjusted } = await clampAutoSizeResultToSizingMath(data.result, arch, modelBytes, availVram);
 
     // Apply recommended settings
     wizardState.hardware.contextSize = r.context_size;
@@ -7398,7 +7423,7 @@ function applyUseCaseSamplingDefaults() {
 
 // ── Summary (Step 4) ──────────────────────────────────────────────────────────
 
-function renderSummary() {
+async function renderSummary() {
   if (!dom.summaryList) return;
   dom.summaryList.innerHTML = '';
 
@@ -7441,7 +7466,35 @@ function renderSummary() {
   }
 
   const ctxK = hw.cacheTypeK || 'q8_0', ctxV = hw.cacheTypeV || 'q8_0';
-  const kvSize = modelBytes > 0 ? kvBytes(arch, hw.contextSize, hw.parallelSlots, ctxK, ctxV) : 0;
+  const kvSize = await (async () => {
+    if (!modelBytes) return 0;
+    try {
+      const headers = (window.authHeaders ? window.authHeaders() : {});
+      const body = {
+        model_path: m.path || m.localPath || '',
+        n_ctx: hw.contextSize || 4096,
+        parallel_slots: hw.parallelSlots || 1,
+        ubatch_size: hw.ubatchSize || 2048,
+        ctk: ctxK,
+        ctv: ctxV,
+        n_cpu_moe: hw.nCpuMoe || 0,
+        available_vram_bytes: availVram,
+        is_unified_memory: isUnifiedMemory(),
+        mmproj_path: m.mmprojPath || '',
+        mmproj_bytes: m.mmprojBytes || 0,
+      };
+      const res = await fetch('/api/vram-estimate', {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) return 0;
+      const d = await res.json();
+      return (d.ok && d.kv_cache_bytes != null) ? d.kv_cache_bytes : 0;
+    } catch {
+      return 0;
+    }
+  })();
 
   const rows = [
     { label: 'Use case',      value: { agentic: 'Agentic / RAG', general: 'General chat', roleplay: 'Roleplay / creative' }[wizardState.useCase] || wizardState.useCase },
