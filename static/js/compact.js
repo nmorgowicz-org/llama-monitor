@@ -1,5 +1,45 @@
 /* eslint-disable no-unsanitized/property */
 /* Reason: all content is server metrics; no user input flows into this page. */
+// ── Theme + palette ──────────────────────────────────────────────────────────
+// The popover is served from the same origin as the main app, so it shares
+// localStorage. Mirror the main UI's theme/palette onto <html> so the tray uses
+// the exact same tokens.css variables (dark/light + accent palette).
+function normalizePaletteId(palette) {
+    return palette === 'carbon-mint' || palette === 'carbon_mint' ? '' : (palette || '');
+}
+
+function readSavedPreferences() {
+    try {
+        return JSON.parse(localStorage.getItem('llama-monitor-preferences') || '{}') || {};
+    } catch (_) {
+        return {};
+    }
+}
+
+function applyAppearancePreferences() {
+    const prefs = readSavedPreferences();
+    const theme = prefs.theme || 'dark';
+    const effectiveTheme = theme === 'auto'
+        ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+        : theme;
+    document.documentElement.dataset.theme = effectiveTheme;
+
+    const palette = normalizePaletteId(prefs.palette);
+    if (palette) {
+        document.documentElement.dataset.palette = palette;
+    } else {
+        delete document.documentElement.dataset.palette;
+    }
+}
+
+applyAppearancePreferences();
+// Re-apply if the user changes theme/palette in the main window while the
+// popover is open, or if the OS appearance changes under "auto".
+window.addEventListener('storage', (e) => {
+    if (e.key === 'llama-monitor-preferences') applyAppearancePreferences();
+});
+window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', applyAppearancePreferences);
+
 document.getElementById('compact-close').addEventListener('click', () => {
     if (window.ipc?.postMessage) {
         window.ipc.postMessage(JSON.stringify({ action: 'close' }));
@@ -44,7 +84,10 @@ function setBar(id, pct, maxVal) {
     const bar = document.getElementById(id);
     if (!bar) return;
     const p = Math.min(100, Math.max(0, (pct / maxVal) * 100));
-    bar.style.transform = 'scaleX(' + (p / 100) + ')';
+    // Width-based fill (matches the GPU bars and animates via the CSS width
+    // transition). Avoids scaleX, which scaled from the element centre because
+    // .metric-bar has no transform-origin, making bars render incorrectly.
+    bar.style.width = p + '%';
 }
 
 function updateStatus(running) {
@@ -95,17 +138,23 @@ function renderGPUs(gpuEntries) {
     }
 }
 
-// Expose function to get content dimensions for native resize
+// Expose function to get content dimensions for native resize.
+// Span from the first visible child's top to the last visible child's bottom so
+// inter-section margins are counted (summing rect heights would miss them and
+// clip the popover), then add the body's vertical padding.
 window.getContentDimensions = function() {
-    let height = 0;
-    for (const child of document.body.children) {
-        const style = window.getComputedStyle(child);
-        if (style.display === 'none') continue;
-        const rect = child.getBoundingClientRect();
-        height += rect.height;
-    }
+    const visible = Array.from(document.body.children).filter((child) => {
+        if (child.tagName === 'SCRIPT') return false;
+        return window.getComputedStyle(child).display !== 'none';
+    });
     const bodyStyle = window.getComputedStyle(document.body);
-    height += parseFloat(bodyStyle.paddingTop) + parseFloat(bodyStyle.paddingBottom);
+    const pad = parseFloat(bodyStyle.paddingTop) + parseFloat(bodyStyle.paddingBottom);
+    let height = pad;
+    if (visible.length > 0) {
+        const top = visible[0].getBoundingClientRect().top;
+        const bottom = visible[visible.length - 1].getBoundingClientRect().bottom;
+        height = (bottom - top) + pad;
+    }
     const width = Math.ceil(Math.max(document.body.getBoundingClientRect().width, document.body.scrollWidth));
     height = Math.ceil(height);
     return { width, height };
