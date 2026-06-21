@@ -2127,6 +2127,20 @@
 .inference-config-panel {
   position: relative;
   align-content: start;
+  padding-top: 8px;
+}
+
+.inference-config-panel .model-info-row,
+.inference-config-panel .speculative-chip,
+.inference-config-panel .config-kv-grid,
+.inference-config-panel .sampler-params-inline {
+  margin-top: 8px;
+}
+
+.inference-config-panel .speculative-chip {
+  display: inline-flex;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .sampler-params-inline {
