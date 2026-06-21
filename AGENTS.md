@@ -113,6 +113,8 @@ CI=1 LLAMA_MONITOR_USE_RELEASE=1 LLAMA_MONITOR_TEST_PORT=17778 npm test
 
 Run before adding `ready-to-test` label or after significant UI/chat/flow changes.
 
+TIMEOUT: Use at least 600 seconds (10 minutes). Full suite is ~193 tests and will exceed 5 min.
+
 Full reference: `docs/agents/playwright.md`
 
 ## Screenshot Harness
