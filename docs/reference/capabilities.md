@@ -1,8 +1,18 @@
 # Capabilities
 
-The capabilities object describes what metrics and features are available for the current session. It is included in every WebSocket push (`capabilities` field) and is also available via `GET /api/capabilities` (in `src/web/api/sessions.rs`).
+The capabilities object describes what metrics and features are available for the current session. It is included in WebSocket dashboard pushes (`capabilities` field) and is also available via `GET /api/capabilities` (in `src/web/api/sessions.rs`).
 
-The `/api/capabilities` endpoint adds a `tray_mode` field not present in WebSocket messages.
+Authentication:
+- `GET /api/capabilities` requires an `Authorization: Bearer <api-token>` header; without it, the endpoint returns 401.
+
+Response envelope:
+- Both the WebSocket push and `/api/capabilities` return the same core fields:
+  - `capabilities` — the MetricsCapabilities object (see below)
+  - `endpoint_kind` — Local / Remote / Unknown
+  - `session_kind` — Spawn / Attach / None
+  - `availability` — per-metric availability reasons
+- `/api/capabilities` additionally returns:
+  - `tray_mode` — Desktop / Headless / Failed (not included in WebSocket messages).
 
 ---
 
@@ -23,7 +33,7 @@ The `/api/capabilities` endpoint adds a `tray_mode` field not present in WebSock
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `inference` | `bool` | llama.cpp server is reachable and responding |
+| `inference` | `bool` | True when an inference session is active or when no session exists (optimistic); false when a configured session cannot be reached |
 | `system` | `bool` | CPU/RAM system metrics are available (includes macOS memory-pressure telemetry) |
 | `gpu` | `bool` | GPU metrics are available |
 | `cpu_temperature` | `bool` | CPU temperature sensor is readable |
@@ -42,7 +52,7 @@ Capabilities are computed from the active session type and connection state:
 ```
 inference: true, system: false, gpu: false, host_metrics: false, tray: true
 ```
-Inference is optimistically set to true; all host metrics are false until a session connects.
+`inference` is hard-coded to true when no active session exists (optimistic assumption you may start or attach to a server). All host metrics are false; they become true when a local session connects or when a remote agent is connected.
 
 ### Local Launch session
 ```
@@ -66,7 +76,7 @@ Basic. No host metrics because the server is on a different machine.
 ```
 inference: true, system: true, gpu: true, cpu_temperature: true, memory: true, host_metrics: true, tray: true
 ```
-Full capabilities. The remote agent running on the target machine provides host metrics over the agent connection.
+Full capabilities. This is gated by `remote_agent_connected()` — the app periodically calls the agent’s `/metrics` endpoint; when it responds, all host-related flags are set true.
 
 ---
 
@@ -120,13 +130,20 @@ The pill label is independent of `endpoint_kind` — a Remote session with the a
 
 ## Availability Reasons
 
-Companion to capabilities, these explain *why* a metric is unavailable. Present in the WebSocket message under `availability` and in the `/api/capabilities` response.
+Companion to capabilities, these explain *why* a metric is unavailable. Present in WebSocket pushes under `availability` and in the `/api/capabilities` response.
+
+The `availability` object has three keys:
+- `system`
+- `gpu`
+- `cpu_temp`
+
+The runtime function `calculate_availability_reasons()` currently emits only two values:
 
 ```json
 "availability": {
   "system":   "Available",
-  "gpu":      "BackendUnavailable",
-  "cpu_temp": "SensorUnavailable"
+  "gpu":      "Available",
+  "cpu_temp": "RemoteEndpoint"
 }
 ```
 
@@ -134,14 +151,10 @@ Companion to capabilities, these explain *why* a metric is unavailable. Present 
 |--------|---------|
 | `Available` | Metric is live |
 | `RemoteEndpoint` | Remote connection without agent; host metrics blocked |
-| `NoDisplay` | Headless system; no graphical session |
-| `TrayUnavailable` | Tray icon not supported on this build/platform |
-| `SensorUnavailable` | Hardware sensor not present or not readable |
-| `BackendUnavailable` | GPU backend (Apple/NVIDIA/ROCm) not detected |
-| `CommandMissing` | Required CLI utility not installed (e.g. `nvidia-smi`) |
-| `PermissionDenied` | Insufficient OS-level permissions |
-| `MetricsUnreachable` | Metrics endpoint not responding |
-| `NotApplicable` | Metric does not apply to this configuration |
+
+The `AvailabilityReason` enum also defines a broader set of variants that may be surfaced in the future or in other contexts:
+`NoDisplay`, `TrayUnavailable`, `SensorUnavailable`, `BackendUnavailable`,
+`CommandMissing`, `PermissionDenied`, `MetricsUnreachable`, `NotApplicable`.
 
 ---
 

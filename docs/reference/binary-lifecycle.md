@@ -29,8 +29,9 @@ All endpoints require the configured API token (`Authorization: Bearer <token>`)
 | `GET` | `/api/llama-binary/latest` | Latest GitHub release metadata (30-min cache) |
 | `GET` | `/api/llama-binary/releases` | Last 8 releases for the version picker |
 | `GET` | `/api/llama-binary/release?build=N` | Metadata for one specific build |
-| `GET` | `/api/llama-binary/platform-info` | Detected OS, arch, recommended backend |
+| `GET` | `/api/llama-binary/platform-info` | Detected OS, arch, available backends |
 | `POST` | `/api/llama-binary/update` | Download and install a release |
+| `POST` | `/api/llama/restart` | Restart the running llama-server with its current config |
 
 ### `GET /api/llama-binary/version`
 
@@ -49,9 +50,10 @@ not on update install.
 
 ### `GET /api/llama-binary/releases`
 
-Returns the most recent 8 releases. Each entry includes tag name, publication date, release
-body (notes), and the subset of assets relevant to the current platform. The asset list is
-pre-filtered by `select_assets` so the UI only shows downloads the host can use.
+Returns the most recent 8 releases. Each entry includes tag name, publication date, and release
+body (notes). The endpoint returns all assets for each release without filtering by the current
+platform; the caller (UI) applies its own `select_assets` filter to present only relevant
+downloads for the host.
 
 ### `GET /api/llama-binary/release?build=N`
 
@@ -63,10 +65,19 @@ Used by the version picker rollback flow.
 
 Returns:
 - `os`: `"macos"` / `"linux"` / `"windows"`
-- `arch`: `"arm64"` / `"x86_64"`
-- `default_backend`: `"metal"` (macOS), `"cpu"` (Linux), `"avx2"` (other)
+- `arch`: `"aarch64"` / `"x86_64"`
+- `arch_label`: human-readable architecture label
+- `auto_backend`: backend chosen automatically for this platform
+- `label`: short human-readable platform label (e.g. "Apple Silicon Metal")
+- `backends`: array of available backend choices, each with:
+  - `id`: backend identifier (e.g. "cuda12", "vulkan", "rocm")
+  - `label`: display label
+  - `note`: short description of requirements
+  - `recommended`: whether it is the recommended option
+- `multi_backend`: true when the platform offers multiple selectable backends (Linux and Windows)
 
-The UI uses this to pre-select the correct backend in the installer UI.
+The UI uses this to pre-select the correct backend and to render backend-choice UI on
+multi-backend platforms.
 
 ### `POST /api/llama-binary/update`
 
@@ -82,10 +93,37 @@ Body (all fields optional):
 `backend` defaults to the platform default (`metal` / `cpu` / `avx2`).
 `tag` defaults to the latest release when omitted.
 
+Response:
+
+```json
+{
+  "ok": true,
+  "version": "b9512",
+  "backend": "metal",
+  "arch": "arm64",
+  "sha256": "abc123...",
+  "server_restarted": true
+}
+```
+
+- `sha256`: SHA256 of the installed llama-server binary (for integrity verification).
+- `server_restarted`: true when llama-monitor already restarted the server with its previous
+  config; the frontend must skip its own restart call when this is true.
+
+### `POST /api/llama/restart`
+
+Restarts the running local llama-server using its saved configuration and the current
+llama-server binary. Commonly used after an in-place update to pick up the new binary.
+
+- If no local server is running, returns an error.
+- Brief pause is inserted between stop and start to ensure the previous process has fully exited.
+
 ## Update pipeline
 
-The install handler follows a strict ordering to ensure the live binary is never
-replaced with a bad one and the server is not stopped until the final install window.
+The install handler follows a strict ordering: it downloads and prepares a candidate
+binary in a temporary directory, then stops the running server (if any), runs a health
+check on the new binary, and only then installs it. If health checks fail, the original
+binary is left in place.
 
 ```
 1. Capture current ServerConfig if a local server is running
@@ -95,16 +133,18 @@ replaced with a bad one and the server is not stopped until the final install wi
 5. Locate llama-server / llama-server.exe inside the temp tree
 6. Set executable bit (unix: chmod 0o755)
 7. Strip macOS Gatekeeper quarantine xattr (macOS only)
-8. Health check: run `llama-server --help` from extracted temp tree with a 10-second timeout
-9. Copy release files into install target
-   - macOS: copy into a fresh sibling staging dir, health-check the staged binary, stop the server if needed, then promote the staging dir to the configured `bin/` path while preserving the previous dir as backup
-   - other platforms: stop the server if needed, copy into the configured `bin/` path, normalize the configured binary name, then health-check the installed binary
-10. Restart server with preserved config (if it was running before)
+8. Stop running llama-server (if it was running)
+9. Health check: run `llama-server --help` from the temp binary with a 10-second timeout
+10. Install:
+    - macOS: copy into a sibling staging dir, health-check again, rename old bin/ to backup, promote staging dir
+    - other platforms: copy into the configured `bin/` path, normalize binary name, health-check the installed binary
+11. Restart server with preserved config (if it was running before)
 ```
 
-If any step from 2–8 fails, the function returns an error response and the live binary
-is untouched; if a server was running, it keeps running because it has not been stopped
-yet. The server is stopped only after pre-install validation succeeds.
+If any step from 1–7 fails, the live binary is untouched and the server (if running)
+continues to run. The server is stopped in step 8; if the subsequent health check (step 9)
+fails, the old binary is not overwritten and the caller receives an error indicating the
+new binary failed validation.
 
 ### Step 3 — Asset selection (`select_assets`)
 

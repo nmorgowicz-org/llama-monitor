@@ -126,22 +126,86 @@ into `auth-config.json` because the persisted dashboard-access UI uses a single 
 
 ## Token Rotation
 
-Three endpoints rotate tokens at runtime. All require a valid `api-token` (Bearer).
-Implemented in `src/web/api/tokens.rs`.
+Three endpoints rotate tokens at runtime. Implemented in `src/web/api/config.rs`.
+Auth requirements:
 
 - `POST /api/rotate-agent-token`
+  - Requires: `api-token` (Bearer).
   - Rotates the remote-agent token.
   - Updates `ui-settings.json` and notifies the agent poll loop.
 - `POST /api/rotate-api-token`
+  - Requires: `api-token` (Bearer).
   - Rotates the general API bearer token.
   - Writes new token to `api-token` file and updates in-memory state via `update_live_api_token`.
 - `POST /api/rotate-db-admin-token`
+  - Requires: `api-token` (Bearer).
   - Rotates the elevated DB admin bearer token.
   - Writes new token to `db-admin-token` file and updates in-memory state via `update_live_db_admin_token`.
 
 Important:
 - All three update both the on-disk file and the live in-memory `AppConfig` atomically, so the old token stops working immediately without a restart.
 - Tokens and nonces are generated with `getrandom::getrandom()`; argon2 salt uses `rand_core::OsRng` where a trait RNG is required. All are stored encrypted when encryption is configured.
+
+### API Token vs DB-Admin Token Boundary
+
+The project uses two tokens:
+
+- `api-token` — general bearer token for routine operations:
+  - Reading sessions, presets, templates, settings, models.
+  - Chat persistence, search, and streaming.
+  - GPU env, browse, HF, VRAM, benchmark, metrics, TLS config.
+  - DB stats, integrity, maintenance, backup creation, index listing, backups listing.
+  - DB queries via `POST /api/db/query` with a relaxed column filter on `SELECT`:
+    - Sensitive columns such as `content` in messages, `system_prompt`, `context_notes`,
+      and `model_params` are blocked unless you use `db-admin-token`.
+    - Non-SELECT commands (`PRAGMA`, `VACUUM`, `ANALYZE`) are allowed as-is.
+
+- `db-admin-token` — elevated token for destructive/high-impact operations:
+  - DB restore, repair, and backup deletion.
+  - Session deletion.
+  - Session spawn (starting llama-server).
+  - Kill-llama.
+  - Self-update.
+  - Metal GPU limit tuning (on macOS).
+  - DB queries via `POST /api/db/query` with no column restrictions on `SELECT`.
+
+Operations protected by `db-admin-token`:
+- `DELETE /api/db/backup`
+- `POST /api/db/restore`
+- `POST /api/db/repair`
+- `DELETE /api/sessions/:id`
+- `POST /api/sessions/spawn`
+- `POST /api/kill-llama`
+- `POST /api/self-update`
+- `POST /api/system/set-metal-gpu-limit`
+
+DB operations:
+- The `POST /api/db/query` endpoint allows more than `SELECT`:
+  - `VACUUM` and `ANALYZE` are allowed.
+  - A restricted PRAGMA allowlist is permitted (see below).
+- This is not limited to "read-only" queries.
+
+### PRAGMA Allowlist (chat_storage.rs)
+
+The `execute_query` in `chat_storage.rs` enforces:
+
+- Single-statement only: presence of `;` anywhere is rejected ("Multi-statement queries are not allowed").
+  - This is a simple substring scan, not a parser; it is fragile and can be bypassed indirectly.
+- Dangerous keywords blocked (e.g., INSERT, UPDATE, DELETE, DDL, ATTACH, LOAD_EXTENSION, etc.).
+- Only `SELECT`, `VACUUM`, `ANALYZE`, and a restricted PRAGMA subset are allowed.
+- `writable_schema` is NOT in the allowlist, so it is blocked.
+- The allowlist includes several write-affecting PRAGMAs:
+  - `INCREMENTAL_VACUUM`, `AUTOVACUUM`, `SECURE_DELETE`, `WAL_AUTOCHECKPOINT`,
+    `TEMP_STORE`, `MMAP_SIZE`, `QUERY_ONLY`, etc.
+
+Example allowed PRAGMAs:
+- `INTEGRITY_CHECK`, `QUICK_CHECK`, `PAGE_COUNT`, `FREELIST_COUNT`, `SCHEMA_VERSION`,
+  `USER_VERSION`, `INDEX_LIST`, `INDEX_INFO`, `TABLE_INFO`, `TABLE_XINFO`,
+  `FOREIGN_KEY_LIST`, `LOCK_LIST`, `DATABASE_LIST`, `JOURNAL_MODE`, `SYNCRONOUS`,
+  `CACHE_SIZE`, `CACHE_SPILL`, `EPOCHMS`.
+
+This design intentionally restricts arbitrary PRAGMA while still permitting some configuration
+queries that may alter internal behavior.
 
 ## Security Headers and CSP
 

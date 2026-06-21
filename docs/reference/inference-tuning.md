@@ -397,6 +397,59 @@ llama-bench -m <moe.gguf> -ngl 99 -fa 1 --n-cpu-moe 48 -n 64 -r 1   # then 40, 3
 - `-r` is repetitions (higher = less noise, slower). Use `-r 1` for quick depth
   sweeps, `-r 2+` for numbers you'll publish.
 
+### Built-in tuning and benchmark endpoints
+
+The app exposes several POST endpoints (all require api-token auth) that automate
+parts of this process. These are internal endpoints used by the UI, Preset Editor,
+and Spawn Wizard.
+
+- **POST /api/benchmark**
+  - Sends a short test prompt to the currently running llama-server and measures
+    prompt tokens/sec, gen tokens/sec, and TTFT.
+  - Normal use: rate-limited to once every 15 seconds.
+  - Tuning mode: include `{ "tuning": true }` in the body to skip the cooldown
+    while iteratively adjusting settings.
+  - Returns verdict plus hints/suggestions.
+
+- **POST /api/advise**
+  - Config-time performance advisor: given model name/params, context size, KV
+    types, platform, and speculative decoding config, returns suggestions for
+    MoE vs dense, KV type, MTP, etc.
+  - Used by the Spawn Wizard and Preset Editor before running any benchmark.
+
+- **POST /api/model-defaults**
+  - Returns recommended chat parameters (temperature, top_p, reasoning, etc.) for
+    a given model based on name, size, and tags.
+  - Ensures tuned defaults align with the model family.
+
+- **POST /api/moe-tune**
+  - Suggests a starting `--n-cpu-moe` value for a MoE model given
+    `model_size_bytes`, `available_vram_bytes`, and `n_moe_layers`.
+  - Helps you fit MoE experts into limited VRAM by offloading some to system RAM.
+
+- **POST /api/tune/ncpumoe**
+  - Advanced `--n-cpu-moe` auto-tuner.
+  - Without `verify`: returns an estimate based on VRAM fit.
+  - With `verify: true`: runs llama-bench against several candidate `--n-cpu-moe`
+    values and selects the one that gives the best real decode speed.
+  - Requires the llama-server to be stopped when verifying (llama-bench needs the GPU).
+
+- **POST /api/bench/sweep**
+  - Offline depth sweep via llama-bench: benchmarks decode at multiple context
+    depths (default 0, 16k, 32k).
+  - Requires llama-server stopped; returns per-depth points (`points` array).
+
+- **POST /api/bench/batch-sweep**
+  - Offline batch/ubatch sweep: probes a matrix of (batch, ubatch) pairs and
+    returns the best prefill throughput along with all probes.
+  - Requires llama-server stopped.
+
+- **POST /api/bench/mtp-sweep**
+  - Online MTP n-max sweep: for a locally-spawned server with speculative decoding,
+    iterates over given `spec-draft-n-max` values, restarting the server between
+    probes, and selects the n_max that maximizes generation tokens/sec.
+  - Requires local server and active MTP/draft config.
+
 ---
 
 ## Quick-pick cheat sheet

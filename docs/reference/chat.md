@@ -74,7 +74,7 @@ Several appearance and chat behaviors are configurable via Settings and are appl
 
 ## Messaging
 
-- **Streaming** — Real-time SSE streaming from `/v1/chat/completions`
+- **Streaming** — Real-time SSE streaming via `POST /api/chat`, which relays to the connected llama.cpp server at `/v1/chat/completions`
 - **Markdown rendering** — Assistant output is rendered with Markdown, syntax-highlighted code blocks, and per-block copy controls
 - **Thinking blocks** — If the upstream model sends `reasoning_content`, the UI renders it in an expandable thinking block during the active browser session
 - **Token estimates** — The composer shows a rough `~N tok` estimate with warning colors at higher counts
@@ -554,6 +554,27 @@ Guided-generation settings (`enabled_context_notes`, `enabled_suggestions`, `ena
 
 Purely device-specific presentation choices such as chat style and font scale remain browser-local.
 
+## Sessions and Attachment
+
+llama-monitor manages one or more backend llama.cpp sessions and routes all chat traffic through them.
+
+Key session endpoints:
+
+- `GET /api/sessions` — list sessions (requires api-token)
+- `GET /api/sessions/active` — current active session
+- `POST /api/sessions` — register a new session definition
+- `DELETE /api/sessions/:id` — remove a session (requires db-admin-token)
+- `POST /api/sessions/active` — switch active session by ID
+- `POST /api/sessions/spawn` — spawn a new llama-server from a preset or inline config (requires db-admin-token)
+- `POST /api/attach` — attach to an existing llama-server endpoint
+- `POST /api/detach` — detach from the current attach-style active session
+- `GET /api/sessions/recent` — last 10 sessions, sorted by recent use
+- `GET /api/sessions/restore-hint` — lightweight hint for restore/attach suggestions
+- `GET /api/sessions/check-endpoint` — probe whether a llama-server URL is reachable
+- `GET /api/capabilities` — current capabilities and availability derived from active session(s)
+
+ChatStorage mediates all database access; browser endpoints never talk directly to SQLite. Conversations and messages are persisted via `ChatStorage` behind the tab and search endpoints.
+
 ## Backend Layout
 
 Chat-related routes are implemented in `src/web/api/chat/`:
@@ -564,13 +585,43 @@ Chat-related routes are implemented in `src/web/api/chat/`:
 - `notes.rs` — context-notes analysis and persistence
 - `tabs.rs` — tab CRUD, search, archive/hide/restore helpers
 
-Public API paths are unchanged by internal refactors; only module boundaries moved.
+Session and attachment routes are implemented in `src/web/api/sessions.rs`.
+
+Note: Many supporting endpoints now exist (guided chat, tab management, search, suggestions, context notes, sessions, capabilities). The list below is not exhaustive and is subject to change as the API grows.
+
+### Key Chat API Endpoints
+
+- `POST /api/chat` — primary SSE relay endpoint for chat completions (proxies to upstream `/v1/chat/completions`)
+- `POST /api/chat/abort` — abort current streaming request
+- `POST /api/chat/guided` — guided variant of `/api/chat`; forces thinking disabled and strips inline thinking/reasoning tags from streamed content
+- `GET /api/chat/tabs` — list tabs with optional `visibility` filter (`active`, `archived`, `hidden`, `all`, or comma-separated)
+- `POST /api/chat/tabs` — create a new tab
+- `GET /api/chat/tabs/:id` — get a tab and its messages
+- `PUT /api/chat/tabs/:id` — full tab update (meta + messages)
+- `DELETE /api/chat/tabs/:id` — delete a tab
+- `PATCH /api/chat/tabs/:id/meta` — partial update of tab metadata
+- `POST /api/chat/tabs/:id/messages` — append messages to a tab
+- `PATCH /api/chat/tabs/order` — reorder tabs via `tab_order` array
+- `POST /api/chat/tabs/:id/archive` — archive a tab
+- `POST /api/chat/tabs/:id/hide` — hide a tab
+- `POST /api/chat/tabs/:id/restore` — restore an archived/hidden tab to active
+- `GET /api/chat/search` — full-text search; accepts query params:
+  - `q` — search query
+  - `limit` — max results (default 20, clamped 1–100)
+  - `offset` — pagination offset
+  - `visibility` — filter (`active`, `archived`, `hidden`, `all`)
+  - `tab_id` — restrict to a single conversation
+
+### Server Control
+
+- `POST /api/kill-llama` — best-effort kill of the managed llama-server process (requires db-admin-token and `"confirm": "kill"` in the body).
 
 ## Data Flow
 
 ```text
-User message -> /v1/chat/completions (SSE stream) -> Browser renders tokens live
-                                                     -> Chat telemetry updates from live metrics
+User message -> llama-monitor POST /api/chat (SSE relay) -> Upstream llama.cpp /v1/chat/completions
+                                                        -> Browser renders tokens live
+                                                        -> Chat telemetry updates from live metrics
 ```
 
 ## Persistence

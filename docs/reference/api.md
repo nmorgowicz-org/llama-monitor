@@ -5,9 +5,37 @@ Llama Monitor serves its REST API on the same port as the web UI, typically `htt
 This page documents the HTTP endpoints exposed by llama-monitor and the data shapes returned.
 
 Internally, the API is implemented as a modular warp router in `src/web/api/mod.rs` delegating to
-domain-specific modules (`chat/`, `models`, `hf`, `sessions`, `sleep`, etc.). These modules define
-route handlers but do not change any public endpoint paths or authentication rules compared to
-previous monolithic `api.rs` implementations.
+25+ domain-specific modules:
+
+- `auth` — dashboard auth status, login, logout, config
+- `benchmark` — benchmark, advise, sweep, MoE tuning
+- `browse` — file system browsing
+- `chat/` — chat streaming, suggestions, notes, guided generation, tabs
+- `common` — shared auth helpers, context, error types
+- `config` — settings, GPU env, token rotation, dashboard auth config
+- `db` — database admin, queries, backups, restore, repair
+- `debug` — diagnostic endpoints
+- `hf` — HuggingFace integration (search, files, token, etc.)
+- `lhm` — LibreHardwareMonitor (Windows-only)
+- `llama_binary` — llama-server binary version and updates
+- `metrics` — system/metrics endpoints
+- `models` — model scan, downloads, GGUF metadata
+- `presets` — preset CRUD
+- `remote_agent` — remote agent install/manage via SSH
+- `self_update` — in-place update of llama-monitor
+- `sensor_bridge` — Windows sensor-bridge service
+- `sessions` — session CRUD, spawn, attach, detach, kill-llama, capabilities
+- `sleep` — sleep mode management
+- `spawn_wizard` — setup wizard helpers, chat templates, import launch files
+- `system_tools` — system info, top processes, Metal GPU limit
+- `templates` — system prompt templates
+- `tls` — TLS/ACME configuration
+- `tokens` — public token bootstrap routes
+- `upstream` — upstream proxy helpers
+- `vram` — VRAM estimation, quant comparison, auto-size
+
+These modules define route handlers but do not change any public endpoint paths or authentication
+rules compared to previous monolithic `api.rs` implementations.
 
 ## Base URL
 
@@ -30,10 +58,26 @@ http://localhost:7778
 ## Sessions
 
 All session endpoints require authentication via `Authorization: Bearer <token>`.
-Most require the `api-token`; a few elevated operations require the `db-admin-token`.
+Most require the `api-token`; several elevated operations require the `db-admin-token`.
 Without a valid token, the endpoint returns 401.
 
 Handlers live in: `src/web/api/sessions.rs`.
+
+Summary of endpoints:
+
+- `GET /api/sessions` — list sessions (api-token)
+- `POST /api/sessions` — create session record (api-token)
+- `DELETE /api/sessions/:id` — delete session (db-admin-token)
+- `GET /api/sessions/recent` — recent attach-mode sessions (api-token)
+- `GET /api/sessions/active` — active session summary (api-token)
+- `POST /api/sessions/active` — set active session (api-token)
+- `GET /api/sessions/active/readiness` — check if active session is ready (api-token)
+- `GET /api/sessions/check-endpoint` — verify reachability of an endpoint (api-token)
+- `POST /api/sessions/spawn` — spawn llama-server from preset (db-admin-token, 15s cooldown)
+- `POST /api/attach` — attach to existing endpoint (api-token, 10s cooldown)
+- `POST /api/detach` — detach from attach session (api-token)
+- `POST /api/kill-llama` — emergency kill llama-server (db-admin-token, 30s cooldown, requires `{ "confirm": "kill" }`)
+- `GET /api/capabilities` — current metrics capability state (api-token)
 
 ### `GET /api/sessions`
 Auth: api-token.
@@ -1125,6 +1169,21 @@ Route handlers: `src/web/api/chat/tabs.rs`.
 
 The live chat persistence layer is SQLite-backed and centered on `chat.db`. Chat tabs are no longer stored as one big JSON array.
 
+Chat tab management endpoints:
+
+- `GET /api/chat/tabs` — list tab metadata (no messages) (api-token)
+- `POST /api/chat/tabs` — create a tab (api-token)
+- `GET /api/chat/tabs/:id` — full tab with messages (api-token)
+- `PUT /api/chat/tabs/:id` — full tab save; replaces messages (api-token)
+- `PATCH /api/chat/tabs/:id/meta` — metadata-only update; messages ignored (api-token)
+- `POST /api/chat/tabs/:id/messages` — append messages (api-token)
+- `PATCH /api/chat/tabs/order` — reorder tabs (api-token)
+- `DELETE /api/chat/tabs/:id` — delete tab (api-token)
+- `POST /api/chat/tabs/:id/archive` — archive a tab (api-token)
+- `POST /api/chat/tabs/:id/hide` — hide a tab (api-token)
+- `POST /api/chat/tabs/:id/restore` — restore a hidden/archived tab (api-token)
+- `GET /api/chat/search` — full-text search across messages (api-token)
+
 ### `GET /api/chat/tabs`
 Auth: api-token.
 Returns tab metadata only, without message bodies.
@@ -1618,7 +1677,36 @@ Requires `api-token`.
 ### `POST /api/db/query`
 Requires `api-token` or `db-admin-token` (dual-token).
 
-Runs admin queries. When called with `api-token`, queries are limited to `SELECT`. When called with `db-admin-token`, additional operations (including `PRAGMA`) are permitted.
+Safeguards:
+- Max body size: 256 KB; max SQL length: 16 KB; execution timeout: 10 seconds.
+- Single-statement only: a semicolon anywhere in the SQL is rejected via a simple substring
+  scan (`;` present → "Multi-statement queries are not allowed"). This is a lightweight and
+  fragile guard, not full parsing.
+- Only allows: `SELECT`, `VACUUM`, `ANALYZE`, and a restricted PRAGMA subset (see below).
+- DML (INSERT/UPDATE/DELETE/REPLACE), DDL (CREATE/DROP/ALTER), ATTACH, LOAD_EXTENSION,
+  and WAL checkpoint PRAGMAs are blocked.
+
+PRAGMA allowlist:
+- The code in `chat_storage.rs` uses an explicit allowlist (e.g. `INTEGRITY_CHECK`,
+  `QUICK_CHECK`, `PAGE_COUNT`, `FREELIST_COUNT`, `SCHEMA_VERSION`, `USER_VERSION`,
+  `INDEX_LIST`, `INDEX_INFO`, `TABLE_INFO`, `TABLE_XINFO`, `FOREIGN_KEY_LIST`,
+  `LOCK_LIST`, `DATABASE_LIST`, `JOURNAL_MODE`, `SYNCRONOUS`, `CACHE_SIZE`,
+  `CACHE_SPILL`, `WAL_AUTOCHECKPOINT`, `AUTOVACUUM`, `INCREMENTAL_VACUUM`,
+  `SECURE_DELETE`, `TEMP_STORE`, `MMAP_SIZE`, `QUERY_ONLY`, `EPOCHMS`, etc.).
+- `writable_schema` is NOT in the allowlist, so it is blocked.
+- Several write-affecting PRAGMAs (e.g., `INCREMENTAL_VACUUM`, `AUTOVACUUM`, `SECURE_DELETE`)
+  are permitted; the allowlist is not strictly "read-only."
+
+Auth behavior:
+- With `api-token`:
+  - `SELECT` queries are allowed but with a relaxed column filter: sensitive columns
+    (message content, `system_prompt`, `context_notes`, `model_params`) are blocked unless
+    you use `db-admin-token`.
+  - `PRAGMA`/`VACUUM`/`ANALYZE` allowed as-is.
+- With `db-admin-token`:
+  - Same allowed operations, but no column restrictions on `SELECT`.
+
+Example request:
 
 ```json
 {
@@ -1909,74 +1997,120 @@ Endpoints supporting the setup wizard, VRAM estimation, and model discovery.
 
 All require `api-token` unless noted.
 
-### `POST /api/vram/estimate`
-Quick VRAM estimate for a given configuration.
+### VRAM Estimation
 
-### `POST /api/vram/estimate-breakdown`
-Full VRAM breakdown: weights, KV cache, mmproj, MTP, overhead, free.
+- `POST /api/vram/estimate` — quick VRAM estimate for a configuration.
+- `POST /api/vram-estimate` — full VRAM breakdown (weights, KV cache, mmproj, MTP, overhead, free).
+- `POST /api/vram/quant-compare` — pre-download quant comparison table (Quant Advisor).
+- `POST /api/vram/auto-size` — compute optimal configuration (context, KV quant, MoE tuning).
 
-### `POST /api/vram/auto-size`
-Compute an optimal configuration (context, KV quant, MoE tuning) for the given hardware.
+All require `api-token`.
 
-### `POST /api/vram/quant-compare`
-Pre-download quant comparison table (Quant Advisor).
+### Llama.cpp Binary Management
 
-### `POST /api/model-defaults`
-Model-family sampling presets used by the setup wizard and preset editor.
+Route handlers: `src/web/api/llama_binary.rs`.
 
-### `POST /api/moe-tune`
-Suggest MoE CPU expert offload settings for a model.
+- `GET /api/llama-binary/version` — currently installed binary version.
+- `GET /api/llama-binary/latest` — latest available llama.cpp release.
+- `GET /api/llama-binary/releases` — list of recent releases.
+- `GET /api/llama-binary/release?build=N` — specific release info by build ID.
+- `GET /api/llama-binary/platform-info` — current platform/backend info.
+- `POST /api/llama-binary/update` — download and install a release.
+  - Request: `{ "version": "b5700", "backend": "metal" }`
+- `POST /api/llama/restart` — restart a locally running llama-server with the current binary (useful after installing a new version).
 
-### `POST /api/benchmark`
-Run a short inference benchmark against the currently running llama-server.
+All require `api-token` unless noted.
 
-- Requires: `api-token`.
-- Behavior:
-  - Sends a fixed prompt via streaming chat.
-  - Measures time to first token, generation speed, and overall latency.
-  - Classifies performance (e.g., Great / Tight / Slow) and returns tuning suggestions.
-- Cooldown: 15 seconds between calls (rate-limited with 429 if too soon).
+### System Information
 
-### `POST /api/model/introspect`
-Run `llama-server --print-model-metadata` on a local GGUF file (or use cache).
+- Route handlers: `src/web/api/system_tools.rs` for top-processes and purge (no `/api` prefix).
+- Route handlers: `src/web/api/vram.rs` for system info and Metal GPU limit.
 
-- Requires: `api-token`.
-- Caches result in `model-cache/<sha256>.json`; cache hit returns `"cached": true`.
-- Timeout: 30 seconds.
+- `GET /system/top-processes` — top CPU/memory-consuming processes (api-token).
+- `POST /system/purge` — purge caches/temporary artifacts (api-token).
+- `GET /api/system/info` — system/platform information (api-token).
+- `GET /api/system/metal-gpu-limit` — current Metal GPU wired memory limit (macOS only, api-token).
+- `POST /api/system/set-metal-gpu-limit` — adjust Metal GPU wired memory limit.
+  - Requires `db-admin-token` (system-level change).
+  - Request: `{ "limit_mb": 40960 }`
 
-### `POST /api/third-party-models`
-Scan local model directories (Ollama, LM Studio, Jan, GPT4All, HF cache, etc.).
+### Benchmark and Tuning
 
-- Requires: `api-token`.
+Route handlers: `src/web/api/benchmark.rs`.
 
-### `POST /api/spawn-wizard/import-launch-file`
-Parse a third-party launch script file and extract potential preset values.
+All require `api-token`.
 
-- Requires: `api-token`.
+- `POST /api/benchmark` — run short inference benchmark against the running llama-server.
+  - Supports optional tuning mode; 15-second cooldown.
+- `POST /api/advise` — performance advice based on current preset and system info.
+- `POST /api/moe-tune` — suggest MoE CPU expert offload settings.
+- `POST /api/tune/ncpumoe` — tune n_cpu_moe for given constraints.
+- `POST /api/model-defaults` — model-family sampling presets.
+- `POST /api/bench/sweep` — benchmark sweep across configurations.
+- `POST /api/bench/batch-sweep` — batched benchmark sweep.
+- `POST /api/bench/mtp-sweep` — MTP-depth benchmark sweep.
 
-### `GET /api/chat-template/fetch`
-Fetch a chat template URL and return its content.
+### Chat Templates
 
-- Requires: `api-token`.
-- Query: `url` parameter.
+All require `api-token`.
 
-### `POST /api/chat-template/upload`
-Upload a local chat template file to be used by presets.
+- `POST /api/chat-template/fetch` — fetch a chat template URL and return its content.
+- `POST /api/chat-template/upload` — upload a local chat template file.
+- `GET /api/chat-template/dir` — list installed chat templates.
+- `POST /api/chat-template/install-hf` — install a chat template from HF.
+- `POST /api/chat-template/install-url` — install from a raw GitHub URL (1 MiB limit, no redirects).
 
-- Requires: `api-token`.
+### Sleep Mode
 
-### `POST /api/chat-template/install-hf`
-Install a chat template from HF.
+Route handlers: `src/web/api/sleep.rs`.
 
-- Requires: `api-token`.
+- `GET /api/sleep-mode` — returns current mode (`off`/`logs-only`/`sleep`), `enabled`, and `config`.
+- `POST /api/sleep-mode/toggle` — cycle mode.
+- `POST /api/sleep-mode/set` — explicitly set mode.
 
-### `POST /api/chat-template/install-url`
-Install and cache a community chat template from an HTTPS
-`raw.githubusercontent.com` URL.
+All require `api-token`.
 
-- Requires: `api-token`.
-- Request fields: `url`, stable `name`, and optional `force`.
-- Redirects are rejected and template content is limited to 1 MiB.
+### TLS / ACME Configuration
+
+Route handlers: `src/web/api/tls.rs`.
+
+All require `api-token`.
+
+- `GET /api/tls/config` — current TLS mode and ACME summary.
+- `PUT /api/tls/config` — update TLS/ACME config.
+- `POST /api/tls/acme/request` — trigger certificate request.
+- `POST /api/tls/acme/renew` — trigger certificate renewal.
+
+### Config and Token Rotation
+
+Route handlers: `src/web/api/config.rs`.
+
+- `GET /api/settings` — masked `UiSettings` (api-token).
+- `GET /api/settings/full` — unmasked `UiSettings` (api-token).
+- `PUT /api/settings` — save `UiSettings` (api-token).
+- `GET /api/gpu-env` — current GPU environment (api-token).
+- `PUT /api/gpu-env` — update GPU environment (api-token).
+- `POST /api/rotate-agent-token` — rotate remote-agent token (api-token).
+- `POST /api/rotate-api-token` — rotate api-token (api-token).
+- `POST /api/rotate-db-admin-token` — rotate db-admin-token (api-token).
+
+All token-rotation endpoints update both the on-disk file and the in-memory `AppConfig` atomically; old tokens stop working immediately.
+
+### Setup Wizard
+
+Route handlers: `src/web/api/spawn_wizard.rs`.
+
+All require `api-token`.
+
+- `POST /api/spawn-wizard/mtp-draft-check` — validate MTP draft configuration.
+- `POST /api/spawn-wizard/import-launch-file` — parse third-party launch script.
+
+### Model Introspection
+
+- `POST /api/model/introspect` — run `llama-server --print-model-metadata` on a local GGUF file (or cache).
+  - Requires `api-token`; caches in `model-cache/<sha256>.json`; 30-second timeout.
+- `POST /api/third-party-models` — scan local model directories (Ollama, LM Studio, etc.).
+  - Requires `api-token`.
 
 ## HuggingFace Integration
 
@@ -2209,9 +2343,9 @@ POST /api/self-update:
 
 POST /api/kill-llama:
 - Emergency kill for llama-server.
-- Requires db-admin-token (elevated operation).
-- Requires confirmation field: { "confirm": "kill" }.
-- Cooldown: 30 seconds between calls; returns 429 with seconds_remaining if too soon.
+- Requires `db-admin-token` (elevated operation).
+- Requires confirmation field: `{ "confirm": "kill" }`.
+- Cooldown: 30 seconds between calls; returns 429 with `seconds_remaining` if too soon.
 - Example:
     Request:  { "confirm": "kill" }
     Success:  { "ok": true }
@@ -2219,9 +2353,9 @@ POST /api/kill-llama:
 
 ## Token Rotation
 
-Route handlers: `src/web/api/tokens.rs`.
+Route handlers: `src/web/api/config.rs`.
 
-All three endpoints require `api-token` and return a 401 if the token is missing or invalid.
+All three endpoints require `api-token` and return 401 if missing or invalid.
 
 ### `POST /api/rotate-agent-token`
 Rotates the remote-agent token stored in `UiSettings`. Updates both on-disk and in-memory state, and notifies the agent-poll loop.
@@ -2232,7 +2366,7 @@ Response:
 ```
 
 ### `POST /api/rotate-api-token`
-Generates a new api-token, writes it to disk (encrypted if configured), and updates the live in-memory value atomically.
+Generates a new api-token, writes it to disk (encrypted if configured), and updates the live in-memory value atomically. Old token stops working immediately.
 
 Response:
 ```json
@@ -2240,7 +2374,7 @@ Response:
 ```
 
 ### `POST /api/rotate-db-admin-token`
-Generates a new db-admin-token, writes it to disk (encrypted if configured), and updates the live in-memory value atomically.
+Generates a new db-admin-token, writes it to disk (encrypted if configured), and updates the live in-memory value atomically. Old token stops working immediately.
 
 Response:
 ```json

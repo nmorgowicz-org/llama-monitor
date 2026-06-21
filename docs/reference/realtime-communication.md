@@ -78,11 +78,19 @@ The Network Information API is supported in Chromium-based browsers (Chrome, Edg
   "session_mode":            "spawn" | "attach" | "",
   "active_session_id":       "session_1746...",
   "active_session_endpoint": "http://127.0.0.1:8001",
+  "active_session_status":   "running" | "stopping" | "error" | "",
+  "active_session_error":    "error message string or empty",
+  "active_session_preset_id": "preset_name or null",
+  "last_spawn_cmd":          "last spawn command string or empty",
   "local_metrics_available": true | false,
   "host_metrics_available":  true | false,
   "remote_agent_connected":  true | false,
   "remote_agent_health_reachable": true | false,
   "remote_agent_url":        "http://...",
+  "remote_agent_version":    "x.y.z or empty",
+  "remote_agent_protocol_version": 1,
+  "remote_agent_update_available": true | false,
+  "remote_agent_protocol_too_old": true | false,
   "capabilities":            { ...MetricsCapabilities },
   "endpoint_kind":           "Local" | "Remote" | "Unknown",
   "session_kind":            "spawn" | "attach" | "none",
@@ -94,11 +102,11 @@ The Network Information API is supported in Chromium-based browsers (Chrome, Edg
 }
 ```
 
-Payload is reduced depending on `mode`:
+Payload is reduced depending on `mode`. In logs-only and sleep, some fields may still appear if the backend has partial or cached data; the rules below describe the intended behavior:
 
 - **off**: full payload with `llama`, `gpu`, `system`, `logs`, and all telemetry fields.
-- **logs-only**: reduced payload — no `llama`, `gpu`, or `system`; includes `logs` plus session flags.
-- **sleep**: minimal heartbeat — no `logs`, no metrics; only `mode`, `sleep_mode`, session flags.
+- **logs-only**: reduced payload — heavy metrics (`llama`, `gpu`, `system`) are typically omitted, but fragments may appear; always includes `logs` plus session flags.
+- **sleep**: minimal heartbeat — no `logs`, no metrics; only `mode`, `sleep_mode`, `sleep_mode_manual`, and session flags.
 
 `system` is `null` when `host_metrics_available` is false.
 `gpu` is an empty object (`{}`) when `host_metrics_available` is false.
@@ -181,6 +189,8 @@ Empty object when `host_metrics_available` is false.
 
 `gpu` is a `BTreeMap<String, GpuMetrics>` keyed by device name (e.g. `"Apple M3 Max"`). Most setups have a single key.
 
+On Apple Silicon, `power_consumption` is derived from `gpu_power` (dedicated GPU sensor) rather than from a generic SoC `total_power`.
+
 ### SystemMetrics (`system`)
 
 `null` when `host_metrics_available` is false.
@@ -227,8 +237,10 @@ Used in `availability.system`, `availability.gpu`, and `availability.cpu_temp`.
 - **Push interval:** Configurable via Settings > Performance (200ms to 10s). Default 500ms.
 - **Sleep modes:**
   - `mode: "off"` — full telemetry; all fields present.
-  - `mode: "logs-only"` — reduced payload; `llama`, `gpu`, and `system` omitted; `logs` included.
-  - `mode: "sleep"` — minimal heartbeat; no logs, no metrics; only `mode`, `sleep_mode`, `sleep_mode_manual`, and session flags.
+  - `mode: "logs-only"` — reduced payload; heavy metrics (`llama`, `gpu`, `system`) are typically omitted, but fragments may appear if the backend has partial data; `logs` are included along with session flags.
+  - `mode: "sleep"` — minimal heartbeat; no logs, no metrics. Fields included:
+    - `mode`, `sleep_mode`, `sleep_mode_manual`
+    - Session flags: `active_session_id`, `active_session_endpoint`, `active_session_status`, `active_session_error`, `active_session_preset_id`, `session_kind`, `session_mode`, `server_running`, `local_server_running`, `remote_agent_connected`
   - During active chat generation, the backend preserves the normal interval and full payload regardless of low-power mode.
 - **Host metrics gating:** `gpu` and `system` are only populated when `host_metrics_available` is `true`. This is true for local spawn/attach sessions and remote sessions where the remote agent is connected.
 - **Memory pressure (macOS):** Fields `memory_pressure_level`, `memory_free_gb`, `memory_compressor_gb`, `memory_compressed_gb`, `swapins`, `swapouts` are populated on macOS via `vm_stat`. On non-macOS platforms they default to zero/empty and `memory_pressure_level` is an empty string.

@@ -384,12 +384,22 @@ Host metrics are available in two ways:
 - **Remote session with agent**: the remote agent reports GPU/system/process telemetry back to the dashboard.
 - **Remote session without agent**: you still get performance metrics, but GPU/system cards stay limited.
 
+### Metrics API endpoints
+
+All metrics endpoints require `api-token` and also act as wake-on-activity signals.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/metrics` | Returns combined `system` and `gpu` metrics |
+| `GET` | `/api/metrics/system` | Returns `system` metrics only |
+| `GET` | `/api/metrics/gpu` | Returns `gpu` metrics only |
+
 ### GPU metrics
 
 | Metric | Local sources |
 |--------|---------------|
 | Utilization | `rocm-smi`, `nvidia-smi`, `mactop` |
-| Power draw | `rocm-smi`, `nvidia-smi` |
+| Power draw | `rocm-smi`, `nvidia-smi`; on Apple Silicon via `gpu_power` (dedicated GPU sensor), not `total_power` |
 | VRAM usage | `rocm-smi`, `nvidia-smi`, `mactop` |
 | Core clock | `rocm-smi`, `nvidia-smi` |
 | Memory clock | `rocm-smi`, `nvidia-smi` |
@@ -411,17 +421,25 @@ Clock visualization:
 
 | Metric | Source |
 |--------|--------|
-| CPU load and model | `sysinfo` |
+| CPU load and model | `sysinfo`; on Apple Silicon weighted from mactop cluster utilization |
 | CPU temperature | Linux thermal zones, `mactop`, or `sensor_bridge.exe` on Windows |
-| CPU clock | `/proc/cpuinfo` on Linux, `mactop` on macOS |
+| CPU clock | `/proc/cpuinfo` on Linux; on Apple Silicon derived from P-cluster frequency (`p_cluster_freq_mhz` via `mactop`), not a generic SoC “clock” |
 | RAM usage | `sysinfo` |
 | RAM available | `sysinfo` |
 | Memory pressure level | macOS `vm_stat` (free pages + compressor ratio → ok/warning/critical) |
 | Memory free (GB) | macOS `vm_stat` |
+| Memory wired (GB) | macOS `vm_stat`; kernel-locked, includes GPU framebuffers; Metal iogpu budget floor on Apple Silicon |
+| Memory purgeable (GB) | macOS `vm_stat`; file-backed pages droppable on demand |
+| Memory inactive (GB) | macOS `vm_stat`; candidate pages for compression/eviction |
 | Memory compressor (GB) | macOS `vm_stat` |
 | Memory compressed (GB) | macOS `vm_stat` (pages stored in compressor) |
 | Swapins / swapouts (counters) | macOS `vm_stat` |
 | Motherboard / platform info | platform-specific host inspection |
+| CPU topology (Apple Silicon) | Read from `hw.perflevelcount` and per-level `hw.perflevel{i}.physicalcpu`/`hw.perflevel{i}.name` to derive P/E/S core counts and cluster names |
+| P-cores / E-cores / S-cores | Apple Silicon only; derived from perf-level core counts; 0 on non-Apple Silicon |
+| P/S/E cluster frequency (MHz) | On macOS via `mactop`; per-cluster current frequencies |
+| P/S/E cluster active (%) | On macOS via `mactop`; per-cluster utilization |
+| Power (total, CPU, GPU) | On macOS via `mactop` (`power_total_w`, `power_cpu_w`, `power_gpu_w`); 0 on other platforms |
 
 CPU clock visualization:
 
@@ -446,15 +464,15 @@ Sensor bridge (Windows):
 
 ## mlock Warnings
 
-When running on macOS with a model whose estimated VRAM exceeds available GPU memory,
-Llama Monitor warns that memory pages may be unmapped by the OS (mlock failure), causing
-slowdowns or crashes.
+On macOS, when a model’s estimated VRAM use (based on the VRAM estimator) exceeds
+available GPU memory, Llama Monitor shows a heuristic warning that memory pages may be
+unmapped by the OS (mlock failure), which can cause slowdowns or crashes.
 
-- **Preset editor**: shows a warning when the estimated model VRAM exceeds available VRAM.
+- **Preset editor**: displays a warning if the estimated VRAM exceeds available VRAM.
 - **Spawn wizard**: shows the same warning on the final review step for macOS when the
-  model is too large for available VRAM.
-- These warnings are informational; they do not block launch but advise reducing layers,
-  using a smaller quantization, or adding swap space.
+  model appears too large for available VRAM.
+- These warnings are informational and heuristic; they do not enforce a hard limit or
+  block launch but suggest reducing layers, using a smaller quantization, or adding swap space.
 
 ## Capability states
 

@@ -8,7 +8,9 @@ The VRAM estimator (`src/llama/vram_estimator/`) predicts GPU memory usage for a
 
 ## ModelArch
 
-`ModelArch` is the central struct. Every estimation function takes a `&ModelArch`. It is populated either from GGUF metadata (ground truth) or from `ModelArch::from_name_and_params()` (heuristic, used pre-download).
+`ModelArch` is the central struct. Every estimation function takes a `&ModelArch`. It is populated in two ways:
+- **Pre-download / filename-only**: `ModelArch::from_name_and_params(name, param_b)` builds a heuristic from the name and parameter count.
+- **From a local GGUF file**: `ModelMetadata::to_arch()` in `spawn_wizard.rs` maps the GGUF metadata keys to `ModelArch` fields; these values override any heuristic. The GGUF `general.architecture` string also selects the family heuristic via `gguf_arch_to_heuristic_name()`.
 
 ```rust
 pub struct ModelArch {
@@ -49,9 +51,9 @@ pub struct ModelArch {
 
 | Method | True when |
 |--------|-----------|
-| `is_moe()` | `n_experts > 0` |
-| `is_hybrid_attn()` | `n_attn_layers > 0` (some layers are DeltaNet/SSM) |
-| `has_local_attn()` | `n_global_attn_layers > 0` (some layers are sliding-window) |
+| `is_moe()` | `n_experts > 1` |
+| `is_hybrid_attn()` | `n_attn_layers > 0 && n_attn_layers < n_layers` |
+| `has_local_attn()` | `local_attn_window > 0 && n_global_attn_layers < n_layers` |
 
 ---
 
@@ -61,16 +63,16 @@ pub struct ModelArch {
 
 ### Priority order (first match wins)
 
-1. `"coder-next"` / `"qwen3-coder-next"` → `qwen3_coder_next_arch()`
-2. `"qwen3.5"` → `qwen35_heuristic(param_b)`
-3. `"qwen3.6"` + `"35b-a3b"` → `qwen36_35b_a3b_arch()`
-4. `"qwen3.6"` → `qwen36_heuristic(param_b)`
-5. GGUF arch string `"qwen35"` or `"qwen3_6"` → `qwen36_heuristic(param_b)` (catches renamed finetunes)
-6. `"gemma-4"` / `"gemma4"` → `gemma4_heuristic(name, param_b)` then MoE suffix
-7. `"exaone-4.5"` / `"exaone45"` → `exaone45_heuristic(param_b)`
-8. `"qwen3"` → `standard_heuristic(param_b)` with MoE suffix parsing
-9. Any name with `"NB-AMB"` MoE suffix → generic heuristic + MoE suffix
-10. Fallback → `standard_heuristic(param_b)`
+1. `"exaone-4.5"` / `"exaone4.5"` → `exaone45_heuristic(param_b)` (checked first)
+2. `"coder-next"` / `"qwen3-coder-next"` → `qwen3_coder_next_arch()`
+3. `"qwen3.6"` / `"qwen3-6"` / `"qwopus3.6"` / `"qwopus3-6"` / `"qwopus36"` →
+   - `"35b-a3b"` → `qwen36_35b_a3b_arch()`
+   - else → `qwen36_heuristic(param_b)`
+   - MTP detection: if filename contains `"mtp"` or `"multi-token"`, set `mtp_depth = 1`
+4. `"qwen3.5"` / `"qwen3-5"` → `qwen35_heuristic(param_b)` (plus MTP detection if present)
+5. `"gemma-4"` / `"gemma4"` → `gemma4_heuristic(name, param_b)` (plus MTP detection if present)
+6. `"gemma-3"` / `"gemma3"` → `gemma3_heuristic(param_b)` (plus MTP detection if present)
+7. Fallback → `standard_heuristic(param_b)` with MoE suffix parsing and MTP detection if present
 
 ### Per-family heuristics
 
@@ -78,14 +80,13 @@ pub struct ModelArch {
 
 | param_b | n_layers | n_kv_heads | head_dim |
 |---------|----------|------------|----------|
-| < 1 | 16 | 8 | 64 |
-| 1–3 | 28 | 8 | 128 |
-| 3–8 | 32 | 8 | 128 |
-| 8–14 | 40 | 8 | 128 |
-| 14–25 | 40 | 8 | 128 |
+| < 2 | 22 | 4 | 64 |
+| 2–5 | 28 | 4 | 128 — Qwen2.5-3B / Phi-3 style |
+| 5–10 | 32 | 8 | 128 — Llama-3.1-8B, Mistral-7B, Qwen2.5-7B |
+| 10–25 | 40 | 8 | 128 — Llama-2-13B, Qwen2.5-14B, Mistral-22B |
 | 25–35 | 48 | 4 | 128 — tuned for Qwen3-30B-A3B |
-| 35–75 | 64 | 8 | 128 |
-| 75+ | 94 | 4 | 128 — tuned for Qwen3-235B |
+| 35–75 | 80 | 8 | 128 — Llama-70B, Qwen2.5-72B |
+| 75+ | 94 | 4 | 128 — Qwen3-235B |
 
 #### Qwen3.6 (hybrid DeltaNet + dense)
 
@@ -143,6 +144,18 @@ DeltaNet V-heads: 64 for 122B (confirmed), 32 assumed for smaller.
 | expert_fraction | 0.92 |
 | DeltaNet state | 36 × 32 × 128² × 2 B ≈ 1.2 GB |
 
+#### Gemma 3 (alternating local/global attention)
+
+1-in-6 layers use full global attention; remaining layers use a 512-token sliding window with MQA (`local_kv_heads = 1`).
+
+| param_b | n_layers | global_layers | n_kv_heads (global) | head_dim | local_kv_heads | window |
+|---------|----------|---------------|---------------------|----------|----------------|--------|
+| < 5 (4B) | 34 | 6 | 4 | 256 | 1 | 512 |
+| 5–14 (12B) | 52 | 9 | 8 | 256 | 1 | 512 |
+| > 14 (27B) | 62 | 10 | 16 | 256 | 1 | 512 |
+
+`global_layers` is computed as `round(n_layers / 6)`.
+
 #### Gemma 4 (sliding-window alternating attention)
 
 5:1 local:global pattern — every 6th layer attends the full context; the rest use a sliding window.
@@ -168,10 +181,23 @@ DeltaNet V-heads: 64 for 122B (confirmed), 32 assumed for smaller.
 
 ### Generic MoE suffix parsing
 
-For names not matched by the above, `parse_moe_suffix()` extracts patterns like `"35B-A3B"` or `"122B-A10B"`:
-- Total experts inferred from sparsity ratio: < 5% → 512, < 100B → 128, < 50B → 64, < 20B → 32, else → 8
+For names not matched by the above, `parse_moe_suffix()` scans for `"NB-AMB"` or `"NB_AMB"` patterns (e.g. `"26B-A4B"`, `"122B-A10B"`). It:
+- Uses the last valid pattern in the name (rightmost match) to avoid false positives.
+- Enforces `total_b >= 7.0` to reject tokens like `"llama-3-a4b"`.
+- Enforces `active_b <= total_b`.
+
+For matched suffixes:
+- `n_experts` inferred from sparsity (`active_b / total_b`):
+  - < 5% → 512 (extremely sparse, Coder-Next style)
+  - total > 100B → 128
+  - total > 50B → 64
+  - total > 20B → 32
+  - else → 8 (Mixtral style)
+- `n_experts_used` derived from sparsity:
+  - < 5% → 11
+  - ≤ 15% → 9
+  - else → 8
 - `expert_fraction` left at default 0.65
-- `n_experts_used` set to `active_b.round()` — this is **active parameters in billions**, not expert count; a known limitation that only affects the generation-speed display note
 
 ---
 
@@ -193,11 +219,15 @@ total = K + V
 
 For DeltaNet hybrid models (Qwen3.5/3.6): `effective_layers = n_attn_layers` (e.g. 16 out of 64 for 27B). KV grows at 1/4 the rate of a standard dense model with the same layer count.
 
-Sliding-window (Gemma 3/4):
+Sliding-window (for any `has_local_attn()` model, e.g. Gemma 3/4, EXAONE 4.5):
 ```
-global_K = global_layers × n_kv_heads × global_head_dim × context × slots × k_bpe
+global_layers = min(n_global_attn_layers, effective_layers)
+local_layers  = max(effective_layers - n_global_attn_layers, 0)
+g_hd          = global_head_dim if > 0 else head_dim   // Gemma 4 uses 512 for global; others fall back to head_dim
+effective_local_ctx = min(context, local_attn_window) × slots
+
+global_K = global_layers × n_kv_heads × g_hd × context × slots × k_bpe
 global_V = (same with v_bpe)
-effective_local_ctx = min(context, window) × slots
 local_K  = local_layers  × local_kv_heads × head_dim × effective_local_ctx × k_bpe
 local_V  = (same with v_bpe)
 total = global_K + global_V + local_K + local_V
@@ -211,11 +241,14 @@ moe_weight_split(model_size_bytes, arch, n_cpu_moe) → (vram_bytes, ram_bytes)
 
 For `n_cpu_moe > 0` on a MoE model:
 ```
-expert_frac = arch.expert_fraction.clamp(0.3, 0.99)
-cpu_ratio   = min(n_cpu_moe, n_experts) / n_experts
-cpu_bytes   = model_size_bytes × expert_frac × cpu_ratio
-vram_bytes  = model_size_bytes − cpu_bytes
+moe_layers   = max(n_layers, 1)
+cpu_layers   = min(n_cpu_moe, moe_layers)
+cpu_ratio    = cpu_layers / moe_layers
+expert_frac  = expert_fraction.clamp(0.3, 0.99)
+cpu_bytes    = model_size_bytes × expert_frac × cpu_ratio
+vram_bytes   = model_size_bytes − cpu_bytes
 ```
+`--n-cpu-moe N` treats N as the number of transformer layers whose experts are kept on CPU — not as a count of individual experts.
 
 For dense models or `n_cpu_moe ≤ 0`: all weights in VRAM.
 
@@ -245,7 +278,7 @@ cuda_compute_buffer_bytes(arch, ubatch_size) → u64
   = 0 if n_embd == 0 or n_layers == 0
 ```
 
-CUDA/ROCm persistent compute buffer for Q/K/V projections, FFN intermediates, and normalization scratch tensors. These are allocated at model load and do not change with context length.
+CUDA/ROCm persistent compute buffer for Q/K/V projections, FFN intermediates, and normalization scratch tensors. These are allocated at model load and do not change with context length. The function itself does **not** check `is_unified_memory`; callers (`full_estimate`, `max_context`) set `cuda_buf = 0` for unified-memory systems before calling it.
 
 **Calibrated on RTX 5090 32 GB (WDDM), Qwen3.6-27B-NEO-CODE Q4_K_M, 212,992-token context, ubatch=1024, flash_attn=on:**
 
@@ -262,7 +295,7 @@ Formula check: 65 × 1024 × 5120 × 2 × 4 = 2.54 GiB → matches within 4%.
 
 Note: WDDM display apps are **already accounted for** in `available_vram_bytes` (the caller subtracts current VRAM used before calling the estimator). The compute buffer formula only covers llama.cpp's persistent scratch allocations.
 
-Returns 0 for `is_unified_memory = true` (Metal) or when `arch.n_embd == 0` (unknown model). When `n_embd = 0`, the estimate falls back to `gpu_overhead_bytes` alone — still accurate for Metal, but will underestimate by ~2–3 GiB for CUDA at large context.
+Returns 0 when `n_embd == 0` or `n_layers == 0`. When `n_embd = 0`, the estimate falls back to `gpu_overhead_bytes` alone — still accurate for Metal, but will underestimate by ~2–3 GiB for CUDA at large context.
 
 ### `full_estimate`
 
@@ -281,14 +314,16 @@ total           = weight_vram + kv + linear_state + mmproj + mtp + overhead
 
 Recommendation thresholds:
 
-| Result | Condition |
-|--------|-----------|
-| `Fit` | total ≤ 82% of available VRAM |
-| `Tight` | total ≤ 100% of available VRAM |
-| `Risk` | total ≤ 120% of available VRAM |
-| `WontFit` | total > 120% of available VRAM |
+| Result | Discrete GPU | Unified Memory |
+|--------|-------------|----------------|
+| `Fit` | total ≤ 82% of available VRAM | same |
+| `Tight` | total ≤ 100% | same |
+| `Risk` | 100–120% (CPU spill possible) | **never** — unified memory skips Risk and jumps to WontFit |
+| `WontFit` | > 120% | > 100% |
 
-On unified-memory Macs: the preset editor and spawn wizard show an mlock warning when result is Tight or Risk. mlock pins model memory so macOS cannot reclaim it; with an already tight estimate, this can push the OS into memory compression or swap.
+Rationale: on unified memory there is no graceful CPU-spill path — once you exceed available memory, macOS begins compression and paging. So Risk is only offered on non-unified-memory systems where the OS can spill to system RAM without thrashing.
+
+On unified-memory Macs: the preset editor and spawn wizard show an mlock warning when result is Tight. mlock pins model memory so macOS cannot reclaim it; with an already tight estimate, this can push the OS into memory compression or swap.
 
 ### `max_context`
 
@@ -311,22 +346,40 @@ Direct (standard / hybrid):
 max_ctx = kv_budget / (effective_layers × n_kv_heads × head_dim × slots × (k_bpe + v_bpe))
 ```
 
-Binary search bounds: lo = 512, hi = 2,097,152. Returns 0 if `kv_cache_bytes(512) > kv_budget`.
+Binary search bounds: lo = 512, hi = 2,097,152. For sliding-window models, binary-search is used to find the largest context; for standard/hybrid, the direct formula is used.
+
+Zero-guard: returns 0 when:
+- `available_vram_bytes == 0`, or
+- fixed costs alone (weights in VRAM + mmproj + MTP + linear-state + overhead) exceed `usable` (available VRAM after headroom is reserved), or
+- for sliding-window models, `kv_cache_bytes(512) > kv_budget` (minimum context doesn't fit).
 
 **Important**: `is_unified_memory` is threaded from the caller. For Mac/Metal: always true. For Windows/Linux CUDA: always false. The auto_size and quant advisor both pass this flag correctly.
+
+### MTP filename detection
+
+When any heuristic path (Qwen3.6, Qwen3.5, Gemma 4, or generic fallback) encounters `"mtp"` or `"multi-token"` in the filename, it sets `mtp_depth = 1`. This triggers the MTP overhead calculation (`model_size_bytes × 1.5%`) in `full_estimate` and `max_context`.
 
 ### `auto_size`
 
 Orchestrates all of the above to produce `AutoSizeResult`:
 
 1. Determine ubatch: 1024 for Agentic/General, 512 for Roleplay
-2. Find minimum `n_cpu_moe` to fit model weights (`find_min_cpu_moe_to_fit_weights`)
-3. For each KV quant × context combination (q8_0, q4_0, f16):
+2. Compute headroom via `compute_headroom(available_vram_bytes, is_unified_memory)`:
+   - **Unified memory**: 10% base, capped at 2 GB.
+   - **Discrete GPU**: 5% base, capped at 1.5 GB.
+   On large budgets (>>30 GB) the cap takes effect; on smaller systems the percentage applies.
+3. Find minimum `n_cpu_moe` to fit model weights via `find_min_cpu_moe_to_fit_weights`:
+   - Binary search over [0, n_layers].
+   - For each candidate, calls `moe_weight_split` and checks whether resulting VRAM weight footprint fits in 80% of available VRAM minus overhead, mmproj, and MTP overhead.
+   - Returns the smallest `n_cpu_moe` that fits; if even all experts on CPU still won't fit, returns `n_layers`.
+4. For each KV quant × context combination (q8_0, q4_0, f16):
    - Call `max_context(…, is_unified_memory)` to find the largest context that fits
    - Call `full_estimate` at that context to get the full breakdown
-4. Pick the standard scenario (q8_0) as the recommended result
-5. Emit warnings for: agentic + low KV quant, context > n_ctx_train, MoE offload speed penalty
-6. Emit notes for: MoE offload ratio, MTP overhead, mmproj presence
+5. Pick the standard scenario (q8_0) as the recommended result
+6. Emit warnings for: agentic + low KV quant, context > n_ctx_train, MoE offload speed penalty
+7. Emit notes for: MoE offload ratio, MTP overhead, mmproj presence
+
+For MoE models, `build_scenarios` adds an "extended" scenario with aggressive CPU offload (~75% of layers on CPU) to show a higher-context, slower option.
 
 ### `estimate_model_size_bytes`
 
@@ -335,6 +388,21 @@ size_bytes = param_b × 1e9 × bpw / 8
 ```
 
 Used for pre-download estimates where the actual file size is not yet known.
+
+### Quant advisor (`quant_comparison_table`)
+
+For each candidate quantization, it:
+- Estimates file size from `param_b` and the quant's BPW.
+- Checks "fits" only if the model plus a minimal KV cache (8 K tokens at q8_0) is under available VRAM.
+- Scores each quant as `min(max_ctx_q8, 128K) × quality_weight` if it fits.
+
+Gemma 4 QAT:
+- If the model name contains both `"gemma-4"` (or `"gemma4"`) and `"qat"`, then Q4_0 is treated as Excellent quality.
+- When Q4_0 fits, it is chosen as the recommended quant instead of higher-bit defaults.
+
+### Legacy `estimate_vram` wrapper
+
+Backward-compat wrapper kept for existing `/api/vram/estimate` callers. Uses a legacy KV heuristic (`context × effective_batch × 64 × kv_bpe`) and no per-layer formula. Always builds a default `ModelArch` with all zeros; `new` code should use `full_estimate`.
 
 ---
 
@@ -401,7 +469,7 @@ All quantizations recognized by the estimator, with bits-per-weight and KV bytes
 | IQ1_M | 1.75 | 0.125 | Very Low | ✓ | ✓ |
 | IQ1_S | 1.5625 | 0.125 | Very Low | ✓ | ✓ |
 | TQ1_0 | 1.69 | 0.125 | Very Low | ✓ | ✓ |
-| TQ2_0 | 2.06 | 0.25 | Reduced | ✓ | ✓ |
+| TQ2_0 | 2.0 | 0.25 | Reduced | ✓ | ✓ |
 
 `Large MoE only`: the quant advisor hides these for models that are not large MoE.
 
@@ -438,7 +506,7 @@ The GGUF arch string `"qwen35"` is mapped to the Qwen3.6 DeltaNet heuristic via 
 | Qwen3.6-35B-A3B n_embd=4096 is estimated | Qwen3.6-35B-A3B | Overridden by GGUF when file is local |
 | Qwen3.5-122B n_embd=7168 is estimated | Qwen3.5 > 80B | Overridden by GGUF when file is local |
 | Qwen3.5 expert counts (256/9) only confirmed for 122B-A10B | Qwen3.5 < 122B | Applied to smaller sizes; update when those release |
-| Generic MoE suffix `n_experts_used` is in active-param-billions, not expert count | Non-Qwen/Gemma MoE | Only affects speed-penalty display note, not VRAM |
+| Generic MoE suffix `n_experts_used` is heuristic (11/9/8) based on sparsity | Non-Qwen/Gemma MoE | Approximation; exact values from GGUF introspection take precedence |
 | `expert_fraction` default 0.65 is a rough average | All MoE models | Overridden per-family; calibrate when architecture is public |
 | CUDA compute buffer formula uses `n_embd=0` fallback for unknown models | Any model without GGUF introspection | Underestimates by ~2–3 GiB on discrete GPU at large context |
 
