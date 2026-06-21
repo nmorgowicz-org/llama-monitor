@@ -3971,17 +3971,11 @@ Start-Sleep -Seconds 2\""
             {
                 Ok(_) => {
                     // Best-effort log that we started the launcher
-                    let _ = fs::write(
-                        &log_file,
-                        format!("{} LAUNCHER_START\n", now),
-                    );
+                    let _ = fs::write(&log_file, format!("{} LAUNCHER_START\n", now));
                 }
                 Err(e) => {
                     // Log spawn failure for debugging
-                    let _ = fs::write(
-                        &log_file,
-                        format!("{} LAUNCHER_SPAWN_FAIL: {}\n", now, e),
-                    );
+                    let _ = fs::write(&log_file, format!("{} LAUNCHER_SPAWN_FAIL: {}\n", now, e));
                 }
             }
         }
