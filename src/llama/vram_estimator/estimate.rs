@@ -103,15 +103,46 @@ pub fn mtp_overhead_bytes(model_size_bytes: u64, mtp_depth: u32) -> u64 {
     (model_size_bytes as f64 * 0.015 * mtp_depth as f64) as u64
 }
 
-/// Metal (unified-memory) GPU context + transient compute-buffer overhead.
-/// Scales slightly with ubatch_size. Used only on Apple Silicon; discrete GPUs use
-/// [`discrete_overhead_bytes`] (which is calibrated separately against real VRAM).
-pub fn gpu_overhead_bytes(ubatch_size: u32) -> u64 {
-    // 300 MB base (Metal context, allocator metadata, etc.)
-    // + approx 0.15 MB per ubatch unit above 512
-    let base = 300 * 1024 * 1024;
-    let ubatch_extra = ((ubatch_size.saturating_sub(512)) as u64) * 150 * 1024;
-    base + ubatch_extra
+/// Metal (unified-memory) overhead — context-INDEPENDENT part, in bytes.
+///
+/// Calibrated on **Apple M5 Max** (llama.cpp b9743, Metal, `--parallel 1 --kv-unified
+/// -fa on`, q8_0 KV) via process physical-footprint measurements. The footprint that does
+/// not scale with context is a per-layer graph/context cost plus a small ubatch scratch
+/// term. Gemma sliding-window models carry a larger per-layer cost (per-layer-input
+/// embeddings + the dual local/global attention graph). Inputs are GGUF-derived.
+pub fn metal_overhead_base_bytes(arch: &ModelArch, ubatch_size: u32) -> u64 {
+    if arch.n_layers == 0 {
+        return 200 * 1024 * 1024; // unknown arch: flat reserve
+    }
+    let mib = 1024.0 * 1024.0;
+    let per_layer = if arch.has_local_attn() { 8.8 } else { 4.3 };
+    let base = per_layer * arch.n_layers as f64 + 0.035 * ubatch_size as f64;
+    (base.max(128.0) * mib) as u64
+}
+
+/// Metal context-SCALING overhead: working buffers tied to the KV cache, measured at a very
+/// stable **~6.5% of KV bytes** across dense / MoE / hybrid / sliding-window models on the
+/// M5 Max. Expressed as a fraction of `kv_cache_bytes` so it automatically tracks hybrid
+/// attention (fewer KV layers), Gemma sliding windows (local layers don't grow), and KV quant.
+pub fn metal_overhead_ctx_bytes(kv_cache_bytes: u64) -> u64 {
+    (kv_cache_bytes as f64 * METAL_KV_OVERHEAD_FRACTION) as u64
+}
+
+/// Fraction of KV-cache bytes that Metal spends on context-scaling working buffers.
+/// Measured 0.063–0.068 across all tested families; 0.065 is the representative value.
+pub const METAL_KV_OVERHEAD_FRACTION: f64 = 0.065;
+
+/// Total Metal (unified-memory) overhead beyond weights + KV + mmproj + MTP, in bytes.
+///
+/// **Calibrated against direct Apple M5 Max physical-footprint measurements** (llama.cpp
+/// b9743, Metal, `--parallel 1 --kv-unified -fa on`, q8_0 KV), across Qwen3.6-27B
+/// (dense-hybrid), Qwen3.6-35B-A3B (MoE-hybrid), Gemma-4-31B (dense SWA) and Gemma-4-26B-A4B
+/// (MoE SWA) at 4k–213k context. Fits within ~40 MiB (worst under-prediction −17 MiB). Far
+/// lighter than the discrete-GPU overhead — Metal's context-scaling buffers are ~6.5% of KV
+/// vs CUDA's much larger attention buffers — and, unlike the prior flat 300 MB estimate, it
+/// correctly grows with context (the old flat value under-reserved Gemma-31B@213k by ~750 MiB).
+pub fn metal_overhead_bytes(arch: &ModelArch, ubatch_size: u32, kv_cache_bytes: u64) -> u64 {
+    metal_overhead_base_bytes(arch, ubatch_size) + metal_overhead_ctx_bytes(kv_cache_bytes)
 }
 
 /// Per-head K/V dimension that drives the context-scaling compute buffer. Gemma's global
@@ -168,7 +199,7 @@ pub fn discrete_overhead_ctx_bytes_per_token(arch: &ModelArch, ubatch_size: u32)
 /// roughly **independent of model depth's KV footprint** — it grows with ubatch (scratch) and
 /// context (attention mask), so the old `n_layers × n_embd × ubatch` model (context-independent)
 /// was wrong in both directions. Returns the Metal estimate's analogue only for discrete GPUs;
-/// unified memory uses [`gpu_overhead_bytes`] in `full_estimate`.
+/// unified memory uses [`metal_overhead_bytes`] in `full_estimate`.
 pub fn discrete_overhead_bytes(arch: &ModelArch, ubatch_size: u32, context_size: u64) -> u64 {
     let base = discrete_overhead_base_bytes(arch, ubatch_size);
     let ctx =
@@ -267,12 +298,11 @@ pub fn full_estimate(
     let linear_state = arch.linear_attn_state_bytes;
     let mmproj = arch.mmproj_bytes;
     let mtp = mtp_overhead_bytes(model_size_bytes, arch.mtp_depth);
-    // Platform-specific overhead. Discrete GPUs use the RTX-5090-calibrated model (scratch +
-    // MoE/Gemma base + context-scaling attention buffers). Unified memory (Metal) keeps the
-    // lighter, context-independent estimate — transient Metal buffers are covered there plus
-    // by the headroom reserve in `compute_headroom`.
+    // Platform-specific overhead, both calibrated against real VRAM/footprint measurements:
+    // discrete GPUs → RTX-5090 model (scratch + MoE/Gemma base + context-scaling attention
+    // buffers); unified memory → Apple M5 Max model (per-layer base + ~6.5% of KV).
     let overhead = if is_unified_memory {
-        gpu_overhead_bytes(ubatch_size)
+        metal_overhead_bytes(arch, ubatch_size, kv)
     } else {
         discrete_overhead_bytes(arch, ubatch_size, context_size)
     };
@@ -368,14 +398,20 @@ pub fn max_context(
     let mmproj = arch.mmproj_bytes;
     let mtp = mtp_overhead_bytes(model_size_bytes, arch.mtp_depth);
     let linear_state = arch.linear_attn_state_bytes; // constant; doesn't scale with context
-    // Context-INDEPENDENT overhead goes into the fixed budget; the context-SCALING part
-    // (discrete attention buffers) is charged per-token alongside the KV cache below.
-    let (base_overhead, overhead_slope) = if is_unified_memory {
-        (gpu_overhead_bytes(ubatch_size), 0.0)
+    // Context-INDEPENDENT overhead goes into the fixed budget. The context-SCALING part is
+    // charged against the KV budget: discrete GPUs add a per-token slope; Metal's scales as a
+    // fraction of the KV cache, so we reserve it by shrinking the KV budget by that factor.
+    let (base_overhead, overhead_slope, kv_overhead_mult) = if is_unified_memory {
+        (
+            metal_overhead_base_bytes(arch, ubatch_size),
+            0.0,
+            1.0 + METAL_KV_OVERHEAD_FRACTION,
+        )
     } else {
         (
             discrete_overhead_base_bytes(arch, ubatch_size),
             discrete_overhead_ctx_bytes_per_token(arch, ubatch_size),
+            1.0,
         )
     };
     let fixed = weight_vram + mmproj + mtp + linear_state + base_overhead;
@@ -384,7 +420,8 @@ pub fn max_context(
     if fixed >= usable {
         return 0;
     }
-    let kv_budget = usable - fixed;
+    // Reserve Metal's KV-proportional overhead up front (no-op on discrete, mult = 1.0).
+    let kv_budget = ((usable - fixed) as f64 / kv_overhead_mult) as u64;
 
     // Binary search for context such that kv_cache_bytes(ctx) + overhead(ctx) ≤ kv_budget.
     // For non-sliding-window models we can solve directly; for Gemma we binary-search.
@@ -702,7 +739,7 @@ pub fn find_min_cpu_moe_to_fit_weights(
     is_unified_memory: bool,
 ) -> i32 {
     let overhead = if is_unified_memory {
-        gpu_overhead_bytes(ubatch_size)
+        metal_overhead_base_bytes(arch, ubatch_size)
     } else {
         discrete_overhead_base_bytes(arch, ubatch_size)
     };
@@ -935,7 +972,7 @@ pub fn quant_comparison_table(
         // there's no budget left for inference context.
         let min_kv = kv_cache_bytes(arch, 8192, parallel_slots, "q8_0", "q8_0");
         let oh = if is_unified_memory {
-            gpu_overhead_bytes(512)
+            metal_overhead_base_bytes(arch, 512)
         } else {
             discrete_overhead_base_bytes(arch, 512)
         };
@@ -1131,7 +1168,9 @@ pub fn estimate_vram(
     if speculative_decoding {
         total = total.saturating_add(model_size_bytes / 8);
     }
-    total = total.saturating_add(gpu_overhead_bytes(ubatch_size));
+    // Legacy/coarse path (no platform flag, often no arch detail): use the Metal model as a
+    // light, safe default — base reserve + ~6.5% of the rough KV estimate.
+    total = total.saturating_add(metal_overhead_bytes(&arch, ubatch_size, kv_est));
 
     let (recommendation, note) = if available_vram_bytes == 0 {
         (VramRecommendation::Risk, "No VRAM info available.".into())

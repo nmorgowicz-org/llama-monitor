@@ -163,33 +163,87 @@ async function triggerSelfUpdate() {
         _pollForReconnect(data.tag_name);
 
     } catch (e) {
+        const msg = e.message || 'Update failed';
+        const msgPlain = escapeHtml(msg);
+        const btn = document.getElementById('release-notes-update-btn');
+        if (!btn) return;
+
         btn.dataset.state = 'error';
         btn.disabled = false;
-        btn.innerHTML = `⚠ ${escapeHtml(e.message)} — retry?`;
+
+        const isAuthError =
+            /permission|administrator|denied|unauthorized|forbidden/i.test(msg);
+
+        // Show a small banner above the button for clarity.
+        let banner = document.getElementById('release-notes-error-banner');
+        if (!banner) {
+            const panel = document.getElementById('release-notes-panel');
+            banner = document.createElement('div');
+            banner.id = 'release-notes-error-banner';
+            banner.style.cssText =
+                'color:#f97316;font-size:12px;margin-top:8px;display:block;';
+            panel.appendChild(banner);
+        }
+
+        if (isAuthError) {
+            banner.textContent =
+                'The update was blocked (likely a permission issue). You may need to run llama-monitor as administrator once.';
+            btn.innerHTML = `${msgPlain} — retry?`;
+        } else {
+            banner.textContent = msgPlain;
+            btn.innerHTML = 'Retry update';
+        }
     }
 }
 
 function _pollForReconnect(newVersion) {
+    const btn = document.getElementById('release-notes-update-btn');
+    const panel = document.getElementById('release-notes-panel');
     let attempts = 0;
+
+    // Short timeout: if the backend has not come back within 8 seconds,
+    // it has likely fully exited (common on macOS/Linux) and we should
+    // give a clear manual restart instruction instead of a dead page.
+    const maxAttempts = 8;
+
     const timer = setInterval(async () => {
         attempts++;
         try {
             const r = await fetch('/', { method: 'HEAD', cache: 'no-store' });
             if (r.ok) {
                 clearInterval(timer);
+                _clearUpdateBanner();
                 location.reload();
             }
         } catch (_) { /* expected while process is restarting */ }
-        if (attempts >= 30) {
+
+        if (attempts >= maxAttempts) {
             clearInterval(timer);
-            const btn = document.getElementById('release-notes-update-btn');
+
+            // Explain situation in plain language.
+            let banner = document.getElementById('release-notes-error-banner');
+            if (!banner) {
+                banner = document.createElement('div');
+                banner.id = 'release-notes-error-banner';
+                banner.style.cssText =
+                    'color:#f97316;font-size:12px;margin-top:8px;display:block;';
+                panel.appendChild(banner);
+            }
+            banner.textContent =
+                'Update installed. llama-monitor has stopped and needs to be restarted.';
+
             if (btn) {
                 btn.dataset.state = '';
                 btn.disabled = false;
-                btn.innerHTML = 'Relaunch the app to finish';
+                btn.innerHTML = 'Restart llama-monitor to complete the update';
             }
         }
     }, 1000);
+}
+
+function _clearUpdateBanner() {
+    const banner = document.getElementById('release-notes-error-banner');
+    if (banner) banner.remove();
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
