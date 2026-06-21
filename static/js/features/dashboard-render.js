@@ -1499,7 +1499,10 @@ function renderSystemCard(sys, visible, grade) {
             var sTone = getMetricTone('load');
             renderHwBar(sBar, Math.min(100, sActive), sTone, false);
             sVal.textContent = clusterVal(sActive, sys.s_cluster_freq_mhz || 0);
-            if (sName) sName.textContent = clusterLabel(secClusterName ? secClusterName + '-A' : '', sCores, 'S-Cores');
+            var sLabelName = (secClusterName && eActualCores > 0)
+                ? secClusterName + '-A'
+                : (secClusterName || '');
+            if (sName) sName.textContent = clusterLabel(sLabelName, sCores, 'S-Cores');
             renderHwMetricSparkline('sys-cluster-s-spark', sysHistory.sCluster, sTone.line, true);
         } else if (sRow) {
             sRow.style.display = 'none';
@@ -1511,7 +1514,7 @@ function renderSystemCard(sys, visible, grade) {
         var eVal = document.getElementById('sys-cluster-e-value');
         var eName = document.getElementById('sys-cluster-e-name');
         var eActualCores = sCores > 0 ? eCores : eCores;
-        if (eRow && eBar && eVal) {
+        if (eActualCores > 0 && eRow && eBar && eVal) {
             eRow.style.display = '';
             var eTone = getMetricTone('load');
             renderHwBar(eBar, Math.min(100, eActive), eTone, false);

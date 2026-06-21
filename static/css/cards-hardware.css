@@ -1331,8 +1331,9 @@
 
   .hw-clock-system-meta {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 12px;
     min-width: 0;
   }
