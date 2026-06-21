@@ -3833,7 +3833,7 @@ Start-Sleep -Seconds 2\""
         Ok(())
     }
 
-    pub async fn self_update_binary() -> Result<SelfUpdateResult> {
+    pub async fn self_update_binary(web_port: u16, agent_port: u16) -> Result<SelfUpdateResult> {
         let os = std::env::consts::OS;
         let arch = std::env::consts::ARCH;
 
@@ -3847,6 +3847,10 @@ Start-Sleep -Seconds 2\""
                 "Windows update path is not available in this build"
             ));
         }
+
+        // Unix/macOS: ports used for restart-launcher wait (passed from AppConfig).
+        let unix_web_port = web_port;
+        let unix_agent_port = agent_port;
 
         let asset = release
             .matching_asset(os, arch)
@@ -3935,7 +3939,6 @@ Start-Sleep -Seconds 2\""
             let _ = fs::write(&marker_file, now.to_string());
 
             let binary_path = current_exe.to_string_lossy().to_string();
-            let safe = binary_path.replace('\'', "'\\''");
 
             let launcher_script = format!(
                 r#"
@@ -3947,23 +3950,30 @@ Start-Sleep -Seconds 2\""
                     exit 0
                 fi
 
-                # Wait briefly for the port to become free.
+                # Wait briefly for the configured listen ports to become free.
+                WEB={web_port}
+                AGENT={agent_port}
                 for i in $(seq 1 6); do
-                    if ! ss -tlnp 2>/dev/null | grep -q ':7778 ' && \
-                       ! ss -tlnp 2>/dev/null | grep -q ':7779 '; then
+                    if ! ss -tlnp 2>/dev/null | grep -q ":${{WEB}} " && \
+                       ! ss -tlnp 2>/dev/null | grep -q ":${{AGENT}} "; then
                         break
                     fi
                     sleep 0.2
                 done
 
                 rm -f '{marker_file}'
-                exec '{safe}'
-                "#
+                exec "$LLAMA_RESTART_BIN"
+                "#,
+                marker_file = marker_file,
+                log_file = log_file,
+                web_port = unix_web_port,
+                agent_port = unix_agent_port,
             );
 
             match std::process::Command::new("sh")
                 .arg("-c")
                 .arg(&launcher_script)
+                .env("LLAMA_RESTART_BIN", &binary_path)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())

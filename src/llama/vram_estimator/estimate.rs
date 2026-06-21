@@ -238,10 +238,20 @@ pub fn compute_headroom(available_vram_bytes: u64, is_unified_memory: bool) -> f
 
 // ── Estimate model file size from param count ─────────────────────────────────
 
+/// Default bits-per-weight for unknown quantizations.
+const DEFAULT_BPW: f64 = 4.85;
+
 /// Estimate model file size in bytes from parameter count and quantization.
 pub fn estimate_model_size_bytes(param_b: f64, quant: &str) -> u64 {
-    let bpw = find_quant(quant).map(|q| q.bpw).unwrap_or(4.85);
+    let bpw = find_quant(quant).map(|q| q.bpw).unwrap_or(DEFAULT_BPW);
     (param_b * 1e9 * bpw / 8.0) as u64
+}
+
+/// Inverse of estimate_model_size_bytes: rough param_b from file size.
+///
+/// Used when GGUF introspection fails and we must guess param_b from the file size.
+pub fn estimate_param_b_from_size(size_bytes: u64, bpw: f64) -> f64 {
+    (size_bytes as f64) / 1e9 / bpw
 }
 
 // ── Full VRAM estimate with breakdown ─────────────────────────────────────────

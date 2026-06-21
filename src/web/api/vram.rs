@@ -69,7 +69,7 @@ fn api_vram_estimate_breakdown(
                             .to_arch(&model_path, meta.param_b().unwrap_or(0.0)),
                         Err(_) => crate::llama::vram_estimator::ModelArch::from_name_and_params(
                             &model_path,
-                            (size as f64) / 1e9 / 4.85,
+                            crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
                         ),
                     };
                     (size, arch)
@@ -94,7 +94,7 @@ fn api_vram_estimate_breakdown(
                             // to the name heuristic so the caller still gets a (rougher) estimate.
                             Err(_) => crate::llama::vram_estimator::ModelArch::from_name_and_params(
                                 &hf_file_path,
-                                (size as f64) / 1e9 / 4.85,
+                                crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
                             ),
                         };
                     (size, arch)
