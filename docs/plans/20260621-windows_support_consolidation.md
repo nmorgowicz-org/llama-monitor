@@ -272,34 +272,48 @@ Windows machine**.
    > library itself. So the framework bump is low-risk; still smoke-test that the published exe
    > returns readings, not just that it builds.
 
-**⚠️ Separate, higher-risk caveat — the WinRing0 kernel driver vs. single-file + Defender.**
-This is independent of the .NET version and is the thing most likely to bite us, so verify it on
-real hardware before trusting the self-contained build:
+**⚠️ Higher-risk caveat — the kernel-driver model changed; verify which one 0.9.6 uses.**
+This is independent of the .NET version and is the thing most likely to bite us. The driver story
+shifted between LHM releases, so the relevant question is *which model our pinned `0.9.6` ships*:
 
-- LHM reads low-level sensors via an embedded kernel driver (`WinRing0x64.sys`). At runtime the
-  library **extracts that `.sys` to disk** and loads it into the kernel.
-- Since ~March 2025 **Microsoft Defender flags WinRing0** (CVE-2020-14979, "vulnerable driver" /
-  HackTool) and may quarantine the `.sys` — which silently kills temperature readings even though
-  `sensor_bridge.exe` itself runs.
-- **`PublishSingleFile` makes this worse:** the bundle (including the native `.sys`) unpacks to a
-  temp self-extract directory, and the driver gets materialized there — both a common Defender
-  trigger and a possible driver-load/path problem. This interaction did **not** exist in the
-  current loose framework-dependent build, so going single-file could *introduce* a regression on
-  Defender-strict machines.
-- It may not have surfaced for the original developer's box (Defender policy/version dependent),
-  so "it worked for me on .NET 8" does **not** clear this for clean/managed Windows targets.
+- **Version landscape (researched 2026-06-21):** `0.9.6` (14 Feb 2026) is the latest **stable**;
+  there is no stable `0.9.7` yet — only `0.9.7-pre700` (29 May 2026), a prerelease. The pinned
+  `0.9.6` we use is the current best stable choice.
+- **Old model (≤ 0.9.4, the horror stories):** LHM extracted an embedded `WinRing0x64.sys` to
+  disk at runtime. Since ~March 2025 Microsoft Defender flags WinRing0 (CVE-2020-14979) and may
+  quarantine it → silent temperature loss. `PublishSingleFile` aggravated this (the `.sys`
+  materializes in the self-extract temp dir). **This predates our version.**
+- **New model (PawnIO swap, PR #1857 by namazso, in the 0.9.5 prerelease line):** WinRing0 was
+  replaced by **PawnIO**, a separately-installed *signed* driver. Our **`0.9.6` changelog
+  includes "Update PawnIO modules to 2.2" (#2174) and "Fix for new PawnIO release + new
+  installer" (#2222)**, so `0.9.6` is almost certainly a **PawnIO build, not the WinRing0
+  extraction model**. That likely *removes* the Defender/single-file `.sys` problem.
 
-**Mitigations to evaluate (pick during implementation, don't pre-commit):**
-  1. **Test single-file first.** If Defender leaves the extracted `.sys` alone on a stock,
-     up-to-date Windows 11, single-file is fine and simplest — proceed.
-  2. **If Defender quarantines it:** either (a) drop `PublishSingleFile` and ship a normal
-     self-contained folder (the `.sys` sits next to the exe as a plain file, often handled better
-     and easier to add an AV exclusion for), or (b) migrate to **namazso's PawnIO fork** of LHM,
-     which uses a separately-installed *signed* driver (PawnIO) instead of an embedded `.sys`.
-     PawnIO sidesteps both the extraction and the Defender flag, but it **requires PawnIO to be
-     installed on the target**, which partially undoes the "works everywhere with zero setup"
-     goal — so treat it as the fallback, not the default.
-  3. Document an AV-exclusion path for managed/enterprise environments regardless of choice.
+**But PawnIO flips the failure mode, which matters more for our push-to-any-machine model:**
+PawnIO is an external driver that must be **installed on the target**. A self-contained bundle
+fixes the *.NET runtime* dependency but does **not** install PawnIO. So on a clean machine the
+bridge may run yet return no readings because the driver isn't present — the same "exists but no
+data" symptom, different cause. This is the single most important thing to verify on real
+hardware before trusting the build everywhere. (It may explain nothing-or-something differences
+between machines; the developer's box that showed temps may simply have had PawnIO present.)
+
+**Verify / decide during implementation (don't pre-commit):**
+  1. **Confirm 0.9.6's driver model and target requirement** empirically: on a *clean* Windows
+     box with no monitoring tools installed, does `sensor_bridge.exe` (built against 0.9.6) return
+     CPU temperature, or does it need PawnIO installed first?
+  2. **If PawnIO must be present on the target:** decide how to deliver it — bundle/run the PawnIO
+     installer as part of sensor-bridge setup, or document it as a prerequisite. This is a real
+     dent in "works everywhere with zero setup" and should be designed, not discovered.
+  3. **If 0.9.6 still falls back to WinRing0** when PawnIO is absent: keep the Defender/single-file
+     mitigation in mind (test single-file first; fall back to a self-contained *folder* so the
+     `.sys` is a plain on-disk file that's easier to AV-exclude).
+  4. **Sensor-identifier drift:** the PawnIO swap reportedly changed some sensor identifiers and
+     dropped certain motherboard sensors in prerelease builds. Re-verify that the CPU-temp match
+     heuristic in `src/lhm.rs:120-138` (looks for `package`/`cpu`/`ccd`/`tdie`/`die`) still hits
+     on a 0.9.6 PawnIO build.
+  5. **Do not chase prereleases** to "fix" this: `0.9.5`/`0.9.7-pre` builds carry documented
+     regressions (AMD Family 10h temporarily disabled, x86 builds broken — x64-only for us so less
+     relevant, missing Nuvoton motherboard sensors). Stay on stable `0.9.6`.
 
 This caveat belongs in `docs/reference/windows-sensor-bridge-implementation.md` too (see §5).
 
@@ -506,10 +520,11 @@ Implementers of the items above **must** update these reference docs in the same
    `--self-contained false`, and it references `net8.0`. After P0-3 the truth is: self-contained,
    single-file, **net10.0**, no .NET runtime required on the target. Update the build command,
    the target-framework references, and keep the "no runtime required on target" wording (now
-   actually true). Also add a **WinRing0 troubleshooting entry**: Microsoft Defender may
-   flag/quarantine the extracted `WinRing0x64.sys` (CVE-2020-14979), making temperature silently
-   unavailable; document the symptom, an AV-exclusion path, and the PawnIO-fork fallback (see the
-   WinRing0 caveat under P0-3).
+   actually true). Also add a **driver troubleshooting entry**: LHM `0.9.6` is a PawnIO build, so
+   the failure mode is "PawnIO driver not installed on the target" (temperature silently
+   unavailable even though the bridge runs); document that symptom and the resolution, and keep a
+   note on the legacy WinRing0/Defender issue (CVE-2020-14979) for older builds. See the driver
+   caveat under P0-3.
 
 2. **New: `docs/reference/windows-support.md`** — *create this.*
    There is currently **no single Windows runtime reference**; knowledge is scattered across the
