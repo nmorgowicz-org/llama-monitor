@@ -289,31 +289,53 @@ shifted between LHM releases, so the relevant question is *which model our pinne
   installer" (#2222)**, so `0.9.6` is almost certainly a **PawnIO build, not the WinRing0
   extraction model**. That likely *removes* the Defender/single-file `.sys` problem.
 
-**But PawnIO flips the failure mode, which matters more for our push-to-any-machine model:**
+**PawnIO flips the failure mode, which matters more for our push-to-any-machine model:**
 PawnIO is an external driver that must be **installed on the target**. A self-contained bundle
 fixes the *.NET runtime* dependency but does **not** install PawnIO. So on a clean machine the
 bridge may run yet return no readings because the driver isn't present — the same "exists but no
-data" symptom, different cause. This is the single most important thing to verify on real
-hardware before trusting the build everywhere. (It may explain nothing-or-something differences
-between machines; the developer's box that showed temps may simply have had PawnIO present.)
+data" symptom, different cause.
 
-**Verify / decide during implementation (don't pre-commit):**
-  1. **Confirm 0.9.6's driver model and target requirement** empirically: on a *clean* Windows
-     box with no monitoring tools installed, does `sensor_bridge.exe` (built against 0.9.6) return
-     CPU temperature, or does it need PawnIO installed first?
-  2. **If PawnIO must be present on the target:** decide how to deliver it — bundle/run the PawnIO
-     installer as part of sensor-bridge setup, or document it as a prerequisite. This is a real
-     dent in "works everywhere with zero setup" and should be designed, not discovered.
-  3. **If 0.9.6 still falls back to WinRing0** when PawnIO is absent: keep the Defender/single-file
-     mitigation in mind (test single-file first; fall back to a self-contained *folder* so the
-     `.sys` is a plain on-disk file that's easier to AV-exclude).
-  4. **Sensor-identifier drift:** the PawnIO swap reportedly changed some sensor identifiers and
-     dropped certain motherboard sensors in prerelease builds. Re-verify that the CPU-temp match
-     heuristic in `src/lhm.rs:120-138` (looks for `package`/`cpu`/`ccd`/`tdie`/`die`) still hits
-     on a 0.9.6 PawnIO build.
-  5. **Do not chase prereleases** to "fix" this: `0.9.5`/`0.9.7-pre` builds carry documented
-     regressions (AMD Family 10h temporarily disabled, x86 builds broken — x64-only for us so less
-     relevant, missing Nuvoton motherboard sensors). Stay on stable `0.9.6`.
+**✅ Confirmed on real hardware (2026-06-21).** Inspected a live Windows box (AMD Ryzen 7 5800XT,
+MSI B550) running the current sensor bridge:
+- `PawnIO` kernel-driver service is installed and `RUNNING` (`C:\Program Files\PawnIO\PawnIO.sys`,
+  AUTO_START, `.sys` dated 2025-12-23); **`WinRing0` service does not exist**. Confirms 0.9.6 is a
+  PawnIO build, and the WinRing0/Defender/single-file problem does **not** apply to us.
+- The bridge serves live data on `http://127.0.0.1:7780/` (plain loopback HTTP, no TLS — by
+  design) and returns real CPU temps: `AMD Ryzen 7 5800XT / Core (Tctl/Tdie) = 54.6`,
+  `CCD1 (Tdie) = 42.25`.
+- **PawnIO was present only because a PawnIO-bundling tool (e.g. the LibreHardwareMonitor desktop
+  app) had been installed on that box at some point** — *not* by our sensor bridge, which never
+  installs it. The installed-programs list shows a standalone `PawnIO` entry and no LHM app, i.e.
+  the driver persisted after its installer ran. **A genuinely clean target would have no PawnIO**,
+  and our pushed bridge would run but report no temperature. This is the confirmed gap, not a
+  hypothetical.
+- Runtime is a non-issue on that box (it has .NET 6/7/8/9/**10** runtimes installed), but that's
+  incidental to *that* machine — exactly why we still want the self-contained build for clean
+  targets.
+
+So the PawnIO dependency is **confirmed real**; the only open question is delivery, not whether it
+matters.
+
+**Decide during implementation (the runtime half is settled; this is the driver half):**
+  1. **Deliver PawnIO with the sensor bridge.** PawnIO is a small signed driver with a silent
+     installer (`pawnio.eu`). Options: (a) bundle the PawnIO installer in the Windows zip and run
+     it (UAC-elevated) as part of the existing sensor-bridge install flow in `src/lhm.rs`
+     (`install_local_sensor_bridge`), alongside the scheduled-task registration; or (b) document
+     PawnIO as a prerequisite the user installs once. Option (a) preserves the "zero-setup" goal
+     and fits the existing elevated-PowerShell install path; prefer it. Verify PawnIO's
+     license/redistribution terms before bundling its installer.
+  2. **Surface the missing-driver state in the UI.** Today `is_sensor_bridge_available()` only
+     checks the exe exists. Add a check (e.g. PawnIO service present/running) so the sensor-bridge
+     UI can say "driver not installed" instead of silently showing no temperature.
+  3. **Sensor-identifier check (verified for AMD, still check Intel).** On the AMD box the temp
+     match works: `Core (Tctl/Tdie)` is correctly picked by the `src/lhm.rs:120-138` heuristic
+     (`tdie` + `ryzen`). **But the gate also requires the hardware/subhardware to contain
+     `cpu`/`ryzen`** — on **Intel**, hardware is e.g. `Intel Core i9-14900K` (no `cpu`/`ryzen`),
+     so a `CPU Package` reading may be **missed**. Re-verify on an Intel box and broaden the gate
+     if needed. (Pre-existing heuristic gap, surfaced by this audit.)
+  4. **Do not chase prereleases** to "fix" anything: `0.9.5`/`0.9.7-pre` builds carry documented
+     regressions (AMD Family 10h temporarily disabled; x86 builds broken — x64-only for us so less
+     relevant; missing Nuvoton motherboard sensors). Stay on stable `0.9.6`.
 
 This caveat belongs in `docs/reference/windows-sensor-bridge-implementation.md` too (see §5).
 
