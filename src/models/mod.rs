@@ -438,11 +438,6 @@ pub fn infer_family_from_architecture(arch: &str) -> Option<String> {
         return Some("exaone".into());
     }
 
-    // Heretic (if it's its own arch string)
-    if a.contains("heretic") {
-        return Some("heretic".into());
-    }
-
     // DeepSeek
     if a.starts_with("deepseek") {
         return Some("deepseek".into());

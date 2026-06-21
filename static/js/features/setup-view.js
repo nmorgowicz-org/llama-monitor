@@ -21,7 +21,6 @@ const FAMILY_LABEL_MAP = {
     gemma: 'Gemma',
     mistral: 'Mistral',
     exaone: 'EXAONE',
-    heretic: 'Heretic',
     deepseek: 'DeepSeek',
     phi: 'Phi',
 };
