@@ -550,16 +550,24 @@
 
 .widget-speed,
 .widget-generation,
-.widget-context,
 .widget-gpu,
 .widget-system,
-.inference-mini-panel,
-.inference-config-panel {
+.inference-mini-panel {
   background:
     radial-gradient(circle at 80% 16%, color-mix(in srgb, var(--surface-card-ambient-a) 30%, transparent), transparent 24%),
     radial-gradient(circle at 14% 85%, color-mix(in srgb, var(--surface-card-ambient-b) 20%, transparent), transparent 28%),
     linear-gradient(180deg, color-mix(in srgb, var(--surface-card-elevated) 88%, rgba(2, 6, 23, 0.97)),
                       color-mix(in srgb, var(--surface-card-base) 88%, rgba(2, 6, 23, 0.97)));
+}
+
+/* Chat Context & Memory + Model Info: muted wash to avoid strong color cast */
+.widget-context,
+.inference-config-panel {
+  background:
+    radial-gradient(circle at 85% 18%, color-mix(in srgb, var(--surface-card-ambient-a) 12%, transparent), transparent 28%),
+    radial-gradient(circle at 12% 85%, color-mix(in srgb, var(--surface-card-ambient-b) 8%, transparent), transparent 30%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-card-elevated) 90%, rgba(2, 6, 23, 0.97)),
+                      color-mix(in srgb, var(--surface-card-base) 92%, rgba(2, 6, 23, 0.98)));
 }
 
 .widget-card::after {
