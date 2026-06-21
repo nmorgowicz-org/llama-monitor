@@ -317,25 +317,28 @@ So the PawnIO dependency is **confirmed real**; the only open question is delive
 matters.
 
 **Decide during implementation (the runtime half is settled; this is the driver half):**
-  1. **Deliver PawnIO via `winget`, do not bundle its installer (license, researched 2026-06-21).**
-     PawnIO's **core driver is GPLv2-or-later** (with a linking exception that lets independent
-     programs talk to it through the device IOCTL interface — so *using* it does **not** make our
-     bridge GPL; LHM communicates via that IOCTL interface). The catch is **redistribution**:
-     shipping the PawnIO driver/installer inside our zip means distributing a GPLv2 work, which
-     pulls in GPLv2 obligations (license text, written offer of source, etc.), and the official
-     installer is separately labeled "Proprietary (Freeware)" with **custom/commercial licensing
-     offered** (`admin@namazso.eu`) — i.e. the installer's own terms may differ from the source
-     license. That ambiguity makes bundling the riskier path.
-     - **Preferred:** install at sensor-bridge-setup time via the official package — no
-       redistribution, always official, always current:
-       `winget install -e --id namazso.PawnIO` (publisher: namazso; also on Chocolatey as
-       `pawnio`). Invoke it from the existing UAC-elevated install flow in `src/lhm.rs`
-       (`install_local_sensor_bridge`), next to the scheduled-task registration. Detect winget
-       (App Installer is present on modern Win10/11); if absent or offline, fall back to (b).
-     - **Fallback (b):** document PawnIO as a one-time prerequisite the user installs from
-       `pawnio.eu`, and surface the missing-driver state in the UI (see item 2).
-     - **Only bundle the installer** if you first get the redistribution terms cleared (contact
-       `admin@namazso.eu` / legal review). Don't assume "freeware" means "redistributable."
+  1. **Auto-install PawnIO via `winget` (confirmed working, fully silent).** This is the cleanest
+     *and* most automated path — no bundling, no manual steps, always the official current build.
+     Verified on real hardware (2026-06-21): `winget` is present (v1.28.240) and **manages PawnIO
+     as a first-class package** — `winget list -e --id namazso.PawnIO` already shows it tracked
+     (`namazso.PawnIO`, source `winget`, upgrade available), and `winget show` resolves the
+     official installer (`PawnIO_setup.exe` from `github.com/namazso/PawnIO.Setup`). So winget can
+     install, detect, *and* upgrade it.
+     - **Silent install command** (run from the existing UAC-elevated flow in `src/lhm.rs`
+       `install_local_sensor_bridge`, alongside the scheduled-task registration):
+       ```
+       winget install -e --id namazso.PawnIO --silent \
+         --accept-package-agreements --accept-source-agreements
+       ```
+     - **Idempotent:** check first so re-runs are no-ops — `sc query PawnIO` (service exists) or
+       `winget list -e --id namazso.PawnIO`. Only install if absent.
+     - **Fallback if winget is somehow missing/offline:** point the user to `pawnio.eu` and show
+       the missing-driver state in the UI (item 2). In practice App Installer/winget ships on
+       modern Win10/11, so this path is rare.
+     - *Licensing (noted, not a blocker for a personal project):* the driver is GPLv2+ with an
+       IOCTL linking exception (using it doesn't make our app GPL); the winget installer is
+       labeled "Proprietary (Freeware)". Installing via winget avoids redistribution entirely, so
+       there's nothing to clear — another reason to prefer it over bundling.
   2. **Surface the missing-driver state in the UI.** Today `is_sensor_bridge_available()` only
      checks the exe exists. Add a check (e.g. PawnIO service present/running) so the sensor-bridge
      UI can say "driver not installed" instead of silently showing no temperature.
@@ -545,6 +548,72 @@ boot-without-login deployment need appears. If so, the design from the old plan 
 
 ---
 
+## 4½. Windows automation — the zero-touch goal
+
+**Guiding principle for this project:** the Windows experience should be as automated and
+hands-off as macOS. The user should download, run, and get full functionality (including CPU
+temperature) with **no manual setup, no CLI flags, no separate installers, no .NET install**.
+Everything below is achievable with mechanisms already in the codebase (an existing UAC-elevated
+PowerShell path, scheduled tasks, winget) plus the P0/P1 fixes. Wire these together rather than
+leaving them as separate manual steps.
+
+### A. One-click "Enable CPU temperature" (single elevation does everything)
+Today, enabling temperature implicitly needs three things on the target: the .NET runtime, the
+PawnIO driver, and the sensor-bridge scheduled task. Collapse them into **one** user action (one
+UAC prompt) in the existing `src/lhm.rs::install_local_sensor_bridge` elevated-PowerShell flow:
+
+1. **.NET runtime → eliminated** by the self-contained build (P0-3). No step needed.
+2. **PawnIO driver →** silent winget install, idempotent (§ P0-3 item 1):
+   `winget install -e --id namazso.PawnIO --silent --accept-package-agreements --accept-source-agreements`
+   guarded by `sc query PawnIO`.
+3. **Sensor bridge →** register + start the scheduled task (already implemented).
+
+Run all three inside the *same* elevated script so the user sees exactly one UAC prompt, then the
+UI polls `is_local_sensor_bridge_running()` + a new PawnIO check until temperature appears. This
+turns "install .NET, install PawnIO, configure a service" into a single button.
+
+### B. Auto-detect and offer (don't make the user hunt)
+On Windows, when the app is running and CPU temperature is unavailable, proactively surface the
+one-click action instead of silently showing nothing. Detection signals to combine:
+- bridge exe present (`is_sensor_bridge_available()`),
+- bridge running (`is_local_sensor_bridge_running()`),
+- **new:** PawnIO driver present (`sc query PawnIO` / `winget list`).
+Map each missing piece to the same one-click remediation. (This also fixes today's confusing
+"file exists but no data" state.)
+
+### C. Keep it healthy automatically (self-heal / self-upgrade)
+- **PawnIO upgrades:** winget already tracks PawnIO, so a periodic/maintenance
+  `winget upgrade -e --id namazso.PawnIO --silent ...` (or surfacing "update available") keeps the
+  driver current with no user effort. Fits the existing DB-maintenance timer pattern in `main.rs`.
+- **Scheduled task already auto-restarts** the bridge at startup (`-AtStartup`, `RestartCount`),
+  so the bridge survives reboots with zero interaction — confirmed live on hardware (it was
+  running as a SYSTEM task without the user connected).
+- **Idempotency everywhere:** every install/enable path must be safe to re-run (guard on service
+  existence / winget list / task query) so "click again" is always safe.
+
+### D. Auto-install the WebView2 runtime too (ties into P1-3)
+The tray popover needs the WebView2 runtime. Rather than only failing gracefully, **auto-install
+it via winget** when missing, using the same pattern:
+`winget install -e --id Microsoft.EdgeWebView2Runtime --silent --accept-package-agreements --accept-source-agreements`.
+On most Win11/Win10 it's already present (so the guarded check is usually a no-op), but this makes
+a bare LTSC/older image self-heal instead of showing a dead popover.
+
+### E. First-run convenience (optional, but on-brand for "zero-touch")
+Consider offering the one-click temperature setup automatically on first Windows launch (with a
+single consent prompt), so a brand-new user gets temperature without even discovering the setting.
+Keep it opt-in (it triggers UAC), but make the happy path one click from first run.
+
+### F. winget invocation notes (so automation is reliable)
+- Always pass `--silent --accept-package-agreements --accept-source-agreements` and
+  `--disable-interactivity` for non-interactive runs; otherwise winget can block on prompts.
+- winget needs to resolve under the elevated context — invoke it from the same elevated PowerShell
+  the install flow already spawns. Capture exit codes (winget returns non-zero on failure / when a
+  reboot is required) and reflect them in the UI rather than assuming success.
+- Route any `winget`/`sc`/`schtasks` helper spawns through `crate::platform::no_window` (P0-2) so
+  they never flash a console.
+
+---
+
 ## 5. Reference-doc changes required
 
 Implementers of the items above **must** update these reference docs in the same PR:
@@ -569,9 +638,13 @@ Implementers of the items above **must** update these reference docs in the same
    - The GUI-subsystem + `AttachConsole` behavior (P0-1) and how logging works.
    - GPU data sources on Windows (the table from the sensor-bridge doc: nvidia-smi/NVML, rocm-smi,
      WMI/registry VRAM, PDH utilization) and what each does/doesn't provide.
-   - WebView2 runtime requirement and the failure-mode UX (P1-3).
+   - WebView2 runtime requirement and the failure-mode UX (P1-3), incl. winget auto-install.
    - The shipped bundle contents (`llama-monitor.exe`, `sensor_bridge.exe`) and where each file
      must live relative to the other.
+   - **The automated setup model (§4½):** CPU temperature requires the PawnIO driver, installed
+     automatically via `winget install namazso.PawnIO` from the one-click sensor-bridge setup
+     (single UAC prompt); .NET runtime is no longer required (self-contained build). Document the
+     driver-detection signals and the self-upgrade story so the "zero-touch" design is captured.
    This doc becomes the canonical "how Windows works" page; link it from `AGENTS.md`.
 
 3. **`docs/reference/binary-lifecycle.md`** — *minor.*
@@ -587,11 +660,16 @@ Implementers of the items above **must** update these reference docs in the same
 1. **P0-1 + P0-2 together** (GUI subsystem + `crate::platform::no_window` everywhere). Land as
    one change; they are only safe together. New file `src/platform.rs`.
 2. **P0-3** (sensor bridge self-contained) + reconcile the sensor-bridge reference doc.
-3. **P1-1** (config dir + Windows migration). Touches startup; run the full test suite after.
-4. **P1-2** (VRAM via registry).
-5. **P1-3** (WebView2 / IPC verification — needs real Windows hardware).
-6. Author **`docs/reference/windows-support.md`** capturing the new behavior (steps 1-5).
-7. P2 items as capacity allows. P2-3 (service mode) only on demand.
+3. **§4½ automation** (one-click temperature: bundle PawnIO-via-winget + driver detection + the
+   existing scheduled-task install into a single elevated flow in `src/lhm.rs`; auto-detect/offer
+   when temp is unavailable). Pairs naturally with P0-3 — do them together so temperature is
+   genuinely zero-touch on a clean machine.
+4. **P1-1** (config dir + Windows migration). Touches startup; run the full test suite after.
+5. **P1-2** (VRAM via registry).
+6. **P1-3** (WebView2 IPC verification + auto-install runtime via winget per §4½ D — needs real
+   Windows hardware).
+7. Author **`docs/reference/windows-support.md`** capturing the new behavior (steps 1-6).
+8. P2 items as capacity allows. P2-3 (service mode) only on demand.
 
 ---
 
@@ -632,6 +710,8 @@ Manual (Windows 11 + a clean Windows 10 VM without .NET / without WebView2):
 | `src/llama/server.rs` | `no_window_tokio` on server spawn; `no_window` on `taskkill` | P0-2 |
 | `src/config.rs` | `no_window` on `icacls`; Windows config-dir default | P0-2, P1-1 |
 | `src/lhm.rs` | `no_window` on `schtasks` (NOT on `RunAs` powershell) | P0-2 |
+| `src/lhm.rs` | one-click flow: winget-install PawnIO + driver detection folded into the elevated install; add PawnIO-present check | §4½ A/B/C |
+| `src/web/api/sensor_bridge.rs` + frontend | auto-detect/offer one-click temperature; report missing-driver state | §4½ B |
 | `.github/workflows/release.yml` | sensor bridge `--self-contained true` | P0-3 |
 | `sensor_bridge/sensor_bridge.csproj` | bump to `net10.0`; pin `RuntimeIdentifier`/`SelfContained`/single-file | P0-3 |
 | `../llama-monitor-runner/Dockerfile` | already has `dotnet-sdk-10.0`; update stale "builds net8.0" comment; ensure NuGet restore reachable | P0-3 |
