@@ -220,28 +220,59 @@ minute → **zero** console flashes. UAC prompt still appears for sensor-bridge 
 
 ---
 
-### P0-3: Sensor bridge requires .NET runtime that we don't ship and don't document
+### P0-3: Ship the sensor bridge self-contained on .NET 10 (no runtime dependency on the target)
 
-**Problem — genuine functional break.** The reference doc says the bridge is built
-`--self-contained true` (no .NET runtime needed on target). The actual CI builds it
-`--self-contained false`:
+**Decision (settled):** make `sensor_bridge.exe` a **self-contained, single-file, net10.0**
+build so it runs on any Windows machine with zero .NET installed on the target. This bumps the
+project to .NET 10 *and* bundles the runtime.
 
-- `.github/workflows/release.yml:56`:
-  `dotnet publish ... -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true`
-- `sensor_bridge/sensor_bridge.csproj`: `net8.0`, no `SelfContained`/`RuntimeIdentifier`.
+**Background — why this matters and why it "looked fine" before.**
+The bridge is currently built **framework-dependent** (`--self-contained false`,
+`release.yml:56`) targeting `net8.0` (`sensor_bridge/sensor_bridge.csproj`, no
+`SelfContained`/`RuntimeIdentifier`). A framework-dependent `.exe` contains only our code, not
+the runtime; at launch it looks for a compatible .NET runtime **already installed on the target
+Windows machine**.
 
-`--self-contained false` produces an `.exe` that **requires the .NET 8 Desktop/Runtime to be
-installed** on the user's machine. On a clean Windows box without .NET 8, `sensor_bridge.exe`
-fails to start → CPU temperature silently unavailable, with the confusing symptom that the file
-*exists* (so `is_sensor_bridge_available()` returns true) but never serves data.
+- This is why a developer's own Windows box (which had a .NET runtime) showed temperature data
+  fine, including via remote-agent push — the remote flow only registers a scheduled task to run
+  the pushed `sensor_bridge.exe` (`src/agent.rs:1664-1672`); it never installs a runtime. It
+  "worked" because that machine happened to have .NET.
+- On a **clean** Windows box with no .NET, the file exists (so `is_sensor_bridge_available()`
+  returns `true`) but the process fails to start → CPU temperature is silently unavailable with
+  no obvious cause. Since the whole point is pushing the bridge to arbitrary machines we don't
+  control, we cannot assume a runtime is present.
+- **The build runner's SDK version does not change what the target needs.** The target
+  requirement is set by `<TargetFramework>`, not by which SDK compiled it. Roll-forward (running
+  a net8.0 app on a machine that has only a newer major) is policy-dependent and not safe to
+  rely on. Self-contained removes all of this guesswork.
 
-**Pick one (recommendation: Option A):**
+**Changes:**
 
-**Option A — ship self-contained (recommended).** Change CI to `--self-contained true`. Pros:
-works on any Windows machine, zero user setup. Cons: bundle grows ~30 MB.
+1. **`sensor_bridge/sensor_bridge.csproj`** — bump to net10.0 and pin self-contained single-file
+   so local builds, the runner, and anyone reading the project all agree:
+
+```xml
+<PropertyGroup>
+  <OutputType>Exe</OutputType>
+  <TargetFramework>net10.0</TargetFramework>
+  <ImplicitUsings>enable</ImplicitUsings>
+  <Nullable>enable</Nullable>
+  <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  <SelfContained>true</SelfContained>
+  <PublishSingleFile>true</PublishSingleFile>
+  <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+</PropertyGroup>
+```
+
+   > Verify `LibreHardwareMonitorLib` `0.9.6` loads under net10.0 (it targets older frameworks
+   > but should bind via roll-forward). If it misbehaves, bump the package or add
+   > `<RollForward>LatestMajor</RollForward>`. Test that the published exe actually returns sensor
+   > readings, not just that it builds.
+
+2. **`.github/workflows/release.yml:54-56`** — build self-contained. With the csproj pinned, the
+   flags are redundant but keep them explicit:
 
 ```yaml
-# release.yml
 - name: Build sensor bridge
   if: matrix.target == 'x86_64-pc-windows-gnu'
   run: dotnet publish sensor_bridge/sensor_bridge.csproj -c Release -r win-x64
@@ -249,23 +280,37 @@ works on any Windows machine, zero user setup. Cons: bundle grows ~30 MB.
        -p:IncludeNativeLibrariesForSelfExtract=true -o sensor_bridge/publish
 ```
 
-Also pin it in the csproj so local builds match CI:
+   Bundle grows by ~30 MB (the embedded runtime). Acceptable — it's the price of "works
+   everywhere." The single resulting `sensor_bridge.exe` still ships next to `llama-monitor.exe`
+   exactly as today (`release.yml:72`).
 
-```xml
-<PropertyGroup>
-  <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-  <SelfContained>true</SelfContained>
-  <PublishSingleFile>true</PublishSingleFile>
-</PropertyGroup>
-```
+**Runner changes (`../llama-monitor-runner/Dockerfile`):**
 
-**Option B — keep framework-dependent, but detect + guide.** Keep `--self-contained false`,
-but in `src/lhm.rs` detect the "exists but won't run" case and surface a clear message in the
-sensor-bridge UI ("CPU temperature needs the .NET 8 Desktop Runtime — install from <link>").
-Cheaper bundle, worse UX, needs runtime detection logic.
+The self-hosted runner that builds the Windows bundle already installs `dotnet-sdk-10.0`
+(Dockerfile ~line 85), so the heavy lift is done. Specifics:
 
-**Verify:** On a Windows VM with **no** .NET installed, run `sensor_bridge.exe` directly →
-serves JSON on `:7780` (Option A) or shows the guidance message (Option B).
+- **No new apt packages needed.** SDK 10 builds net10.0 natively, which actually *removes* the
+  prior latent risk: a net8.0 project on an SDK-10-only image depends on the net8.0
+  reference/targeting pack being restorable; net10.0 needs no such pack.
+- **Self-contained cross-publish for `win-x64` from this Linux container works**, but it
+  restores the Windows runtime packs (`Microsoft.NETCore.App.Runtime.win-x64`,
+  `…Host.win-x64`) from NuGet at build time. The runner already has outbound network during
+  builds (it fetches buildx, etc.), so no change — **but** if the runner is ever switched to
+  offline/locked restore, these packs must be pre-warmed into the NuGet cache. Call this out so
+  nobody is surprised by a restore failure in an air-gapped rebuild.
+- **Stale comment:** the Dockerfile note "SDK 10 can still build net8.0 targets" becomes moot
+  once the project is net10.0. Update or drop it to avoid implying we still target net8.0.
+- No .NET *workload* (e.g. MAUI) is required — this is a plain console app; `dotnet-sdk-10.0`
+  alone is sufficient.
+
+**Verify:**
+- On the runner: `dotnet publish ... -r win-x64 --self-contained true` succeeds and emits a
+  single `sensor_bridge.exe`.
+- On a Windows VM with **no .NET installed at all**, run that `sensor_bridge.exe` directly →
+  it serves sensor JSON on `:7780` (this is the test that the old framework-dependent build
+  would have failed).
+- End-to-end: remote-agent push to a clean Windows box → temperature data appears in the
+  dashboard without any manual .NET install on that box.
 
 ---
 
@@ -423,10 +468,11 @@ boot-without-login deployment need appears. If so, the design from the old plan 
 Implementers of the items above **must** update these reference docs in the same PR:
 
 1. **`docs/reference/windows-sensor-bridge-implementation.md`** — *correctness fix.*
-   It currently claims `--self-contained true` (line ~87) while CI uses `--self-contained false`.
-   Reconcile to whatever P0-3 chooses. If Option A, update the build command and remove any
-   "no .NET runtime required" wording that doesn't match; if Option B, document the .NET 8
-   runtime prerequisite prominently.
+   It currently claims `--self-contained true` (line ~87) while CI actually built
+   `--self-contained false`, and it references `net8.0`. After P0-3 the truth is: self-contained,
+   single-file, **net10.0**, no .NET runtime required on the target. Update the build command,
+   the target-framework references, and keep the "no runtime required on target" wording (now
+   actually true).
 
 2. **New: `docs/reference/windows-support.md`** — *create this.*
    There is currently **no single Windows runtime reference**; knowledge is scattered across the
@@ -481,7 +527,7 @@ Manual (Windows 11 + a clean Windows 10 VM without .NET / without WebView2):
 | `llama-monitor.exe --version` from PowerShell | Version prints (P0-1 re-attach) |
 | Run with a model loaded + GPU polling for 60 s | Zero console flashes (P0-2) |
 | Sensor-bridge install (Settings) | UAC prompt appears (the one allowed window) |
-| Clean VM, run `sensor_bridge.exe` | Serves JSON on `:7780` with no .NET preinstalled (P0-3 Option A) |
+| Clean VM (no .NET at all), run `sensor_bridge.exe` | Serves JSON on `:7780` — self-contained net10.0 (P0-3) |
 | Fresh install | Config under `%APPDATA%\llama-monitor` (P1-1) |
 | Upgrade over a `.config\llama-monitor` install | Data migrated; presets/tokens intact (P1-1) |
 | GPU with >4 GB VRAM | Correct total VRAM shown (P1-2) |
@@ -500,8 +546,9 @@ Manual (Windows 11 + a clean Windows 10 VM without .NET / without WebView2):
 | `src/llama/server.rs` | `no_window_tokio` on server spawn; `no_window` on `taskkill` | P0-2 |
 | `src/config.rs` | `no_window` on `icacls`; Windows config-dir default | P0-2, P1-1 |
 | `src/lhm.rs` | `no_window` on `schtasks` (NOT on `RunAs` powershell) | P0-2 |
-| `.github/workflows/release.yml` | sensor bridge `--self-contained true` (if Option A) | P0-3 |
-| `sensor_bridge/sensor_bridge.csproj` | pin `RuntimeIdentifier`/`SelfContained` | P0-3 |
+| `.github/workflows/release.yml` | sensor bridge `--self-contained true` | P0-3 |
+| `sensor_bridge/sensor_bridge.csproj` | bump to `net10.0`; pin `RuntimeIdentifier`/`SelfContained`/single-file | P0-3 |
+| `../llama-monitor-runner/Dockerfile` | already has `dotnet-sdk-10.0`; update stale "builds net8.0" comment; ensure NuGet restore reachable | P0-3 |
 | `src/gpu/wmi_gpu.rs` | registry VRAM read (add `winreg`) | P1-2 |
 | `src/tray.rs` | IPC polyfill (if needed) + WebView2 failure messaging | P1-3 |
 | `Cargo.toml` | maybe `winreg` (P1-2), `nvml-wrapper` (P2-1), `windows-service` (P2-3) | P1-2, P2 |
