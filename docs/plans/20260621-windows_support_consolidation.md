@@ -264,10 +264,44 @@ Windows machine**.
 </PropertyGroup>
 ```
 
-   > Verify `LibreHardwareMonitorLib` `0.9.6` loads under net10.0 (it targets older frameworks
-   > but should bind via roll-forward). If it misbehaves, bump the package or add
-   > `<RollForward>LatestMajor</RollForward>`. Test that the published exe actually returns sensor
-   > readings, not just that it builds.
+   > **net10.0 compatibility is confirmed safe (researched 2026-06-21).**
+   > `LibreHardwareMonitorLib 0.9.6` ships a `net8.0` assembly (plus `netstandard2.0` and
+   > `net472`), and NuGet explicitly lists `net8.0`, `net9.0`, **`net10.0`** as compatible. A
+   > net10.0 project consumes the net8.0 assembly via forward-compat — no roll-forward hack
+   > needed. The "needs .NET 10" chatter online refers to *host apps* (e.g. FanControl), not the
+   > library itself. So the framework bump is low-risk; still smoke-test that the published exe
+   > returns readings, not just that it builds.
+
+**⚠️ Separate, higher-risk caveat — the WinRing0 kernel driver vs. single-file + Defender.**
+This is independent of the .NET version and is the thing most likely to bite us, so verify it on
+real hardware before trusting the self-contained build:
+
+- LHM reads low-level sensors via an embedded kernel driver (`WinRing0x64.sys`). At runtime the
+  library **extracts that `.sys` to disk** and loads it into the kernel.
+- Since ~March 2025 **Microsoft Defender flags WinRing0** (CVE-2020-14979, "vulnerable driver" /
+  HackTool) and may quarantine the `.sys` — which silently kills temperature readings even though
+  `sensor_bridge.exe` itself runs.
+- **`PublishSingleFile` makes this worse:** the bundle (including the native `.sys`) unpacks to a
+  temp self-extract directory, and the driver gets materialized there — both a common Defender
+  trigger and a possible driver-load/path problem. This interaction did **not** exist in the
+  current loose framework-dependent build, so going single-file could *introduce* a regression on
+  Defender-strict machines.
+- It may not have surfaced for the original developer's box (Defender policy/version dependent),
+  so "it worked for me on .NET 8" does **not** clear this for clean/managed Windows targets.
+
+**Mitigations to evaluate (pick during implementation, don't pre-commit):**
+  1. **Test single-file first.** If Defender leaves the extracted `.sys` alone on a stock,
+     up-to-date Windows 11, single-file is fine and simplest — proceed.
+  2. **If Defender quarantines it:** either (a) drop `PublishSingleFile` and ship a normal
+     self-contained folder (the `.sys` sits next to the exe as a plain file, often handled better
+     and easier to add an AV exclusion for), or (b) migrate to **namazso's PawnIO fork** of LHM,
+     which uses a separately-installed *signed* driver (PawnIO) instead of an embedded `.sys`.
+     PawnIO sidesteps both the extraction and the Defender flag, but it **requires PawnIO to be
+     installed on the target**, which partially undoes the "works everywhere with zero setup"
+     goal — so treat it as the fallback, not the default.
+  3. Document an AV-exclusion path for managed/enterprise environments regardless of choice.
+
+This caveat belongs in `docs/reference/windows-sensor-bridge-implementation.md` too (see §5).
 
 2. **`.github/workflows/release.yml:54-56`** — build self-contained. With the csproj pinned, the
    flags are redundant but keep them explicit:
@@ -472,7 +506,10 @@ Implementers of the items above **must** update these reference docs in the same
    `--self-contained false`, and it references `net8.0`. After P0-3 the truth is: self-contained,
    single-file, **net10.0**, no .NET runtime required on the target. Update the build command,
    the target-framework references, and keep the "no runtime required on target" wording (now
-   actually true).
+   actually true). Also add a **WinRing0 troubleshooting entry**: Microsoft Defender may
+   flag/quarantine the extracted `WinRing0x64.sys` (CVE-2020-14979), making temperature silently
+   unavailable; document the symptom, an AV-exclusion path, and the PawnIO-fork fallback (see the
+   WinRing0 caveat under P0-3).
 
 2. **New: `docs/reference/windows-support.md`** — *create this.*
    There is currently **no single Windows runtime reference**; knowledge is scattered across the
