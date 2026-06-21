@@ -4074,6 +4074,7 @@ async function autoTuneWizard(verify) {
     model_size_bytes: getModelBytes(),
     available_vram_bytes: effectiveAvailBytes(),
     ubatch_size: hw.ubatchSize || 2048,
+    is_unified_memory: isUnifiedMemory(),
     verify: !!verify,
   };
   if (verify) {
