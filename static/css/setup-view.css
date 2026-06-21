@@ -12,7 +12,7 @@
  *           Setup/Welcome view: .view-container, .view-setup, .setup-ambient,
  *               .setup-hero, .setup-action-cards, .setup-action-card,
  *               .setup-quick-stats, view transitions, connecting state,
- *               .sessions-list, .session-item
+ *               setup cards, endpoint cards, launch cards
  */
 
 .analytics-dashboard {
@@ -1682,93 +1682,6 @@ body.setup-active .sidebar-nav {
   top: 72px;
 }
 
-/* Sessions list */
-.sessions-header {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-#sessions-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 400px;
-  overflow-y: auto;
-}
-
-.session-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  transition: background 0.2s ease, border-color 0.2s ease;
-}
-
-.session-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.12);
-}
-
-.session-item.active {
-  background: var(--acc-08);
-  border-color: var(--acc-30);
-}
-
-.session-item-main {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-  cursor: pointer;
-  min-width: 0;
-}
-
-.session-item-icon {
-  font-size: 1.4rem;
-  flex-shrink: 0;
-}
-
-.session-item-info {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.session-item-name {
-  font-weight: 600;
-  font-size: 0.9rem;
-  color: var(--color-text-primary);
-}
-
-.session-item-detail {
-  font-size: 0.78rem;
-  color: var(--color-text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.session-item-status {
-  font-size: 0.52rem;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-success) 12%, transparent);
-  color: var(--color-success);
-  flex-shrink: 0;
-}
-
-.session-item-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-  margin-left: 12px;
-}
 
 /* Setup view responsive */
 @media (max-width: 900px) {
@@ -2336,6 +2249,19 @@ body.setup-active .sidebar-nav {
   transform: translateY(-1px);
   box-shadow: 0 4px 16px var(--acc-20);
   color: var(--color-accent-light);
+}
+
+/* Dashboard return button — green tinted to signal "something's live" */
+.setup-toolbar-btn--dashboard {
+  border-color: rgba(74, 222, 128, 0.4);
+  background: rgba(74, 222, 128, 0.08);
+  color: #4ade80;
+  box-shadow: 0 2px 8px rgba(74, 222, 128, 0.12);
+}
+.setup-toolbar-btn--dashboard:hover {
+  background: rgba(74, 222, 128, 0.16);
+  border-color: rgba(74, 222, 128, 0.6);
+  color: #86efac;
 }
 
 .setup-toolbar-btn-ghost {
@@ -3769,23 +3695,6 @@ body.setup-active .sidebar-nav {
   background: rgba(255, 255, 255, 0.72);
   border-color: rgba(15, 23, 42, 0.09);
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
-}
-
-/* ── Light theme: session items ──────────────────────────────────────────── */
-
-[data-theme="light"] .session-item {
-  background: rgba(255, 255, 255, 0.72);
-  border-color: rgba(15, 23, 42, 0.08);
-}
-
-[data-theme="light"] .session-item:hover {
-  background: rgba(255, 255, 255, 0.92);
-  border-color: rgba(15, 23, 42, 0.14);
-}
-
-[data-theme="light"] .session-item.active {
-  background: var(--acc-08);
-  border-color: var(--acc-25);
 }
 
 /* ── Launch filter bar ──────────────────────────────────────────────────────── */

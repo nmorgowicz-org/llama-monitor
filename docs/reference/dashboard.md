@@ -15,6 +15,7 @@ The compact strip in the top navigation shows the current endpoint state without
 | **Context** | Highest context-pressure percentage across open chat tabs |
 | **GPU** | Temperature of the hottest available GPU |
 | **Sparkline** | Recent generation-speed history |
+| **Memory pressure** | macOS only; shown when memory pressure is warning or critical (based on vm_stat free pages and compressor ratio) |
 
 Clicking the cockpit jumps to the Server tab. On narrower layouts the GPU and sparkline chips collapse first, then the context chip.
 
@@ -32,6 +33,7 @@ Hovering the endpoint status chip in the top nav opens a popover listing per-sub
 | **Context capacity** | Whether context capacity is known |
 | **Context usage** | Live if exposed by llama.cpp; otherwise "derived from chat" |
 | **Host metrics** | Whether GPU/system telemetry is available |
+| **Memory pressure** | Whether macOS memory-pressure telemetry is available (vm_stat-based) |
 | **Remote agent** | Connected or disconnected |
 
 The popover is populated in real time from WebSocket data; each row shows a green LED for live/ok and a muted indicator when unavailable.
@@ -382,12 +384,22 @@ Host metrics are available in two ways:
 - **Remote session with agent**: the remote agent reports GPU/system/process telemetry back to the dashboard.
 - **Remote session without agent**: you still get performance metrics, but GPU/system cards stay limited.
 
+### Metrics API endpoints
+
+All metrics endpoints require `api-token` and also act as wake-on-activity signals.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/metrics` | Returns combined `system` and `gpu` metrics |
+| `GET` | `/api/metrics/system` | Returns `system` metrics only |
+| `GET` | `/api/metrics/gpu` | Returns `gpu` metrics only |
+
 ### GPU metrics
 
 | Metric | Local sources |
 |--------|---------------|
 | Utilization | `rocm-smi`, `nvidia-smi`, `mactop` |
-| Power draw | `rocm-smi`, `nvidia-smi` |
+| Power draw | `rocm-smi`, `nvidia-smi`; on Apple Silicon via `gpu_power` (dedicated GPU sensor), not `total_power` |
 | VRAM usage | `rocm-smi`, `nvidia-smi`, `mactop` |
 | Core clock | `rocm-smi`, `nvidia-smi` |
 | Memory clock | `rocm-smi`, `nvidia-smi` |
@@ -409,20 +421,58 @@ Clock visualization:
 
 | Metric | Source |
 |--------|--------|
-| CPU load and model | `sysinfo` |
+| CPU load and model | `sysinfo`; on Apple Silicon weighted from mactop cluster utilization |
 | CPU temperature | Linux thermal zones, `mactop`, or `sensor_bridge.exe` on Windows |
-| CPU clock | `/proc/cpuinfo` on Linux, `mactop` on macOS |
+| CPU clock | `/proc/cpuinfo` on Linux; on Apple Silicon derived from P-cluster frequency (`p_cluster_freq_mhz` via `mactop`), not a generic SoC “clock” |
 | RAM usage | `sysinfo` |
+| RAM available | `sysinfo` |
+| Memory pressure level | macOS `vm_stat` (free pages + compressor ratio → ok/warning/critical) |
+| Memory free (GB) | macOS `vm_stat` |
+| Memory wired (GB) | macOS `vm_stat`; kernel-locked, includes GPU framebuffers; Metal iogpu budget floor on Apple Silicon |
+| Memory purgeable (GB) | macOS `vm_stat`; file-backed pages droppable on demand |
+| Memory inactive (GB) | macOS `vm_stat`; candidate pages for compression/eviction |
+| Memory compressor (GB) | macOS `vm_stat` |
+| Memory compressed (GB) | macOS `vm_stat` (pages stored in compressor) |
+| Swapins / swapouts (counters) | macOS `vm_stat` |
 | Motherboard / platform info | platform-specific host inspection |
+| CPU topology (Apple Silicon) | Read from `hw.perflevelcount` and per-level `hw.perflevel{i}.physicalcpu`/`hw.perflevel{i}.name` to derive P/E/S core counts and cluster names |
+| P-cores / E-cores / S-cores | Apple Silicon only; derived from perf-level core counts; 0 on non-Apple Silicon |
+| P/S/E cluster frequency (MHz) | On macOS via `mactop`; per-cluster current frequencies |
+| P/S/E cluster active (%) | On macOS via `mactop`; per-cluster utilization |
+| Power (total, CPU, GPU) | On macOS via `mactop` (`power_total_w`, `power_cpu_w`, `power_gpu_w`); 0 on other platforms |
 
 CPU clock visualization:
 
 - Can be shown as a single ring orbit with meter, as a chip, or as a plain numeric value.
 
+Memory pressure (macOS only):
+
+- Based on live `vm_stat` data: free pages, compressor pages, and total RAM.
+- Levels:
+  - **ok**: normal conditions
+  - **warning**: free GB < 1.5 or compressor / total RAM ≥ 18%
+  - **critical**: free GB < 0.5 or compressor / total RAM ≥ 30%
+- Dashboard:
+  - System card includes a Memory Pressure metric with sparkline.
+- Top nav:
+  - A memory-pressure pill appears only at warning or critical level.
+
 Sensor bridge (Windows):
 
 - On Windows, if CPU temperature is unavailable, a "No temp data" badge may appear.
 - A callout with a "Setup" button is shown when the sensor_bridge service is not yet installed; clicking it triggers a UAC prompt to install the service.
+
+## mlock Warnings
+
+On macOS, when a model’s estimated VRAM use (based on the VRAM estimator) exceeds
+available GPU memory, Llama Monitor shows a heuristic warning that memory pages may be
+unmapped by the OS (mlock failure), which can cause slowdowns or crashes.
+
+- **Preset editor**: displays a warning if the estimated VRAM exceeds available VRAM.
+- **Spawn wizard**: shows the same warning on the final review step for macOS when the
+  model appears too large for available VRAM.
+- These warnings are informational and heuristic; they do not enforce a hard limit or
+  block launch but suggest reducing layers, using a smaller quantization, or adding swap space.
 
 ## Capability states
 
@@ -501,7 +551,38 @@ Use the nav **Cadence** chip for quick changes, or go to **Settings → Performa
 
 `Auto` uses the Network Information API (when available) to choose between 500 ms, 1 s, 2 s, or 5 s based on detected connection quality and Data Saver mode. If the browser cannot report network quality, it falls back to 500 ms.
 
+Sleep-mode behavior:
+
+- **Off (full monitoring)**: normal user-configured interval.
+- **Logs only**: applies a slower interval (via `logs_only_ws_interval_ms`) and sends reduced payloads (no heavy metrics) with live logs.
+- **Sleep (full)**: enforces the slowest interval (via `sleep_ws_interval_ms` or a 10 s minimum) and sends minimal heartbeat payloads (no logs, no metrics).
+
 When the browser appears overloaded, Llama Monitor can also recommend **Battery Saver (2s)**. This uses browser timer drift as an inferred responsiveness signal; browsers do not expose reliable total CPU load across platforms.
+
+## Sleep modes
+
+The nav monitoring chip supports three modes, cycled by clicking:
+
+| Mode | Label | Behavior |
+|------|-------|----------|
+| **Off** | Monitoring | Full telemetry and WebSocket pushes. |
+| **Logs only** | Logs only | No heavy metrics or network calls; live server logs still streamed. |
+| **Sleep** | Paused | Minimal heartbeat; no metrics, no logs. |
+
+Details:
+
+- **Cycling**: click the monitoring chip to rotate: Monitoring → Logs only → Paused → Monitoring.
+- **Auto-sleep**:
+  - Auto-sleep (idle timeout) uses a separate internal path and bypasses the toggle endpoint; it activates Sleep directly when needed.
+- **WebSocket reconnect**:
+  - Auto-sleep (non-manual) is cleared when a WebSocket connection opens.
+  - Manual sleep (set via UI or API) persists across WebSocket reconnects.
+- **Chat streaming override**:
+  - While chat generation is active, the backend preserves the normal push interval even in low-power modes to avoid stalling the chat.
+- **API**:
+  - `POST /api/sleep-mode/toggle` cycles the mode through all three states.
+  - `POST /api/sleep-mode/set` with `{"mode": "off" | "logs-only" | "sleep"}` sets explicitly.
+  - Legacy `{"enabled": true/false}` still supported; maps to sleep/off.
 
 ## Settings vs. Configuration
 

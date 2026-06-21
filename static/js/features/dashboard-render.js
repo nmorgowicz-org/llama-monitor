@@ -994,7 +994,7 @@ function pushGpuHistory(key, value) {
     if (gpuHistory[key].length > limit) gpuHistory[key].shift();
 }
 
-var sysHistory = { cpuLoad: [], ramPct: [], cpuClock: [], power: [], pCluster: [], sCluster: [], eCluster: [] };
+var sysHistory = { cpuLoad: [], ramPct: [], memoryPressure: [], cpuClock: [], power: [], pCluster: [], sCluster: [], eCluster: [] };
 function pushSysHistory(key, value) {
     if (!Number.isFinite(value)) return;
     sysHistory[key].push(value);
@@ -1351,6 +1351,58 @@ function renderSystemCard(sys, visible, grade) {
     renderHwMetricSparkline('sys-ram-spark', sysHistory.ramPct, ramColor, ramStyle !== 'sparkline');
     if (ramVal) ramVal.textContent = sys.ram_total_gb > 0 ? sys.ram_used_gb.toFixed(1) + ' / ' + sys.ram_total_gb.toFixed(0) + ' GB' : '\u2014';
 
+    // Memory pressure (macOS vm_stat; hidden on platforms without pressure fields)
+    var pressureBlock = document.getElementById('sys-pressure-block');
+    var pressureViz = document.getElementById('sys-pressure-viz');
+    var pressureVal = document.getElementById('sys-pressure-value');
+    var pressureLevel = sys.memory_pressure_level || '';
+    var hasPressure = pressureLevel || sys.memory_compressor_gb > 0 || sys.memory_free_gb > 0;
+    if (pressureBlock) pressureBlock.style.display = hasPressure ? '' : 'none';
+    if (hasPressure) {
+        var compressorRatio = sys.ram_total_gb > 0 ? (sys.memory_compressor_gb / sys.ram_total_gb) * 100 : 0;
+        var pressurePct = pressureLevel === 'critical' ? 96 : pressureLevel === 'warning' ? 72 : Math.min(55, Math.max(5, compressorRatio * 2));
+        pushSysHistory('memoryPressure', pressurePct);
+        var pressureTone = pressureLevel === 'critical'
+            ? { line: '#f87171', fill: 'rgba(248,113,113,0.18)', glow: 'rgba(248,113,113,0.35)' }
+            : pressureLevel === 'warning'
+                ? { line: '#f59e0b', fill: 'rgba(245,158,11,0.18)', glow: 'rgba(245,158,11,0.35)' }
+                : getMetricTone('memory');
+        renderHwMetricSparkline('sys-pressure-spark', sysHistory.memoryPressure, pressureTone.line, true);
+        // Structured breakdown rows
+        var bkFree = document.getElementById('sys-pressure-free');
+        var bkWired = document.getElementById('sys-pressure-wired');
+        var bkComp = document.getElementById('sys-pressure-compressed');
+        var bkPurg = document.getElementById('sys-pressure-purgeable');
+        var bkInact = document.getElementById('sys-pressure-inactive');
+        var wiredGb = sys.memory_wired_gb || 0;
+        var purgeableGb = sys.memory_purgeable_gb || 0;
+        var inactiveGb = sys.memory_inactive_gb || 0;
+        if (bkFree) bkFree.textContent = sys.memory_free_gb > 0 ? sys.memory_free_gb.toFixed(1) + ' GB' : '—';
+        if (bkWired) {
+            bkWired.textContent = wiredGb > 0 ? wiredGb.toFixed(1) + ' GB' : '—';
+            bkWired.className = 'mem-pressure-val' + (wiredGb > 8 ? ' mem-pressure-val--warn' : '');
+        }
+        if (bkComp) bkComp.textContent = sys.memory_compressor_gb > 0
+            ? sys.memory_compressor_gb.toFixed(1) + ' GB (' + (sys.memory_compressed_gb || 0).toFixed(1) + ' logical)'
+            : '—';
+        if (bkPurg) bkPurg.textContent = purgeableGb > 0
+            ? purgeableGb.toFixed(1) + ' GB'
+            : '—';
+        if (bkInact) bkInact.textContent = inactiveGb > 0
+            ? inactiveGb.toFixed(1) + ' GB'
+            : '—';
+
+        // Keep the old pressureVal for tooltip accessibility but hide the element
+        if (pressureVal) pressureVal.style.display = 'none';
+
+        // Wire the purge button once
+        var purgeBtn = document.getElementById('sys-pressure-purge-btn');
+        if (purgeBtn && !purgeBtn._wired) {
+            purgeBtn._wired = true;
+            purgeBtn.addEventListener('click', () => _triggerMemoryPurge('sys-pressure-purge-btn', 'sys-pressure-purge-status', 'sys-pressure-purge-label'));
+        }
+    }
+
     // Clock
     var clockViz = document.getElementById('sys-clock-viz');
     var clockVal = document.getElementById('sys-clock-value');
@@ -1399,20 +1451,41 @@ function renderSystemCard(sys, visible, grade) {
     if (clustersBlock && hasClusters) {
         clustersBlock.style.display = '';
 
+        var pCores = sys.p_cores || 0;
+        var eCores = sys.e_cores || 0;
+
         // Push history for each cluster
         if (pActive > 0) pushSysHistory('pCluster', pActive);
         if (sActive > 0) pushSysHistory('sCluster', sActive);
         if (eActive > 0) pushSysHistory('eCluster', eActive);
 
+        function clusterVal(pct, freqMhz) {
+            var s = Math.round(pct) + '%';
+            if (freqMhz > 0) s += ' · ' + (freqMhz >= 1000 ? (freqMhz / 1000).toFixed(2) + ' GHz' : freqMhz + ' MHz');
+            return s;
+        }
+
+        // Build cluster labels from sysctl names e.g. "Super (6)", "Performance-A (6)"
+        var pClusterName = sys.p_cluster_name || '';
+        var secClusterName = sys.secondary_cluster_name || '';
+        var sCores = sys.s_cores || 0;
+
+        function clusterLabel(sysctlName, coreCount, suffix) {
+            var base = sysctlName ? sysctlName : suffix;
+            return coreCount > 0 ? base + ' (' + coreCount + ')' : base;
+        }
+
         // P-cores row
         var pRow = document.getElementById('sys-cluster-p-row');
         var pBar = document.getElementById('sys-cluster-p-bar');
         var pVal = document.getElementById('sys-cluster-p-value');
+        var pName = document.getElementById('sys-cluster-p-name');
         if (pRow && pBar && pVal) {
             pRow.style.display = '';
             var pTone = getMetricTone('load');
             renderHwBar(pBar, Math.min(100, pActive), pTone, false);
-            pVal.textContent = Math.round(pActive) + '%';
+            pVal.textContent = clusterVal(pActive, sys.p_cluster_freq_mhz || 0);
+            if (pName) pName.textContent = clusterLabel(pClusterName, pCores, 'P-Cores');
             renderHwMetricSparkline('sys-cluster-p-spark', sysHistory.pCluster, pTone.line, true);
         }
 
@@ -1420,11 +1493,16 @@ function renderSystemCard(sys, visible, grade) {
         var sRow = document.getElementById('sys-cluster-s-row');
         var sBar = document.getElementById('sys-cluster-s-bar');
         var sVal = document.getElementById('sys-cluster-s-value');
+        var sName = document.getElementById('sys-cluster-s-name');
         if (sActive > 0 && sRow && sBar && sVal) {
             sRow.style.display = '';
             var sTone = getMetricTone('load');
             renderHwBar(sBar, Math.min(100, sActive), sTone, false);
-            sVal.textContent = Math.round(sActive) + '%';
+            sVal.textContent = clusterVal(sActive, sys.s_cluster_freq_mhz || 0);
+            var sLabelName = (secClusterName && eActualCores > 0)
+                ? secClusterName + '-A'
+                : (secClusterName || '');
+            if (sName) sName.textContent = clusterLabel(sLabelName, sCores, 'S-Cores');
             renderHwMetricSparkline('sys-cluster-s-spark', sysHistory.sCluster, sTone.line, true);
         } else if (sRow) {
             sRow.style.display = 'none';
@@ -1434,11 +1512,14 @@ function renderSystemCard(sys, visible, grade) {
         var eRow = document.getElementById('sys-cluster-e-row');
         var eBar = document.getElementById('sys-cluster-e-bar');
         var eVal = document.getElementById('sys-cluster-e-value');
-        if (eRow && eBar && eVal) {
+        var eName = document.getElementById('sys-cluster-e-name');
+        var eActualCores = sCores > 0 ? eCores : eCores;
+        if (eActualCores > 0 && eRow && eBar && eVal) {
             eRow.style.display = '';
             var eTone = getMetricTone('load');
             renderHwBar(eBar, Math.min(100, eActive), eTone, false);
-            eVal.textContent = Math.round(eActive) + '%';
+            eVal.textContent = clusterVal(eActive, sys.e_cluster_freq_mhz || 0);
+            if (eName) eName.textContent = clusterLabel(secClusterName ? secClusterName + '-B' : '', eActualCores, 'E-Cores');
             renderHwMetricSparkline('sys-cluster-e-spark', sysHistory.eCluster, eTone.line, true);
         }
     } else if (clustersBlock) {
@@ -1451,6 +1532,81 @@ function setMetricSectionVisibility(cardId, visible, sectionId) {
     if (!card) return;
     const section = sectionId ? document.getElementById(sectionId) : card.closest('.metric-section');
     if (section) section.style.display = visible ? '' : 'none';
+}
+
+// ── Memory purge + top-process helpers ───────────────────────────────────────
+
+// Shared purge handler used by both the dashboard card and nav hovercard buttons.
+// btnId: element to show spinner on, statusId: status message element, labelId: button label element.
+async function _triggerMemoryPurge(btnId, statusId, labelId) {
+    const btn = document.getElementById(btnId);
+    const statusEl = document.getElementById(statusId);
+    const labelEl = document.getElementById(labelId);
+    if (!btn || btn._purging) return;
+    btn._purging = true;
+    if (labelEl) labelEl.textContent = 'Requesting…';
+    if (statusEl) { statusEl.style.display = ''; statusEl.textContent = 'Waiting for macOS admin dialog…'; statusEl.className = 'mem-pressure-purge-status'; }
+
+    try {
+        const res = await fetch('/system/purge', { method: 'POST', headers: window.authHeaders ? window.authHeaders() : {} });
+        const data = await res.json();
+        const msg = data.message || data.error || (data.ok ? 'Done.' : `Request failed (${res.status}).`);
+        if (statusEl) {
+            statusEl.textContent = msg;
+            statusEl.className = 'mem-pressure-purge-status' + (data.ok ? ' mem-pressure-purge-status--ok' : ' mem-pressure-purge-status--err');
+        }
+    } catch {
+        if (statusEl) {
+            statusEl.textContent = 'Request failed — check server connection.';
+            statusEl.className = 'mem-pressure-purge-status mem-pressure-purge-status--err';
+        }
+    } finally {
+        btn._purging = false;
+        if (labelEl) labelEl.textContent = 'Free Memory';
+        // Auto-hide status after 6 s
+        if (statusEl) setTimeout(() => { statusEl.style.display = 'none'; }, 6000);
+    }
+}
+
+// Fetch top memory processes and render them into a container element.
+async function _renderTopProcesses(containerId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.style.display = '';
+    el.textContent = 'Loading…';
+    el.className = 'mem-pressure-proc-loading';
+    try {
+        const res = await fetch('/system/top-processes', { headers: window.authHeaders ? window.authHeaders() : {} });
+        const procs = await res.json();
+        el.textContent = '';
+        el.className = '';
+        if (!Array.isArray(procs) || procs.length === 0) {
+            el.textContent = 'No process data available.';
+            el.className = 'mem-pressure-proc-empty';
+            return;
+        }
+        const title = document.createElement('div');
+        title.className = 'mem-pressure-proc-title';
+        title.textContent = 'Top processes by RAM';
+        el.appendChild(title);
+        procs.slice(0, 10).forEach(p => {
+            const row = document.createElement('div');
+            row.className = 'mem-pressure-proc-row';
+            const name = document.createElement('span');
+            name.className = 'mem-pressure-proc-name';
+            name.title = p.command;
+            name.textContent = p.name;
+            const mb = document.createElement('span');
+            mb.className = 'mem-pressure-proc-mb';
+            mb.textContent = Math.round(p.rss_mb) + ' MB';
+            row.appendChild(name);
+            row.appendChild(mb);
+            el.appendChild(row);
+        });
+    } catch {
+        el.textContent = 'Could not load processes.';
+        el.className = 'mem-pressure-proc-empty';
+    }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

@@ -278,7 +278,10 @@
 
  .hw-metric-block {
    background:
-     linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012));
+     radial-gradient(circle at 15% 15%, color-mix(in srgb, var(--surface-card-ambient-a) 28%, transparent), transparent 26%),
+     radial-gradient(circle at 85% 18%, color-mix(in srgb, var(--surface-card-ambient-b) 20%, transparent), transparent 24%),
+     linear-gradient(180deg, color-mix(in srgb, var(--surface-card-elevated) 90%, rgba(2, 6, 23, 0.97)),
+                       color-mix(in srgb, var(--surface-card-base) 92%, rgba(2, 6, 23, 0.98)));
    border: 1px solid var(--surface-card-overlay);
    border-radius: 16px;
    padding: 14px;
@@ -289,7 +292,8 @@
     min-height: 188px;
     transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease, background 0.25s ease;
    box-shadow:
-     0 8px 18px rgba(0, 0, 0, 0.12),
+     0 10px 22px rgba(0, 0, 0, 0.24),
+     0 3px 10px rgba(0, 0, 0, 0.18),
      inset 0 1px 0 rgba(255, 255, 255, 0.04);
    position: relative;
    overflow: hidden;
@@ -303,13 +307,14 @@
  }
 
  .hw-metric-block:hover {
-   border-color: var(--surface-card-line);
-   background:
-     linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+   border-color: var(--surface-card-line-strong);
    transform: translateY(-2px);
    box-shadow:
-     0 12px 24px rgba(0, 0, 0, 0.16),
-     inset 0 1px 0 rgba(255, 255, 255, 0.05);
+     0 18px 42px rgba(0, 0, 0, 0.45),
+     0 4px 16px rgba(0, 0, 0, 0.32),
+     0 0 40px var(--surface-card-glow),
+     inset 0 1px 0 rgba(255, 255, 255, 0.08),
+     inset 0 -1px 0 rgba(0, 0, 0, 0.25);
  }
 
  .hw-metric-block::before {
@@ -317,7 +322,7 @@
    position: absolute;
    inset: 0;
    pointer-events: none;
-   background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 38%);
+   background: linear-gradient(180deg, color-mix(in srgb, var(--surface-card-ambient-a) 18%, transparent), transparent 40%);
    opacity: 0.9;
  }
 
@@ -1326,8 +1331,9 @@
 
   .hw-clock-system-meta {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 12px;
     min-width: 0;
   }
@@ -1683,11 +1689,16 @@
     animation: none;
   }
 
-  /* Metric block hover glow */
+  /* Metric block hover glow: subtle, matches inference cards */
   .hw-metric-block:hover {
-    border-color: var(--surface-card-line);
-    background: var(--acc-05);
-    box-shadow: 0 0 18px var(--acc-05);
+    border-color: var(--surface-card-line-strong);
+    box-shadow:
+      0 18px 42px rgba(0, 0, 0, 0.45),
+      0 4px 16px rgba(0, 0, 0, 0.32),
+      0 0 40px var(--surface-card-glow),
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+    transform: translateY(-2px);
     animation: none;
   }
 
@@ -1981,24 +1992,28 @@
 /* Metric blocks */
 [data-theme="light"] .hw-metric-block {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.9));
+    radial-gradient(circle at 85% 14%, color-mix(in srgb, var(--surface-card-ambient-a) 24%, transparent), transparent 26%),
+    radial-gradient(circle at 14% 85%, color-mix(in srgb, var(--surface-card-ambient-b) 16%, transparent), transparent 28%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-card-elevated) 94%, rgba(240, 245, 255, 0.98)),
+                      color-mix(in srgb, var(--surface-card-base) 94%, rgba(245, 249, 255, 0.97)));
   border-color: var(--border-subtle);
   box-shadow:
-    0 8px 18px rgba(15, 23, 42, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
-}
-
-[data-theme="light"] .hw-metric-block:hover {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.94));
-  border-color: var(--surface-card-line);
-  box-shadow:
-    0 12px 24px rgba(15, 23, 42, 0.14),
+    0 10px 22px rgba(15, 23, 42, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
+[data-theme="light"] .hw-metric-block:hover {
+  border-color: var(--surface-card-line-strong);
+  transform: translateY(-2px);
+  box-shadow:
+    0 18px 42px rgba(15, 23, 42, 0.18),
+    0 4px 16px rgba(15, 23, 42, 0.14),
+    0 0 40px var(--surface-card-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
 [data-theme="light"] .hw-metric-block::before {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.6), transparent 38%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-card-ambient-a) 22%, transparent), transparent 40%);
   opacity: 0.9;
 }
 

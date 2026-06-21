@@ -1,7 +1,7 @@
 // ── Navigation ────────────────────────────────────────────────────────────────
 // Tab switching and sidebar collapse.
 
-import { chat, contextCapacityTokens, lastLlamaMetrics, metricSeries, setWsData, wsData } from '../core/app-state.js';
+import { chat, contextCapacityTokens, lastLlamaMetrics, lastSystemMetrics, metricSeries, setWsData, wsData } from '../core/app-state.js';
 import { chatScroll } from './chat-render.js';
 import { showSessionPanel, hideSessionPanel } from './chat-sessions-sidebar.js';
 import { isFocusModeActive, exitFocusMode } from './chat-focus-mode.js';
@@ -146,9 +146,13 @@ function buildIdleCockpitPoints() {
     return [0.18, 0.42, 0.3, 0.54, 0.36, 0.62, 0.4, 0.5, 0.34, 0.46];
 }
 
-function refreshMonitoringChip(isSleeping, isManualSleep, hasActiveEndpoint) {
+function refreshMonitoringChip(mode, isManual, hasActiveEndpoint) {
     const chip = document.getElementById('nav-monitoring-chip');
     if (!chip) return;
+
+    const effectiveMode = mode ?? (wsData?.sleep_mode ? 'sleep' : 'off');
+    const isSleeping = effectiveMode === 'sleep';
+    const isLogsOnly = effectiveMode === 'logs-only';
 
     chip.style.display = hasActiveEndpoint ? 'inline-flex' : 'none';
     if (!hasActiveEndpoint) return;
@@ -157,24 +161,126 @@ function refreshMonitoringChip(isSleeping, isManualSleep, hasActiveEndpoint) {
     const label = document.getElementById('nav-monitoring-label');
 
     const unavailable = chip.getAttribute('data-unavailable') === 'true';
-    chip.classList.toggle('is-paused', isSleeping);
-    chip.setAttribute('aria-pressed', isSleeping ? 'true' : 'false');
+    chip.classList.toggle('is-paused', isSleeping || isLogsOnly);
+    chip.setAttribute('aria-pressed', (isSleeping || isLogsOnly) ? 'true' : 'false');
 
     if (dot) {
-        dot.className = 'status-dot ' + (isSleeping ? 'warning' : 'ok');
+        if (isSleeping) {
+            dot.className = 'status-dot warning';
+        } else if (isLogsOnly) {
+            dot.className = 'status-dot info';
+        } else {
+            dot.className = 'status-dot ok';
+        }
     }
     if (label) {
-        label.textContent = isSleeping ? 'Paused' : 'Monitoring';
+        if (isSleeping) {
+            label.textContent = 'Paused';
+        } else if (isLogsOnly) {
+            label.textContent = 'Logs only';
+        } else {
+            label.textContent = 'Monitoring';
+        }
     }
 
     if (unavailable) {
         chip.setAttribute('title', 'Monitoring control is not available on this server.');
-    } else if (isManualSleep) {
-        chip.setAttribute('title', 'Monitoring paused (manual) — llama-server keeps running. Click to resume.');
+    } else if (isLogsOnly) {
+        chip.setAttribute('title', 'Logs-only mode — only live logs active. Click to change mode.');
+    } else if (isSleeping && isManual) {
+        chip.setAttribute('title', 'Monitoring paused (manual) — llama-server keeps running. Click to change mode.');
     } else if (isSleeping) {
         chip.setAttribute('title', 'Monitoring paused (idle timeout) — llama-server keeps running. Click to resume.');
     } else {
-        chip.setAttribute('title', 'Dashboard monitoring active — click to pause telemetry while server keeps running.');
+        chip.setAttribute('title', 'Dashboard monitoring active — click to cycle modes.');
+    }
+}
+
+function refreshMemoryPressureChip() {
+    const wrap = document.getElementById('nav-memory-pressure-wrap');
+    const chip = document.getElementById('nav-memory-pressure-chip');
+    if (!chip) return;
+    const sys = lastSystemMetrics || {};
+    const level = sys.memory_pressure_level || '';
+    const visible = level === 'warning' || level === 'critical';
+    if (wrap) wrap.style.display = visible ? 'inline-flex' : 'none';
+    else chip.style.display = visible ? 'inline-flex' : 'none';
+    if (!visible) return;
+
+    const dot = document.getElementById('nav-memory-pressure-dot');
+    const label = document.getElementById('nav-memory-pressure-label');
+    if (dot) dot.className = 'status-dot ' + (level === 'critical' ? 'error' : 'warning');
+    if (label) label.textContent = level === 'critical' ? 'Memory critical' : 'Memory pressure';
+
+    const free = Number(sys.memory_free_gb || 0).toFixed(1);
+    const wired = Number(sys.memory_wired_gb || 0);
+    const compressed = Number(sys.memory_compressor_gb || 0).toFixed(1);
+    const isCritical = level === 'critical';
+
+    const hcTitle = document.getElementById('nav-memory-pressure-hovercard-title');
+    const hcStats = document.getElementById('nav-memory-pressure-hovercard-stats');
+    const hcBody = document.getElementById('nav-memory-pressure-hovercard-body');
+    if (hcTitle) hcTitle.textContent = isCritical ? 'Memory Critical' : 'Memory Pressure';
+
+    if (hcStats) {
+        const purgeableGb = Number(sys.memory_purgeable_gb || 0);
+        const inactiveGb = Number(sys.memory_inactive_gb || 0);
+        const entries = [
+            ['Free', `${free} GB`],
+            ['Wired', wired > 0 ? `${wired.toFixed(1)} GB` : '—'],
+            ['Compressed', Number(compressed) > 0 ? `${compressed} GB` : '—'],
+            ['Purgeable', purgeableGb > 0 ? `${purgeableGb.toFixed(1)} GB` : '—'],
+            ['Inactive', inactiveGb > 0 ? `${inactiveGb.toFixed(1)} GB` : '—'],
+        ];
+        hcStats.textContent = '';
+        entries.forEach(([k, v]) => {
+            const row = document.createElement('div');
+            row.className = 'mem-hc-row';
+            const key = document.createElement('span');
+            key.className = 'mem-hc-key';
+            key.textContent = k;
+            const val = document.createElement('span');
+            val.className = 'mem-hc-val';
+            val.textContent = v;
+            row.appendChild(key);
+            row.appendChild(val);
+            hcStats.appendChild(row);
+        });
+    }
+
+    if (hcBody) {
+        const advice = isCritical
+            ? 'Disable mlock in your preset or reduce context to free wired memory. Use "Free Memory" to reclaim inactive pages.'
+            : 'Reduce context, pause downloads, or disable mlock in your preset to relieve pressure.';
+        hcBody.textContent = advice;
+    }
+
+    // Wire purge button once
+    const navPurgeBtn = document.getElementById('nav-pressure-purge-btn');
+    if (navPurgeBtn && !navPurgeBtn._wired) {
+        navPurgeBtn._wired = true;
+        navPurgeBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (navPurgeBtn._purging) return;
+            navPurgeBtn._purging = true;
+            const statusEl = document.getElementById('nav-pressure-purge-status');
+            navPurgeBtn.textContent = 'Requesting…';
+            if (statusEl) { statusEl.style.display = ''; statusEl.textContent = 'Waiting for macOS admin dialog…'; }
+            try {
+                const res = await fetch('/system/purge', { method: 'POST', headers: window.authHeaders ? window.authHeaders() : {} });
+                const data = await res.json();
+                if (statusEl) {
+                    statusEl.textContent = data.message || (data.ok ? 'Done.' : 'Failed.');
+                    statusEl.className = 'mem-pressure-hovercard-purge-status' + (data.ok ? ' purge-ok' : ' purge-err');
+                }
+            } catch {
+                if (statusEl) { statusEl.textContent = 'Request failed.'; statusEl.className = 'mem-pressure-hovercard-purge-status purge-err'; }
+            } finally {
+                navPurgeBtn._purging = false;
+                navPurgeBtn.textContent = 'Free Memory';
+                setTimeout(() => { if (statusEl) statusEl.style.display = 'none'; }, 6000);
+            }
+        });
     }
 }
 
@@ -197,14 +303,19 @@ export function refreshTopCockpit() {
     const genDisplayRate = genRate > 0 ? genRate : (l?.last_generation_tokens_per_sec || 0);
     const generationActive = !!l?.slot_generation_active || (l?.slots_processing || 0) > 0 || genRate > 0;
 
-    const isSleeping = wsData?.sleep_mode === true;
+    const wsMode = wsData?.mode ?? (wsData?.sleep_mode ? 'sleep' : 'off');
+    const isSleeping = wsMode === 'sleep';
     const isManualSleep = isSleeping && wsData?.sleep_mode_manual === true;
+    const isLogsOnly = wsMode === 'logs-only';
     let label = 'idle';
     let stateClass = 'idle';
 
     if (isSleeping) {
         label = 'paused';
         stateClass = 'sleep';
+    } else if (isLogsOnly) {
+        label = 'logs';
+        stateClass = 'logs-only';
     } else if (!hasActiveEndpoint) {
         label = 'attach';
     } else if (promptRate > 0 && genRate <= 0) {
@@ -220,11 +331,12 @@ export function refreshTopCockpit() {
         stateEl.className = 'metric-live-chip nav-cockpit-state ' + stateClass;
     }
     cockpit.classList.toggle('is-live', stateClass === 'live');
-    cockpit.classList.toggle('is-idle', stateClass !== 'live' && stateClass !== 'sleep');
+    cockpit.classList.toggle('is-idle', stateClass !== 'live' && stateClass !== 'sleep' && stateClass !== 'logs-only');
     cockpit.classList.toggle('has-session', hasActiveEndpoint);
 
     // Update monitoring chip in nav-right
-    refreshMonitoringChip(isSleeping, isManualSleep, hasActiveEndpoint);
+    refreshMonitoringChip(wsMode, wsData?.sleep_mode_manual, hasActiveEndpoint);
+    refreshMemoryPressureChip();
 
     if (throughputEl) {
         throughputEl.textContent = 'P ' + (promptDisplayRate > 0 ? promptDisplayRate.toFixed(0) : '—') + ' · G ' + (genDisplayRate > 0 ? genDisplayRate.toFixed(0) : '—');
@@ -341,6 +453,53 @@ export function initNav() {
         collapseBtn.addEventListener('click', toggleSidebarCollapse);
     }
 
+    // Memory pressure chip: hover to preview, click to pin open
+    const memChip = document.getElementById('nav-memory-pressure-chip');
+    const memHovercard = document.getElementById('nav-memory-pressure-hovercard');
+    if (memChip && memHovercard) {
+        let _pinned = false;
+
+        // Move hovercard into body so its fixed positioning is truly viewport-relative
+        // (prevents being clipped by nav strip overflow / containing-block issues)
+        document.body.appendChild(memHovercard);
+
+        function _positionHovercard() {
+            const rect = memChip.getBoundingClientRect();
+            memHovercard.style.top = (rect.bottom + 8) + 'px';
+            const rightEdge = window.innerWidth - rect.right;
+            memHovercard.style.right = Math.max(8, rightEdge) + 'px';
+        }
+
+        function _openHovercard() {
+            _positionHovercard();
+            memHovercard.classList.add('mem-pressure-hovercard--open');
+        }
+        function _closeHovercard() { if (!_pinned) memHovercard.classList.remove('mem-pressure-hovercard--open'); }
+
+        memChip.addEventListener('mouseenter', _openHovercard);
+        memChip.addEventListener('mouseleave', () => {
+            if (!_pinned) setTimeout(() => {
+                if (!memHovercard.matches(':hover')) _closeHovercard();
+            }, 80);
+        });
+
+        memHovercard.addEventListener('mouseenter', _openHovercard);
+        memHovercard.addEventListener('mouseleave', () => { if (!_pinned) _closeHovercard(); });
+
+        memChip.addEventListener('click', (e) => {
+            e.stopPropagation();
+            _pinned = !_pinned;
+            if (_pinned) _openHovercard();
+            else _closeHovercard();
+        });
+        document.addEventListener('click', (e) => {
+            if (!memChip.contains(e.target) && !memHovercard.contains(e.target)) {
+                _pinned = false;
+                _closeHovercard();
+            }
+        });
+    }
+
     // Bind nav logo — returns to home (setup) view when in monitor view
     const navLogo = document.getElementById('nav-logo');
     if (navLogo) {
@@ -350,6 +509,20 @@ export function initNav() {
                 switchView('setup');
             }
         });
+    }
+
+    const navHomeBtn = document.getElementById('nav-home-btn');
+    if (navHomeBtn) {
+        navHomeBtn.addEventListener('click', () => {
+            switchView('setup');
+        });
+        // Hide on welcome screen, show on dashboard
+        const observer = new MutationObserver(() => {
+            navHomeBtn.style.display = document.body.classList.contains('setup-active') ? 'none' : '';
+        });
+        observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+        // Set initial state
+        navHomeBtn.style.display = document.body.classList.contains('setup-active') ? 'none' : '';
     }
 
     const cockpit = document.getElementById('nav-cockpit');
@@ -371,8 +544,6 @@ export function initNav() {
             if (monitoringChip.getAttribute('data-disabled') === 'true') return;
             monitoringChip.setAttribute('data-disabled', 'true');
 
-            const wasSleeping = wsData?.sleep_mode === true;
-
             try {
                 const auth = window.authHeaders ? window.authHeaders() : {};
                 const res = await fetch('/api/sleep-mode/toggle', {
@@ -391,26 +562,30 @@ export function initNav() {
                     return;
                 }
 
-                let nextSleeping = wasSleeping;
+                let nextMode = 'off';
+                let nextSleepModeManual = false;
                 try {
                     const data = await res.json();
-                    if (data != null && typeof data.sleep_mode === 'boolean') {
-                        nextSleeping = data.sleep_mode;
-                    } else if (data != null && typeof data.enabled === 'boolean') {
-                        nextSleeping = data.enabled;
-                    }
+                    nextMode = data.mode || (data.sleep_mode ? 'sleep' : 'off');
+                    nextSleepModeManual = data.sleep_mode_manual ?? !!data.enabled;
                 } catch (_) {
-                    nextSleeping = !wasSleeping;
+                    nextMode = 'sleep';
                 }
 
-                setWsData({ ...(wsData || {}), sleep_mode: nextSleeping, sleep_mode_manual: nextSleeping });
+                setWsData({
+                    ...(wsData || {}),
+                    mode: nextMode,
+                    sleep_mode: nextMode !== 'off',
+                    sleep_mode_manual: nextSleepModeManual,
+                });
                 refreshTopCockpit();
 
-                if (nextSleeping) {
-                    showToast('Monitoring paused — llama-server keeps running.', 'success');
-                } else {
-                    showToast('Monitoring resumed.', 'success');
-                }
+                const messages = {
+                    'off': 'Monitoring resumed.',
+                    'logs-only': 'Logs-only mode — only live logs active.',
+                    'sleep': 'Monitoring paused — llama-server keeps running.',
+                };
+                showToast(messages[nextMode] || ('Mode: ' + nextMode), 'success');
             } catch (_err) {
                 showToast('Monitoring toggle failed (network error).', 'error');
             } finally {

@@ -437,24 +437,29 @@ function updateDashboard(d) {
     // Agent status
     updateAgentStatus(d);
 
-    // T-055: if asleep, skip heavy telemetry updates (GPU, system, logs, sparklines)
-    const isSleeping = d.sleep_mode === true;
+    // T-055: 3-way sleep_mode handling
+    // mode: "off" | "logs-only" | "sleep"
+    const mode = d.mode ?? (d.sleep_mode ? 'sleep' : 'off');
+    const isSleeping = mode === 'sleep';
+    const isLogsOnly = mode === 'logs-only';
 
     // Inference metrics (lightweight; always update for basic status)
     updateInferenceMetrics(d);
-    _updateLogTail(d);
+
+    // Log tail: enabled in off and logs-only (KEY feature of logs-only mode)
+    if (!isSleeping) _updateLogTail(d);
     if (activeTab === 'chat') {
         refreshChatTelemetry();
     }
     refreshTopCockpit();
 
-    // GPU card — freeze when asleep
-    if (activeTab === 'server' && !isSleeping) updateGpuCard(d);
+    // GPU card — freeze in both sleep and logs-only
+    if (activeTab === 'server' && mode === 'off') updateGpuCard(d);
 
-    // System card — freeze when asleep
-    if (activeTab === 'server' && !isSleeping) updateSystemCard(d);
+    // System card — freeze in both sleep and logs-only
+    if (activeTab === 'server' && mode === 'off') updateSystemCard(d);
 
-    // Logs — freeze when asleep
+    // Logs tab: enabled in off and logs-only
     if (activeTab === 'logs' && !isSleeping) updateLogs(d);
 
     // Badges

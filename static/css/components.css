@@ -22,8 +22,7 @@
 .btn-preset,
 .btn-preset-reset,
 .btn-firewall-fix,
-.btn-lhm-inline,
-.btn-session-new {
+.btn-lhm-inline {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -547,11 +546,10 @@ button:disabled {
   .nav-user-btn,
   .btn-modal-save,
   .btn-modal-cancel,
-  .btn-preset,
-  .btn-preset-reset,
-  .btn-firewall-fix,
-  .btn-lhm-inline,
-  .btn-session-new {
+.btn-preset,
+.btn-preset-reset,
+.btn-firewall-fix,
+.btn-lhm-inline {
     transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease !important;
   }
 
@@ -1298,6 +1296,12 @@ button:disabled {
   color: var(--color-warning);
 }
 
+.mm-mtp-badge {
+  background: color-mix(in srgb, #6366f1 14%, transparent);
+  border-color: color-mix(in srgb, #6366f1 28%, transparent);
+  color: #a5b4fc;
+}
+
 .mm-card-meta {
   font-size: 0.7rem;
   font-family: var(--font-mono, monospace);
@@ -2035,8 +2039,7 @@ button:disabled {
 [data-theme="light"] .btn-preset,
 [data-theme="light"] .btn-preset-reset,
 [data-theme="light"] .btn-firewall-fix,
-[data-theme="light"] .btn-lhm-inline,
-[data-theme="light"] .btn-session-new {
+[data-theme="light"] .btn-lhm-inline {
   background:
     radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.9), transparent 30%),
     linear-gradient(180deg, rgba(241, 245, 249, 0.8), rgba(248, 250, 252, 0.9));
@@ -3230,12 +3233,108 @@ button:disabled {
   opacity: 0.75;
 }
 
+.preset-vram-sysram {
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+  opacity: 0.65;
+}
+
+.preset-vram-sysram--warn {
+  color: #f59e0b;
+  opacity: 0.9;
+}
+
 .preset-vram-loading {
   font-size: 11.5px;
   color: var(--color-text-muted);
   opacity: 0.45;
 }
 
+
+/* ── Memory pressure dashboard card breakdown ── */
+
+.mem-pressure-breakdown {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  margin-top: 6px;
+}
+.mem-pressure-row { display: contents; }
+.mem-pressure-key {
+  font-size: 10.5px;
+  color: var(--color-text-secondary);
+  opacity: 0.7;
+  white-space: nowrap;
+}
+.mem-pressure-val {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary, #e2e8f0);
+  text-align: right;
+}
+.mem-pressure-val--warn { color: #f59e0b; }
+
+.mem-pressure-purge-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 5px 0;
+  border-radius: 7px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+  color: #f59e0b;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.mem-pressure-purge-btn:hover { background: rgba(245, 158, 11, 0.18); }
+
+.mem-pressure-purge-status {
+  margin-top: 4px;
+  font-size: 10px;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+.mem-pressure-purge-status--ok { color: #4ade80; }
+.mem-pressure-purge-status--err { color: #f87171; }
+
+.mem-pressure-proc-title {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+  opacity: 0.6;
+  margin-bottom: 4px;
+}
+.mem-pressure-proc-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 1px 0;
+}
+.mem-pressure-proc-name {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 70%;
+}
+.mem-pressure-proc-mb {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary, #e2e8f0);
+  white-space: nowrap;
+}
+.mem-pressure-proc-loading,
+.mem-pressure-proc-empty {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  opacity: 0.5;
+}
 
 /* ── Preset context pills ── */
 .preset-context-pills {
@@ -3311,4 +3410,39 @@ button:disabled {
   background: color-mix(in srgb, var(--color-error) 15%, transparent);
   color: var(--color-error);
   border: 1px solid color-mix(in srgb, var(--color-error) 30%, transparent);
+}
+
+/* ── Global styled tooltip ───────────────────────────────────────────────────
+   Intercepts [title] attrs across the app to show a hovercard matching the
+   guided-hovercard pattern (SUGGESTIONS button, memory pressure chip, etc.).  */
+
+#global-tooltip {
+  position: fixed;
+  z-index: 9100;
+  max-width: 300px;
+  padding: 10px 13px;
+  border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at top left, var(--acc-18, rgba(168, 85, 247, 0.1)), transparent 40%),
+    linear-gradient(180deg, rgba(18, 21, 29, 0.97), rgba(17, 20, 28, 0.94));
+  box-shadow: 0 20px 44px rgba(2, 6, 23, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+[data-theme="light"] #global-tooltip {
+  background:
+    radial-gradient(circle at top left, rgba(124, 58, 237, 0.06), transparent 40%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
+  border-color: rgba(0, 0, 0, 0.09);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  color: var(--color-text-secondary);
 }

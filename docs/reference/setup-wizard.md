@@ -178,6 +178,15 @@ Shown automatically when the model has `mtp_depth > 0` (detected from GGUF metad
 - **Enable MTP (experimental)** checkbox — adds `--spec-type draft-mtp,ngram-mod`. It defaults off on Apple Metal because current llama.cpp builds can lose throughput there; other backends keep the opt-out default.
 - **Draft tokens/step** (`hw-mtp-depth`) — sets `--spec-draft-n-max` and forces `--parallel 1`. Benchmark enabled versus disabled because results vary by model, backend, context length, and acceptance rate.
 
+#### mlock Warning (macOS)
+
+When mlock is checked and the VRAM estimate is Tight or Risk, a warning appears:
+- mlock pins model memory so macOS cannot page it out.
+- On unified-memory Macs, with a tight estimate, this can push macOS into compression or swap and make the desktop unresponsive.
+- If the warning is shown, either disable mlock, reduce context size, or choose a smaller quant.
+
+This guidance is also shown in the preset editor.
+
 #### Advanced Options Grid
 
 | Control | ID | Default | Notes |
@@ -308,8 +317,9 @@ Only one should be set at a time. If both are configured, the output mode settin
 
 ![HuggingFace community picks](../screenshots/spawn-wizard-step2-community-picks.png)
 
-- Public repos can be searched and browsed without an HF token.
-- A read-only token is recommended for gated/private repos and to avoid stricter anonymous rate limits.
+- Public repos can be searched and browsed without an HF token (no HuggingFace login needed).
+- All /api/hf/... calls require llama-monitor's own api-token via Authorization header.
+- A read-only HF token is recommended for gated/private repos and to avoid stricter anonymous rate limits.
 - The discover panel includes:
   - Curated community picks (including MoE models).
   - “Trending” and model-specific views (e.g., Qwen3).
@@ -343,7 +353,7 @@ Search the HuggingFace Hub for GGUF model repos.
 
 - Requires: `api-token`
 - Rate limit: 10 requests per 60 seconds
-- Sort options: `downloads` (default), `likes`, `trending`, `recent`
+- Sort options: `downloads` (default), `likes`, `trending`, `createdAt`
 
 #### POST /api/hf/author-models
 Browse all GGUF repos by a specific author.
@@ -355,7 +365,7 @@ Browse all GGUF repos by a specific author.
 ```
 
 #### GET /api/hf/community-picks
-Returns the curated community picks list (hot models shown in the wizard discover panel). No auth required for reads; updating the list requires `api-token`.
+Returns the curated community picks list (hot models shown in the wizard discover panel). Requires `api-token`.
 
 #### GET /api/hf/quantizers
 Returns the list of tracked quantizer authors (used to filter search results). Requires `api-token`.
@@ -477,11 +487,14 @@ Start a streaming download. Returns immediately with a download ID; poll `/statu
 ```
 
 - Requires: `api-token`
-- Rate limit: 10-second cooldown between starts
-- Max 5 concurrent downloads
+- Rate limit: 10-second cooldown between starts; companion downloads (e.g. mmproj alongside a model) bypass this cooldown so both can start at the same time.
+- Max 2 concurrent downloads (to avoid overwhelming the connection and HF rate limits).
+- Duplicate guard: rejects starting a second download for the same (repo, file) while the first is running.
+- Existing-file guard: refuses to re-download if the target file already exists on disk (not a `.part` file).
 - Path traversal guard: rejects `..`, leading `/`, leading `\`
-- Uses `connect_timeout(30s)` only — no total timeout (large files stream indefinitely)
-- On failure: partial file renamed to `.part`; terminal logs record reason
+- Uses `connect_timeout(30s)` only — no total timeout (large files stream indefinitely).
+- On failure: partial file renamed to `.part`; terminal logs record reason.
+- Error handling: stream errors are classified (transient, timeout, auth, not-found) and surfaced as human-readable toasts; the frontend shows start, conflict, and failure toasts so the user always knows the state.
 
 #### GET /api/models/download/:id/status
 Poll download progress.
@@ -514,6 +527,12 @@ When the download starts, the model card displays an indeterminate progress bar 
 
 ![HuggingFace Download Idle](../screenshots/spawn-wizard-hf-download-idle.png)
 ![HuggingFace Download Progress](../screenshots/spawn-wizard-hf-download-progress.png)
+
+### MTP and IQ Quant Detection
+
+The model browser and library recognize and label:
+- MTP (Multi-Token Prediction) / draft models: detected via filename patterns including `-mtp.gguf` (Unsloth convention). These models are shown with an MTP badge (indigo pill) in the model cards.
+- IQ quantizations: filenames with `-IQ` or `_IQ` (e.g., `IQ2_XXS`, `IQ3_M`, `IQ4_XL`) are correctly parsed, including the full `IQ` prefix in the quant label.
 
 ### Model Card
 
@@ -566,7 +585,7 @@ Scan local model directories from Ollama, LM Studio, Jan, GPT4All, and the Huggi
 | Tool | macOS | Linux | Windows |
 |------|-------|-------|---------|
 | Ollama | `~/.ollama/models/` | `~/.ollama/models/` | `%USERPROFILE%\.ollama\models\` |
-| LM Studio | `~/.lmstudio/models/`, `~/.cache/lm-studio/models/` | same | `%USERPROFILE%\.lmstudio\models\` |
+| LM Studio | `~/.lmstudio/models/`, `~/.cache/lm-studio/models/`, `~/Library/Application Support/LM Studio/models/` | `~/.lmstudio/models/`, `~/.cache/lm-studio/models/` | `%USERPROFILE%\.lmstudio\models\` |
 | Jan | `~/Library/Application Support/Jan/models/` | `~/.jan/models/` | `%APPDATA%\Jan\models\` |
 | GPT4All | `~/Library/Application Support/nomic.ai/GPT4All/` | `~/.local/share/nomic.ai/GPT4All/` | `%LOCALAPPDATA%\nomic.ai\GPT4All\` |
 | HuggingFace | `~/.cache/huggingface/hub/` | same | `%USERPROFILE%\.cache\huggingface\hub\` |
@@ -588,7 +607,9 @@ Scan local model directories from Ollama, LM Studio, Jan, GPT4All, and the Huggi
 ## Model Introspection (GGUF Metadata Reader)
 
 #### POST /api/models/gguf-meta
-Read the KV metadata header of a GGUF file directly without invoking an external binary. Works on GGUF v1, v2, and v3 files. Calling this on a 70B model is effectively instant because tensor weights are never touched.
+Read the KV metadata header of a GGUF file directly from the binary — no llama-server
+process is required. Works on GGUF v1, v2, and v3. Calling this on a 70B model is
+effectively instant because tensor weights are never touched. Works on GGUF v1, v2, and v3 files. Calling this on a 70B model is effectively instant because tensor weights are never touched.
 
 ```json
 // Request
@@ -677,6 +698,96 @@ Identify the HuggingFace source of a local GGUF file from its filename. Searches
 - `model_stem`: the filename-derived stem used for search (quant suffixes, version tags, and MTP markers stripped)
 - `errors`: any errors encountered during resolution (e.g., network failures); may be non-empty even when candidates are returned
 - Candidate scoring considers filename similarity, file existence in the repo, size match, download count, and GGUF tag presence
+
+### Spawn Wizard Helpers
+
+#### POST /api/spawn-wizard/mtp-draft-check
+Check whether a compatible MTP draft model is available (local or on HF) for a Gemma4 model.
+Requires `api-token`.
+
+```json
+// Request
+{ "model_name": "Gemma4-...", "repo_id": "owner/repo", "quant_label": "Q8_0" }
+
+// Response
+{
+  "ok": true,
+  "draft_available": true,
+  "draft_path": "/path/to/draft.gguf",
+  "tier": "gemma4-...",
+  "hf_download_url": "https://huggingface.co/...",
+  "hf_repo_id": "owner/draft-repo",
+  "hf_filename": "draft.gguf",
+  "local_filename": "Gemma4-...-draft.gguf"
+}
+```
+
+- Validates whether the model name matches a known Gemma4 tier.
+- Checks for an existing local draft model.
+- Resolves Unsloth HF draft model info for download.
+
+#### POST /api/spawn-wizard/import-launch-file
+Import settings from an existing launch script (e.g. from another tool).
+Requires `api-token`.
+
+```json
+// Request
+{ "file": "..." }   // contents of the launch file
+
+// Response
+{ "ok": true, "preset": { ... }, "warnings": [ "..." ] }
+```
+
+### Chat Template Endpoints
+
+These endpoints manage Jinja chat templates in the local template library.
+All require `api-token`. Templates are stored under the config directory
+(e.g. `~/.config/llama-monitor/chat-templates/`).
+
+#### POST /api/chat-template/fetch
+Fetch a chat template from a URL (https only; SSRF guard applied).
+
+```json
+{ "source_type": "url", "source": "https://example.com/template.jinja" }
+// Response: { "ok": true, "template": "..." }
+```
+
+#### POST /api/chat-template/upload
+Save a chat template to the local library; returns a template ID and on-disk path.
+
+```json
+{ "template": "..." }
+// Response: { "ok": true, "template_id": "temp-...", "path": "/path/to/temp-....jinja" }
+```
+
+#### GET /api/chat-template/dir
+Return the path to the local chat-template directory (creates it if needed).
+
+```json
+// Response: { "ok": true, "path": "/path/to/chat-templates" }
+```
+
+#### POST /api/chat-template/install-hf
+Install a template from HuggingFace by repo and file; caches the file so it is not
+redownloaded unless `force` is true.
+
+```json
+{ "repo": "owner/repo", "file": "template.jinja", "name": "qwen3.6-fixed" }
+// Response: { "ok": true, "path": "/path/to/qwen3.6-fixed.jinja", "already_existed": false }
+```
+
+- Uses the configured HF token (if set) for gated repos.
+
+#### POST /api/chat-template/install-url
+Install a template from a GitHub raw URL (only raw.githubusercontent.com allowed);
+cached by name like install-hf.
+
+```json
+{ "url": "https://raw.githubusercontent.com/...", "name": "gemma4-agentic" }
+// Response: { "ok": true, "path": "/path/to/gemma4-agentic.jinja", "already_existed": false }
+```
+
+- Max 1 MB; no redirects; no SSRF escape via host allowlist.
 
 ---
 
@@ -932,8 +1043,8 @@ Returns model-family sampling recommendations for the Step 4 wizard review form 
 - HF token never appears in logs; masked in the GET response.
 - Download `file_path` rejects `..`, leading `/`, leading `\` (path traversal guard).
 - `target_path` for downloads is canonicalized and verified to remain within `models_dir`.
-- Download rate-limited: 10-second cooldown between starts, max 5 concurrent.
-- Model introspection runs `llama-server` as a subprocess with a 30-second timeout; never passes unsanitized user input as shell arguments.
+- Download rate-limited: 10-second cooldown between starts, max 2 concurrent. Includes duplicate and existing-file guards.
+- Model introspection primarily reads the GGUF binary header directly (fast, no external process) via `/api/models/gguf-meta`; the legacy `/api/model/introspect` still runs `llama-server` as a subprocess with a 30-second timeout. Neither endpoint passes unsanitized user input as shell arguments.
 - Benchmark is rate-limited with a 15-second cooldown to prevent repeated heavy loads on the running llama-server.
 
 ---
@@ -947,7 +1058,10 @@ Returns model-family sampling recommendations for the Step 4 wizard review form 
 | `src/model_download.rs` | Streaming download manager with resume support |
 | `src/llama/gguf_meta.rs` | GGUF metadata reader (binary header parsing) |
 | `src/hf/mod.rs` | HuggingFace API client, file listing, token management, resolve origin, quantizers |
-| `src/web/api.rs` | All wizard-related route handlers |
+| `src/web/api/spawn_wizard.rs` | Wizard-related route handlers |
+| `src/web/api/vram.rs` | VRAM estimation route handlers |
+| `src/web/api/models.rs` | Model library and GGUF metadata routes |
+| `src/web/api/mod.rs` | API module registry (31 route modules) |
 | `static/js/features/spawn-wizard.js` | Wizard frontend (all 5 steps) |
 | `static/css/spawn-wizard.css` | Wizard styles |
 | `docs/reference/vram-estimator.md` | VRAM estimation formulas and heuristics reference |

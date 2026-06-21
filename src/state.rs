@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU8};
 use std::sync::{Arc, Mutex};
 
 use crate::chat_storage::ChatStorage;
@@ -275,6 +275,11 @@ pub struct SleepModeConfig {
     /// WebSocket broadcast interval (milliseconds) while asleep.
     #[serde(default = "default_sleep_ws_interval_ms")]
     pub sleep_ws_interval_ms: u64,
+    /// WebSocket broadcast interval (milliseconds) in logs-only mode.
+    /// Falls between normal and sleep: faster than sleep so logs flow,
+    /// slower than normal to save power.
+    #[serde(default = "default_logs_only_ws_interval_ms")]
+    pub logs_only_ws_interval_ms: u64,
 }
 
 impl Default for SleepModeConfig {
@@ -286,6 +291,7 @@ impl Default for SleepModeConfig {
             sleep_sys_interval_secs: default_sleep_sys_interval_secs(),
             sleep_llama_interval_secs: default_sleep_llama_interval_secs(),
             sleep_ws_interval_ms: default_sleep_ws_interval_ms(),
+            logs_only_ws_interval_ms: default_logs_only_ws_interval_ms(),
         }
     }
 }
@@ -312,6 +318,10 @@ fn default_sleep_llama_interval_secs() -> u64 {
 
 fn default_sleep_ws_interval_ms() -> u64 {
     10_000
+}
+
+fn default_logs_only_ws_interval_ms() -> u64 {
+    2_000
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
@@ -690,7 +700,8 @@ pub struct AppState {
     pub last_spawn_cmd: Arc<Mutex<String>>,
 
     // Sleep/low-power mode (T-042/T-043)
-    pub sleep_mode: Arc<AtomicBool>,
+    // 0 = Off (full monitoring), 1 = LogsOnly, 2 = Sleep (full pause)
+    pub sleep_mode: Arc<AtomicU8>,
     pub sleep_mode_manual: Arc<AtomicBool>,
     pub sleep_mode_config: Arc<Mutex<SleepModeConfig>>,
     pub sleep_notify: Arc<tokio::sync::Notify>,
@@ -796,7 +807,7 @@ impl AppState {
             tls_config: Arc::new(Mutex::new(tls_config)),
             monitor_inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
             last_spawn_cmd: Arc::new(Mutex::new(String::new())),
-            sleep_mode: Arc::new(AtomicBool::new(false)),
+            sleep_mode: Arc::new(AtomicU8::new(0)), // 0 = Off (full monitoring)
             sleep_mode_manual: Arc::new(AtomicBool::new(false)),
             sleep_mode_config: Arc::new(Mutex::new(sleep_cfg)),
             sleep_notify: Arc::new(tokio::sync::Notify::new()),
@@ -1290,6 +1301,33 @@ impl AppState {
 
     pub fn set_tls_config(&self, config: TLSConfig) {
         *self.tls_config.lock().unwrap() = config;
+    }
+
+    /// Sleep mode helpers (T-043 3-way):
+    /// 0 = Off (full monitoring), 1 = LogsOnly, 2 = Sleep (full pause)
+    #[allow(dead_code)]
+    pub fn is_sleeping(&self) -> bool {
+        self.sleep_mode.load(std::sync::atomic::Ordering::Relaxed) >= 2
+    }
+
+    #[allow(dead_code)]
+    pub fn is_logs_only(&self) -> bool {
+        self.sleep_mode.load(std::sync::atomic::Ordering::Relaxed) == 1
+    }
+
+    #[allow(dead_code)]
+    pub fn is_full(&self) -> bool {
+        self.sleep_mode.load(std::sync::atomic::Ordering::Relaxed) == 0
+    }
+
+    /// Current mode as string for APIs/WS.
+    pub fn sleep_mode_str(&self) -> &'static str {
+        match self.sleep_mode.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => "off",
+            1 => "logs-only",
+            2 => "sleep",
+            _ => "off",
+        }
     }
 }
 

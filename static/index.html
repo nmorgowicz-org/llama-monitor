@@ -121,6 +121,20 @@
                     <span class="status-dot ok" id="nav-monitoring-dot"></span>
                     <span id="nav-monitoring-label">Monitoring</span>
                 </button>
+                <div class="mem-pressure-wrap" id="nav-memory-pressure-wrap" style="display:none;">
+                    <button class="nav-monitoring-chip memory-pressure-chip" id="nav-memory-pressure-chip" type="button">
+                        <span class="status-dot warning" id="nav-memory-pressure-dot"></span>
+                        <span id="nav-memory-pressure-label">Memory</span>
+                    </button>
+                    <div class="mem-pressure-hovercard" id="nav-memory-pressure-hovercard">
+                        <div class="mem-pressure-hovercard-title" id="nav-memory-pressure-hovercard-title">Memory Pressure</div>
+                        <div class="mem-pressure-hovercard-stats" id="nav-memory-pressure-hovercard-stats"></div>
+                        <div class="mem-pressure-hovercard-advice" id="nav-memory-pressure-hovercard-body"></div>
+                        <div class="mem-pressure-hovercard-processes" id="nav-pressure-processes" style="display:none;"></div>
+                        <button class="mem-pressure-hovercard-purge-btn" id="nav-pressure-purge-btn" type="button">Free Memory</button>
+                        <div class="mem-pressure-hovercard-purge-status" id="nav-pressure-purge-status" style="display:none;"></div>
+                    </div>
+                </div>
                 <span class="status-dot" id="status-dot"></span>
                 <span class="status-text" id="status-text"></span>
                 <span class="badge-server" id="badge-server"></span>
@@ -149,6 +163,9 @@
             </div>
         </div>
         <div class="nav-right">
+            <button class="nav-home-btn" id="nav-home-btn" type="button" title="Home — return to welcome screen" aria-label="Home">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            </button>
             <div id="session-controls">
                 <button class="nav-btn" id="nav-new-session-btn" title="New Session" style="display:none;">+ New Session</button>
             </div>
@@ -273,6 +290,10 @@
                         </div>
                     </div>
                     <div class="setup-toolbar">
+                        <button class="setup-toolbar-btn setup-toolbar-btn--dashboard" id="setup-dashboard-btn" title="Return to dashboard" style="display:none;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                            Dashboard
+                        </button>
                         <button class="setup-toolbar-btn" id="setup-models-btn" title="Browse and download models">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                             Models
@@ -294,7 +315,6 @@
                         <div id="setup-recent-endpoints" style="display:none;">
                             <div class="setup-section-header">
                                 <span class="setup-section-title">Recent servers</span>
-                                <a id="setup-browse-sessions-link" class="setup-link">Manage →</a>
                             </div>
                             <div class="setup-endpoint-list" id="setup-endpoint-list"></div>
                         </div>
@@ -923,6 +943,21 @@
                                 <svg class="hw-metric-sparkline" id="sys-ram-spark" viewBox="0 0 120 28" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
                                 <div class="hw-metric-value" id="sys-ram-value">&mdash;</div>
                             </div>
+                            <div class="hw-metric-block" id="sys-pressure-block" style="display:none;">
+                                <div class="hw-metric-label">Memory Pressure</div>
+                                <svg class="hw-metric-sparkline" id="sys-pressure-spark" viewBox="0 0 120 28" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
+                                <div class="mem-pressure-breakdown" id="sys-pressure-breakdown">
+                                    <div class="mem-pressure-row"><span class="mem-pressure-key">Free</span><span class="mem-pressure-val" id="sys-pressure-free">&mdash;</span></div>
+                                    <div class="mem-pressure-row"><span class="mem-pressure-key">Wired</span><span class="mem-pressure-val" id="sys-pressure-wired">&mdash;</span></div>
+                                    <div class="mem-pressure-row"><span class="mem-pressure-key">Compressed</span><span class="mem-pressure-val" id="sys-pressure-compressed">&mdash;</span></div>
+                                    <div class="mem-pressure-row"><span class="mem-pressure-key">Purgeable</span><span class="mem-pressure-val" id="sys-pressure-purgeable">&mdash;</span></div>
+                                    <div class="mem-pressure-row"><span class="mem-pressure-key">Inactive</span><span class="mem-pressure-val" id="sys-pressure-inactive">&mdash;</span></div>
+                                </div>
+                                <button class="mem-pressure-purge-btn" id="sys-pressure-purge-btn" type="button" title="Runs 'purge' via macOS admin dialog to reclaim inactive memory">
+                                    <span id="sys-pressure-purge-label">Free Memory</span>
+                                </button>
+                                <div class="mem-pressure-purge-status" id="sys-pressure-purge-status" style="display:none;"></div>
+                            </div>
                             <div class="hw-metric-block" id="sys-clock-block">
                                 <div class="hw-metric-label">Clock</div>
                                 <div class="hw-metric-viz" id="sys-clock-viz"></div>
@@ -939,7 +974,7 @@
 
                                  <div class="hw-cluster-row" id="sys-cluster-p-row">
                                      <div class="hw-cluster-meta">
-                                         <div class="hw-cluster-name">P-Cores</div>
+                                         <div class="hw-cluster-name" id="sys-cluster-p-name" title="Performance (Super) cores — highest clock speed. Handle GPU command dispatch and CPU-side sampling during inference. High utilization here is normal and expected while a model is running.">P-Cores</div>
                                          <div class="hw-cluster-value" id="sys-cluster-p-value">&mdash;</div>
                                      </div>
                                      <div class="hw-cluster-bar" id="sys-cluster-p-bar"></div>
@@ -948,7 +983,7 @@
 
                                  <div class="hw-cluster-row" id="sys-cluster-s-row" style="display:none;">
                                      <div class="hw-cluster-meta">
-                                         <div class="hw-cluster-name">S-Cores</div>
+                                         <div class="hw-cluster-name" id="sys-cluster-s-name" title="Secondary Performance cores — lower clock than P-cores but still high-power. Handle prefill batching and parallel thread workloads. High utilization during heavy batch processing is expected.">S-Cores</div>
                                          <div class="hw-cluster-value" id="sys-cluster-s-value">&mdash;</div>
                                      </div>
                                      <div class="hw-cluster-bar" id="sys-cluster-s-bar"></div>
@@ -957,7 +992,7 @@
 
                                  <div class="hw-cluster-row" id="sys-cluster-e-row">
                                      <div class="hw-cluster-meta">
-                                         <div class="hw-cluster-name">E-Cores</div>
+                                         <div class="hw-cluster-name" id="sys-cluster-e-name" title="Efficiency cores — optimized for low power, handle background OS tasks and browser activity. Should stay low during inference; high E-core utilization suggests other apps competing for CPU time.">E-Cores</div>
                                          <div class="hw-cluster-value" id="sys-cluster-e-value">&mdash;</div>
                                      </div>
                                      <div class="hw-cluster-bar" id="sys-cluster-e-bar"></div>
@@ -2409,80 +2444,6 @@
     </div>
 </div>
 
-<!-- Session Modal -->
-<div class="modal-overlay" id="session-modal">
-    <div class="modal" style="width: 560px;">
-        <div class="modal-header">
-            <h2 id="session-modal-title">Sessions</h2>
-            <button type="button" class="modal-close" id="session-modal-close" aria-label="Close">&times;</button>
-        </div>
-        <div class="modal-body">
-            <div class="sessions-header">
-                <button type="button" class="btn btn-sm" id="btn-new-session">+ New Session</button>
-            </div>
-            <div id="sessions-list-view">
-                <div id="sessions-list"></div>
-                <div id="sessions-empty" style="display:none; text-align:center; padding: 40px 20px; color: var(--color-text-muted);">
-                    <p>No saved sessions yet</p>
-                    <button type="button" class="btn btn-sm" id="session-create-first">Create your first session</button>
-                </div>
-            </div>
-            <div id="sessions-new-form" style="display:none;">
-                <form id="session-form">
-                    <input type="hidden" id="modal-session-id">
-                    <label class="modal-field" title="Display name for this session">
-                        Session Name
-                        <input type="text" id="modal-session-name" required>
-                        <span class="field-error-msg" role="alert">Session name is required</span>
-                    </label>
-                    <label class="modal-field" title="Session mode">
-                        Session Mode
-                        <select id="modal-session-mode">
-                            <option value="spawn">Spawn</option>
-                            <option value="attach">Attach</option>
-                        </select>
-                    </label>
-                    <label class="modal-field" title="Port for spawned server or endpoint for attached server">
-                         <span id="modal-session-port-label">Port</span>
-                         <input type="text" id="modal-session-port" placeholder="8001">
-                     </label>
-                    <div id="spawn-session-fields" style="display:none;">
-                        <label class="modal-field" title="Choose a model preset to use for this session">
-                            Model Preset
-                            <select id="modal-session-preset"></select>
-                        </label>
-                        <label class="modal-field" title="Absolute path to the .gguf model file on disk">
-                            Model Path
-                            <div style="display:flex;gap:6px;">
-                                <input type="text" id="modal-session-model-path" style="flex:1;" placeholder="/path/to/model.gguf">
-                                <button type="button" class="btn-sm btn-preset" id="session-browse-model-btn">Browse</button>
-                            </div>
-                        </label>
-                        <div class="modal-row">
-                            <label class="modal-field" title="Number of layers to offload to GPU. 99 = all layers.">
-                                GPU Layers
-                                <input type="number" id="modal-session-gpu-layers" placeholder="99">
-                            </label>
-                            <label class="modal-field" title="Maximum context length in tokens.">
-                                Context Size
-                                <input type="number" id="modal-session-context-size" value="128000">
-                            </label>
-                        </div>
-                        <div class="modal-row modal-checks">
-                            <label class="chk" title="Disable memory-mapped I/O. Required for models >16GB."><input type="checkbox" id="modal-session-no-mmap"> no-mmap</label>
-                            <label class="chk" title="Lock model in RAM, preventing swap."><input type="checkbox" id="modal-session-mlock"> mlock</label>
-                        </div>
-                    </div>
-                    <div class="modal-buttons" style="margin-top:16px;">
-                        <button type="button" class="btn btn-modal-cancel" id="session-modal-cancel">Cancel</button>
-                        <button type="submit" class="btn btn-modal-save" id="btn-session-save">Save</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-</div>
-
 <!-- Preset Modal -->
 <div class="modal-overlay" id="preset-modal" role="dialog" aria-modal="true" aria-label="Preset editor">
     <div class="preset-editor-shell">
@@ -2618,14 +2579,15 @@
                                     <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
                                     <span class="pe-toggle-label">no-mmap</span>
                                 </label>
-                                <label class="pe-toggle-item" title="Lock model in RAM, preventing OS from swapping it to disk. Improves performance but requires enough physical RAM.">
-                                    <input type="checkbox" id="modal-mlock">
-                                    <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
-                                    <span class="pe-toggle-label">mlock</span>
-                                </label>
-                            </div>
+                            <label class="pe-toggle-item" title="Lock model in RAM, preventing OS from swapping it to disk. Improves performance but requires enough physical RAM.">
+                                <input type="checkbox" id="modal-mlock">
+                                <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
+                                <span class="pe-toggle-label">mlock</span>
+                            </label>
                         </div>
+                        <div class="preset-memory-warning" id="preset-mlock-warning" style="display:none;"></div>
                     </div>
+                </div>
 
                     <!-- 2: Context & KV Cache -->
                     <div class="preset-editor-section" data-section="context">
@@ -2925,7 +2887,7 @@
                         <div class="pe-section-body">
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
-<label class="pe-label" for="modal-threads" title="CPU threads for token generation. On Apple Silicon use P-core count (e.g. 6 on M5 Max) — using all cores includes slow E-cores. On discrete GPUs the GPU does matrix ops so a low value (4–8) is usually enough. Use -1 or leave blank for llama-server default.">Threads (-t)</label>
+<label class="pe-label" for="modal-threads" title="CPU threads for token generation. On Apple Silicon use 1 — Metal GPU handles matrix ops so extra threads add contention without benefit. On discrete GPUs a low value (4–8) is usually enough. Use -1 or leave blank for llama-server default.">Threads (-t)</label>
                                      <input type="number" class="pe-input" id="modal-threads" placeholder="auto (-1 or blank)">
                                 </div>
                                 <div class="pe-field">
@@ -3837,6 +3799,7 @@
                             <div class="kv-inline-field" style="flex:999 1 320px;">
                                 <div class="field-hint" style="margin:0;">Pins model in RAM and helps avoid swap pressure evicting it mid-run.</div>
                             </div>
+                            <div class="ctx-fit-warning" id="spawn-mlock-warning" style="display:none;"></div>
                         </div>
 
                         <!-- Speculative decoding mode selector -->

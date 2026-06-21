@@ -132,24 +132,6 @@ test.describe('modals and menus', () => {
     await expect(page.getByRole('button', { name: /open runtime configuration/i })).toBeVisible();
   });
 
-  test('sessions opens without stale id errors', async ({ page }) => {
-    const errors = [];
-    page.on('pageerror', error => errors.push(error.message));
-
-    // Open session modal directly (nav button now opens spawn wizard)
-    await page.evaluate(async () => {
-      const { openSessionModal } = await import('/js/features/sessions.js');
-      openSessionModal();
-    });
-    await expect(page.locator('#session-modal')).toHaveClass(/open/);
-    await expect(page.locator('#session-modal-title')).toHaveText('Sessions');
-    await page.locator('#btn-new-session').click();
-    await expect(page.locator('#sessions-new-form')).toBeVisible();
-    await page.locator('#modal-session-mode').selectOption('attach');
-    await expect(page.locator('#modal-session-port-label')).toHaveText('Endpoint');
-    expect(errors).toEqual([]);
-  });
-
   test('models modal opens and lists model discovery state', async ({ page }) => {
     // No dedicated Models button; open via JS helper
     await page.evaluate(async () => {

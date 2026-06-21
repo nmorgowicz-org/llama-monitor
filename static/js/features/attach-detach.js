@@ -6,6 +6,7 @@ import { updateActiveSessionInfo } from './sessions.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { saveSettings } from './settings.js';
 import { hideConnectingState, saveLastSessionData, showConnectingState, switchView, restorePreviousPosition, savePreviousPosition } from './setup-view.js';
+import { _showConfirm } from './presets.js';
 import { setTuneConfig, showTunePanel, hideTunePanel } from './tune-panel.js';
 import { hideDisconnectedBanner } from './chat-transport.js';
 import { monitorState } from '../core/app-state.js';
@@ -133,9 +134,20 @@ export async function doStartWithConfig(config, options = {}, buttonArg = null) 
             }).catch(() => null);
             const active = activeResp?.ok ? await activeResp.json().catch(() => ({})) : {};
             const activeStatus = String(active.status || '').toLowerCase();
+            const activeMode = String(active.mode || '').toLowerCase();
             const activePresetId = active.preset_id || '';
-            if (activeStatus === 'running' && activePresetId && activePresetId !== config.preset_id) {
-                if (!confirm('A different preset is already running. Stop it and start the selected preset?')) {
+            // Only prompt if the API confirms a *different* preset is actively running.
+            // Guard against stale state: mode 'off' or 'sleep' means the server stopped.
+            const actuallyRunning = activeStatus === 'running'
+                && activeMode !== 'off'
+                && activeMode !== 'sleep';
+            if (actuallyRunning && activePresetId && activePresetId !== config.preset_id) {
+                const ok = await _showConfirm(
+                    'Switch preset',
+                    'A different preset is already running. Stop it and start the selected preset?'
+                );
+                if (!ok) {
+                    if (btnStart) btnStart.disabled = false;
                     return;
                 }
             }
@@ -262,7 +274,7 @@ export async function doStop() {
 // ── Kill ───────────────────────────────────────────────────────────────────────
 
 export async function doKillLlama() {
-    if (!confirm('Kill all running llama-server processes?')) return;
+    if (!await _showConfirm('Stop server', 'Kill all running llama-server processes?')) return;
 
     const btnKill = document.getElementById('btn-kill');
     if (btnKill) btnKill.disabled = true;

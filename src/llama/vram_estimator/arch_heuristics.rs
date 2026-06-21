@@ -62,6 +62,14 @@ pub struct ModelArch {
     /// Approximate parameter count in billions (used for quant-size estimation
     /// when the exact file size is not yet known, e.g. pre-download advisor).
     pub param_b: f64,
+
+    // ── Hidden dimension (for CUDA compute buffer estimation) ────────────────
+    /// Model embedding / hidden dimension (n_embd).
+    /// Used to estimate CUDA compute buffer size: n_layers × n_embd × ubatch × 2 bytes × 4.
+    /// 0 = unknown; CUDA overhead formula falls back to Metal-style flat estimate.
+    /// Populated from GGUF `embedding_length` when introspecting a local file;
+    /// heuristics set it for the most common families.
+    pub n_embd: u32,
 }
 
 fn default_expert_fraction() -> f64 {
@@ -341,18 +349,22 @@ impl ModelArch {
             local_attn_window,
             n_experts,
             n_experts_used,
+            n_embd,
         ) = if is_e2b {
-            (35u32, 7u32, 1u32, 1u32, 512u32, 0u32, 0u32)
+            (35u32, 7u32, 1u32, 1u32, 512u32, 0u32, 0u32, 1152u32)
         } else if is_e4b {
-            (42, 7, 2, 2, 512, 0, 0)
+            (42, 7, 2, 2, 512, 0, 0, 2048)
         } else if is_12b {
-            (48, 8, 1, 8, 1024, 0, 0)
+            // Gemma4-12B dense: 48 layers, n_embd = 3072
+            (48, 8, 1, 8, 1024, 0, 0, 3072)
         } else if named_26b_a4b || (!has_named_size && param_b < 30.0) {
             // "A4B" is active parameter count. GGUF metadata confirms:
             // block_count=30, pattern 6×(5 local + 1 global), experts=128, used=8.
-            (30, 5, 2, 8, 1024, 128, 8)
+            // n_embd=2048 (Google mobile-efficient base; overridden by GGUF when present)
+            (30, 5, 2, 8, 1024, 128, 8, 2048)
         } else {
-            (60, 10, 4, 16, 1024, 0, 0)
+            // Gemma4-31B dense: 60 layers, n_embd = 5120
+            (60, 10, 4, 16, 1024, 0, 0, 5120)
         };
 
         Self {
@@ -366,6 +378,7 @@ impl ModelArch {
             n_experts,
             n_experts_used,
             expert_fraction: 0.65,
+            n_embd,
             ..Default::default()
         }
     }
@@ -384,6 +397,7 @@ impl ModelArch {
         let n_deltanet = n_layers - n_attn_layers;
         // DeltaNet state: 48 V-heads × 128² × 2 bytes per layer (confirmed for 27B)
         let linear_state = n_deltanet as u64 * 48 * 128 * 128 * 2;
+        // n_embd = 5120 confirmed from GGUF embedding_length for both 27B and davidau 40B
         Self {
             n_layers,
             n_kv_heads: 4,
@@ -391,6 +405,7 @@ impl ModelArch {
             n_attn_layers,
             linear_attn_state_bytes: linear_state,
             expert_fraction: 0.65,
+            n_embd: 5120,
             ..Default::default()
         }
     }
@@ -405,6 +420,7 @@ impl ModelArch {
     fn qwen36_35b_a3b_arch() -> Self {
         let n_deltanet = 30u32;
         let linear_state = n_deltanet as u64 * 32 * 128 * 128 * 2; // 32 V-heads
+        // n_embd = 4096 estimated (similar to Qwen3-30B-A3B base hidden dim)
         Self {
             n_layers: 40,
             n_kv_heads: 2,
@@ -414,6 +430,7 @@ impl ModelArch {
             n_experts: 256,
             n_experts_used: 9,     // 8 routed + 1 shared
             expert_fraction: 0.85, // most params live in expert FFNs
+            n_embd: 4096,
             ..Default::default()
         }
     }
@@ -431,6 +448,8 @@ impl ModelArch {
         // DeltaNet V-heads: 64 for 122B (confirmed), estimated 32 for smaller
         let deltanet_v_heads: u64 = if param_b > 80.0 { 64 } else { 32 };
         let linear_state = n_deltanet as u64 * deltanet_v_heads * 128 * 128 * 2;
+        // n_embd: 7168 for 122B-A10B (Qwen3-235B class base dim), 4096 for smaller
+        let n_embd: u32 = if param_b > 80.0 { 7168 } else { 4096 };
         Self {
             n_layers,
             n_kv_heads: 2,
@@ -440,6 +459,7 @@ impl ModelArch {
             n_experts: 256,
             n_experts_used: 9, // 8 routed + 1 shared
             expert_fraction: 0.85,
+            n_embd,
             ..Default::default()
         }
     }
@@ -483,6 +503,7 @@ impl ModelArch {
         // Standard attention: 16 Q heads, 2 KV heads, head_dim 256
         // DeltaNet recurrent state: 36 layers × 32 V-heads × 128² × 2 bytes ≈ 1.2 GB
         let deltanet_state = 36u64 * 32 * 128 * 128 * 2;
+        // n_embd = 7168 (235B-class model, same base hidden dim as Qwen3-235B-A22B)
         Self {
             n_layers: 48,
             n_kv_heads: 2,
@@ -492,6 +513,7 @@ impl ModelArch {
             n_experts: 512,
             n_experts_used: 11,    // 10 routed + 1 shared
             expert_fraction: 0.92, // nearly all params are in expert FFNs (80B/3B ratio)
+            n_embd: 7168,
             ..Default::default()
         }
     }

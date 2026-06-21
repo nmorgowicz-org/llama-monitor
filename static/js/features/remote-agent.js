@@ -5,7 +5,7 @@
 import { remoteAgent } from '../core/app-state.js';
 import { wsData } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
-import { showToast } from './toast.js';
+import { showToast, showConfirmDialog } from './toast.js';
 import { closeConfigModal, openConfigModal } from './config.js';
 import { closeSettingsModal, saveSettings } from './settings.js';
 
@@ -955,7 +955,11 @@ async function removeManagedRemoteAgent() {
         return;
     }
 
-    const confirmed = window.confirm('Remove the managed remote agent from this host? This stops the process, deletes the startup task, and removes the managed binary.');
+    const confirmed = await showConfirmDialog(
+        'Remove remote agent',
+        'Remove the managed remote agent from this host? This stops the process, deletes the startup task, and removes the managed binary.',
+        'Remove'
+    );
     if (!confirmed) return;
 
     showAgentSetupProgress('Removing managed agent\u2026', 30);
@@ -1867,7 +1871,12 @@ async function remoteAgentRemove() {
         return;
     }
 
-    if (!window.confirm('Remove the managed remote agent from this host? This stops the process, deletes the startup task, and removes the managed binary.')) {
+    const ok = await showConfirmDialog(
+        'Remove remote agent',
+        'Remove the managed remote agent from this host? This stops the process, deletes the startup task, and removes the managed binary.',
+        'Remove'
+    );
+    if (!ok) {
         return;
     }
 

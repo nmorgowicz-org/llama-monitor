@@ -1310,9 +1310,9 @@ pub fn hf_start_download(
     save_as: Option<&str>,
     target_path: &Path,
     _resume: bool,
-) -> Result<String, String> {
+) -> std::result::Result<String, String> {
     crate::model_download::start_download(repo_id, file_path, save_as, target_path, hf_load_token())
-        .map_err(|e| format!("Failed to start download: {e}"))
+        .map_err(|e| e.to_string())
 }
 
 // ── Resolve HF origin from a local GGUF filename ─────────────────────────────

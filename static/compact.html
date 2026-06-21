@@ -4,102 +4,120 @@
 <meta charset='utf-8'>
 <title>Llama Monitor</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<link rel="stylesheet" href="/css/tokens.css">
 <style>
+/* Compact tray popover — uses the app's design tokens (tokens.css) so it
+   inherits the same dark/light themes and accent palettes as the main UI.
+   Theme/palette are applied to <html> from shared localStorage in compact.js. */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
     width: 240px;
     overflow: hidden;
 }
 body {
-    font-family: system-ui, -apple-system, sans-serif;
-    background: #2e3440;
-    color: #d8dee9;
+    font-family: var(--font-body, system-ui, -apple-system, sans-serif);
+    background: var(--color-bg, #0f1115);
+    color: var(--color-text-secondary, #d1d5db);
     font-size: 11px;
-    padding: 4px;
+    padding: 5px;
 }
 .header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 2px 4px;
-    background: #3b4252;
-    border-radius: 4px 4px 0 0;
+    padding: 4px 6px;
+    background: var(--color-bg-elevated, #1f232a);
+    border: 1px solid var(--border-subtle, rgba(255,255,255,0.07));
+    border-radius: var(--radius-sm, 8px);
 }
 .header h1 {
     font-size: 12px;
-    color: #88c0d1;
-    font-weight: 600;
+    color: var(--color-accent, #2dd4bf);
+    font-weight: 700;
+    letter-spacing: 0.2px;
 }
 .close-btn {
     background: none;
     border: none;
-    color: #6a7585;
-    font-size: 14px;
+    color: var(--color-text-muted, #9ca3af);
+    font-size: 15px;
     cursor: pointer;
-    padding: 0;
+    padding: 0 2px;
     line-height: 1;
+    transition: color 0.15s ease;
 }
-.close-btn:hover { color: #d8dee9; }
+.close-btn:hover { color: var(--color-text-primary, #f9fafb); }
 .status-bar {
-    padding: 3px 4px;
+    padding: 4px 6px 2px;
     font-size: 10px;
-    color: #6a7585;
+    color: var(--color-text-muted, #9ca3af);
 }
-.status-bar .running { color: #a3be8c; }
-.status-bar .stopped { color: #bf616a; }
+.status-bar .running { color: var(--color-success, #10b981); }
+.status-bar .stopped { color: var(--color-error, #f43f5e); }
 .section {
-    padding: 3px 4px;
-    border-top: 1px solid #4c566a;
+    padding: 4px 6px;
+    margin-top: 5px;
+    background: var(--color-bg-surface, #16191e);
+    border: 1px solid var(--border-subtle, rgba(255,255,255,0.07));
+    border-radius: var(--radius-sm, 8px);
 }
+.section + .section { margin-top: 4px; }
 .section-title {
-    font-size: 10px;
-    color: #81a1c1;
+    font-size: 9px;
+    color: var(--color-text-muted, #9ca3af);
     font-weight: 600;
-    margin-bottom: 2px;
+    margin-bottom: 4px;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.5px;
 }
 .metric-row {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-bottom: 2px;
+    margin-bottom: 4px;
 }
 .metric-row:last-child { margin-bottom: 0; }
 .metric-label {
-    width: 35px;
-    color: #8899aa;
+    width: 36px;
+    color: var(--color-text-muted, #9ca3af);
     font-size: 10px;
 }
 .metric-bar-wrap {
-    flex: 1;
-    height: 4px;
-    background: #3b4252;
-    border-radius: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 5px;
+    background: var(--color-bg-elevated, #1f232a);
+    border-radius: 3px;
     overflow: hidden;
 }
 .metric-bar {
     height: 100%;
-    border-radius: 2px;
-    transition: width 0.3s ease;
+    width: 0%;
+    border-radius: 3px;
+    transition: width 0.3s ease, background-color 0.3s ease;
 }
-.metric-bar.cpu { background: #81a1c1; }
-.metric-bar.ram { background: #b48ead; }
-.metric-bar.gpu-load { background: #88c0d1; }
-.metric-bar.gpu-temp { background: #ebcb8b; }
-.metric-bar.gpu-vram { background: #a3be8c; }
-.metric-bar.severity-normal { background-color: #a3be8c !important; }
-.metric-bar.severity-warning { background-color: #ebcb8b !important; }
-.metric-bar.severity-critical { background-color: #bf616a !important; }
+.metric-bar.cpu { background: var(--metric-load, #22c55e); }
+.metric-bar.ram { background: var(--metric-memory, #5eead4); }
+.metric-bar.gpu-load { background: var(--metric-clock, #14b8a6); }
+.metric-bar.gpu-temp { background: var(--color-warning, #f59e0b); }
+.metric-bar.gpu-vram { background: var(--metric-memory, #5eead4); }
+.metric-bar.severity-normal { background-color: var(--color-success, #10b981) !important; }
+.metric-bar.severity-warning { background-color: var(--color-warning, #f59e0b) !important; }
+.metric-bar.severity-critical { background-color: var(--color-error, #f43f5e) !important; }
 .metric-value {
-    width: 45px;
+    flex: 0 0 auto;
     text-align: right;
-    font-family: monospace;
+    white-space: nowrap;
+    font-family: var(--font-mono, monospace);
     font-size: 10px;
+    color: var(--color-text-secondary, #d1d5db);
 }
 .inference-section {
-    padding: 3px 4px;
-    border-top: 1px solid #4c566a;
+    padding: 4px 6px;
+    margin-top: 4px;
+    background: var(--color-bg-surface, #16191e);
+    border: 1px solid var(--border-subtle, rgba(255,255,255,0.07));
+    border-radius: var(--radius-sm, 8px);
 }
 .inference-row {
     display: flex;
@@ -109,29 +127,33 @@ body {
     font-size: 10px;
 }
 .inference-label {
-    color: #8899aa;
+    color: var(--color-text-muted, #9ca3af);
     flex: 0 0 auto;
 }
 .inference-value {
-    font-family: monospace;
-    color: #d8dee9;
+    font-family: var(--font-mono, monospace);
+    color: var(--color-text-secondary, #d1d5db);
     text-align: right;
 }
 .dash-line {
-    color: #4c566a;
-    font-family: monospace;
+    color: var(--color-text-muted, #9ca3af);
+    font-family: var(--font-mono, monospace);
+    opacity: 0.6;
 }
 #gpu-sections { display: none; }
 #gpu-sections:not(:empty) { display: block; }
 .gpu-section {
-    padding: 3px 4px;
-    border-top: 1px solid #4c566a;
+    padding: 4px 6px;
+    margin-top: 4px;
+    background: var(--color-bg-surface, #16191e);
+    border: 1px solid var(--border-subtle, rgba(255,255,255,0.07));
+    border-radius: var(--radius-sm, 8px);
 }
 .gpu-name {
     font-size: 10px;
-    color: #88c0d1;
+    color: var(--color-accent, #2dd4bf);
     font-weight: 600;
-    margin-bottom: 2px;
+    margin-bottom: 4px;
 }
 </style>
 </head>
@@ -146,12 +168,12 @@ body {
     <div class="section-title">CPU</div>
     <div class="metric-row">
         <span class="metric-label">Load</span>
-        <div class="metric-bar-wrap"><div class="metric-bar cpu" id="cpu-load-bar" style="width:0%"></div></div>
+        <div class="metric-bar-wrap"><div class="metric-bar cpu" id="cpu-load-bar"></div></div>
         <span class="metric-value" id="cpu-load">—</span>
     </div>
     <div class="metric-row">
         <span class="metric-label">Temp</span>
-        <div class="metric-bar-wrap"><div class="metric-bar cpu" id="cpu-temp-bar" style="width:0%"></div></div>
+        <div class="metric-bar-wrap"><div class="metric-bar cpu" id="cpu-temp-bar"></div></div>
         <span class="metric-value" id="cpu-temp">—</span>
     </div>
 </div>
@@ -159,7 +181,7 @@ body {
 <div class="section" id="ram-section" data-capability="system">
     <div class="metric-row">
         <span class="metric-label">RAM</span>
-        <div class="metric-bar-wrap"><div class="metric-bar ram" id="ram-bar" style="width:0%"></div></div>
+        <div class="metric-bar-wrap"><div class="metric-bar ram" id="ram-bar"></div></div>
         <span class="metric-value" id="ram">—</span>
     </div>
 </div>

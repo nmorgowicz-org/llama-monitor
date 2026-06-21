@@ -2,6 +2,8 @@
 
 The remote agent adds host-level telemetry to remote llama.cpp endpoints. Without it, Llama Monitor can still attach to a remote server and read performance metrics, but GPU, CPU, RAM, and host-health data remain unavailable.
 
+Implementation lives in `src/web/api/remote_agent.rs` (API endpoints) and the agent binary's own codebase. The endpoints are composed into the main router in `src/web/api/mod.rs`.
+
 ## What it adds
 
 When a remote agent is installed and reachable, the dashboard can show:
@@ -25,7 +27,10 @@ When attached to a remote endpoint, the header Agent button and Remote Agent pan
 - **Firewall blocked**:
   - Agent process is considered connected (e.g., started via SSH), but the dashboard cannot reach its HTTP endpoint.
   - Triggered when `remote_agent_connected` is true but `remote_agent_health_reachable` is false.
-  - `remote_agent_health_reachable` is independent from `remote_agent_connected`: it is set to true when the `/metrics` HTTP call succeeds, and reset to false on disconnect.
+  - In practice, both `remote_agent_connected` and `remote_agent_health_reachable` are set and reset together:
+    - On successful `/metrics` call: both become true.
+    - On disconnect (`mark_disconnected`): both become false.
+    - A steady state where only one is false (the “Firewall blocked” condition) is transient or UI-side and should not be assumed to be stable.
   - Header shows “Firewall blocked” with a **Fix** button.
   - Remote Agent panel shows “Agent Started, HTTP Blocked” with firewall guidance.
 
@@ -97,6 +102,13 @@ When a dashboard fails to connect to a remote agent (mTLS rejection) and SSH is 
 4. POSTs this device's CA to the agent's enrollment endpoint, authenticated with the api-token.
 5. Saves the api-token so ongoing API calls authenticate correctly.
 
+The agent exposes a secondary enrollment port at `agent_port + 1` that does not require a client certificate (server-TLS only), to allow unenrolled dashboards to register their CA:
+
+- **POST /api/agent/register-ca**:
+  - Body: `{ "action": "register-ca", "ca_pem": "<base64 or PEM>", "instance_id": "<id>" }`
+  - Auth: bearer token using the agent token.
+  - On success, writes the CA into the agent's `cas/<instance_id>.pem` and reloads its TLS config so the new CA is trusted immediately.
+
 On the next poll iteration, mTLS succeeds in both directions.
 
 This flow requires only that SSH is configured (via Guided SSH Setup). No codes, QR codes, or manual credential management are needed.
@@ -107,12 +119,49 @@ Each device that enrolls gets its own entry in the agent's `cas/` directory. Enr
 
 ## Agent tokens
 
+There are two conceptually separate tokens:
+
+- **--agent-token** (agent-mode bearer):
+  - Set via `--agent-token` when running llama-monitor in agent mode (`--agent`).
+  - Used by the agent process to authenticate its HTTP endpoints (e.g. `/info`, `/metrics`).
+  - Dashboards or callers include it as `Authorization: Bearer <token>` when talking directly to the agent.
+
+- **Dashboard-side remote_agent_token** (config / UI):
+  - Stored in `ui-settings.json` as `remote_agent_token`.
+  - Used by the dashboard (and its `/api/remote-agent/*` endpoints) to talk to the remote agent.
+  - This is how the main app authenticates to the agent during polling and management.
+
+The agent itself:
+
 - The primary agent token is configured via --agent-token or the UI.
 - The agent also supports multiple allowed tokens via agent-tokens.json:
   - File: ~/.config/llama-monitor/agent-tokens.json
   - Format: { "tokens": ["<token1>", "<token2>"] }
   - Any token in this list is accepted for authenticated agent endpoints.
 - On startup, the primary token is automatically ensured in this file, enabling multi-client setups (for example, multiple dashboards polling the same agent).
+
+## Agent-mode API surface
+
+When llama-monitor runs with `--agent` (agent mode), it exposes a small HTTP API
+(protected by `--agent-token`) used by the dashboard and remote clients.
+
+Endpoints:
+
+- **GET /health**
+  - Unauthenticated health check; returns `{ "ok": true }`.
+- **GET /info**
+  - Authenticated; returns version, protocol_version, mode, platform, bind address.
+- **GET /agent/info**
+  - Same as `/info`, plus the current `agent_token` (for verification flows).
+- **GET /metrics/system**
+  - Returns live system metrics (CPU, RAM, platform details).
+- **GET /metrics/gpu**
+  - Returns live GPU metrics by cluster.
+- **GET /metrics**
+  - Combined endpoint returning both system and GPU metrics in a single payload.
+
+All authenticated endpoints require:
+- Header: `Authorization: Bearer <token>` where `<token>` is the agent token.
 
 ## Protocol and versioning
 
@@ -202,6 +251,8 @@ If **After attach, try SSH start if the agent is unreachable** is enabled, the d
 
 This is not global background probing. It only applies after an attach, and only when you have explicitly enabled the setting.
 
+When autostart is used, the agent token is persisted on the remote machine (`agent-token` file) and reused across restarts; SSH does not generate a new token on each start.
+
 ## Platform behavior
 
 ### Windows
@@ -245,8 +296,8 @@ Encrypted values:
   - Encrypted at rest.
   - Masked in `GET /api/settings`; real value available via `GET /api/settings/full` with `api-token` auth.
 - **SSH password** (`remote_agent_ssh_password`):
-  - Used for the current SSH operation when password auth is selected.
-  - Not persisted long-term; used in-memory for the session.
+  - Used for SSH operations when password auth is selected.
+  - Stored in `ui-settings.json` and reused for subsequent operations; not considered transient.
 - **Private key path** (`remote_agent_ssh_key_path`):
   - Path reference only; the key file itself is not copied into llama-monitor’s config.
 
@@ -271,6 +322,11 @@ All `/api/remote-agent/*` endpoints require a bearer token.
   - `POST /api/remote-agent/update`
   - `POST /api/remote-agent/stop`
   - `GET /api/remote-agent/tls-status`
+    - Returns:
+      - `mtls_enforced`: true
+      - `ca_present`: whether `ca.pem` exists
+      - `server_cert_present`: whether `agent-server.pem` exists
+      - `client_cert_present`: whether `agent-client.pem` exists
 
 - **db-admin-token** (elevated operations):
   - `POST /api/remote-agent/install`

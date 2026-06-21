@@ -4,8 +4,7 @@
 import { setupViewState, chat, sessionState } from '../core/app-state.js';
 import { doAttachFromSetup } from './attach-detach.js';
 import { escapeHtml } from '../core/format.js';
-import { quickStartSession } from './sessions.js';
-import { showToast } from './toast.js';
+import { showToast, showConfirmDialog } from './toast.js';
 
 // ── Model / preset classification (mirrors backend) ───────────────────────────
 
@@ -100,6 +99,7 @@ export async function fetchAndRenderMemoryBar() {
         ]);
 
         let totalBytes = 0;
+        let ramUsedBytes = 0;
         let metalGpuLimitMb = 0;
         let isUnified = false;
         let vramUsedBytes = 0;
@@ -107,6 +107,7 @@ export async function fetchAndRenderMemoryBar() {
         if (sysResp.ok) {
             const d = await sysResp.json();
             totalBytes = (d.ram_total_gb || 0) * 1024 ** 3;
+            ramUsedBytes = (d.ram_used_gb || 0) * 1024 ** 3;
         }
 
         if (gpuResp.ok) {
@@ -143,17 +144,23 @@ export async function fetchAndRenderMemoryBar() {
 
         let availBytes, fillPct, availLabel, totalLabel;
 
+        let vramEstimateBytes;
         if (isUnified) {
             const cap = _metalCap(totalBytes, metalGpuLimitMb);
             availBytes = Math.max(0, Math.min(cap, totalBytes) - _MEM_OS_RESERVE);
             fillPct = Math.round((availBytes / totalBytes) * 100);
             availLabel = _fmtGb(availBytes) + ' GB available for inference';
             totalLabel = _fmtGb(totalBytes) + ' GB unified';
+            // Card estimates use current free RAM so high system load shows as risk
+            vramEstimateBytes = ramUsedBytes > 0
+                ? Math.max(0, Math.min(cap, totalBytes - ramUsedBytes) - _MEM_OS_RESERVE)
+                : availBytes;
         } else {
             availBytes = Math.max(0, totalBytes - vramUsedBytes);
             fillPct = Math.round((availBytes / totalBytes) * 100);
             availLabel = _fmtGb(availBytes) + ' GB VRAM free';
             totalLabel = _fmtGb(totalBytes) + ' GB total';
+            vramEstimateBytes = availBytes;
         }
 
         const fill = document.getElementById('setup-mem-bar-fill');
@@ -165,7 +172,7 @@ export async function fetchAndRenderMemoryBar() {
         bar.style.display = '';
 
         _memState = { availBytes, isUnified };
-        _fetchCardVramEstimates(availBytes, isUnified);
+        _fetchCardVramEstimates(vramEstimateBytes, isUnified);
     } catch {
         // leave bar hidden if metrics unavailable
     }
@@ -612,7 +619,12 @@ function _buildLaunchCard(preset, activePresetId) {
 
         card.querySelector('.launch-card-btn-trash').addEventListener('click', async (e) => {
             e.stopPropagation();
-            if (!confirm(`Delete preset "${escapeHtml(preset.name)}"? This cannot be undone.`)) return;
+            const ok = await showConfirmDialog(
+                'Delete preset',
+                `Delete preset "${escapeHtml(preset.name)}"? This cannot be undone.`,
+                'Delete'
+            );
+            if (!ok) return;
             try {
                 const headers = window.authHeaders ? window.authHeaders() : {};
                 const resp = await fetch(`/api/presets/${preset.id}`, { method: 'DELETE', headers });
@@ -745,6 +757,14 @@ export function updateRunningCardHighlight() {
         const badge = card.querySelector('.launch-card-running-badge');
         if (badge) badge.style.display = isRunning ? '' : 'none';
     });
+
+    // Show the "Dashboard" toolbar button whenever a server is live or a remote endpoint is attached
+    const dashBtn = document.getElementById('setup-dashboard-btn');
+    if (dashBtn) {
+        // Only show when server is confirmed running — activeSessionId defaults to 'default'
+        // so it can't be used as a live-session signal.
+        dashBtn.style.display = sessionState.serverRunning ? '' : 'none';
+    }
 }
 
 // ── Recent Sessions ───────────────────────────────────────────────────────────
@@ -1217,6 +1237,12 @@ export function initViewState() {
     document.getElementById('setup-models-btn')?.addEventListener('click', () => {
         import('./models.js').then(({ openModelsModal }) => openModelsModal());
     });
+
+    // Dashboard button: visible when a server is running or remote endpoint attached
+    const dashBtn = document.getElementById('setup-dashboard-btn');
+    if (dashBtn) {
+        dashBtn.addEventListener('click', () => switchView('monitor'));
+    }
 
     // Init filter bar after presets are loaded
     initLaunchFilters();

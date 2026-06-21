@@ -62,7 +62,7 @@ function loadPrefs() {
         showMmproj: true,
         showMain: true,
         showSplit: true,
-        showDraftModels: true,
+        showDraftModels: false,
         sizeMaxGb: 0,
         quantFilters: {},
         tagFilter: '',
@@ -135,8 +135,8 @@ async function loadModels() {
         const count = models.length;
         if (tabCount) tabCount.textContent = count ? String(count) : '';
 
-        // Build toolbar with models list for quant chips
-        buildLibraryToolbar(models);
+        // Build or refresh toolbar filter chips based on models list
+        rebuildLibraryFilters(models);
 
         // Apply client-side filter/sort/search
         const filtered = applyFilters(models);
@@ -189,20 +189,30 @@ function isMmproj(m) {
 }
 
 function isDraftModel(m) {
+    // Trust the backend's is_draft_assistant (size-guarded).
+    // Fallback: quick client-side check using same logic as backend.
+    if (m.is_draft_assistant !== undefined) return m.is_draft_assistant;
     const f = (m.filename || '').toLowerCase();
-    // Explicit draft model keywords — includes Unsloth's `-MTP.gguf` naming convention
     const hasKeyword =
-        f.includes('assistant') ||
         f.includes('mtp-draft') ||
-        f.includes('draft-model') ||
         f.includes('mtp_small') ||
         f.includes('mtp-heads') ||
         f.startsWith('mtp-') ||
         f.endsWith('-mtp.gguf') ||
-        f.includes('/mtp/');
-    // Exclude huge files that are likely main models
+        f.includes('mtp') ||
+        f.includes('draft') ||
+        f.includes('assistant') ||
+        f.includes('draft-model');
     const size = m.size_bytes || 0;
-    return hasKeyword && size <= 3_000_000_000;
+    // Same tiered thresholds as backend:
+    const isUnambiguous =
+        f.includes('mtp-draft') ||
+        f.includes('mtp_small') ||
+        f.includes('mtp-heads') ||
+        (f.startsWith('mtp-') && size <= 5_000_000_000);
+    if (isUnambiguous && size <= 5_000_000_000) return true;
+    if (hasKeyword && size > 0 && size <= 3_000_000_000) return true;
+    return false;
 }
 
 function applyFilters(models) {
@@ -346,16 +356,28 @@ function buildModelCard(m) {
         top.appendChild(mmBadge);
     }
 
+    // MTP / draft model badge
+    const isDraft = m.is_draft_assistant || (m.classification && m.classification.has_mtp);
+    if (isDraft && !mmproj) {
+        const mtpBadge = document.createElement('span');
+        mtpBadge.className = 'mm-quant-badge mm-mtp-badge';
+        mtpBadge.textContent = 'MTP';
+        mtpBadge.title = 'Multi-token prediction / draft model';
+        top.appendChild(mtpBadge);
+    }
+
     card.appendChild(top);
 
-    // Meta row: filename
+    // Meta row: filename (ellipsis + full tooltip)
     const meta = document.createElement('div');
     meta.className = 'mm-card-meta';
-    meta.textContent = m.filename || '';
+    const metaText = m.filename || '';
+    meta.textContent = metaText;
+    if (metaText) meta.title = metaText;
     card.appendChild(meta);
 
-    // Stats row: size, VRAM, and tag pills all in one row
-    if (size || vramEst || tags.length > 0) {
+    // Stats row: size, tag pills (always include if any)
+    if (size || tags.length > 0) {
         const stats = document.createElement('div');
         stats.className = 'mm-card-stats';
         if (size) {
@@ -363,12 +385,6 @@ function buildModelCard(m) {
             sizeEl.className = 'mm-stat';
             sizeEl.textContent = size;
             stats.appendChild(sizeEl);
-        }
-        if (vramEst) {
-            const vramEl = document.createElement('span');
-            vramEl.className = 'mm-stat mm-stat-vram';
-            vramEl.textContent = 'VRAM ~' + vramEst;
-            stats.appendChild(vramEl);
         }
         tags.forEach(tag => {
             const pill = document.createElement('span');
@@ -384,7 +400,18 @@ function buildModelCard(m) {
         card.appendChild(stats);
     }
 
-    // VRAM bar
+    // VRAM estimate: always show when available, regardless of presets.
+    if (vramEst) {
+        const vramEl = document.createElement('div');
+        vramEl.className = 'mm-card-stats';
+        const vramSpan = document.createElement('span');
+        vramSpan.className = 'mm-stat mm-stat-vram';
+        vramSpan.textContent = 'VRAM ~' + vramEst;
+        vramEl.appendChild(vramSpan);
+        card.appendChild(vramEl);
+    }
+
+    // VRAM bar: always show when available, regardless of presets.
     if (vramPct !== null) {
         const barWrap = document.createElement('div');
         barWrap.className = 'mm-vram-bar';
@@ -822,7 +849,13 @@ function openTagPicker(modelPath, currentTags) {
 
 // ── Library toolbar ───────────────────────────────────────────────────────────
 
-function buildLibraryToolbar(models) {
+// ── Library toolbar (stable container to avoid focus loss) ────────────────────
+
+let _toolbarInitialized = false;
+
+function ensureLibraryToolbar() {
+    if (_toolbarInitialized) return;
+    _toolbarInitialized = true;
     const container = document.getElementById('mm-library-toolbar');
     if (!container) return;
     container.innerHTML = '';
@@ -871,7 +904,7 @@ function buildLibraryToolbar(models) {
     const right = document.createElement('div');
     right.className = 'mm-lib-controls';
 
-    // Filters button (collapsible on small screens)
+    // Filters button
     const filtersWrap = document.createElement('div');
     filtersWrap.className = 'mm-lib-filters';
 
@@ -880,245 +913,13 @@ function buildLibraryToolbar(models) {
     filtersBtn.className = 'mm-lib-btn mm-lib-btn--labeled';
     filtersBtn.id = 'mm-lib-filters-toggle';
     filtersBtn.title = 'Filter models by type, quantization, or tag';
-    const hasActiveFilters = !prefs.showMmproj || !prefs.showMain || !prefs.showSplit ||
-        !prefs.showDraftModels || prefs.sizeMaxGb > 0 ||
-        Object.values(prefs.quantFilters).some(v => v === false) ||
-        !!prefs.tagFilter || !!prefs.familyFilter || !!prefs.sizeClassFilter;
-    if (hasActiveFilters) filtersBtn.classList.add('mm-lib-btn--active');
-    // eslint-disable-next-line no-unsanitized/property -- static SVG, no user data
     filtersBtn.innerHTML =
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>'
-        + '<span>Filter' + (hasActiveFilters ? ' •' : '') + '</span>';
+        + '<span>Filter</span>';
 
     const filtersPanel = document.createElement('div');
     filtersPanel.className = 'mm-lib-filters-panel';
     filtersPanel.id = 'mm-lib-filters-panel';
-
-    // Type filters
-    const typeRow = document.createElement('div');
-    typeRow.className = 'mm-lib-filter-row';
-
-    const typeLabel = document.createElement('span');
-    typeLabel.className = 'mm-lib-filter-label';
-    typeLabel.textContent = 'Type';
-
-    const mmprojChip = createChip('mmproj', prefs.showMmproj);
-    const mainChip = createChip('Main', prefs.showMain);
-    const splitChip = createChip('Split', prefs.showSplit);
-    const draftChip = createChip('Draft / MTP', prefs.showDraftModels);
-
-    mmprojChip.addEventListener('click', () => {
-        prefs.showMmproj = !prefs.showMmproj;
-        mmprojChip.classList.toggle('active', prefs.showMmproj);
-        savePrefs();
-        loadModels();
-    });
-    mainChip.addEventListener('click', () => {
-        prefs.showMain = !prefs.showMain;
-        mainChip.classList.toggle('active', prefs.showMain);
-        savePrefs();
-        loadModels();
-    });
-    splitChip.addEventListener('click', () => {
-        prefs.showSplit = !prefs.showSplit;
-        splitChip.classList.toggle('active', prefs.showSplit);
-        savePrefs();
-        loadModels();
-    });
-    draftChip.addEventListener('click', () => {
-        prefs.showDraftModels = !prefs.showDraftModels;
-        draftChip.classList.toggle('active', prefs.showDraftModels);
-        savePrefs();
-        loadModels();
-    });
-
-    typeRow.appendChild(typeLabel);
-    typeRow.appendChild(mmprojChip);
-    typeRow.appendChild(mainChip);
-    typeRow.appendChild(splitChip);
-    typeRow.appendChild(draftChip);
-    filtersPanel.appendChild(typeRow);
-
-    // Size filter row
-    const sizeRow = document.createElement('div');
-    sizeRow.className = 'mm-lib-filter-row';
-    const sizeLabel = document.createElement('span');
-    sizeLabel.className = 'mm-lib-filter-label';
-    sizeLabel.textContent = 'Size';
-    const sizeAnyChip = createChip('Any', prefs.sizeMaxGb === 0);
-    const size3Chip   = createChip('< 3 GB', prefs.sizeMaxGb === 3);
-    const size8Chip   = createChip('< 8 GB', prefs.sizeMaxGb === 8);
-    const setSizeFilter = (gb) => {
-        prefs.sizeMaxGb = gb;
-        sizeAnyChip.classList.toggle('active', gb === 0);
-        size3Chip.classList.toggle('active', gb === 3);
-        size8Chip.classList.toggle('active', gb === 8);
-        savePrefs();
-        loadModels();
-    };
-    sizeAnyChip.addEventListener('click', () => setSizeFilter(0));
-    size3Chip.addEventListener('click', () => setSizeFilter(prefs.sizeMaxGb === 3 ? 0 : 3));
-    size8Chip.addEventListener('click', () => setSizeFilter(prefs.sizeMaxGb === 8 ? 0 : 8));
-    sizeRow.appendChild(sizeLabel);
-    sizeRow.appendChild(sizeAnyChip);
-    sizeRow.appendChild(size3Chip);
-    sizeRow.appendChild(size8Chip);
-    filtersPanel.appendChild(sizeRow);
-
-    // Family filter (from classification)
-    const familySet = new Set();
-    models.forEach(m => {
-        const f = (m.classification || {}).family || '';
-        if (f && f !== 'other') familySet.add(f);
-    });
-
-    if (familySet.size > 0) {
-        const familyRow = document.createElement('div');
-        familyRow.className = 'mm-lib-filter-row';
-        const familyLabel = document.createElement('span');
-        familyLabel.className = 'mm-lib-filter-label';
-        familyLabel.textContent = 'Family';
-
-        const noneChip = createChip('All', !prefs.familyFilter);
-        noneChip.addEventListener('click', () => {
-            prefs.familyFilter = '';
-            savePrefs();
-            loadModels();
-        });
-        familyRow.appendChild(familyLabel);
-        familyRow.appendChild(noneChip);
-
-        const familyLabels = {
-            qwen36: 'Qwen3.6',
-            qwen35: 'Qwen3.5',
-            qwen3: 'Qwen3',
-            llama3: 'Llama 3.x',
-            gemma4: 'Gemma4',
-            gemma: 'Gemma',
-            mistral: 'Mistral',
-            exaone: 'EXAONE',
-            heretic: 'Heretic',
-        };
-
-        familySet.forEach(fam => {
-            const chip = createChip(familyLabels[fam] || fam, prefs.familyFilter === fam);
-            chip.classList.toggle('active', prefs.familyFilter === fam);
-            chip.addEventListener('click', () => {
-                prefs.familyFilter = prefs.familyFilter === fam ? '' : fam;
-                savePrefs();
-                loadModels();
-            });
-            familyRow.appendChild(chip);
-        });
-
-        filtersPanel.appendChild(familyRow);
-    }
-
-    // Size-class filter (from classification)
-    const sizeClassSet = new Set();
-    models.forEach(m => {
-        const s = (m.classification || {}).size_class || '';
-        if (s && s !== 'unknown') sizeClassSet.add(s);
-    });
-
-    if (sizeClassSet.size > 0) {
-        const sizeClassRow = document.createElement('div');
-        sizeClassRow.className = 'mm-lib-filter-row';
-        const sizeClassLabel = document.createElement('span');
-        sizeClassLabel.className = 'mm-lib-filter-label';
-        sizeClassLabel.textContent = 'Size class';
-
-        const noneChip = createChip('All', !prefs.sizeClassFilter);
-        noneChip.addEventListener('click', () => {
-            prefs.sizeClassFilter = '';
-            savePrefs();
-            loadModels();
-        });
-        sizeClassRow.appendChild(sizeClassLabel);
-        sizeClassRow.appendChild(noneChip);
-
-        ['tiny', 'small', 'medium', 'large', 'huge'].forEach(sc => {
-            if (!sizeClassSet.has(sc)) return;
-            const chip = createChip(sc.charAt(0).toUpperCase() + sc.slice(1), prefs.sizeClassFilter === sc);
-            chip.classList.toggle('active', prefs.sizeClassFilter === sc);
-            chip.addEventListener('click', () => {
-                prefs.sizeClassFilter = prefs.sizeClassFilter === sc ? '' : sc;
-                savePrefs();
-                loadModels();
-            });
-            sizeClassRow.appendChild(chip);
-        });
-
-        filtersPanel.appendChild(sizeClassRow);
-    }
-
-    // Quant filters (dynamic from models list)
-    const quantRow = document.createElement('div');
-    quantRow.className = 'mm-lib-filter-row';
-
-    const quantLabel = document.createElement('span');
-    quantLabel.className = 'mm-lib-filter-label';
-    quantLabel.textContent = 'Quant';
-
-    const quantSet = new Set();
-    models.forEach(m => {
-        const qt = (m.quant_type || '').toUpperCase();
-        if (qt && qt !== 'UNKNOWN') quantSet.add(qt);
-    });
-
-    if (quantSet.size > 0 && quantSet.size <= 30) {
-        quantSet.forEach(qt => {
-            const chip = createChip(qt, prefs.quantFilters[qt] !== false);
-            chip.addEventListener('click', () => {
-                const active = !prefs.quantFilters[qt];
-                prefs.quantFilters[qt] = active;
-                chip.classList.toggle('active', active);
-                savePrefs();
-                loadModels();
-            });
-            quantRow.appendChild(chip);
-        });
-    }
-
-    filtersPanel.appendChild(quantRow);
-
-    // Tag filter
-    const tagRow = document.createElement('div');
-    tagRow.className = 'mm-lib-filter-row';
-
-    const tagLabel = document.createElement('span');
-    tagLabel.className = 'mm-lib-filter-label';
-    tagLabel.textContent = 'Tag';
-
-    const allTags = new Set(KNOWN_TAGS);
-    models.forEach(m => {
-        (Array.isArray(m.tags) ? m.tags : []).forEach(t => allTags.add(t));
-    });
-
-    const allTagArr = Array.from(allTags);
-    if (allTagArr.length > 0) {
-        const noneChip = createChip('All', !prefs.tagFilter);
-        noneChip.addEventListener('click', () => {
-            prefs.tagFilter = '';
-            savePrefs();
-            loadModels();
-        });
-        tagRow.appendChild(noneChip);
-
-        allTagArr.forEach(tag => {
-            const chip = createChip(tag, prefs.tagFilter === tag);
-            chip.classList.toggle('active', prefs.tagFilter === tag);
-            chip.addEventListener('click', () => {
-                prefs.tagFilter = prefs.tagFilter === tag ? '' : tag;
-                savePrefs();
-                loadModels();
-            });
-            tagRow.appendChild(chip);
-        });
-    }
-
-    tagRow.appendChild(tagLabel);
-    filtersPanel.appendChild(tagRow);
 
     filtersWrap.appendChild(filtersBtn);
     filtersWrap.appendChild(filtersPanel);
@@ -1150,9 +951,9 @@ function buildLibraryToolbar(models) {
         const opt = document.createElement('option');
         opt.value = o.value;
         opt.textContent = o.label;
-        if (o.value === prefs.sort) opt.selected = true;
         sortSelect.appendChild(opt);
     });
+    sortSelect.value = prefs.sort || 'name-asc';
 
     sortSelect.addEventListener('change', () => {
         prefs.sort = sortSelect.value;
@@ -1193,6 +994,231 @@ function buildLibraryToolbar(models) {
     container.appendChild(right);
 }
 
+// Called each time models list is loaded; only rebuilds dynamic filter chips.
+function rebuildLibraryFilters(models) {
+    const container = document.getElementById('mm-library-toolbar');
+    if (!container) return;
+    ensureLibraryToolbar();
+
+    const filtersPanel = document.getElementById('mm-lib-filters-panel');
+    const filtersBtn = document.getElementById('mm-lib-filters-toggle');
+    if (!filtersPanel || !filtersBtn) return;
+
+    // Update filter button active indicator
+    const hasActiveFilters = !prefs.showMmproj || !prefs.showMain || !prefs.showSplit ||
+        !prefs.showDraftModels || prefs.sizeMaxGb > 0 ||
+        Object.values(prefs.quantFilters).some(v => v === false) ||
+        !!prefs.tagFilter || !!prefs.familyFilter || !!prefs.sizeClassFilter;
+    filtersBtn.classList.toggle('mm-lib-btn--active', hasActiveFilters);
+    const spanEl = filtersBtn.querySelector('span');
+    if (spanEl) spanEl.textContent = 'Filter' + (hasActiveFilters ? ' •' : '');
+
+    // Clear previous filter rows
+    filtersPanel.innerHTML = '';
+
+    // Type filters
+    const typeRow = document.createElement('div');
+    typeRow.className = 'mm-lib-filter-row';
+    const typeLabel = document.createElement('span');
+    typeLabel.className = 'mm-lib-filter-label';
+    typeLabel.textContent = 'Type';
+
+    const mmprojChip = createChip('mmproj', prefs.showMmproj);
+    const mainChip = createChip('Main', prefs.showMain);
+    const splitChip = createChip('Split', prefs.showSplit);
+    const draftChip = createChip('Draft / MTP', prefs.showDraftModels);
+
+    mmprojChip.addEventListener('click', () => {
+        prefs.showMmproj = !prefs.showMmproj;
+        mmprojChip.classList.toggle('active', prefs.showMmproj);
+        savePrefs(); loadModels();
+    });
+    mainChip.addEventListener('click', () => {
+        prefs.showMain = !prefs.showMain;
+        mainChip.classList.toggle('active', prefs.showMain);
+        savePrefs(); loadModels();
+    });
+    splitChip.addEventListener('click', () => {
+        prefs.showSplit = !prefs.showSplit;
+        splitChip.classList.toggle('active', prefs.showSplit);
+        savePrefs(); loadModels();
+    });
+    draftChip.addEventListener('click', () => {
+        prefs.showDraftModels = !prefs.showDraftModels;
+        draftChip.classList.toggle('active', prefs.showDraftModels);
+        savePrefs(); loadModels();
+    });
+
+    typeRow.appendChild(typeLabel);
+    typeRow.appendChild(mmprojChip);
+    typeRow.appendChild(mainChip);
+    typeRow.appendChild(splitChip);
+    typeRow.appendChild(draftChip);
+    filtersPanel.appendChild(typeRow);
+
+    // Size filter row
+    const sizeRow = document.createElement('div');
+    sizeRow.className = 'mm-lib-filter-row';
+    const sizeLabel = document.createElement('span');
+    sizeLabel.className = 'mm-lib-filter-label';
+    sizeLabel.textContent = 'Size';
+    const sizeAnyChip = createChip('Any', prefs.sizeMaxGb === 0);
+    const size3Chip = createChip('< 3 GB', prefs.sizeMaxGb === 3);
+    const size8Chip = createChip('< 8 GB', prefs.sizeMaxGb === 8);
+    const setSizeFilter = (gb) => {
+        prefs.sizeMaxGb = gb;
+        sizeAnyChip.classList.toggle('active', gb === 0);
+        size3Chip.classList.toggle('active', gb === 3);
+        size8Chip.classList.toggle('active', gb === 8);
+        savePrefs(); loadModels();
+    };
+    sizeAnyChip.addEventListener('click', () => setSizeFilter(0));
+    size3Chip.addEventListener('click', () => setSizeFilter(prefs.sizeMaxGb === 3 ? 0 : 3));
+    size8Chip.addEventListener('click', () => setSizeFilter(prefs.sizeMaxGb === 8 ? 0 : 8));
+    sizeRow.appendChild(sizeLabel);
+    sizeRow.appendChild(sizeAnyChip);
+    sizeRow.appendChild(size3Chip);
+    sizeRow.appendChild(size8Chip);
+    filtersPanel.appendChild(sizeRow);
+
+    // Family filter (from classification)
+    const familySet = new Set();
+    models.forEach(m => {
+        const f = (m.classification || {}).family || '';
+        if (f && f !== 'other') familySet.add(f);
+    });
+
+    if (familySet.size > 0) {
+        const familyRow = document.createElement('div');
+        familyRow.className = 'mm-lib-filter-row';
+        const familyLabel = document.createElement('span');
+        familyLabel.className = 'mm-lib-filter-label';
+        familyLabel.textContent = 'Family';
+
+        const noneChip = createChip('All', !prefs.familyFilter);
+        noneChip.addEventListener('click', () => {
+            prefs.familyFilter = ''; savePrefs(); loadModels();
+        });
+        familyRow.appendChild(familyLabel);
+        familyRow.appendChild(noneChip);
+
+        const familyLabels = {
+            qwen36: 'Qwen3.6', qwen35: 'Qwen3.5', qwen3: 'Qwen3',
+            llama3: 'Llama 3.x', gemma4: 'Gemma4', gemma: 'Gemma',
+            mistral: 'Mistral', exaone: 'EXAONE', heretic: 'Heretic',
+        };
+
+        familySet.forEach(fam => {
+            const chip = createChip(familyLabels[fam] || fam, prefs.familyFilter === fam);
+            chip.classList.toggle('active', prefs.familyFilter === fam);
+            chip.addEventListener('click', () => {
+                prefs.familyFilter = prefs.familyFilter === fam ? '' : fam;
+                savePrefs(); loadModels();
+            });
+            familyRow.appendChild(chip);
+        });
+
+        filtersPanel.appendChild(familyRow);
+    }
+
+    // Size-class filter (from classification)
+    const sizeClassSet = new Set();
+    models.forEach(m => {
+        const s = (m.classification || {}).size_class || '';
+        if (s && s !== 'unknown') sizeClassSet.add(s);
+    });
+
+    if (sizeClassSet.size > 0) {
+        const sizeClassRow = document.createElement('div');
+        sizeClassRow.className = 'mm-lib-filter-row';
+        const sizeClassLabel = document.createElement('span');
+        sizeClassLabel.className = 'mm-lib-filter-label';
+        sizeClassLabel.textContent = 'Size class';
+
+        const noneChip = createChip('All', !prefs.sizeClassFilter);
+        noneChip.addEventListener('click', () => {
+            prefs.sizeClassFilter = ''; savePrefs(); loadModels();
+        });
+        sizeClassRow.appendChild(sizeClassLabel);
+        sizeClassRow.appendChild(noneChip);
+
+        ['tiny', 'small', 'medium', 'large', 'huge'].forEach(sc => {
+            if (!sizeClassSet.has(sc)) return;
+            const chip = createChip(sc.charAt(0).toUpperCase() + sc.slice(1), prefs.sizeClassFilter === sc);
+            chip.classList.toggle('active', prefs.sizeClassFilter === sc);
+            chip.addEventListener('click', () => {
+                prefs.sizeClassFilter = prefs.sizeClassFilter === sc ? '' : sc;
+                savePrefs(); loadModels();
+            });
+            sizeClassRow.appendChild(chip);
+        });
+
+        filtersPanel.appendChild(sizeClassRow);
+    }
+
+    // Quant filters (dynamic from models list)
+    const quantRow = document.createElement('div');
+    quantRow.className = 'mm-lib-filter-row';
+    const quantLabel = document.createElement('span');
+    quantLabel.className = 'mm-lib-filter-label';
+    quantLabel.textContent = 'Quant';
+
+    const quantSet = new Set();
+    models.forEach(m => {
+        const qt = (m.quant_type || '').toUpperCase();
+        if (qt && qt !== 'UNKNOWN') quantSet.add(qt);
+    });
+
+    if (quantSet.size > 0 && quantSet.size <= 30) {
+        quantSet.forEach(qt => {
+            const chip = createChip(qt, prefs.quantFilters[qt] !== false);
+            chip.addEventListener('click', () => {
+                const active = !prefs.quantFilters[qt];
+                prefs.quantFilters[qt] = active;
+                chip.classList.toggle('active', active);
+                savePrefs(); loadModels();
+            });
+            quantRow.appendChild(chip);
+        });
+    }
+
+    filtersPanel.appendChild(quantRow);
+
+    // Tag filter
+    const tagRow = document.createElement('div');
+    tagRow.className = 'mm-lib-filter-row';
+    const tagLabel = document.createElement('span');
+    tagLabel.className = 'mm-lib-filter-label';
+    tagLabel.textContent = 'Tag';
+
+    const allTags = new Set(KNOWN_TAGS);
+    models.forEach(m => {
+        (Array.isArray(m.tags) ? m.tags : []).forEach(t => allTags.add(t));
+    });
+
+    const allTagArr = Array.from(allTags);
+    if (allTagArr.length > 0) {
+        const noneChip = createChip('All', !prefs.tagFilter);
+        noneChip.addEventListener('click', () => {
+            prefs.tagFilter = ''; savePrefs(); loadModels();
+        });
+        tagRow.appendChild(noneChip);
+
+        allTagArr.forEach(tag => {
+            const chip = createChip(tag, prefs.tagFilter === tag);
+            chip.classList.toggle('active', prefs.tagFilter === tag);
+            chip.addEventListener('click', () => {
+                prefs.tagFilter = prefs.tagFilter === tag ? '' : tag;
+                savePrefs(); loadModels();
+            });
+            tagRow.appendChild(chip);
+        });
+    }
+
+    tagRow.appendChild(tagLabel);
+    filtersPanel.appendChild(tagRow);
+}
+
 function createChip(label, active) {
     const chip = document.createElement('button');
     chip.type = 'button';
@@ -1206,6 +1232,9 @@ function createChip(label, active) {
 export function initModels() {
     if (initialized) return;
     initialized = true;
+
+    // Initialize toolbar structure once (search, sort, view controls)
+    ensureLibraryToolbar();
 
     // Bind modal close buttons
     const closeBtn = document.getElementById('models-modal-close');
@@ -1470,14 +1499,17 @@ async function onHfFileSelected(file, repoId, downloadPanel) {
     // Check for mmproj companion in this repo
     await detectMmprojCompanion(repoId);
 
-    // Wire download button
+    // Wire download button with double-click guard
     const newBtn = document.getElementById('mm-hf-dlp-download-btn');
     if (newBtn) {
         newBtn.onclick = null;
     }
     if (newBtn) {
         newBtn.disabled = false;
+        let clickLocked = false;
         newBtn.onclick = async () => {
+            if (clickLocked) return;
+            clickLocked = true;
             const modelFilePath = file.path || file.name;
             const started = await hfStartDownload({
                 repoId,
@@ -1485,15 +1517,25 @@ async function onHfFileSelected(file, repoId, downloadPanel) {
                 panelEl: downloadPanel,
                 onComplete: (downloadId, localPath) => {
                     hfState.currentDownloadIds.add(downloadId);
-                    showToast('Model downloaded', 'success');
                     // Refresh library tab
                     loadModels();
                 },
                 onValidationError: (msg) => {
-                    showToast(msg || 'Download failed', 'error');
+                    // hfStartDownload now shows its own toast for most cases.
+                    // This handler is a fallback for non-standard messages.
+                    const e = (msg || '').toLowerCase();
+                    if (!e.includes('already downloading') &&
+                        !e.includes('already exists') &&
+                        !e.includes('too many downloads') &&
+                        !e.includes('download started')) {
+                        showToast(msg || 'Download failed', 'error');
+                    }
                 },
             });
-            if (!started || !hfState.mmprojPath) return;
+            if (!started || !hfState.mmprojPath) {
+                clickLocked = false;
+                return;
+            }
 
             const companion = await hfStartCompanionDownload({
                 repoId: hfState.mmprojRepoId || repoId,
@@ -1503,6 +1545,11 @@ async function onHfFileSelected(file, repoId, downloadPanel) {
             if (!companion) {
                 showToast('Model download started, but the mmproj download could not start.', 'error');
             }
+            // Unlock only after progress is actively showing (polling started).
+            // hfStartDownload sets state to 'progress' internally; keep button
+            // disabled visually via the progress panel, so clickLocked is only
+            // to prevent a second click before that transition.
+            clickLocked = false;
         };
     }
 

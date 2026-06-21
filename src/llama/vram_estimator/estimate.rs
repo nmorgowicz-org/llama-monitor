@@ -113,6 +113,28 @@ pub fn gpu_overhead_bytes(ubatch_size: u32) -> u64 {
     base + ubatch_extra
 }
 
+/// CUDA-specific persistent compute buffer overhead.
+///
+/// On Metal (unified memory), compute buffers are small and transient — `gpu_overhead_bytes`
+/// covers them. On CUDA/ROCm, llama.cpp allocates persistent scratch tensors for the full
+/// compute graph (Q/K/V projections, FFN intermediates, RMS norm buffers) that scale with
+/// model width × ubatch.
+///
+/// Calibrated on RTX 5090 32 GB (WDDM), Qwen3.6-27B-NEO-CODE Q4_K_M, 212k ctx, ubatch=1024,
+/// flash_attn=on:
+///   Total VRAM 28,101 MiB − model 16,511 MB − mmproj 888 MB − KV q8_0@212k 6,656 MB
+///   − WDDM desktop apps ~1,536 MB = ~2,510 MB compute buffers.
+///   Formula: 65 layers × 1024 ubatch × 5120 n_embd × 2 bytes × 4 passes = 2,600 MB → close.
+///
+/// Returns 0 for unified memory (Metal) or when n_embd is unknown (0).
+pub fn cuda_compute_buffer_bytes(arch: &ModelArch, ubatch_size: u32) -> u64 {
+    if arch.n_embd == 0 || arch.n_layers == 0 {
+        return 0;
+    }
+    // n_layers × ubatch × n_embd × sizeof(f16) × 4 compute-graph passes
+    (arch.n_layers as u64) * (ubatch_size as u64) * (arch.n_embd as u64) * 2 * 4
+}
+
 /// Compute the headroom fraction to reserve when sizing context or evaluating fit.
 ///
 /// Both platforms use a sliding-window approach: a percentage base rate that is capped
@@ -204,7 +226,12 @@ pub fn full_estimate(
     let linear_state = arch.linear_attn_state_bytes;
     let mmproj = arch.mmproj_bytes;
     let mtp = mtp_overhead_bytes(model_size_bytes, arch.mtp_depth);
-    let overhead = gpu_overhead_bytes(ubatch_size);
+    let cuda_buf = if is_unified_memory {
+        0
+    } else {
+        cuda_compute_buffer_bytes(arch, ubatch_size)
+    };
+    let overhead = gpu_overhead_bytes(ubatch_size) + cuda_buf;
     let total = weight_vram + kv + linear_state + mmproj + mtp + overhead;
     let headroom = available_vram_bytes as i64 - total as i64;
 
@@ -288,6 +315,7 @@ pub fn max_context(
     fit_granularity: u64,
     headroom_fraction: f64,
     n_ctx_train: Option<u64>,
+    is_unified_memory: bool,
 ) -> u64 {
     if available_vram_bytes == 0 {
         return 0;
@@ -296,7 +324,12 @@ pub fn max_context(
     let mmproj = arch.mmproj_bytes;
     let mtp = mtp_overhead_bytes(model_size_bytes, arch.mtp_depth);
     let linear_state = arch.linear_attn_state_bytes; // constant; doesn't scale with context
-    let overhead = gpu_overhead_bytes(ubatch_size);
+    let cuda_buf = if is_unified_memory {
+        0
+    } else {
+        cuda_compute_buffer_bytes(arch, ubatch_size)
+    };
+    let overhead = gpu_overhead_bytes(ubatch_size) + cuda_buf;
     let fixed = weight_vram + mmproj + mtp + linear_state + overhead;
 
     let usable = (available_vram_bytes as f64 * (1.0 - headroom_fraction)) as u64;
@@ -500,6 +533,7 @@ pub fn auto_size(
         fit_gran,
         headroom,
         n_ctx_train,
+        is_unified_memory,
     );
 
     let breakdown = full_estimate(
@@ -671,6 +705,7 @@ fn build_scenarios(
             fit_gran,
             headroom,
             n_ctx_train,
+            is_unified_memory,
         );
         let bd = full_estimate(
             model_size_bytes,
@@ -718,6 +753,7 @@ fn build_scenarios(
             fit_gran,
             headroom,
             n_ctx_train,
+            is_unified_memory,
         );
         let bd = full_estimate(
             model_size_bytes,
@@ -845,6 +881,7 @@ pub fn quant_comparison_table(
             1024,
             headroom,
             None, // pre-download advisor: VRAM-limited maxes only
+            is_unified_memory,
         );
         let max_q4 = max_context(
             model_bytes,
@@ -858,6 +895,7 @@ pub fn quant_comparison_table(
             1024,
             headroom,
             None, // pre-download advisor: VRAM-limited maxes only
+            is_unified_memory,
         );
 
         let mut notes = Vec::new();

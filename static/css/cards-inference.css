@@ -522,17 +522,17 @@
   position: relative;
   padding: 22px;
   background:
-    radial-gradient(circle at 18% 18%, var(--surface-card-ambient-a), transparent 26%),
-    radial-gradient(circle at 82% 14%, var(--surface-card-ambient-b), transparent 24%),
-    linear-gradient(180deg, var(--surface-card-elevated), var(--surface-card-base));
+    radial-gradient(circle at 15% 15%, color-mix(in srgb, var(--surface-card-ambient-a) 40%, transparent), transparent 28%),
+    radial-gradient(circle at 85% 18%, color-mix(in srgb, var(--surface-card-ambient-b) 30%, transparent), transparent 26%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-card-elevated) 90%, rgba(2, 6, 23, 0.98)),
+                      color-mix(in srgb, var(--surface-card-base) 90%, rgba(2, 6, 23, 0.98)));
   border: 1px solid var(--surface-card-overlay-strong);
   border-radius: var(--radius-card);
   box-shadow:
-    0 16px 40px rgba(0, 0, 0, 0.36),
-    0 4px 16px rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.2),
-    inset 0 36px 80px -38px rgba(255, 255, 255, 0.05);
+    0 18px 44px rgba(0, 0, 0, 0.42),
+    0 6px 20px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.24);
   transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
   backdrop-filter: blur(12px);
   overflow: hidden;
@@ -556,9 +556,10 @@
 .inference-mini-panel,
 .inference-config-panel {
   background:
-    radial-gradient(circle at 84% 16%, var(--surface-card-ambient-a), transparent 22%),
-    radial-gradient(circle at 12% 88%, var(--surface-card-ambient-b), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.012));
+    radial-gradient(circle at 80% 16%, color-mix(in srgb, var(--surface-card-ambient-a) 30%, transparent), transparent 24%),
+    radial-gradient(circle at 14% 85%, color-mix(in srgb, var(--surface-card-ambient-b) 20%, transparent), transparent 28%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-card-elevated) 88%, rgba(2, 6, 23, 0.97)),
+                      color-mix(in srgb, var(--surface-card-base) 88%, rgba(2, 6, 23, 0.97)));
 }
 
 .widget-card::after {
@@ -1098,10 +1099,6 @@
   min-height: 280px;
   position: relative;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 84% 16%, var(--surface-card-ambient-a), transparent 22%),
-    radial-gradient(circle at 12% 88%, var(--surface-card-ambient-b), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.012));
 }
 
 .widget-context .context-chat-strip-wrap,
@@ -2130,10 +2127,20 @@
 .inference-config-panel {
   position: relative;
   align-content: start;
-  background:
-    radial-gradient(circle at 84% 16%, var(--surface-card-ambient-a), transparent 22%),
-    radial-gradient(circle at 12% 88%, var(--surface-card-ambient-b), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.012));
+  padding-top: 8px;
+}
+
+.inference-config-panel .model-info-row,
+.inference-config-panel .speculative-chip,
+.inference-config-panel .config-kv-grid,
+.inference-config-panel .sampler-params-inline {
+  margin-top: 8px;
+}
+
+.inference-config-panel .speculative-chip {
+  display: inline-flex;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .sampler-params-inline {
@@ -2376,7 +2383,7 @@
   background:
     radial-gradient(circle at 84% 16%, var(--surface-card-ambient-a), transparent 22%),
     radial-gradient(circle at 12% 88%, var(--surface-card-ambient-b), transparent 28%),
-    linear-gradient(180deg, rgba(15, 23, 42, 0.04), rgba(15, 23, 42, 0.02));
+    linear-gradient(180deg, var(--surface-card-elevated), var(--surface-card-base));
 }
 
 /* Inference empty state */
@@ -2620,12 +2627,15 @@
   color: var(--color-accent);
 }
 
-/* inference-config-panel / sampler-params-inline / config-kv */
-[data-theme="light"] .inference-config-panel,
+/* inference-config-panel: border only — background inherits gradient from inference-mini-panel rule */
+[data-theme="light"] .inference-config-panel {
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+/* sampler-params-inline: nested sub-panel stays near-white for contrast */
 [data-theme="light"] .sampler-params-inline {
   border-color: rgba(15, 23, 42, 0.12);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.95));
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.95));
 }
 
 [data-theme="light"] .config-kv .config-key {

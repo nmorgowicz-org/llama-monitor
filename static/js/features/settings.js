@@ -709,8 +709,24 @@ async function _loadSettingsGpuInfo() {
 
         if (d.cpu_name) {
             let extra = '';
-            if (d.p_cores) {
-                extra = ' \u00B7 ' + d.p_cores + 'P + ' + (d.e_cores || 0) + 'E cores';
+            const pCores = d.p_cores || 0;
+            const sCores = d.s_cores || 0;
+            const eCores = d.e_cores || 0;
+            const pName = d.p_cluster_name || '';
+            const sName = d.secondary_cluster_name || '';
+            const total = pCores + sCores + eCores;
+            if (total > 0) {
+                const parts = [];
+                if (pCores > 0) {
+                    parts.push(pCores + (pName ? ' ' + pName : 'P'));
+                }
+                if (sCores > 0) {
+                    parts.push(sCores + (sName ? ' ' + sName : 'S'));
+                }
+                if (eCores > 0) {
+                    parts.push(eCores + 'E');
+                }
+                extra = ' \u00B7 ' + parts.join(' + ') + ' cores';
             }
             makeRow('CPU', d.cpu_name + extra);
         }

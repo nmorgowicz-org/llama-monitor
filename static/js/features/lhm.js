@@ -2,7 +2,7 @@
 // LHM notification, install/start/uninstall flow, UAC warning, and status check.
 
 import { lhm } from '../core/app-state.js';
-import { showToast } from './toast.js';
+import { showToast, showConfirmDialog } from './toast.js';
 
 // ── LHM Notification ──────────────────────────────────────────────────────────
 
@@ -97,7 +97,11 @@ export async function showLHMNotification() {
                 `;
                 lhmButtonsEl.querySelector('#btn-lhm-uninstall').onclick = async () => {
                     overlay.remove();
-                    const uninstallConfirm = confirm('Are you sure you want to uninstall LibreHardwareMonitor? This will disable CPU temperature monitoring.');
+                    const uninstallConfirm = await showConfirmDialog(
+                        'Uninstall LibreHardwareMonitor',
+                        'Are you sure you want to uninstall LibreHardwareMonitor? This will disable CPU temperature monitoring.',
+                        'Uninstall'
+                    );
                     if (uninstallConfirm) {
                         try {
                             const uninstallResp = await fetch('/api/lhm/uninstall', {
@@ -146,7 +150,11 @@ export async function showLHMNotification() {
 
                 lhmButtonsEl.querySelector('#btn-lhm-uninstall').onclick = async () => {
                     overlay.remove();
-                    const uninstallConfirm = confirm('Are you sure you want to uninstall LibreHardwareMonitor?');
+                    const uninstallConfirm = await showConfirmDialog(
+                        'Uninstall LibreHardwareMonitor',
+                        'Are you sure you want to uninstall LibreHardwareMonitor?',
+                        'Uninstall'
+                    );
                     if (uninstallConfirm) {
                         try {
                             const uninstallResp = await fetch('/api/lhm/uninstall', {

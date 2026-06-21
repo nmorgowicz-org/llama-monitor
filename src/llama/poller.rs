@@ -275,9 +275,9 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             }
         }
 
-        // T-047: slow poll interval when asleep (session is active here)
-        let asleep = state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
-        let interval_secs = if asleep {
+        // T-047: slow poll interval when in low-power mode (session is active here)
+        let mode = state.sleep_mode.load(std::sync::atomic::Ordering::Relaxed);
+        let interval_secs = if mode >= 1 {
             if let Ok(cfg) = state.sleep_mode_config.lock() {
                 cfg.sleep_llama_interval_secs.max(1)
             } else {

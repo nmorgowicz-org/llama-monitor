@@ -293,10 +293,10 @@ html.palette-changing *::after {
   --surface-card-overlay:        color-mix(in srgb, var(--color-accent) 8%, rgba(71, 85, 105, 0.12));
   --surface-card-overlay-strong: color-mix(in srgb, var(--color-accent) 12%, rgba(71, 85, 105, 0.18));
 
-  /* Carbon Mint light-mode ambient (softer on white) */
-  --surface-card-ambient-a:   rgba(13, 148, 136, 0.08);
-  --surface-card-ambient-b:   rgba(16, 185, 129, 0.06);
-  --surface-card-glow:        rgba(15, 118, 110, 0.10);
+  /* Carbon Mint light-mode ambient */
+  --surface-card-ambient-a:   rgba(13, 148, 136, 0.15);
+  --surface-card-ambient-b:   rgba(16, 185, 129, 0.10);
+  --surface-card-glow:        rgba(15, 118, 110, 0.14);
   --surface-card-line:        rgba(20, 184, 166, 0.16);
   --surface-card-line-strong: rgba(20, 184, 166, 0.28);
 
@@ -358,9 +358,9 @@ html.palette-changing *::after {
   --color-accent:       #db2777;
   --color-accent-deep:  #9d174d;
   --color-accent-light: #f472b6;
-  --surface-card-ambient-a:   rgba(219, 39, 119, 0.08);
-  --surface-card-ambient-b:   rgba(244, 114, 182, 0.06);
-  --surface-card-glow:        rgba(157, 23, 77, 0.10);
+  --surface-card-ambient-a:   rgba(219, 39, 119, 0.15);
+  --surface-card-ambient-b:   rgba(244, 114, 182, 0.10);
+  --surface-card-glow:        rgba(157, 23, 77, 0.14);
   --surface-card-line:        rgba(244, 114, 182, 0.16);
   --surface-card-line-strong: rgba(244, 114, 182, 0.28);
 }
@@ -370,9 +370,9 @@ html.palette-changing *::after {
   --color-accent:       #7c3aed;
   --color-accent-deep:  #5b21b6;
   --color-accent-light: #a78bfa;
-  --surface-card-ambient-a:   rgba(124, 58, 237, 0.08);
-  --surface-card-ambient-b:   rgba(99, 102, 241, 0.06);
-  --surface-card-glow:        rgba(91, 33, 182, 0.10);
+  --surface-card-ambient-a:   rgba(124, 58, 237, 0.15);
+  --surface-card-ambient-b:   rgba(99, 102, 241, 0.10);
+  --surface-card-glow:        rgba(91, 33, 182, 0.14);
   --surface-card-line:        rgba(167, 139, 250, 0.16);
   --surface-card-line-strong: rgba(167, 139, 250, 0.28);
 }
@@ -382,9 +382,9 @@ html.palette-changing *::after {
   --color-accent:       #dc2626;
   --color-accent-deep:  #991b1b;
   --color-accent-light: #f87171;
-  --surface-card-ambient-a:   rgba(220, 38, 38, 0.08);
-  --surface-card-ambient-b:   rgba(249, 115, 22, 0.06);
-  --surface-card-glow:        rgba(153, 27, 27, 0.10);
+  --surface-card-ambient-a:   rgba(220, 38, 38, 0.15);
+  --surface-card-ambient-b:   rgba(249, 115, 22, 0.10);
+  --surface-card-glow:        rgba(153, 27, 27, 0.14);
   --surface-card-line:        rgba(248, 113, 113, 0.16);
   --surface-card-line-strong: rgba(248, 113, 113, 0.28);
 }

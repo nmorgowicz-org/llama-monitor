@@ -432,6 +432,9 @@ function setupWizardEscape() {
 
 // Clear all wizard state for a fresh start
 function resetWizardState() {
+  // Clear DOM inputs so they don't show stale values when the wizard re-opens
+  if (dom.modelPathInput) dom.modelPathInput.value = '';
+
   // Reset model state
   wizardState.model.source = '';
   wizardState.model.path = '';
@@ -453,6 +456,11 @@ function resetWizardState() {
   wizardState.model.mmprojFiles = [];
   wizardState.model.quantFiles = [];
   wizardState.model.hfTokenSet = false;
+  wizardState.model._quantSwapRepo = '';
+
+  // Clear module-level quant-swap search state so next open starts fresh
+  _lastQuantSearchFile = '';
+  _quantSwapSearching = false;
 
   // Reset hardware state
   wizardState.hardware.gpuLayers = '';
@@ -528,6 +536,7 @@ export function closeSpawnWizard() {
   if (!dom.overlay) return;
   dom.overlay.classList.remove('open');
   resetSpawnStatus();
+  resetWizardState();
 }
 
 // ── DOM caching ───────────────────────────────────────────────────────────────
@@ -978,11 +987,6 @@ function bindEvents() {
     // from candidates if not already set.
     if (isDraftMtp) {
       renderMtpSection();
-      // Default p-min to 0.75 for draft-mtp if not already set.
-      if (dom.specDraftPMinInput && !dom.specDraftPMinInput.value) {
-        dom.specDraftPMinInput.value = '0.75';
-        wizardState.hardware.mtpDraftPMin = 0.75;
-      }
       // Also auto-populate the draft model input from candidates
       const candidates = wizardState.model.draftCandidates || [];
       const existing = (dom.draftModelInput?.value || '').trim();
@@ -1102,8 +1106,17 @@ function bindEvents() {
 
   // Local-model quant swap trigger
   document.getElementById('hw-quant-local-btn')?.addEventListener('click', () => {
+    // If quants were already found by the background auto-discover, just open the
+    // dropdown immediately instead of re-searching.
+    if (wizardState.model.quantFiles?.length > 1 && !wizardState.model._quantSwapRepo) {
+      wizardState.model._quantSwapRepo = wizardState.model.originRepo || '_local_quants_';
+      const statusEl = document.getElementById('hw-quant-local-status');
+      if (statusEl) statusEl.textContent = '';
+      renderHardwareModelHeader();
+      return;
+    }
     _lastQuantSearchFile = ''; // reset cache so a re-click re-searches
-    _autoDiscoverLocalModelQuants();
+    _autoDiscoverLocalModelQuants(true); // user-triggered: will show dropdown on success
   });
 
   // Library tag picker trigger
@@ -4258,6 +4271,49 @@ function updateAdvisor() {
   }, 250);
 }
 
+function updateMlockWarning(availBytes = 0, freeBytes = null) {
+  const el = document.getElementById('spawn-mlock-warning');
+  if (!el) return;
+  if (!dom.mlockCheck?.checked) {
+    el.style.display = 'none';
+    el.textContent = '';
+    return;
+  }
+
+  const tight = freeBytes != null && availBytes > 0 && freeBytes < availBytes * 0.18;
+  const unified = isUnifiedMemory();
+  const platform = unified ? 'On unified-memory Macs, ' : '';
+
+  // Check if this model would push total system RAM above 90% when mlock is on.
+  // Above that threshold all model memory is non-compressible and macOS can stall.
+  const sys = lastSystemMetrics;
+  const modelGib = getModelBytes() / (1024 ** 3);
+  const totalRamGb = sys?.ram_total_gb || 0;
+  const usedRamGb = sys?.ram_used_gb || 0;
+  const projectedPct = totalRamGb > 0
+    ? Math.round(((usedRamGb + modelGib) / totalRamGb) * 100)
+    : 0;
+  const wiredOverload = unified && totalRamGb > 0 && projectedPct >= 90;
+
+  let tail;
+  if (wiredOverload) {
+    const wiredGb = (sys?.memory_wired_gb || 0) + modelGib;
+    tail = ` Loading this model will use ~${projectedPct}% of system RAM.`
+      + ` With mlock on, all of that is non-compressible — macOS cannot relieve pressure and the desktop may become unresponsive.`
+      + ` Consider disabling mlock: on Apple Silicon, Metal keeps model memory resident while the server is running.`
+      + ` (System wired would be ~${wiredGb.toFixed(1)} GiB after loading.)`;
+  } else if (tight) {
+    tail = ' This configuration is already close to the memory budget, so pinned memory can push macOS into compression or swap and make the desktop unresponsive.';
+  } else {
+    tail = ' Leave enough free system memory for macOS, browsers, downloads, and build tools.';
+  }
+  el.textContent = `${platform}mlock pins model memory instead of letting the OS reclaim it.${tail}`;
+  el.className = wiredOverload
+    ? 'ctx-fit-warning ctx-fit-error ctx-fit-mlock-suggest-off'
+    : tight ? 'ctx-fit-warning ctx-fit-error' : 'ctx-fit-warning';
+  el.style.display = '';
+}
+
 function updateVramDisplay() {
   const availVram = effectiveAvailBytes();
   if (!dom.vramPanel) return;
@@ -4276,6 +4332,7 @@ function updateVramDisplay() {
   const oh          = gpuOverheadBytes(hw.ubatchSize);
   const total       = weightVram + kv + linearState + mmproj + mtp + oh;
   const free = availVram - total;
+  updateMlockWarning(availVram, free);
 
   // Update total label
   if (dom.vramPanelTotal) {
@@ -4813,7 +4870,13 @@ function renderHardwareModelHeader() {
 
     // Tertiary: if still nothing selected, pick the VRAM-appropriate recommended quant
     if (!matched && recOpt) { recOpt.selected = true; }
-    if (quantRow) quantRow.style.display = '';
+
+    // For local/import models, only show the quant selector when the user explicitly
+    // picked a swap repo (via "Find other quantizations…"). For HF models, always show
+    // it so the user can pick which quant to download/stream.
+    const isLocalSource = source === 'local' || source === 'import';
+    const hasSwapRepo = !!wizardState.model._quantSwapRepo;
+    if (quantRow) quantRow.style.display = (isLocalSource && !hasSwapRepo) ? 'none' : '';
   } else {
     if (quantRow) quantRow.style.display = 'none';
     const fileEl = document.getElementById('hw-model-file');
@@ -4823,18 +4886,20 @@ function renderHardwareModelHeader() {
   // Library tags row — refresh whenever origin is known (non-blocking async).
   _refreshHwTagsRow();
 
-  // Show "Find on HuggingFace" row for local models that haven't loaded quant files yet.
-  // Reset the swap-actions bar whenever we re-render the header.
+  // "Find other quantizations…" row: show for local models that haven't selected a swap
+  // repo yet. Once the user picks a repo, hide this row and show the quant dropdown instead.
   const localRow = document.getElementById('hw-quant-local-row');
   if (localRow) {
     const isLocal = source === 'local' || source === 'import';
-    const hasQuants = quantFiles && quantFiles.length > 1;
-    localRow.style.display = (isLocal && !hasQuants) ? '' : 'none';
+    const hasSwapRepo = !!wizardState.model._quantSwapRepo;
+    localRow.style.display = (isLocal && !hasSwapRepo) ? '' : 'none';
   }
+
+  // Always clear the download/stream actions bar when re-rendering the header.
+  // The hw-quant-select onChange handler will re-populate it if the user picks a
+  // different quant — it must not persist from a previous wizard session.
   const actionsRow = document.getElementById('hw-quant-swap-actions');
-  if (actionsRow && actionsRow.style.display !== 'none') {
-    // Keep visible only if user already selected a swap target
-  }
+  if (actionsRow) actionsRow.style.display = 'none';
 }
 
 // ── Hardware step: mmproj name-matching helper ────────────────────────────────
@@ -5932,7 +5997,10 @@ function _extractQuantLabel(filename) {
 let _lastQuantSearchFile = ''; // prevent redundant searches
 let _quantSwapSearching = false;
 
-async function _autoDiscoverLocalModelQuants() {
+// userTriggered = true: user clicked "Find other quantizations…"; show dropdown on success.
+// userTriggered = false (default): background auto-discover; only populate files + status hint,
+//   never auto-show the dropdown (sets quantFiles without setting _quantSwapRepo).
+async function _autoDiscoverLocalModelQuants(userTriggered = false) {
   if (_quantSwapSearching) return;
   const { source, path, originRepo } = wizardState.model;
   if (source !== 'local' && source !== 'import') return;
@@ -5940,9 +6008,13 @@ async function _autoDiscoverLocalModelQuants() {
   const filename = (path || '').split(/[\\/]/).pop() || '';
   if (!filename || filename === _lastQuantSearchFile) return;
 
-  // Step 1 already fetched quant files — skip re-searching, just refresh the header
+  // Quants already loaded: if user-triggered, open the dropdown now.
+  // If background auto-trigger, just refresh the header without changing visibility.
   if (wizardState.model.quantFiles?.length > 0) {
     _lastQuantSearchFile = filename;
+    if (userTriggered && !wizardState.model._quantSwapRepo) {
+      wizardState.model._quantSwapRepo = wizardState.model.originRepo || '_local_quants_';
+    }
     renderHardwareModelHeader();
     return;
   }
@@ -6039,7 +6111,6 @@ async function _autoDiscoverLocalModelQuants() {
           size: f.size || 0,
           label: _extractQuantLabel(f.rfilename || f.path || ''),
         }));
-        wizardState.model._quantSwapRepo = repoId;
 
         // Pre-select the entry matching the currently loaded local file.
         const currentLower = filename.toLowerCase();
@@ -6047,10 +6118,20 @@ async function _autoDiscoverLocalModelQuants() {
           (f.rfilename || f.path || '').split('/').pop().toLowerCase() === currentLower);
         if (match) wizardState.model.hfFile = match.rfilename || match.path || '';
 
-        if (statusEl) statusEl.textContent = rawFiles.length === 1
-            ? 'Only your current quant is available'
-            : `${rawFiles.length} quants found`;
-        setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
+        if (userTriggered) {
+          // User explicitly asked: open the dropdown immediately.
+          wizardState.model._quantSwapRepo = repoId;
+          if (statusEl) statusEl.textContent = '';
+        } else {
+          // Background auto-discover: don't show the dropdown yet.
+          // Record the repo on originRepo so the click handler can use it without re-searching.
+          if (!wizardState.model.originRepo) wizardState.model.originRepo = repoId;
+          const n = rawFiles.length;
+          if (statusEl) statusEl.textContent = n === 1
+            ? 'No other quants available'
+            : `${n} quants available — click to switch`;
+          // Don't clear the status — user needs to see it to know they can click
+        }
         renderHardwareModelHeader();
       } else {
         // 4) Fallback: let user type a repo manually.
@@ -6560,12 +6641,6 @@ function renderMtpSection() {
   }
 
   section.style.display = '';
-
-  // Default p-min to 0.75 on first render (recommended starting point).
-  if (wizardState.hardware.mtpDraftPMin == null && dom.specDraftPMinInput && !dom.specDraftPMinInput.value) {
-    wizardState.hardware.mtpDraftPMin = 0.75;
-    dom.specDraftPMinInput.value = '0.75';
-  }
 
   const infoNote = document.getElementById('hw-mtp-info-note');
   if (infoNote && hasBuiltInMtp) { infoNote.style.display = ''; }

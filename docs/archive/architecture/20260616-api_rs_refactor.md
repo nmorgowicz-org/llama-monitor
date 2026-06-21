@@ -378,14 +378,14 @@ Keep restart auth and cooldown behavior unchanged.
 
 ### Phase 1: Create API Module Skeleton
 
-- [ ] Convert `src/web/api.rs` into `src/web/api/mod.rs`.
-- [ ] Add empty or minimal domain modules.
-- [ ] Move `ApiError`, reply types, auth helpers, and shared filters into `common.rs`.
-- [ ] Re-export only what `src/web/mod.rs` needs:
+- [x] Convert `src/web/api.rs` into `src/web/api/mod.rs`.
+- [x] Add empty or minimal domain modules.
+- [x] Move `ApiError`, reply types, auth helpers, and shared filters into `common.rs`.
+- [x] Re-export only what `src/web/mod.rs` needs:
   - `ApiError`
   - `check_api_token`
   - route entry points
-- [ ] Keep `src/web/mod.rs` call sites unchanged except module paths if required.
+- [x] Keep `src/web/mod.rs` call sites unchanged except module paths if required.
 
 Expected validation:
 
@@ -397,31 +397,31 @@ cargo check
 
 Start with route groups that have limited coupling:
 
-- [ ] `presets.rs`
-- [ ] `templates.rs`
-- [ ] `lhm.rs`
-- [ ] `sensor_bridge.rs`
-- [ ] `metrics.rs`
-- [ ] `debug.rs`
+- [x] `presets.rs`
+- [x] `templates.rs`
+- [x] `lhm.rs`
+- [x] `sensor_bridge.rs`
+- [x] `metrics.rs`
+- [x] `debug.rs`
 
 For each module:
 
-- [ ] Move handlers and directly related helpers.
-- [ ] Add `pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute`.
-- [ ] Box the module route group.
-- [ ] Wire the group from `api/mod.rs`.
-- [ ] Run `cargo check`.
+- [x] Move handlers and directly related helpers.
+- [x] Add `pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute`.
+- [x] Box the module route group.
+- [x] Wire the group from `api/mod.rs`.
+- [x] Run `cargo check`.
 
 ### Phase 3: Move Config, Models, HF, VRAM, Benchmark
 
 Move medium-coupling groups:
 
-- [ ] `config.rs`
-- [ ] `models.rs`
-- [ ] `hf.rs`
-- [ ] `spawn_wizard.rs`
-- [ ] `vram.rs`
-- [ ] `benchmark.rs`
+- [x] `config.rs`
+- [x] `models.rs`
+- [x] `hf.rs`
+- [x] `spawn_wizard.rs`
+- [x] `vram.rs`
+- [x] `benchmark.rs`
 
 Guardrails:
 

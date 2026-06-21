@@ -2095,11 +2095,30 @@
 }
 
 .preset-vram-strip .preset-vram-display {
-  background: none;
-  border: none;
-  border-radius: 0;
-  padding: 0;
-  margin-bottom: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    margin-bottom: 0;
+}
+
+.preset-memory-warning {
+    margin-top: 10px;
+    padding: 9px 11px;
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: 8px;
+    background: rgba(245, 158, 11, 0.08);
+    color: var(--color-warning, #f59e0b);
+    font-size: 0.78rem;
+    line-height: 1.45;
+}
+
+/* When mlock would wire >90% of RAM: elevate to an orange-red actionable suggestion */
+.preset-mlock-warning--suggest-off {
+    border-color: rgba(239, 100, 60, 0.5);
+    background: rgba(239, 100, 60, 0.1);
+    color: #ef6433;
+    font-weight: 500;
 }
 
 .preset-editor-layout {

@@ -19,14 +19,19 @@ const WS_PUSH_INTERVAL_HIDDEN_MS: u64 = 5_000;
 const WS_PUSH_INTERVAL_SLEEP_MS: u64 = 10_000; // T-049 / T-053: max interval when asleep
 const MAX_WS_CONNECTIONS: usize = 50;
 
-fn clamped_push_interval_ms(settings: &crate::state::UiSettings, asleep: bool) -> u64 {
+fn clamped_push_interval_ms(settings: &crate::state::UiSettings, sleep_mode: u8) -> u64 {
     let val = settings.ws_push_interval_ms;
     let base = val.clamp(WS_PUSH_INTERVAL_MIN_MS, WS_PUSH_INTERVAL_MAX_MS);
 
-    // T-049 / T-053: when asleep, enforce slow interval from config
-    if asleep {
+    // 0 = Off (full), 1 = LogsOnly, 2 = Sleep (full pause)
+    if sleep_mode == 2 {
+        // Full sleep: enforce slow interval from config
         let slow_ms = settings.sleep_mode.sleep_ws_interval_ms;
         base.max(slow_ms)
+    } else if sleep_mode == 1 {
+        // Logs-only: middle interval
+        let logs_ms = settings.sleep_mode.logs_only_ws_interval_ms;
+        base.max(logs_ms)
     } else {
         base
     }
@@ -66,16 +71,18 @@ pub fn ws_route(
                     let client_visible = Arc::new(AtomicBool::new(true));
 
                     // T-051: On open: wake auto-sleep only. Manual sleep persists across reconnects.
-                    let asleep_on_open = state.sleep_mode.load(Ordering::Relaxed);
+                    let mode_on_open = state.sleep_mode.load(Ordering::Relaxed);
                     let manual_on_open = state.sleep_mode_manual.load(Ordering::Relaxed);
+                    // Auto-sleep (mode=2, not manual): wake on WS open.
+                    let should_wake = mode_on_open == 2 && !manual_on_open;
                     eprintln!(
-                        "[sleep] WS open: asleep={} manual={}{}",
-                        asleep_on_open,
+                        "[sleep] WS open: mode={} manual={}{}",
+                        mode_on_open,
                         manual_on_open,
-                        if asleep_on_open && !manual_on_open { " → waking (auto-sleep)" } else { "" }
+                        if should_wake { " → waking (auto-sleep)" } else { "" }
                     );
-                    if asleep_on_open && !manual_on_open {
-                        state.sleep_mode.store(false, Ordering::Relaxed);
+                    if should_wake {
+                        state.sleep_mode.store(0, Ordering::Relaxed);
                         state.sleep_notify.notify_waiters();
                     }
 
@@ -95,30 +102,32 @@ pub fn ws_route(
                                 // Check if the push interval has changed in settings
                                 let current_ms = {
                                     let settings = s.ui_settings.lock().unwrap();
-                                    let asleep = s.sleep_mode.load(Ordering::Relaxed);
-                                    clamped_push_interval_ms(&settings, asleep)
+                                    let mode = s.sleep_mode.load(Ordering::Relaxed);
+                                    clamped_push_interval_ms(&settings, mode)
                                 };
                                 if current_ms != last_interval_ms {
                                     last_interval_ms = current_ms;
                                 }
 
                                 // T-049 / T-053: effective interval depends on visibility + sleep_mode
-                                let asleep = s.sleep_mode.load(Ordering::Relaxed);
+                                let mode = s.sleep_mode.load(Ordering::Relaxed);
                                 let client_vis = update_visible.load(Ordering::Relaxed);
-                                let effective_interval_ms = if asleep {
+                                let is_any_low_power = mode >= 1;
+                                let effective_interval_ms = if mode == 2 {
+                                    // Full sleep: very slow
                                     last_interval_ms.max(WS_PUSH_INTERVAL_SLEEP_MS)
-                                } else if client_vis {
-                                    last_interval_ms
-                                } else {
+                                } else if is_any_low_power || !client_vis {
                                     last_interval_ms.max(WS_PUSH_INTERVAL_HIDDEN_MS)
+                                } else {
+                                    last_interval_ms
                                 };
 
-                                // T-056: if chat streaming is active, don't sleep interval even if asleep
+                                // T-056: if chat streaming is active, don't slow interval even if low-power
                                 let streaming_active = {
                                     let llama = s.llama_metrics.lock().unwrap();
                                     llama.generation_tokens_per_sec > 0.0
                                 };
-                                let final_interval_ms = if streaming_active && asleep {
+                                let final_interval_ms = if streaming_active && is_any_low_power {
                                     last_interval_ms
                                 } else {
                                     effective_interval_ms
@@ -128,10 +137,13 @@ pub fn ws_route(
 
                                 let running = *s.server_running.lock().unwrap();
                                 let local_running = *s.local_server_running.lock().unwrap();
-                                let asleep = s.sleep_mode.load(Ordering::Relaxed);
+                                let mode = s.sleep_mode.load(Ordering::Relaxed);
 
-                                // T-049: when asleep, send minimal payload (heartbeat + critical flags)
-                                let json = if asleep {
+                                // T-049: 3-way payload:
+                                // mode=0 (off): full payload
+                                // mode=1 (logs-only): reduced payload + logs
+                                // mode=2 (sleep): minimal heartbeat (no logs)
+                                let json = if mode == 2 {
                                     let active_session_id =
                                         s.active_session_id.lock().unwrap().clone();
                                     let active_status = {
@@ -148,17 +160,53 @@ pub fn ws_route(
                                             .unwrap_or("stopped")
                                     };
 
-                                    let is_manual = s.sleep_mode_manual.load(Ordering::Relaxed);
-                                    serde_json::json!({
-                                        "sleep_mode": true,
-                                        "sleep_mode_manual": is_manual,
-                                        "server_running": running,
-                                        "local_server_running": local_running,
-                                        "active_session_id": active_session_id,
-                                        "active_session_status": active_status
-                                    })
-                                } else {
-                                    // Full payload (normal mode)
+                                     let is_manual = s.sleep_mode_manual.load(Ordering::Relaxed);
+                                     serde_json::json!({
+                                         "mode": "sleep",
+                                         "sleep_mode": true,
+                                         "sleep_mode_manual": is_manual,
+                                         "server_running": running,
+                                         "local_server_running": local_running,
+                                         "active_session_id": active_session_id,
+                                         "active_session_status": active_status
+                                     })
+                                 } else if mode == 1 {
+                                     // Logs-only mode: reduced payload with logs
+                                     let logs: Vec<String> = s
+                                         .server_logs
+                                         .lock()
+                                         .unwrap()
+                                         .iter()
+                                         .cloned()
+                                         .collect();
+                                     let active_session_id =
+                                         s.active_session_id.lock().unwrap().clone();
+                                     let active_status = {
+                                         let sessions = s.sessions.lock().unwrap();
+                                         sessions
+                                             .iter()
+                                             .find(|ss| ss.id == active_session_id)
+                                             .map(|ss| match &ss.status {
+                                                 crate::state::SessionStatus::Stopped => "stopped",
+                                                 crate::state::SessionStatus::Running => "running",
+                                                 crate::state::SessionStatus::Disconnected => "disconnected",
+                                                 crate::state::SessionStatus::Error(_) => "error",
+                                             })
+                                             .unwrap_or("stopped")
+                                     };
+                                     let is_manual = s.sleep_mode_manual.load(Ordering::Relaxed);
+                                     serde_json::json!({
+                                         "mode": "logs-only",
+                                         "sleep_mode": true,
+                                         "sleep_mode_manual": is_manual,
+                                         "logs": logs,
+                                         "server_running": running,
+                                         "local_server_running": local_running,
+                                         "active_session_id": active_session_id,
+                                         "active_session_status": active_status
+                                     })
+                                 } else {
+                                     // Full payload (off mode)
                                     let local_metrics_available =
                                         s.active_session_uses_local_metrics();
                                     let host_metrics_available = s.host_metrics_available();
@@ -270,9 +318,10 @@ pub fn ws_route(
                                             })
                                     };
 
-                                    let is_manual = s.sleep_mode_manual.load(Ordering::Relaxed);
-                                    serde_json::json!({
-                                        "sleep_mode": asleep,
+                                     let is_manual = s.sleep_mode_manual.load(Ordering::Relaxed);
+                                     serde_json::json!({
+                                         "mode": "off",
+                                         "sleep_mode": false,
                                         "sleep_mode_manual": is_manual,
                                         "gpu": gpu,
                                         "llama": llama,
@@ -351,11 +400,12 @@ pub fn ws_route(
                             }
 
                             // T-051: wake auto-sleep on active visibility; manual sleep is exempt
+                            // (only wakes mode=2 auto-sleep, not manual)
                             if mode == Some("active") || visible == Some(true) {
-                                let asleep = state.sleep_mode.load(Ordering::Relaxed);
+                                let current_mode = state.sleep_mode.load(Ordering::Relaxed);
                                 let manual = state.sleep_mode_manual.load(Ordering::Relaxed);
-                                if asleep && !manual {
-                                    state.sleep_mode.store(false, Ordering::Relaxed);
+                                if current_mode >= 2 && !manual {
+                                    state.sleep_mode.store(0, Ordering::Relaxed);
                                     state.sleep_notify.notify_waiters();
                                 }
                             }
@@ -364,9 +414,9 @@ pub fn ws_route(
                         // T-051: explicit wake command from client — clears manual flag too
                         if msg_type == Some("wake") {
                             state.sleep_mode_manual.store(false, Ordering::Relaxed);
-                            let asleep = state.sleep_mode.load(Ordering::Relaxed);
-                            if asleep {
-                                state.sleep_mode.store(false, Ordering::Relaxed);
+                            let current_mode = state.sleep_mode.load(Ordering::Relaxed);
+                            if current_mode > 0 {
+                                state.sleep_mode.store(0, Ordering::Relaxed);
                                 state.sleep_notify.notify_waiters();
                             }
                         }

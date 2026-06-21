@@ -397,6 +397,59 @@ llama-bench -m <moe.gguf> -ngl 99 -fa 1 --n-cpu-moe 48 -n 64 -r 1   # then 40, 3
 - `-r` is repetitions (higher = less noise, slower). Use `-r 1` for quick depth
   sweeps, `-r 2+` for numbers you'll publish.
 
+### Built-in tuning and benchmark endpoints
+
+The app exposes several POST endpoints (all require api-token auth) that automate
+parts of this process. These are internal endpoints used by the UI, Preset Editor,
+and Spawn Wizard.
+
+- **POST /api/benchmark**
+  - Sends a short test prompt to the currently running llama-server and measures
+    prompt tokens/sec, gen tokens/sec, and TTFT.
+  - Normal use: rate-limited to once every 15 seconds.
+  - Tuning mode: include `{ "tuning": true }` in the body to skip the cooldown
+    while iteratively adjusting settings.
+  - Returns verdict plus hints/suggestions.
+
+- **POST /api/advise**
+  - Config-time performance advisor: given model name/params, context size, KV
+    types, platform, and speculative decoding config, returns suggestions for
+    MoE vs dense, KV type, MTP, etc.
+  - Used by the Spawn Wizard and Preset Editor before running any benchmark.
+
+- **POST /api/model-defaults**
+  - Returns recommended chat parameters (temperature, top_p, reasoning, etc.) for
+    a given model based on name, size, and tags.
+  - Ensures tuned defaults align with the model family.
+
+- **POST /api/moe-tune**
+  - Suggests a starting `--n-cpu-moe` value for a MoE model given
+    `model_size_bytes`, `available_vram_bytes`, and `n_moe_layers`.
+  - Helps you fit MoE experts into limited VRAM by offloading some to system RAM.
+
+- **POST /api/tune/ncpumoe**
+  - Advanced `--n-cpu-moe` auto-tuner.
+  - Without `verify`: returns an estimate based on VRAM fit.
+  - With `verify: true`: runs llama-bench against several candidate `--n-cpu-moe`
+    values and selects the one that gives the best real decode speed.
+  - Requires the llama-server to be stopped when verifying (llama-bench needs the GPU).
+
+- **POST /api/bench/sweep**
+  - Offline depth sweep via llama-bench: benchmarks decode at multiple context
+    depths (default 0, 16k, 32k).
+  - Requires llama-server stopped; returns per-depth points (`points` array).
+
+- **POST /api/bench/batch-sweep**
+  - Offline batch/ubatch sweep: probes a matrix of (batch, ubatch) pairs and
+    returns the best prefill throughput along with all probes.
+  - Requires llama-server stopped.
+
+- **POST /api/bench/mtp-sweep**
+  - Online MTP n-max sweep: for a locally-spawned server with speculative decoding,
+    iterates over given `spec-draft-n-max` values, restarting the server between
+    probes, and selects the n_max that maximizes generation tokens/sec.
+  - Requires local server and active MTP/draft config.
+
 ---
 
 ## Quick-pick cheat sheet
@@ -446,3 +499,41 @@ Gemma 4 QAT:
 - [Gemma 4 QAT guide (Unsloth)](https://unsloth.ai/docs/models/gemma-4/qat)
 
 Related internal docs: [vram-estimator.md](vram-estimator.md) · [cli-flags.md](cli-flags.md) · [setup-wizard.md](setup-wizard.md)
+
+---
+
+## Monitoring your system under load
+
+### Memory pressure (macOS)
+
+The dashboard includes macOS memory-pressure telemetry (via `vm_stat`):
+
+- **Memory Pressure** sparkline and metric in the system card show:
+  - Free GB, compressor GB, swap activity.
+- A **nav-pill** appears (warning or critical) when:
+  - Free memory < 1.5 GB, or compressor uses ≥ 18% of total RAM → warning
+  - Free memory < 0.5 GB, or compressor uses ≥ 30% of total RAM → critical
+
+If you see memory pressure while running a large model:
+- Reduce context size.
+- Stop active downloads.
+- Disable mlock if enabled so macOS can reclaim model memory instead of compressing/ swapping the entire system.
+- Consider MoE over dense for the same "smartness" with far less decode-time pressure.
+
+### mlock and system responsiveness (macOS)
+
+The preset editor and spawn wizard warn when mlock is enabled and the VRAM estimate is tight.
+
+- mlock pins model memory so the OS cannot page it out. On unified-memory Macs, that removes it from the general pool.
+- If the estimated VRAM usage is already close to your available memory, mlock can push macOS into heavy compression and swap, making the desktop feel unresponsive.
+- Rule of thumb: if the VRAM estimator says Tight/Risk, prefer **no mlock** unless you're doing long, memory-intensive runs and know your system has headroom.
+
+### Sleep modes
+
+The monitoring chip in the top nav supports three modes:
+
+- **Monitoring** – full telemetry active.
+- **Logs only** – only the live log tail is active; GPU, system, and sparkline updates are paused to save resources.
+- **Paused** – all telemetry and logs paused; llama-server keeps running.
+
+Use **Logs only** when you're watching a long generation and want to minimize overhead without losing visibility into the log stream.
