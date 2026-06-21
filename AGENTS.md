@@ -199,3 +199,26 @@ For PRs touching multiple files or adding features, run a sub-agent check for:
 - Broken JS→HTML→CSS cross-module references
 - Backend-frontend API contract mismatches
 - Stale code from refactoring
+
+## Screenshots Workflow
+
+- **Capture** (for debugging, UI review): use artifacts/
+  - Run: `node tests/ui/capture.mjs --scenario <name>`
+  - Files go to: `docs/screenshots/artifacts/`
+  - This folder is gitignored: keep it for UX reference, debugging, comparisons.
+
+- **Promote** only when actually used in docs:
+  - 1) Add image reference in README.md or docs/reference/*.md.
+  - 2) Copy from artifacts/ to docs/screenshots/: 
+       `cp docs/screenshots/artifacts/<name>.png docs/screenshots/<name>.png`
+  - 3) Commit both: your doc changes + the promoted screenshot.
+
+- **Check for unused screenshots** (before or after PR):
+  - Run: `bash scripts/check-unused-screenshots.sh`
+  - If it lists files, either:
+      - Add them to docs, or
+      - Delete them.
+
+- **Rules**:
+  - Never commit a screenshot to docs/screenshots/ unless it is referenced in documentation.
+  - Prefer promoting existing artifacts over capturing fresh if the scene hasn't changed.
