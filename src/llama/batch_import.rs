@@ -774,6 +774,10 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         alias: None,
         benchmark_mode: false,
         tags: Vec::new(),
+        gguf_architecture: None,
+        param_count: None,
+        family: None,
+        size_class: None,
     }
 }
 

@@ -91,6 +91,10 @@ fn api_create_preset(
             if preset.id.trim().is_empty() {
                 preset.id = presets::next_id();
             }
+
+            // Populate GGUF metadata if model_path is set
+            presets::ensure_gguf_metadata(&mut preset);
+
             let mut presets = state.presets.lock().unwrap();
             presets.push(preset.clone());
             let _ = presets::save_presets(&state.presets_path, &presets);
@@ -117,6 +121,10 @@ fn api_update_preset(
                     return futures_util::future::ready(Ok(unauthorized_api_token()));
                 }
                 updated.id = id.clone();
+
+                // Populate GGUF metadata if model_path changed/exists
+                presets::ensure_gguf_metadata(&mut updated);
+
                 let mut presets = state.presets.lock().unwrap();
                 if let Some(existing) = presets.iter_mut().find(|p| p.id == id) {
                     *existing = updated.clone();

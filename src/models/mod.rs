@@ -397,6 +397,74 @@ fn detect_size_class(param_b: f32) -> String {
     .into()
 }
 
+/// Derive family from GGUF architecture field (not from filename).
+/// Returns None if unknown — callers must not guess.
+pub fn infer_family_from_architecture(arch: &str) -> Option<String> {
+    let a = arch.to_ascii_lowercase();
+
+    // llama: only llama3 family is currently recognized by name-based rules;
+    // we keep it conservative to avoid mislabeling.
+    if a.contains("llama") {
+        return Some("llama3".into());
+    }
+
+    // Qwen3.6 / Qwen3.5 shared via "qwen35" in GGUF; disambiguated by block_count in practice.
+    // For now treat both as their family (consumer is spawn wizard, caller can refine).
+    if a == "qwen3_6" || a == "qwen36" || a == "qwopus" {
+        return Some("qwen36".into());
+    }
+    if a == "qwen3_5" || a == "qwen35" {
+        return Some("qwen35".into());
+    }
+    if a == "qwen3" || a == "qwen3next" || a.starts_with("qwen3") {
+        return Some("qwen3".into());
+    }
+
+    // Gemma series
+    if a == "gemma4" || a == "gemma_4" {
+        return Some("gemma4".into());
+    }
+    if a == "gemma3" || a == "gemma_3" || a == "gemma2" || a == "gemma_2" || a == "gemma" {
+        return Some("gemma".into());
+    }
+
+    // Mistral family
+    if a.starts_with("mistral") || a == "mixtral" {
+        return Some("mistral".into());
+    }
+
+    // EXAONE
+    if a.contains("exaone") {
+        return Some("exaone".into());
+    }
+
+    // Heretic (if it's its own arch string)
+    if a.contains("heretic") {
+        return Some("heretic".into());
+    }
+
+    // DeepSeek
+    if a.starts_with("deepseek") {
+        return Some("deepseek".into());
+    }
+
+    // Phi
+    if a.starts_with("phi") {
+        return Some("phi".into());
+    }
+
+    None
+}
+
+/// Derive size_class from an exact parameter count (u64).
+pub fn infer_size_class_from_param_count(param_count: u64) -> Option<String> {
+    if param_count == 0 {
+        return None;
+    }
+    let b = param_count as f32 / 1_000_000_000.0;
+    Some(detect_size_class(b))
+}
+
 fn detect_primary_use(name: &str, is_moe: bool) -> Vec<String> {
     let mut uses = Vec::new();
 

@@ -212,6 +212,21 @@ pub struct ModelPreset {
     /// User-assigned tags for organization (general, coding, roleplay, custom).
     #[serde(default)]
     pub tags: Vec<String>,
+
+    // GGUF-derived metadata (populated on preset save when model_path exists).
+    // These replace any name-based guessing for UI labels.
+    /// `general.architecture` from GGUF header (e.g. "qwen3_6", "llama").
+    #[serde(default)]
+    pub gguf_architecture: Option<String>,
+    /// `general.parameter_count` from GGUF header.
+    #[serde(default)]
+    pub param_count: Option<u64>,
+    /// Human-readable family slug derived from architecture (e.g. "qwen36", "llama3", "gemma4").
+    #[serde(default)]
+    pub family: Option<String>,
+    /// Size class derived from param_count: tiny/small/medium/large/huge.
+    #[serde(default)]
+    pub size_class: Option<String>,
 }
 
 pub fn next_id() -> String {
@@ -251,6 +266,58 @@ pub fn save_presets(path: &Path, presets: &[ModelPreset]) -> Result<()> {
     std::fs::write(&tmp, json)?;
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+/// Populate GGUF-derived metadata fields on a preset if they are missing.
+/// Called from preset save endpoints so cards get accurate labels.
+///
+/// Only writes; never overwrites existing family/size_class values (backwards-compatible).
+pub fn ensure_gguf_metadata(preset: &mut ModelPreset) {
+    let model_path = preset.model_path.trim();
+    if model_path.is_empty() {
+        return;
+    }
+
+    // Only fill when metadata is incomplete
+    if preset.gguf_architecture.is_some()
+        && preset.family.is_some()
+        && preset.param_count.is_some()
+        && preset.size_class.is_some()
+    {
+        return;
+    }
+
+    let meta = match crate::llama::gguf_meta::read_gguf_metadata(Path::new(model_path)) {
+        Ok(m) => m,
+        Err(_) => {
+            // Non-critical: leave fields as-is and log quietly
+            return;
+        }
+    };
+
+    // Store architecture (authoritative)
+    if preset.gguf_architecture.is_none() {
+        preset.gguf_architecture = meta.architecture.clone();
+    }
+
+    // Store param_count (authoritative)
+    if preset.param_count.is_none() {
+        preset.param_count = meta.param_count;
+    }
+
+    // Derive family from architecture (not filename)
+    if preset.family.is_none()
+        && let Some(ref arch) = meta.architecture
+    {
+        preset.family = crate::models::infer_family_from_architecture(arch);
+    }
+
+    // Derive size_class from param_count
+    if preset.size_class.is_none()
+        && let Some(pc) = meta.param_count
+    {
+        preset.size_class = crate::models::infer_size_class_from_param_count(pc);
+    }
 }
 
 // ── System Prompt Templates ────────────────────────────────────────────────────
