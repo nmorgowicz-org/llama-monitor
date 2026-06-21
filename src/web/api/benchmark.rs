@@ -459,6 +459,7 @@ fn api_tune_ncpumoe(
                 let batch_size = body["batch_size"].as_u64().unwrap_or(2048) as u32;
                 let ubatch_size = body["ubatch_size"].as_u64().unwrap_or(512) as u32;
                 let verify = body["verify"].as_bool().unwrap_or(false);
+                let is_unified_memory = body["is_unified_memory"].as_bool().unwrap_or(true);
 
                 let arch =
                     crate::llama::vram_estimator::ModelArch::from_name_and_params(name, param_b);
@@ -470,6 +471,7 @@ fn api_tune_ncpumoe(
                         &arch,
                         available_vram_bytes,
                         ubatch_size,
+                        is_unified_memory,
                     );
 
                 if !verify {

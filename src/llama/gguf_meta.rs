@@ -178,7 +178,8 @@ impl GgufMetadata {
     /// computed from the real `ssm.*` GGUF fields. This does NOT grow with context.
     ///
     /// Per linear layer the state is `inner_size × state_size` (the delta matrix)
-    /// plus a small `conv_kernel × inner_size` short-conv state, held at ~2 B/elem.
+    /// plus a small `conv_kernel × inner_size` short-conv state.
+    /// Both components are held at 2 B/elem, then summed over all linear layers.
     /// Returns `None` when the model is not hybrid or lacks SSM metadata.
     pub fn linear_attn_state_bytes(&self) -> Option<u64> {
         let n_attn = self.n_attn_layers()?;

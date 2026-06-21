@@ -564,7 +564,13 @@ pub fn auto_size(
     // Start with all experts in VRAM. If the weights alone don't fit, increment
     // n_cpu_moe until they do (or until fully offloaded).
     let n_cpu_moe = if arch.is_moe() {
-        find_min_cpu_moe_to_fit_weights(model_size_bytes, arch, available_vram_bytes, ubatch)
+        find_min_cpu_moe_to_fit_weights(
+            model_size_bytes,
+            arch,
+            available_vram_bytes,
+            ubatch,
+            is_unified_memory,
+        )
     } else {
         0
     };
@@ -686,16 +692,22 @@ fn best_kv_quant_for_use_case(use_case: UseCase) -> (String, String) {
 /// Find the smallest `--n-cpu-moe` value whose weight footprint fits in VRAM.
 /// Reused by the auto-size flow and the Spawn Wizard / Preset Editor auto-tuner
 /// so the instant estimate always agrees with the animated VRAM bar.
+/// `is_unified_memory` selects the correct overhead model: Metal for Apple Silicon,
+/// discrete (RTX 5090-calibrated) for CUDA/ROCm — the gap is large for MoE models.
 pub fn find_min_cpu_moe_to_fit_weights(
     model_size_bytes: u64,
     arch: &ModelArch,
     available_vram_bytes: u64,
     ubatch_size: u32,
+    is_unified_memory: bool,
 ) -> i32 {
-    let target = (available_vram_bytes * 80 / 100).saturating_sub(
+    let overhead = if is_unified_memory {
         gpu_overhead_bytes(ubatch_size)
-            + arch.mmproj_bytes
-            + mtp_overhead_bytes(model_size_bytes, arch.mtp_depth),
+    } else {
+        discrete_overhead_base_bytes(arch, ubatch_size)
+    };
+    let target = (available_vram_bytes * 80 / 100).saturating_sub(
+        overhead + arch.mmproj_bytes + mtp_overhead_bytes(model_size_bytes, arch.mtp_depth),
     );
 
     // `--n-cpu-moe` counts layers, so the maximum is the layer count.
@@ -922,7 +934,12 @@ pub fn quant_comparison_table(
         // Without this check, a model that fills all available memory shows as fitting even though
         // there's no budget left for inference context.
         let min_kv = kv_cache_bytes(arch, 8192, parallel_slots, "q8_0", "q8_0");
-        let fits = model_bytes + gpu_overhead_bytes(512) + min_kv < available_vram_bytes;
+        let oh = if is_unified_memory {
+            gpu_overhead_bytes(512)
+        } else {
+            discrete_overhead_base_bytes(arch, 512)
+        };
+        let fits = model_bytes + oh + min_kv < available_vram_bytes;
 
         let max_q8 = max_context(
             model_bytes,
