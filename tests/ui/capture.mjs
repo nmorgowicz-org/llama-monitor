@@ -403,16 +403,14 @@ async function loadAppDocument(page, baseUrl) {
         return;
     }
 
-    const response = await fetch(baseUrl);
-    if (!response.ok) {
-        throw new Error(`Unable to fetch app document from ${baseUrl}: ${response.status}`);
-    }
-    let html = await response.text();
-    html = html.replace('<head>', `<head><base href="${baseUrl}/">`);
-    html = html.replace(/<script\b[\s\S]*?<\/\s*script\s*>/gi, '');
-    await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(error => {
-        console.log('[CAPTURE] setContent fallback continuing:', error.message);
-    });
+    // Inject base tag via page.evaluate so relative URLs resolve
+    // (avoids regex-based script stripping that CodeQL flags).
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
+    await page.evaluate((base) => {
+        const baseTag = document.createElement('base');
+        baseTag.href = base;
+        document.head.insertBefore(baseTag, document.head.firstChild);
+    }, baseUrl);
     await page.waitForSelector('#page-server', { timeout: 10000 });
     await page.evaluate(() => {
         document.getElementById('auth-shell')?.classList.add('hidden');
