@@ -15,7 +15,7 @@ The compact strip in the top navigation shows the current endpoint state without
 | **Context** | Highest context-pressure percentage across open chat tabs |
 | **GPU** | Temperature of the hottest available GPU |
 | **Sparkline** | Recent generation-speed history |
-| **Memory pressure** | macOS only; shown when memory pressure is warning or critical (based on vm_stat free pages and compressor ratio) |
+| **Memory pressure** | Shown when memory pressure is warning or critical (macOS `vm_stat`, Linux PSI, Windows WMI memory counters) |
 
 Clicking the cockpit jumps to the Server tab. On narrower layouts the GPU and sparkline chips collapse first, then the context chip.
 
@@ -33,7 +33,7 @@ Hovering the endpoint status chip in the top nav opens a popover listing per-sub
 | **Context capacity** | Whether context capacity is known |
 | **Context usage** | Live if exposed by llama.cpp; otherwise "derived from chat" |
 | **Host metrics** | Whether GPU/system telemetry is available |
-| **Memory pressure** | Whether macOS memory-pressure telemetry is available (vm_stat-based) |
+| **Memory pressure** | Whether platform memory-pressure telemetry is available |
 | **Remote agent** | Connected or disconnected |
 
 The popover is populated in real time from WebSocket data; each row shows a green LED for live/ok and a muted indicator when unavailable.
@@ -436,14 +436,16 @@ Clock visualization:
 | CPU clock | `/proc/cpuinfo` on Linux; on Apple Silicon derived from P-cluster frequency (`p_cluster_freq_mhz` via `mactop`), not a generic SoC “clock” |
 | RAM usage | `sysinfo` |
 | RAM available | `sysinfo` |
-| Memory pressure level | macOS `vm_stat` (free pages + compressor ratio → ok/warning/critical) |
-| Memory free (GB) | macOS `vm_stat` |
-| Memory wired (GB) | macOS `vm_stat`; kernel-locked, includes GPU framebuffers; Metal iogpu budget floor on Apple Silicon |
-| Memory purgeable (GB) | macOS `vm_stat`; file-backed pages droppable on demand |
-| Memory inactive (GB) | macOS `vm_stat`; candidate pages for compression/eviction |
-| Memory compressor (GB) | macOS `vm_stat` |
-| Memory compressed (GB) | macOS `vm_stat` (pages stored in compressor) |
-| Swapins / swapouts (counters) | macOS `vm_stat` |
+| Memory pressure level | Platform score: macOS `vm_stat`, Linux PSI + `/proc/meminfo`, Windows WMI |
+| Memory pressure source / score | Source name plus normalized 0-100 pressure score |
+| Memory free (GB) | Platform free/available physical memory |
+| Memory wired/pinned (GB) | macOS wired pages or Linux mlocked/unevictable pages |
+| Memory reclaimable (GB) | macOS purgeable + inactive pages; Linux cached + reclaimable slab |
+| Memory purgeable / inactive (GB) | macOS `vm_stat` breakdown when available |
+| Memory compressor / compressed (GB) | macOS `vm_stat` compressor counters |
+| Swap/pagefile used (GB) | Windows/Linux where available |
+| Swapins / swapouts / deltas | macOS `vm_stat` counters and per-sample deltas |
+| Linux PSI avg10 | Linux memory stall percentages from `/proc/pressure/memory` |
 | Motherboard / platform info | platform-specific host inspection |
 | CPU topology (Apple Silicon) | Read from `hw.perflevelcount` and per-level `hw.perflevel{i}.physicalcpu`/`hw.perflevel{i}.name` to derive P/E/S core counts and cluster names |
 | P-cores / E-cores / S-cores | Apple Silicon only; derived from perf-level core counts; 0 on non-Apple Silicon |

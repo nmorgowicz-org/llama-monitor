@@ -8450,7 +8450,11 @@ export function buildSpawnPayload() {
     spec_draft_type_v: h.specDraftTypeV || '',
     n_cpu_moe: h.nCpuMoe || null,
     tensor_split: h.tensorSplit || '',
-    no_mmap: true,
+    // mmap default is platform-aware: on Apple Silicon (unified memory) keep mmap ON
+    // (no_mmap=false) — it's zero-copy into Metal, doesn't change throughput (measured
+    // identical tok/s on M5 Max), and avoids slow loads + committing RAM. On discrete GPUs
+    // --no-mmap sidesteps slow Windows mmap paths, so default it on there.
+    no_mmap: !isUnifiedMemory(),
     ngram_spec: false,
     spec_type: specType,
     spec_draft_n_max: _u32(mtpNMax, 1),
