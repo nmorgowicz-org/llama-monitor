@@ -667,7 +667,11 @@ fn api_spawn_session_with_preset(
                     tensor_split: preset.tensor_split.clone(),
                     batch_size: preset.batch_size,
                     ubatch_size: preset.ubatch_size,
-                    no_mmap: preset.no_mmap,
+        no_mmap: if cfg!(target_os = "macos") && preset.mlock {
+            false
+        } else {
+            preset.no_mmap
+        },
                     port,
                     ngram_spec: preset.ngram_spec,
                     parallel_slots: preset.parallel_slots,

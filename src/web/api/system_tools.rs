@@ -1,6 +1,11 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+#[cfg(target_os = "macos")]
+use std::sync::{Mutex, OnceLock};
+#[cfg(target_os = "macos")]
+use std::time::{Duration, Instant};
 use warp::Filter;
 
+use super::common::{check_db_admin_token, unauthorized_db_admin_token};
 use super::{ApiCtx, ApiReply, ApiRoute, check_api_token, unauthorized_api_token};
 
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
@@ -39,45 +44,39 @@ fn top_processes(ctx: ApiCtx) -> ApiRoute {
 }
 
 fn get_top_processes(n: usize) -> Vec<ProcessInfo> {
-    // `ps -axm -o pid,rss,comm` on macOS: -m sorts by memory descending.
-    // RSS is in KB on macOS.
-    let output = std::process::Command::new("ps")
-        .args(["-axm", "-o", "pid=,rss=,comm="])
-        .output();
-
-    let Ok(output) = output else {
-        return vec![];
-    };
-    let text = String::from_utf8_lossy(&output.stdout);
-
-    let mut procs: Vec<ProcessInfo> = text
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() {
+    let sys = sysinfo::System::new_all();
+    let mut procs: Vec<ProcessInfo> = sys
+        .processes()
+        .iter()
+        .filter_map(|(pid, process)| {
+            let rss_bytes = process.memory();
+            if rss_bytes == 0 {
                 return None;
             }
-            let mut parts = line.splitn(3, char::is_whitespace);
-            let pid: u32 = parts.next()?.trim().parse().ok()?;
-            let rss_kb: f64 = parts.next()?.trim().parse().ok()?;
-            let comm = parts.next().unwrap_or("").trim().to_string();
-
-            // Skip kernel threads (rss == 0) and our own server process
-            if rss_kb == 0.0 {
-                return None;
-            }
-
-            let name = comm.split('/').next_back().unwrap_or(&comm).to_string();
+            let command = if process.cmd().is_empty() {
+                process.name().to_string_lossy().into_owned()
+            } else {
+                process
+                    .cmd()
+                    .iter()
+                    .map(|part| part.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
             Some(ProcessInfo {
-                pid,
-                rss_mb: rss_kb / 1024.0,
-                name,
-                command: comm,
+                pid: pid.as_u32(),
+                name: process.name().to_string_lossy().into_owned(),
+                rss_mb: rss_bytes as f64 / 1024.0 / 1024.0,
+                command,
             })
         })
         .collect();
 
-    // Already sorted by ps -m, but take top N excluding already-collected aggregate
+    procs.sort_by(|a, b| {
+        b.rss_mb
+            .partial_cmp(&a.rss_mb)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     procs.truncate(n);
     procs
 }
@@ -90,16 +89,31 @@ struct PurgeResult {
     message: String,
 }
 
+#[derive(Deserialize)]
+struct PurgeRequest {
+    #[serde(default)]
+    confirm: String,
+}
+
 fn purge_memory(ctx: ApiCtx) -> ApiRoute {
     let config = ctx.config;
     warp::path!("system" / "purge")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and_then(move |auth: Option<String>| {
+        .and(warp::body::json())
+        .and_then(move |auth: Option<String>, body: PurgeRequest| {
             let config = config.clone();
             async move {
-                if !check_api_token(&auth, &config) {
-                    return Ok(unauthorized_api_token());
+                if !check_db_admin_token(&auth, &config) {
+                    return Ok(unauthorized_db_admin_token());
+                }
+                if body.confirm != "purge-memory" {
+                    return Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(
+                        &PurgeResult {
+                            ok: false,
+                            message: "Missing confirmation for memory purge.".to_string(),
+                        },
+                    )));
                 }
                 let result = run_purge();
                 Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(&result)))
@@ -109,20 +123,44 @@ fn purge_memory(ctx: ApiCtx) -> ApiRoute {
 }
 
 fn run_purge() -> PurgeResult {
-    // Use osascript to trigger the native macOS privilege dialog so the user
-    // can authorise `purge` without the app needing to run as root.
     #[cfg(target_os = "macos")]
     {
+        static LAST_PURGE: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+        let mut last = LAST_PURGE
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(instant) = *last {
+            let elapsed = instant.elapsed();
+            if elapsed < Duration::from_secs(120) {
+                let wait = Duration::from_secs(120) - elapsed;
+                return PurgeResult {
+                    ok: false,
+                    message: format!(
+                        "Memory purge is cooling down; try again in {} seconds.",
+                        wait.as_secs().max(1)
+                    ),
+                };
+            }
+        }
+
+        // Use osascript to trigger the native macOS privilege dialog so the user
+        // can authorize `purge` without the app needing to run as root. This is
+        // intentionally manual; automated privileged purging should use a
+        // dedicated helper, not repeated hidden sudo calls.
         let script = r#"do shell script "purge" with administrator privileges"#;
         let output = std::process::Command::new("osascript")
             .args(["-e", script])
             .output();
 
         match output {
-            Ok(o) if o.status.success() => PurgeResult {
-                ok: true,
-                message: "Memory purged — inactive pages cleared.".into(),
-            },
+            Ok(o) if o.status.success() => {
+                *last = Some(Instant::now());
+                PurgeResult {
+                    ok: true,
+                    message: "macOS was asked to flush disk cache. This will not free mlock, wired, or model heap memory.".into(),
+                }
+            }
             Ok(o) => {
                 let stderr = String::from_utf8_lossy(&o.stderr).into_owned();
                 // User cancelled the auth dialog: osascript exits 1 with "User cancelled"

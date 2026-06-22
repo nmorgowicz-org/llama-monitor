@@ -2579,12 +2579,13 @@
                                     <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
                                     <span class="pe-toggle-label">no-mmap</span>
                                 </label>
-                            <label class="pe-toggle-item" title="Lock model in RAM, preventing OS from swapping it to disk. Improves performance but requires enough physical RAM.">
+                            <label class="pe-toggle-item" title="Lock model in RAM. On unified-memory Macs, prefer leaving this off and keeping mmap enabled.">
                                 <input type="checkbox" id="modal-mlock">
                                 <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
                                 <span class="pe-toggle-label">mlock</span>
                             </label>
                         </div>
+                        <div class="preset-memory-warning" id="preset-mmap-hint" style="display:none;"></div>
                         <div class="preset-memory-warning" id="preset-mlock-warning" style="display:none;"></div>
                     </div>
                 </div>
@@ -3790,14 +3791,14 @@
                         </div>
                         <div class="kv-inline-row">
                             <div class="kv-inline-field" style="flex:1 1 auto;">
-                                <label class="kv-unified-toggle" title="Locks the model in RAM, helping avoid system swap pressure during long runs. Skip if you're already near 70-80% memory usage.">
+                                <label class="kv-unified-toggle" title="Locks the model in RAM. On unified-memory Macs, prefer leaving this off and keeping mmap enabled.">
                                     <input type="checkbox" id="spawn-mlock">
                                     <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
                                     <span class="kv-unified-text">mlock</span>
                                 </label>
                             </div>
                             <div class="kv-inline-field" style="flex:999 1 320px;">
-                                <div class="field-hint" style="margin:0;">Pins model in RAM and helps avoid swap pressure evicting it mid-run.</div>
+                                <div class="field-hint" style="margin:0;">Pins model in RAM; avoid on unified-memory Macs unless you have clear headroom.</div>
                             </div>
                             <div class="ctx-fit-warning" id="spawn-mlock-warning" style="display:none;"></div>
                         </div>

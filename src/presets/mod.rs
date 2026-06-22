@@ -402,7 +402,7 @@ pub fn default_presets() -> Vec<ModelPreset> {
         ngram_spec: true,
         batch_size: 2048,
         ubatch_size: 2048,
-        no_mmap: true,
+        no_mmap: false,
         parallel_slots: 1,
         ..Default::default()
     }]
