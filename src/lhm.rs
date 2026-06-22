@@ -194,7 +194,7 @@ pub fn install_local_sensor_bridge() -> Result<(), String> {
 # --- PawnIO driver install (best-effort, does not abort task registration) ---
 try {{
     $pawnioSvc = sc.exe query PawnIO 2>$null
-    if ($pawnioSvc -notmatch 'SERVICE_NAME') {{
+    if (-not ($pawnioSvc | Select-String -Quiet 'SERVICE_NAME')) {{
         winget install -e --id namazso.PawnIO --silent --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
     }}
 }} catch {{

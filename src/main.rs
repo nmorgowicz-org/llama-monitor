@@ -284,10 +284,13 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // On Windows: if legacy ~/.config/llama-monitor exists but %APPDATA%\llama-monitor does not,
-    // move the legacy dir to the new location before any config files are read or created.
+    // On Windows: if legacy ~/.config/llama-monitor exists but the new default
+    // %APPDATA%\llama-monitor does not, move legacy dir before config is read.
+    // Explicit --config-dir paths intentionally start clean.
     #[cfg(windows)]
-    migrate_legacy_config_dir(&app_config.config_dir);
+    if args.config_dir.is_none() {
+        migrate_legacy_config_dir(&app_config.config_dir);
+    }
 
     // Initialize at-rest encryption (auto-generates key if needed)
     config::init_encryption_key(&app_config.config_dir);
