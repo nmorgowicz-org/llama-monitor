@@ -37,7 +37,26 @@ function _bindSensorBridgeSetup() {
                     const sd = await s.json();
                     if (sd.running) {
                         clearInterval(poll);
-                        if (callout) callout.style.display = 'none';
+                        // The bridge can run yet report no temperature when the PawnIO
+                        // kernel driver is absent (normally installed during the same
+                        // elevated setup step; can fail if winget is offline).
+                        if (sd.pawnio === false) {
+                            if (callout) {
+                                callout.style.display = '';
+                                callout.textContent =
+                                    'Sensor service installed, but the PawnIO driver is missing — CPU temperature stays unavailable until it is present. It is normally installed automatically; if that failed (e.g. winget offline), install it from ';
+                                const link = document.createElement('a');
+                                link.href = 'https://pawnio.eu';
+                                link.target = '_blank';
+                                link.rel = 'noopener';
+                                link.style.color = '#88c0d0';
+                                link.textContent = 'pawnio.eu';
+                                callout.appendChild(link);
+                                callout.appendChild(document.createTextNode(' and click Setup again.'));
+                            }
+                        } else if (callout) {
+                            callout.style.display = 'none';
+                        }
                     } else if (elapsed >= 30000) {
                         clearInterval(poll);
                         btn.textContent = 'Setup';
