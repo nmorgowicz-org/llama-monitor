@@ -688,39 +688,163 @@ struct MemoryPressure {
     advice: String,
 }
 
-#[cfg(target_os = "macos")]
-fn get_memory_pressure(total_ram_gb: f64, _available_ram_gb: f64) -> MemoryPressure {
-    let output = std::process::Command::new("vm_stat").output();
-    let Ok(output) = output else {
-        return MemoryPressure::default();
-    };
-    let text = String::from_utf8_lossy(&output.stdout);
-    parse_macos_vm_stat(&text, total_ram_gb)
+/// Map a pressure verdict plus a 0..1 intensity into a 0-100 score whose meaning
+/// is consistent across platforms: **ok occupies 0-50, warning 50-80, critical
+/// 80-100**. The per-OS signals (macOS compressor ratio, Linux PSI, Windows
+/// available ratio) differ, but feeding them through this band mapping makes a
+/// given score comparable regardless of platform — e.g. ~65 is always
+/// mid-warning. `intensity` expresses how deep into the verdict's band we are.
+fn score_for_level(level: &str, intensity: f64) -> f64 {
+    let t = intensity.clamp(0.0, 1.0);
+    match level {
+        "critical" => 80.0 + 20.0 * t,
+        "warning" => 50.0 + 30.0 * t,
+        _ => 50.0 * t,
+    }
 }
 
 #[cfg(target_os = "macos")]
-fn parse_macos_vm_stat(text: &str, total_ram_gb: f64) -> MemoryPressure {
-    use std::sync::{Mutex, OnceLock};
+fn get_memory_pressure(total_ram_gb: f64, _available_ram_gb: f64) -> MemoryPressure {
+    // Prefer the syscall; fall back to scraping `vm_stat` only if it fails.
+    let counts = read_macos_vm_counts().unwrap_or_else(macos_vm_counts_from_vm_stat);
+    let kernel_level = read_macos_pressure_level();
+    let swap_used_gb = read_macos_swap_used_gb();
+    compute_macos_pressure(&counts, total_ram_gb, kernel_level, swap_used_gb)
+}
 
-    static LAST_SWAP: OnceLock<Mutex<(u64, u64)>> = OnceLock::new();
+/// Fallback page counts via the `vm_stat` subprocess, used only when the
+/// `host_statistics64` syscall is unavailable.
+#[cfg(target_os = "macos")]
+fn macos_vm_counts_from_vm_stat() -> MacVmCounts {
+    std::process::Command::new("vm_stat")
+        .output()
+        .ok()
+        .map(|o| parse_macos_vm_stat_text(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default()
+}
 
-    let mut page_size = 16_384_u64;
-    let mut free_pages = 0_u64;
-    let mut wired_pages = 0_u64;
-    let mut compressor_pages = 0_u64;
-    let mut compressed_pages = 0_u64;
-    let mut purgeable_pages = 0_u64;
-    let mut inactive_pages = 0_u64;
-    let mut swapins = 0_u64;
-    let mut swapouts = 0_u64;
+/// Raw virtual-memory page counts, sourced from `host_statistics64` (no
+/// subprocess). Page units; `page_size` is bytes.
+#[cfg(target_os = "macos")]
+#[derive(Default)]
+struct MacVmCounts {
+    page_size: u64,
+    free: u64,
+    wired: u64,
+    /// Pages occupied by the compressor (the compressed footprint).
+    compressor: u64,
+    /// Uncompressed-equivalent pages currently held in the compressor.
+    compressed: u64,
+    purgeable: u64,
+    inactive: u64,
+    swapins: u64,
+    swapouts: u64,
+}
 
+/// Read VM statistics directly via the Mach `host_statistics64` syscall instead
+/// of spawning and scraping `vm_stat`. Returns `None` on failure, in which case
+/// callers fall back to the `MacVmCounts::default()` (all-zero) values.
+#[cfg(target_os = "macos")]
+#[allow(deprecated)] // mach_host_self: the libc binding is stable; mach2 is not a dependency.
+fn read_macos_vm_counts() -> Option<MacVmCounts> {
+    // SAFETY: `host_statistics64` fills `info` with exactly `count` integer_t
+    // words. We size `count` from the struct and check the return code before
+    // reading any field.
+    unsafe {
+        let host = libc::mach_host_self();
+        let mut info: libc::vm_statistics64 = std::mem::zeroed();
+        let mut count = (std::mem::size_of::<libc::vm_statistics64>()
+            / std::mem::size_of::<libc::integer_t>())
+            as libc::mach_msg_type_number_t;
+        let rc = libc::host_statistics64(
+            host,
+            libc::HOST_VM_INFO64,
+            &mut info as *mut _ as *mut libc::integer_t,
+            &mut count,
+        );
+        if rc != libc::KERN_SUCCESS {
+            return None;
+        }
+        Some(MacVmCounts {
+            page_size: libc::vm_page_size as u64,
+            free: u64::from(info.free_count),
+            wired: u64::from(info.wire_count),
+            compressor: u64::from(info.compressor_page_count),
+            compressed: info.total_uncompressed_pages_in_compressor,
+            purgeable: u64::from(info.purgeable_count),
+            inactive: u64::from(info.inactive_count),
+            swapins: info.swapins,
+            swapouts: info.swapouts,
+        })
+    }
+}
+
+/// Read the kernel's own memory-pressure verdict from
+/// `kern.memorystatus_vm_pressure_level` via `sysctlbyname`: 1 = normal,
+/// 2 = warning, 4 = critical. This is the same signal the OS uses to drive
+/// jetsam and `DISPATCH_MEMORYPRESSURE` notifications, so it is far more reliable
+/// than reconstructing pressure from raw page counts. Returns `None` if the
+/// sysctl is unavailable (then we fall back to compressor-based heuristics).
+#[cfg(target_os = "macos")]
+fn read_macos_pressure_level() -> Option<u8> {
+    let mut value: i32 = 0;
+    let mut size = std::mem::size_of::<i32>();
+    // SAFETY: we pass a correctly sized i32 out-buffer and check the return code.
+    let rc = unsafe {
+        libc::sysctlbyname(
+            c"kern.memorystatus_vm_pressure_level".as_ptr(),
+            &mut value as *mut _ as *mut libc::c_void,
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc == 0 {
+        u8::try_from(value).ok()
+    } else {
+        None
+    }
+}
+
+/// Read swap currently in use (GB) from `vm.swapusage` via `sysctlbyname`. macOS
+/// swap is a real pressure signal but, unlike Linux/Windows, was previously never
+/// populated.
+#[cfg(target_os = "macos")]
+fn read_macos_swap_used_gb() -> f64 {
+    let mut usage: libc::xsw_usage = unsafe { std::mem::zeroed() };
+    let mut size = std::mem::size_of::<libc::xsw_usage>();
+    // SAFETY: we pass a correctly sized xsw_usage out-buffer and check the rc.
+    let rc = unsafe {
+        libc::sysctlbyname(
+            c"vm.swapusage".as_ptr(),
+            &mut usage as *mut _ as *mut libc::c_void,
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if rc == 0 {
+        usage.xsu_used as f64 / 1024.0 / 1024.0 / 1024.0
+    } else {
+        0.0
+    }
+}
+
+/// Parse `vm_stat` text into `MacVmCounts`. Kept as a fallback path and for unit
+/// tests; the live path uses `read_macos_vm_counts` (syscall) instead.
+#[cfg(target_os = "macos")]
+fn parse_macos_vm_stat_text(text: &str) -> MacVmCounts {
+    let mut counts = MacVmCounts {
+        page_size: 16_384,
+        ..Default::default()
+    };
     for line in text.lines() {
         if let Some(size) = line
             .strip_prefix("Mach Virtual Memory Statistics: (page size of ")
             .and_then(|rest| rest.split_whitespace().next())
             .and_then(|value| value.parse::<u64>().ok())
         {
-            page_size = size;
+            counts.page_size = size;
             continue;
         }
 
@@ -734,75 +858,110 @@ fn parse_macos_vm_stat(text: &str, total_ram_gb: f64) -> MemoryPressure {
             .parse::<u64>()
             .unwrap_or(0);
         match key.trim() {
-            "Pages free" => free_pages = value,
-            "Pages wired down" => wired_pages = value,
-            "Pages occupied by compressor" => compressor_pages = value,
-            "Pages stored in compressor" => compressed_pages = value,
-            "Pages purgeable" => purgeable_pages = value,
-            "Pages inactive" => inactive_pages = value,
-            "Swapins" => swapins = value,
-            "Swapouts" => swapouts = value,
+            "Pages free" => counts.free = value,
+            "Pages wired down" => counts.wired = value,
+            "Pages occupied by compressor" => counts.compressor = value,
+            "Pages stored in compressor" => counts.compressed = value,
+            "Pages purgeable" => counts.purgeable = value,
+            "Pages inactive" => counts.inactive = value,
+            "Swapins" => counts.swapins = value,
+            "Swapouts" => counts.swapouts = value,
             _ => {}
         }
     }
+    counts
+}
 
-    let page_gb = page_size as f64 / 1024.0 / 1024.0 / 1024.0;
-    let free_gb = free_pages as f64 * page_gb;
-    let wired_gb = wired_pages as f64 * page_gb;
-    let compressor_gb = compressor_pages as f64 * page_gb;
-    let compressed_gb = compressed_pages as f64 * page_gb;
-    let purgeable_gb = purgeable_pages as f64 * page_gb;
-    let inactive_gb = inactive_pages as f64 * page_gb;
+#[cfg(target_os = "macos")]
+fn compute_macos_pressure(
+    counts: &MacVmCounts,
+    total_ram_gb: f64,
+    kernel_level: Option<u8>,
+    swap_used_gb: f64,
+) -> MemoryPressure {
+    use std::sync::{Mutex, OnceLock};
+
+    static LAST_SWAP: OnceLock<Mutex<(u64, u64)>> = OnceLock::new();
+
+    let page_gb = counts.page_size as f64 / 1024.0 / 1024.0 / 1024.0;
+    let free_gb = counts.free as f64 * page_gb;
+    let wired_gb = counts.wired as f64 * page_gb;
+    let compressor_gb = counts.compressor as f64 * page_gb;
+    let compressed_gb = counts.compressed as f64 * page_gb;
+    let purgeable_gb = counts.purgeable as f64 * page_gb;
+    let inactive_gb = counts.inactive as f64 * page_gb;
     let reclaimable_gb = purgeable_gb + inactive_gb;
     let compressor_ratio = if total_ram_gb > 0.0 {
         compressor_gb / total_ram_gb
     } else {
         0.0
     };
-    let pressure_score = if total_ram_gb > 0.0 {
-        let free_pressure = (1.0 - (free_gb / total_ram_gb)).clamp(0.0, 1.0) * 45.0;
-        let compressor_pressure = (compressor_ratio / 0.30).clamp(0.0, 1.0) * 45.0;
-        let swap_pressure = if swapouts > 0 { 10.0 } else { 0.0 };
-        (free_pressure + compressor_pressure + swap_pressure).min(100.0)
-    } else {
-        0.0
-    };
     let (swapins_delta, swapouts_delta) = {
         let mut last = LAST_SWAP
-            .get_or_init(|| Mutex::new((swapins, swapouts)))
+            .get_or_init(|| Mutex::new((counts.swapins, counts.swapouts)))
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let delta = (
-            swapins.saturating_sub(last.0),
-            swapouts.saturating_sub(last.1),
+            counts.swapins.saturating_sub(last.0),
+            counts.swapouts.saturating_sub(last.1),
         );
-        *last = (swapins, swapouts);
+        *last = (counts.swapins, counts.swapouts);
         delta
     };
-    let level = if free_gb < 0.5 || compressor_ratio >= 0.30 || swapouts_delta > 0 {
-        "critical"
-    } else if free_gb < 1.5 || compressor_ratio >= 0.18 {
-        "warning"
-    } else {
-        "ok"
+    // Anchor the verdict on the kernel's own pressure level when available.
+    // macOS keeps "Pages free" deliberately low (RAM is used as cache) and swaps
+    // lazily even when healthy, so raw free-page and single-swapout thresholds
+    // produce chronic false alarms. The kernel sysctl is the authoritative signal;
+    // we only let an extreme compressor ratio escalate beyond what it reports.
+    let level = match kernel_level {
+        Some(4) => "critical",
+        Some(2) => "warning",
+        Some(_) => {
+            // Kernel says normal — only flag if the compressor is working very hard.
+            if compressor_ratio >= 0.30 {
+                "warning"
+            } else {
+                "ok"
+            }
+        }
+        None => {
+            // sysctl unavailable: fall back to compressor heuristics. Note we do
+            // NOT use free_gb here — it is misleadingly low on macOS by design.
+            if compressor_ratio >= 0.30 {
+                "critical"
+            } else if compressor_ratio >= 0.18 {
+                "warning"
+            } else {
+                "ok"
+            }
+        }
     }
     .to_string();
+    // Intensity within the verdict's band: how hard the compressor is working,
+    // nudged up while swap is actively churning.
+    let intensity = (compressor_ratio / 0.30)
+        .clamp(0.0, 1.0)
+        .max(if swapouts_delta > 0 { 0.5 } else { 0.0 });
+    let score = score_for_level(&level, intensity);
+    // Keep advice consistent with `level`: don't nag about swapping/compression
+    // while the kernel reports normal pressure (macOS compresses and swaps
+    // routinely on a healthy system).
     let advice = if wired_gb > total_ram_gb * 0.55 {
         "Wired memory is high; prefer mmap-enabled presets and disable mlock.".to_string()
-    } else if reclaimable_gb > 1.0 && free_gb < 1.5 {
+    } else if level == "ok" {
+        "Memory pressure is normal.".to_string()
+    } else if reclaimable_gb > 1.0 {
         "Reclaimable cache is available; Free Memory can help if sudo is already authorized."
             .to_string()
-    } else if compressor_ratio >= 0.18 || swapouts_delta > 0 {
+    } else {
         "Reduce context, batch, or parallel slots; macOS is compressing or swapping memory."
             .to_string()
-    } else {
-        "Memory pressure is normal.".to_string()
     };
 
     MemoryPressure {
         level,
-        source: "vm_stat".to_string(),
-        score: pressure_score,
+        source: "host_statistics64".to_string(),
+        score,
         free_gb,
         wired_gb,
         compressor_gb,
@@ -810,9 +969,9 @@ fn parse_macos_vm_stat(text: &str, total_ram_gb: f64) -> MemoryPressure {
         purgeable_gb,
         inactive_gb,
         reclaimable_gb,
-        swap_used_gb: 0.0,
-        swapins,
-        swapouts,
+        swap_used_gb,
+        swapins: counts.swapins,
+        swapouts: counts.swapouts,
         swapins_delta,
         swapouts_delta,
         psi_some_avg10: 0.0,
@@ -868,10 +1027,6 @@ fn get_memory_pressure(total_ram_gb: f64, available_ram_gb: f64) -> MemoryPressu
         1.0
     };
     let swap_used_gb = kb_to_gb(swap_total_kb.saturating_sub(swap_free_kb));
-    let pressure_score = ((1.0 - available_ratio).clamp(0.0, 1.0) * 55.0
-        + (psi_some_avg10 / 20.0).clamp(0.0, 1.0) * 30.0
-        + (psi_full_avg10 / 5.0).clamp(0.0, 1.0) * 15.0)
-        .min(100.0);
     let level = if psi_full_avg10 >= 1.0
         || psi_some_avg10 >= 20.0
         || (available_ratio < 0.05 && swap_used_gb > 0.0)
@@ -883,6 +1038,12 @@ fn get_memory_pressure(total_ram_gb: f64, available_ram_gb: f64) -> MemoryPressu
         "ok"
     }
     .to_string();
+    // Intensity within the band: the strongest of the PSI stall signals and the
+    // memory-shortfall ratio.
+    let intensity = (psi_some_avg10 / 20.0)
+        .max(psi_full_avg10 / 5.0)
+        .max(1.0 - available_ratio);
+    let pressure_score = score_for_level(&level, intensity);
     let reclaimable_gb = kb_to_gb(cached_kb + sreclaimable_kb);
     let pinned_gb = kb_to_gb(mlocked_kb + unevictable_kb);
     let advice = if psi_full_avg10 >= 1.0 || psi_some_avg10 >= 5.0 {
@@ -931,56 +1092,33 @@ fn parse_linux_psi(text: &str) -> (f64, f64) {
 
 #[cfg(target_os = "windows")]
 fn get_memory_pressure(total_ram_gb: f64, available_ram_gb: f64) -> MemoryPressure {
-    use std::collections::HashMap;
-    use wmi::{Variant, WMIConnection};
+    // Base the pressure ratio on *available* memory (from sysinfo), not WMI's
+    // FreePhysicalMemory. Windows parks large amounts of RAM in the reclaimable
+    // standby/cache list, so truly-free memory is low on a healthy system and
+    // would chronically overstate pressure. "Available" already includes
+    // reclaimable standby pages.
+    let available_gb = available_ram_gb;
 
-    fn variant_to_u64(value: &Variant) -> Option<u64> {
-        match value {
-            Variant::UI4(v) => Some(*v as u64),
-            Variant::I4(v) => (*v).try_into().ok(),
-            Variant::UI8(v) => Some(*v),
-            Variant::I8(v) => (*v).try_into().ok(),
-            Variant::String(v) => v.parse().ok(),
-            _ => None,
-        }
-    }
-
-    let mut free_phys_gb = available_ram_gb;
-    let mut swap_used_gb = 0.0;
-    if let Ok(wmi) = WMIConnection::new()
-        && let Ok(rows) = wmi.raw_query::<HashMap<String, Variant>>(
-            "SELECT FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory FROM Win32_OperatingSystem",
-        )
-        && let Some(row) = rows.first()
-    {
-        if let Some(kb) = row.get("FreePhysicalMemory").and_then(variant_to_u64) {
-            free_phys_gb = kb as f64 / 1024.0 / 1024.0;
-        }
-        let total_virtual = row
-            .get("TotalVirtualMemorySize")
-            .and_then(variant_to_u64)
-            .unwrap_or(0);
-        let free_virtual = row
-            .get("FreeVirtualMemory")
-            .and_then(variant_to_u64)
-            .unwrap_or(0);
-        swap_used_gb = total_virtual.saturating_sub(free_virtual) as f64 / 1024.0 / 1024.0;
-    }
+    // Pagefile/commit usage via sysinfo's cheap memory refresh, which calls
+    // GlobalMemoryStatusEx underneath — no WMI/COM round-trip per poll.
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    let swap_used_gb = sys.used_swap() as f64 / 1024.0 / 1024.0 / 1024.0;
 
     let available_ratio = if total_ram_gb > 0.0 {
-        free_phys_gb / total_ram_gb
+        available_gb / total_ram_gb
     } else {
         1.0
     };
-    let pressure_score = ((1.0 - available_ratio).clamp(0.0, 1.0) * 100.0).min(100.0);
     let level = if available_ratio < 0.05 {
         "critical"
-    } else if available_ratio < 0.10 || pressure_score >= 90.0 {
+    } else if available_ratio < 0.10 {
         "warning"
     } else {
         "ok"
     }
     .to_string();
+    let pressure_score = score_for_level(&level, 1.0 - available_ratio);
     let advice = if level == "critical" || level == "warning" {
         "Windows reports low available memory; reduce context, batch, or stop large processes."
             .to_string()
@@ -990,9 +1128,9 @@ fn get_memory_pressure(total_ram_gb: f64, available_ram_gb: f64) -> MemoryPressu
 
     MemoryPressure {
         level,
-        source: "windows_wmi".to_string(),
+        source: "windows_memstatus".to_string(),
         score: pressure_score,
-        free_gb: free_phys_gb,
+        free_gb: available_gb,
         swap_used_gb,
         advice,
         ..Default::default()
@@ -1068,4 +1206,117 @@ fn get_motherboard() -> String {
     }
 
     "Unknown Motherboard".to_string()
+}
+
+#[cfg(test)]
+mod memory_pressure_tests {
+    #[cfg(target_os = "linux")]
+    use super::parse_linux_psi;
+    use super::score_for_level;
+    #[cfg(target_os = "macos")]
+    use super::{compute_macos_pressure, parse_macos_vm_stat_text};
+
+    #[cfg(target_os = "macos")]
+    const SAMPLE_VM_STAT: &str = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\n\
+Pages free:                               20000.\n\
+Pages wired down:                         50000.\n\
+Pages occupied by compressor:             10000.\n\
+Pages stored in compressor:               30000.\n\
+Pages purgeable:                          5000.\n\
+Pages inactive:                           40000.\n\
+Swapins:                                  100.\n\
+Swapouts:                                 200.\n";
+
+    #[cfg(target_os = "macos")]
+    fn pressure_from_text(
+        text: &str,
+        total: f64,
+        kernel: Option<u8>,
+        swap: f64,
+    ) -> super::MemoryPressure {
+        compute_macos_pressure(&parse_macos_vm_stat_text(text), total, kernel, swap)
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn live_syscall_path_populates_reading() {
+        // Exercises host_statistics64 + sysctlbyname end-to-end on the host.
+        let p = super::get_memory_pressure(64.0, 32.0);
+        assert_eq!(p.source, "host_statistics64");
+        assert!(
+            p.free_gb > 0.0,
+            "free_gb should be populated, got {}",
+            p.free_gb
+        );
+        assert!(["ok", "warning", "critical"].contains(&p.level.as_str()));
+        assert!((0.0..=100.0).contains(&p.score));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn vm_stat_text_parses_page_counts() {
+        let counts = parse_macos_vm_stat_text(SAMPLE_VM_STAT);
+        assert_eq!(counts.page_size, 16384);
+        assert_eq!(counts.free, 20000);
+        assert_eq!(counts.compressor, 10000);
+        assert_eq!(counts.swapouts, 200);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn kernel_level_anchors_verdict() {
+        // Kernel reports critical (4) -> critical regardless of low compressor.
+        let crit = pressure_from_text(SAMPLE_VM_STAT, 64.0, Some(4), 1.0);
+        assert_eq!(crit.level, "critical");
+        // Kernel reports warning (2) -> warning.
+        let warn = pressure_from_text(SAMPLE_VM_STAT, 64.0, Some(2), 1.0);
+        assert_eq!(warn.level, "warning");
+        // Kernel reports normal (1) with a healthy compressor -> ok, even though
+        // free pages are low and swap is in use (the old heuristic false-alarmed).
+        let ok = pressure_from_text(SAMPLE_VM_STAT, 64.0, Some(1), 6.0);
+        assert_eq!(ok.level, "ok");
+        // swap_used is now populated (was previously hardcoded 0.0).
+        assert_eq!(ok.swap_used_gb, 6.0);
+        // Score stays within the band for the verdict.
+        assert!(ok.score < 50.0, "ok score {} should be <50", ok.score);
+        assert!(
+            crit.score >= 80.0,
+            "critical score {} should be >=80",
+            crit.score
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn falls_back_to_compressor_without_kernel_level() {
+        // page size 16384, total 1 GB so compressor of 30000 pages ~= 0.46 GB,
+        // a ratio above the 0.30 critical threshold.
+        let heavy = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\n\
+Pages occupied by compressor:             30000.\n";
+        let p = pressure_from_text(heavy, 1.0, None, 0.0);
+        assert_eq!(p.level, "critical");
+    }
+
+    #[test]
+    fn score_bands_are_consistent_across_levels() {
+        // ok occupies 0-50, warning 50-80, critical 80-100, regardless of platform.
+        assert!((score_for_level("ok", 0.0) - 0.0).abs() < 1e-9);
+        assert!((score_for_level("ok", 1.0) - 50.0).abs() < 1e-9);
+        assert!((score_for_level("warning", 0.0) - 50.0).abs() < 1e-9);
+        assert!((score_for_level("warning", 1.0) - 80.0).abs() < 1e-9);
+        assert!((score_for_level("critical", 0.0) - 80.0).abs() < 1e-9);
+        assert!((score_for_level("critical", 1.0) - 100.0).abs() < 1e-9);
+        // Intensity is clamped.
+        assert!((score_for_level("warning", 5.0) - 80.0).abs() < 1e-9);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn psi_parses_some_and_full_avg10() {
+        let text = "some avg10=12.34 avg60=1.00 avg300=0.10 total=123\n\
+full avg10=2.50 avg60=0.50 avg300=0.05 total=45\n";
+        let (some, full) = parse_linux_psi(text);
+        assert!((some - 12.34).abs() < 1e-9);
+        assert!((full - 2.50).abs() < 1e-9);
+    }
 }

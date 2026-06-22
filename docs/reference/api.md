@@ -1841,13 +1841,13 @@ Response:
 
 Branch-specific addition.
 
-`SystemMetrics` (reported via WebSocket telemetry and used internally for monitoring) includes cross-platform memory-pressure fields. macOS uses `vm_stat`, Linux uses `/proc/pressure/memory` plus `/proc/meminfo`, and Windows uses WMI operating-system memory counters.
+`SystemMetrics` (reported via WebSocket telemetry and used internally for monitoring) includes cross-platform memory-pressure fields. macOS reads the Mach `host_statistics64` syscall plus `kern.memorystatus_vm_pressure_level`/`vm.swapusage` sysctls (no subprocess), Linux uses `/proc/pressure/memory` plus `/proc/meminfo`, and Windows uses `GlobalMemoryStatusEx` (via sysinfo). The normalized `memory_pressure_score` is band-aligned across platforms: 0-50 = ok, 50-80 = warning, 80-100 = critical.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `ram_available_gb` | float | Available RAM in GB |
 | `memory_pressure_level` | string | `"ok"`, `"warning"`, or `"critical"` |
-| `memory_pressure_source` | string | Platform source such as `"vm_stat"`, `"linux_psi"`, or `"windows_wmi"` |
+| `memory_pressure_source` | string | Platform source such as `"host_statistics64"`, `"linux_psi"`, or `"windows_memstatus"` |
 | `memory_pressure_score` | float | Normalized pressure score from 0-100 |
 | `memory_free_gb` | float | Free pages in GB |
 | `memory_reclaimable_gb` | float | Estimated reclaimable cache/inactive memory GB |

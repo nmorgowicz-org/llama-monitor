@@ -2304,6 +2304,7 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "hyper-util",
+ "libc",
  "mac-notification-sys",
  "once_cell",
  "rand 0.10.1",
