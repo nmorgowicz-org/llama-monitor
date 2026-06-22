@@ -98,6 +98,15 @@ jobs:
           git diff --check
           cargo fmt -- --check
           cargo clippy -- -D warnings
+
+          # Lint Windows-only code paths using the same toolchain we ship (cross + Docker).
+          # Use the same env as scripts/build-single-target.sh for x86_64-pc-windows-gnu
+          # so cfg-gating bugs are caught with the exact feature set users get.
+          CROSS_REMOTE=1 \
+            CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
+            CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=cc \
+            cross clippy --target x86_64-pc-windows-gnu --no-default-features --features native-tray,webview-popover -- -D warnings
+
           cargo test
 
       - name: Validate sensor_bridge compiles
