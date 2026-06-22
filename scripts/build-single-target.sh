@@ -53,7 +53,7 @@ case "$TARGET" in
       CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=cc \
       cross build --release --target x86_64-pc-windows-gnu \
-      --no-default-features --features native-tray
+      --no-default-features --features native-tray,webview-popover
     ;;
   aarch64-apple-darwin)
     SDKROOT="/opt/osxcross/target/SDK/${MACOS_SDK}" \
