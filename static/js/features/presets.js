@@ -585,13 +585,56 @@ export function updatePresetAdvisor() {
     }, 250);
 }
 
+// Render a structured hint (icon + headline + body + optional inline action) into one of
+// the `.preset-memory-warning` slots. `severity` picks the colour: info (blue), caution
+// (amber, the base), danger (orange-red). Always sets the base class so the box styling
+// applies (a prior bug overwrote className to an unstyled class).
+function _renderPresetHint(el, { severity = 'caution', icon = '', head = '', body = '', action = null }) {
+    if (!el) return;
+    el.className =
+        severity === 'danger'
+            ? 'preset-memory-warning preset-mlock-warning--suggest-off'
+            : severity === 'info'
+              ? 'preset-memory-warning preset-memory-warning--info'
+              : 'preset-memory-warning';
+    // Build with DOM APIs (textContent) rather than innerHTML — injection-safe and lint-clean.
+    el.replaceChildren();
+    const wrap = document.createElement('div');
+    wrap.className = 'pe-hint';
+    const ic = document.createElement('span');
+    ic.className = 'pe-hint-icon';
+    ic.textContent = icon;
+    const bodyEl = document.createElement('span');
+    bodyEl.className = 'pe-hint-body';
+    if (head) {
+        const h = document.createElement('span');
+        h.className = 'pe-hint-head';
+        h.textContent = head;
+        bodyEl.append(h, document.createTextNode(' '));
+    }
+    bodyEl.append(document.createTextNode(body));
+    if (action) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pe-hint-action';
+        btn.textContent = action.label;
+        btn.addEventListener('click', action.onClick);
+        const btnWrap = document.createElement('div');
+        btnWrap.append(btn);
+        bodyEl.append(btnWrap);
+    }
+    wrap.append(ic, bodyEl);
+    el.append(wrap);
+    el.style.display = '';
+}
+
 function updatePresetMlockWarning(estimate = null) {
     const el = document.getElementById('preset-mlock-warning');
-    const checked = document.getElementById('modal-mlock')?.checked;
     if (!el) return;
+    const checked = document.getElementById('modal-mlock')?.checked;
     if (!checked) {
         el.style.display = 'none';
-        el.textContent = '';
+        el.innerHTML = '';
         return;
     }
 
@@ -600,39 +643,89 @@ function updatePresetMlockWarning(estimate = null) {
     const avail = estimate?.available_vram_bytes || 0;
     const ratio = avail > 0 ? total / avail : 0;
     const pressure = rec === 'risk' || rec === 'tight' || ratio >= 0.82;
-    const platform = _presetIsUnified === true ? 'On unified-memory Macs, ' : '';
     const sys = lastSystemMetrics;
-    const wiredGb = (sys?.memory_wired_gb || 0);
+    const wiredGb = sys?.memory_wired_gb || 0;
     const modelGib = total / (1024 ** 3);
     const wiredAfter = wiredGb + modelGib;
 
-    // Check if loading this model with mlock would push total system RAM above 90%.
-    // Above that threshold macOS cannot compress model pages and gets starved of headroom.
+    // Would mlock push total system RAM above 90%? Past that, macOS can't compress model
+    // pages and gets starved of headroom.
     const totalRamGb = sys?.ram_total_gb || 0;
     const usedRamGb = sys?.ram_used_gb || 0;
-    const projectedPct = totalRamGb > 0
-        ? Math.round(((usedRamGb + modelGib) / totalRamGb) * 100)
-        : 0;
+    const projectedPct = totalRamGb > 0 ? Math.round(((usedRamGb + modelGib) / totalRamGb) * 100) : 0;
     const wiredOverload = _presetIsUnified && totalRamGb > 0 && projectedPct >= 90;
+    const wiredNote =
+        _presetIsUnified && wiredGb > 0 && modelGib > 0
+            ? ` System wired memory: ${wiredGb.toFixed(1)} GB now → ~${wiredAfter.toFixed(1)} GB after loading (wired = non-compressible).`
+            : '';
 
-    const wiredNote = _presetIsUnified && wiredGb > 0 && modelGib > 0
-        ? ` System wired: ${wiredGb.toFixed(1)} GB now → ~${wiredAfter.toFixed(1)} GB after loading (wired = non-compressible).`
-        : '';
+    const turnOff = {
+        label: 'Turn off mlock',
+        onClick: () => {
+            const c = document.getElementById('modal-mlock');
+            if (c) {
+                c.checked = false;
+                // Dispatch change so form listeners (estimate, hints, dirty-tracking) all fire.
+                c.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        },
+    };
 
-    let tail;
     if (wiredOverload) {
-        // Strong suggestion: mlock at this RAM level is counterproductive
-        tail = ` Loading this model will use ~${projectedPct}% of system RAM.`
-            + ` With mlock on, all of that is non-compressible — macOS cannot relieve pressure and the desktop may become unresponsive.`
-            + ` Consider disabling mlock: on Apple Silicon, Metal keeps model memory resident while the server is running.${wiredNote}`;
+        _renderPresetHint(el, {
+            severity: 'danger',
+            icon: '⚠️',
+            head: 'mlock isn’t recommended here.',
+            body: `Loading this model pins ~${projectedPct}% of system RAM as non-compressible — macOS can’t relieve pressure and the desktop may stall. On Apple Silicon, Metal already keeps model memory resident while the server runs, so mlock adds risk with no benefit.${wiredNote}`,
+            action: turnOff,
+        });
     } else if (pressure) {
-        tail = ` This estimate is already tight — pinned memory can push macOS into compression or swap and make the desktop unresponsive.${wiredNote}`;
+        _renderPresetHint(el, {
+            severity: 'caution',
+            icon: '⚠️',
+            head: 'Tight fit with mlock.',
+            body: `This estimate is already tight — pinned memory can push macOS into compression or swap and make the desktop unresponsive.${wiredNote}`,
+            action: _presetIsUnified ? turnOff : null,
+        });
     } else {
-        tail = ` Leave enough free system memory for macOS, browsers, and background tasks.${wiredNote}`;
+        _renderPresetHint(el, {
+            severity: 'caution',
+            icon: '📌',
+            head: 'mlock pins model memory.',
+            body: `It stops the OS reclaiming model pages. Leave enough free RAM for macOS, browsers, and background tasks.${wiredNote}`,
+        });
     }
-    el.textContent = `${platform}mlock pins model memory instead of letting the OS reclaim it.${tail}`;
-    el.className = wiredOverload ? 'preset-mlock-warning preset-mlock-warning--suggest-off' : 'preset-mlock-warning';
-    el.style.display = '';
+}
+
+// Apple Silicon recommendation: keep mmap ON (no-mmap OFF). Measured identical throughput
+// on M-series, and mmap is zero-copy into Metal — disabling it only slows loads and commits
+// the whole model to RAM up front. Shown only on unified memory when no-mmap is enabled.
+function updatePresetMmapHint() {
+    const el = document.getElementById('preset-mmap-hint');
+    if (!el) return;
+    const noMmap = document.getElementById('modal-no-mmap')?.checked;
+    if (!_presetIsUnified || !noMmap) {
+        el.style.display = 'none';
+        el.innerHTML = '';
+        return;
+    }
+    _renderPresetHint(el, {
+        severity: 'info',
+        icon: '🍎',
+        head: 'no-mmap isn’t recommended on Apple Silicon.',
+        body: 'On unified memory, mmap is zero-copy into Metal — it doesn’t change throughput (measured identical tok/s on M-series) but loads faster and avoids committing the whole model to RAM up front. Leave it off unless the model lives on slow network storage.',
+        action: {
+            label: 'Turn off no-mmap',
+            onClick: () => {
+                const c = document.getElementById('modal-no-mmap');
+                if (c) {
+                    c.checked = false;
+                    // Dispatch change so form listeners (estimate, hints, dirty-tracking) all fire.
+                    c.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            },
+        },
+    });
 }
 
 // ── VRAM live estimate for preset editor ─────────────────────────────────────
@@ -700,6 +793,7 @@ export function updatePresetVram() {
     const strip = document.getElementById('preset-vram-strip');
     if (!box) return;
     updatePresetMlockWarning();
+    updatePresetMmapHint();
     const modelVal = document.getElementById('modal-model-path')?.value.trim() || '';
     if (!modelVal) { if (strip) strip.style.display = 'none'; return; }
     if (strip) strip.style.display = '';
@@ -707,6 +801,8 @@ export function updatePresetVram() {
     clearTimeout(_presetVramTimer);
     _presetVramTimer = setTimeout(async () => {
         const isUnified = await _ensureUnifiedFlag();
+        // Platform flag is now resolved — refresh the Apple Silicon mmap hint.
+        updatePresetMmapHint();
         const nCtx = parseInt(document.getElementById('modal-context-size')?.value) || 131072;
         const ctk = document.getElementById('modal-ctk')?.value || 'q8_0';
         const ctv = document.getElementById('modal-ctv')?.value || 'f16';

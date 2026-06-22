@@ -2121,6 +2121,52 @@
     font-weight: 500;
 }
 
+/* Calmer informational tone (e.g. the Apple Silicon mmap recommendation) */
+.preset-memory-warning--info {
+    border-color: rgba(99, 162, 245, 0.35);
+    background: rgba(99, 162, 245, 0.08);
+    color: var(--color-info, #63a2f5);
+}
+
+/* Structured hint: icon + body + optional inline action button */
+.pe-hint {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+.pe-hint-icon {
+    flex-shrink: 0;
+    line-height: 1.45;
+}
+.pe-hint-body {
+    flex: 1;
+    min-width: 0;
+}
+.pe-hint-head {
+    font-weight: 600;
+}
+.pe-hint-action {
+    margin-top: 7px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    font: inherit;
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: inherit;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid currentColor;
+    border-radius: 6px;
+    cursor: pointer;
+    opacity: 0.9;
+    transition: opacity 0.12s ease, background 0.12s ease;
+}
+.pe-hint-action:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.12);
+}
+
 .preset-editor-layout {
   display: flex;
   flex: 1;
