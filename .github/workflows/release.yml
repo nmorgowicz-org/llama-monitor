@@ -126,7 +126,7 @@ jobs:
 
       - name: Update published release with artifacts
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
           tag_name: ${{ github.ref_name }}
           body: ${{ github.event.release.body }}
@@ -141,7 +141,7 @@ jobs:
 
       - name: Create manual release with generated notes
         if: github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
         with:
           tag_name: ${{ github.event.inputs.tag_name }}
           generate_release_notes: true
