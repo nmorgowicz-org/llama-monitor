@@ -225,7 +225,9 @@ export function fileBrowserSelect(path) {
 
     if (el.tagName === 'SELECT') {
         // For <select> targets: add or update an option for this value
-        let opt = el.querySelector(`option[value="${value.replace(/"/g, '\\"')}"]`);
+        let opt = el.querySelector(`option[value="${value
+            .replace(/\\/g, '\\\\')
+            .replace(/"/g, '\\"')}"]`);
         if (!opt) {
             const file = value.split(/[\\/]/).pop() || value;
             opt = document.createElement('option');
