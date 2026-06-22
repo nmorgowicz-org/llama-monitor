@@ -52,7 +52,9 @@ pub(crate) fn harden_file_permissions(path: &std::path::Path) {
         // /inheritance:r  — remove inherited ACEs
         // /grant:r        — replace (not add) explicit grants
         // (F)             — Full Control
-        let result = std::process::Command::new("icacls")
+        let mut icacls_cmd = std::process::Command::new("icacls");
+        crate::platform::no_window(&mut icacls_cmd);
+        let result = icacls_cmd
             .args([
                 path_str.as_ref(),
                 "/inheritance:r",
@@ -461,11 +463,24 @@ impl AppConfig {
         let default_server_cwd = PathBuf::from(".");
 
         let config_dir = args.config_dir.unwrap_or_else(|| {
-            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-            home.join(".config").join("llama-monitor")
+            #[cfg(windows)]
+            {
+                // %APPDATA%\llama-monitor on Windows — matches agent.rs and every remote path.
+                dirs::config_dir()
+                    .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"))
+                    .join("llama-monitor")
+            }
+            #[cfg(not(windows))]
+            {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(".config")
+                    .join("llama-monitor")
+            }
         });
 
-        // Default binary location: ~/.config/llama-monitor/bin/llama-server
+        // Default binary location: <config_dir>/bin/llama-server
+        // (On macOS/Linux: ~/.config/llama-monitor/bin/; on Windows: %APPDATA%\llama-monitor\bin\)
         // Subdirectory keeps binaries separate from JSON config files.
         let binary_name = if cfg!(windows) {
             "llama-server.exe"
