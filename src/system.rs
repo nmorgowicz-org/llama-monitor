@@ -695,11 +695,84 @@ fn get_memory_pressure(total_ram_gb: f64, _available_ram_gb: f64) -> MemoryPress
         return MemoryPressure::default();
     };
     let text = String::from_utf8_lossy(&output.stdout);
-    parse_macos_vm_stat(&text, total_ram_gb)
+    let kernel_level = read_macos_pressure_level();
+    let swap_used_gb = read_macos_swap_used_gb();
+    parse_macos_vm_stat(&text, total_ram_gb, kernel_level, swap_used_gb)
+}
+
+/// Read the kernel's own memory-pressure verdict from
+/// `kern.memorystatus_vm_pressure_level`: 1 = normal, 2 = warning, 4 = critical.
+/// This is the same signal the OS uses to drive jetsam and the
+/// `DISPATCH_MEMORYPRESSURE` notifications, so it is far more reliable than
+/// reconstructing pressure from raw page counts. Returns `None` if the sysctl
+/// is unavailable (then we fall back to compressor-based heuristics).
+#[cfg(target_os = "macos")]
+fn read_macos_pressure_level() -> Option<u8> {
+    let output = std::process::Command::new("sysctl")
+        .args(["-n", "kern.memorystatus_vm_pressure_level"])
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u8>()
+        .ok()
+}
+
+/// Read swap currently in use (GB) from `vm.swapusage`. macOS swap is a real
+/// pressure signal but, unlike Linux/Windows, it was previously never populated.
+#[cfg(target_os = "macos")]
+fn read_macos_swap_used_gb() -> f64 {
+    let Ok(output) = std::process::Command::new("sysctl")
+        .args(["-n", "vm.swapusage"])
+        .output()
+    else {
+        return 0.0;
+    };
+    parse_macos_swapusage(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Parse the `used = N.NNM` field out of `vm.swapusage` output, e.g.
+/// `total = 7168.00M  used = 6133.31M  free = 1034.69M  (encrypted)`.
+/// Handles `M`/`G`/`K` suffixes; returns GB.
+#[cfg(target_os = "macos")]
+fn parse_macos_swapusage(text: &str) -> f64 {
+    let mut tokens = text.split_whitespace();
+    while let Some(token) = tokens.next() {
+        if token == "used" {
+            // Skip the "=" then read the value token.
+            let value = if tokens.clone().next() == Some("=") {
+                tokens.nth(1)
+            } else {
+                tokens.next()
+            };
+            if let Some(value) = value {
+                return parse_size_suffix_to_gb(value);
+            }
+        }
+    }
+    0.0
+}
+
+/// Convert a `123.45M` / `1.5G` / `512K` token (macOS style) into GB.
+#[cfg(target_os = "macos")]
+fn parse_size_suffix_to_gb(token: &str) -> f64 {
+    let token = token.trim();
+    let (num, factor_gb) = match token.chars().last() {
+        Some('G') | Some('g') => (&token[..token.len() - 1], 1.0),
+        Some('M') | Some('m') => (&token[..token.len() - 1], 1.0 / 1024.0),
+        Some('K') | Some('k') => (&token[..token.len() - 1], 1.0 / 1024.0 / 1024.0),
+        _ => (token, 1.0 / 1024.0 / 1024.0 / 1024.0), // assume bytes
+    };
+    num.parse::<f64>().map(|v| v * factor_gb).unwrap_or(0.0)
 }
 
 #[cfg(target_os = "macos")]
-fn parse_macos_vm_stat(text: &str, total_ram_gb: f64) -> MemoryPressure {
+fn parse_macos_vm_stat(
+    text: &str,
+    total_ram_gb: f64,
+    kernel_level: Option<u8>,
+    swap_used_gb: f64,
+) -> MemoryPressure {
     use std::sync::{Mutex, OnceLock};
 
     static LAST_SWAP: OnceLock<Mutex<(u64, u64)>> = OnceLock::new();
@@ -779,24 +852,48 @@ fn parse_macos_vm_stat(text: &str, total_ram_gb: f64) -> MemoryPressure {
         *last = (swapins, swapouts);
         delta
     };
-    let level = if free_gb < 0.5 || compressor_ratio >= 0.30 || swapouts_delta > 0 {
-        "critical"
-    } else if free_gb < 1.5 || compressor_ratio >= 0.18 {
-        "warning"
-    } else {
-        "ok"
+    // Anchor the verdict on the kernel's own pressure level when available.
+    // macOS keeps "Pages free" deliberately low (RAM is used as cache) and swaps
+    // lazily even when healthy, so raw free-page and single-swapout thresholds
+    // produce chronic false alarms. The kernel sysctl is the authoritative signal;
+    // we only let an extreme compressor ratio escalate beyond what it reports.
+    let level = match kernel_level {
+        Some(4) => "critical",
+        Some(2) => "warning",
+        Some(_) => {
+            // Kernel says normal — only flag if the compressor is working very hard.
+            if compressor_ratio >= 0.30 {
+                "warning"
+            } else {
+                "ok"
+            }
+        }
+        None => {
+            // sysctl unavailable: fall back to compressor heuristics. Note we do
+            // NOT use free_gb here — it is misleadingly low on macOS by design.
+            if compressor_ratio >= 0.30 {
+                "critical"
+            } else if compressor_ratio >= 0.18 {
+                "warning"
+            } else {
+                "ok"
+            }
+        }
     }
     .to_string();
+    // Keep advice consistent with `level`: don't nag about swapping/compression
+    // while the kernel reports normal pressure (macOS compresses and swaps
+    // routinely on a healthy system).
     let advice = if wired_gb > total_ram_gb * 0.55 {
         "Wired memory is high; prefer mmap-enabled presets and disable mlock.".to_string()
-    } else if reclaimable_gb > 1.0 && free_gb < 1.5 {
+    } else if level == "ok" {
+        "Memory pressure is normal.".to_string()
+    } else if reclaimable_gb > 1.0 {
         "Reclaimable cache is available; Free Memory can help if sudo is already authorized."
             .to_string()
-    } else if compressor_ratio >= 0.18 || swapouts_delta > 0 {
+    } else {
         "Reduce context, batch, or parallel slots; macOS is compressing or swapping memory."
             .to_string()
-    } else {
-        "Memory pressure is normal.".to_string()
     };
 
     MemoryPressure {
@@ -810,7 +907,7 @@ fn parse_macos_vm_stat(text: &str, total_ram_gb: f64) -> MemoryPressure {
         purgeable_gb,
         inactive_gb,
         reclaimable_gb,
-        swap_used_gb: 0.0,
+        swap_used_gb,
         swapins,
         swapouts,
         swapins_delta,
@@ -945,17 +1042,19 @@ fn get_memory_pressure(total_ram_gb: f64, available_ram_gb: f64) -> MemoryPressu
         }
     }
 
-    let mut free_phys_gb = available_ram_gb;
+    // Base the pressure ratio on *available* memory (from sysinfo), not WMI's
+    // FreePhysicalMemory. Windows parks large amounts of RAM in the reclaimable
+    // standby/cache list, so truly-free memory is low on a healthy system and
+    // would chronically overstate pressure. "Available" already includes
+    // reclaimable standby pages. WMI is used only for swap/commit accounting.
+    let available_gb = available_ram_gb;
     let mut swap_used_gb = 0.0;
     if let Ok(wmi) = WMIConnection::new()
         && let Ok(rows) = wmi.raw_query::<HashMap<String, Variant>>(
-            "SELECT FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory FROM Win32_OperatingSystem",
+            "SELECT TotalVirtualMemorySize,FreeVirtualMemory FROM Win32_OperatingSystem",
         )
         && let Some(row) = rows.first()
     {
-        if let Some(kb) = row.get("FreePhysicalMemory").and_then(variant_to_u64) {
-            free_phys_gb = kb as f64 / 1024.0 / 1024.0;
-        }
         let total_virtual = row
             .get("TotalVirtualMemorySize")
             .and_then(variant_to_u64)
@@ -968,7 +1067,7 @@ fn get_memory_pressure(total_ram_gb: f64, available_ram_gb: f64) -> MemoryPressu
     }
 
     let available_ratio = if total_ram_gb > 0.0 {
-        free_phys_gb / total_ram_gb
+        available_gb / total_ram_gb
     } else {
         1.0
     };
@@ -992,7 +1091,7 @@ fn get_memory_pressure(total_ram_gb: f64, available_ram_gb: f64) -> MemoryPressu
         level,
         source: "windows_wmi".to_string(),
         score: pressure_score,
-        free_gb: free_phys_gb,
+        free_gb: available_gb,
         swap_used_gb,
         advice,
         ..Default::default()
@@ -1068,4 +1167,76 @@ fn get_motherboard() -> String {
     }
 
     "Unknown Motherboard".to_string()
+}
+
+#[cfg(test)]
+mod memory_pressure_tests {
+    #[cfg(target_os = "linux")]
+    use super::parse_linux_psi;
+    #[cfg(target_os = "macos")]
+    use super::{parse_macos_swapusage, parse_macos_vm_stat, parse_size_suffix_to_gb};
+
+    #[cfg(target_os = "macos")]
+    const SAMPLE_VM_STAT: &str = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\n\
+Pages free:                               20000.\n\
+Pages wired down:                         50000.\n\
+Pages occupied by compressor:             10000.\n\
+Pages stored in compressor:               30000.\n\
+Pages purgeable:                          5000.\n\
+Pages inactive:                           40000.\n\
+Swapins:                                  100.\n\
+Swapouts:                                 200.\n";
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn swapusage_parses_used_field_in_gb() {
+        let text = "total = 7168.00M  used = 6133.31M  free = 1034.69M  (encrypted)";
+        let used = parse_macos_swapusage(text);
+        assert!((used - 6133.31 / 1024.0).abs() < 1e-6, "got {used}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn swapusage_handles_gigabyte_suffix_and_missing() {
+        assert!((parse_size_suffix_to_gb("2.0G") - 2.0).abs() < 1e-9);
+        assert_eq!(parse_macos_swapusage("nonsense"), 0.0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn kernel_level_anchors_verdict() {
+        // Kernel reports critical (4) -> critical regardless of low compressor.
+        let crit = parse_macos_vm_stat(SAMPLE_VM_STAT, 64.0, Some(4), 1.0);
+        assert_eq!(crit.level, "critical");
+        // Kernel reports warning (2) -> warning.
+        let warn = parse_macos_vm_stat(SAMPLE_VM_STAT, 64.0, Some(2), 1.0);
+        assert_eq!(warn.level, "warning");
+        // Kernel reports normal (1) with a healthy compressor -> ok, even though
+        // free pages are low and swap is in use (the old heuristic false-alarmed).
+        let ok = parse_macos_vm_stat(SAMPLE_VM_STAT, 64.0, Some(1), 6.0);
+        assert_eq!(ok.level, "ok");
+        // swap_used is now populated (was previously hardcoded 0.0).
+        assert_eq!(ok.swap_used_gb, 6.0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn falls_back_to_compressor_without_kernel_level() {
+        // page size 16384, total 1 GB so compressor of 10000 pages ~= 0.15 GB.
+        // Build a string with a heavy compressor to cross the 0.30 ratio.
+        let heavy = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\n\
+Pages occupied by compressor:             30000.\n";
+        let p = parse_macos_vm_stat(heavy, 1.0, None, 0.0);
+        assert_eq!(p.level, "critical");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn psi_parses_some_and_full_avg10() {
+        let text = "some avg10=12.34 avg60=1.00 avg300=0.10 total=123\n\
+full avg10=2.50 avg60=0.50 avg300=0.05 total=45\n";
+        let (some, full) = parse_linux_psi(text);
+        assert!((some - 12.34).abs() < 1e-9);
+        assert!((full - 2.50).abs() < 1e-9);
+    }
 }

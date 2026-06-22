@@ -457,13 +457,21 @@ CPU clock visualization:
 
 - Can be shown as a single ring orbit with meter, as a chip, or as a plain numeric value.
 
-Memory pressure (macOS only):
+Memory pressure (macOS):
 
-- Based on live `vm_stat` data: free pages, compressor pages, and total RAM.
+- Anchored on the kernel's own verdict, `kern.memorystatus_vm_pressure_level`
+  (1 = normal, 2 = warning, 4 = critical) — the same signal macOS uses to drive
+  jetsam and memory-pressure notifications. `vm_stat` (free, compressor, wired,
+  purgeable, inactive) and `vm.swapusage` are reported as supporting telemetry.
 - Levels:
-  - **ok**: normal conditions
-  - **warning**: free GB < 1.5 or compressor / total RAM ≥ 18%
-  - **critical**: free GB < 0.5 or compressor / total RAM ≥ 30%
+  - **ok**: kernel reports normal pressure
+  - **warning**: kernel reports warning, or compressor / total RAM ≥ 30% while
+    the kernel still reports normal
+  - **critical**: kernel reports critical pressure
+  - If the sysctl is unavailable, falls back to compressor ratio alone
+    (≥ 18% warning, ≥ 30% critical). Free-page count is intentionally **not**
+    used as a threshold — macOS keeps free memory low by design, so it is a poor
+    pressure signal and previously caused chronic false warnings.
 - Dashboard:
   - System card includes a Memory Pressure metric with sparkline.
 - Top nav:
