@@ -15,7 +15,7 @@ The compact strip in the top navigation shows the current endpoint state without
 | **Context** | Highest context-pressure percentage across open chat tabs |
 | **GPU** | Temperature of the hottest available GPU |
 | **Sparkline** | Recent generation-speed history |
-| **Memory pressure** | Shown when memory pressure is warning or critical (macOS `vm_stat`, Linux PSI, Windows WMI memory counters) |
+| **Memory pressure** | Shown when memory pressure is warning or critical (macOS `host_statistics64` + kernel pressure sysctl, Linux PSI, Windows `GlobalMemoryStatusEx`) |
 
 Clicking the cockpit jumps to the Server tab. On narrower layouts the GPU and sparkline chips collapse first, then the context chip.
 
@@ -436,15 +436,15 @@ Clock visualization:
 | CPU clock | `/proc/cpuinfo` on Linux; on Apple Silicon derived from P-cluster frequency (`p_cluster_freq_mhz` via `mactop`), not a generic SoC “clock” |
 | RAM usage | `sysinfo` |
 | RAM available | `sysinfo` |
-| Memory pressure level | Platform score: macOS `vm_stat`, Linux PSI + `/proc/meminfo`, Windows WMI |
-| Memory pressure source / score | Source name plus normalized 0-100 pressure score |
+| Memory pressure level | macOS kernel pressure sysctl, Linux PSI + `/proc/meminfo`, Windows available-memory ratio |
+| Memory pressure source / score | Source name plus band-aligned 0-100 score (0-50 ok, 50-80 warning, 80-100 critical) |
 | Memory free (GB) | Platform free/available physical memory |
 | Memory wired/pinned (GB) | macOS wired pages or Linux mlocked/unevictable pages |
 | Memory reclaimable (GB) | macOS purgeable + inactive pages; Linux cached + reclaimable slab |
-| Memory purgeable / inactive (GB) | macOS `vm_stat` breakdown when available |
-| Memory compressor / compressed (GB) | macOS `vm_stat` compressor counters |
+| Memory purgeable / inactive (GB) | macOS `host_statistics64` breakdown when available |
+| Memory compressor / compressed (GB) | macOS `host_statistics64` compressor counters |
 | Swap/pagefile used (GB) | Windows/Linux where available |
-| Swapins / swapouts / deltas | macOS `vm_stat` counters and per-sample deltas |
+| Swapins / swapouts / deltas | macOS `host_statistics64` counters and per-sample deltas |
 | Linux PSI avg10 | Linux memory stall percentages from `/proc/pressure/memory` |
 | Motherboard / platform info | platform-specific host inspection |
 | CPU topology (Apple Silicon) | Read from `hw.perflevelcount` and per-level `hw.perflevel{i}.physicalcpu`/`hw.perflevel{i}.name` to derive P/E/S core counts and cluster names |
@@ -461,8 +461,10 @@ Memory pressure (macOS):
 
 - Anchored on the kernel's own verdict, `kern.memorystatus_vm_pressure_level`
   (1 = normal, 2 = warning, 4 = critical) — the same signal macOS uses to drive
-  jetsam and memory-pressure notifications. `vm_stat` (free, compressor, wired,
-  purgeable, inactive) and `vm.swapusage` are reported as supporting telemetry.
+  jetsam and memory-pressure notifications. Page counts from the Mach
+  `host_statistics64` syscall (free, compressor, wired, purgeable, inactive —
+  no `vm_stat` subprocess) and `vm.swapusage` are reported as supporting
+  telemetry. If the syscall is unavailable, it falls back to scraping `vm_stat`.
 - Levels:
   - **ok**: kernel reports normal pressure
   - **warning**: kernel reports warning, or compressor / total RAM ≥ 30% while
