@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.1.0...v1.2.0) (2026-06-22)
+
+
+### Features
+
+* **api:** auto-populate preset GGUF metadata on create/update; refresh on model_path change ([c25d42a](https://github.com/nmorgowicz-org/llama-monitor/commit/c25d42abce15f3aa23d6b4ccd7c8ad4a80f68561))
+* **api:** centralized ApiCtx, ApiError, auth helpers in common.rs ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **api:** ncpumoe tune endpoint and callers pass is_unified_memory for platform-correct MoE fit ([c25d42a](https://github.com/nmorgowicz-org/llama-monitor/commit/c25d42abce15f3aa23d6b4ccd7c8ad4a80f68561))
+* **binary:** add release checksums.json and verify on self-update; Unix/macOS restart launcher ([c25d42a](https://github.com/nmorgowicz-org/llama-monitor/commit/c25d42abce15f3aa23d6b4ccd7c8ad4a80f68561))
+* **chat:** map chat routes to new modular backend layout ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **gpu:** use Apple Silicon gpu_power instead of SoC total_power ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **models:** classified user-friendly download error messages ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **models:** concurrency limits and duplicate guard for model downloads ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **models:** derive model-card family and size from GGUF metadata; remove name-guessing ([c25d42a](https://github.com/nmorgowicz-org/llama-monitor/commit/c25d42abce15f3aa23d6b4ccd7c8ad4a80f68561))
+* **models:** enhance GGUF filename parsing for IQ/UD-Q/F16/BF16/F32 ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **models:** stable size-based VRAM estimate in model scan ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **models:** tighter size-aware MTP/draft model classification ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **sessions:** simplify sessions.js; move flows to attach/spawn modules ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **sleep:** 3-level sleep/low-power mode and adaptive WebSocket polling ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **spawn-wizard:** recognize qwen35 arch and use embedding_length ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **spawn:** VRAM bar, scenario cards, and summary now use debounced /api/vram-estimate (single backend source) ([c25d42a](https://github.com/nmorgowicz-org/llama-monitor/commit/c25d42abce15f3aa23d6b4ccd7c8ad4a80f68561))
+* **system:** improved CPU core topology and cluster naming ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **system:** macOS memory-pressure telemetry and purge support ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **system:** new top-processes and purge endpoints ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **ui:** deepened card gradients and refined surface design ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **ui:** in-app confirm/prompt dialogs across chat, sessions, DB admin, LHM, presets ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **ui:** memory-pressure card and nav chip with hovercard ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **ui:** mlock warnings in preset editor and spawn wizard when VRAM tight ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **ui:** model library toolbar and VRAM display improvements ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **ui:** new global tooltip system replacing native tooltips ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **update:** self-update restart uses config ports instead of hardcoded 7778/7779 ([c25d42a](https://github.com/nmorgowicz-org/llama-monitor/commit/c25d42abce15f3aa23d6b4ccd7c8ad4a80f68561))
+* **vram:** include n_embd and GGUF embedding_length in VRAM estimator ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **vram:** new CUDA compute buffer for discrete GPUs; Metal exclusion ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **vram:** remove client-side VRAM formula; all bars use /api/vram-estimate with pre-download GGUF header range-fetch from HF ([c25d42a](https://github.com/nmorgowicz-org/llama-monitor/commit/c25d42abce15f3aa23d6b4ccd7c8ad4a80f68561))
+* **vram:** replace flat Metal overhead with M5 Max-calibrated model (per-layer base + ~6.5% KV scaling) ([c25d42a](https://github.com/nmorgowicz-org/llama-monitor/commit/c25d42abce15f3aa23d6b4ccd7c8ad4a80f68561))
+* **vram:** unify VRAM estimation to backend; new discrete-GPU overhead model calibrated on RTX 5090; GGUF-driven arch as single source of truth ([c25d42a](https://github.com/nmorgowicz-org/llama-monitor/commit/c25d42abce15f3aa23d6b4ccd7c8ad4a80f68561))
+
+
+### Bug Fixes
+
+* **api:** /api/vram/auto-size and /api/models/gguf-meta prefer GGUF-derived arch when model_path exists ([c25d42a](https://github.com/nmorgowicz-org/llama-monitor/commit/c25d42abce15f3aa23d6b4ccd7c8ad4a80f68561))
+* **binary:** harden Unix/macOS restart launcher with crash-loop guard, port-check, and spawn logging ([c25d42a](https://github.com/nmorgowicz-org/llama-monitor/commit/c25d42abce15f3aa23d6b4ccd7c8ad4a80f68561))
+* **db:** restrict PRAGMA allowlist to block dangerous queries ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **system:** correct s-core handling and cluster labels in system metrics ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **tray:** allow web fonts in compact popover CSP ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **tray:** theme macOS popover with shared dark/light + palette and fix metric bar rendering ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **ui:** reduce visual noise in sparklines and card hover states ([bbb83ca](https://github.com/nmorgowicz-org/llama-monitor/commit/bbb83ca6bc523dc11c93ffccffebb0d6871ad2f7))
+* **vram:** correct Qwen3 Coder Next DeltaNet recurrent-state size from ~1.3 GB to ~38 MB; expose hybrid-attention and sliding-window fields from GGUF ([c25d42a](https://github.com/nmorgowicz-org/llama-monitor/commit/c25d42abce15f3aa23d6b4ccd7c8ad4a80f68561))
+* **vram:** use discrete overhead model in auto-size MoE weight fit and quant advisor "fits" check for CUDA/ROCm ([c25d42a](https://github.com/nmorgowicz-org/llama-monitor/commit/c25d42abce15f3aa23d6b4ccd7c8ad4a80f68561))
+
 ## [1.1.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.0.1...v1.1.0) (2026-06-19)
 
 
