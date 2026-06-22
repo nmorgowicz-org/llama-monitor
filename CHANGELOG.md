@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.3.0...v1.3.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* address CodeQL security findings ([#262](https://github.com/nmorgowicz-org/llama-monitor/issues/262)) ([51565fa](https://github.com/nmorgowicz-org/llama-monitor/commit/51565fa375b7d942ac8d6985a043c0e421b5fb58))
+
 ## [1.3.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.2.0...v1.3.0) (2026-06-22)
 
 
