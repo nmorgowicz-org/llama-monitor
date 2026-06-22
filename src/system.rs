@@ -23,6 +23,10 @@ pub struct SystemMetrics {
     #[serde(default)]
     pub memory_pressure_level: String,
     #[serde(default)]
+    pub memory_pressure_source: String,
+    #[serde(default)]
+    pub memory_pressure_score: f64,
+    #[serde(default)]
     pub memory_free_gb: f64,
     #[serde(default)]
     pub memory_compressor_gb: f64,
@@ -50,10 +54,26 @@ pub struct SystemMetrics {
     /// Inactive memory in GB (macOS only). Candidate pages for compression or eviction.
     #[serde(default)]
     pub memory_inactive_gb: f64,
+    /// Cross-platform estimate of memory the OS can reclaim without killing a process.
+    #[serde(default)]
+    pub memory_reclaimable_gb: f64,
+    /// Swap/pagefile currently in use, where the platform exposes it.
+    #[serde(default)]
+    pub swap_used_gb: f64,
     #[serde(default)]
     pub swapins: u64,
     #[serde(default)]
     pub swapouts: u64,
+    #[serde(default)]
+    pub swapins_delta: u64,
+    #[serde(default)]
+    pub swapouts_delta: u64,
+    #[serde(default)]
+    pub memory_psi_some_avg10: f64,
+    #[serde(default)]
+    pub memory_psi_full_avg10: f64,
+    #[serde(default)]
+    pub memory_pressure_advice: String,
     #[serde(default)]
     pub motherboard: String,
     /// Performance-core count (Apple Silicon only; 0 = unknown/not applicable).
@@ -104,6 +124,8 @@ impl Default for SystemMetrics {
             ram_used_gb: 0.0,
             ram_available_gb: 0.0,
             memory_pressure_level: String::new(),
+            memory_pressure_source: String::new(),
+            memory_pressure_score: 0.0,
             memory_free_gb: 0.0,
             memory_compressor_gb: 0.0,
             memory_compressed_gb: 0.0,
@@ -113,8 +135,15 @@ impl Default for SystemMetrics {
             memory_wired_gb: 0.0,
             memory_purgeable_gb: 0.0,
             memory_inactive_gb: 0.0,
+            memory_reclaimable_gb: 0.0,
+            swap_used_gb: 0.0,
             swapins: 0,
             swapouts: 0,
+            swapins_delta: 0,
+            swapouts_delta: 0,
+            memory_psi_some_avg10: 0.0,
+            memory_psi_full_avg10: 0.0,
+            memory_pressure_advice: String::new(),
             motherboard: String::new(),
             p_cores: 0,
             e_cores: 0,
@@ -241,7 +270,7 @@ pub fn get_system_metrics() -> SystemMetrics {
     };
 
     let (ram_total_gb, ram_used_gb, ram_available_gb) = get_ram_info(&sys);
-    let memory_pressure = get_memory_pressure(ram_total_gb);
+    let memory_pressure = get_memory_pressure(ram_total_gb, ram_available_gb);
     let motherboard = get_motherboard();
     let (p_cores, s_cores, e_cores, p_cluster_name, secondary_cluster_name) = get_core_counts();
 
@@ -255,14 +284,23 @@ pub fn get_system_metrics() -> SystemMetrics {
         ram_used_gb,
         ram_available_gb,
         memory_pressure_level: memory_pressure.level,
+        memory_pressure_source: memory_pressure.source,
+        memory_pressure_score: memory_pressure.score,
         memory_free_gb: memory_pressure.free_gb,
         memory_compressor_gb: memory_pressure.compressor_gb,
         memory_compressed_gb: memory_pressure.compressed_gb,
         memory_wired_gb: memory_pressure.wired_gb,
         memory_purgeable_gb: memory_pressure.purgeable_gb,
         memory_inactive_gb: memory_pressure.inactive_gb,
+        memory_reclaimable_gb: memory_pressure.reclaimable_gb,
+        swap_used_gb: memory_pressure.swap_used_gb,
         swapins: memory_pressure.swapins,
         swapouts: memory_pressure.swapouts,
+        swapins_delta: memory_pressure.swapins_delta,
+        swapouts_delta: memory_pressure.swapouts_delta,
+        memory_psi_some_avg10: memory_pressure.psi_some_avg10,
+        memory_psi_full_avg10: memory_pressure.psi_full_avg10,
+        memory_pressure_advice: memory_pressure.advice,
         motherboard,
         p_cores,
         s_cores,
@@ -631,18 +669,27 @@ fn get_ram_info(sys: &System) -> (f64, f64, f64) {
 #[derive(Default)]
 struct MemoryPressure {
     level: String,
+    source: String,
+    score: f64,
     free_gb: f64,
     compressor_gb: f64,
     compressed_gb: f64,
     wired_gb: f64,
     purgeable_gb: f64,
     inactive_gb: f64,
+    reclaimable_gb: f64,
+    swap_used_gb: f64,
     swapins: u64,
     swapouts: u64,
+    swapins_delta: u64,
+    swapouts_delta: u64,
+    psi_some_avg10: f64,
+    psi_full_avg10: f64,
+    advice: String,
 }
 
 #[cfg(target_os = "macos")]
-fn get_memory_pressure(total_ram_gb: f64) -> MemoryPressure {
+fn get_memory_pressure(total_ram_gb: f64, _available_ram_gb: f64) -> MemoryPressure {
     let output = std::process::Command::new("vm_stat").output();
     let Ok(output) = output else {
         return MemoryPressure::default();
@@ -651,13 +698,12 @@ fn get_memory_pressure(total_ram_gb: f64) -> MemoryPressure {
     parse_macos_vm_stat(&text, total_ram_gb)
 }
 
-#[cfg(not(target_os = "macos"))]
-fn get_memory_pressure(_total_ram_gb: f64) -> MemoryPressure {
-    MemoryPressure::default()
-}
-
 #[cfg(target_os = "macos")]
 fn parse_macos_vm_stat(text: &str, total_ram_gb: f64) -> MemoryPressure {
+    use std::sync::{Mutex, OnceLock};
+
+    static LAST_SWAP: OnceLock<Mutex<(u64, u64)>> = OnceLock::new();
+
     let mut page_size = 16_384_u64;
     let mut free_pages = 0_u64;
     let mut wired_pages = 0_u64;
@@ -707,12 +753,33 @@ fn parse_macos_vm_stat(text: &str, total_ram_gb: f64) -> MemoryPressure {
     let compressed_gb = compressed_pages as f64 * page_gb;
     let purgeable_gb = purgeable_pages as f64 * page_gb;
     let inactive_gb = inactive_pages as f64 * page_gb;
+    let reclaimable_gb = purgeable_gb + inactive_gb;
     let compressor_ratio = if total_ram_gb > 0.0 {
         compressor_gb / total_ram_gb
     } else {
         0.0
     };
-    let level = if free_gb < 0.5 || compressor_ratio >= 0.30 {
+    let pressure_score = if total_ram_gb > 0.0 {
+        let free_pressure = (1.0 - (free_gb / total_ram_gb)).clamp(0.0, 1.0) * 45.0;
+        let compressor_pressure = (compressor_ratio / 0.30).clamp(0.0, 1.0) * 45.0;
+        let swap_pressure = if swapouts > 0 { 10.0 } else { 0.0 };
+        (free_pressure + compressor_pressure + swap_pressure).min(100.0)
+    } else {
+        0.0
+    };
+    let (swapins_delta, swapouts_delta) = {
+        let mut last = LAST_SWAP
+            .get_or_init(|| Mutex::new((swapins, swapouts)))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let delta = (
+            swapins.saturating_sub(last.0),
+            swapouts.saturating_sub(last.1),
+        );
+        *last = (swapins, swapouts);
+        delta
+    };
+    let level = if free_gb < 0.5 || compressor_ratio >= 0.30 || swapouts_delta > 0 {
         "critical"
     } else if free_gb < 1.5 || compressor_ratio >= 0.18 {
         "warning"
@@ -720,18 +787,225 @@ fn parse_macos_vm_stat(text: &str, total_ram_gb: f64) -> MemoryPressure {
         "ok"
     }
     .to_string();
+    let advice = if wired_gb > total_ram_gb * 0.55 {
+        "Wired memory is high; prefer mmap-enabled presets and disable mlock.".to_string()
+    } else if reclaimable_gb > 1.0 && free_gb < 1.5 {
+        "Reclaimable cache is available; Free Memory can help if sudo is already authorized."
+            .to_string()
+    } else if compressor_ratio >= 0.18 || swapouts_delta > 0 {
+        "Reduce context, batch, or parallel slots; macOS is compressing or swapping memory."
+            .to_string()
+    } else {
+        "Memory pressure is normal.".to_string()
+    };
 
     MemoryPressure {
         level,
+        source: "vm_stat".to_string(),
+        score: pressure_score,
         free_gb,
         wired_gb,
         compressor_gb,
         compressed_gb,
         purgeable_gb,
         inactive_gb,
+        reclaimable_gb,
+        swap_used_gb: 0.0,
         swapins,
         swapouts,
+        swapins_delta,
+        swapouts_delta,
+        psi_some_avg10: 0.0,
+        psi_full_avg10: 0.0,
+        advice,
     }
+}
+
+#[cfg(target_os = "linux")]
+fn get_memory_pressure(total_ram_gb: f64, available_ram_gb: f64) -> MemoryPressure {
+    use std::fs;
+
+    fn kb_to_gb(kb: u64) -> f64 {
+        kb as f64 / 1024.0 / 1024.0
+    }
+
+    let mut mem_free_kb = 0_u64;
+    let mut cached_kb = 0_u64;
+    let mut sreclaimable_kb = 0_u64;
+    let mut mlocked_kb = 0_u64;
+    let mut unevictable_kb = 0_u64;
+    let mut swap_total_kb = 0_u64;
+    let mut swap_free_kb = 0_u64;
+
+    if let Ok(meminfo) = fs::read_to_string("/proc/meminfo") {
+        for line in meminfo.lines() {
+            let mut parts = line.split_whitespace();
+            let key = parts.next().unwrap_or("").trim_end_matches(':');
+            let value = parts
+                .next()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(0);
+            match key {
+                "MemFree" => mem_free_kb = value,
+                "Cached" => cached_kb = value,
+                "SReclaimable" => sreclaimable_kb = value,
+                "Mlocked" => mlocked_kb = value,
+                "Unevictable" => unevictable_kb = value,
+                "SwapTotal" => swap_total_kb = value,
+                "SwapFree" => swap_free_kb = value,
+                _ => {}
+            }
+        }
+    }
+
+    let (psi_some_avg10, psi_full_avg10) = fs::read_to_string("/proc/pressure/memory")
+        .ok()
+        .map(|psi| parse_linux_psi(&psi))
+        .unwrap_or((0.0, 0.0));
+    let available_ratio = if total_ram_gb > 0.0 {
+        available_ram_gb / total_ram_gb
+    } else {
+        1.0
+    };
+    let swap_used_gb = kb_to_gb(swap_total_kb.saturating_sub(swap_free_kb));
+    let pressure_score = ((1.0 - available_ratio).clamp(0.0, 1.0) * 55.0
+        + (psi_some_avg10 / 20.0).clamp(0.0, 1.0) * 30.0
+        + (psi_full_avg10 / 5.0).clamp(0.0, 1.0) * 15.0)
+        .min(100.0);
+    let level = if psi_full_avg10 >= 1.0
+        || psi_some_avg10 >= 20.0
+        || (available_ratio < 0.05 && swap_used_gb > 0.0)
+    {
+        "critical"
+    } else if psi_some_avg10 >= 5.0 || available_ratio < 0.10 {
+        "warning"
+    } else {
+        "ok"
+    }
+    .to_string();
+    let reclaimable_gb = kb_to_gb(cached_kb + sreclaimable_kb);
+    let pinned_gb = kb_to_gb(mlocked_kb + unevictable_kb);
+    let advice = if psi_full_avg10 >= 1.0 || psi_some_avg10 >= 5.0 {
+        "Linux PSI reports memory stalls; reduce context, batch, or parallel slots.".to_string()
+    } else if available_ratio < 0.10 {
+        "Available memory is low; lower model footprint or stop other large processes.".to_string()
+    } else {
+        "Memory pressure is normal.".to_string()
+    };
+
+    MemoryPressure {
+        level,
+        source: "linux_psi".to_string(),
+        score: pressure_score,
+        free_gb: kb_to_gb(mem_free_kb),
+        wired_gb: pinned_gb,
+        reclaimable_gb,
+        swap_used_gb,
+        psi_some_avg10,
+        psi_full_avg10,
+        advice,
+        ..Default::default()
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn parse_linux_psi(text: &str) -> (f64, f64) {
+    fn avg10(line: &str) -> f64 {
+        line.split_whitespace()
+            .find_map(|part| part.strip_prefix("avg10="))
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(0.0)
+    }
+
+    let mut some = 0.0;
+    let mut full = 0.0;
+    for line in text.lines() {
+        if line.starts_with("some ") {
+            some = avg10(line);
+        } else if line.starts_with("full ") {
+            full = avg10(line);
+        }
+    }
+    (some, full)
+}
+
+#[cfg(target_os = "windows")]
+fn get_memory_pressure(total_ram_gb: f64, available_ram_gb: f64) -> MemoryPressure {
+    use std::collections::HashMap;
+    use wmi::{Variant, WMIConnection};
+
+    fn variant_to_u64(value: &Variant) -> Option<u64> {
+        match value {
+            Variant::UI4(v) => Some(*v as u64),
+            Variant::I4(v) => (*v).try_into().ok(),
+            Variant::UI8(v) => Some(*v),
+            Variant::I8(v) => (*v).try_into().ok(),
+            Variant::String(v) => v.parse().ok(),
+            _ => None,
+        }
+    }
+
+    let mut free_phys_gb = available_ram_gb;
+    let mut swap_used_gb = 0.0;
+    if let Ok(wmi) = WMIConnection::new()
+        && let Ok(rows) = wmi.raw_query::<HashMap<String, Variant>>(
+            "SELECT FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory FROM Win32_OperatingSystem",
+        )
+        && let Some(row) = rows.first()
+    {
+        if let Some(kb) = row.get("FreePhysicalMemory").and_then(variant_to_u64) {
+            free_phys_gb = kb as f64 / 1024.0 / 1024.0;
+        }
+        let total_virtual = row
+            .get("TotalVirtualMemorySize")
+            .and_then(variant_to_u64)
+            .unwrap_or(0);
+        let free_virtual = row
+            .get("FreeVirtualMemory")
+            .and_then(variant_to_u64)
+            .unwrap_or(0);
+        swap_used_gb = total_virtual.saturating_sub(free_virtual) as f64 / 1024.0 / 1024.0;
+    }
+
+    let available_ratio = if total_ram_gb > 0.0 {
+        free_phys_gb / total_ram_gb
+    } else {
+        1.0
+    };
+    let pressure_score = ((1.0 - available_ratio).clamp(0.0, 1.0) * 100.0).min(100.0);
+    let level = if available_ratio < 0.05 {
+        "critical"
+    } else if available_ratio < 0.10 || pressure_score >= 90.0 {
+        "warning"
+    } else {
+        "ok"
+    }
+    .to_string();
+    let advice = if level == "critical" || level == "warning" {
+        "Windows reports low available memory; reduce context, batch, or stop large processes."
+            .to_string()
+    } else {
+        "Memory pressure is normal.".to_string()
+    };
+
+    MemoryPressure {
+        level,
+        source: "windows_wmi".to_string(),
+        score: pressure_score,
+        free_gb: free_phys_gb,
+        swap_used_gb,
+        advice,
+        ..Default::default()
+    }
+}
+
+#[cfg(all(
+    not(target_os = "macos"),
+    not(target_os = "linux"),
+    not(target_os = "windows")
+))]
+fn get_memory_pressure(_total_ram_gb: f64, _available_ram_gb: f64) -> MemoryPressure {
+    MemoryPressure::default()
 }
 
 #[cfg(target_os = "windows")]

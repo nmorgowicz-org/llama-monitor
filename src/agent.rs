@@ -3834,6 +3834,9 @@ Start-Sleep -Seconds 2\""
     }
 
     pub async fn self_update_binary(web_port: u16, agent_port: u16) -> Result<SelfUpdateResult> {
+        #[cfg(not(unix))]
+        let _ = (web_port, agent_port);
+
         let os = std::env::consts::OS;
         let arch = std::env::consts::ARCH;
 
@@ -3849,7 +3852,9 @@ Start-Sleep -Seconds 2\""
         }
 
         // Unix/macOS: ports used for restart-launcher wait (passed from AppConfig).
+        #[cfg(unix)]
         let unix_web_port = web_port;
+        #[cfg(unix)]
         let unix_agent_port = agent_port;
 
         let asset = release

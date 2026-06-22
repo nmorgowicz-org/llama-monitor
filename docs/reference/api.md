@@ -1837,27 +1837,37 @@ Response:
 - If not on macOS, returns:
   `{ "ok": false, "error": "Metal GPU limit tuning is only available on macOS." }`
 
-### Memory-pressure telemetry (macOS)
+### Memory-pressure telemetry
 
 Branch-specific addition.
 
-On macOS, `SystemMetrics` (reported via WebSocket telemetry and used internally for monitoring) now includes additional memory-pressure fields derived from `vm_stat`:
+`SystemMetrics` (reported via WebSocket telemetry and used internally for monitoring) includes cross-platform memory-pressure fields. macOS uses `vm_stat`, Linux uses `/proc/pressure/memory` plus `/proc/meminfo`, and Windows uses WMI operating-system memory counters.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `ram_available_gb` | float | Available RAM in GB |
 | `memory_pressure_level` | string | `"ok"`, `"warning"`, or `"critical"` |
+| `memory_pressure_source` | string | Platform source such as `"vm_stat"`, `"linux_psi"`, or `"windows_wmi"` |
+| `memory_pressure_score` | float | Normalized pressure score from 0-100 |
 | `memory_free_gb` | float | Free pages in GB |
+| `memory_reclaimable_gb` | float | Estimated reclaimable cache/inactive memory GB |
 | `memory_compressor_gb` | float | Compressor in-use GB |
 | `memory_compressed_gb` | float | Total compressed data GB |
+| `swap_used_gb` | float | Swap/pagefile currently used when available |
 | `swapins` | integer | Cumulative swap-ins |
 | `swapouts` | integer | Cumulative swap-outs |
+| `swapins_delta` | integer | Swap-ins since previous sample when available |
+| `swapouts_delta` | integer | Swap-outs since previous sample when available |
+| `memory_psi_some_avg10` | float | Linux PSI `some avg10` stall percent |
+| `memory_psi_full_avg10` | float | Linux PSI `full avg10` stall percent |
+| `memory_pressure_advice` | string | Short platform-aware action hint |
 
 The UI uses this data for:
 - A Memory Pressure sparkline and metric in the system card.
 - A memory-pressure pill in the top navigation bar (shown when warning/critical).
+- Contextual advice that distinguishes wired/pinned memory from reclaimable cache.
 
-On non-macOS platforms, these fields are present but set to safe defaults.
+Unsupported platforms keep these fields present with safe defaults.
 
 ## Llama.cpp Binary Management
 
@@ -2027,7 +2037,7 @@ All require `api-token` unless noted.
 - Route handlers: `src/web/api/vram.rs` for system info and Metal GPU limit.
 
 - `GET /system/top-processes` — top CPU/memory-consuming processes (api-token).
-- `POST /system/purge` — purge caches/temporary artifacts (api-token).
+- `POST /system/purge` — macOS-only manual cache purge (db-admin-token, request body `{ "confirm": "purge-memory" }`). Uses the native macOS authorization dialog and has a cooldown.
 - `GET /api/system/info` — system/platform information (api-token).
 - `GET /api/system/metal-gpu-limit` — current Metal GPU wired memory limit (macOS only, api-token).
 - `POST /api/system/set-metal-gpu-limit` — adjust Metal GPU wired memory limit.
@@ -2438,8 +2448,10 @@ The WebSocket payload includes the following remote-agent fields:
 
 `remote_agent_health_reachable` is set to true when the `/metrics` HTTP call succeeds and reset to false on disconnect. It is used to detect the firewall-blocked state (agent connected but health unreachable).
 
-On macOS, memory-pressure fields are also emitted when present:
-- `memory_pressure_level`, `memory_free_gb`, `memory_compressor_gb`, `memory_compressed_gb`.
+Platform memory-pressure fields are also emitted when present:
+- `memory_pressure_level`, `memory_pressure_source`, `memory_pressure_score`, `memory_free_gb`,
+  `memory_reclaimable_gb`, `memory_compressor_gb`, `memory_compressed_gb`, `swap_used_gb`,
+  `memory_psi_some_avg10`, `memory_psi_full_avg10`, `memory_pressure_advice`.
 
 See `docs/reference/realtime-communication.md` and `docs/reference/capabilities.md`.
 

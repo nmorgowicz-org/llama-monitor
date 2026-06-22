@@ -1385,8 +1385,8 @@ function renderSystemCard(sys, visible, grade) {
         if (bkComp) bkComp.textContent = sys.memory_compressor_gb > 0
             ? sys.memory_compressor_gb.toFixed(1) + ' GB (' + (sys.memory_compressed_gb || 0).toFixed(1) + ' logical)'
             : '—';
-        if (bkPurg) bkPurg.textContent = purgeableGb > 0
-            ? purgeableGb.toFixed(1) + ' GB'
+        if (bkPurg) bkPurg.textContent = purgeableGb > 0 || sys.memory_reclaimable_gb > 0
+            ? (sys.memory_reclaimable_gb || purgeableGb).toFixed(1) + ' GB'
             : '—';
         if (bkInact) bkInact.textContent = inactiveGb > 0
             ? inactiveGb.toFixed(1) + ' GB'
@@ -1548,7 +1548,16 @@ async function _triggerMemoryPurge(btnId, statusId, labelId) {
     if (statusEl) { statusEl.style.display = ''; statusEl.textContent = 'Waiting for macOS admin dialog…'; statusEl.className = 'mem-pressure-purge-status'; }
 
     try {
-        const res = await fetch('/system/purge', { method: 'POST', headers: window.authHeaders ? window.authHeaders() : {} });
+        const adminToken = await _fetchDbAdminTokenForSystemAction();
+        if (!adminToken) throw new Error('Authentication required.');
+        const res = await fetch('/system/purge', {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${adminToken}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ confirm: 'purge-memory' }),
+        });
         const data = await res.json();
         const msg = data.message || data.error || (data.ok ? 'Done.' : `Request failed (${res.status}).`);
         if (statusEl) {
@@ -1566,6 +1575,14 @@ async function _triggerMemoryPurge(btnId, statusId, labelId) {
         // Auto-hide status after 6 s
         if (statusEl) setTimeout(() => { statusEl.style.display = 'none'; }, 6000);
     }
+}
+
+async function _fetchDbAdminTokenForSystemAction() {
+    const tokenResp = await fetch('/api/db/admin-token', {
+        headers: window.authHeaders ? window.authHeaders() : {},
+    });
+    const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
+    return tokenData.token || null;
 }
 
 // Fetch top memory processes and render them into a container element.

@@ -34,7 +34,7 @@ Response envelope:
 | Field | Type | Description |
 |-------|------|-------------|
 | `inference` | `bool` | True when an inference session is active or when no session exists (optimistic); false when a configured session cannot be reached |
-| `system` | `bool` | CPU/RAM system metrics are available (includes macOS memory-pressure telemetry) |
+| `system` | `bool` | CPU/RAM system metrics are available (includes platform memory-pressure telemetry when supported) |
 | `gpu` | `bool` | GPU metrics are available |
 | `cpu_temperature` | `bool` | CPU temperature sensor is readable |
 | `memory` | `bool` | RAM metrics are available |

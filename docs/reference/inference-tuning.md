@@ -517,7 +517,7 @@ The dashboard includes macOS memory-pressure telemetry (via `vm_stat`):
 If you see memory pressure while running a large model:
 - Reduce context size.
 - Stop active downloads.
-- Disable mlock if enabled so macOS can reclaim model memory instead of compressing/ swapping the entire system.
+- Disable mlock if enabled and keep mmap enabled so macOS can reclaim file-backed model pages instead of compressing/swapping the entire system.
 - Consider MoE over dense for the same "smartness" with far less decode-time pressure.
 
 ### mlock and system responsiveness (macOS)
@@ -526,7 +526,7 @@ The preset editor and spawn wizard warn when mlock is enabled and the VRAM estim
 
 - mlock pins model memory so the OS cannot page it out. On unified-memory Macs, that removes it from the general pool.
 - If the estimated VRAM usage is already close to your available memory, mlock can push macOS into heavy compression and swap, making the desktop feel unresponsive.
-- Rule of thumb: if the VRAM estimator says Tight/Risk, prefer **no mlock** unless you're doing long, memory-intensive runs and know your system has headroom.
+- Rule of thumb: if the VRAM estimator says Tight/Risk, prefer **no mlock** and mmap enabled unless you're doing long, memory-intensive runs and know your system has headroom.
 
 ### Sleep modes
 

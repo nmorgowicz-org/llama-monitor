@@ -249,9 +249,9 @@ function refreshMemoryPressureChip() {
     }
 
     if (hcBody) {
-        const advice = isCritical
+        const advice = sys.memory_pressure_advice || (isCritical
             ? 'Disable mlock in your preset or reduce context to free wired memory. Use "Free Memory" to reclaim inactive pages.'
-            : 'Reduce context, pause downloads, or disable mlock in your preset to relieve pressure.';
+            : 'Reduce context, pause downloads, or disable mlock in your preset to relieve pressure.');
         hcBody.textContent = advice;
     }
 
@@ -267,7 +267,16 @@ function refreshMemoryPressureChip() {
             navPurgeBtn.textContent = 'Requesting…';
             if (statusEl) { statusEl.style.display = ''; statusEl.textContent = 'Waiting for macOS admin dialog…'; }
             try {
-                const res = await fetch('/system/purge', { method: 'POST', headers: window.authHeaders ? window.authHeaders() : {} });
+                const adminToken = await fetchDbAdminTokenForSystemAction();
+                if (!adminToken) throw new Error('Authentication required.');
+                const res = await fetch('/system/purge', {
+                    method: 'POST',
+                    headers: {
+                        Authorization: `Bearer ${adminToken}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ confirm: 'purge-memory' }),
+                });
                 const data = await res.json();
                 if (statusEl) {
                     statusEl.textContent = data.message || (data.ok ? 'Done.' : 'Failed.');
@@ -282,6 +291,14 @@ function refreshMemoryPressureChip() {
             }
         });
     }
+}
+
+async function fetchDbAdminTokenForSystemAction() {
+    const tokenResp = await fetch('/api/db/admin-token', {
+        headers: window.authHeaders ? window.authHeaders() : {},
+    });
+    const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
+    return tokenData.token || null;
 }
 
 export function refreshTopCockpit() {
