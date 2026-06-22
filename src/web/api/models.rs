@@ -9,7 +9,7 @@ use crate::state::AppState;
 use super::common::{
     ApiCtx, ApiRoute, check_api_token, check_db_admin_token, unauthorized_api_token,
 };
-use super::vram::gguf_arch_to_heuristic_name;
+use crate::llama::vram_estimator::gguf_arch_to_heuristic_name;
 
 /// Returns the user-configured models directory, or None if not set.
 pub(crate) fn get_effective_models_dir(state: &AppState) -> Option<PathBuf> {
@@ -379,21 +379,16 @@ fn api_models_gguf_meta(
                     }
                 };
 
-                // Resolve n_attn_layers from heuristic (not stored in GGUF format).
-                // Critical for hybrid DeltaNet models (Qwen3.5, Qwen3.6) where
-                // only a subset of layers use the traditional KV cache.
-                let n_attn_layers = meta.architecture.as_ref().and_then(|arch_str| {
+                // Number of full-attention (KV-bearing) layers. Prefer the real GGUF
+                // value (block_count / full_attention_interval); fall back to the name
+                // heuristic only for older GGUFs that don't record the interval.
+                let n_attn_layers = meta.n_attn_layers().or_else(|| {
+                    let arch_str = meta.architecture.as_ref()?;
                     let heuristic_name = gguf_arch_to_heuristic_name(arch_str);
-                    // Qwen3.5 vs Qwen3.6 disambiguation via block_count
                     let resolved = if arch_str.eq_ignore_ascii_case("qwen35") {
-                        if let Some(bc) = meta.block_count {
-                            if bc >= 75 {
-                                "qwen3_5".to_string()
-                            } else {
-                                heuristic_name
-                            }
-                        } else {
-                            heuristic_name
+                        match meta.block_count {
+                            Some(bc) if bc >= 75 => "qwen3_5".to_string(),
+                            _ => heuristic_name,
                         }
                     } else {
                         heuristic_name
@@ -402,11 +397,7 @@ fn api_models_gguf_meta(
                     let arch = crate::llama::vram_estimator::ModelArch::from_name_and_params(
                         &resolved, param_b,
                     );
-                    if arch.n_attn_layers < arch.n_layers {
-                        Some(arch.n_attn_layers)
-                    } else {
-                        None
-                    }
+                    (arch.n_attn_layers < arch.n_layers).then_some(arch.n_attn_layers)
                 });
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
@@ -418,6 +409,7 @@ fn api_models_gguf_meta(
                         "head_count": meta.head_count,
                         "head_count_kv": meta.head_count_kv,
                         "key_length": meta.key_length,
+                        "key_length_swa": meta.key_length_swa,
                         "context_length": meta.context_length,
                         "embedding_length": meta.embedding_length,
                         "feed_forward_length": meta.feed_forward_length,
@@ -425,6 +417,12 @@ fn api_models_gguf_meta(
                         "expert_used_count": meta.expert_used_count,
                         "mtp_depth": meta.mtp_depth,
                         "n_attn_layers": n_attn_layers,
+                        "full_attention_interval": meta.full_attention_interval,
+                        "linear_attn_state_bytes": meta.linear_attn_state_bytes(),
+                        "sliding_window": meta.sliding_window,
+                        "n_global_attn_layers": meta.n_global_attn_layers,
+                        "global_kv_heads": meta.global_kv_heads,
+                        "local_kv_heads": meta.local_kv_heads,
                     }),
                 )))
             }

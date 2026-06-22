@@ -266,8 +266,8 @@ Some endpoints enforce short cooldowns to reduce accidental or abusive use.
   - Requires `db-admin-token` and `{ "confirm": "kill" }`.
   - 30-second cooldown between calls.
 - `POST /api/self-update`
-  - Requires `db-admin-token` and `{ "confirm": "update" }`.
-  - 5-minute cooldown between calls.
+  - Requires db-admin-token and `{ "confirm": "update" }`. 5-minute cooldown between calls.
+  - Update safety: self-update downloads the release asset for the running platform in-place. No cryptographic signature or integrity check is currently enforced beyond token-based auth.
 - `POST /api/sessions/spawn`
   - Requires `db-admin-token`.
   - 15-second cooldown between spawns.

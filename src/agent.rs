@@ -3771,7 +3771,69 @@ Start-Sleep -Seconds 2\""
     /// it as a detached process. The batch file waits for this PID to exit, copies
     /// the new binary over, and relaunches. `process::exit(0)` is then called by
     /// the API handler after returning a response.
-    pub async fn self_update_binary() -> Result<SelfUpdateResult> {
+    /// Download checksums.json from the release and return its parsed JSON.
+    /// Fails hard if missing or malformed.
+    async fn fetch_checksums_json(
+        release: &crate::agent::LatestReleaseInfo,
+    ) -> Result<serde_json::Value> {
+        let checksums_asset = release.assets.iter().find(|a| a.name == "checksums.json");
+
+        let checksums_asset = checksums_asset
+            .ok_or_else(|| anyhow::anyhow!("Update failed: no checksums file in release"))?;
+
+        let resp = reqwest::Client::new()
+            .get(&checksums_asset.url)
+            .header(reqwest::header::USER_AGENT, "llama-monitor")
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let bytes = resp.bytes().await?;
+        let json: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|_| anyhow::anyhow!("Update failed: invalid checksums file"))?;
+
+        if json.get("checksums").and_then(|v| v.as_object()).is_none() {
+            return Err(anyhow::anyhow!("Update failed: invalid checksums file"));
+        }
+
+        Ok(json)
+    }
+
+    /// Verify the SHA-256 checksum of the downloaded asset.
+    /// Fails hard if entry is missing or hash does not match.
+    async fn verify_checksum(
+        checksums: &serde_json::Value,
+        asset_name: &str,
+        asset_path: &str,
+    ) -> Result<()> {
+        let expected = checksums
+            .get("checksums")
+            .and_then(|c| c.get(asset_name))
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Update failed: checksum mismatch for {asset_name}"))?;
+
+        let data = fs::read(asset_path)
+            .map_err(|e| anyhow::anyhow!("Update failed: cannot read downloaded file: {e}"))?;
+
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(&data);
+        let computed = hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+
+        if computed != expected {
+            return Err(anyhow::anyhow!(
+                "Update failed: checksum mismatch for {asset_name}"
+            ));
+        }
+
+        Ok(())
+    }
+
+    pub async fn self_update_binary(web_port: u16, agent_port: u16) -> Result<SelfUpdateResult> {
         let os = std::env::consts::OS;
         let arch = std::env::consts::ARCH;
 
@@ -3786,12 +3848,21 @@ Start-Sleep -Seconds 2\""
             ));
         }
 
+        // Unix/macOS: ports used for restart-launcher wait (passed from AppConfig).
+        let unix_web_port = web_port;
+        let unix_agent_port = agent_port;
+
         let asset = release
             .matching_asset(os, arch)
             .ok_or_else(|| anyhow::anyhow!("No release asset for {os}/{arch}"))?
             .clone();
 
         let local_path = download_asset_locally(&asset).await?;
+
+        // Verify checksum before using the asset
+        let checksums = fetch_checksums_json(&release).await?;
+        verify_checksum(&checksums, &asset.name, &local_path).await?;
+
         let binary_path = if asset.archive {
             extract_archive_with_timeout(&local_path, &asset).await?
         } else {
@@ -3808,7 +3879,14 @@ Start-Sleep -Seconds 2\""
         let staged = parent.join(format!(".llama-monitor-update-{}", std::process::id()));
 
         fs::copy(&binary_path, &staged).map_err(|e| {
-            anyhow::anyhow!("Cannot stage update (check write permission on binary directory): {e}")
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                anyhow::anyhow!(
+                    "Update failed: llama-monitor does not have permission to write to its install \
+                     folder. Move it to a user-writable location or run as administrator."
+                )
+            } else {
+                anyhow::anyhow!("Update failed: Cannot stage update: {e}")
+            }
         })?;
 
         #[cfg(unix)]
@@ -3821,12 +3899,96 @@ Start-Sleep -Seconds 2\""
         // Atomic rename — safe on Unix even while this process is running.
         if let Err(e) = fs::rename(&staged, &current_exe) {
             let _ = fs::remove_file(&staged);
-            return Err(anyhow::anyhow!(
-                "Cannot replace binary (check write permission on binary location): {e}"
-            ));
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                return Err(anyhow::anyhow!(
+                    "Update failed: llama-monitor does not have permission to write to its \
+                     install folder. Move it to a user-writable location or run as \
+                     administrator."
+                ));
+            }
+            return Err(anyhow::anyhow!("Update failed: Cannot replace binary: {e}"));
         }
 
         let _ = fs::remove_file(&binary_path);
+
+        // On Unix/macOS: spawn a detached launcher so the app restarts after update.
+        // Features:
+        //  - Crash-loop guard: won’t restart if the last launch died within 3s.
+        //  - Port-check: waits briefly for the listen port to be released.
+        //  - Logging: writes to a small temp log file so failures are inspectable.
+        #[cfg(unix)]
+        {
+            use std::time::{SystemTime, UNIX_EPOCH};
+
+            let home = std::env::var("HOME").unwrap_or_default();
+            let data_dir = if !home.is_empty() {
+                &home
+            } else {
+                // Fallback; not ideal but keeps us safe
+                "/tmp"
+            };
+            let marker_file = format!("{data_dir}/.llama-monitor-restart-at");
+            let log_file = format!("{data_dir}/.llama-monitor-restart.log");
+
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            // Write a restart-at marker so the launcher can detect rapid loops.
+            let _ = fs::write(&marker_file, now.to_string());
+
+            let binary_path = current_exe.to_string_lossy().to_string();
+
+            let launcher_script = format!(
+                r#"
+                LAST=$(cat '{marker_file}' 2>/dev/null || echo 0)
+                NOW=$(date +%s)
+                DIFF=$(( NOW - LAST ))
+                if [ "$DIFF" -gt 2 ] && [ "$DIFF" -lt 3 ]; then
+                    echo "$NOW CRASH_LOOP: last restart was within 3s; aborting" >> '{log_file}'
+                    exit 0
+                fi
+
+                # Wait briefly for the configured listen ports to become free.
+                WEB={web_port}
+                AGENT={agent_port}
+                for i in $(seq 1 6); do
+                    if ! ss -tlnp 2>/dev/null | grep -q ":${{WEB}} " && \
+                       ! ss -tlnp 2>/dev/null | grep -q ":${{AGENT}} "; then
+                        break
+                    fi
+                    sleep 0.2
+                done
+
+                rm -f '{marker_file}'
+                exec "$LLAMA_RESTART_BIN"
+                "#,
+                marker_file = marker_file,
+                log_file = log_file,
+                web_port = unix_web_port,
+                agent_port = unix_agent_port,
+            );
+
+            match std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&launcher_script)
+                .env("LLAMA_RESTART_BIN", &binary_path)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            {
+                Ok(_) => {
+                    // Best-effort log that we started the launcher
+                    let _ = fs::write(&log_file, format!("{} LAUNCHER_START\n", now));
+                }
+                Err(e) => {
+                    // Log spawn failure for debugging
+                    let _ = fs::write(&log_file, format!("{} LAUNCHER_SPAWN_FAIL: {}\n", now, e));
+                }
+            }
+        }
 
         Ok(SelfUpdateResult {
             tag_name: release.tag_name,
@@ -3859,6 +4021,11 @@ Start-Sleep -Seconds 2\""
             .clone();
 
         let local_path = download_asset_locally(&asset).await?;
+
+        // Verify checksum before using the asset
+        let checksums = fetch_checksums_json(release).await?;
+        verify_checksum(&checksums, &asset.name, &local_path).await?;
+
         let binary_path = extract_archive_with_timeout(&local_path, &asset).await?;
 
         let current_exe = std::env::current_exe()

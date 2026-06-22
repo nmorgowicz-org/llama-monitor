@@ -72,10 +72,10 @@ fn api_self_update(
                     ));
                 }
 
-                match crate::agent::self_update_binary().await {
+                match crate::agent::self_update_binary(cfg.port, cfg.agent_port).await {
                     Ok(result) => {
                         tokio::spawn(async {
-                            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                             std::process::exit(0);
                         });
                         Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(

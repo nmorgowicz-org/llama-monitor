@@ -96,6 +96,8 @@ pub const FEATURES_TUNE_PANEL_JS: &str = include_str!("../../static/js/features/
 pub const FEATURES_TUNING_CARDS_JS: &str = include_str!("../../static/js/features/tuning-cards.js");
 pub const FEATURES_UPDATES_JS: &str = include_str!("../../static/js/features/updates.js");
 pub const FEATURES_USER_MENU_JS: &str = include_str!("../../static/js/features/user-menu.js");
+pub const FEATURES_VRAM_ESTIMATE_JS: &str =
+    include_str!("../../static/js/features/vram-estimate.js");
 pub const FEATURES_WORKSPACE_COMMAND_PALETTE_JS: &str =
     include_str!("../../static/js/features/workspace-command-palette.js");
 pub const MANIFEST_JSON: &str = include_str!("../../static/manifest.json");

@@ -873,6 +873,23 @@ pub struct ModelMetadata {
     // ── Multi-token prediction ───────────────────────────────────────────────
     /// MTP prediction depth (0 = none).
     pub mtp_depth: Option<u32>,
+    // ── Hybrid linear attention (Qwen3-Next / DeltaNet), from real GGUF data ──
+    /// Full-attention (KV-bearing) layer count = block_count / full_attention_interval.
+    /// `Some` only for hybrid models; overrides the name heuristic when present.
+    pub n_attn_layers: Option<u32>,
+    /// Fixed DeltaNet recurrent-state size in bytes, computed from `ssm.*` fields.
+    pub linear_attn_state_bytes: Option<u64>,
+    // ── Sliding-window / alternating attention (Gemma 3/4), from real GGUF data ──
+    /// Global (full-context) layer count, from `sliding_window_pattern`.
+    pub n_global_attn_layers: Option<u32>,
+    /// KV head count on local (sliding-window) layers (per-layer head_count_kv array).
+    pub local_kv_heads: Option<u32>,
+    /// Per-head K/V dimension on global layers (Gemma4 = 512).
+    pub global_head_dim: Option<u32>,
+    /// Per-head K/V dimension on local (SWA) layers (Gemma4 = 256).
+    pub local_head_dim: Option<u32>,
+    /// Local sliding-window size in tokens (Gemma4 = 1024).
+    pub sliding_window: Option<u32>,
     // ── Multimodal ───────────────────────────────────────────────────────────
     pub mmproj_required: bool,
     // ── Cache marker ─────────────────────────────────────────────────────────
@@ -903,8 +920,8 @@ impl ModelMetadata {
         let heuristic_name = self
             .gguf_arch
             .as_deref()
-            .map(gguf_arch_to_heuristic_name)
-            .unwrap_or(model_name);
+            .map(crate::llama::vram_estimator::gguf_arch_to_heuristic_name)
+            .unwrap_or_else(|| model_name.to_string());
 
         // For Gemma4, the tier (e2b/e4b/12b/26b/31b) is normally chosen from
         // param_b, which can be unreliable. If we know the exact layer count from
@@ -930,7 +947,7 @@ impl ModelMetadata {
             && !heuristic.is_moe()
             && self.gguf_arch.is_some()
         {
-            ModelArch::from_name_and_params(heuristic_name, param_b_for_heuristic)
+            ModelArch::from_name_and_params(&heuristic_name, param_b_for_heuristic)
         } else {
             heuristic
         };
@@ -948,40 +965,51 @@ impl ModelMetadata {
             heuristic.expert_fraction = 0.65;
         }
 
-        // For Gemma4 with sliding window, the GGUF n_kv_heads encodes the local
-        // sliding-window layers' KV heads; the correct global-layer KV heads are
-        // smaller and captured by the heuristic. Using the GGUF value for global
-        // layers will massively inflate the KV cache estimate.
-        let gemma4_sw = self.gguf_arch.as_deref() == Some("gemma4") && heuristic.has_local_attn();
-        let kv_heads = if gemma4_sw {
-            heuristic.n_kv_heads
+        // Sliding-window / alternating attention (Gemma 3/4). When the GGUF carries
+        // the per-layer split (parsed in gguf_meta), `self.n_kv_heads` is already the
+        // *global*-layer KV head count and `self.local_kv_heads` the local one, so we
+        // can trust them directly. Otherwise rely on the family heuristic.
+        let is_local = heuristic.has_local_attn() || self.sliding_window.is_some();
+
+        // KV heads: GGUF global-layer count when known, else heuristic.
+        let kv_heads = self.n_kv_heads.unwrap_or(heuristic.n_kv_heads);
+        let local_kv_heads = self.local_kv_heads.unwrap_or(heuristic.local_kv_heads);
+
+        // Per-head dimensions: for sliding-window models the GGUF reports a wide
+        // global K/V length and a narrow local (SWA) one; map them to the right slots.
+        let head_dim_resolved = if is_local {
+            self.local_head_dim
+                .or(head_dim) // non-split fallback
+                .unwrap_or(heuristic.head_dim)
         } else {
-            self.n_kv_heads.unwrap_or(heuristic.n_kv_heads)
+            head_dim.unwrap_or(heuristic.head_dim)
         };
-        let local_kv_heads = heuristic.local_kv_heads;
+        let global_head_dim_resolved = if is_local {
+            self.global_head_dim.unwrap_or(heuristic.global_head_dim)
+        } else {
+            heuristic.global_head_dim
+        };
 
         ModelArch {
             n_layers: self.n_layers.unwrap_or(heuristic.n_layers),
             n_kv_heads: kv_heads,
-            // For sliding-window models (e.g. Gemma4), GGUF’s key_length is the
-            // global head_dim (512) but local layers use a smaller dim (256).
-            // Trust the heuristic’s local head_dim in that case.
-            head_dim: if heuristic.has_local_attn() {
-                heuristic.head_dim
-            } else {
-                head_dim.unwrap_or(heuristic.head_dim)
-            },
-            n_global_attn_layers: heuristic.n_global_attn_layers,
-            local_attn_window: heuristic.local_attn_window,
+            head_dim: head_dim_resolved,
+            n_global_attn_layers: self
+                .n_global_attn_layers
+                .unwrap_or(heuristic.n_global_attn_layers),
+            local_attn_window: self.sliding_window.unwrap_or(heuristic.local_attn_window),
             local_kv_heads,
-            // Hybrid linear attention: preserve from heuristic; introspection will refine
-            n_attn_layers: heuristic.n_attn_layers,
-            linear_attn_state_bytes: heuristic.linear_attn_state_bytes,
+            // Hybrid linear attention: GGUF (full_attention_interval / ssm.*) is the
+            // ground truth; fall back to the name heuristic only when absent.
+            n_attn_layers: self.n_attn_layers.unwrap_or(heuristic.n_attn_layers),
+            linear_attn_state_bytes: self
+                .linear_attn_state_bytes
+                .unwrap_or(heuristic.linear_attn_state_bytes),
             n_experts: self.n_experts.unwrap_or(heuristic.n_experts),
             n_experts_used: self.n_experts_used.unwrap_or(heuristic.n_experts_used),
             expert_fraction: heuristic.expert_fraction,
             mtp_depth: self.mtp_depth.unwrap_or(heuristic.mtp_depth),
-            global_head_dim: heuristic.global_head_dim,
+            global_head_dim: global_head_dim_resolved,
             mmproj_bytes: 0, // filled in separately when mmproj path is known
             // GGUF embedding_length overrides heuristic when present (exact value)
             n_embd: self.n_embd.unwrap_or(heuristic.n_embd),
@@ -1085,27 +1113,6 @@ pub async fn introspect_model(
     let meta = parse_model_metadata(&output);
     let _ = save_model_cache(model_path, &meta);
     Ok(meta)
-}
-
-/// Map a GGUF `general.architecture` value to a synthetic model name that
-/// `ModelArch::from_name_and_params` can pattern-match against.
-///
-/// This ensures renamed finetunes get the right hybrid/sliding-window heuristic
-/// regardless of what the user calls the file.
-#[allow(dead_code)]
-fn gguf_arch_to_heuristic_name(gguf_arch: &str) -> &str {
-    match gguf_arch {
-        // "qwen35" is llama.cpp's arch tag for Qwen3.5/3.6 hybrid DeltaNet models
-        // (e.g. Qwen3.6-27B GGUFs often report this tag).
-        "qwen3_6" | "qwen3.6" | "qwen35" | "qwen35moe" => "qwen3.6-model",
-        "qwen3_5" | "qwen3.5" => "qwen3.5-model",
-        "qwen3_coder_next" | "qwen3-coder-next" => "qwen3-coder-next",
-        "gemma4" | "gemma-4" => "gemma4-model",
-        "gemma3" | "gemma-3" => "gemma3-model",
-        // For all other architectures, pass through as-is — from_name_and_params
-        // will fall through to standard_heuristic which is correct for llama, mistral, etc.
-        other => other,
-    }
 }
 
 fn parse_model_metadata(output: &str) -> ModelMetadata {

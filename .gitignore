@@ -61,3 +61,7 @@ scripts/*.sh
 !scripts/cfg-audit.sh
 .claude/
 .serena/
+
+# Screenshot test artifacts (for debugging only; promote to docs/screenshots/ when documented)
+docs/screenshots/artifacts/
+!scripts/check-unused-screenshots.sh

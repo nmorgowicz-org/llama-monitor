@@ -49,6 +49,9 @@ let hfState = {
 
 // Cached hardware
 let cachedVram = 0;
+// True when the GPU pool is unified memory (Apple Silicon / Metal) — selects the Metal
+// overhead model in the backend estimator instead of the discrete-GPU one.
+let cachedUnified = false;
 let cachedRamTotal = 0;
 
 // Library preferences
@@ -1750,6 +1753,8 @@ async function fetchGpuVram() {
         for (const g of gpus) {
             const t = g.vram_total_mb || g.total_mb || g.total_memory_mb || g.vram_total || 0;
             totalVram += t * 1024 * 1024;
+            const id = `${g.name || ''} ${g.vendor || ''} ${g.backend || ''}`;
+            if (/apple|metal/i.test(id)) cachedUnified = true;
         }
         if (totalVram > 0) cachedVram = totalVram;
     } catch {
@@ -1793,11 +1798,45 @@ async function updateVramDisplay(file) {
         return;
     }
 
-    // Simple VRAM estimate: weights + KV cache + overhead
-    const kvEstimate = estimateKvBytes(hfState.paramB, 4096); // assume 4k ctx for download preview
-    const overhead = 200 * 1024 * 1024; // 200 MB overhead
+    // Estimate via the backend so the preview uses the SAME math as the spawn wizard /
+    // preset editor. Pre-download, the backend range-fetches the GGUF header from HuggingFace
+    // (hf_repo_id + hf_file_path) to introspect the model's real architecture — no name
+    // guessing, no divergent client-side formula. We assume a modest preview context.
+    const PREVIEW_CTX = 16384;
     const mmprojBytes = hfState.mmprojBytes || 0;
-    const total = modelBytes + kvEstimate + overhead + mmprojBytes;
+    let data;
+    try {
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        const body = {
+            hf_repo_id: hfState.selectedRepoId || '',
+            hf_file_path: file?.path || file?.name || '',
+            model_size_bytes: modelBytes,
+            available_vram_bytes: availVram,
+            n_ctx: PREVIEW_CTX,
+            ctk: 'q8_0',
+            ctv: 'q8_0',
+            ubatch_size: 512,
+            parallel_slots: 1,
+            is_unified_memory: cachedUnified,
+            mmproj_bytes: mmprojBytes,
+        };
+        const resp = await fetch('/api/vram-estimate', { method: 'POST', headers, body: JSON.stringify(body) });
+        if (resp.ok) data = await resp.json();
+    } catch {
+        // network error — fall through to hide
+    }
+    if (!data || !data.ok) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    // Fold MTP + linear-attention state into the displayed "overhead" segment.
+    const weightsBytes = data.weights_bytes || 0;
+    const kvEstimate = data.kv_cache_bytes || 0;
+    const overhead = (data.overhead_bytes || 0) + (data.mtp_bytes || 0) + (data.linear_attn_state_bytes || 0);
+    const total = data.total_bytes || (weightsBytes + kvEstimate + overhead + mmprojBytes);
     const free = availVram - total;
 
     // Show panel
@@ -1806,12 +1845,12 @@ async function updateVramDisplay(file) {
     // Update header
     const labelEl = document.getElementById('mm-vram-panel-label');
     const totalEl = document.getElementById('mm-vram-panel-total');
-    if (labelEl) labelEl.textContent = 'VRAM budget';
+    if (labelEl) labelEl.textContent = `VRAM @ ${PREVIEW_CTX / 1024}K ctx`;
     if (totalEl) totalEl.textContent = formatVramTotal(availVram) + ' total';
 
     // Update bar
     const denom = availVram > 0 ? availVram : total;
-    const weightsPct = modelBytes / denom;
+    const weightsPct = weightsBytes / denom;
     const kvPct = kvEstimate / denom;
     const mmprojPct = mmprojBytes / denom;
     const overheadPct = overhead / denom;
@@ -1842,7 +1881,7 @@ async function updateVramDisplay(file) {
     const freeLabel = document.getElementById('mm-vleg-free-label');
     const freeDot = document.querySelector('#mm-vleg-free .vram-legend-dot-free');
 
-    if (weightsLabel) weightsLabel.textContent = 'Weights ' + formatGB(modelBytes);
+    if (weightsLabel) weightsLabel.textContent = 'Weights ' + formatGB(weightsBytes);
     if (kvLabel) kvLabel.textContent = 'KV ' + formatGB(kvEstimate);
 
     if (mmprojBytes > 0) {
@@ -2081,17 +2120,3 @@ function guessQuantFromName(name) {
     return 'q4_k_m';
 }
 
-function estimateKvBytes(paramB, ctxTokens) {
-    // Rough KV cache estimate: 2 * ctx * (n_layers * n_kv_heads * head_dim * 2 bytes)
-    // Use heuristic arch based on param count
-    let nLayers, nKvHeads, headDim;
-    if (paramB < 2)       { nLayers = 22; nKvHeads = 4; headDim = 64; }
-    else if (paramB < 5)  { nLayers = 28; nKvHeads = 4; headDim = 128; }
-    else if (paramB < 10) { nLayers = 32; nKvHeads = 8; headDim = 128; }
-    else if (paramB < 18) { nLayers = 40; nKvHeads = 8; headDim = 128; }
-    else if (paramB < 35) { nLayers = 40; nKvHeads = 8; headDim = 128; }
-    else if (paramB < 55) { nLayers = 60; nKvHeads = 8; headDim = 128; }
-    else                  { nLayers = 80; nKvHeads = 8; headDim = 128; }
-
-    return 2 * ctxTokens * nLayers * nKvHeads * headDim * 2; // *2 for K+V, *2 for f16
-}

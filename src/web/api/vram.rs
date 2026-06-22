@@ -40,40 +40,71 @@ fn api_vram_estimate_breakdown(
                 // mmproj_bytes: explicit size override (used when path is unavailable).
                 let mmproj_path = body["mmproj_path"].as_str().unwrap_or("").to_string();
                 let mmproj_bytes_override = body["mmproj_bytes"].as_u64();
+                // HuggingFace coordinates for pre-download introspection: when there is no
+                // local file yet, the GGUF KV header is range-fetched so the estimate uses the
+                // model's real architecture instead of name-based guesses.
+                let hf_repo_id = body["hf_repo_id"].as_str().unwrap_or("").to_string();
+                let hf_file_path = body["hf_file_path"].as_str().unwrap_or("").to_string();
+                let model_size_override = body["model_size_bytes"].as_u64();
 
-                if model_path.is_empty() {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": "model_path is required"
-                        }))),
-                    );
-                }
-
-                let model_size_bytes = match std::fs::metadata(&model_path) {
-                    Ok(m) => m.len(),
-                    Err(e) => {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                            Box::new(warp::reply::json(&serde_json::json!({
+                // Resolve (model_size_bytes, arch) from a local file (preferred) or, failing
+                // that, by range-fetching the GGUF header straight from HuggingFace.
+                let (model_size_bytes, mut arch) = if !model_path.is_empty() {
+                    let size = match std::fs::metadata(&model_path) {
+                        Ok(m) => m.len(),
+                        Err(e) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": format!("Cannot stat model file: {e}")
+                                })),
+                            ));
+                        }
+                    };
+                    let arch = match crate::llama::gguf_meta::read_gguf_metadata(
+                        std::path::Path::new(&model_path),
+                    ) {
+                        Ok(meta) => meta
+                            .to_model_metadata()
+                            .to_arch(&model_path, meta.param_b().unwrap_or(0.0)),
+                        Err(_) => crate::llama::vram_estimator::ModelArch::from_name_and_params(
+                            &model_path,
+                            crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
+                        ),
+                    };
+                    (size, arch)
+                } else if !hf_repo_id.is_empty() && !hf_file_path.is_empty() {
+                    // Size must be supplied by the caller (from the HF file listing).
+                    let size = model_size_override.unwrap_or(0);
+                    if size == 0 {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
                                 "ok": false,
-                                "error": format!("Cannot stat model file: {e}")
-                            }))),
-                        );
+                                "error": "model_size_bytes is required when introspecting a HuggingFace model"
+                            })),
+                        ));
                     }
-                };
-
-                let mut arch = match crate::llama::gguf_meta::read_gguf_metadata(
-                    std::path::Path::new(&model_path),
-                ) {
-                    Ok(meta) => {
-                        let mm = meta.to_model_metadata();
-                        let param_b = meta.param_b().unwrap_or(0.0);
-                        mm.to_arch(&model_path, param_b)
-                    }
-                    Err(_) => crate::llama::vram_estimator::ModelArch::from_name_and_params(
-                        &model_path,
-                        (model_size_bytes as f64) / 1e9 / 4.85,
-                    ),
+                    let arch =
+                        match crate::hf::fetch_gguf_header_metadata(&hf_repo_id, &hf_file_path).await
+                        {
+                            Ok(meta) => meta
+                                .to_model_metadata()
+                                .to_arch(&hf_file_path, meta.param_b().unwrap_or(0.0)),
+                            // Range-fetch failed (offline / gated / no range support): fall back
+                            // to the name heuristic so the caller still gets a (rougher) estimate.
+                            Err(_) => crate::llama::vram_estimator::ModelArch::from_name_and_params(
+                                &hf_file_path,
+                                crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
+                            ),
+                        };
+                    (size, arch)
+                } else {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "model_path, or hf_repo_id + hf_file_path, is required"
+                        })),
+                    ));
                 };
 
                 // Override mmproj_bytes from explicit path or body field.
@@ -356,7 +387,14 @@ fn api_vram_auto_size(
                 // Also cap auto-size at the model's training context length
                 let context_cap = gguf_context_length.map(|c| c as u64);
 
-                let arch = build_arch_from_body(&enriched_body, &model_name, param_b);
+                // When the GGUF file is present, build the arch straight from its real
+                // metadata (full_attention_interval, ssm.*, per-layer head_count_kv,
+                // sliding_window, …) — the authoritative source. Only fall back to the
+                // body/name heuristic for the pre-download advisor where no file exists.
+                let arch = match &gguf_read {
+                    Some(meta) => meta.to_model_metadata().to_arch(&model_name, param_b),
+                    None => build_arch_from_body(&enriched_body, &model_name, param_b),
+                };
 
                 // If model_size_bytes is not given, estimate from param_b + quant
                 let quant_hint = body["quant"].as_str().unwrap_or("q4_k_m");
@@ -384,27 +422,7 @@ fn api_vram_auto_size(
         })
 }
 
-/// Map a GGUF architecture string (e.g. "qwen3_6") to a heuristic name for
-/// `from_name_and_params`. This ensures that renamed finetunes (e.g. "Qwopus3.6"
-/// or "Pantheon-27B") get the correct hybrid-DeltaNet / sliding-window heuristic
-/// regardless of filename.
-pub(crate) fn gguf_arch_to_heuristic_name(gguf_arch: &str) -> String {
-    let a = gguf_arch.to_ascii_lowercase();
-    match a.as_str() {
-        "qwen3_6" | "qwen3.6" => "qwen3.6-model".into(),
-        "qwen3_5" | "qwen3.5" => "qwen3.5-model".into(),
-        // "qwen35" is shared by Qwen3.5 and Qwen3.6 in llama.cpp GGUF.
-        // Without block_count we can't distinguish them. Default to qwen3.6
-        // since renamed 27B finetunes (Pantheon, Qwopus) are qwen3.6 derivatives.
-        "qwen35" | "qwen35moe" => "qwen3.6-model".into(),
-        "qwen3_coder_next" | "qwen3-coder-next" => "qwen3-coder-next-model".into(),
-        "gemma4" | "gemma-4" => "gemma4-model".into(),
-        "gemma3" | "gemma-3" => "gemma3-27b".into(),
-        // For all other architectures, pass through — from_name_and_params
-        // falls through to standard_heuristic which is correct for llama, mistral, etc.
-        other => other.to_string(),
-    }
-}
+use crate::llama::vram_estimator::gguf_arch_to_heuristic_name;
 
 /// Build a `ModelArch` from a JSON request body, falling back to heuristics
 /// when introspection fields are absent.

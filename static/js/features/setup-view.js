@@ -6,42 +6,39 @@ import { doAttachFromSetup } from './attach-detach.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showConfirmDialog } from './toast.js';
 
-// ── Model / preset classification (mirrors backend) ───────────────────────────
+// ── Model / preset classification (from GGUF-derived metadata) ────────────────
+// No name-based guessing: labels come from preset.family and preset.size_class
+// which are derived from GGUF metadata (architecture, parameter_count).
+// For presets missing metadata, we intentionally show no family/size badge
+// instead of guessing.
 
-function classifyPresetName(nameOrRepo) {
-    const name = (nameOrRepo || '').toString().toLowerCase();
-    let family = 'other';
-    if (name.includes('qwen3.6') || name.includes('qwen36') || name.includes('qwopus')) family = 'qwen36';
-    else if (name.includes('qwen3.5') || name.includes('qwen35')) family = 'qwen35';
-    else if (name.includes('qwen3')) family = 'qwen3';
-    else if (name.includes('llama-3') || name.includes('llama3')) family = 'llama3';
-    else if (name.includes('gemma-4') || name.includes('gemma4')) family = 'gemma4';
-    else if (name.includes('gemma')) family = 'gemma';
-    else if (name.includes('mistral') || name.includes('mixtral')) family = 'mistral';
-    else if (name.includes('exaone-4.5') || name.includes('exaone4.5')) family = 'exaone';
-    else if (name.includes('heretic')) family = 'heretic';
-    return family;
-}
+const FAMILY_LABEL_MAP = {
+    qwen36: 'Qwen3.6',
+    qwen35: 'Qwen3.5',
+    qwen3: 'Qwen3',
+    qwen2: 'Qwen2',
+    qwen: 'Qwen',
+    llama3: 'Llama',
+    gemma4: 'Gemma4',
+    gemma: 'Gemma',
+    mistral: 'Mistral',
+    exaone: 'EXAONE',
+    deepseek: 'DeepSeek',
+    phi: 'Phi',
+    falcon: 'Falcon',
+    grok: 'Grok',
+    mamba: 'Mamba',
+    rwkv: 'RWKV',
+    olmo: 'OLMo',
+    stablelm: 'StableLM',
+    granite: 'Granite',
+    starcoder: 'StarCoder',
+};
 
 function classifyPreset(preset) {
-    const name = (preset.name || '') + ' ' + (preset.model_path || '') + ' ' + (preset.hf_repo || '');
-    const lower = name.toLowerCase();
-    const family = classifyPresetName(name);
-    // Extract param size (simplified: look for XB pattern)
-    const m = lower.match(/(\d+(?:\.\d+)?)b\b/);
-    const paramB = m ? parseFloat(m[1]) : 0;
-    let sizeClass = 'unknown';
-    if (paramB > 0) {
-        if (paramB <= 3) sizeClass = 'tiny';
-        else if (paramB <= 7) sizeClass = 'small';
-        else if (paramB <= 17) sizeClass = 'medium';
-        else if (paramB <= 40) sizeClass = 'large';
-        else sizeClass = 'huge';
-    }
-    const isMoe = lower.includes('moe') || lower.includes('a3b') || lower.includes('a10b') ||
-                  lower.includes('mixtral') || lower.includes('deepseek') ||
-                  lower.includes('qwen3.5') || lower.includes('qwen3.6');
-    return { family, sizeClass, isMoe };
+    const family = preset.family || null;
+    const sizeClass = preset.size_class || 'unknown';
+    return { family, sizeClass };
 }
 
 // ── Quantization tag extraction ───────────────────────────────────────────────
@@ -461,24 +458,10 @@ function _renderFlatLaunchGrid(grid, presets, activePresetId, hasUserPresets, sh
 function _renderGroupedLaunchGrid(grid, presets, activePresetId, hasUserPresets, showNewConfigCard) {
     const byFamily = {};
     presets.forEach(p => {
-        const c = classifyPreset(p);
-        const key = c.family === 'other' ? 'other' : c.family;
+        const key = p.family || 'other';
         if (!byFamily[key]) byFamily[key] = [];
         byFamily[key].push(p);
     });
-
-    const familyLabels = {
-        qwen36: 'Qwen3.6',
-        qwen35: 'Qwen3.5',
-        qwen3: 'Qwen3',
-        llama3: 'Llama 3.x',
-        gemma4: 'Gemma4',
-        gemma: 'Gemma',
-        mistral: 'Mistral / MoE',
-        exaone: 'EXAONE',
-        heretic: 'Heretic',
-        other: 'Other'
-    };
 
     let i = 0;
     const sections = Object.keys(byFamily);
@@ -486,7 +469,7 @@ function _renderGroupedLaunchGrid(grid, presets, activePresetId, hasUserPresets,
         const header = document.createElement('div');
         header.className = 'launch-grid-group';
         header.style.gridColumn = '1 / -1';
-        const label = familyLabels[fam] || fam;
+        const label = fam === 'other' ? 'Other' : (FAMILY_LABEL_MAP[fam] || fam);
         const list = byFamily[fam];
         header.textContent = `${label} (${list.length})`;
         grid.appendChild(header);
@@ -551,8 +534,11 @@ function _buildLaunchCard(preset, activePresetId) {
         });
     } else {
         const c = classifyPreset(preset);
-        const familyLabel = c.family !== 'other' ? c.family.toUpperCase() : '';
-        const sizeLabel = c.sizeClass !== 'unknown' && c.sizeClass !== 'huge' ? c.sizeClass.charAt(0).toUpperCase() + c.sizeClass.slice(1) : '';
+        const familyLabel = c.family ? FAMILY_LABEL_MAP[c.family] || c.family.toUpperCase() : '';
+        const sizeLabel =
+            c.sizeClass && c.sizeClass !== 'unknown' && c.sizeClass !== 'huge'
+                ? c.sizeClass.charAt(0).toUpperCase() + c.sizeClass.slice(1)
+                : '';
         const presetTags = (preset.tags || []);
         const tagPills = presetTags.length > 0
             ? '<div class="launch-card-tags">' +
@@ -1070,11 +1056,11 @@ export async function initLaunchFilters() {
     }
     bar.style.display = '';
 
-    // Populate family pills based on available families
+    // Populate family pills based on available families (from GGUF metadata)
     const families = new Set();
     userPresets.forEach(p => {
-        const f = classifyPreset(p).family;
-        if (f !== 'other') families.add(f);
+        const f = p.family;
+        if (f) families.add(f);
     });
 
     const familyContainer = document.getElementById('setup-filter-family-pills');
@@ -1086,23 +1072,12 @@ export async function initLaunchFilters() {
             updateFilterPillActive(familyContainer, 'family-all');
             renderLaunchGrid();
         });
-        const familyLabels = {
-            qwen36: 'Qwen3.6',
-            qwen35: 'Qwen3.5',
-            qwen3: 'Qwen3',
-            llama3: 'Llama 3.x',
-            gemma4: 'Gemma4',
-            gemma: 'Gemma',
-            mistral: 'Mistral',
-            exaone: 'EXAONE',
-            heretic: 'Heretic',
-        };
         for (const fam of families) {
             const btn = document.createElement('button');
             btn.className = 'launch-filter-pill';
             btn.dataset.filter = fam;
             btn.type = 'button';
-            btn.textContent = familyLabels[fam] || fam;
+            btn.textContent = FAMILY_LABEL_MAP[fam] || fam;
             btn.addEventListener('click', () => {
                 launchFilters.family = fam;
                 updateFilterPillActive(familyContainer, fam);

@@ -1053,7 +1053,7 @@ Returns model-family sampling recommendations for the Step 4 wizard review form 
 
 | File | Purpose |
 |------|---------|
-| `src/llama/vram_estimator.rs` | All VRAM estimation logic and `ModelArch` |
+| `src/llama/vram_estimator/` | All VRAM estimation logic and `ModelArch` (module dir: `estimate.rs`, `arch_heuristics.rs`, `quant_table.rs`) |
 | `src/llama/spawn_wizard.rs` | `auto_size` wrapper called by the wizard API |
 | `src/model_download.rs` | Streaming download manager with resume support |
 | `src/llama/gguf_meta.rs` | GGUF metadata reader (binary header parsing) |

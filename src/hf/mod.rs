@@ -472,6 +472,68 @@ pub fn hf_get_file_info(repo_id: &str, path: &str) -> Result<HfFileInfo> {
         .ok_or_else(|| anyhow::anyhow!("File not found: {path}"))
 }
 
+/// Range-fetch only the GGUF KV-metadata header of a HuggingFace-hosted file and parse it,
+/// without downloading the multi-GB tensor data. This lets the pre-download estimator use the
+/// model's *real* architecture (layer counts, hybrid attention interval, sliding window,
+/// expert counts, …) instead of name-based guesses.
+///
+/// The KV header sits at the start of the file, so we fetch progressively larger prefixes
+/// until the parser succeeds (the tokenizer arrays can push real headers to several MB).
+pub async fn fetch_gguf_header_metadata(
+    repo_id: &str,
+    file_path: &str,
+) -> Result<crate::llama::gguf_meta::GgufMetadata, String> {
+    let api = ApiBuilder::new()
+        .with_token(hf_load_token())
+        .build()
+        .map_err(|e| format!("Failed to build HF API client: {e}"))?;
+    let url = api
+        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+        .url(file_path);
+    if url.is_empty() {
+        return Err(format!(
+            "Could not resolve HF URL for {repo_id}/{file_path}"
+        ));
+    }
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+    let token = hf_load_token();
+
+    let mut last_err = String::from("header larger than fetch cap");
+    for &end in &[4 * 1024 * 1024u64, 16 * 1024 * 1024, 48 * 1024 * 1024] {
+        let mut req = client
+            .get(&url)
+            .header("Range", format!("bytes=0-{}", end - 1));
+        if let Some(ref tok) = token {
+            req = req.bearer_auth(tok);
+        }
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| format!("range request failed: {e}"))?;
+        // Require a 206 so a server that ignores Range can't make us buffer the whole file.
+        if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+            return Err(format!(
+                "HF did not honor range request (HTTP {})",
+                resp.status()
+            ));
+        }
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| format!("reading header bytes: {e}"))?;
+        match crate::llama::gguf_meta::read_gguf_metadata_from_bytes(&bytes) {
+            Ok(md) => return Ok(md),
+            Err(e) => last_err = e, // likely truncated header — try a larger prefix
+        }
+    }
+    Err(format!("could not parse GGUF header: {last_err}"))
+}
+
 /// Stream-download a file from HF with optional resume.
 /// Returns total bytes written.
 #[allow(dead_code)]

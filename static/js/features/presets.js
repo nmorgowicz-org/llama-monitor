@@ -836,6 +836,7 @@ async function autoTunePreset() {
         ctk: document.getElementById('modal-ctk')?.value || 'q8_0',
         ctv: document.getElementById('modal-ctv')?.value || 'q8_0',
         flash_attn: true,
+        is_unified_memory: !!(await _ensureUnifiedFlag()),
         verify: true,
     };
     if (statusEl) statusEl.innerHTML = '<span class="moe-autotune-spinner"></span>Running sweep… this can take a few minutes';

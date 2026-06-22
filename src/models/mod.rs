@@ -397,6 +397,114 @@ fn detect_size_class(param_b: f32) -> String {
     .into()
 }
 
+/// Derive family from GGUF architecture field (not from filename).
+/// Returns None if unknown — callers must not guess.
+pub fn infer_family_from_architecture(arch: &str) -> Option<String> {
+    let a = arch.to_ascii_lowercase();
+
+    // Llama family
+    if a.starts_with("llama") {
+        return Some("llama3".into());
+    }
+
+    // Qwen family (dense/MoE/VL variants grouped by generation)
+    if a == "qwen3_6" || a == "qwen36" || a == "qwopus" {
+        return Some("qwen36".into());
+    }
+    if a == "qwen3_5" || a == "qwen35" || a == "qwen3_5moe" {
+        return Some("qwen35".into());
+    }
+    if a.starts_with("qwen3") {
+        return Some("qwen3".into());
+    }
+    if a.starts_with("qwen2") {
+        return Some("qwen2".into());
+    }
+    if a == "qwen" {
+        return Some("qwen".into());
+    }
+
+    // Gemma family (all generations)
+    if a.starts_with("gemma") {
+        // gemma4 / gemma_4 → distinct; others → gemma
+        if a.starts_with("gemma4") || a == "gemma_4" {
+            return Some("gemma4".into());
+        }
+        return Some("gemma".into());
+    }
+
+    // Mistral family (Mistral + Mixtral)
+    if a.starts_with("mistral") || a.starts_with("mixtral") {
+        return Some("mistral".into());
+    }
+
+    // DeepSeek family
+    if a.starts_with("deepseek") {
+        return Some("deepseek".into());
+    }
+
+    // Phi family (phi2/phi3/phimoe)
+    if a.starts_with("phi") {
+        return Some("phi".into());
+    }
+
+    // Falcon family
+    if a.starts_with("falcon") {
+        return Some("falcon".into());
+    }
+
+    // EXAONE family
+    if a.starts_with("exaone") {
+        return Some("exaone".into());
+    }
+
+    // Grok (xAI)
+    if a.starts_with("grok") {
+        return Some("grok".into());
+    }
+
+    // Mamba / SSM family
+    if a.starts_with("mamba") || a == "jamba" {
+        return Some("mamba".into());
+    }
+
+    // RWKV family
+    if a.starts_with("rwkv") {
+        return Some("rwkv".into());
+    }
+
+    // OLMo family
+    if a.starts_with("olmo") {
+        return Some("olmo".into());
+    }
+
+    // StableLM
+    if a.starts_with("stablelm") {
+        return Some("stablelm".into());
+    }
+
+    // Granite (IBM)
+    if a.starts_with("granite") {
+        return Some("granite".into());
+    }
+
+    // StarCoder family
+    if a.starts_with("starcoder") {
+        return Some("starcoder".into());
+    }
+
+    None
+}
+
+/// Derive size_class from an exact parameter count (u64).
+pub fn infer_size_class_from_param_count(param_count: u64) -> Option<String> {
+    if param_count == 0 {
+        return None;
+    }
+    let b = param_count as f32 / 1_000_000_000.0;
+    Some(detect_size_class(b))
+}
+
 fn detect_primary_use(name: &str, is_moe: bool) -> Vec<String> {
     let mut uses = Vec::new();
 
