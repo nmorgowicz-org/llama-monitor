@@ -56,8 +56,9 @@ pub fn is_lhm_available() -> bool {
 /// Check whether the sensor_bridge scheduled task exists in the task scheduler.
 #[cfg(target_os = "windows")]
 pub fn is_local_sensor_bridge_service_installed() -> bool {
-    std::process::Command::new("schtasks")
-        .args(["/Query", "/TN", SENSOR_BRIDGE_TASK_NAME])
+    let mut cmd = std::process::Command::new("schtasks");
+    crate::platform::no_window(&mut cmd);
+    cmd.args(["/Query", "/TN", SENSOR_BRIDGE_TASK_NAME])
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -74,6 +75,32 @@ pub fn is_local_sensor_bridge_running() -> bool {
         Err(_) => return false,
     };
     TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
+}
+
+/// Check whether the PawnIO kernel driver service is installed on this machine.
+///
+/// Uses `sc query PawnIO` to detect the service. Returns `true` if the service
+/// entry exists (regardless of running state). Non-blocking; spawns a short-lived
+/// process via `crate::platform::no_window` to avoid console flashes.
+/// Always returns `false` on non-Windows platforms.
+#[cfg(target_os = "windows")]
+#[allow(dead_code)]
+pub fn is_pawnio_installed() -> bool {
+    let mut cmd = std::process::Command::new("sc");
+    crate::platform::no_window(&mut cmd);
+    cmd.args(["query", "PawnIO"])
+        .output()
+        .map(|o| {
+            let stdout = String::from_utf8_lossy(&o.stdout);
+            stdout.contains("SERVICE_NAME")
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
+pub fn is_pawnio_installed() -> bool {
+    false
 }
 
 /// Poll the local sensor_bridge HTTP server for a CPU temperature reading.
@@ -164,6 +191,16 @@ pub fn install_local_sensor_bridge() -> Result<(), String> {
 
     let script = format!(
         r#"$ErrorActionPreference = 'Stop'
+# --- PawnIO driver install (best-effort, does not abort task registration) ---
+try {{
+    $pawnioSvc = sc.exe query PawnIO 2>$null
+    if ($pawnioSvc -notmatch 'SERVICE_NAME') {{
+        winget install -e --id namazso.PawnIO --silent --accept-package-agreements --accept-source-agreements --disable-interactivity | Out-Null
+    }}
+}} catch {{
+    # PawnIO install failure is non-fatal; continue with scheduled-task setup
+}}
+# --- Sensor bridge scheduled task registration ---
 $bridge = '{bridge_path_str}'
 $action = New-ScheduledTaskAction -Execute $bridge -Argument '--server'
 $trigger = New-ScheduledTaskTrigger -AtStartup
