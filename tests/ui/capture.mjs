@@ -409,7 +409,7 @@ async function loadAppDocument(page, baseUrl) {
     }
     let html = await response.text();
     html = html.replace('<head>', `<head><base href="${baseUrl}/">`);
-    html = html.replace(/<script\b(?:\s[^>]*)?>[\s\S]*?<\/script>/gi, '');
+    html = html.replace(/<script\b[\s\S]*?<\/script\s*>/gi, '');
     await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(error => {
         console.log('[CAPTURE] setContent fallback continuing:', error.message);
     });
