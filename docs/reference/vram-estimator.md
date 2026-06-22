@@ -294,14 +294,30 @@ mtp_overhead_bytes(model_size_bytes, mtp_depth) → u64
 
 1.5% of model weights per MTP depth level. Heuristic for DeepSeek-V3 / Qwen3-MTP style heads.
 
-### `gpu_overhead_bytes`
+### Metal (unified-memory) overhead
 
-```
-gpu_overhead_bytes(ubatch_size) → u64
-  = 300 MB + max(0, ubatch_size − 512) × 150 KB
-```
+Used on Apple Silicon. Like the discrete model it has a context-independent base plus a
+context-scaling part, but it is **much lighter** and calibrated separately against real
+measurements. All inputs are GGUF-derived.
 
-Covers Metal (Apple Silicon) context, KV allocator metadata, and transient Metal compute buffers. On unified memory, this is the only overhead function used; discrete GPUs use `discrete_overhead_bytes` instead.
+- `metal_overhead_base_bytes(arch, ubatch_size)`:
+  - Context-independent per-layer graph/context cost + small ubatch scratch.
+  - Formula: `per_layer × n_layers + 0.035 × ubatch` MiB, where `per_layer = 4.3` (dense) or
+    `8.8` (sliding-window / Gemma — extra per-layer-input embeddings + dual local/global graph).
+  - 128 MiB floor; flat 200 MiB if arch unknown.
+
+- `metal_overhead_ctx_bytes(kv_cache_bytes)`:
+  - Context-scaling working buffers, measured at a very stable **~6.5% of KV bytes**
+    (`METAL_KV_OVERHEAD_FRACTION = 0.065`) across dense/MoE/hybrid/SWA models. Because it's a
+    fraction of `kv_cache_bytes`, it automatically tracks hybrid attention, Gemma windows and KV quant.
+
+- `metal_overhead_bytes(arch, ubatch_size, kv_cache_bytes)` = base + ctx.
+
+**Calibrated on Apple M5 Max (llama.cpp b9743, Metal, `--parallel 1 --kv-unified -fa on`,
+q8_0 KV)** via process physical-footprint measurements, across the same four models as the
+discrete model, at 4k–213k context. Fits within ~40 MiB (worst under-prediction −17 MiB).
+Metal's overhead is far smaller than CUDA's and grows ~6× more gently with context. Note: the
+prior flat 300 MB estimate under-reserved Gemma-4-31B@213k by ~750 MiB — a real OOM risk this fixes.
 
 ### Discrete-GPU overhead (CUDA/ROCm)
 
@@ -329,7 +345,33 @@ The discrete overhead model has three parts. All inputs are GGUF-derived (`embed
 
 at 4k–213k context, ubatch 1024/2048. For Qwen-family models, predictions land within tens of MiB; Gemma models are over-estimated modestly (the safe direction). The overhead is roughly **independent of model depth's KV footprint** — it grows with ubatch (scratch) and context (attention mask), so the prior `n_layers × n_embd × ubatch` formula (context-independent) was wrong in both directions.
 
-On unified memory (Metal), none of these functions are used — `gpu_overhead_bytes` plus the headroom reserve is sufficient.
+### Discrete-GPU overhead (CUDA/ROCm)
+
+The discrete overhead model has three parts. All inputs are GGUF-derived (`embedding_length`, `expert_count`, `block_count`, sliding-window pattern), never from name parsing.
+
+- `discrete_overhead_base_bytes(arch, ubatch_size)`:
+  - Context-independent: graph compute scratch (∝ ubatch × model width), MoE expert gather/scatter buffers, and (for Gemma with sliding-window) per-layer-input embedding tables.
+  - If `n_embd == 0` or `n_layers == 0` (unknown architecture): flat 256 MB fallback.
+  - 200 MiB floor in `base_bytes` (CUDA context minimum).
+
+- `discrete_overhead_ctx_bytes_per_token(arch, ubatch_size)`:
+  - Context-dependent: attention mask and per-layer prefill scratch that grow linearly with context, `n_layers`, and per-head dimension.
+  - Uses `max(head_dim, global_head_dim)` for Gemma-style models with wider global heads.
+  - Formula: `0.46 × n_layers × max(head_dim, global_head_dim) × (0.8 + 0.2 × ubatch/1024)`.
+
+- `discrete_overhead_bytes(arch, ubatch_size, context_size)`:
+  - Total discrete overhead = base + (per_token × context_size).
+
+**Calibrated on RTX 5090 32 GB (WDDM), llama.cpp b9728, `--parallel 1 --kv-unified -fa on`, q8_0 KV, full GPU offload**, across:
+
+- Qwen3.6-27B (dense-hybrid)
+- Qwen3.6-35B-A3B (MoE-hybrid)
+- Gemma-4-31B (dense SWA)
+- Gemma-4-26B-A4B (MoE SWA)
+
+at 4k–213k context, ubatch 1024/2048. For Qwen-family models, predictions land within tens of MiB; Gemma models are over-estimated modestly (the safe direction). The overhead is roughly **independent of model depth's KV footprint** — it grows with ubatch (scratch) and context (attention mask), so the prior `n_layers × n_embd × ubatch` formula (context-independent) was wrong in both directions.
+
+On unified memory (Metal), the discrete functions are not used — `metal_overhead_bytes` (above) handles it, plus the headroom reserve.
 
 ### `full_estimate`
 
@@ -344,7 +386,7 @@ mtp             = mtp_overhead_bytes(model_size, arch.mtp_depth)
 
 overhead:
   if is_unified_memory:
-      gpu_overhead_bytes(ubatch)
+      metal_overhead_bytes(arch, ubatch, kv)        # per-layer base + ~6.5% of KV
   else:
       discrete_overhead_bytes(arch, ubatch, context)
         (base + per_token × context)
@@ -378,21 +420,22 @@ max_context(model_size, arch, ctk, ctv, parallel_slots, ubatch,
 
 usable = available_vram × (1 − headroom_fraction)
 
-# base overhead (context-independent) and slope (per-token)
+# base overhead (context-independent), per-token slope, and KV multiplier
 if is_unified_memory:
-    base_overhead = gpu_overhead_bytes(ubatch)
-    overhead_slope = 0
+    base_overhead    = metal_overhead_base_bytes(arch, ubatch)
+    overhead_slope   = 0
+    kv_overhead_mult = 1 + METAL_KV_OVERHEAD_FRACTION   # Metal ctx overhead = ~6.5% of KV
 else:
-    base_overhead = discrete_overhead_base_bytes(arch, ubatch)
-    overhead_slope = discrete_overhead_ctx_bytes_per_token(arch, ubatch)
+    base_overhead    = discrete_overhead_base_bytes(arch, ubatch)
+    overhead_slope   = discrete_overhead_ctx_bytes_per_token(arch, ubatch)
+    kv_overhead_mult = 1
 
 fixed       = weight_vram + mmproj + mtp + linear_state + base_overhead
-kv_budget   = usable − fixed
+kv_budget   = (usable − fixed) / kv_overhead_mult   # reserve Metal's KV-proportional overhead
 
 # Binary search (sliding-window) or direct solve (standard/hybrid).
-# The per-token cost is:
-#   (kv_bytes_per_token) + overhead_slope
-# so the overhead slope is charged alongside the KV cache.
+# Discrete charges a per-token overhead slope alongside the KV cache; Metal instead reserves
+# its KV-proportional overhead by shrinking kv_budget (mult), since it scales with the KV size.
 ```
 
 Direct (standard / hybrid):
@@ -421,7 +464,7 @@ Fallback: When any heuristic path (Qwen3.6, Qwen3.5, Gemma 3/4, or generic) enco
 
 Binary search over `[0, n_layers]` to find the smallest `n_cpu_moe` whose weight footprint fits in VRAM.
 
-Uses the unified-memory overhead function `gpu_overhead_bytes(ubatch)` (not discrete overhead) as its overhead estimate, then checks whether `moe_weight_split` yields a VRAM footprint that fits in 80% of available VRAM minus overhead, mmproj, and MTP overhead.
+Uses the platform-appropriate base overhead (`metal_overhead_base_bytes` on unified memory, `discrete_overhead_base_bytes` on CUDA/ROCm) as its overhead estimate, then checks whether `moe_weight_split` yields a VRAM footprint that fits in 80% of available VRAM minus overhead, mmproj, and MTP overhead.
 
 If even with all experts on CPU it still doesn't fit, returns `n_layers`.
 
@@ -525,7 +568,7 @@ The VRAM bars consume `/api/vram-estimate` directly (single source of truth) —
 
 | Backend | Model size | KV cache | Discrete overhead | Total accuracy |
 |---------|-----------|----------|-----------------|----------------|
-| Metal (Apple Silicon) | ✓ exact from file | ✓ formula | N/A (uses gpu_overhead_bytes) | ±0.3 GiB |
+| Metal (Apple Silicon) | ✓ exact from file | ✓ formula | ✓ M5 Max-calibrated (`metal_overhead_bytes`) | ±0.05 GiB |
 | CUDA (Windows/Linux) | ✓ exact from file | ✓ formula | ✓ calibrated when n_embd known | ±0.5 GiB |
 | CUDA, n_embd unknown | ✓ exact from file | ✓ formula | 256 MB fallback | ~2–3 GiB low |
 
@@ -683,7 +726,19 @@ The `discrete_overhead_*` constants in `estimate.rs` were fit to **direct VRAM m
 | Gemma-4-26B-A4B | 30 | 512 | 2816 | yes | yes | 4k | 1024 | 803 |
 | Gemma-4-26B-A4B | 30 | 512 | 2816 | yes | yes | 213k | 1024 | 2091 |
 
-Key findings that shaped the model: overhead is **linear in context** (the attention mask / per-layer prefill scratch), scales with `n_layers × head_dim` (not KV footprint), grows with ubatch (graph scratch), gets a fixed bump for MoE (expert gather ~260 MiB), and a large per-layer base for Gemma SWA (per-layer-input embeddings ~20 MiB/layer). The current formula reproduces Qwen within tens of MiB and over-reserves Gemma modestly (worst under-prediction across the set: −67 MiB — i.e. essentially never under-reserves). No Metal/Apple measurements were taken, so the unified-memory path still uses the lighter `gpu_overhead_bytes` + headroom reserve — **do not apply these CUDA constants to Metal without separate Apple Silicon measurements.**
+Key findings that shaped the model: overhead is **linear in context** (the attention mask / per-layer prefill scratch), scales with `n_layers × head_dim` (not KV footprint), grows with ubatch (graph scratch), gets a fixed bump for MoE (expert gather ~260 MiB), and a large per-layer base for Gemma SWA (per-layer-input embeddings ~20 MiB/layer). The current formula reproduces Qwen within tens of MiB and over-reserves Gemma modestly (worst under-prediction across the set: −67 MiB — i.e. essentially never under-reserves).
+
+## Recalibrating the Metal overhead (Apple Silicon)
+
+The Metal path is calibrated separately on **Apple M5 Max** (llama.cpp b9743, Metal). The measurement method differs from CUDA because macOS has no `nvidia-smi`:
+
+- **Use process physical footprint, not a system delta.** Launch `llama-server` (mmap on, the default) and read `footprint <pid>` / `vmmap --summary <pid>` → "Physical footprint". With mmap, the model weights are file-backed and **excluded** from the footprint, so `footprint ≈ KV + overhead` — exactly the overhead component, cleanly isolated. Then `overhead = footprint − kv_cache_bytes(ctx)`.
+  - Validation: a `--no-mmap` control makes the footprint jump by the full weight size (~20 GB), confirming weights are excluded under mmap.
+- Same flags as CUDA otherwise: `-fa on -ctk q8_0 -ctv q8_0 -ngl 99 -fit off --parallel 1 --kv-unified --no-warmup`.
+
+Findings: Metal overhead = a per-layer base (4.3 MiB/layer dense, 8.8 MiB/layer Gemma SWA) + 0.035 MiB/ubatch + **~6.5% of KV bytes** (stable 0.063–0.068 across all four families). It is far lighter than CUDA and the context part rides on the KV size, so it auto-handles hybrid/windowing/quant.
+
+**mmap is not a throughput knob on Apple Silicon.** `llama-bench` measured identical pp/tg t/s with mmap on vs off (e.g. 35B-A3B: pp512 3163 vs 3150, tg128 113.6 vs 113.8). mmap is zero-copy into Metal; disabling it only slows the initial load and commits the whole model to RAM. The wizard therefore defaults `no_mmap = false` on unified memory, and the preset editor shows a hint recommending it stay off. The real Apple-Silicon perf lever is staying under the memory budget (avoid compression/swap) — which the estimator enforces.
 
 ---
 
