@@ -54,6 +54,112 @@ into shared session and UI code.
     tools bolted together.
 13. GGUF to MLX conversion is fully in scope. It is implemented as a backend model
     source resolver, not as wizard-only special casing or downstream spawn logic.
+14. Rapid-MLX is first implementation target, not permanent shape of backend
+    architecture. Shared contracts must remain capable of supporting at least
+    one other MLX loader without rewriting session lifecycle, preset schema,
+    chat routing, telemetry polling, or dashboard card composition.
+
+## Loader Selection Decision
+
+External survey date: 2026-06-22. This section records current integration
+judgment for fresh agents. Re-check upstream before implementation, but do not
+change chosen first backend without concrete incompatibility and update to this
+document.
+
+### Decision
+
+Implement Rapid-MLX first. Use `vllm-mlx` as reference alternate backend when
+designing shared contracts. Do not implement `oMLX`, `vllm-metal`, or `MTPLX`
+in this feature branch unless user explicitly expands scope.
+
+Every shared Rust and UI surface added for Rapid-MLX must answer: "could
+vllm-mlx be added later by writing a new adapter and compatibility profile,
+without changing this shared type?" If answer is no, shared type is too
+Rapid-MLX-specific and belongs inside `src/inference/rapid_mlx/`.
+
+### Current project ratings for llama-monitor integration
+
+| Project | Role | Integration rating | Rationale |
+|---|---|---:|---|
+| Rapid-MLX | First backend | 8.5/10 | Best match for current plan: local single-model serve flow, OpenAI-compatible chat, readiness/status endpoints, runtime install/upgrade paths, tool/reasoning parser focus, and strong Apple Silicon performance claims. |
+| vllm-mlx | Reference future adapter | 8/10 | Strongest alternate contract shape: OpenAI and Anthropic APIs, `/health`, `/v1/status`, optional Prometheus `/metrics`, continuous batching, paged/prefix cache, and documented benchmark methodology. |
+| oMLX | Watchlist, not first backend | 7/10 | Rich Mac product surface, multi-model serving, menu bar/admin UI, model downloader, tiered SSD KV cache. Overlaps llama-monitor product ownership and appears less clean as headless backend primitive. |
+| vllm-metal | Strategic watchlist | 6.5/10 | Important because under `vllm-project` and may become long-term ecosystem path. Current shape is lower-level plugin/runtime path, not first product integration target. |
+| MTPLX | Technique watchlist | 5.5/10 backend, 8/10 signal | Native MTP speculative decoding and claimed 1.6x-2.24x speedups are important, but scope is narrower and model-specific. Track as capability inspiration, not initial backend. |
+
+### Performance interpretation
+
+Treat MLX performance gains as plausible but requiring local validation. Public
+evidence says MLX-family runtimes can outperform llama.cpp on Apple Silicon,
+especially for sustained generation, batching, prefix/paged cache reuse, and
+newer model families not equally optimized in llama.cpp. However, published
+claims are not directly comparable unless hardware, model weights, quantization,
+prompt length, concurrency, thinking mode, sampling, cache state, and tokenizer
+accounting match.
+
+Implementation therefore must include an app-owned benchmark/probe path before
+claiming speedups in UI or docs. The first release may say Rapid-MLX is an
+Apple Silicon native engine and show measured tokens/sec from live telemetry.
+It must not promise "2x faster than llama.cpp" unless llama-monitor measured
+the same model/task locally and stores enough benchmark metadata to explain the
+comparison.
+
+### Required shared contract seams
+
+Design these as backend-neutral contracts in Milestones 1-2. Rapid-MLX and
+vllm-mlx should both map cleanly onto them:
+
+- Backend identity: stable enum and persisted preset/session discriminator.
+- Runtime discovery: executable, version/source, platform availability,
+  compatibility profile, missing extras, and remediation action.
+- Launch model: resolved model identifier/path plus backend-specific source
+  metadata, not raw wizard inputs.
+- Health/readiness: liveness and readiness are separate. Never infer readiness
+  from open TCP port or model name alone.
+- Chat surface: OpenAI-compatible request/stream path plus capability-filtered
+  request controls.
+- Anthropic compatibility: optional capability. Do not bake Anthropic-specific
+  routing into shared chat contract until backend advertises support.
+- Request cancellation: optional capability keyed by backend endpoint shape.
+- Status telemetry: normalized optional fields for status, model, uptime,
+  running/waiting counts, prompt/generation throughput, token totals, memory,
+  cache, and active requests.
+- Metrics endpoint: optional capability. Support JSON status and Prometheus
+  scrape endpoints as different telemetry sources behind normalized snapshots.
+- Dashboard cards: capability-driven registry. Unsupported cards are omitted
+  from the DOM, not rendered as empty or permanent `N/A` cards.
+- Benchmark evidence: store engine, version, model, quantization/source,
+  prompt/output token counts, context length, concurrency, sampling, cache
+  state, hardware summary, and measured TTFT/prompt TPS/decode TPS.
+
+### Backend-specific boundaries
+
+Rapid-MLX-specific code owns:
+
+- `rapid-mlx serve` command construction;
+- `gguf2mlx` conversion and conversion cache;
+- Rapid-MLX aliases and model-source rules;
+- Rapid-MLX-specific flags, mutual exclusions, extras, and compatibility probes;
+- `/health`, `/health/ready`, `/v1/status`, `/v1/cache/stats`, and request
+  cancel endpoint parsing;
+- Rapid-MLX release/install/rollback details.
+
+Shared code must not mention Rapid-MLX flags, aliases, endpoint field names, or
+GGUF conversion mechanics except through adapter-owned types. UI may render
+Rapid-MLX labels and controls, but may not reimplement resolver decisions in
+JavaScript.
+
+### Future-backend non-goals for this branch
+
+- Do not add a generic plugin ABI.
+- Do not add dynamic backend loading.
+- Do not implement vllm-mlx, oMLX, vllm-metal, or MTPLX launch paths.
+- Do not make UI look like a backend marketplace.
+- Do not expose loader-specific experimental flags just because upstream has
+  them.
+
+Feature branch succeeds when Rapid-MLX works well and code has one clear
+adapter slot where vllm-mlx could be added later.
 
 ## Verified Upstream Baseline
 
