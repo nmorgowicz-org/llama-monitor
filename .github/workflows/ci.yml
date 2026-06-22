@@ -99,6 +99,10 @@ jobs:
           cargo fmt -- --check
           cargo clippy -- -D warnings
 
+          # Install cross so we can lint Windows targets with the correct toolchain
+          # (the check runner does not call release-preflight.sh, so cross is not guaranteed).
+          command -v cross >/dev/null || cargo install cross
+
           # Lint Windows-only code paths using the same toolchain we ship (cross + Docker).
           # Use the same env as scripts/build-single-target.sh for x86_64-pc-windows-gnu
           # so cfg-gating bugs are caught with the exact feature set users get.
