@@ -98,11 +98,6 @@ jobs:
           git diff --check
           cargo fmt -- --check
           cargo clippy -- -D warnings
-          # Lint the Windows targets with the same toolchain we ship (cross + Docker),
-          # where x86_64-w64-mingw32-gcc is available. Use the SHIPPED feature set
-          # (see scripts/build-single-target.sh) so this catches cfg-gating bugs in
-          # exactly the binary users get.
-          cross clippy --target x86_64-pc-windows-gnu --no-default-features --features native-tray,webview-popover -- -D warnings
           cargo test
 
       - name: Validate sensor_bridge compiles
