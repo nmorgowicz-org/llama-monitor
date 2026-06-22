@@ -739,6 +739,11 @@ struct MacVmCounts {
     inactive: u64,
     swapins: u64,
     swapouts: u64,
+    swapins_delta: u64,
+    swapouts_delta: u64,
+    psi_some_avg10: f64,
+    psi_full_avg10: f64,
+    advice: String,
 }
 
 /// Read VM statistics directly via the Mach `host_statistics64` syscall instead
