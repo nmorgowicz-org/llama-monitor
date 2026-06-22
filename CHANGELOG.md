@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.2.0...v1.3.0) (2026-06-22)
+
+
+### Features
+
+* **system:** add cross-platform memory-pressure telemetry and purge hardening ([12a1398](https://github.com/nmorgowicz-org/llama-monitor/commit/12a1398169cddd53b2522734eada350e350ee72f))
+* **system:** add cross-platform memory-pressure telemetry, kernel-anchored macOS detection, purge endpoint, and normalized 0-100 score bands ([4615343](https://github.com/nmorgowicz-org/llama-monitor/commit/4615343c6359cb9c58dc54737a6694f1abc4c28d))
+
+
+### Bug Fixes
+
+* **presets:** Apple Silicon mmap hint + clearer, actionable mlock warning ([12a1398](https://github.com/nmorgowicz-org/llama-monitor/commit/12a1398169cddd53b2522734eada350e350ee72f))
+* **presets:** Apple Silicon mmap hint and clearer mlock warning ([4615343](https://github.com/nmorgowicz-org/llama-monitor/commit/4615343c6359cb9c58dc54737a6694f1abc4c28d))
+* **self-update:** harden cross-platform restart, downloads, and cleanup ([4615343](https://github.com/nmorgowicz-org/llama-monitor/commit/4615343c6359cb9c58dc54737a6694f1abc4c28d))
+* **self-update:** harden cross-platform restart, downloads, and cleanup ([0bd4d14](https://github.com/nmorgowicz-org/llama-monitor/commit/0bd4d145c0cff28dbb478f769d5bf5f5c75260d6))
+* **system:** anchor macOS memory pressure on kernel verdict; fix Windows available-memory and swap ([4615343](https://github.com/nmorgowicz-org/llama-monitor/commit/4615343c6359cb9c58dc54737a6694f1abc4c28d))
+* **wizard:** default mmap on (no_mmap=false) on Apple Silicon ([4615343](https://github.com/nmorgowicz-org/llama-monitor/commit/4615343c6359cb9c58dc54737a6694f1abc4c28d))
+* **wizard:** default mmap on (no_mmap=false) on Apple Silicon ([12a1398](https://github.com/nmorgowicz-org/llama-monitor/commit/12a1398169cddd53b2522734eada350e350ee72f))
+
 ## [1.2.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.1.0...v1.2.0) (2026-06-22)
 
 
