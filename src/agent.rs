@@ -996,7 +996,10 @@ pub async fn latest_release_info() -> Result<LatestReleaseInfo> {
         return Ok(cached);
     }
 
-    let release = reqwest::Client::new()
+    let release = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(30))
+        .build()?
         .get(GITHUB_LATEST_RELEASE_URL)
         .header(reqwest::header::USER_AGENT, "llama-monitor")
         .send()
@@ -2870,7 +2873,13 @@ pub mod install {
     }
 
     async fn download_asset_locally(asset: &ReleaseAssetInfo) -> Result<String> {
-        let resp = reqwest::Client::new()
+        // Bounded timeouts so a stalled connection can never hang the update
+        // indefinitely. `connect_timeout` covers the handshake; the overall
+        // `timeout` covers the full body transfer (release binaries are tens of MB).
+        let resp = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(300))
+            .build()?
             .get(&asset.url)
             .header(reqwest::header::USER_AGENT, "llama-monitor")
             .send()
@@ -3753,10 +3762,6 @@ Start-Sleep -Seconds 2\""
     #[derive(Debug, Serialize)]
     pub struct SelfUpdateResult {
         pub tag_name: String,
-        /// True when running on Windows where in-place binary replacement is not possible.
-        pub windows: bool,
-        /// Direct download URL for the matching release asset (Windows only).
-        pub download_url: Option<String>,
     }
 
     /// Replace the running binary with the latest release from GitHub.
@@ -3781,7 +3786,10 @@ Start-Sleep -Seconds 2\""
         let checksums_asset = checksums_asset
             .ok_or_else(|| anyhow::anyhow!("Update failed: no checksums file in release"))?;
 
-        let resp = reqwest::Client::new()
+        let resp = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(60))
+            .build()?
             .get(&checksums_asset.url)
             .header(reqwest::header::USER_AGENT, "llama-monitor")
             .send()
@@ -3914,12 +3922,26 @@ Start-Sleep -Seconds 2\""
             return Err(anyhow::anyhow!("Update failed: Cannot replace binary: {e}"));
         }
 
-        let _ = fs::remove_file(&binary_path);
+        // Clean up the downloaded archive and the extraction temp dir. When the
+        // asset was an archive, `binary_path` lives inside a `tempfile` dir that
+        // `extract_archive` deliberately leaked (`.keep()`); remove its parent so
+        // we don't accumulate one stale dir in $TMPDIR per update. When the asset
+        // was a bare binary, `binary_path == local_path` and the file is already
+        // gone from the rename above, so only the archive cleanup applies.
+        if asset.archive {
+            if let Some(extract_dir) = std::path::Path::new(&binary_path).parent() {
+                let _ = fs::remove_dir_all(extract_dir);
+            }
+            let _ = fs::remove_file(&local_path);
+        } else {
+            let _ = fs::remove_file(&binary_path);
+        }
 
         // On Unix/macOS: spawn a detached launcher so the app restarts after update.
         // Features:
-        //  - Crash-loop guard: won’t restart if the last launch died within 3s.
-        //  - Port-check: waits briefly for the listen port to be released.
+        //  - Port-check: waits for the web/agent listen ports to be released by the
+        //    exiting process before relaunching, so the new process can bind them.
+        //  - Arg forwarding: preserves the original CLI arguments across the restart.
         //  - Logging: writes to a small temp log file so failures are inspectable.
         #[cfg(unix)]
         {
@@ -3932,7 +3954,6 @@ Start-Sleep -Seconds 2\""
                 // Fallback; not ideal but keeps us safe
                 "/tmp"
             };
-            let marker_file = format!("{data_dir}/.llama-monitor-restart-at");
             let log_file = format!("{data_dir}/.llama-monitor-restart.log");
 
             let now = SystemTime::now()
@@ -3940,44 +3961,42 @@ Start-Sleep -Seconds 2\""
                 .unwrap_or_default()
                 .as_secs();
 
-            // Write a restart-at marker so the launcher can detect rapid loops.
-            let _ = fs::write(&marker_file, now.to_string());
-
-            let binary_path = current_exe.to_string_lossy().to_string();
-
+            // `lsof` is present on both macOS and Linux; `ss`/`netstat` are not
+            // universally available (`ss` is absent on macOS entirely). We poll
+            // for the LISTEN sockets to disappear, with a bounded retry budget so a
+            // stuck port never wedges the relaunch forever.
             let launcher_script = format!(
                 r#"
-                LAST=$(cat '{marker_file}' 2>/dev/null || echo 0)
-                NOW=$(date +%s)
-                DIFF=$(( NOW - LAST ))
-                if [ "$DIFF" -gt 2 ] && [ "$DIFF" -lt 3 ]; then
-                    echo "$NOW CRASH_LOOP: last restart was within 3s; aborting" >> '{log_file}'
-                    exit 0
-                fi
-
-                # Wait briefly for the configured listen ports to become free.
                 WEB={web_port}
                 AGENT={agent_port}
-                for i in $(seq 1 6); do
-                    if ! ss -tlnp 2>/dev/null | grep -q ":${{WEB}} " && \
-                       ! ss -tlnp 2>/dev/null | grep -q ":${{AGENT}} "; then
+                port_in_use() {{
+                    lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+                }}
+                for i in $(seq 1 25); do
+                    if ! port_in_use "$WEB" && ! port_in_use "$AGENT"; then
                         break
                     fi
                     sleep 0.2
                 done
 
-                rm -f '{marker_file}'
-                exec "$LLAMA_RESTART_BIN"
+                exec "$LLAMA_RESTART_BIN" "$@"
                 "#,
-                marker_file = marker_file,
-                log_file = log_file,
                 web_port = unix_web_port,
                 agent_port = unix_agent_port,
             );
 
+            let binary_path = current_exe.to_string_lossy().to_string();
+
+            // Forward the original CLI arguments (everything after argv[0]) so a
+            // non-default launch (custom port, config path, …) survives the restart.
+            let forwarded_args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+
             match std::process::Command::new("sh")
                 .arg("-c")
                 .arg(&launcher_script)
+                // `$0` placeholder for `sh -c`; forwarded args become `$1`, `$2`, …
+                .arg("llama-monitor-restart")
+                .args(&forwarded_args)
                 .env("LLAMA_RESTART_BIN", &binary_path)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
@@ -3997,8 +4016,6 @@ Start-Sleep -Seconds 2\""
 
         Ok(SelfUpdateResult {
             tag_name: release.tag_name,
-            windows: false,
-            download_url: None,
         })
     }
 
@@ -4075,8 +4092,6 @@ Start-Sleep -Seconds 2\""
 
         Ok(SelfUpdateResult {
             tag_name: release.tag_name.clone(),
-            windows: false,
-            download_url: None,
         })
     }
 }
