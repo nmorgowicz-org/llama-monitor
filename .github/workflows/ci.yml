@@ -265,8 +265,11 @@ jobs:
         if: matrix.target == 'x86_64-pc-windows-gnu'
         run: |
           # Lint Windows-only code paths with the SHIPPED feature set (see scripts/build-single-target.sh).
-          # Run here where x86_64-w64-mingw32-gcc is installed (release-smoke runner).
-          cargo clippy --target x86_64-pc-windows-gnu --no-default-features --features native-tray,webview-popover -- -D warnings
+          # Use cross to match the actual Windows build environment (same Docker image/toolchain).
+          CROSS_REMOTE=1 \
+            CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
+            CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=cc \
+            cross clippy --target x86_64-pc-windows-gnu --no-default-features --features native-tray,webview-popover -- -D warnings
 
       - name: Smoke build ${{ matrix.target }}
         run: bash scripts/build-single-target.sh ${{ matrix.target }}
