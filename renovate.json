@@ -1,6 +1,7 @@
 {
   "extends": ["github>nmorgowicz-org/docker-compose-config//renovate"],
   "ignorePaths": ["**/node_modules/**", "**/bower_components/**"],
+  "prCreation": "immediate",
   "packageRules": [
     {
       "description": "Playwright updates require manual review - version bumps can break tests",
