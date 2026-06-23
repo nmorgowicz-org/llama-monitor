@@ -490,6 +490,13 @@ pub(crate) fn build_arch_from_body(
     let expert_frac = body["expert_fraction"]
         .as_f64()
         .unwrap_or(heuristic.expert_fraction);
+    // Exact measured per-layer expert bytes from the GGUF tensor directory (0 =
+    // unmeasured → the estimator falls back to expert_fraction).
+    let expert_bytes_per_layer = body["expert_bytes_per_layer"].as_u64().unwrap_or(0);
+    let moe_layer_count = body["moe_layer_count"]
+        .as_u64()
+        .map(|v| v as u32)
+        .unwrap_or(0);
 
     // Hybrid DeltaNet: override from body if provided, otherwise preserve heuristic
     let n_attn_layers = body["n_attn_layers"]
@@ -525,6 +532,8 @@ pub(crate) fn build_arch_from_body(
         n_experts,
         n_experts_used: n_exp_used,
         expert_fraction: expert_frac,
+        expert_bytes_per_layer,
+        moe_layer_count,
         global_head_dim,
         mtp_depth,
         mmproj_bytes,

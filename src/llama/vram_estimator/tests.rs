@@ -83,6 +83,33 @@ fn moe_weight_split_proportional() {
 }
 
 #[test]
+fn moe_weight_split_uses_measured_expert_bytes() {
+    // When measured per-layer expert bytes are present, the split is exact and the
+    // expert_fraction heuristic is ignored.
+    let arch = ModelArch {
+        n_layers: 48,
+        n_experts: 128,
+        moe_layer_count: 48,
+        expert_bytes_per_layer: 1_000_000_000, // 1 GB measured per MoE layer
+        expert_fraction: 0.65,                 // must be ignored
+        ..Default::default()
+    };
+    let model = 50_000_000_000u64;
+
+    // Offloading 4 layers moves exactly 4 GB to CPU.
+    let (vram, ram) = moe_weight_split(model, &arch, 4);
+    assert_eq!(ram, 4_000_000_000);
+    assert_eq!(vram, model - 4_000_000_000);
+
+    // Clamped to the measured MoE layer count.
+    let (_, ram_all) = moe_weight_split(model, &arch, 999);
+    assert_eq!(ram_all, 48_000_000_000);
+
+    // n_cpu_moe = 0 keeps everything in VRAM.
+    assert_eq!(moe_weight_split(model, &arch, 0), (model, 0));
+}
+
+#[test]
 fn quant_table_has_expected_entries() {
     assert!(find_quant("q4_k_m").is_some());
     assert!(find_quant("iq2_xxs").is_some());

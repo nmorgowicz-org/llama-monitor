@@ -80,10 +80,27 @@ pub fn moe_weight_split(model_size_bytes: u64, arch: &ModelArch, n_cpu_moe: i32)
     if !arch.is_moe() || n_cpu_moe <= 0 {
         return (model_size_bytes, 0);
     }
-    // `--n-cpu-moe N` keeps the experts of the first N transformer layers on the
-    // CPU, so the offloaded fraction is N / (MoE layer count) — NOT N / (experts
-    // per layer). n_layers is the right denominator (≈ the MoE layer count; a few
-    // models have a handful of dense layers, which this slightly over-counts).
+    // `--n-cpu-moe N` keeps the experts of the first N MoE layers on the CPU.
+    //
+    // Exact path: when we have measured per-layer expert bytes from the GGUF tensor
+    // directory, each offloaded layer moves exactly `expert_bytes_per_layer` to RAM.
+    // The denominator is the number of layers that actually carry experts.
+    if arch.expert_bytes_per_layer > 0 {
+        let moe_layers = if arch.moe_layer_count > 0 {
+            arch.moe_layer_count
+        } else {
+            arch.n_layers.max(1)
+        };
+        let cpu_layers = (n_cpu_moe as u32).min(moe_layers) as u64;
+        let cpu_bytes = (arch.expert_bytes_per_layer * cpu_layers).min(model_size_bytes);
+        let vram_bytes = model_size_bytes.saturating_sub(cpu_bytes);
+        return (vram_bytes, cpu_bytes);
+    }
+
+    // Fallback (no measured tensor sizes, e.g. pre-download advisor): estimate the
+    // offloaded fraction as N / (MoE layer count) × expert_fraction. n_layers is the
+    // right denominator (≈ the MoE layer count; a few models have a handful of dense
+    // layers, which this slightly over-counts).
     let moe_layers = arch.n_layers.max(1) as f64;
     let cpu_layers = (n_cpu_moe as f64).min(moe_layers);
     let cpu_ratio = cpu_layers / moe_layers;
