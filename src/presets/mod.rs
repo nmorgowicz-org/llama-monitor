@@ -257,7 +257,14 @@ pub fn load_presets(path: &Path) -> Vec<ModelPreset> {
     if path.exists() {
         match std::fs::read_to_string(path) {
             Ok(contents) => match serde_json::from_str::<Vec<ModelPreset>>(&contents) {
-                Ok(presets) if !presets.is_empty() => return presets,
+                Ok(mut presets) if !presets.is_empty() => {
+                    // Backfill GGUF-derived metadata (architecture_kind, active_params_b,
+                    // expert counts, etc.) for presets saved before these fields existed,
+                    // then persist so the welcome page / launch cards render correctly
+                    // without requiring the user to re-save each preset.
+                    backfill_gguf_metadata(path, &mut presets);
+                    return presets;
+                }
                 Ok(_) => eprintln!("[warn] Presets file is empty, using defaults"),
                 Err(e) => eprintln!("[warn] Failed to parse presets file: {e}, using defaults"),
             },
@@ -270,6 +277,33 @@ pub fn load_presets(path: &Path) -> Vec<ModelPreset> {
     presets
 }
 
+/// Run [`ensure_gguf_metadata`] over every preset and persist the result if any
+/// preset gained new metadata. Used at load time so existing presets pick up
+/// fields added after they were first saved (e.g. architecture labels). Presets
+/// whose model file is missing are left untouched (ensure_gguf_metadata is a no-op).
+fn backfill_gguf_metadata(path: &Path, presets: &mut [ModelPreset]) {
+    let mut changed = false;
+    for preset in presets.iter_mut() {
+        let before = (
+            preset.architecture_kind.clone(),
+            preset.active_params_b,
+            preset.gguf_architecture.clone(),
+        );
+        ensure_gguf_metadata(preset);
+        let after = (
+            preset.architecture_kind.clone(),
+            preset.active_params_b,
+            preset.gguf_architecture.clone(),
+        );
+        if before != after {
+            changed = true;
+        }
+    }
+    if changed {
+        let _ = save_presets(path, presets);
+    }
+}
+
 /// Save presets to disk atomically (write tmp, rename).
 pub fn save_presets(path: &Path, presets: &[ModelPreset]) -> Result<()> {
     if let Some(parent) = path.parent() {
@@ -280,6 +314,26 @@ pub fn save_presets(path: &Path, presets: &[ModelPreset]) -> Result<()> {
     std::fs::write(&tmp, json)?;
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+impl ModelPreset {
+    /// Reset every GGUF-derived metadata field to `None`.
+    ///
+    /// Call this whenever `model_path` changes so [`ensure_gguf_metadata`] recomputes
+    /// from the new file instead of keeping stale values (it only refills `None` fields).
+    ///
+    /// This is the single source of truth for "which fields come from the GGUF" — when a
+    /// new GGUF-derived field is added to [`ModelPreset`], add it here and nowhere else.
+    pub fn clear_gguf_metadata(&mut self) {
+        self.gguf_architecture = None;
+        self.param_count = None;
+        self.family = None;
+        self.size_class = None;
+        self.architecture_kind = None;
+        self.expert_count = None;
+        self.expert_used_count = None;
+        self.active_params_b = None;
+    }
 }
 
 /// Populate GGUF-derived metadata fields on a preset if they are missing.
@@ -581,6 +635,34 @@ mod tests {
         assert!(templates.is_empty());
         assert!(path.exists());
         assert_eq!(load_templates(&path).len(), 0);
+    }
+
+    #[test]
+    fn clear_gguf_metadata_resets_all_derived_fields() {
+        // Guards against the recurring bug where a new GGUF-derived field is added
+        // to ModelPreset but not to the model_path-change reset, leaving stale data.
+        let mut preset = ModelPreset {
+            gguf_architecture: Some("qwen3moe".into()),
+            param_count: Some(30_000_000_000),
+            family: Some("qwen".into()),
+            size_class: Some("large".into()),
+            architecture_kind: Some("moe".into()),
+            expert_count: Some(128),
+            expert_used_count: Some(8),
+            active_params_b: Some(3.3),
+            ..Default::default()
+        };
+
+        preset.clear_gguf_metadata();
+
+        assert!(preset.gguf_architecture.is_none());
+        assert!(preset.param_count.is_none());
+        assert!(preset.family.is_none());
+        assert!(preset.size_class.is_none());
+        assert!(preset.architecture_kind.is_none());
+        assert!(preset.expert_count.is_none());
+        assert!(preset.expert_used_count.is_none());
+        assert!(preset.active_params_b.is_none());
     }
 
     #[test]
