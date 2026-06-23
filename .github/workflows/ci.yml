@@ -139,11 +139,12 @@ jobs:
         run: npm run lint
 
   ui:
-    needs: [paths-filter, check]
+    needs: [paths-filter, check, check-windows]
     timeout-minutes: 60
     if: >-
       always() &&
       needs.check.result != 'failure' &&
+      needs.check-windows.result != 'failure' &&
       !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
       (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
       needs.paths-filter.outputs.ui == 'true' &&
@@ -232,11 +233,12 @@ jobs:
           retention-days: 1
 
   release-smoke:
-    needs: [paths-filter, check]
+    needs: [paths-filter, check, check-windows]
     timeout-minutes: 90
     if: >-
       always() &&
       needs.check.result != 'failure' &&
+      needs.check-windows.result != 'failure' &&
       !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
       (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
       needs.paths-filter.outputs.release == 'true' &&
@@ -260,15 +262,63 @@ jobs:
           save-if: "${{ github.ref == 'refs/heads/main' }}"
       - name: Preflight release toolchain
         run: bash scripts/release-preflight.sh
+
       - name: Smoke build ${{ matrix.target }}
         run: bash scripts/build-single-target.sh ${{ matrix.target }}
 
+  check-windows:
+    # Gates in parallel with `check` (depends only on paths-filter), so a
+    # Windows-only clippy failure surfaces early instead of after `check` and the
+    # release build. Lints natively with the host mingw-w64 toolchain — no cross /
+    # Docker — which avoids the cross-remote volume-permission error in the dind
+    # runner. The release build still uses cross (mingw lives inside its image).
+    needs: paths-filter
+    timeout-minutes: 20
+    if: >-
+      always() &&
+      github.event.pull_request.draft == false &&
+      !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
+      (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
+       startsWith(github.actor, 'dependabot')) &&
+      needs.paths-filter.outputs.code == 'true'
+    name: check-windows (clippy)
+    runs-on: arc-llama-monitor-fast
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: x86_64-pc-windows-gnu
+          components: clippy
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v0-rust"
+          shared-key: "llama-monitor-x86_64-pc-windows-gnu-${{ hashFiles('Cargo.lock') }}"
+          save-if: "${{ github.ref == 'refs/heads/main' }}"
+
+      - name: Clippy (Windows target)
+        # Lints the SHIPPED Windows feature set (matches scripts/build-single-target.sh).
+        # Build scripts for C deps (aws-lc-sys, ring) compile via the host mingw-w64
+        # cross compiler installed in the runner image.
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER: x86_64-w64-mingw32-gcc
+          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS: "-C target-feature=+crt-static"
+          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
+          CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++
+          AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
+        run: cargo clippy --target x86_64-pc-windows-gnu --no-default-features --features native-tray,webview-popover -- -D warnings
+
   release-smoke-rest:
-    needs: [paths-filter, check, release-smoke]
+    needs: [paths-filter, check, check-windows, release-smoke]
     timeout-minutes: 90
     if: >-
       always() &&
       needs.check.result != 'failure' &&
+      needs.check-windows.result != 'failure' &&
       needs.release-smoke.result != 'failure' &&
       !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
       (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&

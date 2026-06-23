@@ -8,7 +8,9 @@ pub struct RocmBackend;
 
 impl GpuBackend for RocmBackend {
     fn read_metrics(&self) -> Result<BTreeMap<String, GpuMetrics>> {
-        let output = Command::new("rocm-smi")
+        let mut cmd = Command::new("rocm-smi");
+        crate::platform::no_window(&mut cmd);
+        let output = cmd
             .args([
                 "--json",
                 "--showclocks",

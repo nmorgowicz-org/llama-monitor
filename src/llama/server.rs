@@ -408,6 +408,7 @@ pub async fn start_server(
     }
 
     let mut cmd = TokioCommand::new(&app_config.llama_server_path);
+    crate::platform::no_window_tokio(&mut cmd);
     cmd.current_dir(&app_config.llama_server_cwd);
 
     // Set GPU-specific environment variables
@@ -1034,7 +1035,9 @@ pub async fn stop_server(state: &AppState) -> Result<()> {
         }
         #[cfg(windows)]
         {
-            let _ = TokioCommand::new("taskkill")
+            let mut kill_cmd = TokioCommand::new("taskkill");
+            crate::platform::no_window_tokio(&mut kill_cmd);
+            let _ = kill_cmd
                 .args(["/F", "/PID", &pid.to_string()])
                 .status()
                 .await;

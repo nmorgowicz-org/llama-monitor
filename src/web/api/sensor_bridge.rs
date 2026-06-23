@@ -36,11 +36,16 @@ fn api_sensor_bridge_status(
                 {
                     let installed = lhm::is_local_sensor_bridge_service_installed();
                     let running = lhm::is_local_sensor_bridge_running();
+                    // PawnIO is the kernel driver the bridge needs to read CPU temps.
+                    // Surface it so the UI can distinguish "exists but no data" (driver
+                    // missing) from a healthy bridge.
+                    let pawnio = lhm::is_pawnio_installed();
                     Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                         &serde_json::json!({
                             "installed": installed,
                             "running": running,
                             "available": lhm::is_sensor_bridge_available(),
+                            "pawnio": pawnio,
                         }),
                     )))
                 }
@@ -51,6 +56,7 @@ fn api_sensor_bridge_status(
                             "installed": false,
                             "running": false,
                             "available": false,
+                            "pawnio": false,
                         }),
                     )))
                 }

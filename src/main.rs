@@ -1,3 +1,12 @@
+// GUI subsystem on Windows so the tray app does not spawn a console window.
+// We manage the console at runtime:
+// - If launched from a terminal: attach to that console (AttachConsole).
+// - If launched interactively (double-click / shortcut): allocate a new console
+//   (AllocConsole) so logs are visible.
+// - If --headless / --agent: no console; redirect to log file.
+// This lets users see startup info and panics by default, while still supporting
+// fully silent (headless) operation.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 #![recursion_limit = "256"]
 
 mod acme;
@@ -14,6 +23,7 @@ mod lhm_persistence;
 mod llama;
 mod model_download;
 mod models;
+mod platform;
 mod presets;
 mod remote_ssh;
 mod state;
@@ -28,6 +38,192 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+/// Windows-only: attach to the parent console if running from a terminal.
+/// Safe to call from Explorer; it will simply fail to attach in that case.
+#[cfg(windows)]
+fn attach_parent_console() {
+    unsafe {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn AttachConsole(dwProcessId: u32) -> i32;
+        }
+        const ATTACH_PARENT_PROCESS: u32 = 0xFFFF_FFFF;
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+}
+
+/// Windows-only: allocate a console window and ensure stdio routes there.
+///
+/// Behavior:
+/// - If a console already exists (parent or prior), no-op.
+/// - If is_interactive is false (e.g., headless/agent), no console (file logging).
+/// - Otherwise: AllocConsole() so logs are visible when launched interactively
+///   (double-click / Start menu).
+///
+/// Best-effort: if allocation fails, startup continues and a file-based fallback
+/// is used by redirect_output_to_log_if_no_console().
+#[cfg(windows)]
+fn maybe_alloc_console(is_interactive: bool) -> bool {
+    if !is_interactive {
+        return false;
+    }
+
+    // If we already have a console (parent or otherwise), nothing to do.
+    unsafe {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetConsoleWindow() -> *mut core::ffi::c_void;
+        }
+        if !GetConsoleWindow().is_null() {
+            return true;
+        }
+    }
+
+    unsafe {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn AllocConsole() -> i32;
+        }
+        if AllocConsole() == 0 {
+            // Allocation failed; continue without console, log-file fallback applies.
+            return false;
+        }
+
+        // Rust's stdio on Windows (GUI subsystem) is lazily initialized from
+        // GetStdHandle(). After AllocConsole(), that now returns the console
+        // handles, so subsequent println!/eprintln! go to the new console.
+        // No extra handle wiring needed.
+        true
+    }
+}
+
+/// Windows-only: if no console is present, redirect stdout+stderr to a log file.
+/// This is the fallback when:
+/// - launched interactively with --headless/--agent, OR
+/// - console allocation failed.
+#[cfg(windows)]
+fn redirect_output_to_log_if_no_console() {
+    unsafe {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetConsoleWindow() -> *mut core::ffi::c_void;
+            fn SetStdHandle(n_std_handle: u32, h_handle: *mut core::ffi::c_void) -> i32;
+        }
+        // Have a console → keep printing there (live output, like a normal CLI).
+        if !GetConsoleWindow().is_null() {
+            return;
+        }
+        // No console → log to %APPDATA%\llama-monitor\logs\llama-monitor.log
+        let Some(dir) = dirs::config_dir().map(|d| d.join("llama-monitor").join("logs")) else {
+            return;
+        };
+        if std::fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let path = dir.join("llama-monitor.log");
+        let Ok(file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        else {
+            return;
+        };
+        use std::os::windows::io::AsRawHandle;
+        const STD_OUTPUT_HANDLE: u32 = -11i32 as u32;
+        const STD_ERROR_HANDLE: u32 = -12i32 as u32;
+        let handle = file.as_raw_handle();
+        SetStdHandle(STD_OUTPUT_HANDLE, handle);
+        SetStdHandle(STD_ERROR_HANDLE, handle);
+        // Keep the file handle open for the lifetime of the process.
+        std::mem::forget(file);
+        eprintln!(
+            "[log] llama-monitor started (no console; logging to {})",
+            path.display()
+        );
+    }
+}
+
+/// No-op on non-Windows: on those platforms we don't auto-allocate consoles.
+#[cfg(not(windows))]
+#[allow(dead_code)]
+fn maybe_alloc_console() -> bool {
+    false
+}
+
+/// Windows-only: if the new config dir (%APPDATA%\llama-monitor) does not yet exist but the
+/// legacy location (%USERPROFILE%\.config\llama-monitor) does, move the legacy dir to the new
+/// location so users upgrading from older builds keep their presets/tokens/etc.
+///
+/// This is best-effort: any failure is logged but never blocks startup.
+#[cfg(windows)]
+fn migrate_legacy_config_dir(new_dir: &std::path::Path) {
+    if new_dir.exists() {
+        // New location already exists — nothing to migrate.
+        return;
+    }
+    let legacy_dir = match dirs::home_dir() {
+        Some(home) => home.join(".config").join("llama-monitor"),
+        None => return,
+    };
+    if !legacy_dir.exists() {
+        // Neither location exists yet — first run, nothing to migrate.
+        return;
+    }
+    eprintln!(
+        "[migrate] found legacy config at {}; migrating to {}",
+        legacy_dir.display(),
+        new_dir.display()
+    );
+    // Ensure parent of new_dir exists.
+    if let Some(parent) = new_dir.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        eprintln!(
+            "[migrate] could not create parent dir {}: {e} — migration skipped, startup continues",
+            parent.display()
+        );
+        return;
+    }
+    // Attempt atomic rename first (same-volume, instant).
+    if std::fs::rename(&legacy_dir, new_dir).is_ok() {
+        eprintln!(
+            "[migrate] moved legacy config from {} to {}",
+            legacy_dir.display(),
+            new_dir.display()
+        );
+        return;
+    }
+    // Rename failed (e.g. cross-volume). Fall back to recursive copy, leaving the legacy dir
+    // in place as a backup so no data is lost even if the copy is partial.
+    eprintln!("[migrate] rename failed; falling back to copy (legacy dir will remain as backup)");
+    fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(dst)?;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            let ty = entry.file_type()?;
+            let dst_path = dst.join(entry.file_name());
+            if ty.is_dir() {
+                copy_dir_all(&entry.path(), &dst_path)?;
+            } else {
+                std::fs::copy(entry.path(), &dst_path)?;
+            }
+        }
+        Ok(())
+    }
+    if let Err(e) = copy_dir_all(&legacy_dir, new_dir) {
+        eprintln!(
+            "[migrate] copy failed: {e} — startup continues, config remains at {}",
+            legacy_dir.display()
+        );
+    } else {
+        eprintln!(
+            "[migrate] copied legacy config from {} to {} (legacy dir left as backup)",
+            legacy_dir.display(),
+            new_dir.display()
+        );
+    }
+}
+
 use crate::chat_storage::ChatStorage;
 use crate::config::{
     DashboardAuthConfig, TlsMode, clear_auth_config, harden_file_permissions, load_auth_config,
@@ -39,7 +235,28 @@ const GPU_POLL_INTERVAL: Duration = Duration::from_millis(500); // fallback; dyn
 const SYSTEM_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 fn main() -> Result<()> {
+    // On Windows: console setup (before most logging).
+    //
+    // Steps:
+    // 1) If launched from a terminal: attach to parent console (AttachConsole).
+    // 2) Parse args with clap (so --headless/--agent are canonical and future-safe).
+    // 3) If not headless/agent (interactive):
+    //    - If no console (Explorer, Start menu, shortcut): AllocConsole so logs are visible.
+    // 4) If still no console (headless/agent or AllocConsole failed):
+    //    - redirect stdout/stderr to %APPDATA%\llama-monitor\logs\llama-monitor.log.
+    //
+    // This matches: "don't hide the terminal unless it clearly makes sense."
+    #[cfg(windows)]
+    attach_parent_console();
+
     let args = cli::AppArgs::parse();
+
+    #[cfg(windows)]
+    {
+        let is_interactive = !(args.headless || args.agent);
+        let _console_allocated = maybe_alloc_console(is_interactive);
+        redirect_output_to_log_if_no_console();
+    }
     let app_config = Arc::new(config::AppConfig::from_args(args.clone()));
 
     if args.clear_auth_config {
@@ -65,6 +282,14 @@ fn main() -> Result<()> {
             }
         }
         return Ok(());
+    }
+
+    // On Windows: if legacy ~/.config/llama-monitor exists but the new default
+    // %APPDATA%\llama-monitor does not, move legacy dir before config is read.
+    // Explicit --config-dir paths intentionally start clean.
+    #[cfg(windows)]
+    if args.config_dir.is_none() {
+        migrate_legacy_config_dir(&app_config.config_dir);
     }
 
     // Initialize at-rest encryption (auto-generates key if needed)
