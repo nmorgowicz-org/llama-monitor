@@ -23,7 +23,7 @@ jobs:
     if: >-
       !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
       (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test')
-    runs-on: arc-llama-monitor
+    runs-on: arc-llama-monitor-v5
     outputs:
       code: ${{ steps.filter.outputs.code }}
       ui: ${{ steps.filter.outputs.ui }}
@@ -122,7 +122,7 @@ jobs:
       (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
       needs.paths-filter.outputs.ui == 'true' &&
       github.event.pull_request.draft == false
-    runs-on: arc-llama-monitor
+    runs-on: arc-llama-monitor-v5
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
@@ -151,7 +151,7 @@ jobs:
       github.event.pull_request.draft == false &&
       (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
        startsWith(github.actor, 'dependabot'))
-    runs-on: arc-llama-monitor
+    runs-on: arc-llama-monitor-v5
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
@@ -246,7 +246,7 @@ jobs:
       (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
        startsWith(github.actor, 'dependabot'))
     name: release-smoke (${{ matrix.target }})
-    runs-on: arc-llama-monitor
+    runs-on: arc-llama-monitor-v5
     strategy:
       fail-fast: true
       matrix:
@@ -327,7 +327,7 @@ jobs:
       (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
        startsWith(github.actor, 'dependabot'))
     name: release-smoke-rest (${{ matrix.target }})
-    runs-on: arc-llama-monitor
+    runs-on: arc-llama-monitor-v5
     strategy:
       fail-fast: true
       matrix:
