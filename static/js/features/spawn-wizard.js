@@ -1,4 +1,4 @@
-import { buildArchitectureLabel } from './setup-view.js';
+import { buildArchitectureLabel, isMoEEligible } from './setup-view.js';
 
 // ── Spawn Wizard Module ───────────────────────────────────────────────────────
 // Spawn Llama-Server V2 — complete guided wizard.
@@ -4246,16 +4246,43 @@ function updateAdvisor() {
     const hw = wizardState.hardware;
     const m = wizardState.model;
 
-    // Show the n_cpu_moe auto-tuner only for MoE models.
-    const moeBox = document.getElementById('spawn-moe-autotune');
-    if (moeBox) moeBox.style.display = (arch.nExperts || 0) > 0 ? '' : 'none';
-
     // Batch/ubatch sweep and depth sweep are available once a local .gguf is selected.
     const localGguf = !!(m.path && m.path.toLowerCase().endsWith('.gguf'));
     const batchSweepBox = document.getElementById('wizard-batch-sweep');
     if (batchSweepBox) batchSweepBox.style.display = localGguf ? '' : 'none';
     const sweepBox = document.getElementById('wizard-depth-sweep');
     if (sweepBox) sweepBox.style.display = localGguf ? '' : 'none';
+
+    // Confident MoE only: nExperts/nExpertsUsed from introspection or explicit arch.
+    const kind = (wizardState.arch.kind || '').toLowerCase();
+    const moeConfident =
+        (kind === 'moe' || kind === 'hybrid_moe') ||
+        (wizardState.arch.nExperts > 0 && wizardState.arch.nExpertsUsed > 0);
+
+    const nCpuMoeInput = document.getElementById('spawn-n-cpu-moe');
+    if (nCpuMoeInput) {
+        const field = nCpuMoeInput.closest('.hardware-field') || nCpuMoeInput.parentElement;
+        if (field) field.style.display = moeConfident ? '' : 'none';
+        else nCpuMoeInput.style.display = moeConfident ? '' : 'none';
+    }
+
+    const moeBox = document.getElementById('spawn-moe-autotune');
+    if (moeBox) moeBox.style.display = moeConfident ? '' : 'none';
+
+    // On Apple Silicon / unified memory: warn that n_cpu_moe is for discrete GPUs
+    const hintEl = document.getElementById('spawn-n-cpu-moe-hint');
+    if (hintEl) {
+        const isAppleUnified = isUnifiedMemory();
+        if (moeConfident && isAppleUnified) {
+            hintEl.style.display = '';
+            hintEl.textContent = 'For discrete GPUs only. On Apple Silicon (unified memory), this usually slows performance—leave at Auto.';
+        } else if (moeConfident) {
+            hintEl.style.display = '';
+            hintEl.textContent = 'Useful on discrete GPUs: offload some MoE expert layers to CPU RAM when VRAM is limited.';
+        } else {
+            hintEl.style.display = 'none';
+        }
+    }
 
     const name = (m.path || m.hfFile || m.hfRepo || m.originFile || '').split('/').pop() || '';
     const paramB = arch.paramB || m.paramB || 0;

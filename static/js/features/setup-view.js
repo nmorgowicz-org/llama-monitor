@@ -120,6 +120,16 @@ export function buildArchitectureLabel(p, c) {
     return null;
 }
 
+// ── MoE CPU offload eligibility ───────────────────────────────────────────────
+// --n-cpu-moe is only valid for MoE / hybrid-moE models with real experts.
+// For dense models, it either does nothing or misbehaves in llama.cpp.
+export function isMoEEligible(p) {
+    if (!p) return false;
+    const kind = p.architecture_kind;
+    const experts = p.expert_count || 0;
+    return (kind === 'moe' || kind === 'hybrid_moe') && experts > 0;
+}
+
 // ── Quantization tag extraction ───────────────────────────────────────────────
 
 function extractQuantFromFilename(filename) {

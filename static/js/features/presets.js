@@ -4,7 +4,7 @@
 
 import { sessionState, lastSystemMetrics } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
-import { buildArchitectureLabel } from './setup-view.js';
+import { buildArchitectureLabel, isMoEEligible } from './setup-view.js';
 import { openModelFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
 import { applySettings, saveSettings } from './settings.js';
 import { showToast, showToastWithActions, showConfirmDialog } from './toast.js';
@@ -1013,7 +1013,22 @@ export function openPresetModal(mode, section) {
         // Threading
         numOrEmpty('modal-threads', p.threads);
         numOrEmpty('modal-threads-batch', p.threads_batch);
-        numOrEmpty('modal-n-cpu-moe', p.n_cpu_moe);
+        // n_cpu_moe: only for MoE / hybrid-moE with experts
+        const moeRow = document.getElementById('modal-n-cpu-moe')?.closest('.pe-field') ||
+                       document.getElementById('modal-n-cpu-moe')?.parentElement;
+        const moeAutotuneBtn = document.getElementById('preset-moe-autotune-verify');
+        if (moeRow) {
+            moeRow.style.display = isMoEEligible(p) ? '' : 'none';
+        }
+        if (moeAutotuneBtn) {
+            moeAutotuneBtn.style.display = isMoEEligible(p) ? '' : 'none';
+        }
+        if (isMoEEligible(p)) {
+            numOrEmpty('modal-n-cpu-moe', p.n_cpu_moe);
+        } else {
+            const el = document.getElementById('modal-n-cpu-moe');
+            if (el) el.value = '';
+        }
         // Rope
         setOpt('modal-rope-scaling', p.rope_scaling);
         numOrEmpty('modal-rope-freq-base', p.rope_freq_base);
