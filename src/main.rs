@@ -93,7 +93,7 @@ fn maybe_alloc_console(is_interactive: bool) -> bool {
         // GetStdHandle(). After AllocConsole(), that now returns the console
         // handles, so subsequent println!/eprintln! go to the new console.
         // No extra handle wiring needed.
-        return true;
+        true
     }
 }
 
