@@ -711,6 +711,7 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         expert_count: None,
         expert_used_count: None,
         active_params_b: None,
+        block_count: None,
         flash_attn: String::new(),
         split_mode: String::new(),
         main_gpu: None,

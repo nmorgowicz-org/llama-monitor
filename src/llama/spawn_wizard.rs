@@ -865,6 +865,12 @@ pub struct ModelMetadata {
     /// renamed/finetuned models (e.g. "Pantheon-27B" from Qwen3.6 base) still
     /// get the correct hybrid-DeltaNet / sliding-window treatment.
     pub gguf_arch: Option<String>,
+    /// Architecture label derived from the GGUF: `"dense"`, `"moe"`, or `"hybrid_moe"`.
+    /// Single source of truth shared with the preset metadata path.
+    pub architecture_kind: Option<String>,
+    /// Effective active parameters in billions (dense = total; MoE = backbone + active
+    /// experts). Backend-computed so the spawn wizard's arch label matches the editor.
+    pub active_params_b: Option<f64>,
     // ── MoE ─────────────────────────────────────────────────────────────────
     /// Total experts per layer (from `n_experts` / `expert_count` / `n_exp`).
     pub n_experts: Option<u32>,
@@ -1032,8 +1038,12 @@ pub async fn introspect_model(
     model_path: &str,
     llama_server_path: &str,
 ) -> Result<ModelMetadata, String> {
-    // Check cache first.
-    if let Ok(cached) = load_model_cache(model_path) {
+    // Check cache first. Entries written before architecture_kind existed lack it;
+    // treat those as stale and fall through to a fresh read so the derived arch label
+    // / active-param fields get populated.
+    if let Ok(cached) = load_model_cache(model_path)
+        && cached.architecture_kind.is_some()
+    {
         return Ok(ModelMetadata {
             cached: true,
             ..cached

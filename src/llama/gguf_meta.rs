@@ -192,6 +192,114 @@ impl GgufMetadata {
         Some(n_linear * per_layer_elems * 2)
     }
 
+    /// Architecture label derived from the GGUF: `"dense"`, `"moe"`, or `"hybrid_moe"`.
+    ///
+    /// - MoE: `expert_count > 0`.
+    /// - Hybrid MoE: MoE **and** hybrid attention (`full_attention_interval > 1`, i.e.
+    ///   only some layers carry full KV, the rest are linear/DeltaNet).
+    /// - Dense: everything else.
+    ///
+    /// This is the single source of truth for the architecture label shown on launch
+    /// cards, in the preset editor, and in the spawn wizard.
+    pub fn architecture_kind(&self) -> String {
+        let is_moe = self.expert_count.is_some_and(|e| e > 0);
+        let is_hybrid_attn = self.full_attention_interval.is_some_and(|v| v > 1);
+        if is_moe && is_hybrid_attn {
+            "hybrid_moe".to_string()
+        } else if is_moe {
+            "moe".to_string()
+        } else {
+            "dense".to_string()
+        }
+    }
+
+    /// Estimate "active parameters" in billions.
+    ///
+    /// - Dense: active = total.
+    /// - MoE / hybrid-MoE: `active ≈ backbone + N_used · (expert_total / N_experts)`,
+    ///   where the backbone is approximated from attention + embedding projections.
+    ///   Falls back to the simple ratio `total / (1 + N_experts / N_used)` when the
+    ///   structural estimate is unavailable or implausible.
+    ///
+    /// Returns `None` only when `param_count` is missing.
+    pub fn active_params_b(&self) -> Option<f64> {
+        let total_params = self.param_count?;
+
+        let is_moe = self.expert_count.is_some_and(|e| e > 0);
+        if !is_moe {
+            return Some(total_params as f64 / 1e9);
+        }
+
+        let n_experts = self.expert_count?;
+        let n_used = self.expert_used_count?;
+        if n_experts == 0 || n_used == 0 || n_used > n_experts {
+            // Invalid expert ratio → fall back to total.
+            return Some(total_params as f64 / 1e9);
+        }
+
+        // Attempt a structural estimate from GGUF:
+        //   backbone ≈ attention projections + token-embedding/output projection
+        //   experts_total = P - backbone
+        //   active ≈ backbone + N_used · (experts_total / N_experts)
+        let have_enough = matches!(
+            (
+                self.block_count,
+                self.head_count,
+                self.head_count_kv,
+                self.key_length,
+                self.embedding_length,
+            ),
+            (Some(_), Some(_), Some(_), Some(_), Some(_))
+        );
+
+        if have_enough {
+            let n_layers = self.block_count.unwrap() as u64;
+            let head_count = self.head_count.unwrap() as u64;
+            let head_count_kv = self.head_count_kv.unwrap() as u64;
+            let head_dim = self.key_length.unwrap() as u64;
+            let embd = self.embedding_length.unwrap() as u64;
+
+            // Approximate the dense "backbone" (non-expert) parameter count. This is a
+            // deliberately rough lower bound — it does not model shared experts,
+            // dense-then-MoE layer splits, or attention variants — so it is guarded by
+            // the sanity clamps below. The FFN/expert weights are intentionally *not*
+            // counted here: in MoE GGUFs `feed_forward_length` is the per-expert
+            // intermediate size, so they fall into `expert_total` instead.
+            //
+            // Per layer, attention Q/K/V/O projections (head_dim == key_length):
+            //   embd · head_dim · (2·n_head + 2·n_head_kv)
+            // Plus a one-off token-embedding + output projection: ~2 · embd².
+            let attn_per_layer = embd * head_dim * (2 * head_count + 2 * head_count_kv);
+            let backbone_total: u64 = n_layers * attn_per_layer + 2 * embd * embd;
+
+            if total_params <= backbone_total {
+                // Backbone estimate exceeds total (bad input); use the simple ratio.
+                return Some(simple_moe_active_b(total_params, n_experts, n_used));
+            }
+            let expert_total = total_params - backbone_total;
+
+            // If the expert portion is <10% of total, the structural estimate is clearly
+            // off (a real MoE keeps most weight in experts), so fall back.
+            if (expert_total as f64) < (total_params as f64 * 0.1) {
+                return Some(simple_moe_active_b(total_params, n_experts, n_used));
+            }
+
+            let per_expert = expert_total / n_experts as u64;
+            let active = backbone_total as f64 + (n_used as f64 * per_expert as f64);
+            let active_b = active / 1e9;
+
+            // Sanity: active must be > 0 and < total.
+            if active > 0.0 && active_b < total_params as f64 / 1e9 {
+                Some(active_b)
+            } else {
+                Some(simple_moe_active_b(total_params, n_experts, n_used))
+            }
+        } else {
+            // Not enough GGUF fields → simple ratio.
+            Some(simple_moe_active_b(total_params, n_experts, n_used))
+        }
+    }
+
     /// Convert to the `ModelMetadata` type used by the spawn wizard / VRAM estimator.
     ///
     /// Sets `gguf_arch` so that renamed finetunes (e.g. "Pantheon-27B" from a
@@ -212,6 +320,8 @@ impl GgufMetadata {
             n_kv_heads,
             head_dim: self.key_length,
             gguf_arch: self.architecture.clone(),
+            architecture_kind: Some(self.architecture_kind()),
+            active_params_b: self.active_params_b(),
             n_experts: self.expert_count,
             n_experts_used: self.expert_used_count,
             mtp_depth: self.mtp_depth,
@@ -225,6 +335,22 @@ impl GgufMetadata {
             mmproj_required: false,
             cached: false,
         }
+    }
+}
+
+/// Simple ratio-based active-parameter estimate (in billions) for MoE models:
+/// `active ≈ total / (1 + N_experts / N_used)`. Used only when the structural
+/// estimate in [`GgufMetadata::active_params_b`] is unavailable or implausible.
+fn simple_moe_active_b(total: u64, n_experts: u32, n_used: u32) -> f64 {
+    if n_experts == 0 || n_used == 0 {
+        return total as f64 / 1e9;
+    }
+    let ratio = n_experts as f64 / n_used as f64;
+    let active_b = total as f64 / (1.0 + ratio) / 1e9;
+    if active_b > 0.0 && active_b < total as f64 / 1e9 {
+        active_b
+    } else {
+        total as f64 / 1e9
     }
 }
 
