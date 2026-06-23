@@ -4048,26 +4048,79 @@ Start-Sleep -Seconds 2\""
         let checksums = fetch_checksums_json(release).await?;
         verify_checksum(&checksums, &asset.name, &local_path).await?;
 
-        let binary_path = extract_archive_with_timeout(&local_path, &asset).await?;
+        // extract_archive_with_timeout:
+        //   - creates a temp directory,
+        //   - extracts the release zip,
+        //   - returns one file path (via extracted_binary_path).
+        //
+        // We need the full extracted directory so we can copy all release files
+        // (llama-monitor.exe, sensor_bridge.exe, WebView2Loader.dll) into the
+        // original install folder, not just llama-monitor.exe.
+        let _binary_path = extract_archive_with_timeout(&local_path, &asset).await?;
+        let extract_dir = _binary_path
+            .rsplit_once('\\')
+            .map(|(dir, _)| dir.to_string())
+            .unwrap_or_else(|| _binary_path.clone());
 
         let current_exe = std::env::current_exe()
             .map_err(|e| anyhow::anyhow!("Cannot locate current binary: {e}"))?;
 
+        // Destination directory (where llama-monitor is installed).
+        let install_dir = current_exe
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("Current exe has no parent directory"))?
+            .to_string_lossy()
+            .replace('/', "\\");
+
+        // Collect all extracted files (flat layout from CI).
+        let mut files: Vec<String> = match fs::read_dir(&extract_dir) {
+            Ok(rd) => rd
+                .filter_map(|entry| entry.ok())
+                .filter_map(|e| {
+                    let p = e.path();
+                    if p.is_file() {
+                        Some(p.to_string_lossy().replace('/', "\\"))
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "Cannot read extracted update directory: {e}"
+                ));
+            }
+        };
+        files.sort();
+
+        if files.is_empty() {
+            return Err(anyhow::anyhow!("Extracted archive contained no files"));
+        }
+
         let pid = std::process::id();
         let batch_path = std::env::temp_dir().join(format!("lm-update-{pid}.bat"));
 
-        // Backslash-normalize paths embedded in the batch file.
-        let new_exe = binary_path.replace('/', "\\");
-        let cur_exe = current_exe.to_string_lossy().replace('/', "\\");
-
         // The batch file:
-        //   :check  — loop until this PID disappears from tasklist
-        //   copy    — overwrite the old exe with the new one
-        //   start   — relaunch from the same path
-        //   del     — self-destruct
+        //   :check      — loop until this PID disappears from tasklist
+        //   copy        — copy each release file into the install directory
+        //   start       — relaunch from the same path
+        //   rmdir       — clean temp extract directory
+        //   del         — self-destruct
         //
-        // `find /I "exe"` matches any .exe line in tasklist output for the given
-        // PID. When the process exits, tasklist returns only the header, no match.
+        // We copy ALL files instead of only llama-monitor.exe so that
+        // sensor_bridge.exe and WebView2Loader.dll are updated in-place.
+        let copy_lines: String = files
+            .iter()
+            .map(|src| {
+                let src_batch = src.replace('\\', "\\\\");
+                format!(
+                    "    for %%F in (\"{src_batch}\") do copy /Y \"%%F\" \"{install_dir}\\%%~nxF\"\r\n",
+                    src_batch = src_batch,
+                    install_dir = install_dir.replace('\\', "\\\\"),
+                )
+            })
+            .collect();
+
         let batch = format!(
             "@echo off\r\n\
              :check\r\n\
@@ -4076,9 +4129,14 @@ Start-Sleep -Seconds 2\""
                  timeout /t 1 /nobreak >NUL\r\n\
                  goto check\r\n\
              )\r\n\
-             copy /Y \"{new_exe}\" \"{cur_exe}\"\r\n\
-             start \"\" \"{cur_exe}\"\r\n\
-             (goto) 2>NUL & del \"%~f0\"\r\n"
+             {copy_lines}\
+             start \"\" \"{install_dir}\\\\llama-monitor.exe\"\r\n\
+             rmdir /S /Q \"{extract_dir}\"\r\n\
+             (goto) 2>NUL & del \"%~f0\"\r\n",
+            pid = pid,
+            copy_lines = copy_lines,
+            install_dir = install_dir.replace('\\', "\\\\"),
+            extract_dir = extract_dir.replace('\\', "\\\\"),
         );
 
         fs::write(&batch_path, &batch)
