@@ -871,6 +871,12 @@ pub struct ModelMetadata {
     /// Effective active parameters in billions (dense = total; MoE = backbone + active
     /// experts). Backend-computed so the spawn wizard's arch label matches the editor.
     pub active_params_b: Option<f64>,
+    /// Exact bytes per transformer layer, measured from the GGUF tensor directory.
+    /// VRAM occupied by each `-ngl` layer on the GPU (dense). Real data, not an estimate.
+    pub bytes_per_layer: Option<u64>,
+    /// Exact routed-expert bytes per MoE layer, measured from the tensor directory.
+    /// VRAM freed per layer offloaded via `--n-cpu-moe`.
+    pub expert_bytes_per_layer: Option<u64>,
     // ── MoE ─────────────────────────────────────────────────────────────────
     /// Total experts per layer (from `n_experts` / `expert_count` / `n_exp`).
     pub n_experts: Option<u32>,

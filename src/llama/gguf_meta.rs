@@ -152,6 +152,21 @@ pub struct GgufMetadata {
     /// KV head count on local (sliding-window) layers, read from the per-layer
     /// `{arch}.attention.head_count_kv` array at a local position.
     pub local_kv_heads: Option<u32>,
+
+    // ── Measured tensor sizes (from the GGUF tensor directory, not metadata) ──────
+    // These are exact byte counts read from the on-disk tensor layout — no estimation.
+    // Only populated when parsing a complete local file (not range-fetched prefixes).
+    /// Sum of all tensor (weight) bytes on disk.
+    pub tensor_bytes_total: Option<u64>,
+    /// Sum of bytes in repeating per-layer blocks (`blk.*` tensors).
+    pub layer_bytes_total: Option<u64>,
+    /// Sum of bytes in routed-expert FFN tensors (`*_exps.*`) — the exact portion
+    /// `--n-cpu-moe` moves to CPU/RAM per offloaded layer.
+    pub expert_bytes_total: Option<u64>,
+    /// Number of distinct layers that contain routed-expert tensors (the `--n-cpu-moe`
+    /// denominator). For most MoE models this equals `block_count`, but some have a few
+    /// leading dense layers.
+    pub moe_layer_count: Option<u32>,
 }
 
 impl GgufMetadata {
@@ -300,6 +315,25 @@ impl GgufMetadata {
         }
     }
 
+    /// Exact bytes per repeating transformer block, measured from the tensor directory.
+    /// `layer_bytes_total / block_count`. This is the VRAM each `-ngl` layer occupies on
+    /// the GPU (dense models) — real on-disk data, not an estimate. `None` when tensor
+    /// sizes were not measured (e.g. range-fetched prefixes) or `block_count` is unknown.
+    pub fn bytes_per_layer(&self) -> Option<u64> {
+        let total = self.layer_bytes_total?;
+        let n = self.block_count? as u64;
+        (n > 0).then(|| total / n)
+    }
+
+    /// Exact routed-expert bytes per MoE layer, measured from the tensor directory.
+    /// `expert_bytes_total / moe_layer_count`. This is the VRAM freed per layer offloaded
+    /// via `--n-cpu-moe`. `None` for dense models or when tensor sizes were not measured.
+    pub fn expert_bytes_per_layer(&self) -> Option<u64> {
+        let total = self.expert_bytes_total?;
+        let n = self.moe_layer_count? as u64;
+        (n > 0).then(|| total / n)
+    }
+
     /// Convert to the `ModelMetadata` type used by the spawn wizard / VRAM estimator.
     ///
     /// Sets `gguf_arch` so that renamed finetunes (e.g. "Pantheon-27B" from a
@@ -322,6 +356,8 @@ impl GgufMetadata {
             gguf_arch: self.architecture.clone(),
             architecture_kind: Some(self.architecture_kind()),
             active_params_b: self.active_params_b(),
+            bytes_per_layer: self.bytes_per_layer(),
+            expert_bytes_per_layer: self.expert_bytes_per_layer(),
             n_experts: self.expert_count,
             n_experts_used: self.expert_used_count,
             mtp_depth: self.mtp_depth,
@@ -363,7 +399,9 @@ fn simple_moe_active_b(total: u64, n_experts: u32, n_used: u32) -> f64 {
 /// is not a valid GGUF file, or uses an unsupported version.
 pub fn read_gguf_metadata(path: &Path) -> Result<GgufMetadata, String> {
     let file = File::open(path).map_err(|e| format!("Cannot open '{}': {e}", path.display()))?;
-    read_gguf_metadata_reader(BufReader::with_capacity(64 * 1024, file))
+    // Exact file size lets us measure per-tensor bytes from the tensor directory layout.
+    let file_size = file.metadata().ok().map(|m| m.len());
+    read_gguf_metadata_reader(BufReader::with_capacity(64 * 1024, file), file_size)
 }
 
 /// Parse GGUF metadata from an in-memory buffer — e.g. the first few MB of a remote file
@@ -372,12 +410,16 @@ pub fn read_gguf_metadata(path: &Path) -> Result<GgufMetadata, String> {
 /// unexpected-EOF) if the buffer is shorter than the full KV header, so callers can retry
 /// with a larger prefix.
 pub fn read_gguf_metadata_from_bytes(buf: &[u8]) -> Result<GgufMetadata, String> {
-    read_gguf_metadata_reader(std::io::Cursor::new(buf))
+    // A prefix buffer lacks the tensor blob, so we cannot measure tensor sizes here.
+    read_gguf_metadata_reader(std::io::Cursor::new(buf), None)
 }
 
 /// Core parser shared by the file- and buffer-based entry points. Works over any
 /// seekable reader; reads only the KV-metadata header.
-pub fn read_gguf_metadata_reader<R: Read + Seek>(mut r: R) -> Result<GgufMetadata, String> {
+pub fn read_gguf_metadata_reader<R: Read + Seek>(
+    mut r: R,
+    file_size: Option<u64>,
+) -> Result<GgufMetadata, String> {
     // Magic
     let mut magic = [0u8; 4];
     r.read_exact(&mut magic)
@@ -393,7 +435,7 @@ pub fn read_gguf_metadata_reader<R: Read + Seek>(mut r: R) -> Result<GgufMetadat
     }
 
     // tensor_count and kv_count (u32 in v1, u64 in v2+)
-    let (_tensor_count, kv_count) = if version == 1 {
+    let (tensor_count, kv_count) = if version == 1 {
         (read_u32(&mut r)? as u64, read_u32(&mut r)? as u64)
     } else {
         (read_u64(&mut r)?, read_u64(&mut r)?)
@@ -492,7 +534,126 @@ pub fn read_gguf_metadata_reader<R: Read + Seek>(mut r: R) -> Result<GgufMetadat
         }
     }
 
+    // ── Measure exact tensor sizes from the tensor directory ──────────────────────
+    // The reader is now positioned at the start of the tensor-info section (the KV loop
+    // read everything before it). Only attempt this for complete local files (file_size
+    // known); range-fetched prefixes lack the tensor blob. Failures are non-fatal — the
+    // architecture metadata above is already populated.
+    if let Some(fsize) = file_size {
+        let alignment = kv
+            .get("general.alignment")
+            .and_then(KvValue::as_u32)
+            .unwrap_or(32) as u64;
+        if let Ok(sizes) = parse_tensor_directory(&mut r, version, tensor_count, alignment, fsize) {
+            meta.tensor_bytes_total = Some(sizes.tensor_bytes_total);
+            meta.layer_bytes_total = Some(sizes.layer_bytes_total);
+            meta.expert_bytes_total = Some(sizes.expert_bytes_total);
+            meta.moe_layer_count = Some(sizes.moe_layer_count);
+        }
+    }
+
     Ok(meta)
+}
+
+/// Aggregated tensor byte sizes measured from the GGUF tensor directory.
+struct TensorSizes {
+    tensor_bytes_total: u64,
+    layer_bytes_total: u64,
+    expert_bytes_total: u64,
+    moe_layer_count: u32,
+}
+
+/// Parse the GGUF tensor-info directory and compute exact per-tensor byte sizes.
+///
+/// GGUF lays out tensor data contiguously in directory order, each tensor starting at an
+/// aligned `offset` relative to the tensor-data section. We derive each tensor's size from
+/// the gap to the next offset (and the final tensor from the end of the file), which is
+/// exact regardless of quantization type — including future/unknown quant formats. Tensors
+/// are then classified by name: `blk.*` are repeating layers; `*_exps.*` are routed-expert
+/// FFN weights (what `--n-cpu-moe` offloads).
+fn parse_tensor_directory<R: Read + Seek>(
+    r: &mut R,
+    version: u32,
+    tensor_count: u64,
+    alignment: u64,
+    file_size: u64,
+) -> Result<TensorSizes, String> {
+    if tensor_count == 0 || tensor_count > 1_000_000 {
+        return Err(format!("Implausible tensor_count {tensor_count}"));
+    }
+
+    // (name, offset) for each tensor.
+    let mut infos: Vec<(String, u64)> = Vec::with_capacity(tensor_count as usize);
+    for _ in 0..tensor_count {
+        let name = read_str(r, version)?;
+        let n_dims = read_u32(r)?;
+        if n_dims > 8 {
+            return Err(format!("Implausible tensor n_dims {n_dims}"));
+        }
+        for _ in 0..n_dims {
+            // GGUF v1 stored dimensions as u32; v2+ as u64.
+            if version == 1 {
+                read_u32(r)?;
+            } else {
+                read_u64(r)?;
+            }
+        }
+        let _ggml_type = read_u32(r)?;
+        let offset = read_u64(r)?;
+        infos.push((name, offset));
+    }
+
+    // Tensor data begins after the directory, padded up to `alignment`.
+    let pos = r
+        .stream_position()
+        .map_err(|e| format!("stream_position failed: {e}"))?;
+    let align = alignment.max(1);
+    let data_start = pos.div_ceil(align) * align;
+    if data_start > file_size {
+        return Err("tensor data start beyond EOF".into());
+    }
+    let data_len = file_size - data_start;
+
+    // Sizes from offset deltas (offsets are relative to data_start, in ascending order
+    // once sorted). The last tensor runs to the end of the data section.
+    let mut order: Vec<usize> = (0..infos.len()).collect();
+    order.sort_by_key(|&i| infos[i].1);
+
+    let mut tensor_bytes_total: u64 = 0;
+    let mut layer_bytes_total: u64 = 0;
+    let mut expert_bytes_total: u64 = 0;
+    let mut moe_layers: std::collections::HashSet<u32> = std::collections::HashSet::new();
+
+    for k in 0..order.len() {
+        let i = order[k];
+        let start = infos[i].1;
+        let end = if k + 1 < order.len() {
+            infos[order[k + 1]].1
+        } else {
+            data_len
+        };
+        let size = end.saturating_sub(start);
+        let name = &infos[i].0;
+
+        tensor_bytes_total += size;
+        if let Some(rest) = name.strip_prefix("blk.") {
+            layer_bytes_total += size;
+            // Routed-expert FFN weights, e.g. `blk.3.ffn_gate_exps.weight`.
+            if name.contains("_exps") {
+                expert_bytes_total += size;
+                if let Some(idx) = rest.split('.').next().and_then(|s| s.parse::<u32>().ok()) {
+                    moe_layers.insert(idx);
+                }
+            }
+        }
+    }
+
+    Ok(TensorSizes {
+        tensor_bytes_total,
+        layer_bytes_total,
+        expert_bytes_total,
+        moe_layer_count: moe_layers.len() as u32,
+    })
 }
 
 // ── Internal value type ───────────────────────────────────────────────────────
@@ -788,6 +949,56 @@ mod tests {
         Str(String),
     }
 
+    /// Build a GGUF v3 byte stream with a real tensor directory + blob, so the exact
+    /// per-tensor size measurement (offset deltas + final file size) can be tested.
+    /// `tensors` is a list of `(name, byte_size)`; sizes should be multiples of 32.
+    fn make_gguf_with_tensors(kv: &[(&str, KvEntry)], tensors: &[(&str, u64)]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"GGUF");
+        out.extend_from_slice(&3u32.to_le_bytes());
+        out.extend_from_slice(&(tensors.len() as u64).to_le_bytes()); // tensor_count
+        out.extend_from_slice(&(kv.len() as u64).to_le_bytes());
+
+        for (key, entry) in kv {
+            out.extend_from_slice(&(key.len() as u64).to_le_bytes());
+            out.extend_from_slice(key.as_bytes());
+            match entry {
+                KvEntry::U32(v) => {
+                    out.extend_from_slice(&GgufType::Uint32.as_u32().to_le_bytes());
+                    out.extend_from_slice(&v.to_le_bytes());
+                }
+                KvEntry::U64(v) => {
+                    out.extend_from_slice(&GgufType::Uint64.as_u32().to_le_bytes());
+                    out.extend_from_slice(&v.to_le_bytes());
+                }
+                KvEntry::Str(s) => {
+                    out.extend_from_slice(&GgufType::String.as_u32().to_le_bytes());
+                    out.extend_from_slice(&(s.len() as u64).to_le_bytes());
+                    out.extend_from_slice(s.as_bytes());
+                }
+            }
+        }
+
+        // Tensor directory: cumulative offsets, n_dims=1, dims=[1], type=F32(0).
+        let mut offset: u64 = 0;
+        for (name, size) in tensors {
+            out.extend_from_slice(&(name.len() as u64).to_le_bytes());
+            out.extend_from_slice(name.as_bytes());
+            out.extend_from_slice(&1u32.to_le_bytes()); // n_dims
+            out.extend_from_slice(&1u64.to_le_bytes()); // dims[0]
+            out.extend_from_slice(&0u32.to_le_bytes()); // ggml_type = F32
+            out.extend_from_slice(&offset.to_le_bytes());
+            offset += size;
+        }
+
+        // Pad to the default 32-byte alignment, then append a blob = sum(sizes).
+        let align = 32usize;
+        let pad = (align - (out.len() % align)) % align;
+        out.extend(std::iter::repeat_n(0u8, pad));
+        out.extend(std::iter::repeat_n(0u8, offset as usize));
+        out
+    }
+
     fn read_from_bytes(bytes: &[u8]) -> Result<GgufMetadata, String> {
         let tmp = tempfile::NamedTempFile::new().map_err(|e| format!("tempfile: {e}"))?;
         std::fs::write(tmp.path(), bytes).map_err(|e| format!("write: {e}"))?;
@@ -813,6 +1024,43 @@ mod tests {
         assert_eq!(meta.key_length, Some(256));
         assert_eq!(meta.context_length, Some(262144));
         assert!((meta.param_b().unwrap() - 27.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn measures_exact_tensor_sizes_from_directory() {
+        let kv = [
+            ("general.architecture", KvEntry::Str("qwen3_6".into())),
+            ("qwen3_6.block_count", KvEntry::U32(2)),
+            ("qwen3_6.expert_count", KvEntry::U32(8)),
+            ("qwen3_6.expert_used_count", KvEntry::U32(2)),
+        ];
+        // Two layers, each with a small attention tensor + a large routed-expert tensor,
+        // plus non-layer embedding/output tensors.
+        let tensors = [
+            ("token_embd.weight", 1024u64),
+            ("blk.0.attn_q.weight", 512),
+            ("blk.0.ffn_gate_exps.weight", 4096),
+            ("blk.1.attn_q.weight", 512),
+            ("blk.1.ffn_gate_exps.weight", 4096),
+            ("output.weight", 1024),
+        ];
+        let bytes = make_gguf_with_tensors(&kv, &tensors);
+
+        // The file-size-aware reader measures exact tensor bytes from offset deltas.
+        let meta =
+            read_gguf_metadata_reader(std::io::Cursor::new(&bytes), Some(bytes.len() as u64))
+                .unwrap();
+        assert_eq!(meta.tensor_bytes_total, Some(11264)); // sum of all
+        assert_eq!(meta.layer_bytes_total, Some(9216)); // blk.* only
+        assert_eq!(meta.expert_bytes_total, Some(8192)); // *_exps only
+        assert_eq!(meta.moe_layer_count, Some(2));
+        assert_eq!(meta.bytes_per_layer(), Some(4608)); // 9216 / 2 layers
+        assert_eq!(meta.expert_bytes_per_layer(), Some(4096)); // 8192 / 2 moe layers
+
+        // Without a known file size (e.g. range-fetched prefix) sizes are not measured.
+        let meta_prefix = read_gguf_metadata_reader(std::io::Cursor::new(&bytes), None).unwrap();
+        assert_eq!(meta_prefix.tensor_bytes_total, None);
+        assert_eq!(meta_prefix.bytes_per_layer(), None);
     }
 
     #[test]

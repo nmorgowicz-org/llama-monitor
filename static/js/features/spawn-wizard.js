@@ -2085,11 +2085,16 @@ function updateSelectedModelArchLabel() {
   const nLayers = wizardState.arch.nLayers || 0;
   const layerStr = nLayers > 0 ? ` This model has ${nLayers} layers` : '';
   if (archKind === 'moe' || archKind === 'hybrid_moe') {
+    // Real measured routed-expert bytes per MoE layer (the VRAM --n-cpu-moe frees).
+    const perExpert = wizardState.arch.expertBytesPerLayer || 0;
+    const perExpertStr = perExpert > 0 ? ` (~${formatBytes(perExpert)} freed per offloaded layer)` : '';
     note.textContent = 'MoE / Hybrid MoE: only a subset of parameters active per token; often more efficient.' +
-        (layerStr ? layerStr + ' — set --n-cpu-moe between 0 and ' + nLayers + ' to offload expert layers to CPU/RAM.' : '');
+        (layerStr ? layerStr + ' — set --n-cpu-moe between 0 and ' + nLayers + ' to offload expert layers to CPU/RAM' + perExpertStr + '.' : '');
   } else if (archKind === 'dense') {
+    const perLayer = wizardState.arch.bytesPerLayer || 0;
+    const perLayerStr = perLayer > 0 ? ` (~${formatBytes(perLayer)} of VRAM each)` : '';
     note.textContent = 'Dense: all parameters used each token.' +
-        (layerStr ? layerStr + ' — set --gpu-layers (-ngl) between 0 and ' + nLayers + ' to offload layers to the GPU.' : '');
+        (layerStr ? layerStr + perLayerStr + ' — set --gpu-layers (-ngl) between 0 and ' + nLayers + ' to offload layers to the GPU.' : '');
   }
   container.appendChild(note);
 }
@@ -2221,6 +2226,9 @@ async function doIntrospect(path) {
     // same computation the preset editor uses, so the wizard label matches it).
     if (m.architecture_kind) wizardState.arch.archKind = m.architecture_kind;
     if (m.active_params_b != null) wizardState.model.activeParamsB = m.active_params_b;
+    // Exact per-layer byte sizes measured from the GGUF tensor directory (real data).
+    if (m.bytes_per_layer != null) wizardState.arch.bytesPerLayer = m.bytes_per_layer;
+    if (m.expert_bytes_per_layer != null) wizardState.arch.expertBytesPerLayer = m.expert_bytes_per_layer;
 
     // Re-fetch sampling defaults now that gguf_arch is known — the earlier call
     // (on hardware step entry) ran before introspection completed and sent an empty
@@ -2370,7 +2378,10 @@ async function doIntrospect(path) {
     const nglHint = document.getElementById('spawn-gpu-layers-manual-hint');
     if (nglHint) {
       if (nLayers > 0) {
-        nglHint.textContent = `This model has ${nLayers} layers. Enter 0–${nLayers}: layers above your value stay on CPU/RAM (e.g. ${Math.max(0, nLayers - 4)} keeps 4 layers off the GPU).`;
+        // Real per-layer VRAM from the GGUF tensor directory when available.
+        const perLayer = wizardState.arch.bytesPerLayer || 0;
+        const perLayerStr = perLayer > 0 ? ` (~${formatBytes(perLayer)} of VRAM each)` : '';
+        nglHint.textContent = `This model has ${nLayers} layers${perLayerStr}. Enter 0–${nLayers}: layers above your value stay on CPU/RAM (e.g. ${Math.max(0, nLayers - 4)} keeps 4 layers off the GPU).`;
         nglHint.style.display = '';
       } else {
         nglHint.style.display = 'none';

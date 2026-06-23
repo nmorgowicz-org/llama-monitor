@@ -245,6 +245,14 @@ pub struct ModelPreset {
     /// tune `--n-cpu-moe`, which offloads expert layers and is bounded by this count.
     #[serde(default)]
     pub block_count: Option<u32>,
+    /// Exact bytes per transformer layer, measured from the GGUF tensor directory
+    /// (not estimated). The VRAM each `-ngl` layer occupies on the GPU.
+    #[serde(default)]
+    pub bytes_per_layer: Option<u64>,
+    /// Exact routed-expert bytes per MoE layer, measured from the tensor directory.
+    /// The VRAM freed per layer offloaded via `--n-cpu-moe`.
+    #[serde(default)]
+    pub expert_bytes_per_layer: Option<u64>,
 }
 
 pub fn next_id() -> String {
@@ -293,6 +301,7 @@ fn backfill_gguf_metadata(path: &Path, presets: &mut [ModelPreset]) {
             preset.active_params_b,
             preset.gguf_architecture.clone(),
             preset.block_count,
+            preset.bytes_per_layer,
         );
         ensure_gguf_metadata(preset);
         let after = (
@@ -300,6 +309,7 @@ fn backfill_gguf_metadata(path: &Path, presets: &mut [ModelPreset]) {
             preset.active_params_b,
             preset.gguf_architecture.clone(),
             preset.block_count,
+            preset.bytes_per_layer,
         );
         if before != after {
             changed = true;
@@ -340,6 +350,8 @@ impl ModelPreset {
         self.expert_used_count = None;
         self.active_params_b = None;
         self.block_count = None;
+        self.bytes_per_layer = None;
+        self.expert_bytes_per_layer = None;
     }
 }
 
@@ -363,6 +375,7 @@ pub fn ensure_gguf_metadata(preset: &mut ModelPreset) {
         && preset.architecture_kind.is_some()
         && preset.active_params_b.is_some()
         && preset.block_count.is_some()
+        && preset.bytes_per_layer.is_some()
     {
         return;
     }
@@ -410,6 +423,13 @@ pub fn ensure_gguf_metadata(preset: &mut ModelPreset) {
     }
     if preset.block_count.is_none() {
         preset.block_count = meta.block_count;
+    }
+    // Exact per-layer byte sizes measured from the tensor directory (real data).
+    if preset.bytes_per_layer.is_none() {
+        preset.bytes_per_layer = meta.bytes_per_layer();
+    }
+    if preset.expert_bytes_per_layer.is_none() {
+        preset.expert_bytes_per_layer = meta.expert_bytes_per_layer();
     }
 
     // Derive architecture_kind + active_params_b from the shared GgufMetadata helpers

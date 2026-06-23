@@ -1032,7 +1032,11 @@ export function openPresetModal(mode, section) {
             else if (nMoeEl) nMoeEl.removeAttribute('max');
             if (moeLayersHint) {
                 if (p.block_count != null) {
-                    moeLayersHint.textContent = `This model has ${p.block_count} expert layers — values are clamped to 0–${p.block_count}.`;
+                    // Real measured routed-expert bytes per MoE layer (VRAM freed per offload).
+                    const freed = p.expert_bytes_per_layer
+                        ? ` Each offloaded layer frees ~${_formatLayerBytes(p.expert_bytes_per_layer)} of VRAM.`
+                        : '';
+                    moeLayersHint.textContent = `This model has ${p.block_count} expert layers — values are clamped to 0–${p.block_count}.${freed}`;
                     moeLayersHint.style.display = '';
                 } else {
                     moeLayersHint.style.display = 'none';
@@ -1054,7 +1058,11 @@ export function openPresetModal(mode, section) {
         if (nglHint) {
             if (p.block_count != null) {
                 const off = Math.max(0, p.block_count - 4);
-                nglHint.textContent = `This model has ${p.block_count} layers. Enter 0–${p.block_count}: layers above your value stay on CPU/RAM (e.g. ${off} keeps 4 layers off the GPU).`;
+                // Real measured per-layer weight bytes (VRAM each GPU layer occupies).
+                const perLayer = p.bytes_per_layer
+                    ? ` (~${_formatLayerBytes(p.bytes_per_layer)} of VRAM each)`
+                    : '';
+                nglHint.textContent = `This model has ${p.block_count} layers${perLayer}. Enter 0–${p.block_count}: layers above your value stay on CPU/RAM (e.g. ${off} keeps 4 layers off the GPU).`;
                 nglHint.style.display = '';
             } else {
                 nglHint.style.display = 'none';
@@ -2112,6 +2120,13 @@ async function _restartServerWithPreset(presetId) {
 }
 
 // ── Model architecture info (preset editor) ───────────────────────────────────
+
+// Format a byte count as GiB/MiB for per-layer VRAM hints.
+function _formatLayerBytes(bytes) {
+    const gib = bytes / (1024 ** 3);
+    if (gib >= 1) return gib.toFixed(gib >= 10 ? 0 : 2) + ' GiB';
+    return Math.round(bytes / (1024 ** 2)) + ' MiB';
+}
 
 function _renderPresetArchInfo(preset) {
     const container = document.getElementById('pe-arch-info');
