@@ -30,8 +30,18 @@ pub struct ModelArch {
     pub n_experts_used: u32,
     /// Fraction of total model params that are expert FFN blocks.
     /// Typical range 0.55–0.75; default 0.65 when unknown.
+    /// Used only as a fallback when `expert_bytes_per_layer` is not measured.
     #[serde(default = "default_expert_fraction")]
     pub expert_fraction: f64,
+    /// Exact routed-expert bytes per MoE layer, measured from the GGUF tensor
+    /// directory (0 = unmeasured → fall back to `expert_fraction`). This is the
+    /// VRAM freed per layer offloaded via `--n-cpu-moe`.
+    #[serde(default)]
+    pub expert_bytes_per_layer: u64,
+    /// Number of layers that carry routed experts (the `--n-cpu-moe` denominator;
+    /// 0 = unknown → fall back to `n_layers`). Measured from the tensor directory.
+    #[serde(default)]
+    pub moe_layer_count: u32,
 
     // ── Sliding-window global head dimension (Gemma 4 style) ────────────────
     /// Head dimension for global (full-context) attention layers.

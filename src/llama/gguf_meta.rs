@@ -358,6 +358,7 @@ impl GgufMetadata {
             active_params_b: self.active_params_b(),
             bytes_per_layer: self.bytes_per_layer(),
             expert_bytes_per_layer: self.expert_bytes_per_layer(),
+            moe_layer_count: self.moe_layer_count,
             n_experts: self.expert_count,
             n_experts_used: self.expert_used_count,
             mtp_depth: self.mtp_depth,

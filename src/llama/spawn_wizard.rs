@@ -877,6 +877,8 @@ pub struct ModelMetadata {
     /// Exact routed-expert bytes per MoE layer, measured from the tensor directory.
     /// VRAM freed per layer offloaded via `--n-cpu-moe`.
     pub expert_bytes_per_layer: Option<u64>,
+    /// Number of layers carrying routed experts (the `--n-cpu-moe` denominator).
+    pub moe_layer_count: Option<u32>,
     // ── MoE ─────────────────────────────────────────────────────────────────
     /// Total experts per layer (from `n_experts` / `expert_count` / `n_exp`).
     pub n_experts: Option<u32>,
@@ -1020,6 +1022,9 @@ impl ModelMetadata {
             n_experts: self.n_experts.unwrap_or(heuristic.n_experts),
             n_experts_used: self.n_experts_used.unwrap_or(heuristic.n_experts_used),
             expert_fraction: heuristic.expert_fraction,
+            // Exact measured expert bytes (0 when unmeasured → heuristic fallback).
+            expert_bytes_per_layer: self.expert_bytes_per_layer.unwrap_or(0),
+            moe_layer_count: self.moe_layer_count.unwrap_or(0),
             mtp_depth: self.mtp_depth.unwrap_or(heuristic.mtp_depth),
             global_head_dim: global_head_dim_resolved,
             mmproj_bytes: 0, // filled in separately when mmproj path is known
