@@ -139,11 +139,12 @@ jobs:
         run: npm run lint
 
   ui:
-    needs: [paths-filter, check]
+    needs: [paths-filter, check, check-windows]
     timeout-minutes: 60
     if: >-
       always() &&
       needs.check.result != 'failure' &&
+      needs.check-windows.result != 'failure' &&
       !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
       (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
       needs.paths-filter.outputs.ui == 'true' &&
@@ -232,11 +233,12 @@ jobs:
           retention-days: 1
 
   release-smoke:
-    needs: [paths-filter, check]
+    needs: [paths-filter, check, check-windows]
     timeout-minutes: 90
     if: >-
       always() &&
       needs.check.result != 'failure' &&
+      needs.check-windows.result != 'failure' &&
       !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
       (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
       needs.paths-filter.outputs.release == 'true' &&
@@ -311,11 +313,12 @@ jobs:
         run: cargo clippy --target x86_64-pc-windows-gnu --no-default-features --features native-tray,webview-popover -- -D warnings
 
   release-smoke-rest:
-    needs: [paths-filter, check, release-smoke]
+    needs: [paths-filter, check, check-windows, release-smoke]
     timeout-minutes: 90
     if: >-
       always() &&
       needs.check.result != 'failure' &&
+      needs.check-windows.result != 'failure' &&
       needs.release-smoke.result != 'failure' &&
       !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
       (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
