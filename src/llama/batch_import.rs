@@ -705,6 +705,12 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         n_cpu_moe,
         gpu_layers,
         mlock: false,
+
+        // Architecture metadata fields (populated later via ensure_gguf_metadata).
+        architecture_kind: None,
+        expert_count: None,
+        expert_used_count: None,
+        active_params_b: None,
         flash_attn: String::new(),
         split_mode: String::new(),
         main_gpu: None,

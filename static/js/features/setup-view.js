@@ -41,6 +41,82 @@ function classifyPreset(preset) {
     return { family, sizeClass };
 }
 
+/**
+ * Build an architecture label for a preset/model.
+ * Returns { display, tooltip } or null.
+ * Exposed globally so spawn-wizard and presets can reuse without duplication.
+ */
+export function buildArchitectureLabel(p, c) {
+    var kind = p.architecture_kind;
+    var activeB = p.active_params_b;
+    var totalB = p.param_count
+        ? p.param_count / 1e9
+        : (c && c.paramB) || null;
+
+    if (!kind || (kind !== 'moe' && kind !== 'hybrid_moe' && !totalB)) {
+        return null;
+    }
+
+    var fmt = function (v) {
+        if (v == null) return null;
+        var r = Number(v);
+        if (Number.isFinite(r)) {
+            if (r >= 10) return Math.round(r) + 'B';
+            if (r % 1 === 0) return r + 'B';
+            return r.toFixed(1) + 'B';
+        }
+        return null;
+    };
+
+    var activeStr = fmt(activeB);
+    var totalStr = fmt(totalB);
+
+    // Append "— N experts, M active per token" when either count is known.
+    var withExpertSuffix = function (tip) {
+        if (p.expert_count == null && p.expert_used_count == null) return tip;
+        var ec = p.expert_count != null ? p.expert_count : '*';
+        var uc = p.expert_used_count != null ? p.expert_used_count : '*';
+        return tip + ' — ' + ec + ' experts, ' + uc + ' active per token';
+    };
+
+    if (kind === 'dense') {
+        if (totalStr) {
+            return {
+                display: 'Dense • ' + totalStr,
+                tooltip: 'All ' + totalStr + ' parameters active per token'
+            };
+        }
+        return null;
+    }
+
+    if (kind === 'moe' || kind === 'hybrid_moe') {
+        if (totalStr && activeStr) {
+            var isHybrid = kind === 'hybrid_moe';
+            var tip = isHybrid
+                ? 'MoE + hybrid attention (fewer full-KV layers) — often faster at long context'
+                : 'MoE: only a subset of parameters active per token';
+            return {
+                display: (isHybrid ? 'Hybrid MoE • ' : 'MoE • ') +
+                    totalStr + ' (' + activeStr + ' active)',
+                tooltip: withExpertSuffix(tip)
+            };
+        }
+        return null;
+    }
+
+    return null;
+}
+
+// ── MoE CPU offload eligibility ───────────────────────────────────────────────
+// --n-cpu-moe is only valid for MoE / hybrid-moE models with real experts.
+// For dense models, it either does nothing or misbehaves in llama.cpp.
+export function isMoEEligible(p) {
+    if (!p) return false;
+    const kind = p.architecture_kind;
+    const experts = p.expert_count || 0;
+    return (kind === 'moe' || kind === 'hybrid_moe') && experts > 0;
+}
+
 // ── Quantization tag extraction ───────────────────────────────────────────────
 
 function extractQuantFromFilename(filename) {
@@ -546,6 +622,12 @@ function _buildLaunchCard(preset, activePresetId) {
               (presetTags.length > 3 ? `<span class="launch-tag launch-tag--more">+${presetTags.length - 3}</span>` : '') +
               '</div>' : '';
 
+        // Architecture label from preset metadata (backend-driven)
+        const arch = buildArchitectureLabel(preset, c);
+        const archHtml = arch
+            ? `<div class="launch-card-arch" title="${escapeHtml(arch.tooltip)}">${escapeHtml(arch.display)}</div>`
+            : '';
+
         // eslint-disable-next-line no-unsanitized/property -- content sanitized via escapeHtml
         card.innerHTML = `
             <div class="launch-card-top">
@@ -557,6 +639,7 @@ function _buildLaunchCard(preset, activePresetId) {
                 ${sizeLabel ? `<span class="launch-meta-badge launch-meta-badge--size" title="Size class">${escapeHtml(sizeLabel)}</span>` : ''}
             </div>
             <div class="launch-card-model ${hasModel ? '' : 'launch-card-model--empty'}" title="${escapeHtml(modelFile || '')}">${escapeHtml(modelFile || 'No model configured')}</div>
+            ${archHtml}
             <div class="launch-card-chips">
                 <span class="launch-chip">${ctxDisplay}</span>
                 <span class="launch-chip">${ctkDisplay}</span>

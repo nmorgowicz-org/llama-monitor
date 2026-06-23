@@ -1,3 +1,5 @@
+import { buildArchitectureLabel, isMoEEligible } from './setup-view.js';
+
 // ── Spawn Wizard Module ───────────────────────────────────────────────────────
 // Spawn Llama-Server V2 — complete guided wizard.
 //
@@ -499,9 +501,10 @@ function cacheDom() {
   dom.importPathInput   = document.getElementById('spawn-import-path');
   dom.browseModelBtn   = document.getElementById('spawn-browse-model-btn');
   dom.importBrowseBtn  = document.getElementById('spawn-import-browse-btn');
-  dom.selectedModel     = document.getElementById('spawn-selected-model');
-  dom.selectedModelName = document.getElementById('spawn-selected-model-name');
-  dom.selectedModelMeta = document.getElementById('spawn-selected-model-meta');
+  dom.selectedModel         = document.getElementById('spawn-selected-model');
+  dom.selectedModelName     = document.getElementById('spawn-selected-model-name');
+  dom.selectedModelMeta     = document.getElementById('spawn-selected-model-meta');
+  dom.selectedModelArch     = document.getElementById('spawn-selected-model-arch');
   dom.hfFileList       = document.getElementById('spawn-hf-file-list');
   dom.quantAdvisor     = document.getElementById('quant-advisor');
   dom.quantAdvisorTable  = document.getElementById('quant-advisor-table');
@@ -2009,10 +2012,58 @@ function updateSelectedModelDisplay() {
     name = path.split(/[\\/]/).pop() || path;
     meta = path;
   }
-  if (!name) { dom.selectedModel?.classList.remove('visible'); return; }
+  if (!name) {
+    if (dom.selectedModel?.classList) dom.selectedModel.classList.remove('visible');
+    if (dom.selectedModelArch) dom.selectedModelArch.innerHTML = '';
+    return;
+  }
   dom.selectedModel?.classList.add('visible');
   if (dom.selectedModelName) dom.selectedModelName.textContent = name;
   if (dom.selectedModelMeta) dom.selectedModelMeta.textContent = meta;
+
+  // Build architecture label if we have metadata (from introspection or presets)
+  updateSelectedModelArchLabel();
+}
+
+function updateSelectedModelArchLabel() {
+  const container = dom.selectedModelArch;
+  if (!container) return;
+  container.innerHTML = '';
+
+  // Build a pseudo-preset from wizard state so we can reuse buildArchitectureLabel
+  const pseudoPreset = {
+    architecture_kind: wizardState.arch.isMoe === true
+        ? (wizardState.arch.name?.includes?.('Hybrid') || wizardState.arch.name?.includes?.('DeltaNet') ? 'hybrid_moe' : 'moe')
+        : (wizardState.arch.nLayers > 0 && !wizardState.arch.isMoe
+            ? 'dense'
+            : null),
+    expert_count: wizardState.arch.nExperts || null,
+    expert_used_count: wizardState.arch.nExpertsUsed || null,
+    active_params_b: wizardState.model.activeParamsB || null,
+    param_count: wizardState.model.paramB
+        ? wizardState.model.paramB * 1e9
+        : null,
+  };
+
+  const arch = buildArchitectureLabel(pseudoPreset, { paramB: wizardState.model.paramB });
+  if (!arch) return;
+
+  const label = document.createElement('div');
+  label.className = 'selected-model-arch-label';
+  label.textContent = arch.display;
+  label.title = arch.tooltip;
+  container.appendChild(label);
+
+  // Brief architecture note for educational clarity
+  const note = document.createElement('div');
+  note.className = 'selected-model-arch-hint';
+  const kind = pseudoPreset.architecture_kind;
+  if (kind === 'moe' || kind === 'hybrid_moe') {
+    note.textContent = 'MoE / Hybrid MoE: only a subset of parameters active per token; often more efficient.';
+  } else if (kind === 'dense') {
+    note.textContent = 'Dense: all parameters used each token.';
+  }
+  container.appendChild(note);
 }
 
 // ── Model path changed ────────────────────────────────────────────────────────
@@ -4195,16 +4246,42 @@ function updateAdvisor() {
     const hw = wizardState.hardware;
     const m = wizardState.model;
 
-    // Show the n_cpu_moe auto-tuner only for MoE models.
-    const moeBox = document.getElementById('spawn-moe-autotune');
-    if (moeBox) moeBox.style.display = (arch.nExperts || 0) > 0 ? '' : 'none';
-
     // Batch/ubatch sweep and depth sweep are available once a local .gguf is selected.
     const localGguf = !!(m.path && m.path.toLowerCase().endsWith('.gguf'));
     const batchSweepBox = document.getElementById('wizard-batch-sweep');
     if (batchSweepBox) batchSweepBox.style.display = localGguf ? '' : 'none';
     const sweepBox = document.getElementById('wizard-depth-sweep');
     if (sweepBox) sweepBox.style.display = localGguf ? '' : 'none';
+
+    // Confident MoE only: explicit isMoe flag, or expert counts from introspection.
+    const moeConfident =
+        wizardState.arch.isMoe === true ||
+        (wizardState.arch.nExperts > 0 && wizardState.arch.nExpertsUsed > 0);
+
+    const nCpuMoeInput = document.getElementById('spawn-n-cpu-moe');
+    if (nCpuMoeInput) {
+        const field = nCpuMoeInput.closest('.hardware-field') || nCpuMoeInput.parentElement;
+        if (field) field.style.display = moeConfident ? '' : 'none';
+        else nCpuMoeInput.style.display = moeConfident ? '' : 'none';
+    }
+
+    const moeBox = document.getElementById('spawn-moe-autotune');
+    if (moeBox) moeBox.style.display = moeConfident ? '' : 'none';
+
+    // On Apple Silicon / unified memory: warn that n_cpu_moe is for discrete GPUs
+    const hintEl = document.getElementById('spawn-n-cpu-moe-hint');
+    if (hintEl) {
+        const isAppleUnified = isUnifiedMemory();
+        if (moeConfident && isAppleUnified) {
+            hintEl.style.display = '';
+            hintEl.textContent = 'For discrete GPUs only. On Apple Silicon (unified memory), this usually slows performance—leave at Auto.';
+        } else if (moeConfident) {
+            hintEl.style.display = '';
+            hintEl.textContent = 'Useful on discrete GPUs: offload some MoE expert layers to CPU RAM when VRAM is limited.';
+        } else {
+            hintEl.style.display = 'none';
+        }
+    }
 
     const name = (m.path || m.hfFile || m.hfRepo || m.originFile || '').split('/').pop() || '';
     const paramB = arch.paramB || m.paramB || 0;
