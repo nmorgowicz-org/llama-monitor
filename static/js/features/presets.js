@@ -4,6 +4,7 @@
 
 import { sessionState, lastSystemMetrics } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
+import { buildArchitectureLabel } from './setup-view.js';
 import { openModelFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
 import { applySettings, saveSettings } from './settings.js';
 import { showToast, showToastWithActions, showConfirmDialog } from './toast.js';
@@ -970,6 +971,7 @@ export function openPresetModal(mode, section) {
         // - Else if hf_repo present, treat as HF repo.
         const modelValue = p.model_path || p.hf_repo || '';
         setVal('modal-model-path', modelValue);
+        _renderPresetArchInfo(p);
         setVal('modal-alias', p.alias || '');
         numOrEmpty('modal-gpu-layers', p.gpu_layers);
         setChk('modal-no-mmap', p.no_mmap);
@@ -2063,6 +2065,47 @@ async function _restartServerWithPreset(presetId) {
     showToast('llama-server restarted', 'success', '', { duration: 6000 });
 }
 
+// ── Model architecture info (preset editor) ───────────────────────────────────
+
+function _renderPresetArchInfo(preset) {
+    const container = document.getElementById('pe-arch-info');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const arch = buildArchitectureLabel(preset, null);
+    if (!arch) return;
+
+    // Main line: "Architecture: MoE • 35B (3B active)"
+    const main = document.createElement('div');
+    main.className = 'pe-arch-main';
+    main.textContent = 'Architecture: ' + arch.display;
+    main.title = arch.tooltip;
+
+    // Expert sub-line (if present)
+    if (preset.expert_count != null || preset.expert_used_count != null) {
+        const sub = document.createElement('div');
+        sub.className = 'pe-arch-sub';
+        const parts = [];
+        if (preset.expert_count != null) {
+            parts.push(preset.expert_count + ' experts');
+        }
+        if (preset.expert_used_count != null) {
+            parts.push(preset.expert_used_count + ' active per token');
+        }
+        sub.textContent = parts.join(', ');
+        container.appendChild(main);
+        container.appendChild(sub);
+    } else {
+        container.appendChild(main);
+    }
+}
+
+// Clear architecture info when model path changes so it doesn't show stale data
+document.getElementById('modal-model-path')?.addEventListener('input', () => {
+    const container = document.getElementById('pe-arch-info');
+    if (container) container.innerHTML = '';
+});
+
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initPresets() {
@@ -2364,9 +2407,11 @@ function _renderContextPills(mode, section) {
     pillsContainer.innerHTML = '';
     pills.forEach(pill => {
         const pillEl = document.createElement('button');
+        pillEl.type = 'button';
         pillEl.className = 'preset-context-pill';
         pillEl.textContent = pill.label;
-        pillEl.onclick = () => {
+        pillEl.onclick = (e) => {
+            e.preventDefault();
             const input = document.getElementById('modal-context-size');
             if (input) {
                 input.value = pill.value;
