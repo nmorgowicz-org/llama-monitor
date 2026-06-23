@@ -397,19 +397,18 @@ fn compute_active_params_b(
     }
 
     // Attempt a structural estimate from GGUF:
-    // backbone_params ≈ L*(4*H*kv_len + 2*K*kv_len + embd²*3 + ff*2)
-    // experts_total = P - backbone_params
+    // backbone ≈ attention projections + token-embedding/output projection
+    // experts_total = P - backbone
     // active ≈ backbone + N_used * (experts_total / N_experts)
     let n_layers = meta.block_count;
     let head_count = meta.head_count;
     let head_count_kv = meta.head_count_kv;
     let kv_len = meta.key_length;
     let embd = meta.embedding_length;
-    let ff = meta.feed_forward_length;
 
     let have_enough = matches!(
-        (n_layers, head_count, head_count_kv, kv_len, embd, ff),
-        (Some(_), Some(_), Some(_), Some(_), Some(_), Some(_))
+        (n_layers, head_count, head_count_kv, kv_len, embd),
+        (Some(_), Some(_), Some(_), Some(_), Some(_))
     );
 
     if have_enough {
@@ -418,28 +417,37 @@ fn compute_active_params_b(
         let head_count_kv = head_count_kv.unwrap();
         let kv_len = kv_len.unwrap();
         let embd = embd.unwrap();
-        let ff = ff.unwrap();
 
-        // Approximate backbone (non-expert) params per layer:
-        // - attention projections: 4 * head_count * kv_len
-        // - KV cache trainable: 2 * head_count_kv * kv_len
-        // - layer-norm / embedding projections: ~3 * embd^2 (RMSNorm*3 + residual scales etc.)
-        // - feed-forward (non-expert backbone routing/FFN gate base): 2 * ff
-        let backbone_per_layer: u64 = n_layers as u64
-            * (4 * head_count as u64 * kv_len as u64
-                + 2 * head_count_kv as u64 * kv_len as u64
-                + 3 * embd as u64 * embd as u64
-                + 2 * ff as u64);
+        // Approximate the dense "backbone" (non-expert) parameter count. This is
+        // a deliberately rough lower bound — it does not model shared experts,
+        // dense-then-MoE layer splits, or attention variants — so it is guarded by
+        // the sanity clamps below. The FFN/expert weights are intentionally *not*
+        // counted here: in MoE GGUFs `feed_forward_length` is the per-expert
+        // intermediate size, so they fall into `expert_total` instead.
+        //
+        // Per layer, attention Q/K/V/O projections (head_dim == key_length):
+        //   embd * head_dim * (2*n_head + 2*n_head_kv)
+        // Plus a one-off token-embedding + output projection: ~2 * embd^2.
+        let head_dim = kv_len as u64;
+        let attn_per_layer =
+            embd as u64 * head_dim * (2 * head_count as u64 + 2 * head_count_kv as u64);
+        let backbone_total: u64 = n_layers as u64 * attn_per_layer + 2 * embd as u64 * embd as u64;
 
-        let expert_total = if total_params > backbone_per_layer {
-            total_params - backbone_per_layer
+        let expert_total = if total_params > backbone_total {
+            total_params - backbone_total
         } else {
             // Backbone estimate exceeds total (bad input); fall back to simple ratio.
             return simple_moe_active(total_params, n_experts, n_used);
         };
 
+        // If the expert portion is <10% of total, the structural estimate is
+        // clearly off (a real MoE keeps most weight in experts), so fall back.
+        if (expert_total as f64) < (total_params as f64 * 0.1) {
+            return simple_moe_active(total_params, n_experts, n_used);
+        }
+
         let per_expert = expert_total / n_experts as u64;
-        let active: f64 = (backbone_per_layer as f64) + (n_used as f64 * per_expert as f64);
+        let active: f64 = (backbone_total as f64) + (n_used as f64 * per_expert as f64);
         let active_b = active / 1e9;
 
         // Sanity: active must be < total and > 0. If ratio is off, use simple.

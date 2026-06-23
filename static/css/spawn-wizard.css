@@ -656,8 +656,9 @@
   margin-top: 1px;
 }
 
+.selected-model-arch-label,
 .selected-model-arch strong {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 
 /* Architecture hint note (educational, non-intrusive) */

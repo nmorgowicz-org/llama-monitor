@@ -2056,7 +2056,7 @@ function updateSelectedModelArchLabel() {
 
   // Brief architecture note for educational clarity
   const note = document.createElement('div');
-  note.className = 'selected-model-arch-note';
+  note.className = 'selected-model-arch-hint';
   const kind = pseudoPreset.architecture_kind;
   if (kind === 'moe' || kind === 'hybrid_moe') {
     note.textContent = 'MoE / Hybrid MoE: only a subset of parameters active per token; often more efficient.';
@@ -4253,10 +4253,9 @@ function updateAdvisor() {
     const sweepBox = document.getElementById('wizard-depth-sweep');
     if (sweepBox) sweepBox.style.display = localGguf ? '' : 'none';
 
-    // Confident MoE only: nExperts/nExpertsUsed from introspection or explicit arch.
-    const kind = (wizardState.arch.kind || '').toLowerCase();
+    // Confident MoE only: explicit isMoe flag, or expert counts from introspection.
     const moeConfident =
-        (kind === 'moe' || kind === 'hybrid_moe') ||
+        wizardState.arch.isMoe === true ||
         (wizardState.arch.nExperts > 0 && wizardState.arch.nExpertsUsed > 0);
 
     const nCpuMoeInput = document.getElementById('spawn-n-cpu-moe');

@@ -71,6 +71,14 @@ export function buildArchitectureLabel(p, c) {
     var activeStr = fmt(activeB);
     var totalStr = fmt(totalB);
 
+    // Append "— N experts, M active per token" when either count is known.
+    var withExpertSuffix = function (tip) {
+        if (p.expert_count == null && p.expert_used_count == null) return tip;
+        var ec = p.expert_count != null ? p.expert_count : '*';
+        var uc = p.expert_used_count != null ? p.expert_used_count : '*';
+        return tip + ' — ' + ec + ' experts, ' + uc + ' active per token';
+    };
+
     if (kind === 'dense') {
         if (totalStr) {
             return {
@@ -81,37 +89,16 @@ export function buildArchitectureLabel(p, c) {
         return null;
     }
 
-    if (kind === 'moe') {
+    if (kind === 'moe' || kind === 'hybrid_moe') {
         if (totalStr && activeStr) {
-            var tip = 'MoE: only a subset of parameters active per token';
-            if ((p.expert_count != null && p.expert_used_count != null) ||
-                (p.expert_count != null) ||
-                (p.expert_used_count != null)) {
-                var ec = p.expert_count || (p.expert_used_count != null ? '*' : '');
-                var uc = p.expert_used_count != null ? p.expert_used_count : '*';
-                tip += ' — ' + ec + ' experts, ' + uc + ' active per token';
-            }
+            var isHybrid = kind === 'hybrid_moe';
+            var tip = isHybrid
+                ? 'MoE + hybrid attention (fewer full-KV layers) — often faster at long context'
+                : 'MoE: only a subset of parameters active per token';
             return {
-                display: 'MoE • ' + totalStr + ' (' + activeStr + ' active)',
-                tooltip: tip
-            };
-        }
-        return null;
-    }
-
-    if (kind === 'hybrid_moe') {
-        if (totalStr && activeStr) {
-            var tip2 = 'MoE + hybrid attention (fewer full-KV layers) — often faster at long context';
-            if ((p.expert_count != null && p.expert_used_count != null) ||
-                (p.expert_count != null) ||
-                (p.expert_used_count != null)) {
-                var ec2 = p.expert_count || (p.expert_used_count != null ? '*' : '');
-                var uc2 = p.expert_used_count != null ? p.expert_used_count : '*';
-                tip2 += ' — ' + ec2 + ' experts, ' + uc2 + ' active per token';
-            }
-            return {
-                display: 'Hybrid MoE • ' + totalStr + ' (' + activeStr + ' active)',
-                tooltip: tip2
+                display: (isHybrid ? 'Hybrid MoE • ' : 'MoE • ') +
+                    totalStr + ' (' + activeStr + ' active)',
+                tooltip: withExpertSuffix(tip)
             };
         }
         return null;

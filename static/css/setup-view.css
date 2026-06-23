@@ -2844,7 +2844,7 @@ body.setup-active .sidebar-nav {
 
 .launch-card-arch {
   font-size: 10.5px;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-muted);
   margin-top: 2px;
   letter-spacing: 0.025em;
   white-space: nowrap;
@@ -2867,11 +2867,12 @@ body.setup-active .sidebar-nav {
   margin-bottom: 2px;
 }
 
+.pe-arch-info .pe-arch-main,
 .pe-arch-info strong {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 
-.pe-arch-info .pe-arch-note {
+.pe-arch-info .pe-arch-sub {
   display: block;
   font-size: 9px;
   color: var(--color-text-muted);
