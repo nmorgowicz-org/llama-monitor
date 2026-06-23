@@ -14,6 +14,7 @@ pub mod lhm_persistence;
 pub mod llama;
 pub mod model_download;
 pub mod models;
+pub mod platform;
 pub mod presets;
 pub mod remote_ssh;
 pub mod state;

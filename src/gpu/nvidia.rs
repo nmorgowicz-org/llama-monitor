@@ -7,7 +7,9 @@ pub struct NvidiaBackend;
 
 impl GpuBackend for NvidiaBackend {
     fn read_metrics(&self) -> Result<BTreeMap<String, GpuMetrics>> {
-        let output = std::process::Command::new("nvidia-smi")
+        let mut cmd = std::process::Command::new("nvidia-smi");
+        crate::platform::no_window(&mut cmd);
+        let output = cmd
             .args([
                 "--query-gpu=index,name,temperature.gpu,utilization.gpu,power.draw,power.limit,memory.used,memory.total,clocks.gr,clocks.mem",
                 "--format=csv,noheader,nounits",

@@ -81,14 +81,19 @@ Fields:
 
 ### Building sensor_bridge.exe
 
-Requires .NET SDK 8.0+ and the `LibreHardwareMonitorLib` NuGet package. Build from the `sensor_bridge/` directory:
+Requires .NET SDK 10.0 and the `LibreHardwareMonitorLib` NuGet package. Build from the `sensor_bridge/` directory:
 
 ```bash
-dotnet publish -c Release -r win-x64 --self-contained true \
-  -p:PublishSingleFile=true -o ./publish
+dotnet publish sensor_bridge/sensor_bridge.csproj -c Release -r win-x64 \
+  --self-contained true -p:PublishSingleFile=true \
+  -p:IncludeNativeLibrariesForSelfExtract=true
 ```
 
-This produces a single self-contained `sensor_bridge.exe` (~30 MB) in `./publish`. No .NET runtime installation required on the target machine.
+The project file (`sensor_bridge/sensor_bridge.csproj`) pins `net10.0`, `RuntimeIdentifier win-x64`, `SelfContained true`, and `PublishSingleFile true`, so the flags above are redundant but are kept explicit in CI for clarity.
+
+This produces a single self-contained `sensor_bridge.exe` in `./publish`. **No .NET runtime installation is required on the target machine.** The runtime is bundled into the executable. `LibreHardwareMonitorLib 0.9.6` ships a `net8.0` assembly that is forward-compatible with net10.0 — no special steps required.
+
+The CI release workflow (`release.yml`) builds with `--self-contained true` explicitly alongside the csproj settings.
 
 ### Distribution
 
@@ -153,16 +158,45 @@ When running `sensor_bridge.exe` directly (e.g., for testing), launch the termin
 
 ---
 
+## Driver requirement — PawnIO
+
+`LibreHardwareMonitorLib 0.9.6` uses the **PawnIO** kernel driver to access hardware sensors. PawnIO is a separately-installed, signed kernel driver; it is not bundled inside `sensor_bridge.exe`.
+
+**If the PawnIO driver is not present on the target machine, the bridge process will start and respond on port 7780, but will return no temperature readings (`[]`).** The `/api/sensor-bridge/status` endpoint returns a `pawnio` boolean so the dashboard can distinguish "bridge running but driver missing" from "bridge not running". When the bridge runs but PawnIO is absent, the dashboard surfaces a "driver missing" message with a link to pawnio.eu.
+
+### One-click setup (recommended)
+
+The **Settings → Sensor Bridge** install flow (which already registers the scheduled task) now also installs PawnIO inside the same elevated PowerShell session — a single UAC prompt handles everything:
+
+```powershell
+# Idempotent: guarded by sc query PawnIO before running
+winget install -e --id namazso.PawnIO --silent `
+  --accept-package-agreements --accept-source-agreements --disable-interactivity
+```
+
+A failed winget install is non-fatal; the scheduled task is still registered and the dashboard will report the missing driver state rather than silently showing no data.
+
+### Manual install
+
+If winget is unavailable, download and run the official PawnIO installer from [pawnio.eu](https://pawnio.eu) or the [namazso/PawnIO.Setup](https://github.com/namazso/PawnIO.Setup) GitHub releases page.
+
+### Legacy note — WinRing0 and Defender (builds ≤ 0.9.4 only)
+
+Older LHM builds (0.9.4 and earlier) extracted a `WinRing0x64.sys` driver to disk at runtime. Since approximately March 2025, Microsoft Defender flags WinRing0 (CVE-2020-14979) and may quarantine the extracted `.sys` file, silently disabling temperature readings. **This does not apply to 0.9.6**, which is a PawnIO build and does not use WinRing0.
+
+Do not chase prerelease versions (0.9.5/0.9.7-pre): those carry documented regressions (AMD Family 10h temporarily disabled; missing Nuvoton sensors). Stay on stable 0.9.6.
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | CPU temp shows unavailable | sensor_bridge not running | Install via Settings → Sensor Bridge tab |
+| Bridge running but no temperature | PawnIO driver not installed | Use one-click setup or install PawnIO manually from pawnio.eu |
 | `sensor_bridge.exe` returns `[]` | Not running as Administrator | Run terminal as Admin; or install as scheduled task |
 | Port 7780 conflict | Another process or stale URL reservation | sensor_bridge auto-resolves via netsh cleanup and process kill on startup |
 | "sensor_bridge.exe not found" | Binary missing from install dir | Re-run the installer or copy `sensor_bridge.exe` next to `llama-monitor.exe` |
-| Sensor bridge crashes immediately | Missing .NET runtime | Use the self-contained build (`--self-contained true`); no .NET required |
+| Sensor bridge crashes immediately | Missing .NET runtime | Use the self-contained build (current default); no .NET required |
 
 ---
 
-**Last updated:** 2026-05-19
+**Last updated:** 2026-06-22

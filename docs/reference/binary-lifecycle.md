@@ -317,6 +317,12 @@ When the local server is running at update time:
 4. After a successful install and final installed-path health check, the server is restarted with the preserved config.
 5. If promotion fails after the old directory is moved aside, the updater attempts to restore the previous directory before returning an error.
 
+## Windows self-update
+
+On Windows, a running executable cannot overwrite itself. When `llama-monitor.exe` installs an update to itself (the `install` module in `src/agent.rs`), it writes a small `.bat` helper and launches it with the `DETACHED_PROCESS` creation flag. The batch file waits for the parent process PID to exit, then copies the new binary over the old path and starts the updated executable. This is distinct from the llama-server binary update described above, which uses the rename-based `copy_all_files` pipeline and runs entirely within the Rust process.
+
+---
+
 ## Expected quality bar for future backends
 
 The Rapid-MLX integration must provide the same set of capabilities through its own

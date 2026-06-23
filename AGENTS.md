@@ -134,6 +134,7 @@ Docs updated in same PR as code — not as follow-up. Primary areas:
 - CLI: `docs/reference/cli-flags.md`
 - Spawn wizard/HF: `docs/reference/spawn-wizard.md`
 - VRAM estimator: `docs/reference/vram-estimator.md`
+- Windows runtime behavior: `docs/reference/windows-support.md`
 
 Write as if feature always existed.
 
