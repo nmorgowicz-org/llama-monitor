@@ -53,7 +53,7 @@ jobs:
 
       - name: Build sensor bridge
         if: matrix.target == 'x86_64-pc-windows-gnu'
-        run: dotnet publish sensor_bridge/sensor_bridge.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o sensor_bridge/publish
+        run: dotnet publish sensor_bridge/sensor_bridge.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o sensor_bridge/publish
 
       - name: Package artifact
         run: |
@@ -70,6 +70,13 @@ jobs:
               mkdir -p windows-bundle
               cp target/x86_64-pc-windows-gnu/release/llama-monitor.exe windows-bundle/llama-monitor.exe
               cp sensor_bridge/publish/sensor_bridge.exe windows-bundle/sensor_bridge.exe
+              # The WebView2 tray popover (wry, enabled via native-tray,webview-popover)
+              # dynamically links WebView2Loader.dll on the GNU target. It must ship next
+              # to the exe — the WebView2 *runtime* does not place it on the system path,
+              # so without it the app fails to launch (STATUS_DLL_NOT_FOUND, 0xC0000135).
+              webview2_dll=$(find target/x86_64-pc-windows-gnu/release/build -path '*webview2-com-sys*/out/x64/WebView2Loader.dll' | head -1)
+              if [ -z "$webview2_dll" ]; then echo "ERROR: WebView2Loader.dll not found in build output" >&2; exit 1; fi
+              cp "$webview2_dll" windows-bundle/WebView2Loader.dll
               (cd windows-bundle && zip -9 -r ../llama-monitor-windows-x86_64.zip .)
               ;;
             aarch64-apple-darwin)

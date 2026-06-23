@@ -4,6 +4,61 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
+/// Attempt a silent winget install of the WebView2 Evergreen runtime.
+///
+/// Guarded by a `Once` so the install is only attempted a single time per process
+/// lifetime even if the popover is opened repeatedly. Failures are logged but never
+/// propagate — this is best-effort. Only compiled on Windows when the WebView2
+/// popover is built (its only caller is the popover's failure path).
+#[cfg(all(windows, feature = "webview-popover"))]
+fn try_install_webview2() {
+    use std::sync::Once;
+    static INSTALL_ONCE: Once = Once::new();
+    INSTALL_ONCE.call_once(|| {
+        eprintln!(
+            "[tray] WebView2 runtime appears missing. \
+             Attempting silent install via winget \
+             (Microsoft.EdgeWebView2Runtime). \
+             If this fails, download from: \
+             https://developer.microsoft.com/microsoft-edge/webview2/"
+        );
+        let status = crate::platform::no_window(&mut std::process::Command::new("winget"))
+            .args([
+                "install",
+                "-e",
+                "--id",
+                "Microsoft.EdgeWebView2Runtime",
+                "--silent",
+                "--accept-package-agreements",
+                "--accept-source-agreements",
+                "--disable-interactivity",
+            ])
+            .status();
+        match status {
+            Ok(s) if s.success() => {
+                eprintln!(
+                    "[tray] winget install Microsoft.EdgeWebView2Runtime succeeded. \
+                     Please restart llama-monitor to enable the tray popover."
+                );
+            }
+            Ok(s) => {
+                eprintln!(
+                    "[tray] winget install Microsoft.EdgeWebView2Runtime exited with \
+                     status {s}. Install it manually from: \
+                     https://developer.microsoft.com/microsoft-edge/webview2/"
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "[tray] winget not found or failed to launch ({e}). \
+                     Install WebView2 runtime manually from: \
+                     https://developer.microsoft.com/microsoft-edge/webview2/"
+                );
+            }
+        }
+    });
+}
+
 #[cfg(feature = "webview-popover")]
 use tray_icon::TrayIconEvent;
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
@@ -118,8 +173,10 @@ pub fn run_tray(state: AppState, port: u16) -> anyhow::Result<()> {
         },
         tray: None,
         icon: create_tray_icon(),
-        #[cfg(feature = "webview-popover")]
         port,
+        menu_quit_id: None,
+        menu_open_id: None,
+        menu_open_logs_id: None,
         #[cfg(feature = "webview-popover")]
         popover: None,
         #[cfg(feature = "webview-popover")]
@@ -144,8 +201,12 @@ struct TrayApp {
     tray_state: TrayState,
     tray: Option<TrayIcon>,
     icon: Icon,
-    #[cfg(feature = "webview-popover")]
     port: u16,
+    /// Right-click context-menu item ids (so every platform/config has a way to quit
+    /// and open the dashboard, independent of the WebView2 popover).
+    menu_quit_id: Option<tray_icon::menu::MenuId>,
+    menu_open_id: Option<tray_icon::menu::MenuId>,
+    menu_open_logs_id: Option<tray_icon::menu::MenuId>,
     #[cfg(feature = "webview-popover")]
     popover: Option<Popover>,
     #[cfg(feature = "webview-popover")]
@@ -196,7 +257,16 @@ impl ApplicationHandler for TrayApp {
                 .is_some_and(|popover| popover.window.id() == id);
             if is_popover {
                 match event {
-                    WindowEvent::CloseRequested | WindowEvent::Focused(false) => {
+                    WindowEvent::CloseRequested => {
+                        self.close_popover();
+                    }
+                    // Click-outside-to-dismiss via focus loss. NOT on Windows: the
+                    // WebView2 child window steals focus from the parent winit window as
+                    // soon as it renders, which fires Focused(false) and would close the
+                    // popover instantly (the "white flash then closes" bug). On Windows we
+                    // dismiss via the tray-icon toggle, the in-page close button, or Quit.
+                    #[cfg(not(windows))]
+                    WindowEvent::Focused(false) => {
                         self.close_popover();
                     }
                     WindowEvent::Destroyed => {
@@ -213,8 +283,27 @@ impl ApplicationHandler for TrayApp {
 
         if self.tray.is_none() {
             let initial_metrics = self.tray_state.get_metrics();
+
+            // Right-click context menu — present on every platform/config so there is
+            // always a way to open the dashboard and quit, even when the WebView2
+            // popover is unavailable or misbehaving.
+            let menu = tray_icon::menu::Menu::new();
+            let open_item = tray_icon::menu::MenuItem::new("Open Dashboard", true, None);
+            let open_logs_item = tray_icon::menu::MenuItem::new("Open Logs Folder", true, None);
+            let quit_item = tray_icon::menu::MenuItem::new("Quit Llama Monitor", true, None);
+            let _ = menu.append(&open_item);
+            let _ = menu.append(&open_logs_item);
+            let _ = menu.append(&tray_icon::menu::PredefinedMenuItem::separator());
+            let _ = menu.append(&quit_item);
+            self.menu_open_id = Some(open_item.id().clone());
+            self.menu_open_logs_id = Some(open_logs_item.id().clone());
+            self.menu_quit_id = Some(quit_item.id().clone());
+
             let builder = TrayIconBuilder::new()
                 .with_tooltip("Llama Monitor")
+                .with_menu(Box::new(menu))
+                // Keep left-click for the popover toggle; menu is right-click only.
+                .with_menu_on_left_click(false)
                 .with_icon(std::mem::replace(
                     &mut self.icon,
                     Icon::from_rgba(vec![0, 0, 0, 255], 1, 1).unwrap(),
@@ -244,6 +333,18 @@ impl ApplicationHandler for TrayApp {
             event_loop.set_control_flow(ControlFlow::WaitUntil(
                 Instant::now() + Duration::from_millis(500),
             ));
+        }
+
+        // Right-click context-menu events (Quit / Open Dashboard / Open Logs Folder).
+        // Handled on every platform and feature configuration so the app is always quittable.
+        while let Ok(menu_event) = tray_icon::menu::MenuEvent::receiver().try_recv() {
+            if self.menu_quit_id.as_ref() == Some(&menu_event.id) {
+                event_loop.exit();
+            } else if self.menu_open_id.as_ref() == Some(&menu_event.id) {
+                open_dashboard(self.port);
+            } else if self.menu_open_logs_id.as_ref() == Some(&menu_event.id) {
+                open_logs_folder();
+            }
         }
 
         #[cfg(feature = "webview-popover")]
@@ -313,11 +414,9 @@ impl TrayApp {
 
     #[cfg(feature = "webview-popover")]
     fn open_popover(&mut self, event_loop: &dyn ActiveEventLoop, icon_rect: tray_icon::Rect) {
-        let pos = icon_rect.position;
         let width = POPOVER_WIDTH;
         let height = POPOVER_INITIAL_HEIGHT;
-        let x = pos.x + (icon_rect.size.width as f64 / 2.0) - (width / 2.0);
-        let y = pos.y + icon_rect.size.height as f64 + 4.0;
+        let (x, y) = popover_position(event_loop, icon_rect, width, height);
 
         let url = format!(
             "http://127.0.0.1:{}/compact?t={}",
@@ -408,12 +507,38 @@ impl TrayApp {
                 size: wry::dpi::LogicalSize::new(width, height).into(),
             });
 
-        // On Windows, wry's with_ipc_handler bridges window.ipc via WebView2 automatically.
-        // If that proves unreliable, add a with_initialization_script polyfill here.
+        // Verify on real Windows hardware: confirm window.ipc.postMessage bridges via
+        // WebView2; add with_initialization_script polyfill forwarding
+        // window.chrome.webview.postMessage if messages don't arrive.
         #[cfg(not(target_os = "linux"))]
         let webview = match webview_builder.build_as_child(&window) {
             Ok(wv) => wv,
             Err(e) => {
+                // On Windows the most common cause of build_as_child failure is a
+                // missing WebView2 runtime (not present on LTSC / older Win10 images).
+                // Surface a clear message and attempt a silent winget install so the
+                // user can restart and get a working popover without manual steps.
+                #[cfg(windows)]
+                {
+                    let err_str = e.to_string().to_lowercase();
+                    let likely_missing_runtime = err_str.contains("webview2")
+                        || err_str.contains("regdb")
+                        || err_str.contains("0x800700c1")
+                        || err_str.contains("class not registered")
+                        || err_str.contains("co_e_classstring");
+                    if likely_missing_runtime {
+                        eprintln!(
+                            "[tray] Tray popover unavailable: WebView2 runtime not found. \
+                             Attempting automatic install — restart llama-monitor afterward. \
+                             Manual download: \
+                             https://developer.microsoft.com/microsoft-edge/webview2/"
+                        );
+                        try_install_webview2();
+                    } else {
+                        eprintln!("[tray] Failed to create tray WebView: {e}");
+                    }
+                }
+                #[cfg(not(windows))]
                 eprintln!("[tray] Failed to create tray WebView: {e}");
                 return;
             }
@@ -530,6 +655,167 @@ impl TrayApp {
 #[cfg(feature = "webview-popover")]
 fn rect_has_position(rect: tray_icon::Rect) -> bool {
     rect.size.width > 0 || rect.size.height > 0 || rect.position.x > 0.0 || rect.position.y > 0.0
+}
+
+/// Compute an on-screen position for the popover relative to the tray icon.
+///
+/// Defaults to just below the icon, but flips to *above* it when below would run off
+/// the bottom of the monitor (the Windows taskbar is typically at the bottom, so the
+/// tray icon sits low — opening downward clipped the popover off-screen). The result is
+/// clamped so the whole popover stays within the monitor bounds. Coordinates are
+/// physical pixels, matching `icon_rect.position` and the window `with_position` call.
+#[cfg(feature = "webview-popover")]
+fn popover_position(
+    event_loop: &dyn ActiveEventLoop,
+    icon_rect: tray_icon::Rect,
+    width: f64,
+    height: f64,
+) -> (f64, f64) {
+    let pos = icon_rect.position;
+    let icon_w = icon_rect.size.width as f64;
+    let icon_h = icon_rect.size.height as f64;
+
+    let mut x = pos.x + (icon_w / 2.0) - (width / 2.0);
+    let mut y = pos.y + icon_h + 4.0;
+
+    // Prefer the monitor that contains the tray icon; fall back to primary/first.
+    let monitor = event_loop
+        .available_monitors()
+        .find(|m| {
+            let Some(mp) = m.position() else { return false };
+            let Some(ms) = m.current_video_mode().map(|mode| mode.size()) else {
+                return false;
+            };
+            let (left, top) = (mp.x as f64, mp.y as f64);
+            pos.x >= left
+                && pos.x < left + ms.width as f64
+                && pos.y >= top
+                && pos.y < top + ms.height as f64
+        })
+        .or_else(|| event_loop.primary_monitor());
+
+    if let Some(monitor) = monitor
+        && let Some(mp) = monitor.position()
+        && let Some(ms) = monitor.current_video_mode().map(|mode| mode.size())
+    {
+        let left = mp.x as f64;
+        let top = mp.y as f64;
+        let right = left + ms.width as f64;
+        let bottom = top + ms.height as f64;
+
+        // Flip above the icon if opening below would overflow the bottom edge.
+        if y + height > bottom {
+            y = pos.y - height - 4.0;
+        }
+        // Keep the whole popover on-screen.
+        x = x.clamp(left, (right - width).max(left));
+        y = y.clamp(top, (bottom - height).max(top));
+    }
+
+    (x, y)
+}
+
+/// Open the dashboard in the user's default browser. Used by the tray context menu.
+/// Routed through `no_window` on Windows so it never flashes a console.
+fn open_dashboard(port: u16) {
+    let url = format!("http://127.0.0.1:{port}/");
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        // `explorer <url>` opens the default browser without a console window.
+        let mut c = std::process::Command::new("explorer.exe");
+        c.arg(&url);
+        crate::platform::no_window(&mut c);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg(&url);
+        c
+    };
+    #[cfg(target_os = "linux")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(&url);
+        c
+    };
+    if let Err(e) = cmd.spawn() {
+        eprintln!("[tray] failed to open dashboard {url}: {e}");
+    }
+}
+
+/// Open the logs directory in the file explorer.
+/// Uses:
+/// - Windows: explorer
+/// - macOS: open
+/// - Linux: xdg-open
+///
+/// If the logs directory doesn't exist, creates it.
+fn open_logs_folder() {
+    let Some(config_dir) = dirs::config_dir() else {
+        eprintln!("[tray] failed to open logs folder: could not determine config dir");
+        return;
+    };
+
+    let logs_dir = config_dir.join("llama-monitor").join("logs");
+
+    // Defensive: canonicalize and ensure it is still under config_dir
+    // to guard against future config_dir overrides with .. segments.
+    let Ok(canonical_config) = config_dir.canonicalize() else {
+        eprintln!(
+            "[tray] failed to open logs folder: could not canonicalize config dir {}",
+            config_dir.display()
+        );
+        return;
+    };
+    if let Err(e) = std::fs::create_dir_all(&logs_dir) {
+        eprintln!(
+            "[tray] failed to create logs folder {}: {e}",
+            logs_dir.display()
+        );
+        return;
+    }
+    let Some(canonical_logs) = logs_dir.canonicalize().ok() else {
+        eprintln!(
+            "[tray] failed to open logs folder: could not canonicalize logs dir {}",
+            logs_dir.display()
+        );
+        return;
+    };
+    if !canonical_logs.starts_with(&canonical_config) {
+        eprintln!(
+            "[tray] failed to open logs folder: logs dir escaped config dir: {}",
+            canonical_logs.display()
+        );
+        return;
+    }
+
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("explorer");
+        c.arg(&logs_dir);
+        crate::platform::no_window(&mut c);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg(&logs_dir);
+        c
+    };
+    #[cfg(target_os = "linux")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(&logs_dir);
+        c
+    };
+
+    if let Err(e) = cmd.spawn() {
+        eprintln!(
+            "[tray] failed to open logs folder {}: {e}",
+            logs_dir.display()
+        );
+    }
 }
 
 #[cfg(all(target_os = "linux", feature = "webview-popover"))]

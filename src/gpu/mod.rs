@@ -80,7 +80,7 @@ pub fn detect_backend(force: &str) -> Arc<dyn GpuBackend> {
                         "[info] No GPU CLI tool found (rocm-smi, nvidia-smi); \
                         using WMI GPU discovery (name/VRAM only)"
                     );
-                    return Arc::new(wmi_gpu::WmiGpuBackend);
+                    Arc::new(wmi_gpu::WmiGpuBackend)
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
@@ -124,7 +124,9 @@ fn command_exists(cmd: &str) -> bool {
         "which"
     };
 
-    std::process::Command::new(finder)
+    let mut finder_cmd = std::process::Command::new(finder);
+    crate::platform::no_window(&mut finder_cmd);
+    finder_cmd
         .arg(cmd)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
