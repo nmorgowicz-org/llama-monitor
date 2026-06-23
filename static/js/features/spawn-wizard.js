@@ -1,3 +1,5 @@
+import { buildArchitectureLabel } from './setup-view.js';
+
 // ── Spawn Wizard Module ───────────────────────────────────────────────────────
 // Spawn Llama-Server V2 — complete guided wizard.
 //
@@ -499,9 +501,10 @@ function cacheDom() {
   dom.importPathInput   = document.getElementById('spawn-import-path');
   dom.browseModelBtn   = document.getElementById('spawn-browse-model-btn');
   dom.importBrowseBtn  = document.getElementById('spawn-import-browse-btn');
-  dom.selectedModel     = document.getElementById('spawn-selected-model');
-  dom.selectedModelName = document.getElementById('spawn-selected-model-name');
-  dom.selectedModelMeta = document.getElementById('spawn-selected-model-meta');
+  dom.selectedModel         = document.getElementById('spawn-selected-model');
+  dom.selectedModelName     = document.getElementById('spawn-selected-model-name');
+  dom.selectedModelMeta     = document.getElementById('spawn-selected-model-meta');
+  dom.selectedModelArch     = document.getElementById('spawn-selected-model-arch');
   dom.hfFileList       = document.getElementById('spawn-hf-file-list');
   dom.quantAdvisor     = document.getElementById('quant-advisor');
   dom.quantAdvisorTable  = document.getElementById('quant-advisor-table');
@@ -2009,10 +2012,58 @@ function updateSelectedModelDisplay() {
     name = path.split(/[\\/]/).pop() || path;
     meta = path;
   }
-  if (!name) { dom.selectedModel?.classList.remove('visible'); return; }
+  if (!name) {
+    if (dom.selectedModel?.classList) dom.selectedModel.classList.remove('visible');
+    if (dom.selectedModelArch) dom.selectedModelArch.innerHTML = '';
+    return;
+  }
   dom.selectedModel?.classList.add('visible');
   if (dom.selectedModelName) dom.selectedModelName.textContent = name;
   if (dom.selectedModelMeta) dom.selectedModelMeta.textContent = meta;
+
+  // Build architecture label if we have metadata (from introspection or presets)
+  updateSelectedModelArchLabel();
+}
+
+function updateSelectedModelArchLabel() {
+  const container = dom.selectedModelArch;
+  if (!container) return;
+  container.innerHTML = '';
+
+  // Build a pseudo-preset from wizard state so we can reuse buildArchitectureLabel
+  const pseudoPreset = {
+    architecture_kind: wizardState.arch.isMoe === true
+        ? (wizardState.arch.name?.includes?.('Hybrid') || wizardState.arch.name?.includes?.('DeltaNet') ? 'hybrid_moe' : 'moe')
+        : (wizardState.arch.nLayers > 0 && !wizardState.arch.isMoe
+            ? 'dense'
+            : null),
+    expert_count: wizardState.arch.nExperts || null,
+    expert_used_count: wizardState.arch.nExpertsUsed || null,
+    active_params_b: wizardState.model.activeParamsB || null,
+    param_count: wizardState.model.paramB
+        ? wizardState.model.paramB * 1e9
+        : null,
+  };
+
+  const arch = buildArchitectureLabel(pseudoPreset, { paramB: wizardState.model.paramB });
+  if (!arch) return;
+
+  const label = document.createElement('div');
+  label.className = 'selected-model-arch-label';
+  label.textContent = arch.display;
+  label.title = arch.tooltip;
+  container.appendChild(label);
+
+  // Brief architecture note for educational clarity
+  const note = document.createElement('div');
+  note.className = 'selected-model-arch-note';
+  const kind = pseudoPreset.architecture_kind;
+  if (kind === 'moe' || kind === 'hybrid_moe') {
+    note.textContent = 'MoE / Hybrid MoE: only a subset of parameters active per token; often more efficient.';
+  } else if (kind === 'dense') {
+    note.textContent = 'Dense: all parameters used each token.';
+  }
+  container.appendChild(note);
 }
 
 // ── Model path changed ────────────────────────────────────────────────────────

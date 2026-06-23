@@ -227,6 +227,20 @@ pub struct ModelPreset {
     /// Size class derived from param_count: tiny/small/medium/large/huge.
     #[serde(default)]
     pub size_class: Option<String>,
+    /// Architecture label: "dense" | "moe" | "hybrid_moe".
+    #[serde(default)]
+    pub architecture_kind: Option<String>,
+    /// Total MoE experts per layer (for MoE / hybrid-moE models).
+    #[serde(default)]
+    pub expert_count: Option<u32>,
+    /// Active MoE experts per token (for MoE / hybrid-moE models).
+    #[serde(default)]
+    pub expert_used_count: Option<u32>,
+    /// Effective active parameters in billions (for MoE / hybrid-moE models).
+    /// For dense models, equals total params; for MoE, only counts params
+    /// used per token (backbone + active experts).
+    #[serde(default)]
+    pub active_params_b: Option<f64>,
 }
 
 pub fn next_id() -> String {
@@ -278,11 +292,15 @@ pub fn ensure_gguf_metadata(preset: &mut ModelPreset) {
         return;
     }
 
-    // Only fill when metadata is incomplete
+    // Only fill when metadata is incomplete.
+    // New architecture_kind/expert/active_params_b fields are included in the
+    // "complete" check so existing presets with older fields get them as well.
     if preset.gguf_architecture.is_some()
         && preset.family.is_some()
         && preset.param_count.is_some()
         && preset.size_class.is_some()
+        && preset.architecture_kind.is_some()
+        && preset.active_params_b.is_some()
     {
         return;
     }
@@ -317,6 +335,138 @@ pub fn ensure_gguf_metadata(preset: &mut ModelPreset) {
         && let Some(pc) = meta.param_count
     {
         preset.size_class = crate::models::infer_size_class_from_param_count(pc);
+    }
+
+    // Store expert_count / expert_used_count from GGUF.
+    if preset.expert_count.is_none() {
+        preset.expert_count = meta.expert_count;
+    }
+    if preset.expert_used_count.is_none() {
+        preset.expert_used_count = meta.expert_used_count;
+    }
+
+    // Derive architecture_kind:
+    // - MoE: expert_count is set and > 0
+    // - Hybrid: MoE + full_attention_interval > 1 (some layers full attention, others linear/DeltaNet)
+    // - Dense: everything else
+    if preset.architecture_kind.is_none() {
+        let expert_count = meta.expert_count.unwrap_or(0);
+        let is_moe = expert_count > 0;
+        let is_hybrid_attn = meta.full_attention_interval.is_some_and(|v| v > 1);
+
+        preset.architecture_kind = if is_moe && is_hybrid_attn {
+            Some("hybrid_moe".into())
+        } else if is_moe {
+            Some("moe".into())
+        } else {
+            Some("dense".into())
+        };
+    }
+
+    // Derive active_params_b for MoE/hybrid-moE models.
+    // For dense: active = total.
+    // For MoE/hybrid-moE: estimate from backbone + active experts.
+    if preset.active_params_b.is_none()
+        && let Some(total_params) = meta.param_count
+    {
+        preset.active_params_b = compute_active_params_b(&meta, total_params);
+    }
+}
+
+/// Estimate "active parameters" in billions from GGUF metadata.
+///
+/// For dense models: active = total.
+/// For MoE/hybrid-MoE: active ≈ backbone_params + (N_used / N_experts) * expert_params.
+///
+/// Fallback: if data is incomplete, falls back to total / (1 + N_experts / N_used)
+/// if that ratio is reasonable; otherwise total params (param_b).
+fn compute_active_params_b(
+    meta: &crate::llama::gguf_meta::GgufMetadata,
+    total_params: u64,
+) -> Option<f64> {
+    let is_moe = meta.expert_count.is_some_and(|e| e > 0);
+    if !is_moe {
+        return Some(total_params as f64 / 1e9);
+    }
+
+    let n_experts = meta.expert_count?;
+    let n_used = meta.expert_used_count?;
+    if n_experts == 0 || n_used == 0 || n_used > n_experts {
+        // Invalid expert ratio → fallback to total.
+        return Some(total_params as f64 / 1e9);
+    }
+
+    // Attempt a structural estimate from GGUF:
+    // backbone_params ≈ L*(4*H*kv_len + 2*K*kv_len + embd²*3 + ff*2)
+    // experts_total = P - backbone_params
+    // active ≈ backbone + N_used * (experts_total / N_experts)
+    let n_layers = meta.block_count;
+    let head_count = meta.head_count;
+    let head_count_kv = meta.head_count_kv;
+    let kv_len = meta.key_length;
+    let embd = meta.embedding_length;
+    let ff = meta.feed_forward_length;
+
+    let have_enough = matches!(
+        (n_layers, head_count, head_count_kv, kv_len, embd, ff),
+        (Some(_), Some(_), Some(_), Some(_), Some(_), Some(_))
+    );
+
+    if have_enough {
+        let n_layers = n_layers.unwrap();
+        let head_count = head_count.unwrap();
+        let head_count_kv = head_count_kv.unwrap();
+        let kv_len = kv_len.unwrap();
+        let embd = embd.unwrap();
+        let ff = ff.unwrap();
+
+        // Approximate backbone (non-expert) params per layer:
+        // - attention projections: 4 * head_count * kv_len
+        // - KV cache trainable: 2 * head_count_kv * kv_len
+        // - layer-norm / embedding projections: ~3 * embd^2 (RMSNorm*3 + residual scales etc.)
+        // - feed-forward (non-expert backbone routing/FFN gate base): 2 * ff
+        let backbone_per_layer: u64 = n_layers as u64
+            * (4 * head_count as u64 * kv_len as u64
+                + 2 * head_count_kv as u64 * kv_len as u64
+                + 3 * embd as u64 * embd as u64
+                + 2 * ff as u64);
+
+        let expert_total = if total_params > backbone_per_layer {
+            total_params - backbone_per_layer
+        } else {
+            // Backbone estimate exceeds total (bad input); fall back to simple ratio.
+            return simple_moe_active(total_params, n_experts, n_used);
+        };
+
+        let per_expert = expert_total / n_experts as u64;
+        let active: f64 = (backbone_per_layer as f64) + (n_used as f64 * per_expert as f64);
+        let active_b = active / 1e9;
+
+        // Sanity: active must be < total and > 0. If ratio is off, use simple.
+        if active > 0.0 && active_b < total_params as f64 / 1e9 {
+            Some(active_b)
+        } else {
+            simple_moe_active(total_params, n_experts, n_used)
+        }
+    } else {
+        // Not enough GGUF fields → simple ratio.
+        simple_moe_active(total_params, n_experts, n_used)
+    }
+}
+
+/// Simple ratio-based active param estimate for MoE:
+/// active ≈ total / (1 + N_experts / N_used)
+/// Only used when structural estimate is not possible.
+fn simple_moe_active(total: u64, n_experts: u32, n_used: u32) -> Option<f64> {
+    if n_experts == 0 || n_used == 0 {
+        return Some(total as f64 / 1e9);
+    }
+    let ratio = n_experts as f64 / n_used as f64;
+    let active_b = total as f64 / (1.0 + ratio) / 1e9;
+    if active_b > 0.0 && active_b < total as f64 / 1e9 {
+        Some(active_b)
+    } else {
+        Some(total as f64 / 1e9)
     }
 }
 

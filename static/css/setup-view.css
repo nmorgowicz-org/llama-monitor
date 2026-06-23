@@ -2840,6 +2840,43 @@ body.setup-active .sidebar-nav {
 .launch-card-vram-dot--tight  { background: var(--color-warning); box-shadow: 0 0 4px color-mix(in srgb, var(--color-warning) 40%, transparent); }
 .launch-card-vram-dot--risk   { background: var(--color-error); box-shadow: 0 0 4px color-mix(in srgb, var(--color-error) 40%, transparent); }
 
+/* ── Architecture label on launch cards ──────────────────────────────────────── */
+
+.launch-card-arch {
+  font-size: 10.5px;
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
+  letter-spacing: 0.025em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.9;
+}
+
+.launch-card-arch:hover {
+  opacity: 1;
+  color: var(--color-text-secondary);
+}
+
+/* ── Preset editor: architecture info under model path ─────────────────────── */
+
+.pe-arch-info {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+  margin-bottom: 2px;
+}
+
+.pe-arch-info strong {
+  color: var(--color-text-tertiary);
+}
+
+.pe-arch-info .pe-arch-note {
+  display: block;
+  font-size: 9px;
+  color: var(--color-text-muted);
+}
+
 /* ── VRAM fit legend ────────────────────────────────────────────────────────── */
 
 .vram-fit-legend {

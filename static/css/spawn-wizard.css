@@ -649,6 +649,25 @@
   color: var(--color-text-muted);
 }
 
+/* Architecture label in spawn wizard (under model name) */
+.selected-model-arch {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-top: 1px;
+}
+
+.selected-model-arch strong {
+  color: var(--color-text-tertiary);
+}
+
+/* Architecture hint note (educational, non-intrusive) */
+.selected-model-arch-hint {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  opacity: 0.9;
+  margin-top: 1px;
+}
+
 /* HF file list */
 
 .hf-file-list {
