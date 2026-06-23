@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.3.1...v1.4.0) (2026-06-23)
+
+
+### Features
+
+* **gpu:** integrate PawnIO driver install and expose status in sensor bridge ([41b72e5](https://github.com/nmorgowicz-org/llama-monitor/commit/41b72e58c1c22e618c3c4082268e55d11daa8455))
+* **tray:** add unified right-click menu, popover fix, and WebView2 auto-install ([41b72e5](https://github.com/nmorgowicz-org/llama-monitor/commit/41b72e58c1c22e618c3c4082268e55d11daa8455))
+* **windows:** show console by default on Windows and log to file when headless ([41b72e5](https://github.com/nmorgowicz-org/llama-monitor/commit/41b72e58c1c22e618c3c4082268e55d11daa8455))
+* **windows:** use APPDATA as default config dir and add legacy migration ([41b72e5](https://github.com/nmorgowicz-org/llama-monitor/commit/41b72e58c1c22e618c3c4082268e55d11daa8455))
+
+
+### Bug Fixes
+
+* **gpu:** apply no_window to GPU tools, LHM, and llama-server subprocesses ([41b72e5](https://github.com/nmorgowicz-org/llama-monitor/commit/41b72e58c1c22e618c3c4082268e55d11daa8455))
+* **gpu:** correct WMI GPU VRAM wrap at 4 GiB using registry value ([41b72e5](https://github.com/nmorgowicz-org/llama-monitor/commit/41b72e58c1c22e618c3c4082268e55d11daa8455))
+* **windows:** skip legacy migration when --config-dir is set and harden PawnIO check ([41b72e5](https://github.com/nmorgowicz-org/llama-monitor/commit/41b72e58c1c22e618c3c4082268e55d11daa8455))
+* **windows:** update all release files in-place during self-update ([68c36b1](https://github.com/nmorgowicz-org/llama-monitor/commit/68c36b12ef652cb9253220e4988ee4866fa926e8))
+
 ## [1.3.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.3.0...v1.3.1) (2026-06-22)
 
 
