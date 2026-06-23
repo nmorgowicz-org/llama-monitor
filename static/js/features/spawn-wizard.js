@@ -2030,43 +2030,19 @@ function updateSelectedModelArchLabel() {
   if (!container) return;
   container.innerHTML = '';
 
-  // Derive MoE state from real signals: an expert count (from introspection or the
-  // filename guess) or the pending-MoE flag set off the "A<n>B" suffix. The legacy
-  // `arch.isMoe` flag was never populated, so relying on it made every model fall
-  // through to "dense".
-  const isMoe =
-      (wizardState.arch.nExperts || 0) > 0 ||
-      wizardState.arch.isMoe === true ||
-      wizardState.arch._isMoePending === true;
-  // Hybrid attention is flagged by the GGUF arch name / filename (the previous
-  // `arch.name` field was never set, so this never matched before).
-  const archName = `${wizardState.arch.ggufArch || ''} ${wizardState.model.path || ''}`;
-  const isHybrid = /hybrid|deltanet/i.test(archName);
-  const totalB = wizardState.model.paramB || null;
-
-  // Active-parameter budget: prefer the value parsed from the filename / introspection;
-  // otherwise estimate from the expert ratio (active ≈ total / (1 + experts/used)),
-  // mirroring the backend's simple_moe_active fallback.
-  let activeB = wizardState.model.activeParamsB || null;
-  if (isMoe && !activeB && totalB &&
-      wizardState.arch.nExperts > 0 && wizardState.arch.nExpertsUsed > 0) {
-    const ratio = wizardState.arch.nExperts / wizardState.arch.nExpertsUsed;
-    activeB = totalB / (1 + ratio);
-  }
-
-  // Prefer the backend-derived architecture_kind (authoritative, from introspection);
-  // fall back to the local derivation before introspection completes.
-  const archKind = wizardState.arch.archKind ||
-      (isMoe ? (isHybrid ? 'hybrid_moe' : 'moe')
-             : (wizardState.arch.nLayers > 0 ? 'dense' : null));
-
-  // Build a pseudo-preset from wizard state so we can reuse buildArchitectureLabel.
+  // Build a pseudo-preset from wizard state so we can reuse buildArchitectureLabel
   const pseudoPreset = {
-    architecture_kind: archKind,
+    architecture_kind: wizardState.arch.isMoe === true
+        ? (wizardState.arch.name?.includes?.('Hybrid') || wizardState.arch.name?.includes?.('DeltaNet') ? 'hybrid_moe' : 'moe')
+        : (wizardState.arch.nLayers > 0 && !wizardState.arch.isMoe
+            ? 'dense'
+            : null),
     expert_count: wizardState.arch.nExperts || null,
     expert_used_count: wizardState.arch.nExpertsUsed || null,
-    active_params_b: activeB,
-    param_count: totalB ? totalB * 1e9 : null,
+    active_params_b: wizardState.model.activeParamsB || null,
+    param_count: wizardState.model.paramB
+        ? wizardState.model.paramB * 1e9
+        : null,
   };
 
   const arch = buildArchitectureLabel(pseudoPreset, { paramB: wizardState.model.paramB });
@@ -2078,23 +2054,14 @@ function updateSelectedModelArchLabel() {
   label.title = arch.tooltip;
   container.appendChild(label);
 
-  // Brief architecture note for educational clarity, including which GPU-offload knob
-  // the model's layer count applies to (--n-cpu-moe for MoE, --gpu-layers/-ngl for dense).
+  // Brief architecture note for educational clarity
   const note = document.createElement('div');
   note.className = 'selected-model-arch-hint';
-  const nLayers = wizardState.arch.nLayers || 0;
-  const layerStr = nLayers > 0 ? ` This model has ${nLayers} layers` : '';
-  if (archKind === 'moe' || archKind === 'hybrid_moe') {
-    // Real measured routed-expert bytes per MoE layer (the VRAM --n-cpu-moe frees).
-    const perExpert = wizardState.arch.expertBytesPerLayer || 0;
-    const perExpertStr = perExpert > 0 ? ` (~${formatBytes(perExpert)} freed per offloaded layer)` : '';
-    note.textContent = 'MoE / Hybrid MoE: only a subset of parameters active per token; often more efficient.' +
-        (layerStr ? layerStr + ' — set --n-cpu-moe between 0 and ' + nLayers + ' to offload expert layers to CPU/RAM' + perExpertStr + '.' : '');
-  } else if (archKind === 'dense') {
-    const perLayer = wizardState.arch.bytesPerLayer || 0;
-    const perLayerStr = perLayer > 0 ? ` (~${formatBytes(perLayer)} of VRAM each)` : '';
-    note.textContent = 'Dense: all parameters used each token.' +
-        (layerStr ? layerStr + perLayerStr + ' — set --gpu-layers (-ngl) between 0 and ' + nLayers + ' to offload layers to the GPU.' : '');
+  const kind = pseudoPreset.architecture_kind;
+  if (kind === 'moe' || kind === 'hybrid_moe') {
+    note.textContent = 'MoE / Hybrid MoE: only a subset of parameters active per token; often more efficient.';
+  } else if (kind === 'dense') {
+    note.textContent = 'Dense: all parameters used each token.';
   }
   container.appendChild(note);
 }
@@ -2116,18 +2083,16 @@ function onModelPathChanged() {
     // Detect MoE from "NB-AMB" suffix (e.g. 35B-A3B, 26B-A4B, 122B-A10B)
     const moeInfo = parseMoeSuffix(name);
     if (moeInfo && !wizardState.arch.nExperts) {
-      // We don't know exact expert count without introspection, but we know it's MoE.
-      // Set a flag so the MoE panel + arch label show up; introspection fills exact counts.
+      // We don't know exact expert count without introspection, but we know it's MoE
+      // Set a flag so the MoE panel shows up; introspection will fill exact count
       wizardState.arch._isMoePending = true;
+      // Rough expert count: assume Qwen3/Gemma4 style ~128 experts for large MoE
+      // Will be overridden by introspection
       const totalB = moeInfo.total, activeB = moeInfo.active;
-      // The "A<n>B" suffix is the active-parameter budget in billions — record it so the
-      // architecture label can show "MoE • <total> (<active> active)" before introspection.
-      if (activeB > 0) wizardState.model.activeParamsB = activeB;
-      // Rough expert count guess for the MoE panel; introspection overrides it.
-      // (Active-expert *count* is unknown from the filename, so leave nExpertsUsed for
-      // introspection — it is an expert count, not the active-parameter billions.)
       if (totalB > 20) {
+        // Likely many experts (128+)
         wizardState.arch.nExperts = totalB > 100 ? 128 : (totalB > 30 ? 64 : 8);
+        wizardState.arch.nExpertsUsed = Math.round(activeB);
       }
     }
 
@@ -2222,13 +2187,6 @@ async function doIntrospect(path) {
     if (m.n_experts_used) wizardState.arch.nExpertsUsed = m.n_experts_used;
     if (m.mtp_depth)      wizardState.arch.mtpDepth      = m.mtp_depth;
     if (m.gguf_arch)      wizardState.arch.ggufArch      = m.gguf_arch;
-    // Backend-derived architecture label + active-param estimate (authoritative —
-    // same computation the preset editor uses, so the wizard label matches it).
-    if (m.architecture_kind) wizardState.arch.archKind = m.architecture_kind;
-    if (m.active_params_b != null) wizardState.model.activeParamsB = m.active_params_b;
-    // Exact per-layer byte sizes measured from the GGUF tensor directory (real data).
-    if (m.bytes_per_layer != null) wizardState.arch.bytesPerLayer = m.bytes_per_layer;
-    if (m.expert_bytes_per_layer != null) wizardState.arch.expertBytesPerLayer = m.expert_bytes_per_layer;
 
     // Re-fetch sampling defaults now that gguf_arch is known — the earlier call
     // (on hardware step entry) ran before introspection completed and sent an empty
@@ -2366,26 +2324,6 @@ async function doIntrospect(path) {
     // Update MoE slider max — n_cpu_moe counts layers, so the max is the layer count
     if (wizardState.arch.nExperts > 0 && dom.moeOffloadSlider) {
       dom.moeOffloadSlider.max = wizardState.arch.nLayers || wizardState.arch.nExperts;
-    }
-
-    // Bound the manual --gpu-layers (-ngl) input to the layer count and show it, so the
-    // user knows e.g. a 70B model has 69 layers and can put 65 on GPU, 4 on CPU/RAM.
-    const nLayers = wizardState.arch.nLayers || 0;
-    if (dom.gpuLayersManualInput && nLayers > 0) {
-      dom.gpuLayersManualInput.max = nLayers;
-      dom.gpuLayersManualInput.placeholder = `0–${nLayers}`;
-    }
-    const nglHint = document.getElementById('spawn-gpu-layers-manual-hint');
-    if (nglHint) {
-      if (nLayers > 0) {
-        // Real per-layer VRAM from the GGUF tensor directory when available.
-        const perLayer = wizardState.arch.bytesPerLayer || 0;
-        const perLayerStr = perLayer > 0 ? ` (~${formatBytes(perLayer)} of VRAM each)` : '';
-        nglHint.textContent = `This model has ${nLayers} layers${perLayerStr}. Enter 0–${nLayers}: layers above your value stay on CPU/RAM (e.g. ${Math.max(0, nLayers - 4)} keeps 4 layers off the GPU).`;
-        nglHint.style.display = '';
-      } else {
-        nglHint.style.display = 'none';
-      }
     }
 
       // Store the model's training context ceiling for UX warnings
