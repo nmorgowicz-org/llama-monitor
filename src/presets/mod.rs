@@ -241,6 +241,18 @@ pub struct ModelPreset {
     /// used per token (backbone + active experts).
     #[serde(default)]
     pub active_params_b: Option<f64>,
+    /// Model layer count (GGUF `block_count`). Surfaced in the editor so users can
+    /// tune `--n-cpu-moe`, which offloads expert layers and is bounded by this count.
+    #[serde(default)]
+    pub block_count: Option<u32>,
+    /// Exact bytes per transformer layer, measured from the GGUF tensor directory
+    /// (not estimated). The VRAM each `-ngl` layer occupies on the GPU.
+    #[serde(default)]
+    pub bytes_per_layer: Option<u64>,
+    /// Exact routed-expert bytes per MoE layer, measured from the tensor directory.
+    /// The VRAM freed per layer offloaded via `--n-cpu-moe`.
+    #[serde(default)]
+    pub expert_bytes_per_layer: Option<u64>,
 }
 
 pub fn next_id() -> String {
@@ -257,7 +269,14 @@ pub fn load_presets(path: &Path) -> Vec<ModelPreset> {
     if path.exists() {
         match std::fs::read_to_string(path) {
             Ok(contents) => match serde_json::from_str::<Vec<ModelPreset>>(&contents) {
-                Ok(presets) if !presets.is_empty() => return presets,
+                Ok(mut presets) if !presets.is_empty() => {
+                    // Backfill GGUF-derived metadata (architecture_kind, active_params_b,
+                    // expert counts, etc.) for presets saved before these fields existed,
+                    // then persist so the welcome page / launch cards render correctly
+                    // without requiring the user to re-save each preset.
+                    backfill_gguf_metadata(path, &mut presets);
+                    return presets;
+                }
                 Ok(_) => eprintln!("[warn] Presets file is empty, using defaults"),
                 Err(e) => eprintln!("[warn] Failed to parse presets file: {e}, using defaults"),
             },
@@ -270,6 +289,37 @@ pub fn load_presets(path: &Path) -> Vec<ModelPreset> {
     presets
 }
 
+/// Run [`ensure_gguf_metadata`] over every preset and persist the result if any
+/// preset gained new metadata. Used at load time so existing presets pick up
+/// fields added after they were first saved (e.g. architecture labels). Presets
+/// whose model file is missing are left untouched (ensure_gguf_metadata is a no-op).
+fn backfill_gguf_metadata(path: &Path, presets: &mut [ModelPreset]) {
+    let mut changed = false;
+    for preset in presets.iter_mut() {
+        let before = (
+            preset.architecture_kind.clone(),
+            preset.active_params_b,
+            preset.gguf_architecture.clone(),
+            preset.block_count,
+            preset.bytes_per_layer,
+        );
+        ensure_gguf_metadata(preset);
+        let after = (
+            preset.architecture_kind.clone(),
+            preset.active_params_b,
+            preset.gguf_architecture.clone(),
+            preset.block_count,
+            preset.bytes_per_layer,
+        );
+        if before != after {
+            changed = true;
+        }
+    }
+    if changed {
+        let _ = save_presets(path, presets);
+    }
+}
+
 /// Save presets to disk atomically (write tmp, rename).
 pub fn save_presets(path: &Path, presets: &[ModelPreset]) -> Result<()> {
     if let Some(parent) = path.parent() {
@@ -280,6 +330,29 @@ pub fn save_presets(path: &Path, presets: &[ModelPreset]) -> Result<()> {
     std::fs::write(&tmp, json)?;
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+impl ModelPreset {
+    /// Reset every GGUF-derived metadata field to `None`.
+    ///
+    /// Call this whenever `model_path` changes so [`ensure_gguf_metadata`] recomputes
+    /// from the new file instead of keeping stale values (it only refills `None` fields).
+    ///
+    /// This is the single source of truth for "which fields come from the GGUF" — when a
+    /// new GGUF-derived field is added to [`ModelPreset`], add it here and nowhere else.
+    pub fn clear_gguf_metadata(&mut self) {
+        self.gguf_architecture = None;
+        self.param_count = None;
+        self.family = None;
+        self.size_class = None;
+        self.architecture_kind = None;
+        self.expert_count = None;
+        self.expert_used_count = None;
+        self.active_params_b = None;
+        self.block_count = None;
+        self.bytes_per_layer = None;
+        self.expert_bytes_per_layer = None;
+    }
 }
 
 /// Populate GGUF-derived metadata fields on a preset if they are missing.
@@ -301,6 +374,8 @@ pub fn ensure_gguf_metadata(preset: &mut ModelPreset) {
         && preset.size_class.is_some()
         && preset.architecture_kind.is_some()
         && preset.active_params_b.is_some()
+        && preset.block_count.is_some()
+        && preset.bytes_per_layer.is_some()
     {
         return;
     }
@@ -337,144 +412,33 @@ pub fn ensure_gguf_metadata(preset: &mut ModelPreset) {
         preset.size_class = crate::models::infer_size_class_from_param_count(pc);
     }
 
-    // Store expert_count / expert_used_count from GGUF.
+    // Store expert_count / expert_used_count and layer count from GGUF. block_count
+    // is the model's layer count, surfaced in the editor so users can tune --n-cpu-moe
+    // (which offloads expert layers and is bounded by the layer count).
     if preset.expert_count.is_none() {
         preset.expert_count = meta.expert_count;
     }
     if preset.expert_used_count.is_none() {
         preset.expert_used_count = meta.expert_used_count;
     }
+    if preset.block_count.is_none() {
+        preset.block_count = meta.block_count;
+    }
+    // Exact per-layer byte sizes measured from the tensor directory (real data).
+    if preset.bytes_per_layer.is_none() {
+        preset.bytes_per_layer = meta.bytes_per_layer();
+    }
+    if preset.expert_bytes_per_layer.is_none() {
+        preset.expert_bytes_per_layer = meta.expert_bytes_per_layer();
+    }
 
-    // Derive architecture_kind:
-    // - MoE: expert_count is set and > 0
-    // - Hybrid: MoE + full_attention_interval > 1 (some layers full attention, others linear/DeltaNet)
-    // - Dense: everything else
+    // Derive architecture_kind + active_params_b from the shared GgufMetadata helpers
+    // (same computation used by the spawn wizard's introspection path).
     if preset.architecture_kind.is_none() {
-        let expert_count = meta.expert_count.unwrap_or(0);
-        let is_moe = expert_count > 0;
-        let is_hybrid_attn = meta.full_attention_interval.is_some_and(|v| v > 1);
-
-        preset.architecture_kind = if is_moe && is_hybrid_attn {
-            Some("hybrid_moe".into())
-        } else if is_moe {
-            Some("moe".into())
-        } else {
-            Some("dense".into())
-        };
+        preset.architecture_kind = Some(meta.architecture_kind());
     }
-
-    // Derive active_params_b for MoE/hybrid-moE models.
-    // For dense: active = total.
-    // For MoE/hybrid-moE: estimate from backbone + active experts.
-    if preset.active_params_b.is_none()
-        && let Some(total_params) = meta.param_count
-    {
-        preset.active_params_b = compute_active_params_b(&meta, total_params);
-    }
-}
-
-/// Estimate "active parameters" in billions from GGUF metadata.
-///
-/// For dense models: active = total.
-/// For MoE/hybrid-MoE: active ≈ backbone_params + (N_used / N_experts) * expert_params.
-///
-/// Fallback: if data is incomplete, falls back to total / (1 + N_experts / N_used)
-/// if that ratio is reasonable; otherwise total params (param_b).
-fn compute_active_params_b(
-    meta: &crate::llama::gguf_meta::GgufMetadata,
-    total_params: u64,
-) -> Option<f64> {
-    let is_moe = meta.expert_count.is_some_and(|e| e > 0);
-    if !is_moe {
-        return Some(total_params as f64 / 1e9);
-    }
-
-    let n_experts = meta.expert_count?;
-    let n_used = meta.expert_used_count?;
-    if n_experts == 0 || n_used == 0 || n_used > n_experts {
-        // Invalid expert ratio → fallback to total.
-        return Some(total_params as f64 / 1e9);
-    }
-
-    // Attempt a structural estimate from GGUF:
-    // backbone ≈ attention projections + token-embedding/output projection
-    // experts_total = P - backbone
-    // active ≈ backbone + N_used * (experts_total / N_experts)
-    let n_layers = meta.block_count;
-    let head_count = meta.head_count;
-    let head_count_kv = meta.head_count_kv;
-    let kv_len = meta.key_length;
-    let embd = meta.embedding_length;
-
-    let have_enough = matches!(
-        (n_layers, head_count, head_count_kv, kv_len, embd),
-        (Some(_), Some(_), Some(_), Some(_), Some(_))
-    );
-
-    if have_enough {
-        let n_layers = n_layers.unwrap();
-        let head_count = head_count.unwrap();
-        let head_count_kv = head_count_kv.unwrap();
-        let kv_len = kv_len.unwrap();
-        let embd = embd.unwrap();
-
-        // Approximate the dense "backbone" (non-expert) parameter count. This is
-        // a deliberately rough lower bound — it does not model shared experts,
-        // dense-then-MoE layer splits, or attention variants — so it is guarded by
-        // the sanity clamps below. The FFN/expert weights are intentionally *not*
-        // counted here: in MoE GGUFs `feed_forward_length` is the per-expert
-        // intermediate size, so they fall into `expert_total` instead.
-        //
-        // Per layer, attention Q/K/V/O projections (head_dim == key_length):
-        //   embd * head_dim * (2*n_head + 2*n_head_kv)
-        // Plus a one-off token-embedding + output projection: ~2 * embd^2.
-        let head_dim = kv_len as u64;
-        let attn_per_layer =
-            embd as u64 * head_dim * (2 * head_count as u64 + 2 * head_count_kv as u64);
-        let backbone_total: u64 = n_layers as u64 * attn_per_layer + 2 * embd as u64 * embd as u64;
-
-        let expert_total = if total_params > backbone_total {
-            total_params - backbone_total
-        } else {
-            // Backbone estimate exceeds total (bad input); fall back to simple ratio.
-            return simple_moe_active(total_params, n_experts, n_used);
-        };
-
-        // If the expert portion is <10% of total, the structural estimate is
-        // clearly off (a real MoE keeps most weight in experts), so fall back.
-        if (expert_total as f64) < (total_params as f64 * 0.1) {
-            return simple_moe_active(total_params, n_experts, n_used);
-        }
-
-        let per_expert = expert_total / n_experts as u64;
-        let active: f64 = (backbone_total as f64) + (n_used as f64 * per_expert as f64);
-        let active_b = active / 1e9;
-
-        // Sanity: active must be < total and > 0. If ratio is off, use simple.
-        if active > 0.0 && active_b < total_params as f64 / 1e9 {
-            Some(active_b)
-        } else {
-            simple_moe_active(total_params, n_experts, n_used)
-        }
-    } else {
-        // Not enough GGUF fields → simple ratio.
-        simple_moe_active(total_params, n_experts, n_used)
-    }
-}
-
-/// Simple ratio-based active param estimate for MoE:
-/// active ≈ total / (1 + N_experts / N_used)
-/// Only used when structural estimate is not possible.
-fn simple_moe_active(total: u64, n_experts: u32, n_used: u32) -> Option<f64> {
-    if n_experts == 0 || n_used == 0 {
-        return Some(total as f64 / 1e9);
-    }
-    let ratio = n_experts as f64 / n_used as f64;
-    let active_b = total as f64 / (1.0 + ratio) / 1e9;
-    if active_b > 0.0 && active_b < total as f64 / 1e9 {
-        Some(active_b)
-    } else {
-        Some(total as f64 / 1e9)
+    if preset.active_params_b.is_none() {
+        preset.active_params_b = meta.active_params_b();
     }
 }
 
@@ -581,6 +545,34 @@ mod tests {
         assert!(templates.is_empty());
         assert!(path.exists());
         assert_eq!(load_templates(&path).len(), 0);
+    }
+
+    #[test]
+    fn clear_gguf_metadata_resets_all_derived_fields() {
+        // Guards against the recurring bug where a new GGUF-derived field is added
+        // to ModelPreset but not to the model_path-change reset, leaving stale data.
+        let mut preset = ModelPreset {
+            gguf_architecture: Some("qwen3moe".into()),
+            param_count: Some(30_000_000_000),
+            family: Some("qwen".into()),
+            size_class: Some("large".into()),
+            architecture_kind: Some("moe".into()),
+            expert_count: Some(128),
+            expert_used_count: Some(8),
+            active_params_b: Some(3.3),
+            ..Default::default()
+        };
+
+        preset.clear_gguf_metadata();
+
+        assert!(preset.gguf_architecture.is_none());
+        assert!(preset.param_count.is_none());
+        assert!(preset.family.is_none());
+        assert!(preset.size_class.is_none());
+        assert!(preset.architecture_kind.is_none());
+        assert!(preset.expert_count.is_none());
+        assert!(preset.expert_used_count.is_none());
+        assert!(preset.active_params_b.is_none());
     }
 
     #[test]
