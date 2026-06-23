@@ -522,6 +522,14 @@ All fields use `#[serde(default)]` for backward compatibility.
 | `cache_ram_mib` | Option<i32> | null | Max RAM for cache (MiB) |
 | `prio` | Option<i32> | null | Process priority |
 | `prio_batch` | Option<i32> | null | Batch process priority |
+| `gguf_architecture` | Option<String> | null | GGUF architecture (e.g. "llama", "qwen3_6") |
+| `param_count` | Option<u64> | null | Total parameter count from GGUF |
+| `family` | Option<String> | null | Derived family slug (e.g. "qwen36", "llama3") |
+| `size_class` | Option<String> | null | Size class derived from param_count |
+| `architecture_kind` | Option<String> | null | "dense" / "moe" / "hybrid_moe" |
+| `expert_count` | Option<u32> | null | MoE experts per layer (MoE models) |
+| `expert_used_count` | Option<u32> | null | Active MoE experts per token |
+| `active_params_b` | Option<f64> | null | Effective active parameters (in billions) |
 | `bind_host` | Option<String> | null | Bind address override |
 | `port` | Option<u16> | null | Port override |
 

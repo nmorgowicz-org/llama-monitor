@@ -166,6 +166,26 @@ bytes/token = 2 (K+V) × n_layers × n_kv_heads × head_dim × bytes_per_elem
 
 ---
 
+## Architecture labels (Dense / MoE / Hybrid MoE)
+
+Wherever llama-monitor shows architecture info (welcome screen cards, preset editor, spawn wizard), you may see:
+
+- **Dense • X B**
+  - All X B parameters active per token.
+  - Heavy on memory bandwidth; slower on Apple Silicon when large.
+- **MoE • X B (Y B active)**
+  - X B total, but only Y B actually computed per token via expert routing.
+  - Often much faster than a dense model of similar total size, especially on:
+    - Apple Silicon (less memory traffic)
+    - Discrete GPUs with MoE offload (--n-cpu-moe).
+- **Hybrid MoE • X B (Y B active)**
+  - MoE plus hybrid attention (fewer full-KV layers).
+  - More efficient at long context: smaller KV cache, faster decode.
+
+Use these labels as a quick guide:
+- For shared or laptop systems: prefer MoE or Hybrid MoE at the same quality tier.
+- For dedicated desktops/GPU rigs: dense is acceptable and often fine with high priority.
+
 ## The throughput levers, in priority order
 
 1. **Model architecture (MoE > dense)** — the only ~3× lever on unified memory.
