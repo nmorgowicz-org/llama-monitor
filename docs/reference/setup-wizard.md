@@ -139,7 +139,7 @@ Upstream references:
 |---------|----|---------|-------|
 | GPU layers | `spawn-gpu-layers` | Auto | Auto / All / Manual |
 | Layers count | `spawn-gpu-layers-manual` | — | Shown only when Manual selected |
-| Context size | `spawn-context-size` | 8192 | Primary tuning control. Quick-pick buttons: 32k Chat, 65k RP, 131k Agent, 200k Large, Model max |
+| Context size | `spawn-context-size` | 8192 | Primary tuning control. Quick-pick buttons: 65k RP, 131k Agent, 160k Large, 212k Large, 262k Max, Model max |
 | KV cache (K) | `spawn-cache-type-k` | q8_0 | f16 / q8_0 / q4_0 |
 | KV cache (V) | `spawn-cache-type-v` | q8_0 | f16 / q8_0 / q4_0 |
 | KV Unified | `spawn-kv-unified` | Default | Default omits the flag; On passes `--kv-unified`; Off passes `--no-kv-unified` |
