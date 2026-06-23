@@ -98,19 +98,6 @@ jobs:
           git diff --check
           cargo fmt -- --check
           cargo clippy -- -D warnings
-
-          # Install cross so we can lint Windows targets with the correct toolchain
-          # (the check runner does not call release-preflight.sh, so cross is not guaranteed).
-          command -v cross >/dev/null || cargo install cross
-
-          # Lint Windows-only code paths using the same toolchain we ship (cross + Docker).
-          # Use the same env as scripts/build-single-target.sh for x86_64-pc-windows-gnu
-          # so cfg-gating bugs are caught with the exact feature set users get.
-          CROSS_REMOTE=1 \
-            CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
-            CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=cc \
-            cross clippy --target x86_64-pc-windows-gnu --no-default-features --features native-tray,webview-popover -- -D warnings
-
           cargo test
 
       - name: Validate sensor_bridge compiles
@@ -274,18 +261,45 @@ jobs:
       - name: Preflight release toolchain
         run: bash scripts/release-preflight.sh
 
-      - name: Lint Windows targets (only for Windows matrix)
-        if: matrix.target == 'x86_64-pc-windows-gnu'
+      - name: Smoke build ${{ matrix.target }}
+        run: bash scripts/build-single-target.sh ${{ matrix.target }}
+
+  check-windows:
+    needs: [paths-filter, check]
+    timeout-minutes: 30
+    if: >-
+      always() &&
+      needs.check.result != 'failure' &&
+      !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
+      needs.paths-filter.outputs.release == 'true' &&
+      github.event.pull_request.draft == false &&
+      (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
+       startsWith(github.actor, 'dependabot'))
+    name: check-windows (clippy)
+    runs-on: arc-llama-monitor
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: "v0-rust"
+          shared-key: "llama-monitor-x86_64-pc-windows-gnu-${{ hashFiles('Cargo.lock') }}"
+          save-if: "${{ github.ref == 'refs/heads/main' }}"
+
+      - name: Preflight release toolchain
+        run: bash scripts/release-preflight.sh
+
+      - name: Lint Windows target with cross
         run: |
-          # Lint Windows-only code paths with the SHIPPED feature set (see scripts/build-single-target.sh).
-          # Use cross to match the actual Windows build environment (same Docker image/toolchain).
+          # Lint Windows-only code paths using the same toolchain we ship (cross + Docker),
+          # identical to scripts/build-single-target.sh. This is a fast check (no build),
+          # just cross + cargo clippy for x86_64-pc-windows-gnu.
           CROSS_REMOTE=1 \
             CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
             CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=cc \
             cross clippy --target x86_64-pc-windows-gnu --no-default-features --features native-tray,webview-popover -- -D warnings
-
-      - name: Smoke build ${{ matrix.target }}
-        run: bash scripts/build-single-target.sh ${{ matrix.target }}
 
   release-smoke-rest:
     needs: [paths-filter, check, release-smoke]
