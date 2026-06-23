@@ -1370,7 +1370,7 @@
             <!-- Behavior / Persona panel -->
             <div class="chat-behavior-panel" id="chat-behavior-panel">
                 <div class="chat-behavior-header">
-                    <label class="chat-behavior-label">Behavior</label>
+                    <div class="chat-behavior-label">Behavior</div>
                     <div class="chat-behavior-actions">
                         <button class="chat-copy-settings-btn" id="chat-copy-settings-btn" title="Copy settings from another tab">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2543,6 +2543,7 @@
                                     <input type="text" class="pe-input" id="modal-model-path" required>
                                     <button type="button" class="btn-sm btn-preset" id="preset-browse-model-btn" title="Browse filesystem for .gguf files">Browse</button>
                                 </div>
+                                <div class="pe-arch-info" id="pe-arch-info"></div>
                                 <span class="field-error-msg" role="alert">Model path is required</span>
                             </div>
                             <div class="pe-field">
@@ -2741,12 +2742,12 @@
                             </div>
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-prio" title="--prio: inference thread scheduling priority for token decode. 2 (High) is recommended for dedicated inference machines on Mac. 0 = Normal (OS default). Do not use 3 (Realtime) unless this machine does nothing else.">Thread Priority (--prio)</label>
+                                    <label class="pe-label" for="modal-prio" title="--prio: inference thread scheduling priority for token decode. 1 (Medium) is good for shared use (laptops), 2 (High) for dedicated systems. Do not use 3 (Realtime) unless this machine does nothing else.">Thread Priority (--prio)</label>
                                     <select class="pe-select" id="modal-prio">
                                         <option value="">(default)</option>
                                         <option value="0">0 — Normal</option>
                                         <option value="1">1 — Medium</option>
-                                        <option value="2">2 — High (recommended for Mac)</option>
+                                        <option value="2">2 — High</option>
                                         <option value="3">3 — Realtime (dedicated server only)</option>
                                     </select>
                                 </div>
@@ -3480,6 +3481,7 @@
                         <div class="selected-model-info">
                             <div class="selected-model-name" id="spawn-selected-model-name"></div>
                             <div class="selected-model-meta" id="spawn-selected-model-meta"></div>
+                            <div class="selected-model-arch" id="spawn-selected-model-arch"></div>
                         </div>
                     </div>
 
@@ -3597,11 +3599,11 @@
                             <input type="number" id="spawn-context-size" min="512" step="512" value="8192" title="Type any value. Smaller = less VRAM used by KV cache.">
                             <div class="field-hint ctx-primary-hint">Primary tradeoff: more context uses more KV memory. Stay within model max for best quality; go beyond it only if you plan to extend with RoPE/YaRN.</div>
                             <div class="ctx-quick-picks" id="ctx-quick-picks">
-                                <button type="button" class="ctx-pick" data-ctx="32768"  title="32k — solid default for general chat">32k <span class="ctx-pick-tag">Chat</span></button>
                                 <button type="button" class="ctx-pick" data-ctx="65536"  title="65k — Roleplay / RP with lorebooks">65k <span class="ctx-pick-tag">RP</span></button>
                                 <button type="button" class="ctx-pick" data-ctx="131072" title="131k — Minimum for agentic work">131k <span class="ctx-pick-tag">Agent</span></button>
-                                <button type="button" class="ctx-pick" data-ctx="204800" title="200k — large context if your model and VRAM can support it">200k <span class="ctx-pick-tag">Large</span></button>
-                                <button type="button" class="ctx-pick" data-ctx="262144" title="256k — full Qwen training context when available">256k <span class="ctx-pick-tag">Max</span></button>
+                                <button type="button" class="ctx-pick" data-ctx="163840" title="160k — extra room for long tasks">160k <span class="ctx-pick-tag">Large</span></button>
+                                <button type="button" class="ctx-pick" data-ctx="212000" title="212k — large context for demanding workflows">212k <span class="ctx-pick-tag">Large</span></button>
+                                <button type="button" class="ctx-pick" data-ctx="262144" title="262k — near-max for long-context models">262k <span class="ctx-pick-tag">Max</span></button>
                                 <button type="button" class="ctx-pick ctx-pick-model-max" id="ctx-pick-model-max" style="display:none;" title="This model's training context limit">— <span class="ctx-pick-tag">Model max</span></button>
                             </div>
                         </div>
@@ -3729,15 +3731,15 @@
                                 <div class="field-hint">Required for KV cache quantization. Recommended on most systems, especially with Metal.</div>
                             </div>
                             <div class="hardware-field">
-                                <label for="spawn-prio" title="--prio: inference thread priority. 2 (High) is recommended for dedicated inference machines. 0 = Normal. Do not use 3 (Realtime) unless this is the only process running.">Thread Priority (--prio)</label>
+                                <label for="spawn-prio" title="--prio: inference thread priority. 1 (Medium) is good for shared use (laptops), 2 (High) for dedicated systems (desktops/GPU rigs). Do not use 3 (Realtime) unless this is the only process running.">Thread Priority (--prio)</label>
                                 <select id="spawn-prio">
                                     <option value="">(default)</option>
                                     <option value="0">0 — Normal</option>
                                     <option value="1">1 — Medium</option>
-                                    <option value="2">2 — High (recommended)</option>
+                                    <option value="2">2 — High</option>
                                     <option value="3">3 — Realtime (dedicated only)</option>
                                 </select>
-                                <div class="field-hint">Higher priority reduces inference interruptions. 2 is recommended for most systems.</div>
+                                <div class="field-hint">Higher priority reduces inference interruptions. Use 1 on shared/laptop systems, 2 on dedicated desktops or GPU rigs.</div>
                             </div>
                             <div class="hardware-field">
                                 <label for="spawn-threads" title="-t: CPU thread count for inference. On Apple Silicon, Apple recommends 1 (Metal GPU handles compute). Never exceed your chip's P-core count. Leave blank for server default.">Threads (-t)</label>
@@ -3774,7 +3776,7 @@
                                 <div class="field-hint">Max system RAM for KV prefix reuse across requests. Default: 8192 MiB. 0 = disable · −1 = no limit.</div>
                             </div>
                             <div class="hardware-field" style="grid-column: 1/-1;">
-                                <label>Auto-fit context to memory</label>
+                                <label for="spawn-fit-enable">Auto-fit context to memory</label>
                                 <div class="fit-target-row">
                                     <select id="spawn-fit-enable" title="Default leaves fit behavior to llama-server.">
                                         <option value="">Default</option>
