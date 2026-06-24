@@ -2571,8 +2571,7 @@
                             <div class="pe-row">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-gpu-layers" title="Number of layers to offload to GPU. Leave empty for all layers. Lower values keep some layers on CPU to save VRAM.">GPU Layers (-ngl)</label>
-                                    <input type="number" class="pe-input" id="modal-gpu-layers" min="0" placeholder="all (leave empty)">
-                                    <div class="pe-field-hint" id="modal-gpu-layers-layers" style="display:none;"></div>
+                                    <input type="number" class="pe-input" id="modal-gpu-layers" placeholder="all (leave empty)">
                                 </div>
                             </div>
                             <div class="pe-toggles">
@@ -2899,9 +2898,8 @@
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-n-cpu-moe" title="Number of MoE expert layers to offload to CPU/RAM instead of GPU. Useful when the model's expert layers don't fully fit in VRAM. Each layer moved to GPU speeds decode; start with all experts in RAM, then move layers to GPU one by one until just before OOM.">CPU MoE (-n-cpu-moe)</label>
-                                    <input type="number" class="pe-input" id="modal-n-cpu-moe" placeholder="auto" min="0">
+                                    <input type="number" class="pe-input" id="modal-n-cpu-moe" placeholder="auto">
                                     <div class="pe-field-hint">MoE offload tuning: start with the full expert layer count in RAM. Incrementally reduce this number (move layers to GPU) until just before running out of memory — each GPU layer speeds decode.</div>
-                                    <div class="pe-field-hint" id="modal-n-cpu-moe-layers" style="display:none;"></div>
                                     <div class="moe-autotune" id="preset-moe-autotune">
                                         <button type="button" class="moe-autotune-btn" id="preset-moe-autotune-verify" title="Run llama-bench to find the fastest n_cpu_moe empirically. Requires the server to be stopped.">⚡ Auto-tune offload (sweep)</button>
                                         <span class="moe-autotune-status" id="preset-moe-autotune-status"></span>
@@ -3591,7 +3589,6 @@
                         <div class="hardware-field" id="spawn-gpu-layers-manual-wrap" style="display:none;">
                             <label for="spawn-gpu-layers-manual">Layers count</label>
                             <input type="number" id="spawn-gpu-layers-manual" min="0" placeholder="e.g. 32">
-                            <div class="field-hint" id="spawn-gpu-layers-manual-hint" style="display:none;"></div>
                         </div>
                         <!-- Context size spans 5 subgrid rows in col 2 (label, input, hint, quick-picks, padding) -->
                         <div class="hardware-field hardware-field-ctx">

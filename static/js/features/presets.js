@@ -1023,50 +1023,11 @@ export function openPresetModal(mode, section) {
         if (moeAutotuneBtn) {
             moeAutotuneBtn.style.display = isMoEEligible(p) ? '' : 'none';
         }
-        const moeLayersHint = document.getElementById('modal-n-cpu-moe-layers');
         if (isMoEEligible(p)) {
             numOrEmpty('modal-n-cpu-moe', p.n_cpu_moe);
-            const nMoeEl = document.getElementById('modal-n-cpu-moe');
-            // Bound the input to the model's layer count (from backend GGUF metadata).
-            if (nMoeEl && p.block_count != null) nMoeEl.max = p.block_count;
-            else if (nMoeEl) nMoeEl.removeAttribute('max');
-            if (moeLayersHint) {
-                if (p.block_count != null) {
-                    // Real measured routed-expert bytes per MoE layer (VRAM freed per offload).
-                    const freed = p.expert_bytes_per_layer
-                        ? ` Each offloaded layer frees ~${_formatLayerBytes(p.expert_bytes_per_layer)} of VRAM.`
-                        : '';
-                    moeLayersHint.textContent = `This model has ${p.block_count} expert layers — values are clamped to 0–${p.block_count}.${freed}`;
-                    moeLayersHint.style.display = '';
-                } else {
-                    moeLayersHint.style.display = 'none';
-                }
-            }
         } else {
             const el = document.getElementById('modal-n-cpu-moe');
-            if (el) { el.value = ''; el.removeAttribute('max'); }
-            if (moeLayersHint) moeLayersHint.style.display = 'none';
-        }
-        // Bound --gpu-layers (-ngl) to the layer count for all models (the primary
-        // GPU-offload knob for dense models, where there are no experts to offload).
-        const nglEl = document.getElementById('modal-gpu-layers');
-        if (nglEl) {
-            if (p.block_count != null) nglEl.max = p.block_count;
-            else nglEl.removeAttribute('max');
-        }
-        const nglHint = document.getElementById('modal-gpu-layers-layers');
-        if (nglHint) {
-            if (p.block_count != null) {
-                const off = Math.max(0, p.block_count - 4);
-                // Real measured per-layer weight bytes (VRAM each GPU layer occupies).
-                const perLayer = p.bytes_per_layer
-                    ? ` (~${_formatLayerBytes(p.bytes_per_layer)} of VRAM each)`
-                    : '';
-                nglHint.textContent = `This model has ${p.block_count} layers${perLayer}. Enter 0–${p.block_count}: layers above your value stay on CPU/RAM (e.g. ${off} keeps 4 layers off the GPU).`;
-                nglHint.style.display = '';
-            } else {
-                nglHint.style.display = 'none';
-            }
+            if (el) el.value = '';
         }
         // Rope
         setOpt('modal-rope-scaling', p.rope_scaling);
@@ -2121,13 +2082,6 @@ async function _restartServerWithPreset(presetId) {
 
 // ── Model architecture info (preset editor) ───────────────────────────────────
 
-// Format a byte count as GiB/MiB for per-layer VRAM hints.
-function _formatLayerBytes(bytes) {
-    const gib = bytes / (1024 ** 3);
-    if (gib >= 1) return gib.toFixed(gib >= 10 ? 0 : 2) + ' GiB';
-    return Math.round(bytes / (1024 ** 2)) + ' MiB';
-}
-
 function _renderPresetArchInfo(preset) {
     const container = document.getElementById('pe-arch-info');
     if (!container) return;
@@ -2142,8 +2096,6 @@ function _renderPresetArchInfo(preset) {
     main.textContent = 'Architecture: ' + arch.display;
     main.title = arch.tooltip;
 
-    container.appendChild(main);
-
     // Expert sub-line (if present)
     if (preset.expert_count != null || preset.expert_used_count != null) {
         const sub = document.createElement('div');
@@ -2156,36 +2108,17 @@ function _renderPresetArchInfo(preset) {
             parts.push(preset.expert_used_count + ' active per token');
         }
         sub.textContent = parts.join(', ');
+        container.appendChild(main);
         container.appendChild(sub);
-    }
-
-    // Layer-count sub-line — the value users need to bound the GPU-offload knobs.
-    // For MoE/hybrid: --n-cpu-moe offloads expert layers to CPU/RAM.
-    // For dense: --gpu-layers (-ngl) is the primary offload knob (no experts).
-    if (preset.block_count != null) {
-        const layers = document.createElement('div');
-        layers.className = 'pe-arch-sub';
-        layers.textContent = isMoEEligible(preset)
-            ? preset.block_count + ' layers — set --n-cpu-moe between 0 and ' +
-                preset.block_count + ' to offload expert layers to CPU/RAM'
-            : preset.block_count + ' layers — set --gpu-layers (-ngl) between 0 and ' +
-                preset.block_count + ' to offload layers to the GPU';
-        container.appendChild(layers);
+    } else {
+        container.appendChild(main);
     }
 }
 
-// Clear architecture info + layer hints when model path changes so they don't show
-// stale data (block_count is refreshed by the backend only after the preset is saved).
+// Clear architecture info when model path changes so it doesn't show stale data
 document.getElementById('modal-model-path')?.addEventListener('input', () => {
     const container = document.getElementById('pe-arch-info');
     if (container) container.innerHTML = '';
-    ['modal-n-cpu-moe-layers', 'modal-gpu-layers-layers'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) { el.textContent = ''; el.style.display = 'none'; }
-    });
-    ['modal-gpu-layers', 'modal-n-cpu-moe'].forEach(id => {
-        document.getElementById(id)?.removeAttribute('max');
-    });
 });
 
 // ── Init ───────────────────────────────────────────────────────────────────────
