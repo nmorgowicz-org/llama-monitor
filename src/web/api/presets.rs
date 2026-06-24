@@ -133,10 +133,7 @@ fn api_update_preset(
 
                 // Reset GGUF metadata if model_path changed so we refresh from new file
                 if Some(updated.model_path.trim().to_string()) != previous_model_path {
-                    updated.gguf_architecture = None;
-                    updated.param_count = None;
-                    updated.family = None;
-                    updated.size_class = None;
+                    updated.clear_gguf_metadata();
                 }
 
                 // Populate/refresh GGUF metadata if model_path is set and fields incomplete.
