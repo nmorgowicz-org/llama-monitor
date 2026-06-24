@@ -53,7 +53,7 @@ export function buildArchitectureLabel(p, c) {
         ? p.param_count / 1e9
         : (c && c.paramB) || null;
 
-    if (!kind || (kind !== 'moe' && kind !== 'hybrid_moe' && !totalB)) {
+    if (!kind) {
         return null;
     }
 
@@ -86,22 +86,28 @@ export function buildArchitectureLabel(p, c) {
                 tooltip: 'All ' + totalStr + ' parameters active per token'
             };
         }
-        return null;
+        return { display: 'Dense', tooltip: 'Dense (all parameters active per token)' };
     }
 
     if (kind === 'moe' || kind === 'hybrid_moe') {
+        var isHybrid = kind === 'hybrid_moe';
+        var tip = isHybrid
+            ? 'MoE + hybrid attention (fewer full-KV layers) — often faster at long context'
+            : 'MoE: only a subset of parameters active per token';
         if (totalStr && activeStr) {
-            var isHybrid = kind === 'hybrid_moe';
-            var tip = isHybrid
-                ? 'MoE + hybrid attention (fewer full-KV layers) — often faster at long context'
-                : 'MoE: only a subset of parameters active per token';
             return {
                 display: (isHybrid ? 'Hybrid MoE • ' : 'MoE • ') +
                     totalStr + ' (' + activeStr + ' active)',
                 tooltip: withExpertSuffix(tip)
             };
         }
-        return null;
+        if (totalStr) {
+            return {
+                display: (isHybrid ? 'Hybrid MoE • ' : 'MoE • ') + totalStr,
+                tooltip: withExpertSuffix(tip)
+            };
+        }
+        return { display: isHybrid ? 'Hybrid MoE' : 'MoE', tooltip: withExpertSuffix(tip) };
     }
 
     return null;

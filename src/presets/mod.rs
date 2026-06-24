@@ -358,35 +358,27 @@ impl ModelPreset {
 }
 
 /// Populate GGUF-derived metadata fields on a preset if they are missing.
-/// Called from preset save endpoints so cards get accurate labels.
+/// Called:
+/// - at startup via backfill_gguf_metadata() for all presets
+/// - on preset create/update via the API
 ///
-/// Only writes; never overwrites existing family/size_class values (backwards-compatible).
+/// Safety rule (backwards-compatible and forward-safe):
+/// - Only writes to fields that are currently None.
+/// - Never overwrites user-edited or previously set values.
+/// - Does not require "all or nothing": even if some fields are set, we still
+///   attempt to fill the rest. This ensures that new GGUF-derived fields are
+///   backfilled into existing presets without the user having to change model_path.
 pub fn ensure_gguf_metadata(preset: &mut ModelPreset) {
     let model_path = preset.model_path.trim();
     if model_path.is_empty() {
         return;
     }
 
-    // Only fill when metadata is incomplete.
-    // New architecture_kind/expert/active_params_b fields are included in the
-    // "complete" check so existing presets with older fields get them as well.
-    if preset.gguf_architecture.is_some()
-        && preset.family.is_some()
-        && preset.param_count.is_some()
-        && preset.size_class.is_some()
-        && preset.architecture_kind.is_some()
-        && preset.active_params_b.is_some()
-        && preset.block_count.is_some()
-        && preset.bytes_per_layer.is_some()
-        && preset.expert_bytes_per_layer.is_some()
-    {
-        return;
-    }
-
+    // Attempt to read GGUF metadata.
+    // Non-critical: if read fails (missing file, not a GGUF, etc.), leave fields as-is.
     let meta = match crate::llama::gguf_meta::read_gguf_metadata(Path::new(model_path)) {
         Ok(m) => m,
         Err(_) => {
-            // Non-critical: leave fields as-is and log quietly
             return;
         }
     };
@@ -401,11 +393,25 @@ pub fn ensure_gguf_metadata(preset: &mut ModelPreset) {
         preset.param_count = meta.param_count;
     }
 
-    // Derive family from architecture (not filename)
+    // Derive family from architecture (not filename).
+    // Both "qwen35" and "qwen35moe" cover Qwen3.5 and Qwen3.6 — block_count disambiguates:
+    // ≥75 → Qwen3.5 (e.g. 122B-A10B: 94 blocks); <75 → Qwen3.6 (27B dense: 64, 35B-A3B: 41).
+    // Same heuristic used by vram.rs.
     if preset.family.is_none()
         && let Some(ref arch) = meta.architecture
     {
-        preset.family = crate::models::infer_family_from_architecture(arch);
+        let a = arch.to_ascii_lowercase();
+        preset.family = if a == "qwen35" || a == "qwen35moe" {
+            Some(
+                match meta.block_count {
+                    Some(bc) if bc >= 75 => "qwen35",
+                    _ => "qwen36",
+                }
+                .into(),
+            )
+        } else {
+            crate::models::infer_family_from_architecture(arch)
+        };
     }
 
     // Derive size_class from param_count

@@ -210,15 +210,19 @@ impl GgufMetadata {
     /// Architecture label derived from the GGUF: `"dense"`, `"moe"`, or `"hybrid_moe"`.
     ///
     /// - MoE: `expert_count > 0`.
-    /// - Hybrid MoE: MoE **and** hybrid attention (`full_attention_interval > 1`, i.e.
-    ///   only some layers carry full KV, the rest are linear/DeltaNet).
+    /// - Hybrid MoE: MoE **and** hybrid attention, detected via either:
+    ///   - `full_attention_interval > 1` (Qwen3/DeltaNet style), or
+    ///   - `n_global_attn_layers < block_count` (Gemma4 sliding_window_pattern style).
     /// - Dense: everything else.
     ///
     /// This is the single source of truth for the architecture label shown on launch
     /// cards, in the preset editor, and in the spawn wizard.
     pub fn architecture_kind(&self) -> String {
         let is_moe = self.expert_count.is_some_and(|e| e > 0);
-        let is_hybrid_attn = self.full_attention_interval.is_some_and(|v| v > 1);
+        let is_hybrid_attn = self.full_attention_interval.is_some_and(|v| v > 1)
+            || self
+                .n_global_attn_layers
+                .is_some_and(|g| self.block_count.is_some_and(|b| b > 0 && g < b));
         if is_moe && is_hybrid_attn {
             "hybrid_moe".to_string()
         } else if is_moe {
@@ -550,6 +554,10 @@ pub fn read_gguf_metadata_reader<R: Read + Seek>(
             meta.layer_bytes_total = Some(sizes.layer_bytes_total);
             meta.expert_bytes_total = Some(sizes.expert_bytes_total);
             meta.moe_layer_count = Some(sizes.moe_layer_count);
+            // Use tensor-derived param count only when the KV field is absent.
+            if meta.param_count.is_none() && sizes.param_count > 0 {
+                meta.param_count = Some(sizes.param_count);
+            }
         }
     }
 
@@ -562,6 +570,9 @@ struct TensorSizes {
     layer_bytes_total: u64,
     expert_bytes_total: u64,
     moe_layer_count: u32,
+    /// Sum of all tensor element counts (product of dims per tensor).
+    /// Falls back to 0 on overflow; set from tensor shapes regardless of quant format.
+    param_count: u64,
 }
 
 /// Parse the GGUF tensor-info directory and compute exact per-tensor byte sizes.
@@ -583,25 +594,29 @@ fn parse_tensor_directory<R: Read + Seek>(
         return Err(format!("Implausible tensor_count {tensor_count}"));
     }
 
-    // (name, offset) for each tensor.
-    let mut infos: Vec<(String, u64)> = Vec::with_capacity(tensor_count as usize);
+    // (name, offset, n_elements) for each tensor.
+    let mut infos: Vec<(String, u64, u64)> = Vec::with_capacity(tensor_count as usize);
+    let mut param_count_total: u64 = 0;
     for _ in 0..tensor_count {
         let name = read_str(r, version)?;
         let n_dims = read_u32(r)?;
         if n_dims > 8 {
             return Err(format!("Implausible tensor n_dims {n_dims}"));
         }
+        let mut n_elements: u64 = 1;
         for _ in 0..n_dims {
             // GGUF v1 stored dimensions as u32; v2+ as u64.
-            if version == 1 {
-                read_u32(r)?;
+            let dim = if version == 1 {
+                read_u32(r)? as u64
             } else {
-                read_u64(r)?;
-            }
+                read_u64(r)?
+            };
+            n_elements = n_elements.saturating_mul(dim);
         }
         let _ggml_type = read_u32(r)?;
         let offset = read_u64(r)?;
-        infos.push((name, offset));
+        param_count_total = param_count_total.saturating_add(n_elements);
+        infos.push((name, offset, n_elements));
     }
 
     // Tensor data begins after the directory, padded up to `alignment`.
@@ -654,6 +669,7 @@ fn parse_tensor_directory<R: Read + Seek>(
         layer_bytes_total,
         expert_bytes_total,
         moe_layer_count: moe_layers.len() as u32,
+        param_count: param_count_total,
     })
 }
 
