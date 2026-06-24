@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.5.0...v1.5.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* **gguf:** restore all PR [#272](https://github.com/nmorgowicz-org/llama-monitor/issues/272) changes lost during revert/resquash ([156c222](https://github.com/nmorgowicz-org/llama-monitor/commit/156c222549c720a2532aac6b9401e31d9d0f88c3))
+* **presets:** backfill GGUF metadata on load and add clear_gguf_metadata ([156c222](https://github.com/nmorgowicz-org/llama-monitor/commit/156c222549c720a2532aac6b9401e31d9d0f88c3))
+* **presets:** include expert_bytes_per_layer in completeness guard, backfill comparison, and test assertions ([156c222](https://github.com/nmorgowicz-org/llama-monitor/commit/156c222549c720a2532aac6b9401e31d9d0f88c3))
+* **ui:** wire GGUF arch and layer data into editor and spawn wizard ([156c222](https://github.com/nmorgowicz-org/llama-monitor/commit/156c222549c720a2532aac6b9401e31d9d0f88c3))
+* **vram:** use measured expert bytes for --n-cpu-moe split ([156c222](https://github.com/nmorgowicz-org/llama-monitor/commit/156c222549c720a2532aac6b9401e31d9d0f88c3))
+
 ## [1.5.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.4.0...v1.5.0) (2026-06-24)
 
 
