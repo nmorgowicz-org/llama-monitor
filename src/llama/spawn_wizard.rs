@@ -865,20 +865,6 @@ pub struct ModelMetadata {
     /// renamed/finetuned models (e.g. "Pantheon-27B" from Qwen3.6 base) still
     /// get the correct hybrid-DeltaNet / sliding-window treatment.
     pub gguf_arch: Option<String>,
-    /// Architecture label derived from the GGUF: `"dense"`, `"moe"`, or `"hybrid_moe"`.
-    /// Single source of truth shared with the preset metadata path.
-    pub architecture_kind: Option<String>,
-    /// Effective active parameters in billions (dense = total; MoE = backbone + active
-    /// experts). Backend-computed so the spawn wizard's arch label matches the editor.
-    pub active_params_b: Option<f64>,
-    /// Exact bytes per transformer layer, measured from the GGUF tensor directory.
-    /// VRAM occupied by each `-ngl` layer on the GPU (dense). Real data, not an estimate.
-    pub bytes_per_layer: Option<u64>,
-    /// Exact routed-expert bytes per MoE layer, measured from the tensor directory.
-    /// VRAM freed per layer offloaded via `--n-cpu-moe`.
-    pub expert_bytes_per_layer: Option<u64>,
-    /// Number of layers carrying routed experts (the `--n-cpu-moe` denominator).
-    pub moe_layer_count: Option<u32>,
     // ── MoE ─────────────────────────────────────────────────────────────────
     /// Total experts per layer (from `n_experts` / `expert_count` / `n_exp`).
     pub n_experts: Option<u32>,
@@ -1022,9 +1008,6 @@ impl ModelMetadata {
             n_experts: self.n_experts.unwrap_or(heuristic.n_experts),
             n_experts_used: self.n_experts_used.unwrap_or(heuristic.n_experts_used),
             expert_fraction: heuristic.expert_fraction,
-            // Exact measured expert bytes (0 when unmeasured → heuristic fallback).
-            expert_bytes_per_layer: self.expert_bytes_per_layer.unwrap_or(0),
-            moe_layer_count: self.moe_layer_count.unwrap_or(0),
             mtp_depth: self.mtp_depth.unwrap_or(heuristic.mtp_depth),
             global_head_dim: global_head_dim_resolved,
             mmproj_bytes: 0, // filled in separately when mmproj path is known
@@ -1049,12 +1032,8 @@ pub async fn introspect_model(
     model_path: &str,
     llama_server_path: &str,
 ) -> Result<ModelMetadata, String> {
-    // Check cache first. Entries written before architecture_kind existed lack it;
-    // treat those as stale and fall through to a fresh read so the derived arch label
-    // / active-param fields get populated.
-    if let Ok(cached) = load_model_cache(model_path)
-        && cached.architecture_kind.is_some()
-    {
+    // Check cache first.
+    if let Ok(cached) = load_model_cache(model_path) {
         return Ok(ModelMetadata {
             cached: true,
             ..cached
