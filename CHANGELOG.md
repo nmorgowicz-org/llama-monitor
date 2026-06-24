@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.4.0...v1.5.0) (2026-06-24)
+
+
+### Features
+
+* **gguf:** measure exact per-layer tensor sizes for -ngl/--n-cpu-moe tuning ([74485c9](https://github.com/nmorgowicz-org/llama-monitor/commit/74485c95b60042b83734e257a9b93a4c090e39a0))
+* **gguf:** measure exact per-layer tensor sizes for -ngl/--n-cpu-moe tuning ([d464f81](https://github.com/nmorgowicz-org/llama-monitor/commit/d464f812da09b454120d40c9b8c193d94fe365af))
+* **ui:** add Dense/MoE/Hybrid MoE architecture labels to launch cards, editor, and spawn wizard ([dba7cea](https://github.com/nmorgowicz-org/llama-monitor/commit/dba7ceae84e1b69cd23884bfcf7776cddbe1f879))
+* **ui:** wire backend GGUF arch + layer data into editor and spawn wizard ([74485c9](https://github.com/nmorgowicz-org/llama-monitor/commit/74485c95b60042b83734e257a9b93a4c090e39a0))
+* **ui:** wire backend GGUF arch + layer data into editor and spawn wizard ([d464f81](https://github.com/nmorgowicz-org/llama-monitor/commit/d464f812da09b454120d40c9b8c193d94fe365af))
+* **vram:** use measured per-layer expert bytes for --n-cpu-moe split ([74485c9](https://github.com/nmorgowicz-org/llama-monitor/commit/74485c95b60042b83734e257a9b93a4c090e39a0))
+* **vram:** use measured per-layer expert bytes for --n-cpu-moe split ([d464f81](https://github.com/nmorgowicz-org/llama-monitor/commit/d464f812da09b454120d40c9b8c193d94fe365af))
+
+
+### Bug Fixes
+
+* **deps:** update rust crate winreg to 0.56 ([#271](https://github.com/nmorgowicz-org/llama-monitor/issues/271)) ([9188c1e](https://github.com/nmorgowicz-org/llama-monitor/commit/9188c1e56d130a7035ee07139d817303b6a4fa67))
+* **presets:** backfill GGUF architecture metadata on load; centralize reset ([74485c9](https://github.com/nmorgowicz-org/llama-monitor/commit/74485c95b60042b83734e257a9b93a4c090e39a0))
+* **presets:** backfill GGUF architecture metadata on load; centralize reset ([d464f81](https://github.com/nmorgowicz-org/llama-monitor/commit/d464f812da09b454120d40c9b8c193d94fe365af))
+* **ui:** fix label accessibility, prioritize prio guidance, align spawn wizard context options ([dba7cea](https://github.com/nmorgowicz-org/llama-monitor/commit/dba7ceae84e1b69cd23884bfcf7776cddbe1f879))
+* **ui:** improve MoE active-params estimate, unify arch label logic, fix minor styling ([dba7cea](https://github.com/nmorgowicz-org/llama-monitor/commit/dba7ceae84e1b69cd23884bfcf7776cddbe1f879))
+* **ui:** prevent context pills from submitting the preset form ([dba7cea](https://github.com/nmorgowicz-org/llama-monitor/commit/dba7ceae84e1b69cd23884bfcf7776cddbe1f879))
+* **ui:** restrict n-cpu-moe to MoE models and add unified-memory hint ([dba7cea](https://github.com/nmorgowicz-org/llama-monitor/commit/dba7ceae84e1b69cd23884bfcf7776cddbe1f879))
+
+
+### Reverts
+
+* feat(gguf) ([#272](https://github.com/nmorgowicz-org/llama-monitor/issues/272)) ([#273](https://github.com/nmorgowicz-org/llama-monitor/issues/273)) ([93482ee](https://github.com/nmorgowicz-org/llama-monitor/commit/93482ee8509017346051edbc0ab3ed22cc1f36fe))
+
 ## [1.4.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.3.1...v1.4.0) (2026-06-23)
 
 
