@@ -411,7 +411,10 @@ pub fn infer_family_from_architecture(arch: &str) -> Option<String> {
     if a == "qwen3_6" || a == "qwen36" || a == "qwopus" {
         return Some("qwen36".into());
     }
-    if a == "qwen3_5" || a == "qwen35" || a == "qwen3_5moe" {
+    // "qwen35" and "qwen35moe" cover both Qwen3.5 and Qwen3.6 — without block_count we
+    // default to qwen35. Callers with access to block_count (ensure_gguf_metadata) refine
+    // this: bc ≥ 75 → qwen35, bc < 75 → qwen36.
+    if a == "qwen3_5" || a == "qwen35" || a == "qwen35moe" || a == "qwen3_5moe" {
         return Some("qwen35".into());
     }
     if a.starts_with("qwen3") {

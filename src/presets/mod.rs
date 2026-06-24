@@ -393,11 +393,25 @@ pub fn ensure_gguf_metadata(preset: &mut ModelPreset) {
         preset.param_count = meta.param_count;
     }
 
-    // Derive family from architecture (not filename)
+    // Derive family from architecture (not filename).
+    // Both "qwen35" and "qwen35moe" cover Qwen3.5 and Qwen3.6 — block_count disambiguates:
+    // ≥75 → Qwen3.5 (e.g. 122B-A10B: 94 blocks); <75 → Qwen3.6 (27B dense: 64, 35B-A3B: 41).
+    // Same heuristic used by vram.rs.
     if preset.family.is_none()
         && let Some(ref arch) = meta.architecture
     {
-        preset.family = crate::models::infer_family_from_architecture(arch);
+        let a = arch.to_ascii_lowercase();
+        preset.family = if a == "qwen35" || a == "qwen35moe" {
+            Some(
+                match meta.block_count {
+                    Some(bc) if bc >= 75 => "qwen35",
+                    _ => "qwen36",
+                }
+                .into(),
+            )
+        } else {
+            crate::models::infer_family_from_architecture(arch)
+        };
     }
 
     // Derive size_class from param_count
