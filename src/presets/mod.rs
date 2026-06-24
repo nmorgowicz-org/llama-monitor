@@ -302,6 +302,7 @@ fn backfill_gguf_metadata(path: &Path, presets: &mut [ModelPreset]) {
             preset.gguf_architecture.clone(),
             preset.block_count,
             preset.bytes_per_layer,
+            preset.expert_bytes_per_layer,
         );
         ensure_gguf_metadata(preset);
         let after = (
@@ -310,6 +311,7 @@ fn backfill_gguf_metadata(path: &Path, presets: &mut [ModelPreset]) {
             preset.gguf_architecture.clone(),
             preset.block_count,
             preset.bytes_per_layer,
+            preset.expert_bytes_per_layer,
         );
         if before != after {
             changed = true;
@@ -376,6 +378,7 @@ pub fn ensure_gguf_metadata(preset: &mut ModelPreset) {
         && preset.active_params_b.is_some()
         && preset.block_count.is_some()
         && preset.bytes_per_layer.is_some()
+        && preset.expert_bytes_per_layer.is_some()
     {
         return;
     }
@@ -573,6 +576,9 @@ mod tests {
         assert!(preset.expert_count.is_none());
         assert!(preset.expert_used_count.is_none());
         assert!(preset.active_params_b.is_none());
+        assert!(preset.block_count.is_none());
+        assert!(preset.bytes_per_layer.is_none());
+        assert!(preset.expert_bytes_per_layer.is_none());
     }
 
     #[test]
