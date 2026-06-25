@@ -858,11 +858,13 @@ function _renderCardVram(el, data, availBytes, availRamBytes, isUnified) {
                     <div class="launch-card-vram-seg launch-card-vram-seg--extras" style="width:${toWidth(extrasBytes)}"></div>
                     ${freeSegment}
                 </div>
+                <span class="launch-card-vram-dot launch-card-vram-dot--${dotClass}" title="${dotTitle}"></span>
+            </div>
+            <div class="launch-card-memory-total-row">
                 <span class="launch-card-vram-total" title="Approximate total VRAM: ${parts.join(' · ')}">${totalLabel}${overflowLabel}</span>
             </div>
             ${ramRow}
         </div>
-        <span class="launch-card-vram-dot launch-card-vram-dot--${dotClass}" title="${dotTitle}"></span>
     `;
 }
 
