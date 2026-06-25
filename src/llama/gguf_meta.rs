@@ -272,24 +272,40 @@ impl GgufMetadata {
         );
 
         if have_enough {
-            let n_layers = self.block_count.unwrap() as u64;
+            let n_total_layers = self.block_count.unwrap() as u64;
             let head_count = self.head_count.unwrap() as u64;
             let head_count_kv = self.head_count_kv.unwrap() as u64;
             let head_dim = self.key_length.unwrap() as u64;
             let embd = self.embedding_length.unwrap() as u64;
 
-            // Approximate the dense "backbone" (non-expert) parameter count. This is a
-            // deliberately rough lower bound — it does not model shared experts,
-            // dense-then-MoE layer splits, or attention variants — so it is guarded by
-            // the sanity clamps below. The FFN/expert weights are intentionally *not*
-            // counted here: in MoE GGUFs `feed_forward_length` is the per-expert
-            // intermediate size, so they fall into `expert_total` instead.
-            //
-            // Per layer, attention Q/K/V/O projections (head_dim == key_length):
-            //   embd · head_dim · (2·n_head + 2·n_head_kv)
-            // Plus a one-off token-embedding + output projection: ~2 · embd².
+            // For hybrid DeltaNet models (Qwen3-Next, Qwen3.6, Qwen3.5) only a subset
+            // of layers are standard attention — the rest are Gated DeltaNet layers.
+            // DeltaNet layers have their own always-active parameters (Q/K/V/O projections
+            // sized by ssm_inner_size) that are NOT in the expert pool but MUST be counted
+            // as backbone because they run on every token.
+            let n_attn_layers = self
+                .n_attn_layers()
+                .map(|n| n as u64)
+                .unwrap_or(n_total_layers);
+
+            // Standard-attention backbone: Q/K/V/O per attention layer + token embeddings.
+            //   attn Q/K/V/O: embd · head_dim · (2·n_head + 2·n_head_kv)
+            //   token-embedding + output projection: ~2 · embd²
             let attn_per_layer = embd * head_dim * (2 * head_count + 2 * head_count_kv);
-            let backbone_total: u64 = n_layers * attn_per_layer + 2 * embd * embd;
+            let mut backbone_total: u64 = n_attn_layers * attn_per_layer + 2 * embd * embd;
+
+            // DeltaNet backbone: for each linear-attention layer, add V+O projections
+            // (embd × ssm_inner_size × 2) and the smaller Q+K projections
+            // (embd × head_count_kv × head_dim × 2). All are always-active.
+            if let Some(ssm_inner) = self.ssm_inner_size {
+                let n_deltanet = n_total_layers.saturating_sub(n_attn_layers);
+                if n_deltanet > 0 {
+                    let deltanet_per_layer = 2 * embd
+                        * (head_count_kv * head_dim + ssm_inner as u64);
+                    backbone_total =
+                        backbone_total.saturating_add(n_deltanet * deltanet_per_layer);
+                }
+            }
 
             if total_params <= backbone_total {
                 // Backbone estimate exceeds total (bad input); use the simple ratio.
@@ -1312,6 +1328,47 @@ mod tests {
         assert!(
             gguf.expert_count.is_some(),
             "Qwen3-Coder-Next is MoE (should have expert_count)"
+        );
+    }
+
+    /// Verify that the hybrid DeltaNet active-param formula uses n_attn_layers and
+    /// ssm_inner_size to correctly account for always-active DeltaNet backbone params.
+    ///
+    /// Model: synthetic Qwen3.6-35B-A3B-like GGUF (40 layers, 10 attn + 30 DeltaNet,
+    /// 256 experts, 9 used, embd=4096, head_dim=256, n_kv=2, ssm_inner=3907).
+    ///
+    /// Without the fix the old formula over-counted backbone (used 40 layers of Q/K/V/O)
+    /// and produced ~1.9 B instead of the expected ~3 B.
+    #[test]
+    fn hybrid_deltanet_active_params_uses_ssm_inner_size() {
+        // Parameters chosen to approximate Qwen3.6-35B-A3B architecture:
+        //   embd=4096, head_count=32, head_count_kv=2, head_dim=256
+        //   40 layers total, full_attention_interval=4 → 10 attn + 30 DeltaNet
+        //   256 experts, 9 used, ssm_inner=3907
+        let bytes = make_gguf(&[
+            ("general.architecture", KvEntry::Str("qwen3_6".into())),
+            ("general.parameter_count", KvEntry::U64(35_000_000_000)),
+            ("qwen3_6.block_count", KvEntry::U32(40)),
+            ("qwen3_6.full_attention_interval", KvEntry::U32(4)),
+            ("qwen3_6.attention.head_count", KvEntry::U32(32)),
+            ("qwen3_6.attention.head_count_kv", KvEntry::U32(2)),
+            ("qwen3_6.attention.key_length", KvEntry::U32(256)),
+            ("qwen3_6.embedding_length", KvEntry::U32(4096)),
+            ("qwen3_6.expert_count", KvEntry::U32(256)),
+            ("qwen3_6.expert_used_count", KvEntry::U32(9)),
+            ("qwen3_6.ssm.inner_size", KvEntry::U32(3907)),
+        ]);
+        let meta = read_from_bytes(&bytes).unwrap();
+        let active = meta.active_params_b().expect("should compute active_params_b");
+        // Expect close to 3 B (the "A3B" designation); old formula gave ~1.9 B.
+        assert!(
+            (active - 3.0).abs() < 0.5,
+            "expected ~3 B active for 35B-A3B-like model, got {active:.2} B"
+        );
+        // Must be greater than what the old formula (backbone from all 40 layers) gave.
+        assert!(
+            active > 2.0,
+            "hybrid fix should raise estimate above old 1.9 B; got {active:.2} B"
         );
     }
 }

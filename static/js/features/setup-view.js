@@ -770,20 +770,32 @@ async function _fetchCardVramEstimates(availBytes, isUnified) {
 }
 
 function _renderCardVram(el, data, availBytes) {
-    const budget = availBytes > 0 ? availBytes : data.total_bytes * 1.25;
+    const hasAvail = availBytes > 0;
     const totalGb = data.total_bytes / 1e9;
     const weightsGb = data.weights_bytes / 1e9;
     const kvGb = data.kv_cache_bytes / 1e9;
     const extrasBytes = (data.mmproj_bytes || 0) + (data.mtp_bytes || 0) +
                         (data.linear_attn_state_bytes || 0) + (data.overhead_bytes || 0);
 
-    // Under budget: segments + empty track shows headroom.
-    // Over budget: bar is full, segments proportional to total (not budget).
-    const denominator = data.total_bytes > budget ? data.total_bytes : budget;
-    const toWidth = (b) => Math.min(100, (b / denominator) * 100).toFixed(1) + '%';
-
     const rec = data.recommendation || 'risk';
     const dotClass = rec === 'fit' ? 'fit' : rec === 'tight' ? 'tight' : 'risk';
+
+    // Bar scale: always budget when available so 100% = full available VRAM.
+    // When model exceeds budget clip segments to total so they fill proportionally.
+    const fitsInBudget = hasAvail && data.total_bytes <= availBytes;
+    const denominator = hasAvail
+        ? (fitsInBudget ? availBytes : data.total_bytes)
+        : data.total_bytes * 1.25;
+    const toWidth = (b) => Math.min(100, (b / denominator) * 100).toFixed(1) + '%';
+
+    // Explicit free-headroom segment — colored per fit/tight status so it reads from
+    // the same success/warning palette as the dot indicator.
+    const freeBytes = fitsInBudget ? (availBytes - data.total_bytes) : 0;
+    const freeSegment = freeBytes > 0
+        ? `<div class="launch-card-vram-seg launch-card-vram-seg--free launch-card-vram-seg--free-${dotClass}" style="width:${toWidth(freeBytes)}"></div>`
+        : '';
+
+    const availGb = hasAvail ? (availBytes / 1e9) : 0;
 
     const parts = [
         `Weights ${weightsGb.toFixed(1)} GB`,
@@ -792,6 +804,18 @@ function _renderCardVram(el, data, availBytes) {
     if (data.mmproj_bytes > 0) parts.push(`mmproj ${(data.mmproj_bytes / 1e9).toFixed(1)} GB`);
     if (data.mtp_bytes > 0)    parts.push(`MTP ${(data.mtp_bytes / 1e9).toFixed(1)} GB`);
     parts.push(`overhead ${(data.overhead_bytes / 1e9).toFixed(2)} GB`);
+    if (hasAvail) parts.push(`${availGb.toFixed(1)} GB currently available`);
+
+    // Label: "approx. 27.0 / 26.8 GB" makes the over-budget case immediately obvious.
+    const totalLabel = hasAvail
+        ? `approx. ${totalGb.toFixed(1)} / ${availGb.toFixed(1)} GB`
+        : `approx. ${totalGb.toFixed(1)} GB`;
+
+    const dotTitle = dotClass === 'fit'
+        ? 'Fits comfortably in VRAM'
+        : dotClass === 'tight'
+            ? 'Tight fit — may work but leaves little headroom'
+            : 'May exceed available VRAM — consider reducing context or KV quant';
 
     el.classList.remove('launch-card-vram--loading');
     el.title = parts.join(' · ');
@@ -801,9 +825,10 @@ function _renderCardVram(el, data, availBytes) {
             <div class="launch-card-vram-seg launch-card-vram-seg--weights" style="width:${toWidth(data.weights_bytes)}"></div>
             <div class="launch-card-vram-seg launch-card-vram-seg--kv" style="width:${toWidth(data.kv_cache_bytes)}"></div>
             <div class="launch-card-vram-seg launch-card-vram-seg--extras" style="width:${toWidth(extrasBytes)}"></div>
+            ${freeSegment}
         </div>
-        <span class="launch-card-vram-total" title="Approximate total VRAM: ${parts.join(' · ')}">approx. ${totalGb.toFixed(1)} GB</span>
-        <span class="launch-card-vram-dot launch-card-vram-dot--${dotClass}" title="${dotClass === 'fit' ? 'Fits comfortably in VRAM' : dotClass === 'tight' ? 'Tight fit — may work but leaves little headroom' : 'May exceed available VRAM — consider reducing context or KV quant'}"></span>
+        <span class="launch-card-vram-total" title="Approximate total VRAM: ${parts.join(' · ')}">${totalLabel}</span>
+        <span class="launch-card-vram-dot launch-card-vram-dot--${dotClass}" title="${dotTitle}"></span>
     `;
 }
 

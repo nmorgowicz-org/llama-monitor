@@ -2815,6 +2815,10 @@ body.setup-active .sidebar-nav {
   background: rgba(156, 163, 175, 0.5);
 }
 
+/* Available-headroom segment — palette-matched to the dot indicator */
+.launch-card-vram-seg--free-fit   { background: color-mix(in srgb, var(--color-success) 28%, transparent); }
+.launch-card-vram-seg--free-tight { background: color-mix(in srgb, var(--color-warning) 28%, transparent); }
+
 .launch-card-vram-total {
   font-size: 11.5px;
   font-weight: 600;
