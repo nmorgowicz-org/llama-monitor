@@ -1,5 +1,46 @@
 # VRAM Estimator Reference
 
+## Memory-pool and active-parameter behavior
+
+GGUF tensor shapes are the source of truth for MoE active parameters:
+
+```text
+active = non-routed parameters
+       + routed-expert parameters × active_experts / total_experts
+```
+
+This is quantization-independent and works for complete local GGUFs and
+range-fetched headers. Local validation gives 3.455B active parameters for
+Qwen3.6-35B-A3B, 3.875B for Qwen3-Coder-Next, and 3.823B for Gemma 4 26B-A4B.
+When tensor shapes are unavailable, the structural DeltaNet fallback only
+reduces attention layers if `ssm.inner_size` is also present.
+
+Exact path (primary):
+
+- The GGUF tensor directory provides `tensor_param_count` (total tensor elements)
+  and `expert_param_count` (routed-expert tensor elements).
+- Active parameters are:
+
+  ```text
+  active = (tensor_param_count − expert_param_count)
+         + expert_param_count × active_experts / total_experts
+  ```
+
+- Non-routed parameters (backbone, embeddings, DeltaNet projections) are always
+  active; routed experts are scaled by the expert ratio.
+- This path is preferred when both counts are present and reasonable; it matches
+  local GGUF validation more closely than the older structural heuristic.
+
+When tensor counts are missing, the estimator falls back to the structural DeltaNet
+heuristic or simple MoE ratio.
+
+Unified-memory systems use one Metal-capped memory pool. Discrete systems keep
+VRAM and system RAM independent: `--n-cpu-moe` moves routed experts to RAM, and
+dense `--gpu-layers` moves transformer-layer weights between the two pools.
+Spawn Wizard, Preset Editor, and welcome-screen preset cards use this same
+backend split. Card bars use fixed machine VRAM/RAM denominators so model and
+context-size differences remain directly comparable.
+
 The VRAM estimator (`src/llama/vram_estimator/`) predicts GPU memory usage for a given model, quantization, context size, and hardware configuration. It powers:
 
 - The auto-size wizard
@@ -61,6 +102,9 @@ pub struct ModelArch {
     pub param_b: f64,           // Approximate param count in billions
     pub n_embd: u32,            // Hidden/embedding dimension (for CUDA overhead estimate)
                                  // 0 = unknown; set from GGUF embedding_length when available
+
+    // Exact per-layer size (from GGUF tensor directory)
+    pub bytes_per_layer: u64,   // Bytes per repeating transformer block (0 = unknown)
 }
 ```
 
@@ -382,28 +426,50 @@ On unified memory (Metal), the discrete functions are not used — `metal_overhe
 
 ### `full_estimate`
 
-Sums all components:
+Sums all components. How weights are split depends on platform and model type:
+
+- **Unified memory** (Metal): all weights go into VRAM; `ram_bytes = 0`.
+- **Discrete GPU + MoE**: uses `moe_weight_split(model_size, arch, n_cpu_moe)`.
+- **Discrete GPU + dense**: uses `dense_weight_split(model_size, arch, gpu_layers)`:
+  - `gpu_layers < 0`: all weights in VRAM (automatic/all-GPU).
+  - `gpu_layers == 0`: all weights in CPU RAM.
+  - Otherwise: VRAM = `bytes_per_layer × gpu_layers` (or proportional fallback), rest in RAM.
+
+Inside `full_estimate`:
 
 ```
-weight_vram, ram = moe_weight_split(model_size, arch, n_cpu_moe)
+weight_vram, ram:
+  if is_unified_memory:
+      all weights in VRAM
+  else if arch.is_moe():
+      moe_weight_split(...)
+  else:
+      dense_weight_split(...)
+
 kv              = kv_cache_bytes(arch, context, slots, ctk, ctv)
-linear_state    = arch.linear_attn_state_bytes             (fixed; not context-dependent)
-mmproj          = arch.mmproj_bytes                        (set from mmproj_path stat in API)
+linear_state    = arch.linear_attn_state_bytes
+mmproj          = arch.mmproj_bytes
 mtp             = mtp_overhead_bytes(model_size, arch.mtp_depth)
 
 overhead:
   if is_unified_memory:
-      metal_overhead_bytes(arch, ubatch, kv)        # per-layer base + ~6.5% of KV
+      metal_overhead_bytes(arch, ubatch, kv)
   else:
       discrete_overhead_bytes(arch, ubatch, context)
-        (base + per_token × context)
 
 total = weight_vram + kv + linear_state + mmproj + mtp + overhead
 ```
 
+RAM headroom and WontFit:
+
+- `ram_headroom_bytes = available_ram_bytes - ram_bytes`.
+- On discrete GPUs, if `ram_headroom_bytes < 0` and there are CPU-offloaded weights, `full_estimate` returns:
+  - `recommendation = WontFit`
+  - `note = "CPU-offloaded weights exceed available system RAM."`
+
 When `available_vram_bytes == 0`, recommendation is always `Risk` with note "Memory size unknown; estimate is best-effort."
 
-Recommendation thresholds:
+Recommendation thresholds (VRAM-based):
 
 | Result | Discrete GPU | Unified Memory |
 |--------|-------------|----------------|
@@ -411,6 +477,11 @@ Recommendation thresholds:
 | `Tight` | total ≤ 100% | same |
 | `Risk` | 100–120% (CPU spill possible) | **never** — unified memory skips Risk and jumps to WontFit |
 | `WontFit` | > 120% | > 100% |
+
+Plus a separate RAM-based condition:
+
+- On discrete GPUs, if CPU-offloaded weights exceed available system RAM,
+  `full_estimate` forces `WontFit` (even if VRAM alone would allow Fit/Tight).
 
 Rationale: on unified memory there is no graceful CPU-spill path — once you exceed available memory, macOS begins compression and paging. So Risk is only offered on non-unified-memory systems where the OS can spill to system RAM without thrashing.
 
@@ -550,11 +621,13 @@ Architecture-aware VRAM breakdown endpoint.
 
 - Requires: `api-token` (Authorization header)
 - Requires (body): **either** `model_path` (local file) **or** `hf_repo_id` + `hf_file_path` + `model_size_bytes` (pre-download HuggingFace introspection)
-- Optional (body): `n_ctx`, `gpu_layers`, `parallel_slots`, `ubatch_size`, `ctk`, `ctv`, `n_cpu_moe`, `available_vram_bytes`, `is_unified_memory`, `mmproj_path`, `mmproj_bytes`
+- Optional (body): `n_ctx`, `gpu_layers`, `parallel_slots`, `ubatch_size`, `ctk`, `ctv`, `n_cpu_moe`, `available_vram_bytes`, `available_ram_bytes`, `is_unified_memory`, `mmproj_path`, `mmproj_bytes`
+  - `gpu_layers` (int): for dense models on discrete GPU: how many layers on GPU; negative = all-GPU, zero = all-CPU.
+  - `available_ram_bytes` (u64): system RAM available; used to check CPU-offloaded weight budget.
 - Behavior:
   - **Local path**: reads GGUF metadata from `model_path` (primary); falls back to `from_name_and_params()` on parse failure.
   - **HuggingFace (no local file yet)**: `crate::hf::fetch_gguf_header_metadata()` issues an HTTP **Range** request for the first few MB of the `.gguf` (the KV header sits at the file start), parses it with `read_gguf_metadata_from_bytes()`, and uses the caller-supplied `model_size_bytes` (from the HF file listing) for weights. This gives the model's **real** architecture before downloading 16 GB. Requires HTTP 206 (partial content); on any failure (gated repo, offline, no range support) it falls back to the name heuristic so the caller still gets a rough estimate.
-- Output fields: `weights_bytes`, `kv_cache_bytes`, `linear_attn_state_bytes`, `mmproj_bytes`, `mtp_bytes`, `overhead_bytes`, `total_bytes`, `available_bytes`, `headroom_bytes`, `ram_bytes`, `recommendation`, `note`
+- Output fields: `weights_bytes`, `kv_cache_bytes`, `linear_attn_state_bytes`, `mmproj_bytes`, `mtp_bytes`, `overhead_bytes`, `total_bytes`, `available_bytes`, `headroom_bytes`, `ram_bytes`, `available_ram_bytes`, `ram_headroom_bytes`, `recommendation`, `note`
 - Consumers: Spawn Wizard, Preset Editor, Setup view, **and the Models modal HF-browse preview bar** (`updateVramDisplay` in `static/js/features/models.js`) — all share this one endpoint, so they all get identical, GGUF-accurate numbers. There is no client-side VRAM/KV formula anymore.
 
 ### API helpers (`build_arch_from_body`)
@@ -638,9 +711,13 @@ KV BPE is used only for KV cache estimation (`kv_cache_bytes`). The `ctk` / `ctv
 
 ## GGUF Metadata Integration
 
-When a GGUF file is present, `gguf_meta.rs` reads the model's real KV header and `ModelMetadata::to_model_metadata()` (in `gguf_meta.rs`) builds the metadata struct. `ModelMetadata::to_arch()` (in `spawn_wizard.rs`) then converts it into `ModelArch`.
+When a GGUF file is present, `gguf_meta.rs` reads the model's real KV header and `GgufMetadata::to_model_metadata()` builds the metadata struct. `ModelMetadata::to_arch()` (in `spawn_wizard.rs`) then converts it into `ModelArch`.
 
 **Structural fields come from the file, not from name guesses** — the name heuristic is always run first as a scaffold, but is then overridden field-by-field with GGUF data. For "weak" heuristic results (no MoE, no hybrid, no sliding-window) with a known GGUF architecture, it may re-run the heuristic using the GGUF-derived family name. The breakdown endpoint (`/api/vram-estimate`) and `auto_size` (`/api/vram/auto-size`) both build their arch through this real-data path when `model_path` points at an on-disk GGUF.
+
+The tensor directory (shapes and element counts) is always parsed, even for range-fetched prefixes:
+- **Parameter counts** (`tensor_param_count`, `expert_param_count`) are derived from tensor shapes in the GGUF header, so they are exact for both local files and range-fetched prefixes. These feed the active-parameter formula at the top of this doc.
+- **Byte sizes** (`tensor_bytes_total`, `layer_bytes_total`, `expert_bytes_total`) require the full file; they are only available for complete local files. `bytes_per_layer()` (used by `dense_weight_split`) is one such derived value.
 
 ### Key mapping
 

@@ -557,6 +557,18 @@ The setup screen's attach card is replaced with a recent-endpoints dashboard:
 - The active recent session is labeled `Resume`; previously connected sessions use `Reconnect`
 - A manual attach section remains available below the recent list for new endpoints
 
+### Preset-card memory bars
+
+Each preset card uses VRAM/RAM estimates from `/api/vram-estimate` to show memory footprint:
+
+- On discrete-GPU systems:
+  - Top bar (“VRAM”): GPU weights, KV cache, and overhead vs available VRAM. Shows an overflow label when it exceeds the VRAM budget.
+  - Bottom bar (“RAM”): CPU-offloaded weights vs available system RAM. Highlights when RAM usage exceeds headroom.
+  - The label switches between “VRAM”/“RAM” depending on whether the system is discrete or unified.
+- On unified-memory systems:
+  - A single “MEM” bar is shown for total memory use vs available memory.
+- All cards use the same machine-wide VRAM/RAM denominators so models are directly comparable.
+
 ## Refresh rate
 
 The dashboard pushes live data over WebSocket. The backend clamps the interval to **200 ms minimum** and **10 s maximum**; the default is **500 ms**.

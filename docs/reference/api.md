@@ -2018,7 +2018,10 @@ All require `api-token` unless noted.
 ### VRAM Estimation
 
 - `POST /api/vram/estimate` — quick VRAM estimate for a configuration.
-- `POST /api/vram-estimate` — full VRAM breakdown (weights, KV cache, mmproj, MTP, overhead, free).
+- `POST /api/vram-estimate` — full VRAM breakdown:
+  - Request: optional `gpu_layers` (dense GPU layer count), `available_ram_bytes` (system RAM budget).
+  - Response: `weights_bytes`, `kv_cache_bytes`, `linear_attn_state_bytes`, `mmproj_bytes`, `mtp_bytes`, `overhead_bytes`, `total_bytes`, `available_bytes`, `headroom_bytes`, `ram_bytes`, `available_ram_bytes`, `ram_headroom_bytes`, `recommendation`, `note`.
+  - New recommendation: `WontFit` when CPU-offloaded weights exceed available system RAM.
 - `POST /api/vram/quant-compare` — pre-download quant comparison table (Quant Advisor).
 - `POST /api/vram/auto-size` — compute optimal configuration (context, KV quant, MoE tuning).
 
