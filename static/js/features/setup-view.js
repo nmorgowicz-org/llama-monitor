@@ -200,7 +200,7 @@ export async function fetchAndRenderMemoryBar() {
                     metalGpuLimitMb = g.metal_gpu_limit_mb || 0;
                     if (!totalBytes) totalBytes = tMb * 1024 * 1024;
                 } else {
-                    totalBytes = totalBytes || tMb * 1024 * 1024;
+                    totalBytes += tMb * 1024 * 1024;
                     vramUsedBytes += uMb * 1024 * 1024;
                 }
             }
