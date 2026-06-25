@@ -265,8 +265,10 @@ impl GgufMetadata {
         // fraction of routed experts. Shared experts and DeltaNet projections
         // naturally remain in the always-active pool.
         if let (Some(tensor_params), Some(expert_params)) =
-                (self.tensor_param_count, self.expert_param_count)
-            && tensor_params > 0 && expert_params > 0 && expert_params < tensor_params
+            (self.tensor_param_count, self.expert_param_count)
+            && tensor_params > 0
+            && expert_params > 0
+            && expert_params < tensor_params
         {
             let always_active = tensor_params - expert_params;
             let active_experts = expert_params as f64 * n_used as f64 / n_experts as f64;
@@ -660,7 +662,9 @@ fn parse_tensor_directory<R: Read + Seek>(
         let _ggml_type = read_u32(r)?;
         let offset = read_u64(r)?;
         param_count_total = param_count_total.saturating_add(n_elements);
-        if let Some(rest) = name.strip_prefix("blk.") && name.contains("_exps") {
+        if let Some(rest) = name.strip_prefix("blk.")
+            && name.contains("_exps")
+        {
             expert_param_count = expert_param_count.saturating_add(n_elements);
             if let Some(idx) = rest.split('.').next().and_then(|s| s.parse::<u32>().ok()) {
                 moe_layers.insert(idx);
