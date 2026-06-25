@@ -152,7 +152,7 @@ const launchFilters = {
 const _MEM_OS_RESERVE = 512 * 1024 * 1024; // 512 MB
 
 // Cached memory state shared between the memory bar and card VRAM estimates.
-let _memState = { availBytes: 0, isUnified: false };
+let _memState = { availBytes: 0, availRamBytes: 0, isUnified: false };
 
 function _metalCap(totalBytes, metalGpuLimitMb) {
     if (metalGpuLimitMb > 0) return metalGpuLimitMb * 1024 * 1024;
@@ -177,7 +177,8 @@ export async function fetchAndRenderMemoryBar() {
             fetch('/api/system/metal-gpu-limit', { headers }),
         ]);
 
-        let totalBytes = 0;
+        let ramTotalBytes = 0;
+        let vramTotalBytes = 0;
         let ramUsedBytes = 0;
         let metalGpuLimitMb = 0;
         let isUnified = false;
@@ -185,7 +186,7 @@ export async function fetchAndRenderMemoryBar() {
 
         if (sysResp.ok) {
             const d = await sysResp.json();
-            totalBytes = (d.ram_total_gb || 0) * 1024 ** 3;
+            ramTotalBytes = (d.ram_total_gb || 0) * 1024 ** 3;
             ramUsedBytes = (d.ram_used_gb || 0) * 1024 ** 3;
         }
 
@@ -198,9 +199,9 @@ export async function fetchAndRenderMemoryBar() {
                 if (g.metal_gpu_limit_mb !== undefined) {
                     isUnified = true;
                     metalGpuLimitMb = g.metal_gpu_limit_mb || 0;
-                    if (!totalBytes) totalBytes = tMb * 1024 * 1024;
+                    if (!ramTotalBytes) ramTotalBytes = tMb * 1024 * 1024;
                 } else {
-                    totalBytes = totalBytes || tMb * 1024 * 1024;
+                    vramTotalBytes += tMb * 1024 * 1024;
                     vramUsedBytes += uMb * 1024 * 1024;
                 }
             }
@@ -219,26 +220,28 @@ export async function fetchAndRenderMemoryBar() {
             }
         }
 
-        if (!totalBytes) return;
-
         let availBytes, fillPct, availLabel, totalLabel;
 
         let vramEstimateBytes;
+        let availableRamBytes = 0;
         if (isUnified) {
-            const cap = _metalCap(totalBytes, metalGpuLimitMb);
-            availBytes = Math.max(0, Math.min(cap, totalBytes) - _MEM_OS_RESERVE);
-            fillPct = Math.round((availBytes / totalBytes) * 100);
+            if (!ramTotalBytes) return;
+            const cap = _metalCap(ramTotalBytes, metalGpuLimitMb);
+            availBytes = Math.max(0, Math.min(cap, ramTotalBytes) - _MEM_OS_RESERVE);
+            fillPct = Math.round((availBytes / ramTotalBytes) * 100);
             availLabel = _fmtGb(availBytes) + ' GB available for inference';
-            totalLabel = _fmtGb(totalBytes) + ' GB unified';
+            totalLabel = _fmtGb(ramTotalBytes) + ' GB unified';
             // Card estimates use current free RAM so high system load shows as risk
             vramEstimateBytes = ramUsedBytes > 0
-                ? Math.max(0, Math.min(cap, totalBytes - ramUsedBytes) - _MEM_OS_RESERVE)
+                ? Math.max(0, Math.min(cap, ramTotalBytes - ramUsedBytes) - _MEM_OS_RESERVE)
                 : availBytes;
         } else {
-            availBytes = Math.max(0, totalBytes - vramUsedBytes);
-            fillPct = Math.round((availBytes / totalBytes) * 100);
+            if (!vramTotalBytes) return;
+            availBytes = Math.max(0, vramTotalBytes - vramUsedBytes);
+            availableRamBytes = Math.max(0, ramTotalBytes - ramUsedBytes);
+            fillPct = Math.round((availBytes / vramTotalBytes) * 100);
             availLabel = _fmtGb(availBytes) + ' GB VRAM free';
-            totalLabel = _fmtGb(totalBytes) + ' GB total';
+            totalLabel = _fmtGb(vramTotalBytes) + ' GB total';
             vramEstimateBytes = availBytes;
         }
 
@@ -250,8 +253,8 @@ export async function fetchAndRenderMemoryBar() {
         if (totalEl) totalEl.textContent = totalLabel;
         bar.style.display = '';
 
-        _memState = { availBytes, isUnified };
-        _fetchCardVramEstimates(vramEstimateBytes, isUnified);
+        _memState = { availBytes, availRamBytes: availableRamBytes, isUnified };
+        _fetchCardVramEstimates(vramEstimateBytes, availableRamBytes, isUnified);
     } catch {
         // leave bar hidden if metrics unavailable
     }
@@ -730,7 +733,7 @@ function _buildLaunchCard(preset, activePresetId) {
 
 // ── Card VRAM estimates ───────────────────────────────────────────────────────
 
-async function _fetchCardVramEstimates(availBytes, isUnified) {
+async function _fetchCardVramEstimates(availBytes, availRamBytes, isUnified) {
     const cards = document.querySelectorAll('.launch-card[data-preset-id]');
     const presets = sessionState.presets || [];
 
@@ -753,7 +756,9 @@ async function _fetchCardVramEstimates(availBytes, isUnified) {
                     parallel_slots: preset.parallel_slots || 1,
                     ubatch_size: preset.ubatch_size || 1024,
                     n_cpu_moe: preset.n_cpu_moe || 0,
+                    gpu_layers: preset.gpu_layers ?? -1,
                     available_vram_bytes: availBytes,
+                    available_ram_bytes: availRamBytes,
                     is_unified_memory: isUnified,
                 }),
             });
@@ -762,28 +767,38 @@ async function _fetchCardVramEstimates(availBytes, isUnified) {
             if (!data.ok) return;
             // Guard: card may have been re-rendered while awaiting
             if (!document.contains(vramEl)) return;
-            _renderCardVram(vramEl, data, availBytes);
+            _renderCardVram(vramEl, data, availBytes, availRamBytes, isUnified);
         } catch {
             // silently skip — VRAM row stays in loading state
         }
     }));
 }
 
-function _renderCardVram(el, data, availBytes) {
-    const budget = availBytes > 0 ? availBytes : data.total_bytes * 1.25;
+function _renderCardVram(el, data, availBytes, availRamBytes, isUnified) {
+    const hasAvail = availBytes > 0;
     const totalGb = data.total_bytes / 1e9;
     const weightsGb = data.weights_bytes / 1e9;
     const kvGb = data.kv_cache_bytes / 1e9;
     const extrasBytes = (data.mmproj_bytes || 0) + (data.mtp_bytes || 0) +
                         (data.linear_attn_state_bytes || 0) + (data.overhead_bytes || 0);
 
-    // Under budget: segments + empty track shows headroom.
-    // Over budget: bar is full, segments proportional to total (not budget).
-    const denominator = data.total_bytes > budget ? data.total_bytes : budget;
-    const toWidth = (b) => Math.min(100, (b / denominator) * 100).toFixed(1) + '%';
-
     const rec = data.recommendation || 'risk';
     const dotClass = rec === 'fit' ? 'fit' : rec === 'tight' ? 'tight' : 'risk';
+
+    // Every card uses the same machine budget as its denominator, so bar lengths
+    // remain directly comparable across models and context sizes.
+    const fitsInBudget = hasAvail && data.total_bytes <= availBytes;
+    const denominator = hasAvail ? availBytes : data.total_bytes * 1.25;
+    const toWidth = (b) => Math.min(100, (b / denominator) * 100).toFixed(1) + '%';
+
+    // Explicit free-headroom segment — colored per fit/tight status so it reads from
+    // the same success/warning palette as the dot indicator.
+    const freeBytes = fitsInBudget ? (availBytes - data.total_bytes) : 0;
+    const freeSegment = freeBytes > 0
+        ? `<div class="launch-card-vram-seg launch-card-vram-seg--free launch-card-vram-seg--free-${dotClass}" style="width:${toWidth(freeBytes)}"></div>`
+        : '';
+
+    const availGb = hasAvail ? (availBytes / 1e9) : 0;
 
     const parts = [
         `Weights ${weightsGb.toFixed(1)} GB`,
@@ -792,18 +807,64 @@ function _renderCardVram(el, data, availBytes) {
     if (data.mmproj_bytes > 0) parts.push(`mmproj ${(data.mmproj_bytes / 1e9).toFixed(1)} GB`);
     if (data.mtp_bytes > 0)    parts.push(`MTP ${(data.mtp_bytes / 1e9).toFixed(1)} GB`);
     parts.push(`overhead ${(data.overhead_bytes / 1e9).toFixed(2)} GB`);
+    if (hasAvail) parts.push(`${availGb.toFixed(1)} GB currently available`);
+    if ((data.ram_bytes || 0) > 0) {
+        parts.push(`CPU weights ${(data.ram_bytes / 1e9).toFixed(1)} GB`);
+    }
+
+    // Label: "approx. 27.0 / 26.8 GB" makes the over-budget case immediately obvious.
+    const totalLabel = hasAvail
+        ? `approx. ${totalGb.toFixed(1)} / ${availGb.toFixed(1)} GB`
+        : `approx. ${totalGb.toFixed(1)} GB`;
+    const overflowLabel = hasAvail && data.total_bytes > availBytes
+        ? ` (+${((data.total_bytes - availBytes) / 1e9).toFixed(1)} GB)`
+        : '';
+
+    const ramBytes = data.ram_bytes || 0;
+    const ramDenominator = availRamBytes > 0 ? availRamBytes : ramBytes;
+    const ramWidth = ramDenominator > 0
+        ? Math.min(100, (ramBytes / ramDenominator) * 100).toFixed(1) + '%'
+        : '0%';
+    const ramOver = availRamBytes > 0 && ramBytes > availRamBytes;
+    const ramLabel = availRamBytes > 0
+        ? `${(ramBytes / 1e9).toFixed(1)} / ${(availRamBytes / 1e9).toFixed(1)} GB`
+        : `${(ramBytes / 1e9).toFixed(1)} GB`;
+    const ramRow = !isUnified && ramBytes > 0
+        ? `<div class="launch-card-memory-row">
+            <span class="launch-card-memory-kind">RAM</span>
+            <div class="launch-card-vram-bar${ramOver ? ' launch-card-vram-bar--over' : ''}">
+                <div class="launch-card-vram-seg launch-card-vram-seg--ram" style="width:${ramWidth}"></div>
+            </div>
+            <span class="launch-card-vram-total">${ramLabel}</span>
+        </div>`
+        : '';
+
+    const dotTitle = dotClass === 'fit'
+        ? 'Fits comfortably in VRAM'
+        : dotClass === 'tight'
+            ? 'Tight fit — may work but leaves little headroom'
+            : 'May exceed available VRAM — consider reducing context or KV quant';
 
     el.classList.remove('launch-card-vram--loading');
     el.title = parts.join(' · ');
     // eslint-disable-next-line no-unsanitized/property -- all values are numeric; no user strings
     el.innerHTML = `
-        <div class="launch-card-vram-bar">
-            <div class="launch-card-vram-seg launch-card-vram-seg--weights" style="width:${toWidth(data.weights_bytes)}"></div>
-            <div class="launch-card-vram-seg launch-card-vram-seg--kv" style="width:${toWidth(data.kv_cache_bytes)}"></div>
-            <div class="launch-card-vram-seg launch-card-vram-seg--extras" style="width:${toWidth(extrasBytes)}"></div>
+        <div class="launch-card-memory-bars">
+            <div class="launch-card-memory-row">
+                <span class="launch-card-memory-kind">${isUnified ? 'MEM' : 'VRAM'}</span>
+                <div class="launch-card-vram-bar${hasAvail && !fitsInBudget ? ' launch-card-vram-bar--over' : ''}">
+                    <div class="launch-card-vram-seg launch-card-vram-seg--weights" style="width:${toWidth(data.weights_bytes)}"></div>
+                    <div class="launch-card-vram-seg launch-card-vram-seg--kv" style="width:${toWidth(data.kv_cache_bytes)}"></div>
+                    <div class="launch-card-vram-seg launch-card-vram-seg--extras" style="width:${toWidth(extrasBytes)}"></div>
+                    ${freeSegment}
+                </div>
+                <span class="launch-card-vram-dot launch-card-vram-dot--${dotClass}" title="${dotTitle}"></span>
+            </div>
+            <div class="launch-card-memory-total-row">
+                <span class="launch-card-vram-total" title="Approximate total VRAM: ${parts.join(' · ')}">${totalLabel}${overflowLabel}</span>
+            </div>
+            ${ramRow}
         </div>
-        <span class="launch-card-vram-total" title="Approximate total VRAM: ${parts.join(' · ')}">approx. ${totalGb.toFixed(1)} GB</span>
-        <span class="launch-card-vram-dot launch-card-vram-dot--${dotClass}" title="${dotClass === 'fit' ? 'Fits comfortably in VRAM' : dotClass === 'tight' ? 'Tight fit — may work but leaves little headroom' : 'May exceed available VRAM — consider reducing context or KV quant'}"></span>
     `;
 }
 

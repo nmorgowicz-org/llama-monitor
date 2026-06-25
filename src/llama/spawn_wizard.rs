@@ -1021,6 +1021,7 @@ impl ModelMetadata {
                 .unwrap_or(heuristic.linear_attn_state_bytes),
             n_experts: self.n_experts.unwrap_or(heuristic.n_experts),
             n_experts_used: self.n_experts_used.unwrap_or(heuristic.n_experts_used),
+            bytes_per_layer: self.bytes_per_layer.unwrap_or(0),
             expert_fraction: heuristic.expert_fraction,
             // Exact measured expert bytes (0 when unmeasured → heuristic fallback).
             expert_bytes_per_layer: self.expert_bytes_per_layer.unwrap_or(0),

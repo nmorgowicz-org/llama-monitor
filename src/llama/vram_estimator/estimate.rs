@@ -111,6 +111,31 @@ pub fn moe_weight_split(model_size_bytes: u64, arch: &ModelArch, n_cpu_moe: i32)
     (vram_bytes, cpu_bytes)
 }
 
+/// Split dense-model weights for a discrete GPU `--gpu-layers` setting.
+/// Negative values mean automatic/all-GPU placement.
+pub fn dense_weight_split(model_size_bytes: u64, arch: &ModelArch, gpu_layers: i32) -> (u64, u64) {
+    if arch.is_moe() || gpu_layers < 0 || arch.n_layers == 0 {
+        return (model_size_bytes, 0);
+    }
+
+    let gpu_layers = (gpu_layers as u32).min(arch.n_layers);
+    if gpu_layers == arch.n_layers {
+        return (model_size_bytes, 0);
+    }
+    if gpu_layers == 0 {
+        return (0, model_size_bytes);
+    }
+
+    let gpu_bytes = if arch.bytes_per_layer > 0 {
+        arch.bytes_per_layer
+            .saturating_mul(gpu_layers as u64)
+            .min(model_size_bytes)
+    } else {
+        (model_size_bytes as f64 * gpu_layers as f64 / arch.n_layers as f64) as u64
+    };
+    (gpu_bytes, model_size_bytes.saturating_sub(gpu_bytes))
+}
+
 /// MTP prediction-head VRAM overhead.
 /// Each depth level adds approximately 1.5% of model weights.
 pub fn mtp_overhead_bytes(model_size_bytes: u64, mtp_depth: u32) -> u64 {
@@ -286,7 +311,9 @@ pub struct VramBreakdown {
     pub total_bytes: u64,
     pub available_bytes: u64,
     pub headroom_bytes: i64, // can be negative (over budget)
-    pub ram_bytes: u64,      // weights offloaded to CPU RAM (MoE only)
+    pub ram_bytes: u64,      // weights placed in CPU RAM
+    pub available_ram_bytes: u64,
+    pub ram_headroom_bytes: i64,
     pub recommendation: VramRecommendation,
     pub note: String,
 }
@@ -315,10 +342,18 @@ pub fn full_estimate(
     parallel_slots: u32,
     ubatch_size: u32,
     n_cpu_moe: i32,
+    gpu_layers: i32,
     available_vram_bytes: u64,
+    available_ram_bytes: u64,
     is_unified_memory: bool,
 ) -> VramBreakdown {
-    let (weight_vram, ram) = moe_weight_split(model_size_bytes, arch, n_cpu_moe);
+    let (weight_vram, ram) = if is_unified_memory {
+        (model_size_bytes, 0)
+    } else if arch.is_moe() {
+        moe_weight_split(model_size_bytes, arch, n_cpu_moe)
+    } else {
+        dense_weight_split(model_size_bytes, arch, gpu_layers)
+    };
     let kv = kv_cache_bytes(arch, context_size, parallel_slots, ctk, ctv);
     // For hybrid linear-attention models (e.g. Qwen3-Coder-Next / DeltaNet):
     // add the fixed recurrent state. This is constant — it does NOT grow with context.
@@ -335,8 +370,15 @@ pub fn full_estimate(
     };
     let total = weight_vram + kv + linear_state + mmproj + mtp + overhead;
     let headroom = available_vram_bytes as i64 - total as i64;
+    let ram_headroom = available_ram_bytes as i64 - ram as i64;
 
-    let (recommendation, note) = if available_vram_bytes == 0 {
+    let ram_exceeded = !is_unified_memory && ram > 0 && available_ram_bytes > 0 && ram_headroom < 0;
+    let (recommendation, note) = if ram_exceeded {
+        (
+            VramRecommendation::WontFit,
+            "CPU-offloaded weights exceed available system RAM.".into(),
+        )
+    } else if available_vram_bytes == 0 {
         (
             VramRecommendation::Risk,
             "Memory size unknown; estimate is best-effort.".into(),
@@ -389,6 +431,8 @@ pub fn full_estimate(
         available_bytes: available_vram_bytes,
         headroom_bytes: headroom,
         ram_bytes: ram,
+        available_ram_bytes,
+        ram_headroom_bytes: ram_headroom,
         recommendation,
         note,
     }
@@ -670,7 +714,9 @@ pub fn auto_size(
         parallel_slots,
         ubatch,
         n_cpu_moe,
+        -1,
         available_vram_bytes,
+        0,
         is_unified_memory,
     );
 
@@ -847,7 +893,9 @@ fn build_scenarios(
             parallel_slots,
             ubatch,
             n_cpu_moe,
+            -1,
             available_vram_bytes,
+            0,
             is_unified_memory,
         );
         let warn = if _use_case == UseCase::Agentic && kv_elem_bytes(kk) < 1.0 {
@@ -895,7 +943,9 @@ fn build_scenarios(
             parallel_slots,
             ubatch,
             aggressive_cpu,
+            -1,
             available_vram_bytes,
+            0,
             is_unified_memory,
         );
         scenarios.push(ContextScenario {

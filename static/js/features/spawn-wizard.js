@@ -362,6 +362,11 @@ function setupWizardEscape() {
 function resetWizardState() {
   // Clear DOM inputs so they don't show stale values when the wizard re-opens
   if (dom.modelPathInput) dom.modelPathInput.value = '';
+  if (dom.presetNameInput) dom.presetNameInput.value = '';
+  if (dom.savedPresetName) {
+    dom.savedPresetName.style.display = 'none';
+    dom.savedPresetName.textContent = '';
+  }
 
   // Reset model state
   wizardState.model.source = '';
@@ -2511,19 +2516,22 @@ async function fetchGpuVram() {
     // /metrics/gpu returns BTreeMap<String, GpuMetrics> (object keyed by GPU name on Mac/Linux)
     // or an array or { gpus: [...] } depending on endpoint version
     let totalVram = 0;
+    let usedVram = 0;
     const gpus = Array.isArray(data) ? data : (data.gpus ? data.gpus : Object.values(data));
     for (const g of gpus) {
       // Rust GpuMetrics struct uses `vram_total` field (value in MB); also check legacy names
       const t = g.vram_total_mb || g.total_mb || g.total_memory_mb || g.vram_total || 0;
+      const u = g.vram_used_mb || g.used_mb || g.vram_used || 0;
       totalVram += t * 1024 * 1024;
+      usedVram += u * 1024 * 1024;
       // Capture Metal GPU wired limit from Apple backend (0 = system default)
       if (g.metal_gpu_limit_mb !== undefined && g.metal_gpu_limit_mb !== null) {
         cachedMetalGpuLimitMb = g.metal_gpu_limit_mb;
       }
     }
     if (totalVram > 0) {
-      cachedVram = totalVram;
-      wizardState.vram.available = totalVram;
+      cachedVram = isUnifiedMemory() ? totalVram : Math.max(0, totalVram - usedVram);
+      wizardState.vram.available = cachedVram;
     }
   } catch {}
 }
@@ -4437,9 +4445,12 @@ function updateVramDisplay() {
   const modelBytes = getModelBytes();
   const nCpuMoe = hw.nCpuMoe || 0;
 
-  // Ensure vram-estimate uses accurate effective values
-  wizardState.vram.available = availVram;
-  wizardState.vram.isUnifiedMemory = isUnifiedMemory();
+    // Ensure vram-estimate uses accurate effective values
+    wizardState.vram.available = availVram;
+    wizardState.vram.availableRam = isUnifiedMemory()
+      ? 0
+      : Math.max(0, cachedRamTotal - cachedRamUsed);
+    wizardState.vram.isUnifiedMemory = isUnifiedMemory();
 
   // Always render scenario cards so the UI doesn't go blank when the backend is unavailable.
   // renderScenarioCards will degrade gracefully if individual estimates fail.
@@ -4611,7 +4622,10 @@ function updateVramDisplay() {
         }
         if (est.ram_bytes > 0) {
           if (dom.rLegMoeItem) dom.rLegMoeItem.style.display = '';
-          if (dom.rLegMoe) dom.rLegMoe.textContent = `MoE ${formatGB(est.ram_bytes)}`;
+          if (dom.rLegMoe) {
+            const label = arch.nExperts > 1 ? 'MoE experts' : 'CPU weights';
+            dom.rLegMoe.textContent = `${label} ${formatGB(est.ram_bytes)}`;
+          }
         } else {
           if (dom.rLegMoeItem) dom.rLegMoeItem.style.display = 'none';
         }
