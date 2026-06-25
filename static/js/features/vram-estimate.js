@@ -10,6 +10,9 @@ let currentRequestId = 0;
 function buildEstimateBody(state) {
   const hw = state.hardware;
   const m = state.model;
+  const gpuLayers = hw.gpuLayers === 'manual'
+    ? (Number.isFinite(Number(hw.gpuLayersManual)) ? Number(hw.gpuLayersManual) : -1)
+    : -1;
 
   return {
     model_path: m.path || m.localPath || '',
@@ -19,7 +22,9 @@ function buildEstimateBody(state) {
     ctk: hw.cacheTypeK || 'q8_0',
     ctv: hw.cacheTypeV || 'q8_0',
     n_cpu_moe: hw.nCpuMoe || 0,
+    gpu_layers: gpuLayers,
     available_vram_bytes: state.vram?.available || 0,
+    available_ram_bytes: state.vram?.availableRam || 0,
     is_unified_memory: state.vram?.isUnifiedMemory || false,
     mmproj_path: m.mmprojPath || '',
     mmproj_bytes: m.mmprojBytes || 0,

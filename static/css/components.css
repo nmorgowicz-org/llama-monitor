@@ -3219,6 +3219,19 @@ button:disabled {
   gap: 8px;
 }
 
+.preset-vram-row--ram {
+  margin-top: 5px;
+}
+
+.preset-memory-kind {
+  width: 32px;
+  flex: 0 0 32px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  letter-spacing: 0.04em;
+}
+
 .preset-vram-display .launch-card-vram-bar,
 .preset-vram-display .vram-bar {
   flex: 1;

@@ -472,6 +472,8 @@ document.addEventListener('DOMContentLoaded', () => {
 let _presetAdvisorTimer = null;
 let _presetAdvisorSeq = 0;
 let _presetIsUnified = null; // cached platform check
+let _presetRamUsedBytes = 0;
+let _presetVramBytes = 0;
 let _presetRamBytes = 0;    // cached RAM total (bytes)
 let _presetMetalLimitMb = 0; // cached iogpu.wired_limit_mb (0 = use heuristic)
 
@@ -480,23 +482,38 @@ let _presetVramTimer = null;
 let _presetVramSeq = 0;
 
 function _presetAvailBytes() {
-    if (!_presetIsUnified || _presetRamBytes === 0) return 0;
+    if (!_presetIsUnified) return _presetVramBytes;
+    if (_presetRamBytes === 0) return 0;
     const limitBytes = _presetMetalLimitMb > 0 ? _presetMetalLimitMb * 1024 * 1024 : null;
     const fraction = _presetRamBytes <= 36 * 1024 ** 3 ? 2 / 3 : 3 / 4;
     const cap = limitBytes ?? Math.floor(_presetRamBytes * fraction);
     return Math.max(0, Math.min(cap, _presetRamBytes) - 512 * 1024 * 1024);
 }
 
+function _presetAvailableRamBytes() {
+    return _presetIsUnified ? 0 : Math.max(0, _presetRamBytes - _presetRamUsedBytes);
+}
+
 async function _ensureUnifiedFlag() {
     if (_presetIsUnified !== null) return _presetIsUnified;
     try {
         const headers = window.authHeaders ? window.authHeaders() : {};
-        const [platform, sys] = await Promise.all([
+        const [platform, sys, gpu] = await Promise.all([
             fetch('/api/llama-binary/platform-info', { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
             fetch('/metrics/system', { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
+            fetch('/metrics/gpu', { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
         ]);
         _presetIsUnified = platform?.auto_backend === 'metal';
         _presetRamBytes = (sys?.ram_total_gb || lastSystemMetrics?.ram_total_gb || 0) * 1024 ** 3;
+        _presetRamUsedBytes = (sys?.ram_used_gb || lastSystemMetrics?.ram_used_gb || 0) * 1024 ** 3;
+        if (!_presetIsUnified && gpu) {
+            const gpus = Array.isArray(gpu) ? gpu : (gpu.gpus ? gpu.gpus : Object.values(gpu));
+            _presetVramBytes = gpus.reduce((sum, g) => {
+                const totalMb = g.vram_total_mb || g.total_mb || g.total_memory_mb || g.vram_total || 0;
+                const usedMb = g.vram_used_mb || g.used_mb || g.vram_used || 0;
+                return sum + Math.max(0, totalMb - usedMb) * 1024 * 1024;
+            }, 0);
+        }
         if (_presetIsUnified) {
             const lim = await fetch('/api/system/metal-gpu-limit', { headers }).then(r => r.ok ? r.json() : null).catch(() => null);
             if (lim?.ok && lim.limit_mb > 0) _presetMetalLimitMb = lim.limit_mb;
@@ -755,7 +772,11 @@ async function autoSizePreset() {
             parallel_slots: parseInt(document.getElementById('modal-parallel-slots')?.value) || 1,
             ubatch_size: parseInt(document.getElementById('modal-ubatch-size')?.value) || 512,
             n_cpu_moe: parseInt(document.getElementById('modal-n-cpu-moe')?.value) || 0,
+            gpu_layers: Number.isFinite(parseInt(document.getElementById('modal-gpu-layers')?.value))
+                ? parseInt(document.getElementById('modal-gpu-layers')?.value)
+                : -1,
             available_vram_bytes: _presetAvailBytes(),
+            available_ram_bytes: _presetAvailableRamBytes(),
             is_unified_memory: !!_presetIsUnified,
         };
 
@@ -810,6 +831,7 @@ export function updatePresetVram() {
         const parallelSlots = parseInt(document.getElementById('modal-parallel-slots')?.value) || 1;
         const ubatch = parseInt(document.getElementById('modal-ubatch-size')?.value) || 512;
         const nCpuMoe = parseInt(document.getElementById('modal-n-cpu-moe')?.value) || 0;
+        const gpuLayers = parseInt(document.getElementById('modal-gpu-layers')?.value);
         const mmprojPath = document.getElementById('modal-mmproj')?.value?.trim() || '';
         const available_vram_bytes = _presetAvailBytes();
         const body = {
@@ -819,7 +841,9 @@ export function updatePresetVram() {
             parallel_slots: parallelSlots,
             ubatch_size: ubatch,
             n_cpu_moe: nCpuMoe,
+            gpu_layers: Number.isFinite(gpuLayers) ? gpuLayers : -1,
             available_vram_bytes,
+            available_ram_bytes: _presetAvailableRamBytes(),
             is_unified_memory: !!isUnified,
             ...(mmprojPath ? { mmproj_path: mmprojPath } : {}),
         };
@@ -861,6 +885,21 @@ function _renderPresetVram(el, data) {
     const rec = data.recommendation || 'fit';
     const recLabel = rec === 'fit' ? 'Fits' : rec === 'tight' ? 'Tight' : 'Risk';
     const recClass = rec === 'fit' ? 'fit' : rec === 'tight' ? 'tight' : 'risk';
+    const ramBytes = data.ram_bytes || 0;
+    const ramAvail = data.available_ram_bytes || _presetAvailableRamBytes();
+    const ramPct = ramAvail > 0
+        ? Math.max(0, Math.min(100, (ramBytes / ramAvail) * 100)).toFixed(1) + '%'
+        : '0%';
+    const ramLabel = ramAvail > 0 ? `${fmt(ramBytes)} / ${fmt(ramAvail)}` : fmt(ramBytes);
+    const ramBar = !_presetIsUnified && ramBytes > 0
+        ? `<div class="preset-vram-row preset-vram-row--ram">
+            <span class="preset-memory-kind">RAM</span>
+            <div class="vram-bar${ramBytes > ramAvail && ramAvail > 0 ? ' over-budget' : ''}">
+                <div class="vram-segment seg-ram-moe" style="width:${ramPct}" title="CPU model weights"></div>
+            </div>
+            <span class="launch-card-vram-total">${ramLabel}</span>
+        </div>`
+        : '';
 
     const parts = [];
     if (weights > 0) parts.push(`Weights ${fmt(weights)}`);
@@ -894,11 +933,20 @@ function _renderPresetVram(el, data) {
         systemLine = `<div class="preset-vram-sysram${isTight ? ' preset-vram-sysram--warn' : ''}">` +
             `System RAM: ${sysGib.toFixed(1)} GiB now → ~${afterGib.toFixed(1)} GiB after loading (${pctAfter}% of ${totalGib.toFixed(0)} GiB${wiredNote})${mlockHint}` +
             `</div>`;
+    } else if (!_presetIsUnified && (data.ram_bytes || 0) > 0) {
+        const ramNeeded = data.ram_bytes || 0;
+        const ramAvail = data.available_ram_bytes || _presetAvailableRamBytes();
+        const ramOver = ramAvail > 0 && ramNeeded > ramAvail;
+        const ramCapacity = ramAvail > 0 ? ` / ${fmt(ramAvail)} system RAM available` : '';
+        systemLine = `<div class="preset-vram-sysram${ramOver ? ' preset-vram-sysram--warn' : ''}">` +
+            `CPU weights: ${fmt(ramNeeded)}${ramCapacity}` +
+            `</div>`;
     }
 
     // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes the VRAM bar HTML
     el.innerHTML = window.DOMPurify.sanitize(`
         <div class="preset-vram-row">
+            <span class="preset-memory-kind">${_presetIsUnified ? 'MEM' : 'VRAM'}</span>
             <div class="vram-bar">
                 <div class="vram-segment seg-weights" style="width:${pct(weights)}" title="Weights"></div>
                 <div class="vram-segment seg-kv" style="width:${pct(kv)}" title="KV Cache"></div>
@@ -910,6 +958,7 @@ function _renderPresetVram(el, data) {
             <span class="launch-card-vram-total">~${fmt(used)}</span>
             <span class="preset-vram-badge preset-vram-badge--${recClass}">${recLabel}</span>
         </div>
+        ${ramBar}
         ${parts.length ? `<div class="preset-vram-breakdown">${parts.join(' · ')}</div>` : ''}
         ${systemLine}
     `);
