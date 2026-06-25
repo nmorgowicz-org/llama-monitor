@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.5.2...v1.5.3) (2026-06-25)
+
+
+### Bug Fixes
+
+* **spawn:** clear preset name input on wizard close ([44d48e5](https://github.com/nmorgowicz-org/llama-monitor/commit/44d48e568fc81c14e469ac4fd018799efa9fa1c5))
+* **ui:** move preset card VRAM label below memory bar ([44d48e5](https://github.com/nmorgowicz-org/llama-monitor/commit/44d48e568fc81c14e469ac4fd018799efa9fa1c5))
+* **ui:** show separate VRAM and RAM bars with available-budget awareness ([44d48e5](https://github.com/nmorgowicz-org/llama-monitor/commit/44d48e568fc81c14e469ac4fd018799efa9fa1c5))
+* **vram:** correct Hybrid DeltaNet test comment and document active_params_b behavior ([44d48e5](https://github.com/nmorgowicz-org/llama-monitor/commit/44d48e568fc81c14e469ac4fd018799efa9fa1c5))
+* **vram:** improve card VRAM bar math and Hybrid DeltaNet active-param estimates ([44d48e5](https://github.com/nmorgowicz-org/llama-monitor/commit/44d48e568fc81c14e469ac4fd018799efa9fa1c5))
+* **vram:** sum VRAM totals across multiple GPUs ([44d48e5](https://github.com/nmorgowicz-org/llama-monitor/commit/44d48e568fc81c14e469ac4fd018799efa9fa1c5))
+* **vram:** use exact GGUF tensor counts for active params, add partial GPU-layer and RAM-budget support ([44d48e5](https://github.com/nmorgowicz-org/llama-monitor/commit/44d48e568fc81c14e469ac4fd018799efa9fa1c5))
+
 ## [1.5.2](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.5.1...v1.5.2) (2026-06-24)
 
 
