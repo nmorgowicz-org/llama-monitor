@@ -28,6 +28,10 @@ pub struct ModelArch {
     pub n_experts: u32,
     /// Experts activated per token (for generation-speed estimation).
     pub n_experts_used: u32,
+    /// Exact bytes per transformer layer measured from a local GGUF.
+    /// Used to model partial `--gpu-layers` placement on discrete GPUs.
+    #[serde(default)]
+    pub bytes_per_layer: u64,
     /// Fraction of total model params that are expert FFN blocks.
     /// Typical range 0.55–0.75; default 0.65 when unknown.
     /// Used only as a fallback when `expert_bytes_per_layer` is not measured.

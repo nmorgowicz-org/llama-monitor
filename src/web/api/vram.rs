@@ -28,13 +28,14 @@ fn api_vram_estimate_breakdown(
 
                 let model_path = body["model_path"].as_str().unwrap_or("").to_string();
                 let n_ctx = body["n_ctx"].as_u64().unwrap_or(4096);
-                let _gpu_layers = body["gpu_layers"].as_i64().unwrap_or(-1);
+                let gpu_layers = body["gpu_layers"].as_i64().unwrap_or(-1) as i32;
                 let parallel_slots = body["parallel_slots"].as_u64().unwrap_or(1) as u32;
                 let ubatch_size = body["ubatch_size"].as_u64().unwrap_or(2048) as u32;
                 let ctk = body["ctk"].as_str().unwrap_or("q8_0").to_string();
                 let ctv = body["ctv"].as_str().unwrap_or("q8_0").to_string();
                 let n_cpu_moe = body["n_cpu_moe"].as_i64().map(|v| v as i32).unwrap_or(0);
                 let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
+                let available_ram_bytes = body["available_ram_bytes"].as_u64().unwrap_or(0);
                 let is_unified_memory = body["is_unified_memory"].as_bool().unwrap_or(false);
                 // mmproj_path: path to the vision projector GGUF; size read from disk.
                 // mmproj_bytes: explicit size override (used when path is unavailable).
@@ -123,7 +124,9 @@ fn api_vram_estimate_breakdown(
                     parallel_slots,
                     ubatch_size,
                     n_cpu_moe,
+                    gpu_layers,
                     available_vram_bytes,
+                    available_ram_bytes,
                     is_unified_memory,
                 );
 
@@ -140,6 +143,8 @@ fn api_vram_estimate_breakdown(
                         "available_bytes": breakdown.available_bytes,
                         "headroom_bytes": breakdown.headroom_bytes,
                         "ram_bytes": breakdown.ram_bytes,
+                        "available_ram_bytes": breakdown.available_ram_bytes,
+                        "ram_headroom_bytes": breakdown.ram_headroom_bytes,
                         "recommendation": serde_json::to_value(&breakdown.recommendation).unwrap_or(serde_json::Value::Null),
                         "note": breakdown.note
                     }))),
@@ -531,6 +536,7 @@ pub(crate) fn build_arch_from_body(
         linear_attn_state_bytes,
         n_experts,
         n_experts_used: n_exp_used,
+        bytes_per_layer: body["bytes_per_layer"].as_u64().unwrap_or(0),
         expert_fraction: expert_frac,
         expert_bytes_per_layer,
         moe_layer_count,

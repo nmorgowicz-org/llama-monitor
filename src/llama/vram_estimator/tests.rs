@@ -110,6 +110,55 @@ fn moe_weight_split_uses_measured_expert_bytes() {
 }
 
 #[test]
+fn dense_weight_split_uses_measured_layer_bytes() {
+    let arch = ModelArch {
+        n_layers: 80,
+        bytes_per_layer: 800_000_000,
+        ..Default::default()
+    };
+    let model = 70_000_000_000u64;
+
+    assert_eq!(dense_weight_split(model, &arch, -1), (model, 0));
+    assert_eq!(dense_weight_split(model, &arch, 0), (0, model));
+    assert_eq!(
+        dense_weight_split(model, &arch, 40),
+        (32_000_000_000, 38_000_000_000)
+    );
+    assert_eq!(dense_weight_split(model, &arch, 80), (model, 0));
+}
+
+#[test]
+fn dense_partial_gpu_layers_reports_independent_ram_budget() {
+    let arch = ModelArch {
+        n_layers: 80,
+        bytes_per_layer: 800_000_000,
+        ..Default::default()
+    };
+    let breakdown = full_estimate(
+        70_000_000_000,
+        &arch,
+        4096,
+        "q8_0",
+        "q8_0",
+        1,
+        512,
+        0,
+        40,
+        48_000_000_000,
+        32_000_000_000,
+        false,
+    );
+
+    assert_eq!(breakdown.weights_bytes, 32_000_000_000);
+    assert_eq!(breakdown.ram_bytes, 38_000_000_000);
+    assert!(breakdown.ram_headroom_bytes < 0);
+    assert!(matches!(
+        breakdown.recommendation,
+        VramRecommendation::WontFit
+    ));
+}
+
+#[test]
 fn quant_table_has_expected_entries() {
     assert!(find_quant("q4_k_m").is_some());
     assert!(find_quant("iq2_xxs").is_some());
@@ -801,7 +850,9 @@ fn estimate_vram_zero_context() {
         1,
         1024,
         0,
+        -1,
         16 * 1024 * 1024 * 1024,
+        0,
         false,
     );
     // Should still succeed, just no KV overhead
@@ -823,7 +874,9 @@ fn estimate_vram_too_large_for_vram() {
         1,
         1024,
         0,
+        -1,
         16 * 1024 * 1024 * 1024, // 16GB available
+        0,
         false,
     );
     assert!(matches!(

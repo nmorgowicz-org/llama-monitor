@@ -154,8 +154,8 @@ pub struct GgufMetadata {
     pub local_kv_heads: Option<u32>,
 
     // ── Measured tensor sizes (from the GGUF tensor directory, not metadata) ──────
-    // These are exact byte counts read from the on-disk tensor layout — no estimation.
-    // Only populated when parsing a complete local file (not range-fetched prefixes).
+    // Byte counts require a complete local file. Tensor element counts below come
+    // from the header and are also available from range-fetched prefixes.
     /// Sum of all tensor (weight) bytes on disk.
     pub tensor_bytes_total: Option<u64>,
     /// Sum of bytes in repeating per-layer blocks (`blk.*` tensors).
@@ -163,6 +163,10 @@ pub struct GgufMetadata {
     /// Sum of bytes in routed-expert FFN tensors (`*_exps.*`) — the exact portion
     /// `--n-cpu-moe` moves to CPU/RAM per offloaded layer.
     pub expert_bytes_total: Option<u64>,
+    /// Sum of all tensor element counts from the GGUF tensor directory.
+    pub tensor_param_count: Option<u64>,
+    /// Sum of routed-expert tensor element counts (`*_exps.*`).
+    pub expert_param_count: Option<u64>,
     /// Number of distinct layers that contain routed-expert tensors (the `--n-cpu-moe`
     /// denominator). For most MoE models this equals `block_count`, but some have a few
     /// leading dense layers.
@@ -256,6 +260,22 @@ impl GgufMetadata {
             return Some(total_params as f64 / 1e9);
         }
 
+        // Exact path: tensor element counts are independent of quantization.
+        // Keep every non-routed parameter active and activate only the selected
+        // fraction of routed experts. Shared experts and DeltaNet projections
+        // naturally remain in the always-active pool.
+        if let (Some(tensor_params), Some(expert_params)) =
+                (self.tensor_param_count, self.expert_param_count)
+            && tensor_params > 0 && expert_params > 0 && expert_params < tensor_params
+        {
+            let always_active = tensor_params - expert_params;
+            let active_experts = expert_params as f64 * n_used as f64 / n_experts as f64;
+            let active = always_active as f64 + active_experts;
+            if active > 0.0 && active < tensor_params as f64 {
+                return Some(active / 1e9);
+            }
+        }
+
         // Attempt a structural estimate from GGUF:
         //   backbone ≈ attention projections + token-embedding/output projection
         //   experts_total = P - backbone
@@ -283,10 +303,17 @@ impl GgufMetadata {
             // DeltaNet layers have their own always-active parameters (Q/K/V/O projections
             // sized by ssm_inner_size) that are NOT in the expert pool but MUST be counted
             // as backbone because they run on every token.
-            let n_attn_layers = self
-                .n_attn_layers()
-                .map(|n| n as u64)
-                .unwrap_or(n_total_layers);
+            // Only reduce the standard-attention layer count when the DeltaNet
+            // dimensions are available to account for the replacement layers.
+            // Otherwise those always-active weights would disappear from the
+            // backbone estimate and be misclassified as routed expert weights.
+            let n_attn_layers = if self.ssm_inner_size.is_some() {
+                self.n_attn_layers()
+                    .map(|n| n as u64)
+                    .unwrap_or(n_total_layers)
+            } else {
+                n_total_layers
+            };
 
             // Standard-attention backbone: Q/K/V/O per attention layer + token embeddings.
             //   attn Q/K/V/O: embd · head_dim · (2·n_head + 2·n_head_kv)
@@ -554,25 +581,24 @@ pub fn read_gguf_metadata_reader<R: Read + Seek>(
         }
     }
 
-    // ── Measure exact tensor sizes from the tensor directory ──────────────────────
-    // The reader is now positioned at the start of the tensor-info section (the KV loop
-    // read everything before it). Only attempt this for complete local files (file_size
-    // known); range-fetched prefixes lack the tensor blob. Failures are non-fatal — the
-    // architecture metadata above is already populated.
-    if let Some(fsize) = file_size {
-        let alignment = kv
-            .get("general.alignment")
-            .and_then(KvValue::as_u32)
-            .unwrap_or(32) as u64;
-        if let Ok(sizes) = parse_tensor_directory(&mut r, version, tensor_count, alignment, fsize) {
-            meta.tensor_bytes_total = Some(sizes.tensor_bytes_total);
-            meta.layer_bytes_total = Some(sizes.layer_bytes_total);
-            meta.expert_bytes_total = Some(sizes.expert_bytes_total);
-            meta.moe_layer_count = Some(sizes.moe_layer_count);
-            // Use tensor-derived param count only when the KV field is absent.
-            if meta.param_count.is_none() && sizes.param_count > 0 {
-                meta.param_count = Some(sizes.param_count);
-            }
+    // ── Parse the tensor directory ────────────────────────────────────────────────
+    // Tensor shapes are part of the GGUF header, so parameter counts are exact for
+    // both local files and range-fetched prefixes. Exact byte sizes additionally
+    // require the complete local file length.
+    let alignment = kv
+        .get("general.alignment")
+        .and_then(KvValue::as_u32)
+        .unwrap_or(32) as u64;
+    if let Ok(sizes) = parse_tensor_directory(&mut r, version, tensor_count, alignment, file_size) {
+        meta.tensor_bytes_total = sizes.tensor_bytes_total;
+        meta.layer_bytes_total = sizes.layer_bytes_total;
+        meta.expert_bytes_total = sizes.expert_bytes_total;
+        meta.tensor_param_count = Some(sizes.param_count);
+        meta.expert_param_count = Some(sizes.expert_param_count);
+        meta.moe_layer_count = Some(sizes.moe_layer_count);
+        // Use tensor-derived param count only when the KV field is absent.
+        if meta.param_count.is_none() && sizes.param_count > 0 {
+            meta.param_count = Some(sizes.param_count);
         }
     }
 
@@ -581,13 +607,14 @@ pub fn read_gguf_metadata_reader<R: Read + Seek>(
 
 /// Aggregated tensor byte sizes measured from the GGUF tensor directory.
 struct TensorSizes {
-    tensor_bytes_total: u64,
-    layer_bytes_total: u64,
-    expert_bytes_total: u64,
+    tensor_bytes_total: Option<u64>,
+    layer_bytes_total: Option<u64>,
+    expert_bytes_total: Option<u64>,
     moe_layer_count: u32,
     /// Sum of all tensor element counts (product of dims per tensor).
     /// Falls back to 0 on overflow; set from tensor shapes regardless of quant format.
     param_count: u64,
+    expert_param_count: u64,
 }
 
 /// Parse the GGUF tensor-info directory and compute exact per-tensor byte sizes.
@@ -603,7 +630,7 @@ fn parse_tensor_directory<R: Read + Seek>(
     version: u32,
     tensor_count: u64,
     alignment: u64,
-    file_size: u64,
+    file_size: Option<u64>,
 ) -> Result<TensorSizes, String> {
     if tensor_count == 0 || tensor_count > 1_000_000 {
         return Err(format!("Implausible tensor_count {tensor_count}"));
@@ -612,6 +639,8 @@ fn parse_tensor_directory<R: Read + Seek>(
     // (name, offset, n_elements) for each tensor.
     let mut infos: Vec<(String, u64, u64)> = Vec::with_capacity(tensor_count as usize);
     let mut param_count_total: u64 = 0;
+    let mut expert_param_count: u64 = 0;
+    let mut moe_layers: std::collections::HashSet<u32> = std::collections::HashSet::new();
     for _ in 0..tensor_count {
         let name = read_str(r, version)?;
         let n_dims = read_u32(r)?;
@@ -631,53 +660,56 @@ fn parse_tensor_directory<R: Read + Seek>(
         let _ggml_type = read_u32(r)?;
         let offset = read_u64(r)?;
         param_count_total = param_count_total.saturating_add(n_elements);
+        if let Some(rest) = name.strip_prefix("blk.") && name.contains("_exps") {
+            expert_param_count = expert_param_count.saturating_add(n_elements);
+            if let Some(idx) = rest.split('.').next().and_then(|s| s.parse::<u32>().ok()) {
+                moe_layers.insert(idx);
+            }
+        }
         infos.push((name, offset, n_elements));
     }
 
-    // Tensor data begins after the directory, padded up to `alignment`.
-    let pos = r
-        .stream_position()
-        .map_err(|e| format!("stream_position failed: {e}"))?;
-    let align = alignment.max(1);
-    let data_start = pos.div_ceil(align) * align;
-    if data_start > file_size {
-        return Err("tensor data start beyond EOF".into());
-    }
-    let data_len = file_size - data_start;
+    let (tensor_bytes_total, layer_bytes_total, expert_bytes_total) =
+        if let Some(file_size) = file_size {
+            // Tensor data begins after the directory, padded up to `alignment`.
+            let pos = r
+                .stream_position()
+                .map_err(|e| format!("stream_position failed: {e}"))?;
+            let align = alignment.max(1);
+            let data_start = pos.div_ceil(align) * align;
+            if data_start > file_size {
+                return Err("tensor data start beyond EOF".into());
+            }
+            let data_len = file_size - data_start;
 
-    // Sizes from offset deltas (offsets are relative to data_start, in ascending order
-    // once sorted). The last tensor runs to the end of the data section.
-    let mut order: Vec<usize> = (0..infos.len()).collect();
-    order.sort_by_key(|&i| infos[i].1);
-
-    let mut tensor_bytes_total: u64 = 0;
-    let mut layer_bytes_total: u64 = 0;
-    let mut expert_bytes_total: u64 = 0;
-    let mut moe_layers: std::collections::HashSet<u32> = std::collections::HashSet::new();
-
-    for k in 0..order.len() {
-        let i = order[k];
-        let start = infos[i].1;
-        let end = if k + 1 < order.len() {
-            infos[order[k + 1]].1
-        } else {
-            data_len
-        };
-        let size = end.saturating_sub(start);
-        let name = &infos[i].0;
-
-        tensor_bytes_total += size;
-        if let Some(rest) = name.strip_prefix("blk.") {
-            layer_bytes_total += size;
-            // Routed-expert FFN weights, e.g. `blk.3.ffn_gate_exps.weight`.
-            if name.contains("_exps") {
-                expert_bytes_total += size;
-                if let Some(idx) = rest.split('.').next().and_then(|s| s.parse::<u32>().ok()) {
-                    moe_layers.insert(idx);
+            // Sizes from offset deltas. The last tensor runs to EOF.
+            let mut order: Vec<usize> = (0..infos.len()).collect();
+            order.sort_by_key(|&i| infos[i].1);
+            let mut tensor_total = 0u64;
+            let mut layer_total = 0u64;
+            let mut expert_total = 0u64;
+            for k in 0..order.len() {
+                let i = order[k];
+                let start = infos[i].1;
+                let end = if k + 1 < order.len() {
+                    infos[order[k + 1]].1
+                } else {
+                    data_len
+                };
+                let size = end.saturating_sub(start);
+                let name = &infos[i].0;
+                tensor_total = tensor_total.saturating_add(size);
+                if name.starts_with("blk.") {
+                    layer_total = layer_total.saturating_add(size);
+                    if name.contains("_exps") {
+                        expert_total = expert_total.saturating_add(size);
+                    }
                 }
             }
-        }
-    }
+            (Some(tensor_total), Some(layer_total), Some(expert_total))
+        } else {
+            (None, None, None)
+        };
 
     Ok(TensorSizes {
         tensor_bytes_total,
@@ -685,6 +717,7 @@ fn parse_tensor_directory<R: Read + Seek>(
         expert_bytes_total,
         moe_layer_count: moe_layers.len() as u32,
         param_count: param_count_total,
+        expert_param_count,
     })
 }
 
@@ -1085,13 +1118,18 @@ mod tests {
         assert_eq!(meta.tensor_bytes_total, Some(11264)); // sum of all
         assert_eq!(meta.layer_bytes_total, Some(9216)); // blk.* only
         assert_eq!(meta.expert_bytes_total, Some(8192)); // *_exps only
+        assert_eq!(meta.tensor_param_count, Some(6)); // helper uses one element per tensor
+        assert_eq!(meta.expert_param_count, Some(2)); // two *_exps tensors
         assert_eq!(meta.moe_layer_count, Some(2));
         assert_eq!(meta.bytes_per_layer(), Some(4608)); // 9216 / 2 layers
         assert_eq!(meta.expert_bytes_per_layer(), Some(4096)); // 8192 / 2 moe layers
 
-        // Without a known file size (e.g. range-fetched prefix) sizes are not measured.
+        // A range-fetched prefix still contains tensor shapes, so parameter counts
+        // remain exact even though on-disk byte sizes cannot be measured.
         let meta_prefix = read_gguf_metadata_reader(std::io::Cursor::new(&bytes), None).unwrap();
         assert_eq!(meta_prefix.tensor_bytes_total, None);
+        assert_eq!(meta_prefix.tensor_param_count, Some(6));
+        assert_eq!(meta_prefix.expert_param_count, Some(2));
         assert_eq!(meta_prefix.bytes_per_layer(), None);
     }
 
@@ -1346,17 +1384,17 @@ mod tests {
         //   40 layers total, full_attention_interval=4 → 10 attn + 30 DeltaNet
         //   256 experts, 9 used, ssm_inner=3907
         let bytes = make_gguf(&[
-            ("general.architecture", KvEntry::Str("qwen3_6".into())),
+            ("general.architecture", KvEntry::Str("qwen35moe".into())),
             ("general.parameter_count", KvEntry::U64(35_000_000_000)),
-            ("qwen3_6.block_count", KvEntry::U32(40)),
-            ("qwen3_6.full_attention_interval", KvEntry::U32(4)),
-            ("qwen3_6.attention.head_count", KvEntry::U32(32)),
-            ("qwen3_6.attention.head_count_kv", KvEntry::U32(2)),
-            ("qwen3_6.attention.key_length", KvEntry::U32(256)),
-            ("qwen3_6.embedding_length", KvEntry::U32(4096)),
-            ("qwen3_6.expert_count", KvEntry::U32(256)),
-            ("qwen3_6.expert_used_count", KvEntry::U32(9)),
-            ("qwen3_6.ssm.inner_size", KvEntry::U32(3907)),
+            ("qwen35moe.block_count", KvEntry::U32(40)),
+            ("qwen35moe.full_attention_interval", KvEntry::U32(4)),
+            ("qwen35moe.attention.head_count", KvEntry::U32(32)),
+            ("qwen35moe.attention.head_count_kv", KvEntry::U32(2)),
+            ("qwen35moe.attention.key_length", KvEntry::U32(256)),
+            ("qwen35moe.embedding_length", KvEntry::U32(4096)),
+            ("qwen35moe.expert_count", KvEntry::U32(256)),
+            ("qwen35moe.expert_used_count", KvEntry::U32(9)),
+            ("qwen35moe.ssm.inner_size", KvEntry::U32(3907)),
         ]);
         let meta = read_from_bytes(&bytes).unwrap();
         let active = meta
@@ -1371,6 +1409,114 @@ mod tests {
         assert!(
             active < 4.0,
             "hybrid fix should reduce estimate from old ~4 B; got {active:.2} B"
+        );
+    }
+
+    #[test]
+    fn active_params_uses_exact_routed_expert_tensor_counts() {
+        // Real topology from local Qwen3.6-35B-A3B GGUF:
+        // 34.66B total tensor elements, 32.21B routed across 256 experts,
+        // 8 active experts. The remaining 2.45B parameters are always active.
+        let meta = GgufMetadata {
+            architecture: Some("qwen35moe".into()),
+            param_count: Some(34_660_610_688),
+            expert_count: Some(256),
+            expert_used_count: Some(8),
+            tensor_param_count: Some(34_660_610_688),
+            expert_param_count: Some(32_212_254_720),
+            ..Default::default()
+        };
+
+        let active = meta.active_params_b().expect("active parameter estimate");
+        assert!(
+            (active - 3.454_988_928).abs() < 1e-9,
+            "exact tensor split should produce 3.455 B active, got {active:.9} B"
+        );
+    }
+
+    #[test]
+    fn local_moe_ggufs_have_expected_active_parameter_ranges() {
+        let Some(home) = std::env::var("HOME").ok() else {
+            return;
+        };
+        let models = Path::new(&home).join(".config/llama-monitor/models");
+        let cases = [
+            (
+                "Qwen3.6-35B-A3B-uncensored-heretic-Q4_K_M.gguf",
+                "qwen35moe",
+                3.3,
+                3.6,
+            ),
+            (
+                "Qwen3-Coder-Next-Opus-Distilled-Q4_K_M.gguf",
+                "qwen3next",
+                3.7,
+                4.1,
+            ),
+            (
+                "G4-MeroMero-26B-A4B-it-uncensored-heretic-Q5_K_M.gguf",
+                "gemma4",
+                3.6,
+                4.1,
+            ),
+            (
+                "Nex-N2-mini-ultra-uncensored-heretic-Q6_K.gguf",
+                "qwen35moe",
+                3.3,
+                3.6,
+            ),
+        ];
+
+        for (filename, expected_arch, min_active, max_active) in cases {
+            let path = models.join(filename);
+            if !path.exists() {
+                continue;
+            }
+            let meta = read_gguf_metadata(&path).unwrap_or_else(|e| panic!("{filename}: {e}"));
+            assert_eq!(
+                meta.architecture.as_deref(),
+                Some(expected_arch),
+                "{filename}"
+            );
+            let active = meta
+                .active_params_b()
+                .unwrap_or_else(|| panic!("{filename}: missing active params"));
+            assert!(
+                (min_active..=max_active).contains(&active),
+                "{filename}: expected {min_active:.1}–{max_active:.1} B active, got {active:.3} B"
+            );
+        }
+    }
+
+    #[test]
+    fn hybrid_deltanet_active_params_requires_ssm_dimensions() {
+        // Partial GGUF metadata may expose the attention interval without the
+        // DeltaNet dimensions. Keep the conservative all-attention backbone in
+        // that case rather than dropping the always-active DeltaNet weights.
+        let bytes = make_gguf(&[
+            ("general.architecture", KvEntry::Str("qwen35moe".into())),
+            ("general.parameter_count", KvEntry::U64(35_000_000_000)),
+            ("qwen35moe.block_count", KvEntry::U32(40)),
+            ("qwen35moe.full_attention_interval", KvEntry::U32(4)),
+            ("qwen35moe.attention.head_count", KvEntry::U32(32)),
+            ("qwen35moe.attention.head_count_kv", KvEntry::U32(2)),
+            ("qwen35moe.attention.key_length", KvEntry::U32(256)),
+            ("qwen35moe.embedding_length", KvEntry::U32(4096)),
+            ("qwen35moe.expert_count", KvEntry::U32(256)),
+            ("qwen35moe.expert_used_count", KvEntry::U32(9)),
+        ]);
+        let meta = read_from_bytes(&bytes).unwrap();
+        let active = meta
+            .active_params_b()
+            .expect("should compute active_params_b");
+
+        assert!(
+            (active - 4.01).abs() < 0.1,
+            "missing SSM dimensions should retain the ~4.01 B all-attention fallback; got {active:.2} B"
+        );
+        assert!(
+            active > 3.5,
+            "partial hybrid metadata must not produce the undercounted ~1.95 B estimate; got {active:.2} B"
         );
     }
 }
