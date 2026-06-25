@@ -362,6 +362,11 @@ function setupWizardEscape() {
 function resetWizardState() {
   // Clear DOM inputs so they don't show stale values when the wizard re-opens
   if (dom.modelPathInput) dom.modelPathInput.value = '';
+  if (dom.presetNameInput) dom.presetNameInput.value = '';
+  if (dom.savedPresetName) {
+    dom.savedPresetName.style.display = 'none';
+    dom.savedPresetName.textContent = '';
+  }
 
   // Reset model state
   wizardState.model.source = '';
