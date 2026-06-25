@@ -124,7 +124,14 @@ KV cache only grows for `n_attn_layers` — the DeltaNet layers contribute nothi
 
 #### Qwen3.6-35B-A3B (exact — confirmed from model card)
 
-40 total layers: 10 Attention + 30 DeltaNet. "A3B" = 3B **active parameters**, not 3 active experts.
+40 total layers: 10 Attention + 30 DeltaNet. "A3B" = 3B **active parameters**, not 3 active experts. Active params are derived from GGUF metadata via `GgufMetadata::active_params_b()`, which:
+
+- Estimates backbone (non-expert) params from real attention head dims, KV heads, and embedding length.
+- For hybrid DeltaNet models, uses `n_attn_layers` (from `full_attention_interval`) for the standard-attention backbone, then adds always-active DeltaNet projections sized by `ssm_inner_size`.
+- Treats the rest as expert weight; active ≈ backbone + (used / total) × experts.
+- Falls back to a simple ratio `total / (1 + N_experts / N_used)` when GGUF fields are missing or sanity-checks fail.
+
+This ensures "A3B"-style labels reflect the model's actual on-the-fly footprint, not a misleading name-based guess.
 
 | Field | Value |
 |-------|-------|

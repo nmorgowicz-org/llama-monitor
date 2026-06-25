@@ -300,10 +300,9 @@ impl GgufMetadata {
             if let Some(ssm_inner) = self.ssm_inner_size {
                 let n_deltanet = n_total_layers.saturating_sub(n_attn_layers);
                 if n_deltanet > 0 {
-                    let deltanet_per_layer = 2 * embd
-                        * (head_count_kv * head_dim + ssm_inner as u64);
-                    backbone_total =
-                        backbone_total.saturating_add(n_deltanet * deltanet_per_layer);
+                    let deltanet_per_layer =
+                        2 * embd * (head_count_kv * head_dim + ssm_inner as u64);
+                    backbone_total = backbone_total.saturating_add(n_deltanet * deltanet_per_layer);
                 }
             }
 
@@ -1337,8 +1336,9 @@ mod tests {
     /// Model: synthetic Qwen3.6-35B-A3B-like GGUF (40 layers, 10 attn + 30 DeltaNet,
     /// 256 experts, 9 used, embd=4096, head_dim=256, n_kv=2, ssm_inner=3907).
     ///
-    /// Without the fix the old formula over-counted backbone (used 40 layers of Q/K/V/O)
-    /// and produced ~1.9 B instead of the expected ~3 B.
+    /// Without this logic, all 40 layers would be treated as standard attention,
+    /// over-counting backbone and pushing the estimate to ~4 B instead of the
+    /// correct ~3 B for an "A3B" model.
     #[test]
     fn hybrid_deltanet_active_params_uses_ssm_inner_size() {
         // Parameters chosen to approximate Qwen3.6-35B-A3B architecture:
@@ -1359,16 +1359,18 @@ mod tests {
             ("qwen3_6.ssm.inner_size", KvEntry::U32(3907)),
         ]);
         let meta = read_from_bytes(&bytes).unwrap();
-        let active = meta.active_params_b().expect("should compute active_params_b");
-        // Expect close to 3 B (the "A3B" designation); old formula gave ~1.9 B.
+        let active = meta
+            .active_params_b()
+            .expect("should compute active_params_b");
+        // Expect close to 3 B (the "A3B" designation); old formula gave ~4 B.
         assert!(
             (active - 3.0).abs() < 0.5,
             "expected ~3 B active for 35B-A3B-like model, got {active:.2} B"
         );
-        // Must be greater than what the old formula (backbone from all 40 layers) gave.
+        // Must be less than what the old formula (all 40 layers as attn) would give.
         assert!(
-            active > 2.0,
-            "hybrid fix should raise estimate above old 1.9 B; got {active:.2} B"
+            active < 4.0,
+            "hybrid fix should reduce estimate from old ~4 B; got {active:.2} B"
         );
     }
 }
