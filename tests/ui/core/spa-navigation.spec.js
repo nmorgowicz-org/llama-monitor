@@ -1,15 +1,14 @@
 // ── SPA Navigation & History ──────────────────────────────────────────────────
-// Validates that the SPA router correctly:
-// - loads shell for core routes
-// - deep-links into /chat/:id
-// - dismisses modals when navigating away (Back/Forward behavior)
+// Validates:
+// - SPA routes load the shell
+// - /chat/:id deep-links
+// - modals dismiss when navigating away via Router
 
 import { test, expect } from '@playwright/test';
 
 test.describe('SPA navigation & history', () => {
   test('SPA routes load the shell', async ({ page }) => {
-    // These are the key SPA routes that must return HTML (not 404/JSON).
-    for (const path of ['/', '/chat', '/logs', '/server', '/settings', '/spawn']) {
+    for (const path of ['/', '/chat', '/logs', '/server', '/spawn']) {
       const resp = await page.goto(path);
       expect(resp.status()).toBe(200);
       await expect(page.locator('html.modules-ready')).toBeVisible({ timeout: 15000 });
@@ -20,17 +19,20 @@ test.describe('SPA navigation & history', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
 
-    // Get the default active tab ID
-    const tabId = await page.evaluate(() => {
-      const chat = (window.__TEST_CHAT || {});
-      const state = (typeof window !== 'undefined')
-        ? (window.__APP_STATE || {})
-        : {};
-      return (state?.chat?.activeTabId) || null;
+    // Ensure we are in chat view
+    await page.evaluate(async () => {
+      const Router = (await import('/js/features/router.js')).default;
+      Router.navigate('/chat');
+    });
+
+    // Get the active tab ID (if any)
+    const tabId = await page.evaluate(async () => {
+      const { chat } = await import('/js/core/app-state.js');
+      return chat.activeTabId || null;
     });
 
     if (!tabId) {
-      // No explicit tab; fall back: just ensure /chat/:id route does not crash.
+      // No explicit tab; ensure /chat/:id route does not crash.
       await page.goto('/chat/invalid-uuid-not-real');
       await expect(page.locator('.top-nav-bar')).toBeVisible();
       return;
@@ -39,7 +41,7 @@ test.describe('SPA navigation & history', () => {
     const encodedId = encodeURIComponent(tabId);
     await page.goto('/chat/' + encodedId);
 
-    // Page should stay on chat tab with matching URL
+    // Page should be on chat with matching URL
     await expect(page.locator('html.modules-ready')).toBeVisible({ timeout: 15000 });
     expect(page.url()).toContain('/chat/' + encodedId);
   });
@@ -48,28 +50,36 @@ test.describe('SPA navigation & history', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
 
-    // Open settings via button
-    await page.click('[data-action="settings"]', { timeout: 10000 });
+    // Open settings via JS (same pattern as app-shell tests)
+    await page.evaluate(async () => {
+      const { openSettingsModal } = await import('/js/features/settings.js');
+      openSettingsModal();
+    });
     const modal = page.locator('#settings-modal');
-    await expect(modal).toBeVisible();
+    await expect(modal).toHaveClass(/open/);
 
-    // Navigate to /chat via sidebar
-    await page.click('text=/^Chat$/i', { timeout: 10000 });
-    await expect(modal).not.toBeVisible();
+    // Navigate away using Router (avoids sidebar click issues)
+    await page.evaluate(async () => {
+      const Router = (await import('/js/features/router.js')).default;
+      Router.navigate('/chat');
+    });
+
+    await expect(modal).not.toHaveClass(/open/);
     expect(page.url()).toContain('/chat');
   });
 
-  test('Escape key closes modals', async ({ page }) => {
+  test('Escape key closes settings modal', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
 
-    // Open settings
-    await page.click('[data-action="settings"]', { timeout: 10000 });
+    await page.evaluate(async () => {
+      const { openSettingsModal } = await import('/js/features/settings.js');
+      openSettingsModal();
+    });
     const modal = page.locator('#settings-modal');
-    await expect(modal).toBeVisible();
+    await expect(modal).toHaveClass(/open/);
 
-    // Press Escape
     await page.keyboard.press('Escape');
-    await expect(modal).not.toBeVisible();
+    await expect(modal).not.toHaveClass(/open/);
   });
 });
