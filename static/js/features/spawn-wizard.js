@@ -19,7 +19,7 @@ import {
   buildCommunityTemplateInstallRequest,
   detectCommunityTemplateFamily,
 } from './chat-template-registry.js';
-import { switchView } from './setup-view.js';
+import Router from './router.js';
 import { scheduleEstimate, cancelEstimate } from './vram-estimate.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune, requestDepthSweep, renderDepthSweep, requestBatchSweep, renderBatchSweep } from './tuning-cards.js';
@@ -266,7 +266,7 @@ export function initSpawnWizard() {
   });
 
   document.getElementById('hf-dlp-open-settings')?.addEventListener('click', () => {
-    window.openSettingsModal?.();
+    Router.navigate('/settings');
     setTimeout(() => {
       document.querySelector('.settings-tab[data-tab="models"]')?.click();
       document.getElementById('settings-hf-token')?.focus();
@@ -1068,14 +1068,14 @@ function bindEvents() {
   // "Settings → Models" link inside the Import card description
   document.querySelector('.wizard-settings-link[data-open-settings="models"]')?.addEventListener('click', e => {
     e.preventDefault();
-    window.openSettingsModal?.();
+    Router.navigate('/settings');
     setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
   });
 
   // Binary prereq buttons
   dom.prereqDownloadBtn?.addEventListener('click', _downloadBinaryForWizard);
   dom.prereqSettingsBtn?.addEventListener('click', () => {
-    window.openSettingsModal?.();
+    Router.navigate('/settings');
     setTimeout(() => {
       document.querySelector('.settings-tab[data-tab="session"]')?.click();
       document.getElementById('set-server-path')?.focus();
@@ -7391,7 +7391,7 @@ function _buildBrowseDropdown(dropdownEl, targetInputId, allDirs) {
   manageBtn.textContent = '⚙ Manage model locations…';
   manageBtn.addEventListener('click', () => {
     _closeBrowseDropdowns();
-    window.openSettingsModal?.();
+    Router.navigate('/settings');
     setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
   });
   dropdownEl.appendChild(manageBtn);
@@ -8482,7 +8482,7 @@ async function spawnServer() {
       closeSpawnWizard();
       setHeaderMode('Spawn:' + (payload.port || 8001));
       if (document.body.classList.contains('setup-active')) {
-        switchView('monitor');
+        Router.navigate('/');
       }
       showTunePanel();
       // Select the preset that was saved during this wizard run (if any)

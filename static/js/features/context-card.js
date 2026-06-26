@@ -4,7 +4,7 @@
 import { chat } from '../core/app-state.js';
 import { escapeHtml, formatMetricNumber } from '../core/format.js';
 import { setCardState, setChipState, setEmptyState } from './dashboard-render.js';
-import { switchChatTab } from './chat-state.js';
+import Router from './router.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { compactChatTab } from './chat-params.js';
 
@@ -478,7 +478,7 @@ export function updateContextCard(d, l) {
                         label: overflowing.length === 1 ? 'Compact now' : `Compact "${tab.name}"`,
                         primary: overflowing.length === 1,
                         handler: () => {
-                            switchChatTab(tab.id);
+                            Router.navigate('/chat/' + encodeURIComponent(tab.id));
                             compactChatTab(tab, null, !!tab.auto_compact_summarize);
                             toast?.remove();
                         },

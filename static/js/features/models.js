@@ -4,6 +4,7 @@
 import { sessionState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showToastWithActions } from './toast.js';
+import Router from './router.js';
 import { _showConfirm } from './presets.js';
 import {
     hfSearch,
@@ -515,9 +516,7 @@ function buildModelCard(m) {
             useBtn.textContent = relatedPresets.length ? 'New Preset' : 'Use in Wizard';
             useBtn.addEventListener('click', () => {
                 closeModelsModal();
-                import('./spawn-wizard.js').then(({ openSpawnWizard }) => {
-                    openSpawnWizard({ localPath: m.path || '', localModel: m });
-                });
+                Router.navigate('/spawn');
             });
             actions.appendChild(useBtn);
 
@@ -1269,7 +1268,7 @@ export function initModels() {
     if (settingsLink) {
         settingsLink.addEventListener('click', () => {
             closeModelsModal();
-            if (typeof window.openSettingsModal === 'function') window.openSettingsModal('models');
+            Router.navigate('/settings');
         });
     }
 
@@ -1438,9 +1437,7 @@ async function initHfDownloadTab() {
     const settingsBtn = document.getElementById('mm-hf-dlp-open-settings');
     if (settingsBtn) {
         settingsBtn.addEventListener('click', () => {
-            if (typeof window.openSettingsModal === 'function') {
-                window.openSettingsModal('models');
-            }
+            Router.navigate('/settings');
         });
     }
 }

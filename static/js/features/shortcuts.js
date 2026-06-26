@@ -2,7 +2,7 @@
 // Global keyboard shortcuts: modal toggle, chat tab switching.
 
 import { chat } from '../core/app-state.js';
-import { switchChatTab } from './chat-state.js';
+import Router from './router.js';
 
 // ── Keyboard Shortcuts Modal ──────────────────────────────────────────────────
 
@@ -37,19 +37,19 @@ function initChatKeyboardShortcuts() {
         if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9') {
             e.preventDefault();
             const idx = parseInt(e.key) - 1;
-            if (chat.tabs[idx]) switchChatTab(chat.tabs[idx].id);
+            if (chat.tabs[idx]) Router.navigate('/chat/' + encodeURIComponent(chat.tabs[idx].id));
         }
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'ArrowRight') {
             e.preventDefault();
             const idx = chat.tabs.findIndex(t => t.id === chat.activeTabId);
             const next = chat.tabs[(idx + 1) % chat.tabs.length];
-            if (next) switchChatTab(next.id);
+            if (next) Router.navigate('/chat/' + encodeURIComponent(next.id));
         }
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'ArrowLeft') {
             e.preventDefault();
             const idx = chat.tabs.findIndex(t => t.id === chat.activeTabId);
             const prev = chat.tabs[(idx - 1 + chat.tabs.length) % chat.tabs.length];
-            if (prev) switchChatTab(prev.id);
+            if (prev) Router.navigate('/chat/' + encodeURIComponent(prev.id));
         }
     });
 }

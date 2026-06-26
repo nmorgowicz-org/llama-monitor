@@ -5,6 +5,7 @@ import { setupViewState, chat, sessionState } from '../core/app-state.js';
 import { doAttachFromSetup } from './attach-detach.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showConfirmDialog } from './toast.js';
+import Router from './router.js';
 
 // ── Model / preset classification (from GGUF-derived metadata) ────────────────
 // No name-based guessing: labels come from preset.family and preset.size_class
@@ -295,22 +296,20 @@ export function initSetupDropZone() {
                     (m.path || '').split(/[/\\]/).pop() === file.name
                 );
                 if (match) {
-                    import('./spawn-wizard.js').then(({ openSpawnWizard }) =>
-                        openSpawnWizard({ localPath: match.path, localModel: match })
-                    );
+                    Router.navigate('/spawn');
                     return;
                 }
             }
         } catch {}
 
         // File not in library — open wizard on the model step so user can browse
-        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard({}));
+        Router.navigate('/spawn');
     });
 
     // Also open wizard on click (as an explicit affordance)
-    zone.addEventListener('click', () =>
-        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard({}))
-    );
+    zone.addEventListener('click', () => {
+        Router.navigate('/spawn');
+    });
 }
 
 function setAttachButtonLabel(button, label) {
@@ -615,7 +614,7 @@ function _buildLaunchCard(preset, activePresetId) {
             </div>
         `;
         card.querySelector('.launch-card-btn-start').addEventListener('click', () => {
-            import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard({ templatePreset: preset }));
+            Router.navigate('/spawn');
         });
     } else {
         const c = classifyPreset(preset);
@@ -718,7 +717,7 @@ function _buildLaunchCard(preset, activePresetId) {
 
         card.querySelector('.launch-card-btn-start').addEventListener('click', () => {
             if (!hasModel) {
-                import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+                Router.navigate('/spawn');
                 return;
             }
             import('./presets.js').then(({ syncSelectedPresetSelection }) => {
@@ -880,7 +879,7 @@ function _buildNewConfigCard(isPrimary = false) {
         ${isPrimary ? '<div class="launch-card-new-hint">Set up your first local model</div>' : ''}
     `;
     card.addEventListener('click', () => {
-        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+        Router.navigate('/spawn');
     });
     return card;
 }
@@ -1130,16 +1129,20 @@ export async function restorePreviousPosition() {
     const position = loadPreviousPosition();
     if (!position) return;
 
-    // Switch to saved nav tab
+    // Switch to saved nav tab via Router
     if (position.navTab && position.navTab !== 'server') {
-        const { switchTab } = await import('./nav.js');
-        switchTab(position.navTab);
+        if (position.navTab === 'chat') {
+            Router.navigate('/chat');
+        } else if (position.navTab === 'logs') {
+            Router.navigate('/logs');
+        } else {
+            Router.navigate('/');
+        }
     }
 
-    // Switch to saved chat tab
+    // Switch to saved chat tab via Router
     if (position.chatTabId && position.navTab === 'chat') {
-        const { switchChatTab } = await import('./chat-state.js');
-        switchChatTab(position.chatTabId);
+        Router.navigate('/chat/' + encodeURIComponent(position.chatTabId));
     }
 
     // Restore scroll position
@@ -1366,7 +1369,7 @@ export function initViewState() {
     // Dashboard button: visible when a server is running or remote endpoint attached
     const dashBtn = document.getElementById('setup-dashboard-btn');
     if (dashBtn) {
-        dashBtn.addEventListener('click', () => switchView('monitor'));
+        dashBtn.addEventListener('click', () => Router.navigate('/'));
     }
 
     // Init filter bar after presets are loaded
@@ -1389,8 +1392,7 @@ export function initViewState() {
     if (btn) {
         btn.addEventListener('click', async () => {
             try {
-                const { openSpawnWizard } = await import('./spawn-wizard.js');
-                openSpawnWizard();
+                Router.navigate('/spawn');
             } catch (e) {
                 console.error('Failed to open spawn wizard from new-config button:', e);
             }

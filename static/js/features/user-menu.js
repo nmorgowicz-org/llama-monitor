@@ -3,6 +3,7 @@
 
 import { showToast } from './toast.js';
 import { openKeyboardShortcutsModal } from './shortcuts.js';
+import Router from './router.js';
 
 // ── User Menu ─────────────────────────────────────────────────────────────────
 
@@ -274,11 +275,7 @@ export function initUserMenu() {
         openSettingsBtn.addEventListener('click', (e) => {
             e.preventDefault();
             closeUserMenu();
-            if (typeof window.openSettingsModal === 'function') {
-                window.openSettingsModal();
-            } else if (typeof window.switchTab === 'function') {
-                window.switchTab('settings');
-            }
+            Router.navigate('/settings');
         });
     }
 

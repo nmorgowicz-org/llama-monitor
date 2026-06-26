@@ -4,9 +4,10 @@
 
 import { showPromptDialog } from './toast.js';
 import { chat } from '../core/app-state.js';
-import { switchChatTab, closeChatTab, addChatTab, renameChatTab,
+import { closeChatTab, addChatTab, renameChatTab,
           togglePinTab, activeChatTab, archiveChatTab, hideChatTab, restoreChatTab, setChatTabVisibility,
           duplicateChatTab, deleteManyChatTabs, archiveManyChatTabs } from './chat-state.js';
+import Router from './router.js';
 
 const CSP_COLLAPSED_KEY = 'csp-collapsed';
 
@@ -403,7 +404,7 @@ function _buildSessionItem(tab, isActive, isSelected) {
             // No selections: just switch tab.
             selectedIds.clear();
         }
-        switchChatTab(id);
+        Router.navigate('/chat/' + encodeURIComponent(id));
         renderChatSessionsSidebar();
     };
 
