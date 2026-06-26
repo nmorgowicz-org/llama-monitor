@@ -11,6 +11,8 @@
     "puppeteer": "25.2.0"
   },
   "dependencies": {
-    "dompurify": "^3.4.11"
+    "dompurify": "^3.4.11",
+    "highlight.js": "^11.9.0",
+    "marked": "^15.0.0"
   }
 }
