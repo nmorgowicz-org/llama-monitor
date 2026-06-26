@@ -7,7 +7,8 @@ use super::static_assets;
 use warp::Filter;
 
 /// Returns a warp Filter that serves all static assets.
-pub fn static_routes() -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+pub fn static_routes()
+-> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     // Helper: serve static JS with no-cache (force browser to reload on every request)
     fn js_reply(content: &'static str) -> impl warp::Reply {
         warp::reply::with_header(
