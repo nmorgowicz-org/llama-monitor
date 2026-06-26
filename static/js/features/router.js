@@ -46,8 +46,8 @@ const Router = {
     for (const key of Object.keys(this.routes)) {
       if (key.includes(':')) {
         const pattern = key
-          .replace(/\//g, '\\/')
-          .replace(/:[^/]+/g, '[^/]+');
+          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+          .replace(/\\:[^/]+/g, '[^/]+');
         const re = new RegExp('^' + pattern + '$');
         if (re.test(path)) {
           this.routes[key](path);
