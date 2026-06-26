@@ -194,9 +194,11 @@ pub fn build_routes(
     let non_index = non_index.and(rate_limited.clone()).map(|reply, ()| reply);
     let compact_protected = compact_protected.and(rate_limited).map(|reply, ()| reply);
 
-    index
-        .or(non_index)
+    // non_index + compact_protected first; index (SPA-aware) last as fallback
+    // so all API/static/compact routes take priority.
+    non_index
         .or(compact_protected)
+        .or(index)
         .recover(handle_rejection)
 }
 
@@ -339,56 +341,72 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
     gen_routes::static_routes()
 }
 
-fn index_route(
-    auth_manager: AuthManager,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    // Special handling for index.html: inject version, platform, and CSP nonce
-    warp::path::end()
-        .and(warp::header::optional::<String>("Authorization"))
-        .and(warp::header::optional::<String>("cookie"))
-        .and_then(move |auth_header: Option<String>, cookie_header: Option<String>| {
-            let auth_manager = auth_manager.clone();
-            async move {
-                if auth_manager.has_basic()
-                    && !auth_manager.has_form()
-                    && !auth_manager.authenticate_request(
-                        auth_header.as_deref(),
-                        cookie_header.as_deref(),
-                    )
-                {
-                    return Err(warp::reject::custom(AuthReject {
-                        challenge_basic: true,
-                    }));
+fn index_route(auth_manager: AuthManager) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    // Special handling for index.html:
+    // - Exact match at '/' (as before).
+    // - Fallback for any GET path (SPA routing) for paths not handled by API/static/compact.
+    //
+    // This route is placed last in the .or() chain so that:
+    // - /api/*, /ws, and static assets take priority.
+    // - /compact is excluded and handled separately.
+
+    // Helper: generate index.html with version, platform, and CSP nonce.
+    let serve_index =
+        warp::header::optional::<String>("Authorization")
+            .and(warp::header::optional::<String>("cookie"))
+            .and_then(move |auth_header: Option<String>, cookie_header: Option<String>| {
+                let auth_manager = auth_manager.clone();
+                async move {
+                    if auth_manager.has_basic()
+                        && !auth_manager.has_form()
+                        && !auth_manager.authenticate_request(
+                            auth_header.as_deref(),
+                            cookie_header.as_deref(),
+                        )
+                    {
+                        return Err(warp::reject::custom(AuthReject {
+                            challenge_basic: true,
+                        }));
+                    }
+
+                    // Generate a per-request CSP nonce (URL-safe base64, 16 bytes)
+                    let nonce_bytes: [u8; 16] = rand_core_getrandom_u128().to_be_bytes();
+                    let nonce = BASE64.encode(nonce_bytes);
+
+                    let html = static_assets::INDEX_HTML
+                        .replace("{{ VERSION }}", env!("CARGO_PKG_VERSION"))
+                        .replace("{{ PLATFORM }}", std::env::consts::OS)
+                        .replace("{{ NONCE }}", &nonce);
+
+                    // CSP for index.html: same as global, plus nonce for the version script
+                    // style-src keeps 'unsafe-inline' because index.html uses inline styles (display:none, etc.)
+                    let csp = format!(
+                        "default-src 'self' data:; \
+                         connect-src 'self' https: wss:; \
+                         script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; \
+                         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; \
+                         font-src 'self' https://fonts.gstatic.com; \
+                         img-src 'self' data: https:; \
+                         frame-src 'self'"
+                    );
+
+                    Ok::<_, warp::Rejection>(warp::reply::with_header(
+                        warp::reply::with_header(html, "content-type", "text/html"),
+                        "content-security-policy",
+                        csp,
+                    ))
                 }
+            });
 
-                // Generate a per-request CSP nonce (URL-safe base64, 16 bytes)
-                let nonce_bytes: [u8; 16] = rand_core_getrandom_u128().to_be_bytes();
-                let nonce = BASE64.encode(nonce_bytes);
+    let root = warp::path::end().and(serve_index.clone());
 
-                let html = static_assets::INDEX_HTML
-                    .replace("{{ VERSION }}", env!("CARGO_PKG_VERSION"))
-                    .replace("{{ PLATFORM }}", std::env::consts::OS)
-                    .replace("{{ NONCE }}", &nonce);
+    // SPA fallback: any GET path that hasn't been matched (e.g. /chat, /logs, /settings).
+    let spa_fallback = warp::get()
+        .and(warp::path::full())
+        .and(serve_index)
+        .map(|_path, reply| reply);
 
-                // CSP for index.html: same as global, plus nonce for the version script
-                // style-src keeps 'unsafe-inline' because index.html uses inline styles (display:none, etc.)
-                let csp = format!(
-                    "default-src 'self' data:; \
-                     connect-src 'self' https: wss:; \
-                     script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; \
-                     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; \
-                     font-src 'self' https://fonts.gstatic.com; \
-                     img-src 'self' data: https:; \
-                     frame-src 'self'"
-                );
-
-                Ok::<_, warp::Rejection>(warp::reply::with_header(
-                    warp::reply::with_header(html, "content-type", "text/html"),
-                    "content-security-policy",
-                    csp,
-                ))
-            }
-        })
+    root.or(spa_fallback)
 }
 
 // Simple u128 helper for CSP nonce generation (no extra dependency)
