@@ -516,6 +516,10 @@ function buildModelCard(m) {
             useBtn.textContent = relatedPresets.length ? 'New Preset' : 'Use in Wizard';
             useBtn.addEventListener('click', () => {
                 closeModelsModal();
+                window.__spawnWizardOpts = {
+                    localPath: m.path || '',
+                    localModel: m,
+                };
                 Router.navigate('/spawn');
             });
             actions.appendChild(useBtn);

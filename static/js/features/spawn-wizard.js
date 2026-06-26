@@ -266,11 +266,10 @@ export function initSpawnWizard() {
   });
 
   document.getElementById('hf-dlp-open-settings')?.addEventListener('click', () => {
-    Router.navigate('/settings');
-    setTimeout(() => {
-      document.querySelector('.settings-tab[data-tab="models"]')?.click();
-      document.getElementById('settings-hf-token')?.focus();
-    }, 80);
+    location.hash = 'models';
+    Router.navigate('/settings#models');
+    // Focus is secondary; openSettingsModal can handle tab, but we may still want to focus.
+    setTimeout(() => document.getElementById('settings-hf-token')?.focus(), 80);
   });
 
   // Refresh download destination when settings change (e.g., models dir updated)
@@ -1068,18 +1067,14 @@ function bindEvents() {
   // "Settings → Models" link inside the Import card description
   document.querySelector('.wizard-settings-link[data-open-settings="models"]')?.addEventListener('click', e => {
     e.preventDefault();
-    Router.navigate('/settings');
-    setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
+    Router.navigate('/settings#models');
   });
 
   // Binary prereq buttons
   dom.prereqDownloadBtn?.addEventListener('click', _downloadBinaryForWizard);
   dom.prereqSettingsBtn?.addEventListener('click', () => {
-    Router.navigate('/settings');
-    setTimeout(() => {
-      document.querySelector('.settings-tab[data-tab="session"]')?.click();
-      document.getElementById('set-server-path')?.focus();
-    }, 80);
+    Router.navigate('/settings#session');
+    setTimeout(() => document.getElementById('set-server-path')?.focus(), 80);
   });
 }
 
@@ -7391,8 +7386,7 @@ function _buildBrowseDropdown(dropdownEl, targetInputId, allDirs) {
   manageBtn.textContent = '⚙ Manage model locations…';
   manageBtn.addEventListener('click', () => {
     _closeBrowseDropdowns();
-    Router.navigate('/settings');
-    setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
+    Router.navigate('/settings#models');
   });
   dropdownEl.appendChild(manageBtn);
 }

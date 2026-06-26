@@ -43,12 +43,22 @@ const Router = {
     }
 
     // 2) Pattern match (e.g. /chat/:id)
+    // Build regex per key: segment starting with ':' becomes ([^/]+), others are literal.
     for (const key of Object.keys(this.routes)) {
       if (key.includes(':')) {
-        const pattern = key
-          .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-          .replace(/\\:[^/]+/g, '[^/]+');
-        const re = new RegExp('^' + pattern + '$');
+        const parts = key.split('/').filter(Boolean);
+        const pathParts = path.split('/').filter(Boolean);
+        if (parts.length !== pathParts.length) continue;
+
+        const segments = [];
+        for (let i = 0; i < parts.length; i++) {
+          if (parts[i].startsWith(':')) {
+            segments.push('([^/]+)');
+          } else {
+            segments.push(this._escapeRegex(parts[i]));
+          }
+        }
+        const re = new RegExp('^/' + segments.join('/') + '$');
         if (re.test(path)) {
           this.routes[key](path);
           return;
@@ -60,6 +70,10 @@ const Router = {
     if (this.routes['/']) {
       this.routes['/'](path);
     }
+  },
+
+  _escapeRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   },
 };
 

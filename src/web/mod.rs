@@ -194,8 +194,11 @@ pub fn build_routes(
     let non_index = non_index.and(rate_limited.clone()).map(|reply, ()| reply);
     let compact_protected = compact_protected.and(rate_limited).map(|reply, ()| reply);
 
-    // non_index + compact_protected first; index (SPA-aware) last as fallback
-    // so all API/static/compact routes take priority.
+    // Route priority:
+    // - non_index: /api/*, /ws, static assets (no SPA fallback)
+    // - compact_protected: /compact with its own CSP
+    // - index: exact root '/' plus SPA fallback for any other GET path
+    // Only GET is allowed via index/SPA fallback; non-GET unmatched → 404 via handle_rejection.
     non_index
         .or(compact_protected)
         .or(index)

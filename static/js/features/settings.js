@@ -419,7 +419,7 @@ function applyWsIntervalLive() {
 
 // ── Modal open/close ──────────────────────────────────────────────────────────
 
-export function openSettingsModal() {
+export function openSettingsModal(initialTab) {
     const modal = document.getElementById('settings-modal');
     if (!modal) return;
     modal.removeAttribute('aria-hidden');
@@ -449,6 +449,12 @@ export function openSettingsModal() {
         headers: window.authHeaders ? window.authHeaders() : {},
     }).then(r => r.ok ? r.json() : null).then(s => { if (s) applySettings(s); }).catch(() => {});
     _refreshHfTokenStatus();
+
+    // Switch to a specific tab if requested (e.g. from /settings#models).
+    if (initialTab) {
+      const tabEl = modal.querySelector(`.settings-tab[data-tab="${initialTab}"]`);
+      if (tabEl) tabEl.click();
+    }
 }
 
 export function closeSettingsModal() {

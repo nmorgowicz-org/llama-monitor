@@ -164,24 +164,36 @@ async function initializeApp() {
     await initChatTabs();
 
     // Phase 13: Router (must run after all navigation functions are available)
-    if (typeof history !== 'undefined' && history.pushState) {
-      Router.register('/', () => switchView('setup'));
-      Router.register('/spawn', () => openSpawnWizard());
-      Router.register('/chat', () => switchTab('chat'));
-      Router.register('/logs', () => switchTab('logs'));
-      Router.register('/settings', () => openSettingsModal());
-      Router.register('/chat/:id', path => {
-        const id = path.split('/chat/')[1];
-        if (id && typeof switchChatTab === 'function') {
-          switchTab('chat');
-          switchChatTab(id);
-        } else {
-          switchTab('chat');
-        }
-      });
+    // __spawnWizardOpts is set by callers (e.g. models.js, setup-view.js) so the
+    // /spawn route can forward options into openSpawnWizard without hard-coding
+    // wiring for each caller.
+    window.__spawnWizardOpts = null;
 
-      Router.init();
-    }
+    Router.register('/', () => switchView('setup'));
+    Router.register('/spawn', () => {
+      const opts = window.__spawnWizardOpts || {};
+      // Consume once so a later /spawn with no context stays clean.
+      window.__spawnWizardOpts = null;
+      openSpawnWizard(opts);
+    });
+    Router.register('/chat', () => switchTab('chat'));
+    Router.register('/logs', () => switchTab('logs'));
+    Router.register('/settings', () => {
+      // Support hash-based tab targeting: /settings#models, /settings#session, etc.
+      const hash = (location.hash || '').replace('#', '');
+      openSettingsModal(hash || null);
+    });
+    Router.register('/chat/:id', path => {
+      const id = path.split('/chat/')[1];
+      if (id && typeof switchChatTab === 'function') {
+        switchTab('chat');
+        switchChatTab(id);
+      } else {
+        switchTab('chat');
+      }
+    });
+
+    Router.init();
 }
 
 initializeApp().catch(err => console.error('[bootstrap] initializeApp failed:', err));

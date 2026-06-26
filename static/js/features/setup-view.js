@@ -614,6 +614,7 @@ function _buildLaunchCard(preset, activePresetId) {
             </div>
         `;
         card.querySelector('.launch-card-btn-start').addEventListener('click', () => {
+            window.__spawnWizardOpts = { templatePreset: preset };
             Router.navigate('/spawn');
         });
     } else {
@@ -717,6 +718,7 @@ function _buildLaunchCard(preset, activePresetId) {
 
         card.querySelector('.launch-card-btn-start').addEventListener('click', () => {
             if (!hasModel) {
+                window.__spawnWizardOpts = { templatePreset: preset };
                 Router.navigate('/spawn');
                 return;
             }
