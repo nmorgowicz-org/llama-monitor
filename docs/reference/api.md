@@ -43,6 +43,18 @@ rules compared to previous monolithic `api.rs` implementations.
 http://localhost:7778
 ```
 
+## SPA Fallback Routing
+
+The server includes an SPA fallback for unknown non-API paths to support client-side routing.
+
+- For GET:
+  - If the path does not start with /api and its last segment contains a dot
+    (e.g., .js, .css), it is treated as asset-like and returns 404 if not found.
+  - Otherwise, the server returns the SPA shell so the frontend router can handle the route.
+- Existing /api/* endpoints and WebSocket routes are not affected by this fallback.
+- Invariant: all SPA routes must have no dot in the last segment; new routes must respect
+  this or update the guard.
+
 ## Rate Limiting and DoS Protections
 
 - A global rate limiter is applied to all non-index routes:
