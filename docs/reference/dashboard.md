@@ -2,6 +2,19 @@
 
 Llama Monitor's monitoring surface is split between a live top-nav cockpit, the Server tab, and host telemetry cards that light up when the app can read local hardware or reach a remote agent.
 
+## SPA Navigation
+
+Top-level views (Dashboard, Chat, Logs, Server, Spawn) are now SPA routes:
+
+- Navigating between them uses the client-side router (no page reload).
+- The URL reflects the current view:
+  - / for dashboard.
+  - /chat, /logs, /server, /spawn for other views.
+- Browser history and the Back/Forward buttons are supported via the router.
+- The top-nav cockpit and keyboard shortcuts (Ctrl+1/2/3, etc.) use this same router.
+
+See also: [Navigation](navigation.md)
+
 ## Monitoring Surfaces
 
 ### Top-nav cockpit

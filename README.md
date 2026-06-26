@@ -38,6 +38,7 @@ Real-time GPU utilization, temperature, memory, and power, plus CPU and system-l
 
 Chat tabs, prompt controls, telemetry overlays, and logs live next to the monitoring dashboard. Focus mode hides all chrome for a distraction-free view.
 
+- SPA-style navigation and deep linking: seamless transitions between views, browser history support, and stable URLs for conversations (e.g. /chat/:id).
 - Multi-session chats with full history and search
 - Per-tab prompt and sampling controls
 - Focus mode: hide nav, sidebars, and chrome
@@ -135,6 +136,7 @@ Llama Monitor includes in-app updates via the dashboard (Settings or header upda
 - [Dashboard Capabilities](docs/reference/dashboard.md) — Monitoring, telemetry, refresh behavior
 - [Remote Agent](docs/reference/remote-agent.md) — Remote host telemetry, SSH setup, agent lifecycle
 - [Chat](docs/reference/chat.md) — Chat tabs, guided generation, prompt tooling
+- [Navigation](docs/reference/navigation.md) — SPA routing, deep linking, and vendor assets
 - [Setup wizard](docs/reference/setup-wizard.md) — Configure, download, and start a server; model discovery; VRAM tuning
 - [VRAM Estimator](docs/reference/vram-estimator.md) — Architecture-aware VRAM heuristics
 - [Real-Time Communication](docs/reference/realtime-communication.md) — WebSocket schema, polling, network detection

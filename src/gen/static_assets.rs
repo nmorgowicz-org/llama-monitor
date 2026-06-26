@@ -80,6 +80,7 @@ pub const FEATURES_NETWORK_DETECTION_JS: &str =
     include_str!("../../static/js/features/network-detection.js");
 pub const FEATURES_PRESETS_JS: &str = include_str!("../../static/js/features/presets.js");
 pub const FEATURES_REMOTE_AGENT_JS: &str = include_str!("../../static/js/features/remote-agent.js");
+pub const FEATURES_ROUTER_JS: &str = include_str!("../../static/js/features/router.js");
 pub const FEATURES_SENSOR_BRIDGE_JS: &str =
     include_str!("../../static/js/features/sensor-bridge.js");
 pub const FEATURES_SESSIONS_JS: &str = include_str!("../../static/js/features/sessions.js");
@@ -119,3 +120,8 @@ pub const SCI_FI_MD: &str = include_str!("../../static/prompts/sci-fi.md");
 pub const TEMPLATE_MD: &str = include_str!("../../static/prompts/template.md");
 pub const THRILLER_MD: &str = include_str!("../../static/prompts/thriller.md");
 pub const SW_JS: &str = include_str!("../../static/sw.js");
+pub const ATOM_ONE_DARK_MIN_CSS: &str =
+    include_str!("../../static/vendor/css/atom-one-dark.min.css");
+pub const HIGHLIGHT_MIN_JS: &str = include_str!("../../static/vendor/js/highlight.min.js");
+pub const MARKED_MIN_JS: &str = include_str!("../../static/vendor/js/marked.min.js");
+pub const PURIFY_MIN_JS: &str = include_str!("../../static/vendor/js/purify.min.js");

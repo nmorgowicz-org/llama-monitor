@@ -6,6 +6,7 @@ import { updateActiveSessionInfo } from './sessions.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { saveSettings } from './settings.js';
 import { hideConnectingState, saveLastSessionData, showConnectingState, switchView, restorePreviousPosition, savePreviousPosition } from './setup-view.js';
+import Router from './router.js';
 import { _showConfirm } from './presets.js';
 import { setTuneConfig, showTunePanel, hideTunePanel } from './tune-panel.js';
 import { hideDisconnectedBanner } from './chat-transport.js';
@@ -209,7 +210,7 @@ export async function doStartWithConfig(config, options = {}, buttonArg = null) 
         showToast('llama-server is running', 'success', '', { duration: 6000 });
         setTuneConfig(config);
         setHeaderMode('Spawn:' + config.port);
-        switchView('monitor');
+        Router.navigate('/server');
         hideConnectingState();
         showTunePanel();
         saveSettings();
@@ -259,7 +260,7 @@ export async function doStop() {
         id: 'home',
         label: '↩ Home',
         primary: false,
-        handler: () => switchView('setup'),
+        handler: () => Router.navigate('/'),
     });
 
     showToastWithActions(
@@ -385,7 +386,7 @@ export async function doAttach() {
 
         monitorState.speedMax = { prompt: 0, generation: 0 };
         hideDisconnectedBanner();
-        switchView('monitor');
+        Router.navigate('/server');
         showTunePanel();
         setTimeout(() => restorePreviousPosition(), 600);
     }
@@ -437,7 +438,7 @@ export async function doDetach() {
 
             monitorState.speedMax = { prompt: 0, generation: 0 };
             hideTunePanel();
-            switchView('setup');
+            Router.navigate('/');
         }
 
         updateActiveSessionInfo();
@@ -518,8 +519,15 @@ export async function initAttachDetachButtons() {
         setHeaderMode(data?.mode ?? null);
         // If a session is already running, restore the monitor view instead of
         // leaving the user stranded on the welcome screen after a hard refresh.
+        // Only auto-restore when the user landed on '/' (the welcome route) — an
+        // explicit deep link like /chat or /logs must be respected. This runs early
+        // during init (before the router is fully wired), so switch the view directly
+        // and sync the URL with replaceState rather than dispatching through the router.
         if (data?.status === 'Running' && setupViewState.view === 'setup') {
-            switchView('monitor');
+            if (location.pathname === '/' || location.pathname === '') {
+                switchView('monitor');
+                try { history.replaceState({ path: '/server' }, '', '/server'); } catch {}
+            }
             showTunePanel();
         }
     } catch (err) {
@@ -541,7 +549,7 @@ export function initAttachDetach() {
     // Setup wizard button — opens the spawn wizard overlay from the welcome screen
     const setupWizardBtn = document.getElementById('setup-spawn-wizard-btn');
     if (setupWizardBtn) setupWizardBtn.addEventListener('click', () => {
-        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+        Router.navigate('/spawn');
     });
 
     const setupStart = document.getElementById('setup-start-btn');
@@ -569,13 +577,13 @@ export function initAttachDetach() {
     // Bind control bar spawn button — opens wizard from monitor view
     const btnControlSpawn = document.getElementById('btn-control-spawn');
     if (btnControlSpawn) btnControlSpawn.addEventListener('click', () => {
-        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+        Router.navigate('/spawn');
     });
 
     // Bind logs empty state button — opens wizard
     const btnSpawnFromLogs = document.getElementById('btn-spawn-server');
     if (btnSpawnFromLogs) btnSpawnFromLogs.addEventListener('click', () => {
-        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+        Router.navigate('/spawn');
     });
 
     // Initialize button states

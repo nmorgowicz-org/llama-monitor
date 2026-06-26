@@ -4,7 +4,6 @@
 import { showPromptDialog } from './toast.js';
 import { chat } from '../core/app-state.js';
 import {
-    switchChatTab,
     addChatTab,
     renameChatTab,
     togglePinTab,
@@ -14,6 +13,7 @@ import {
     closeChatTab,
     duplicateChatTab,
 } from './chat-state.js';
+import Router from './router.js';
 
 const DEBOUNCE_MS = 150;
 const FTS_LIMIT = 20;
@@ -455,11 +455,11 @@ async function switchToConversation(item) {
         restoreChatTab(item.tabId);
     }
 
-    await switchChatTab(item.tabId);
+    Router.navigate('/chat/' + encodeURIComponent(item.tabId));
 }
 
 async function openMessage(item) {
-    await switchChatTab(item.tabId);
+    Router.navigate('/chat/' + encodeURIComponent(item.tabId));
 
     setTimeout(() => {
         const el = document.querySelector(`.chat-message[data-msg-id="${item.messageId}"]`);

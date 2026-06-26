@@ -29,6 +29,7 @@ import { escapeHtml, formatMetricNumber } from '../core/format.js';
 import { autoResizeChatInput } from './chat-state.js';
 import { getExplicitModePolicy, resolveActiveTemplate } from './chat-templates.js';
 import { showToast, showToastWithActions } from './toast.js';
+import Router from './router.js';
 
 // ── Summarization ──────────────────────────────────────────────────────────────
 
@@ -918,8 +919,7 @@ export function showConnectionLostModal() {
 
     document.getElementById('connection-lost-go-welcome-btn')?.addEventListener('click', async () => {
         closeModal();
-        const { switchView } = await import('./setup-view.js');
-        switchView('setup');
+        Router.navigate('/');
     });
     document.getElementById('connection-lost-dismiss-btn')?.addEventListener('click', () => {
         closeModal();
@@ -946,10 +946,9 @@ function showDisconnectedBanner() {
     if (setupBtn) {
         const fresh = setupBtn.cloneNode(true);
         setupBtn.replaceWith(fresh);
-        fresh.addEventListener('click', async () => {
+        fresh.addEventListener('click', () => {
             hideDisconnectedBanner();
-            const { switchView } = await import('./setup-view.js');
-            switchView('setup');
+            Router.navigate('/');
         });
     }
 }

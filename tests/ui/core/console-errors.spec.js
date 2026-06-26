@@ -28,6 +28,8 @@ test.describe('console error detection', () => {
         'Unsupported site:',
         'Fetch API',
         'content-security-policy',
+        // Known CDN quirk: jsDelivr returns text/plain for some SRI scripts.
+        'Refused to execute',
       ];
 
       return !ignored.some(pattern => e.text.includes(pattern)) &&

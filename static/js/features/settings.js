@@ -7,6 +7,7 @@ import { renderChatMessages } from './chat-render.js';
 import { getAutoPollingInterval } from './network-detection.js';
 import { showToast } from './toast.js';
 import { setEnterToSend, applyChatStyle } from './chat-params.js';
+import { routeForCurrentView } from './router.js';
 
 // ── Secret masking helpers ────────────────────────────────────────────────────
 
@@ -419,7 +420,7 @@ function applyWsIntervalLive() {
 
 // ── Modal open/close ──────────────────────────────────────────────────────────
 
-export function openSettingsModal() {
+export function openSettingsModal(initialTab) {
     const modal = document.getElementById('settings-modal');
     if (!modal) return;
     modal.removeAttribute('aria-hidden');
@@ -449,11 +450,26 @@ export function openSettingsModal() {
         headers: window.authHeaders ? window.authHeaders() : {},
     }).then(r => r.ok ? r.json() : null).then(s => { if (s) applySettings(s); }).catch(() => {});
     _refreshHfTokenStatus();
+
+    // Switch to a specific tab if requested (e.g. from /settings#models).
+    if (initialTab) {
+      const tabEl = modal.querySelector(`.settings-tab[data-tab="${initialTab}"]`);
+      if (tabEl) tabEl.click();
+    }
 }
 
 export function closeSettingsModal() {
     const modal = document.getElementById('settings-modal');
     if (!modal) return;
+    // If the user dismissed the modal directly (X/Esc/Cancel) while the URL still
+    // points at /settings, return the URL to the underlying view so a reload won't
+    // re-open settings. When closed as part of a route change the path is already
+    // updated, so this is skipped. replaceState (no dispatch) is enough: the
+    // underlying view never changed while the modal was open.
+    if (location.pathname === '/settings') {
+        const base = routeForCurrentView();
+        try { history.replaceState({ path: base }, '', base); } catch {}
+    }
     modal.classList.add('closing');
     setTimeout(() => {
         modal.classList.remove('open', 'closing');
@@ -601,6 +617,13 @@ function _bindSettingsEvents() {
             tab.classList.add('active');
             document.getElementById('settings-' + target)?.classList.add('active');
             document.querySelector('#settings-modal .settings-content')?.scrollTo({ top: 0, behavior: 'instant' });
+
+            // Reflect the open tab in the URL hash so it's deep-linkable and survives
+            // reload. Only while the settings route is active; replaceState avoids
+            // spamming history on every tab click.
+            if (location.pathname === '/settings' && target) {
+                try { history.replaceState({ path: '/settings' }, '', '/settings#' + target); } catch {}
+            }
 
             if (target === 'security') {
                 loadTlsConfig();

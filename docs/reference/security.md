@@ -217,8 +217,8 @@ Applied via `Helmet` with a custom `ContentSecurityPolicy`:
 
 - `default-src`: `'self' data:`
 - `connect-src`: `'self' https: wss:`
-- `script-src`: `'self' https://cdn.jsdelivr.net`
-- `style-src`: `'self' https://fonts.googleapis.com https://cdn.jsdelivr.net`
+- `script-src`: `'self'` (no CDN) for non-index routes.
+- `style-src`: `'self' https://fonts.googleapis.com`
 - `font-src`: `'self' https://fonts.gstatic.com`
 - `img-src`: `'self' data: https:`
 - `frame-src`: `'self'`
@@ -232,9 +232,12 @@ Served with a dedicated CSP that:
 - Uses a per-request cryptographic nonce (16-byte, `getrandom::getrandom()`) for inline scripts.
 - Allows:
   - `connect-src`: `'self' https: wss:`
-  - `script-src`: `'self'` + nonce + `https://cdn.jsdelivr.net`
-  - `style-src`: `'self' 'unsafe-inline'` + Google Fonts + jsDelivr
+  - `script-src`: `'self'` + nonce + `https://cdn.jsdelivr.net` (CDN kept only for
+    backward compatibility with SRI-pinned scripts; most vendor scripts are now self-hosted).
+  - `style-src`: `'self' 'unsafe-inline'` + Google Fonts.
   - `font-src`, `img-src`, `frame-src` similar to global.
+- Note: `strict-dynamic` is not used; it disabled host allowlists and blocked both local
+  and CDN scripts.
 
 ### /compact
 

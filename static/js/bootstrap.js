@@ -4,10 +4,11 @@
 
 import './compat/globals.js'; // Set window.escapeHtml, window.formatMetricNumber
 
+import { chat } from './core/app-state.js';
 import { initDashboardRender } from './features/dashboard-render.js';
 import { initWebSocket } from './features/dashboard-ws.js';
 import { initPresets } from './features/presets.js';
-import { activeChatTab, addChatTab, autoResizeChatInput, initChatState, initChatTabs, restoreTabFromTrash } from './features/chat-state.js';
+import { activeChatTab, addChatTab, autoResizeChatInput, initChatState, initChatTabs, restoreTabFromTrash, switchChatTab } from './features/chat-state.js';
 import { chatScroll, initChatRender } from './features/chat-render.js';
 import { initChatSessionsSidebar, renderChatSessionsSidebar } from './features/chat-sessions-sidebar.js';
 import { initChatSearch } from './features/chat-search.js';
@@ -16,14 +17,14 @@ import { initRemoteAgent } from './features/remote-agent.js';
 import { initChatTransport } from './features/chat-transport.js';
 import { initChatTemplates } from './features/chat-templates.js';
 import { initChatParams } from './features/chat-params.js';
-import { initSetupView } from './features/setup-view.js';
+import { initSetupView, ensureMonitorView, ensureSetupView } from './features/setup-view.js';
 import { initShortcuts } from './features/shortcuts.js';
-import { initNav } from './features/nav.js';
+import { initNav, switchTab } from './features/nav.js';
 import { initChatWidthObserver } from './features/chat-width-observer.js';
 import { initChatFocusMode, toggleFocusMode } from './features/chat-focus-mode.js';
 import { initChatHistoryQA } from './features/chat-history-qa.js';
 import { initAnimate } from './features/animate.js';
-import { initSettings } from './features/settings.js';
+import { initSettings, openSettingsModal, closeSettingsModal } from './features/settings.js';
 import { initUserMenu } from './features/user-menu.js';
 import { initConfig } from './features/config.js';
 import { initModels } from './features/models.js';
@@ -38,11 +39,12 @@ import { initAuthGate, logoutCurrentUser } from './features/auth.js';
 import { deriveTelemetryGrade, gradeLabel, gradeStatusClass, gradeActionCopy } from './features/telemetry-grade.js';
 import { initReplyPlanUpdates } from './features/chat-reply-plan.js';
 import { initCommandPalette } from './features/workspace-command-palette.js';
-import { initSpawnWizard } from './features/spawn-wizard.js';
+import { initSpawnWizard, showSpawnRoute, closeSpawnWizard } from './features/spawn-wizard.js';
 import { initTunePanel } from './features/tune-panel.js';
 import { initLlamaUpdater } from './features/llama-updater.js';
 import { HF_DISCOVER_CATEGORIES } from './features/hf-browse.js';
 import { initGlobalTooltip } from './core/tooltip.js';
+import Router from './features/router.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
@@ -161,6 +163,81 @@ async function initializeApp() {
 
     // Initialize chat tabs only after token bootstrap and feature init complete.
     await initChatTabs();
+
+    // Phase 13: Router (must run after all navigation functions are available)
+    // __spawnWizardOpts is set by callers (e.g. models.js, setup-view.js) so the
+    // /spawn route can forward options into openSpawnWizard without hard-coding
+    // wiring for each caller.
+    window.__spawnWizardOpts = null;
+
+    // Top-level views: '/' is the welcome/setup screen; '/server', '/chat', '/logs'
+    // live inside the monitor (dashboard) view. The /chat, /logs, /server handlers
+    // must ensure the monitor view is active first — switchTab only toggles the page
+    // inside the monitor view, which is display:none while on the setup screen, so a
+    // deep link or Back/Forward to /chat would otherwise show nothing.
+    Router.register('/', () => ensureSetupView());
+    Router.register('/server', () => { ensureMonitorView(); switchTab('server'); });
+    // Spawn wizard. /spawn is step 1; /spawn/<slug> deep-links a later step so
+    // browser Back/Forward traverses the wizard. showSpawnRoute opens the wizard
+    // if needed (consuming any queued options) and shows the requested step; it is
+    // idempotent so Back to an earlier step never resets an open wizard.
+    Router.register('/spawn', (path) => showSpawnRoute(path));
+    Router.register('/spawn/:step', (path) => showSpawnRoute(path));
+    Router.register('/chat', () => {
+      ensureMonitorView();
+      switchTab('chat');
+      // Reflect the active session in the URL so it's bookmarkable / reload-safe.
+      if (chat.activeTabId) {
+        const target = '/chat/' + encodeURIComponent(chat.activeTabId);
+        if (location.pathname !== target) {
+          Router.updateUrlWithoutDispatch(target);
+        }
+      }
+    });
+    Router.register('/logs', () => { ensureMonitorView(); switchTab('logs'); });
+    Router.register('/settings', () => {
+      // Support hash-based tab targeting: /settings#models, /settings#session, etc.
+      // Sanitize against the real tab values to avoid using arbitrary hashes.
+      const allowedTabs = ['chat', 'models', 'session', 'performance', 'gpu', 'advanced', 'security', 'appearance'];
+      const hash = (location.hash || '').replace('#', '').trim();
+      const tab = allowedTabs.includes(hash) ? hash : null;
+      openSettingsModal(tab);
+    });
+    // Dismiss any open modal when navigating to a different route, so browser
+    // Back/Forward dismisses overlays instead of leaving them stranded on top of
+    // the underlying view. Gated on the open marker so it's a no-op when closed.
+    // /spawn/<step> stays "in the wizard", so only close it when leaving /spawn*.
+    Router.onBeforeDispatch((path) => {
+      if (path !== '/settings') {
+        const m = document.getElementById('settings-modal');
+        if (m && m.classList.contains('open')) closeSettingsModal();
+      }
+      const inSpawn = path === '/spawn' || path.startsWith('/spawn/');
+      if (!inSpawn) {
+        const o = document.getElementById('spawn-wizard-overlay');
+        if (o && o.classList.contains('open')) closeSpawnWizard();
+      }
+    });
+
+    Router.register('/chat/:id', (path, params) => {
+      const id = params?.id || '';
+      ensureMonitorView();
+      switchTab('chat');
+      // Reject if id is empty, contains suspicious chars, or looks like a path —
+      // fall back to the general chat view.
+      if (!id || /[\x00-\x1f<>"/:;\\]/.test(id) || id.includes('..') || id.startsWith('//')) {
+        console.warn('[router] rejecting /chat/:id; suspicious or invalid id:', id);
+        return;
+      }
+      // Only switch to the session if it actually exists. A stale/deleted id
+      // (e.g. an old bookmark) falls back to the current chat view instead of
+      // selecting a non-existent tab and rendering a broken empty conversation.
+      if (typeof switchChatTab === 'function' && chat.tabs.some(t => t.id === id)) {
+        switchChatTab(id);
+      }
+    });
+
+    Router.init();
 }
 
 initializeApp().catch(err => console.error('[bootstrap] initializeApp failed:', err));

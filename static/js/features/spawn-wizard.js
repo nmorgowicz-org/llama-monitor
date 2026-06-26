@@ -19,7 +19,7 @@ import {
   buildCommunityTemplateInstallRequest,
   detectCommunityTemplateFamily,
 } from './chat-template-registry.js';
-import { switchView } from './setup-view.js';
+import Router, { routeForCurrentView } from './router.js';
 import { scheduleEstimate, cancelEstimate } from './vram-estimate.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune, requestDepthSweep, renderDepthSweep, requestBatchSweep, renderBatchSweep } from './tuning-cards.js';
@@ -94,6 +94,63 @@ function formatSpeed(bps) {
 // ── State ─────────────────────────────────────────────────────────────────────
 
 const STEP_LABELS = ['How it works', 'Choose model', 'Hardware & memory', 'Settings', 'Review settings', 'Start server'];
+// URL slugs parallel to STEP_LABELS so wizard steps are deep-linkable and browser
+// Back/Forward traverses them. Step 0 has no slug ('/spawn'); the rest are
+// '/spawn/<slug>'. Keep in sync with STEP_LABELS.
+const STEP_SLUGS = ['', 'model', 'hardware', 'settings', 'review', 'start'];
+
+// Set while openSpawnWizard runs its own initial showStep() so that internal step
+// change doesn't push a history entry; showSpawnRoute reconciles the URL afterward.
+let _suppressStepUrl = false;
+
+function stepRoute(index) {
+  const slug = STEP_SLUGS[index];
+  return slug ? '/spawn/' + slug : '/spawn';
+}
+
+// Map a /spawn or /spawn/<slug> path to a step index, or 0 if unrecognized.
+function stepFromRoute(path) {
+  const m = /^\/spawn(?:\/([^/]+))?$/.exec(path || '');
+  if (!m) return 0;
+  const idx = STEP_SLUGS.indexOf(m[1] || '');
+  return idx >= 0 ? idx : 0;
+}
+
+// Reflect the wizard's current step in the URL without adding history (used after
+// an open, where openSpawnWizard may have jumped to a step, e.g. model for a
+// dropped local file).
+function syncStepUrlToCurrent() {
+  if (!dom.overlay || !dom.overlay.classList.contains('open')) return;
+  if (!(location.pathname === '/spawn' || location.pathname.startsWith('/spawn/'))) return;
+  const target = stepRoute(wizardState.currentStep);
+  if (location.pathname !== target) {
+    try { history.replaceState({ path: target }, '', target); } catch {}
+  }
+}
+
+// Router entry point: open the wizard if needed (consuming queued options) and
+// show the step encoded in the path. Idempotent — re-dispatching a /spawn route
+// for an already-open wizard just changes the step, never resets it.
+export function showSpawnRoute(path) {
+  const wasOpen = !!dom.overlay && dom.overlay.classList.contains('open');
+  const explicitStep = path !== '/spawn';
+  if (wasOpen) {
+    showStep(stepFromRoute(path));
+    return;
+  }
+  const opts = window.__spawnWizardOpts || {};
+  window.__spawnWizardOpts = null;
+  _suppressStepUrl = true;
+  try {
+    openSpawnWizard(opts);
+  } finally {
+    _suppressStepUrl = false;
+  }
+  // A bare /spawn honors whatever initial step openSpawnWizard chose (it may jump
+  // to the model step for a queued local model); an explicit /spawn/<slug> wins.
+  if (explicitStep) showStep(stepFromRoute(path));
+  else syncStepUrlToCurrent();
+}
 
 // Exposed for testing/screenshot scripts; internal state is mutable.
 export const wizardState = {
@@ -266,11 +323,9 @@ export function initSpawnWizard() {
   });
 
   document.getElementById('hf-dlp-open-settings')?.addEventListener('click', () => {
-    window.openSettingsModal?.();
-    setTimeout(() => {
-      document.querySelector('.settings-tab[data-tab="models"]')?.click();
-      document.getElementById('settings-hf-token')?.focus();
-    }, 80);
+    Router.navigate('/settings#models');
+    // Focus is secondary; openSettingsModal can handle tab, but we may still want to focus.
+    setTimeout(() => document.getElementById('settings-hf-token')?.focus(), 80);
   });
 
   // Refresh download destination when settings change (e.g., models dir updated)
@@ -353,7 +408,9 @@ function setupWizardEscape() {
   window.addEventListener('keydown', function wizardEsc(e) {
     if (e.key === 'Escape') {
       window.removeEventListener('keydown', wizardEsc);
-      dom.overlay?.classList.remove('open');
+      // Full close (resets state + syncs URL back to the underlying view) so a
+      // reload doesn't re-open the wizard, matching the X/close-button behavior.
+      closeSpawnWizard();
     }
   });
 }
@@ -467,6 +524,13 @@ function resetWizardState() {
 
 export function closeSpawnWizard() {
   if (!dom.overlay) return;
+  // If dismissed directly while the URL still points at a /spawn route, return the
+  // URL to the underlying view so a reload won't re-open the wizard. When closed as
+  // part of a route change the path is already updated, so this is skipped.
+  if (location.pathname === '/spawn' || location.pathname.startsWith('/spawn/')) {
+    const base = routeForCurrentView();
+    try { history.replaceState({ path: base }, '', base); } catch {}
+  }
   dom.overlay.classList.remove('open');
   resetSpawnStatus();
   resetWizardState();
@@ -678,7 +742,15 @@ function bindEvents() {
   });
 
   dom.backBtn?.addEventListener('click', () => {
-    if (wizardState.currentStep > 0) showStep(wizardState.currentStep - 1);
+    if (wizardState.currentStep <= 0) return;
+    // Each forward step pushed a history entry, so popping keeps the browser and
+    // the wizard's own Back button in sync (no duplicate forward entries). Fall
+    // back to a direct step change if we're somehow not on a /spawn route.
+    if (location.pathname === '/spawn' || location.pathname.startsWith('/spawn/')) {
+      history.back();
+    } else {
+      showStep(wizardState.currentStep - 1);
+    }
   });
   dom.nextBtn?.addEventListener('click', () => {
     const next = wizardState.currentStep + 1;
@@ -1068,18 +1140,14 @@ function bindEvents() {
   // "Settings → Models" link inside the Import card description
   document.querySelector('.wizard-settings-link[data-open-settings="models"]')?.addEventListener('click', e => {
     e.preventDefault();
-    window.openSettingsModal?.();
-    setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
+    Router.navigate('/settings#models');
   });
 
   // Binary prereq buttons
   dom.prereqDownloadBtn?.addEventListener('click', _downloadBinaryForWizard);
   dom.prereqSettingsBtn?.addEventListener('click', () => {
-    window.openSettingsModal?.();
-    setTimeout(() => {
-      document.querySelector('.settings-tab[data-tab="session"]')?.click();
-      document.getElementById('set-server-path')?.focus();
-    }, 80);
+    Router.navigate('/settings#session');
+    setTimeout(() => document.getElementById('set-server-path')?.focus(), 80);
   });
 }
 
@@ -1821,6 +1889,19 @@ function hfSearchForWizard({ query, author, sort, limit }) {
 
 function showStep(index) {
   wizardState.currentStep = index;
+
+  // Keep the URL in sync so browser Back/Forward traverses wizard steps. Only
+  // when the wizard is open and already on a /spawn route; pushState (no dispatch)
+  // avoids recursing through the route handler. When the route handler drives the
+  // step, target === current so this is a no-op.
+  if (!_suppressStepUrl && dom.overlay && dom.overlay.classList.contains('open') &&
+      (location.pathname === '/spawn' || location.pathname.startsWith('/spawn/'))) {
+    const target = stepRoute(index);
+    if (location.pathname !== target) {
+      try { history.pushState({ path: target }, '', target); } catch {}
+    }
+  }
+
   clearValidationError();
 
   dom.steps?.forEach(s => s.classList.remove('active'));
@@ -7391,8 +7472,7 @@ function _buildBrowseDropdown(dropdownEl, targetInputId, allDirs) {
   manageBtn.textContent = '⚙ Manage model locations…';
   manageBtn.addEventListener('click', () => {
     _closeBrowseDropdowns();
-    window.openSettingsModal?.();
-    setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
+    Router.navigate('/settings#models');
   });
   dropdownEl.appendChild(manageBtn);
 }
@@ -8482,7 +8562,7 @@ async function spawnServer() {
       closeSpawnWizard();
       setHeaderMode('Spawn:' + (payload.port || 8001));
       if (document.body.classList.contains('setup-active')) {
-        switchView('monitor');
+        Router.navigate('/server');
       }
       showTunePanel();
       // Select the preset that was saved during this wizard run (if any)

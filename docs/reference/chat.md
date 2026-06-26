@@ -11,6 +11,22 @@ The chat tab provides multi-conversation streaming chat against the connected ll
 - **Rename** — Double-click the top tab label or use the sidebar context menu
 - **Delete with undo** — Closing a tab moves it into an in-memory trash bin with an Undo toast; the trash list is not persisted across reloads. This includes the last remaining tab, which leaves the chat view in an empty-state screen until you create or restore a conversation. Trash entries auto-purge after 24 hours and can be cleared with `Clear all`.
 
+## SPA Navigation and Deep Linking
+
+Chat now participates in the SPA routing model.
+
+- The Chat workspace is accessed via:
+  - /chat — opens chat, typically with the last active tab.
+  - /chat/:id — deep links to a specific conversation.
+- Switching conversations or views no longer reloads the page:
+  - The router updates the URL and active tab in the background.
+- Behavior:
+  - Browser Back/Forward navigates between views and previously opened conversations.
+  - Invalid or suspicious /chat/:id values are rejected and fall back to a safe chat view.
+  - Direct links and bookmarks to /chat/:id are supported.
+
+See also: [Navigation](navigation.md)
+
 ## Command Palette
 
 `Ctrl+K` / `Cmd+K` opens a unified workspace search overlay.
