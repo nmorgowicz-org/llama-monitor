@@ -67,6 +67,7 @@ import { refreshTopCockpit } from './nav.js';
 import { activeChatTab } from './chat-state.js';
 import { setRemoteAgentStatus } from './remote-agent.js';
 import { hideConnectingState, switchView } from './setup-view.js';
+import Router from './router.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { loadPresets, syncSelectedPresetSelection } from './presets.js';
 
@@ -634,7 +635,7 @@ function _updateSetupRunningStrip(isRunning, endpoint) {
     }
     if (btn && !btn._bound) {
         btn._bound = true;
-        btn.addEventListener('click', () => switchView('monitor'));
+        btn.addEventListener('click', () => Router.navigate('/server'));
     }
     strip.style.display = '';
 }

@@ -7,7 +7,6 @@ import { showSessionPanel, hideSessionPanel } from './chat-sessions-sidebar.js';
 import { isFocusModeActive, exitFocusMode } from './chat-focus-mode.js';
 import { renderCapabilityPopover } from './dashboard-render.js';
 import { showToast } from './toast.js';
-import { switchView } from './setup-view.js';
 import Router from './router.js';
 
 export function switchTab(name) {
@@ -467,6 +466,9 @@ export function initNav() {
         btn.addEventListener('click', () => {
             const tab = btn.dataset.tab;
             switch (tab) {
+                case 'server':
+                    Router.navigate('/server');
+                    break;
                 case 'chat':
                     Router.navigate('/chat');
                     break;
@@ -477,7 +479,7 @@ export function initNav() {
                     Router.navigate('/settings');
                     break;
                 default:
-                    // For non-mapped tabs (server, etc.), use existing switchTab
+                    // For any non-mapped tab, fall back to existing switchTab
                     switchTab(tab);
                     break;
             }
@@ -565,12 +567,12 @@ export function initNav() {
     const cockpit = document.getElementById('nav-cockpit');
     if (cockpit) {
         cockpit.addEventListener('click', () => {
-            switchTab('server');
+            Router.navigate('/server');
         });
         cockpit.addEventListener('keydown', (e) => {
             if (e.key !== 'Enter' && e.key !== ' ') return;
             e.preventDefault();
-            switchTab('server');
+            Router.navigate('/server');
         });
     }
 

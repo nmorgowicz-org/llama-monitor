@@ -344,7 +344,9 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
     gen_routes::static_routes()
 }
 
-fn index_route(auth_manager: AuthManager) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn index_route(
+    auth_manager: AuthManager,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     // Special handling for index.html:
     // - Exact match at '/' (as before).
     // - Fallback for any GET path (SPA routing) for paths not handled by API/static/compact.
@@ -404,14 +406,32 @@ fn index_route(auth_manager: AuthManager) -> impl Filter<Extract = (impl warp::R
     let root = warp::path::end().and(serve_index.clone());
 
     // SPA fallback: any GET path that hasn't been matched (e.g. /chat, /logs, /settings).
-    let spa_fallback = warp::path::full()
-        .and(serve_index)
-        .map(|_path, reply| reply);
+    //
+    // It must NOT swallow API, WebSocket, or static-asset paths: those have their own
+    // handlers and 404 semantics. If an unmatched /api/* request reached here it would
+    // return the HTML shell with 200, breaking JSON clients and masking real 404s.
+    // Likewise a missing /js/foo.js should 404, not return HTML that fails to parse as
+    // a module. We therefore reject (→ JSON 404 via handle_rejection) when the path is:
+    //   - under /api or /ws, or
+    //   - "asset-like": its last segment contains a dot (every static asset and file
+    //     has an extension; the SPA routes /chat, /logs, /settings, /chat/<uuid> do not).
+    let spa_guard = warp::path::full().and_then(|path: warp::path::FullPath| async move {
+        let p = path.as_str();
+        let is_api = p == "/api" || p.starts_with("/api/");
+        let is_ws = p == "/ws" || p.starts_with("/ws/");
+        let is_asset_like = p.rsplit('/').next().is_some_and(|seg| seg.contains('.'));
+        if is_api || is_ws || is_asset_like {
+            Err(warp::reject::not_found())
+        } else {
+            Ok::<(), warp::Rejection>(())
+        }
+    });
+
+    let spa_fallback = spa_guard.untuple_one().and(serve_index);
 
     // Enforce: only GET allowed for SPA routes; non-GET → 404 via handle_rejection.
     let spa = root.or(spa_fallback);
-    spa
-        .and(warp::method())
+    spa.and(warp::method())
         .and_then(|reply, method| async move {
             if method == warp::http::Method::GET {
                 Ok(reply)
@@ -486,4 +506,107 @@ pub async fn handle_rejection(
         warp::reply::json(&serde_json::json!({ "error": "not_found" })),
         warp::http::StatusCode::NOT_FOUND,
     )))
+}
+
+#[cfg(test)]
+mod spa_fallback_tests {
+    use super::*;
+    use crate::config::TlsMode;
+
+    fn no_auth() -> AuthManager {
+        AuthManager::new(None, None, &TlsMode::None)
+    }
+
+    // index_route returns a Filter with Error=Rejection; recover so rejections
+    // become real responses (mirrors how build_routes wires it).
+    fn routes()
+    -> impl Filter<Extract = (impl warp::Reply,), Error = std::convert::Infallible> + Clone {
+        index_route(no_auth()).recover(handle_rejection)
+    }
+
+    #[tokio::test]
+    async fn spa_routes_return_html_shell() {
+        let filter = routes();
+        for path in [
+            "/",
+            "/chat",
+            "/logs",
+            "/settings",
+            "/server",
+            "/spawn",
+            "/chat/123e4567-e89b-12d3-a456-426614174000",
+            "/x/y/z",
+        ] {
+            let resp = warp::test::request()
+                .method("GET")
+                .path(path)
+                .reply(&filter)
+                .await;
+            assert_eq!(resp.status(), 200, "GET {path} should serve the SPA shell");
+            assert_eq!(
+                resp.headers()
+                    .get("content-type")
+                    .map(|v| v.to_str().unwrap()),
+                Some("text/html"),
+                "GET {path} should be text/html"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn api_paths_never_return_spa_shell() {
+        // Unmatched /api/* must fall through to the JSON 404, not the HTML shell.
+        let filter = routes();
+        for path in ["/api", "/api/bogus", "/api/sessions/does-not-exist"] {
+            let resp = warp::test::request()
+                .method("GET")
+                .path(path)
+                .reply(&filter)
+                .await;
+            assert_eq!(resp.status(), 404, "GET {path} should 404, not serve HTML");
+            assert_ne!(
+                resp.headers()
+                    .get("content-type")
+                    .map(|v| v.to_str().unwrap()),
+                Some("text/html"),
+                "GET {path} must not return the HTML shell"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_assets_and_ws_do_not_return_spa_shell() {
+        let filter = routes();
+        for path in [
+            "/js/missing.js",
+            "/css/missing.css",
+            "/favicon.ico",
+            "/ws",
+            "/ws/x",
+        ] {
+            let resp = warp::test::request()
+                .method("GET")
+                .path(path)
+                .reply(&filter)
+                .await;
+            assert_eq!(resp.status(), 404, "GET {path} should 404, not serve HTML");
+        }
+    }
+
+    #[tokio::test]
+    async fn non_get_methods_are_rejected() {
+        let filter = routes();
+        for method in ["POST", "PUT", "DELETE"] {
+            let resp = warp::test::request()
+                .method(method)
+                .path("/chat")
+                .reply(&filter)
+                .await;
+            assert_eq!(
+                resp.status(),
+                404,
+                "{method} /chat should not serve the SPA shell"
+            );
+        }
+    }
 }

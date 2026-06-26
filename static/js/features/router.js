@@ -7,10 +7,21 @@
 //
 // Delegates to existing navigation functions; never reimplements them.
 
+import { chat } from '../core/app-state.js';
+
 const Router = {
   routes: {},
   // For pattern routes: store { re, params } so handler receives { path, params }.
   patternRoutes: [],
+  // Optional hook run before every dispatch; used to dismiss open overlays
+  // (settings/spawn modals) when navigating away so Back/Forward works.
+  _beforeDispatch: null,
+
+  // Register a callback invoked with the path about to be dispatched, before
+  // the route handler runs.
+  onBeforeDispatch(fn) {
+    this._beforeDispatch = fn;
+  },
 
   register(path, handler) {
     if (path.includes(':')) {
@@ -41,7 +52,11 @@ const Router = {
     const [pathOnly, hash] = path.split('#');
     const url = hash ? pathOnly + '#' + hash : pathOnly;
 
-    if (push) {
+    // Avoid stacking duplicate history entries: re-navigating to the URL we're
+    // already on (e.g. re-clicking the active tab) replaces instead of pushing,
+    // so Back doesn't have to be pressed repeatedly to escape.
+    const current = location.pathname + location.hash;
+    if (push && url !== current) {
       history.pushState({ path: pathOnly }, '', url);
     } else {
       history.replaceState({ path: pathOnly }, '', url);
@@ -61,6 +76,15 @@ const Router = {
   },
 
   _dispatch(path) {
+    // Let listeners dismiss overlays before the route handler runs.
+    if (this._beforeDispatch) {
+      try {
+        this._beforeDispatch(path);
+      } catch (e) {
+        console.error('[router] beforeDispatch hook failed:', e);
+      }
+    }
+
     // 1) Exact match
     const exact = this.routes[path];
     if (exact) {
@@ -92,5 +116,24 @@ const Router = {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   },
 };
+
+// Best-effort route for whatever top-level view is currently showing underneath
+// any modal. Used when a modal closes so the URL returns to the underlying view
+// without needing to re-dispatch (the underlying view never changed while the
+// modal was open). DOM-only so it pulls in no module dependencies.
+export function routeForCurrentView() {
+  if (document.body.classList.contains('setup-active')) return '/';
+  const page = document.querySelector('.page.active');
+  switch (page && page.id) {
+    case 'page-chat':
+      // Preserve the active session so closing a modal over a chat returns to
+      // that exact conversation (bookmarkable / reload-safe).
+      return chat.activeTabId ? '/chat/' + encodeURIComponent(chat.activeTabId) : '/chat';
+    case 'page-logs':
+      return '/logs';
+    default:
+      return '/server';
+  }
+}
 
 export default Router;

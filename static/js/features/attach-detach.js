@@ -5,7 +5,7 @@ import { sessionState, setupViewState } from '../core/app-state.js';
 import { updateActiveSessionInfo } from './sessions.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { saveSettings } from './settings.js';
-import { hideConnectingState, saveLastSessionData, showConnectingState, restorePreviousPosition, savePreviousPosition } from './setup-view.js';
+import { hideConnectingState, saveLastSessionData, showConnectingState, switchView, restorePreviousPosition, savePreviousPosition } from './setup-view.js';
 import Router from './router.js';
 import { _showConfirm } from './presets.js';
 import { setTuneConfig, showTunePanel, hideTunePanel } from './tune-panel.js';
@@ -210,7 +210,7 @@ export async function doStartWithConfig(config, options = {}, buttonArg = null) 
         showToast('llama-server is running', 'success', '', { duration: 6000 });
         setTuneConfig(config);
         setHeaderMode('Spawn:' + config.port);
-        Router.navigate('/');
+        Router.navigate('/server');
         hideConnectingState();
         showTunePanel();
         saveSettings();
@@ -386,7 +386,7 @@ export async function doAttach() {
 
         monitorState.speedMax = { prompt: 0, generation: 0 };
         hideDisconnectedBanner();
-        Router.navigate('/');
+        Router.navigate('/server');
         showTunePanel();
         setTimeout(() => restorePreviousPosition(), 600);
     }
@@ -519,8 +519,15 @@ export async function initAttachDetachButtons() {
         setHeaderMode(data?.mode ?? null);
         // If a session is already running, restore the monitor view instead of
         // leaving the user stranded on the welcome screen after a hard refresh.
+        // Only auto-restore when the user landed on '/' (the welcome route) — an
+        // explicit deep link like /chat or /logs must be respected. This runs early
+        // during init (before the router is fully wired), so switch the view directly
+        // and sync the URL with replaceState rather than dispatching through the router.
         if (data?.status === 'Running' && setupViewState.view === 'setup') {
-            Router.navigate('/');
+            if (location.pathname === '/' || location.pathname === '') {
+                switchView('monitor');
+                try { history.replaceState({ path: '/server' }, '', '/server'); } catch {}
+            }
             showTunePanel();
         }
     } catch (err) {

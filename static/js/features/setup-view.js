@@ -379,6 +379,17 @@ export function switchView(targetView) {
     }
 }
 
+// Idempotent view guards used by the router so route handlers can ensure the
+// correct top-level view without triggering a redundant (and visually jarring)
+// transition when already there. `switchView` itself no-ops while transitioning.
+export function ensureMonitorView() {
+    if (setupViewState.view === 'setup') switchView('monitor');
+}
+
+export function ensureSetupView() {
+    if (setupViewState.view === 'monitor') switchView('setup');
+}
+
 // ── Connecting State ──────────────────────────────────────────────────────────
 
 export function showConnectingState() {
@@ -1372,7 +1383,7 @@ export function initViewState() {
     // Dashboard button: visible when a server is running or remote endpoint attached
     const dashBtn = document.getElementById('setup-dashboard-btn');
     if (dashBtn) {
-        dashBtn.addEventListener('click', () => Router.navigate('/'));
+        dashBtn.addEventListener('click', () => Router.navigate('/server'));
     }
 
     // Init filter bar after presets are loaded
