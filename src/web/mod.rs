@@ -388,15 +388,15 @@ fn index_route(
                         .replace("{{ NONCE }}", &nonce);
 
                     // CSP for index.html:
-                    // - script-src uses nonce + strict-dynamic: inline version script is nonce-authorized;
-                    //   external SRI-pinned scripts (marked, dompurify, highlight.js from cdn.jsdelivr.net)
-                    //   are trusted via strict-dynamic and their integrity hashes.
-                    // - No floating CDN allowlist for scripts.
+                    // - script-src: 'self' (all local scripts) + nonce (inline version script) +
+                    //   cdn.jsdelivr.net (SRI-pinned external scripts: marked, dompurify, highlight.js).
+                    //   SRI is the trust anchor here; strict-dynamic was too restrictive for our
+                    //   current script layout and is left out.
                     // - style-src keeps 'unsafe-inline' because index.html uses inline styles.
                     let csp = format!(
                         "default-src 'self' data:; \
                          connect-src 'self' https: wss:; \
-                         script-src 'self' 'nonce-{nonce}' 'strict-dynamic'; \
+                         script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; \
                          style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; \
                          font-src 'self' https://fonts.gstatic.com; \
                          img-src 'self' data: https:; \
