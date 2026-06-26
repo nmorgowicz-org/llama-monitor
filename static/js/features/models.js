@@ -1272,7 +1272,7 @@ export function initModels() {
     if (settingsLink) {
         settingsLink.addEventListener('click', () => {
             closeModelsModal();
-            Router.navigate('/settings');
+            Router.navigate('/settings#models');
         });
     }
 

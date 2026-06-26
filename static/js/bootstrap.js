@@ -180,12 +180,20 @@ async function initializeApp() {
     Router.register('/logs', () => switchTab('logs'));
     Router.register('/settings', () => {
       // Support hash-based tab targeting: /settings#models, /settings#session, etc.
-      const hash = (location.hash || '').replace('#', '');
-      openSettingsModal(hash || null);
+      // Sanitize against known tab values to avoid using arbitrary hashes.
+      const allowedTabs = ['general', 'chat', 'models', 'session', 'system', 'security', 'appearance'];
+      const hash = (location.hash || '').replace('#', '').trim();
+      const tab = allowedTabs.includes(hash) ? hash : null;
+      openSettingsModal(tab);
     });
-    Router.register('/chat/:id', path => {
-      const id = path.split('/chat/')[1];
-      if (id && typeof switchChatTab === 'function') {
+    Router.register('/chat/:id', (path, params) => {
+      const id = params?.id || '';
+      // Reject if id is empty, contains suspicious chars, or looks like a path.
+      if (!id || /[\x00-\x1f<>"/:;\\]/.test(id) || id.includes('..') || id.startsWith('//')) {
+        switchTab('chat');
+        return;
+      }
+      if (typeof switchChatTab === 'function') {
         switchTab('chat');
         switchChatTab(id);
       } else {

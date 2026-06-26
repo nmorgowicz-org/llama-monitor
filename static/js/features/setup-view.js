@@ -296,6 +296,7 @@ export function initSetupDropZone() {
                     (m.path || '').split(/[/\\]/).pop() === file.name
                 );
                 if (match) {
+                    window.__spawnWizardOpts = { localPath: match.path, localModel: match };
                     Router.navigate('/spawn');
                     return;
                 }

@@ -9,9 +9,31 @@
 
 const Router = {
   routes: {},
+  // For pattern routes: store { re, params } so handler receives { path, params }.
+  patternRoutes: [],
 
   register(path, handler) {
-    this.routes[path] = handler;
+    if (path.includes(':')) {
+      // Precompute regex and param names once.
+      const parts = path.split('/').filter(Boolean);
+      const segments = [];
+      const params = [];
+      for (const p of parts) {
+        if (p.startsWith(':')) {
+          segments.push('([^/]+)');
+          params.push(p.slice(1));
+        } else {
+          segments.push(this._escapeRegex(p));
+        }
+      }
+      this.patternRoutes.push({
+        re: new RegExp('^/' + segments.join('/') + '$'),
+        params,
+        handler,
+      });
+    } else {
+      this.routes[path] = handler;
+    }
   },
 
   navigate(path, options = {}) {
@@ -42,28 +64,18 @@ const Router = {
       return;
     }
 
-    // 2) Pattern match (e.g. /chat/:id)
-    // Build regex per key: segment starting with ':' becomes ([^/]+), others are literal.
-    for (const key of Object.keys(this.routes)) {
-      if (key.includes(':')) {
-        const parts = key.split('/').filter(Boolean);
-        const pathParts = path.split('/').filter(Boolean);
-        if (parts.length !== pathParts.length) continue;
-
-        const segments = [];
-        for (let i = 0; i < parts.length; i++) {
-          if (parts[i].startsWith(':')) {
-            segments.push('([^/]+)');
-          } else {
-            segments.push(this._escapeRegex(parts[i]));
-          }
-        }
-        const re = new RegExp('^/' + segments.join('/') + '$');
-        if (re.test(path)) {
-          this.routes[key](path);
-          return;
-        }
+    // 2) Pattern match (e.g. /chat/:id) using precomputed regex.
+    const pathParts = path.split('/');
+    for (const pr of this.patternRoutes) {
+      if (pathParts.length !== (pr.params.length + 1)) continue;
+      const m = pr.re.exec(path);
+      if (!m) continue;
+      const params = {};
+      for (let i = 0; i < pr.params.length; i++) {
+        params[pr.params[i]] = decodeURIComponent(m[i + 1]);
       }
+      pr.handler(path, params);
+      return;
     }
 
     // 3) Fallback to root route if defined
