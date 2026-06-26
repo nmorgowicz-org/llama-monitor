@@ -7,7 +7,7 @@ import './compat/globals.js'; // Set window.escapeHtml, window.formatMetricNumbe
 import { initDashboardRender } from './features/dashboard-render.js';
 import { initWebSocket } from './features/dashboard-ws.js';
 import { initPresets } from './features/presets.js';
-import { activeChatTab, addChatTab, autoResizeChatInput, initChatState, initChatTabs, restoreTabFromTrash } from './features/chat-state.js';
+import { activeChatTab, addChatTab, autoResizeChatInput, initChatState, initChatTabs, restoreTabFromTrash, switchChatTab } from './features/chat-state.js';
 import { chatScroll, initChatRender } from './features/chat-render.js';
 import { initChatSessionsSidebar, renderChatSessionsSidebar } from './features/chat-sessions-sidebar.js';
 import { initChatSearch } from './features/chat-search.js';
@@ -16,14 +16,14 @@ import { initRemoteAgent } from './features/remote-agent.js';
 import { initChatTransport } from './features/chat-transport.js';
 import { initChatTemplates } from './features/chat-templates.js';
 import { initChatParams } from './features/chat-params.js';
-import { initSetupView } from './features/setup-view.js';
+import { initSetupView, switchView } from './features/setup-view.js';
 import { initShortcuts } from './features/shortcuts.js';
-import { initNav } from './features/nav.js';
+import { initNav, switchTab } from './features/nav.js';
 import { initChatWidthObserver } from './features/chat-width-observer.js';
 import { initChatFocusMode, toggleFocusMode } from './features/chat-focus-mode.js';
 import { initChatHistoryQA } from './features/chat-history-qa.js';
 import { initAnimate } from './features/animate.js';
-import { initSettings } from './features/settings.js';
+import { initSettings, openSettingsModal } from './features/settings.js';
 import { initUserMenu } from './features/user-menu.js';
 import { initConfig } from './features/config.js';
 import { initModels } from './features/models.js';
@@ -38,11 +38,12 @@ import { initAuthGate, logoutCurrentUser } from './features/auth.js';
 import { deriveTelemetryGrade, gradeLabel, gradeStatusClass, gradeActionCopy } from './features/telemetry-grade.js';
 import { initReplyPlanUpdates } from './features/chat-reply-plan.js';
 import { initCommandPalette } from './features/workspace-command-palette.js';
-import { initSpawnWizard } from './features/spawn-wizard.js';
+import { initSpawnWizard, openSpawnWizard } from './features/spawn-wizard.js';
 import { initTunePanel } from './features/tune-panel.js';
 import { initLlamaUpdater } from './features/llama-updater.js';
 import { HF_DISCOVER_CATEGORIES } from './features/hf-browse.js';
 import { initGlobalTooltip } from './core/tooltip.js';
+import Router from './features/router.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
@@ -161,6 +162,26 @@ async function initializeApp() {
 
     // Initialize chat tabs only after token bootstrap and feature init complete.
     await initChatTabs();
+
+    // Phase 13: Router (must run after all navigation functions are available)
+    if (typeof history !== 'undefined' && history.pushState) {
+      Router.register('/', () => switchView('setup'));
+      Router.register('/spawn', () => openSpawnWizard());
+      Router.register('/chat', () => switchTab('chat'));
+      Router.register('/logs', () => switchTab('logs'));
+      Router.register('/settings', () => openSettingsModal());
+      Router.register('/chat/:id', path => {
+        const id = path.split('/chat/')[1];
+        if (id && typeof switchChatTab === 'function') {
+          switchTab('chat');
+          switchChatTab(id);
+        } else {
+          switchTab('chat');
+        }
+      });
+
+      Router.init();
+    }
 }
 
 initializeApp().catch(err => console.error('[bootstrap] initializeApp failed:', err));
