@@ -171,13 +171,17 @@ pub fn build_routes(
     let non_index = protected.or(public_api).or(static_files);
 
     // Apply HTTP security headers to non-index routes
-    // Custom CSP: allow external CDN scripts, fonts, styles, and data URIs (app requirements)
-    // connect-src allows any HTTPS — needed for API calls and WebSocket connections
-    // No 'unsafe-inline' for scripts.
+    // Scripts/styles/fonts from external CDNs are loaded only from index.html
+    // using SRI (integrity attributes) and are not needed on API/asset routes;
+    // so we keep this global policy conservative:
+    // - script-src: 'self' only (no floating CDN allowlist).
+    // - style-src: allow Google Fonts + jsDelivr for highlight.js theme used on the SPA shell.
+    // - font-src: Google Fonts.
+    // Index route defines its own per-request CSP with nonce + strict-dynamic.
     let csp = ContentSecurityPolicy::new()
         .default_src(vec!["'self'", "data:"])
         .connect_src(vec!["'self'", "https:", "wss:"])
-        .script_src(vec!["'self'", "https://cdn.jsdelivr.net"])
+        .script_src(vec!["'self'"])
         .style_src(vec![
             "'self'",
             "https://fonts.googleapis.com",
@@ -383,12 +387,16 @@ fn index_route(
                         .replace("{{ PLATFORM }}", std::env::consts::OS)
                         .replace("{{ NONCE }}", &nonce);
 
-                    // CSP for index.html: same as global, plus nonce for the version script
-                    // style-src keeps 'unsafe-inline' because index.html uses inline styles (display:none, etc.)
+                    // CSP for index.html:
+                    // - script-src uses nonce + strict-dynamic: inline version script is nonce-authorized;
+                    //   external SRI-pinned scripts (marked, dompurify, highlight.js from cdn.jsdelivr.net)
+                    //   are trusted via strict-dynamic and their integrity hashes.
+                    // - No floating CDN allowlist for scripts.
+                    // - style-src keeps 'unsafe-inline' because index.html uses inline styles.
                     let csp = format!(
                         "default-src 'self' data:; \
                          connect-src 'self' https: wss:; \
-                         script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; \
+                         script-src 'self' 'nonce-{nonce}' 'strict-dynamic'; \
                          style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; \
                          font-src 'self' https://fonts.gstatic.com; \
                          img-src 'self' data: https:; \
@@ -415,6 +423,9 @@ fn index_route(
     //   - under /api or /ws, or
     //   - "asset-like": its last segment contains a dot (every static asset and file
     //     has an extension; the SPA routes /chat, /logs, /settings, /chat/<uuid> do not).
+    //
+    // INVARIANT: all SPA routes must have no dot in the last segment.
+    // If you add a dotted SPA route, update this guard accordingly.
     let spa_guard = warp::path::full().and_then(|path: warp::path::FullPath| async move {
         let p = path.as_str();
         let is_api = p == "/api" || p.starts_with("/api/");
@@ -606,6 +617,69 @@ mod spa_fallback_tests {
                 resp.status(),
                 404,
                 "{method} /chat should not serve the SPA shell"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_dotted_paths_404_not_spa() {
+        // Ensure unknown paths with a dot in last segment return 404, not SPA shell.
+        let filter = routes();
+        for path in [
+            "/unknown/with.dot",
+            "/chat/export.html",
+            "/tools/update.txt",
+        ] {
+            let resp = warp::test::request()
+                .method("GET")
+                .path(path)
+                .reply(&filter)
+                .await;
+            assert_eq!(
+                resp.status(),
+                404,
+                "GET {path} should 404 (asset-like), not SPA shell"
+            );
+            assert_ne!(
+                resp.headers()
+                    .get("content-type")
+                    .map(|v| v.to_str().unwrap()),
+                Some("text/html"),
+                "GET {path} must not return the HTML shell"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn spa_routes_with_query_strings_return_html() {
+        // SPA routes with query strings must still serve the shell.
+        let filter = routes();
+        for (path, query) in [
+            ("/chat", Some("foo=bar")),
+            ("/settings", None),
+            ("/logs", Some("t=1")),
+        ] {
+            let full_path = if let Some(q) = query {
+                format!("{path}?{q}")
+            } else {
+                path.to_string()
+            };
+            let resp = warp::test::request()
+                .method("GET")
+                .path(&full_path)
+                .reply(&filter)
+                .await;
+            assert_eq!(
+                resp.status(),
+                200,
+                "GET {full_path} should serve the SPA shell"
+            );
+            assert_eq!(
+                resp.headers()
+                    .get("content-type")
+                    .map(|v| v.to_str().unwrap()),
+                Some("text/html"),
+                "GET {full_path} should be text/html"
             );
         }
     }

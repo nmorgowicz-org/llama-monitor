@@ -190,7 +190,7 @@ async function initializeApp() {
       if (chat.activeTabId) {
         const target = '/chat/' + encodeURIComponent(chat.activeTabId);
         if (location.pathname !== target) {
-          try { history.replaceState({ path: target }, '', target); } catch {}
+          Router.updateUrlWithoutDispatch(target);
         }
       }
     });
@@ -226,6 +226,7 @@ async function initializeApp() {
       // Reject if id is empty, contains suspicious chars, or looks like a path —
       // fall back to the general chat view.
       if (!id || /[\x00-\x1f<>"/:;\\]/.test(id) || id.includes('..') || id.startsWith('//')) {
+        console.warn('[router] rejecting /chat/:id; suspicious or invalid id:', id);
         return;
       }
       // Only switch to the session if it actually exists. A stale/deleted id

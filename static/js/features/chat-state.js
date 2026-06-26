@@ -4,6 +4,7 @@
 import { chat, settingsState } from '../core/app-state.js';
 import { refreshTopCockpit } from './nav.js';
 import { showToast, showToastWithActions } from './toast.js';
+import Router from './router.js';
 
 const CHAT_TABS_PERSIST_DEBOUNCE_MS = 500;
 const CHAT_TABS_PERIODIC_SAVE_MS = 30_000; // 30 seconds
@@ -470,12 +471,12 @@ export async function switchChatTab(id) {
     // survives reloads, regardless of how the switch was triggered (new chat,
     // closing the active tab, duplicate, search, etc.). Only rewrite when already
     // on a chat route: this must not hijack the initial load (e.g. restoring the
-    // last tab while the user is on '/'). replaceState (no dispatch) avoids
-    // recursing through the /chat/:id route handler.
+    // last tab while the user is on '/'). Uses Router to centralize history
+    // policy; updateUrlWithoutDispatch avoids recursing through /chat/:id.
     if (location.pathname === '/chat' || location.pathname.startsWith('/chat/')) {
         const target = '/chat/' + encodeURIComponent(id);
         if (location.pathname !== target) {
-            try { history.replaceState({ path: target }, '', target); } catch {}
+            Router.updateUrlWithoutDispatch(target);
         }
     }
 
