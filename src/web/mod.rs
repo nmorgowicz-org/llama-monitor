@@ -404,12 +404,21 @@ fn index_route(auth_manager: AuthManager) -> impl Filter<Extract = (impl warp::R
     let root = warp::path::end().and(serve_index.clone());
 
     // SPA fallback: any GET path that hasn't been matched (e.g. /chat, /logs, /settings).
-    let spa_fallback = warp::get()
-        .and(warp::path::full())
+    let spa_fallback = warp::path::full()
         .and(serve_index)
         .map(|_path, reply| reply);
 
-    root.or(spa_fallback)
+    // Enforce: only GET allowed for SPA routes; non-GET → 404 via handle_rejection.
+    let spa = root.or(spa_fallback);
+    spa
+        .and(warp::method())
+        .and_then(|reply, method| async move {
+            if method == warp::http::Method::GET {
+                Ok(reply)
+            } else {
+                Err(warp::reject::not_found())
+            }
+        })
 }
 
 // Simple u128 helper for CSP nonce generation (no extra dependency)

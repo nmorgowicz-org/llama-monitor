@@ -266,7 +266,6 @@ export function initSpawnWizard() {
   });
 
   document.getElementById('hf-dlp-open-settings')?.addEventListener('click', () => {
-    location.hash = 'models';
     Router.navigate('/settings#models');
     // Focus is secondary; openSettingsModal can handle tab, but we may still want to focus.
     setTimeout(() => document.getElementById('settings-hf-token')?.focus(), 80);

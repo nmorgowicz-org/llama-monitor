@@ -38,12 +38,16 @@ const Router = {
 
   navigate(path, options = {}) {
     const push = options.push !== false;
+    const [pathOnly, hash] = path.split('#');
+    const url = hash ? pathOnly + '#' + hash : pathOnly;
+
     if (push) {
-      history.pushState({ path }, '', path);
+      history.pushState({ path: pathOnly }, '', url);
     } else {
-      history.replaceState({ path }, '', path);
+      history.replaceState({ path: pathOnly }, '', url);
     }
-    this._dispatch(path);
+
+    this._dispatch(pathOnly);
   },
 
   init() {
