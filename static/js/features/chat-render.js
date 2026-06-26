@@ -21,6 +21,7 @@ import {
 import { showToast, showToastWithActions, showConfirmDialog } from './toast.js';
 import { openTemplateManager } from './chat-templates.js';
 import { renderChatSessionsSidebar } from './chat-sessions-sidebar.js';
+import Router from './router.js';
 
 // Getter for transport functions — avoids circular import (chat-render ↔ chat-transport)
 let _getTransport = null;
@@ -431,7 +432,7 @@ export function renderChatTabs() {
             const closeBtn = e.target.closest('.chat-tab-close');
             if (closeBtn) return;
             if (e.target.classList.contains('chat-tab-name') && e.detail === 2) return;
-            switchChatTab(tab.id);
+            Router.navigate('/chat/' + encodeURIComponent(tab.id));
         });
 
         // Drag-to-reorder
@@ -1383,7 +1384,7 @@ export function importChatTab() {
                         newTab.created_at = Date.now();
                         newTab.updated_at = Date.now();
                         chat.tabs.push(newTab);
-                        switchChatTab(newTab.id);
+                        Router.navigate('/chat/' + encodeURIComponent(newTab.id));
                         scheduleChatPersist();
                         showToast('Conversation imported', 'success');
                     }

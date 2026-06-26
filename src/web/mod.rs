@@ -171,13 +171,17 @@ pub fn build_routes(
     let non_index = protected.or(public_api).or(static_files);
 
     // Apply HTTP security headers to non-index routes
-    // Custom CSP: allow external CDN scripts, fonts, styles, and data URIs (app requirements)
-    // connect-src allows any HTTPS — needed for API calls and WebSocket connections
-    // No 'unsafe-inline' for scripts.
+    // Scripts/styles/fonts from external CDNs are loaded only from index.html
+    // using SRI (integrity attributes) and are not needed on API/asset routes;
+    // so we keep this global policy conservative:
+    // - script-src: 'self' only (no floating CDN allowlist).
+    // - style-src: allow Google Fonts + jsDelivr for highlight.js theme used on the SPA shell.
+    // - font-src: Google Fonts.
+    // Index route defines its own per-request CSP with nonce + strict-dynamic.
     let csp = ContentSecurityPolicy::new()
         .default_src(vec!["'self'", "data:"])
         .connect_src(vec!["'self'", "https:", "wss:"])
-        .script_src(vec!["'self'", "https://cdn.jsdelivr.net"])
+        .script_src(vec!["'self'"])
         .style_src(vec![
             "'self'",
             "https://fonts.googleapis.com",
@@ -194,9 +198,14 @@ pub fn build_routes(
     let non_index = non_index.and(rate_limited.clone()).map(|reply, ()| reply);
     let compact_protected = compact_protected.and(rate_limited).map(|reply, ()| reply);
 
-    index
-        .or(non_index)
+    // Route priority:
+    // - non_index: /api/*, /ws, static assets (no SPA fallback)
+    // - compact_protected: /compact with its own CSP
+    // - index: exact root '/' plus SPA fallback for any other GET path
+    // Only GET is allowed via index/SPA fallback; non-GET unmatched → 404 via handle_rejection.
+    non_index
         .or(compact_protected)
+        .or(index)
         .recover(handle_rejection)
 }
 
@@ -342,51 +351,103 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
 fn index_route(
     auth_manager: AuthManager,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    // Special handling for index.html: inject version, platform, and CSP nonce
-    warp::path::end()
-        .and(warp::header::optional::<String>("Authorization"))
-        .and(warp::header::optional::<String>("cookie"))
-        .and_then(move |auth_header: Option<String>, cookie_header: Option<String>| {
-            let auth_manager = auth_manager.clone();
-            async move {
-                if auth_manager.has_basic()
-                    && !auth_manager.has_form()
-                    && !auth_manager.authenticate_request(
-                        auth_header.as_deref(),
-                        cookie_header.as_deref(),
-                    )
-                {
-                    return Err(warp::reject::custom(AuthReject {
-                        challenge_basic: true,
-                    }));
+    // Special handling for index.html:
+    // - Exact match at '/' (as before).
+    // - Fallback for any GET path (SPA routing) for paths not handled by API/static/compact.
+    //
+    // This route is placed last in the .or() chain so that:
+    // - /api/*, /ws, and static assets take priority.
+    // - /compact is excluded and handled separately.
+
+    // Helper: generate index.html with version, platform, and CSP nonce.
+    let serve_index =
+        warp::header::optional::<String>("Authorization")
+            .and(warp::header::optional::<String>("cookie"))
+            .and_then(move |auth_header: Option<String>, cookie_header: Option<String>| {
+                let auth_manager = auth_manager.clone();
+                async move {
+                    if auth_manager.has_basic()
+                        && !auth_manager.has_form()
+                        && !auth_manager.authenticate_request(
+                            auth_header.as_deref(),
+                            cookie_header.as_deref(),
+                        )
+                    {
+                        return Err(warp::reject::custom(AuthReject {
+                            challenge_basic: true,
+                        }));
+                    }
+
+                    // Generate a per-request CSP nonce (URL-safe base64, 16 bytes)
+                    let nonce_bytes: [u8; 16] = rand_core_getrandom_u128().to_be_bytes();
+                    let nonce = BASE64.encode(nonce_bytes);
+
+                    let html = static_assets::INDEX_HTML
+                        .replace("{{ VERSION }}", env!("CARGO_PKG_VERSION"))
+                        .replace("{{ PLATFORM }}", std::env::consts::OS)
+                        .replace("{{ NONCE }}", &nonce);
+
+                    // CSP for index.html:
+                    // - script-src: 'self' (all local scripts) + nonce (inline version script) +
+                    //   cdn.jsdelivr.net (SRI-pinned external scripts: marked, dompurify, highlight.js).
+                    //   SRI is the trust anchor here; strict-dynamic was too restrictive for our
+                    //   current script layout and is left out.
+                    // - style-src keeps 'unsafe-inline' because index.html uses inline styles.
+                    let csp = format!(
+                        "default-src 'self' data:; \
+                         connect-src 'self' https: wss:; \
+                         script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; \
+                         style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; \
+                         font-src 'self' https://fonts.gstatic.com; \
+                         img-src 'self' data: https:; \
+                         frame-src 'self'"
+                    );
+
+                    Ok::<_, warp::Rejection>(warp::reply::with_header(
+                        warp::reply::with_header(html, "content-type", "text/html"),
+                        "content-security-policy",
+                        csp,
+                    ))
                 }
+            });
 
-                // Generate a per-request CSP nonce (URL-safe base64, 16 bytes)
-                let nonce_bytes: [u8; 16] = rand_core_getrandom_u128().to_be_bytes();
-                let nonce = BASE64.encode(nonce_bytes);
+    let root = warp::path::end().and(serve_index.clone());
 
-                let html = static_assets::INDEX_HTML
-                    .replace("{{ VERSION }}", env!("CARGO_PKG_VERSION"))
-                    .replace("{{ PLATFORM }}", std::env::consts::OS)
-                    .replace("{{ NONCE }}", &nonce);
+    // SPA fallback: any GET path that hasn't been matched (e.g. /chat, /logs, /settings).
+    //
+    // It must NOT swallow API, WebSocket, or static-asset paths: those have their own
+    // handlers and 404 semantics. If an unmatched /api/* request reached here it would
+    // return the HTML shell with 200, breaking JSON clients and masking real 404s.
+    // Likewise a missing /js/foo.js should 404, not return HTML that fails to parse as
+    // a module. We therefore reject (→ JSON 404 via handle_rejection) when the path is:
+    //   - under /api or /ws, or
+    //   - "asset-like": its last segment contains a dot (every static asset and file
+    //     has an extension; the SPA routes /chat, /logs, /settings, /chat/<uuid> do not).
+    //
+    // INVARIANT: all SPA routes must have no dot in the last segment.
+    // If you add a dotted SPA route, update this guard accordingly.
+    let spa_guard = warp::path::full().and_then(|path: warp::path::FullPath| async move {
+        let p = path.as_str();
+        let is_api = p == "/api" || p.starts_with("/api/");
+        let is_ws = p == "/ws" || p.starts_with("/ws/");
+        let is_asset_like = p.rsplit('/').next().is_some_and(|seg| seg.contains('.'));
+        if is_api || is_ws || is_asset_like {
+            Err(warp::reject::not_found())
+        } else {
+            Ok::<(), warp::Rejection>(())
+        }
+    });
 
-                // CSP for index.html: same as global, plus nonce for the version script
-                // style-src keeps 'unsafe-inline' because index.html uses inline styles (display:none, etc.)
-                let csp = format!(
-                    "default-src 'self' data:; \
-                     connect-src 'self' https: wss:; \
-                     script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; \
-                     style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; \
-                     font-src 'self' https://fonts.gstatic.com; \
-                     img-src 'self' data: https:; \
-                     frame-src 'self'"
-                );
+    let spa_fallback = spa_guard.untuple_one().and(serve_index);
 
-                Ok::<_, warp::Rejection>(warp::reply::with_header(
-                    warp::reply::with_header(html, "content-type", "text/html"),
-                    "content-security-policy",
-                    csp,
-                ))
+    // Enforce: only GET allowed for SPA routes; non-GET → 404 via handle_rejection.
+    let spa = root.or(spa_fallback);
+    spa.and(warp::method())
+        .and_then(|reply, method| async move {
+            if method == warp::http::Method::GET {
+                Ok(reply)
+            } else {
+                Err(warp::reject::not_found())
             }
         })
 }
@@ -456,4 +517,170 @@ pub async fn handle_rejection(
         warp::reply::json(&serde_json::json!({ "error": "not_found" })),
         warp::http::StatusCode::NOT_FOUND,
     )))
+}
+
+#[cfg(test)]
+mod spa_fallback_tests {
+    use super::*;
+    use crate::config::TlsMode;
+
+    fn no_auth() -> AuthManager {
+        AuthManager::new(None, None, &TlsMode::None)
+    }
+
+    // index_route returns a Filter with Error=Rejection; recover so rejections
+    // become real responses (mirrors how build_routes wires it).
+    fn routes()
+    -> impl Filter<Extract = (impl warp::Reply,), Error = std::convert::Infallible> + Clone {
+        index_route(no_auth()).recover(handle_rejection)
+    }
+
+    #[tokio::test]
+    async fn spa_routes_return_html_shell() {
+        let filter = routes();
+        for path in [
+            "/",
+            "/chat",
+            "/logs",
+            "/settings",
+            "/server",
+            "/spawn",
+            "/chat/123e4567-e89b-12d3-a456-426614174000",
+            "/x/y/z",
+        ] {
+            let resp = warp::test::request()
+                .method("GET")
+                .path(path)
+                .reply(&filter)
+                .await;
+            assert_eq!(resp.status(), 200, "GET {path} should serve the SPA shell");
+            assert_eq!(
+                resp.headers()
+                    .get("content-type")
+                    .map(|v| v.to_str().unwrap()),
+                Some("text/html"),
+                "GET {path} should be text/html"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn api_paths_never_return_spa_shell() {
+        // Unmatched /api/* must fall through to the JSON 404, not the HTML shell.
+        let filter = routes();
+        for path in ["/api", "/api/bogus", "/api/sessions/does-not-exist"] {
+            let resp = warp::test::request()
+                .method("GET")
+                .path(path)
+                .reply(&filter)
+                .await;
+            assert_eq!(resp.status(), 404, "GET {path} should 404, not serve HTML");
+            assert_ne!(
+                resp.headers()
+                    .get("content-type")
+                    .map(|v| v.to_str().unwrap()),
+                Some("text/html"),
+                "GET {path} must not return the HTML shell"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_assets_and_ws_do_not_return_spa_shell() {
+        let filter = routes();
+        for path in [
+            "/js/missing.js",
+            "/css/missing.css",
+            "/favicon.ico",
+            "/ws",
+            "/ws/x",
+        ] {
+            let resp = warp::test::request()
+                .method("GET")
+                .path(path)
+                .reply(&filter)
+                .await;
+            assert_eq!(resp.status(), 404, "GET {path} should 404, not serve HTML");
+        }
+    }
+
+    #[tokio::test]
+    async fn non_get_methods_are_rejected() {
+        let filter = routes();
+        for method in ["POST", "PUT", "DELETE"] {
+            let resp = warp::test::request()
+                .method(method)
+                .path("/chat")
+                .reply(&filter)
+                .await;
+            assert_eq!(
+                resp.status(),
+                404,
+                "{method} /chat should not serve the SPA shell"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_dotted_paths_404_not_spa() {
+        // Ensure unknown paths with a dot in last segment return 404, not SPA shell.
+        let filter = routes();
+        for path in [
+            "/unknown/with.dot",
+            "/chat/export.html",
+            "/tools/update.txt",
+        ] {
+            let resp = warp::test::request()
+                .method("GET")
+                .path(path)
+                .reply(&filter)
+                .await;
+            assert_eq!(
+                resp.status(),
+                404,
+                "GET {path} should 404 (asset-like), not SPA shell"
+            );
+            assert_ne!(
+                resp.headers()
+                    .get("content-type")
+                    .map(|v| v.to_str().unwrap()),
+                Some("text/html"),
+                "GET {path} must not return the HTML shell"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn spa_routes_with_query_strings_return_html() {
+        // SPA routes with query strings must still serve the shell.
+        let filter = routes();
+        for (path, query) in [
+            ("/chat", Some("foo=bar")),
+            ("/settings", None),
+            ("/logs", Some("t=1")),
+        ] {
+            let full_path = if let Some(q) = query {
+                format!("{path}?{q}")
+            } else {
+                path.to_string()
+            };
+            let resp = warp::test::request()
+                .method("GET")
+                .path(&full_path)
+                .reply(&filter)
+                .await;
+            assert_eq!(
+                resp.status(),
+                200,
+                "GET {full_path} should serve the SPA shell"
+            );
+            assert_eq!(
+                resp.headers()
+                    .get("content-type")
+                    .map(|v| v.to_str().unwrap()),
+                Some("text/html"),
+                "GET {full_path} should be text/html"
+            );
+        }
+    }
 }

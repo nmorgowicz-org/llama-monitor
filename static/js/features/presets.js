@@ -1240,7 +1240,9 @@ export function openPresetsPanel() {
     _renderPresetsPanel();
     document.getElementById('presets-panel-wizard-btn')?.addEventListener('click', () => {
         closePresetsPanel();
-        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+        // Route through the Router so the URL, Back/Forward, and wizard step state
+        // stay in sync instead of opening the wizard out-of-band.
+        import('./router.js').then(({ default: Router }) => Router.navigate('/spawn'));
     }, { once: true });
 }
 

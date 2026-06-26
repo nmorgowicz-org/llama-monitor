@@ -2,8 +2,8 @@
 // Provides a visible "Search messages" entry point near the title filter and
 // renders a larger flyout beside the sidebar for full-text search results.
 
-import { switchChatTab } from './chat-state.js';
 import { chat } from '../core/app-state.js';
+import Router from './router.js';
 
 const SEARCH_PAGE_SIZE = 20;
 
@@ -294,16 +294,17 @@ function renderResults(page, query, { append = false } = {}) {
             <div class="csp-search-result-snippet">${snippet}</div>`;
 
         card.addEventListener('click', () => {
-            switchChatTab(r.tab_id).then(() => {
-                setTimeout(() => {
-                    const el = document.querySelector(`.chat-message[data-msg-id="${r.message_id}"]`);
-                    if (el) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        el.classList.add('chat-msg-highlight');
-                        setTimeout(() => el.classList.remove('chat-msg-highlight'), 2000);
-                    }
-                }, 400);
-            });
+            // Route through the Router so the chat view, active session, and URL all
+            // stay in sync, then scroll to the matched message once it has rendered.
+            Router.navigate('/chat/' + encodeURIComponent(r.tab_id));
+            setTimeout(() => {
+                const el = document.querySelector(`.chat-message[data-msg-id="${r.message_id}"]`);
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    el.classList.add('chat-msg-highlight');
+                    setTimeout(() => el.classList.remove('chat-msg-highlight'), 2000);
+                }
+            }, 450);
             closeSearch();
         });
 

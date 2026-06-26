@@ -7,7 +7,7 @@ import { showSessionPanel, hideSessionPanel } from './chat-sessions-sidebar.js';
 import { isFocusModeActive, exitFocusMode } from './chat-focus-mode.js';
 import { renderCapabilityPopover } from './dashboard-render.js';
 import { showToast } from './toast.js';
-import { switchView } from './setup-view.js';
+import Router from './router.js';
 
 export function switchTab(name) {
     if (name !== 'chat' && isFocusModeActive()) exitFocusMode();
@@ -19,7 +19,9 @@ export function switchTab(name) {
         document.querySelectorAll('.sidebar-btn').forEach(b => b.classList.remove('active'));
         const sidebarButton = document.querySelector(`.sidebar-btn[data-tab="${name}"]`);
         if (sidebarButton) sidebarButton.classList.add('active');
-        if (name === 'settings') window.openSettingsModal?.();
+        if (name === 'settings') {
+            Router.navigate('/settings');
+        }
         return;
     }
 
@@ -459,9 +461,29 @@ function initSidebarResize() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initNav() {
-    // Bind sidebar tab switching
+    // Bind sidebar tab switching with Router so URLs stay in sync
     document.querySelectorAll('.sidebar-btn[data-tab]').forEach(btn => {
-        btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+        btn.addEventListener('click', () => {
+            const tab = btn.dataset.tab;
+            switch (tab) {
+                case 'server':
+                    Router.navigate('/server');
+                    break;
+                case 'chat':
+                    Router.navigate('/chat');
+                    break;
+                case 'logs':
+                    Router.navigate('/logs');
+                    break;
+                case 'settings':
+                    Router.navigate('/settings');
+                    break;
+                default:
+                    // For any non-mapped tab, fall back to existing switchTab
+                    switchTab(tab);
+                    break;
+            }
+        });
     });
 
     // Bind sidebar collapse
@@ -523,7 +545,7 @@ export function initNav() {
         navLogo.addEventListener('click', event => {
             event.preventDefault();
             if (!document.body.classList.contains('setup-active')) {
-                switchView('setup');
+                Router.navigate('/');
             }
         });
     }
@@ -531,7 +553,7 @@ export function initNav() {
     const navHomeBtn = document.getElementById('nav-home-btn');
     if (navHomeBtn) {
         navHomeBtn.addEventListener('click', () => {
-            switchView('setup');
+            Router.navigate('/');
         });
         // Hide on welcome screen, show on dashboard
         const observer = new MutationObserver(() => {
@@ -544,11 +566,13 @@ export function initNav() {
 
     const cockpit = document.getElementById('nav-cockpit');
     if (cockpit) {
-        cockpit.addEventListener('click', () => switchTab('server'));
+        cockpit.addEventListener('click', () => {
+            Router.navigate('/server');
+        });
         cockpit.addEventListener('keydown', (e) => {
             if (e.key !== 'Enter' && e.key !== ' ') return;
             e.preventDefault();
-            switchTab('server');
+            Router.navigate('/server');
         });
     }
 
