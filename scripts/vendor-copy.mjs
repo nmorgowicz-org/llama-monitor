@@ -30,10 +30,24 @@ function ensureDir(filePath) {
 }
 
 function copy(srcPath, destPath) {
-  ensureDir(destPath);
-  const out = fs.readFileSync(srcPath);
-  fs.writeFileSync(destPath, out);
-  console.log(`copy: ${srcPath} -> ${destPath}`);
+    ensureDir(destPath);
+    const out = fs.readFileSync(srcPath);
+    fs.writeFileSync(destPath, out);
+    console.log(`copy: ${srcPath} -> ${destPath}`);
+}
+
+function copyCommonJsBrowserGlobal(srcPath, destPath, globalName) {
+    ensureDir(destPath);
+    const source = fs.readFileSync(srcPath, 'utf8');
+    const out = `(() => {
+    const module = { exports: {} };
+    const exports = module.exports;
+${source}
+    globalThis.${globalName} = module.exports;
+})();
+`;
+    fs.writeFileSync(destPath, out);
+    console.log(`copy: ${srcPath} -> ${destPath}`);
 }
 
 // marked
@@ -46,9 +60,10 @@ copy(
 );
 
 // highlight.js core
-copy(
-  src('highlight.js', 'lib', 'core.js'),
-  dest('js', 'highlight.min.js'),
+copyCommonJsBrowserGlobal(
+    src('highlight.js', 'lib', 'core.js'),
+    dest('js', 'highlight.min.js'),
+    'hljs',
 );
 
 // highlight.js theme (atom-one-dark)
