@@ -3161,7 +3161,7 @@ if (!(Test-Path '{dir}')) {{ New-Item -ItemType Directory -Path '{dir}' -Force |
 if (Test-Path '{extract_dir}') {{ Remove-Item -LiteralPath '{extract_dir}' -Recurse -Force -ErrorAction SilentlyContinue }}; \
 New-Item -ItemType Directory -Path '{extract_dir}' -Force | Out-Null; \
 Expand-Archive -LiteralPath '{archive}' -DestinationPath '{extract_dir}' -Force; \
-$targets = @('llama-monitor.exe', 'sensor_bridge.exe'); \
+$targets = @('llama-monitor.exe', 'sensor_bridge.exe', 'WebView2Loader.dll'); \
 foreach ($name in $targets) {{ \
   $src = Join-Path '{extract_dir}' $name; \
   $dst = Join-Path '{dir}' $name; \
@@ -3310,6 +3310,46 @@ Start-Sleep -Seconds 2\""
         pub matches_install_path: bool,
     }
 
+    /// Maps a Windows scheduled-task `LastTaskResult` code to a human-readable
+    /// hint. The agent crashes in the OS loader (before `main()`) emit no agent
+    /// logs, so the task exit code is the only signal we have for *why* it died.
+    fn describe_windows_task_result(code: i64) -> Option<&'static str> {
+        match code {
+            0 => None,
+            // 0xC0000135 STATUS_DLL_NOT_FOUND — a required DLL (e.g.
+            // WebView2Loader.dll) is missing next to llama-monitor.exe.
+            3_221_225_781 => {
+                Some("missing DLL — WebView2Loader.dll is likely absent from the install directory")
+            }
+            // 0xC0000139 STATUS_ENTRYPOINT_NOT_FOUND
+            3_221_225_785 => Some("missing DLL export (entry point not found)"),
+            // 0x1 ERROR_INVALID_FUNCTION — task still running or generic failure.
+            1 => Some("generic failure (task may still be starting)"),
+            _ => Some("non-zero exit; the agent process failed to start"),
+        }
+    }
+
+    /// Queries the managed agent scheduled task's `LastTaskResult` so a failed
+    /// health check can report the real reason the process never came up.
+    async fn windows_agent_task_diagnostic(connection: &SshConnection) -> Option<String> {
+        let output = remote_ssh::exec(
+            connection.clone(),
+            format!(
+                "powershell.exe -NoProfile -NonInteractive -Command \"(Get-ScheduledTaskInfo -TaskName '{WINDOWS_AGENT_TASK_NAME}').LastTaskResult\""
+            ),
+        )
+        .await
+        .ok()?;
+        if output.status != 0 {
+            return None;
+        }
+        let code: i64 = output.stdout.trim().parse().ok()?;
+        let hint = describe_windows_task_result(code)?;
+        Some(format!(
+            "Scheduled task '{WINDOWS_AGENT_TASK_NAME}' last exit code {code} (0x{code:08X}): {hint}."
+        ))
+    }
+
     pub async fn start_remote_agent(
         ssh_target: &str,
         ssh_connection: Option<SshConnection>,
@@ -3378,19 +3418,21 @@ Start-Sleep -Seconds 2\""
         // /health requires no auth; token is read after startup to avoid a race
         // where a freshly-started agent hasn't written its token file yet.
         //
-        // Build HTTPS/HTTP clients once and reuse them across all 20 attempts.
-        // Use a 1-second per-request timeout so 20 attempts fit within the
-        // 30-second outer timeout even on slow or firewalled networks.
+        // Build HTTPS/HTTP clients once and reuse them across all attempts.
+        // A 2-second per-request timeout plus a 3-second gap between attempts
+        // keeps 5 attempts well within the 30-second outer timeout even on slow
+        // or firewalled networks.
         //
         // Wait a few seconds before the first poll: the scheduled-task startup
         // on Windows typically takes 3–5 s, so an immediate check produces
         // several noisy "error sending request" lines before the agent is ready.
-        let health_https = build_agent_https_client(Duration::from_secs(1));
-        let health_http = build_plain_http_client(Duration::from_secs(1));
+        const HEALTH_CHECK_ATTEMPTS: u32 = 5;
+        let health_https = build_agent_https_client(Duration::from_secs(2));
+        let health_http = build_plain_http_client(Duration::from_secs(2));
         let health_reachable = tokio::time::timeout(Duration::from_secs(30), async {
             tokio::time::sleep(Duration::from_secs(3)).await;
-            for i in 1..=20 {
-                eprintln!("[agent] Health check attempt {}/20...", i);
+            for i in 1..=HEALTH_CHECK_ATTEMPTS {
+                eprintln!("[agent] Health check attempt {i}/{HEALTH_CHECK_ATTEMPTS}...");
                 let reached = 'check: {
                     for candidate in agent_url_candidates(&agent_url) {
                         let client =
@@ -3417,7 +3459,9 @@ Start-Sleep -Seconds 2\""
                     eprintln!("[agent] Agent health check passed");
                     return true;
                 }
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                if i < HEALTH_CHECK_ATTEMPTS {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                }
             }
             false
         })
@@ -3427,7 +3471,20 @@ Start-Sleep -Seconds 2\""
 
         let error = if !running {
             let health_error = match health_reachable {
-                Err(tokio::time::error::Elapsed { .. }) => Some("Agent did not start within 30 seconds. Check if the agent is listening on 0.0.0.0:7779 and if the remote firewall allows inbound connections on port 7779.".to_string()),
+                Err(tokio::time::error::Elapsed { .. }) => {
+                    let mut msg = "Agent did not start within 30 seconds. Check if the agent is listening on 0.0.0.0:7779 and if the remote firewall allows inbound connections on port 7779.".to_string();
+                    // On Windows the agent can crash in the OS loader before main()
+                    // (e.g. a missing DLL), emitting no agent logs — surface the
+                    // scheduled task's last exit code so the real cause is visible.
+                    if os_hint == RemoteOs::Windows
+                        && let Some(diag) = windows_agent_task_diagnostic(&connection).await
+                    {
+                        eprintln!("[agent] {diag}");
+                        msg.push(' ');
+                        msg.push_str(&diag);
+                    }
+                    Some(msg)
+                }
                 Ok(_) => None,
             };
             if health_error.is_some() {

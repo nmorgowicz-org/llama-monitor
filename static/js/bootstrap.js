@@ -12,7 +12,7 @@ import { activeChatTab, addChatTab, autoResizeChatInput, initChatState, initChat
 import { chatScroll, initChatRender } from './features/chat-render.js';
 import { initChatSessionsSidebar, renderChatSessionsSidebar } from './features/chat-sessions-sidebar.js';
 import { initChatSearch } from './features/chat-search.js';
-import { initAttachDetach } from './features/attach-detach.js';
+import { initAttachDetach, initAttachDetachButtons } from './features/attach-detach.js';
 import { initRemoteAgent } from './features/remote-agent.js';
 import { initChatTransport } from './features/chat-transport.js';
 import { initChatTemplates } from './features/chat-templates.js';
@@ -163,6 +163,13 @@ async function initializeApp() {
 
     // Initialize chat tabs only after token bootstrap and feature init complete.
     await initChatTabs();
+
+    // Reconcile the restored URL with the live session state before the router
+    // dispatches it: a hard refresh onto a dashboard URL (/server, /chat, …)
+    // with no active session must fall back to the welcome screen, and a live
+    // session landing on '/' should restore the monitor view. Awaited so the
+    // initial dispatch sees the corrected location (no view flash).
+    await initAttachDetachButtons();
 
     // Phase 13: Router (must run after all navigation functions are available)
     // __spawnWizardOpts is set by callers (e.g. models.js, setup-view.js) so the
