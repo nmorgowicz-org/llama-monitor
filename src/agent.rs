@@ -3161,7 +3161,7 @@ if (!(Test-Path '{dir}')) {{ New-Item -ItemType Directory -Path '{dir}' -Force |
 if (Test-Path '{extract_dir}') {{ Remove-Item -LiteralPath '{extract_dir}' -Recurse -Force -ErrorAction SilentlyContinue }}; \
 New-Item -ItemType Directory -Path '{extract_dir}' -Force | Out-Null; \
 Expand-Archive -LiteralPath '{archive}' -DestinationPath '{extract_dir}' -Force; \
-$targets = @('llama-monitor.exe', 'sensor_bridge.exe'); \
+$targets = @('llama-monitor.exe', 'sensor_bridge.exe', 'WebView2Loader.dll'); \
 foreach ($name in $targets) {{ \
   $src = Join-Path '{extract_dir}' $name; \
   $dst = Join-Path '{dir}' $name; \
