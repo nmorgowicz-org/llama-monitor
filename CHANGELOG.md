@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.5.3...v1.6.0) (2026-06-27)
+
+
+### Features
+
+* **agent:** diagnose failed Windows start; trim health-check retries ([b4ae87e](https://github.com/nmorgowicz-org/llama-monitor/commit/b4ae87e961eaf945927ed431382a19397eead4c5))
+* **nav:** self-host vendor scripts via node_modules ([a199888](https://github.com/nmorgowicz-org/llama-monitor/commit/a1998884b682567d7baf3fb1f359093a58327ee0))
+* **nav:** SPA routing with History API and deep-linking ([a199888](https://github.com/nmorgowicz-org/llama-monitor/commit/a1998884b682567d7baf3fb1f359093a58327ee0))
+
+
+### Bug Fixes
+
+* **agent:** ship WebView2Loader.dll on remote Windows agent install ([b4ae87e](https://github.com/nmorgowicz-org/llama-monitor/commit/b4ae87e961eaf945927ed431382a19397eead4c5))
+* **deps:** update dependency marked to v18 ([#287](https://github.com/nmorgowicz-org/llama-monitor/issues/287)) ([4624937](https://github.com/nmorgowicz-org/llama-monitor/commit/4624937627ec867261f7d5b9ce5c2f32d3dfa925))
+* **nav:** centralize history writes, harden CSP, remove CDN dependency ([a199888](https://github.com/nmorgowicz-org/llama-monitor/commit/a1998884b682567d7baf3fb1f359093a58327ee0))
+* **nav:** return to welcome screen on fresh session after hard refresh ([b4ae87e](https://github.com/nmorgowicz-org/llama-monitor/commit/b4ae87e961eaf945927ed431382a19397eead4c5))
+* **ui:** expose vendored highlight.js in browser ([b4ae87e](https://github.com/nmorgowicz-org/llama-monitor/commit/b4ae87e961eaf945927ed431382a19397eead4c5))
+* **ui:** expose vendored highlight.js in browser ([d3d9d43](https://github.com/nmorgowicz-org/llama-monitor/commit/d3d9d4306cb9e6a52bf0c363143decf58a93f9e1))
+
 ## [1.5.3](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.5.2...v1.5.3) (2026-06-25)
 
 
