@@ -517,18 +517,37 @@ export async function initAttachDetachButtons() {
         }
         const data = await resp.json();
         setHeaderMode(data?.mode ?? null);
-        // If a session is already running, restore the monitor view instead of
-        // leaving the user stranded on the welcome screen after a hard refresh.
-        // Only auto-restore when the user landed on '/' (the welcome route) — an
-        // explicit deep link like /chat or /logs must be respected. This runs early
-        // during init (before the router is fully wired), so switch the view directly
-        // and sync the URL with replaceState rather than dispatching through the router.
-        if (data?.status === 'Running' && setupViewState.view === 'setup') {
-            if (location.pathname === '/' || location.pathname === '') {
+
+        // Reconcile the restored URL with the actual session state. This runs
+        // before Router.init() dispatches, so adjusting location here with
+        // replaceState steers the initial dispatch (no view flash).
+        const path = location.pathname || '/';
+        // Routes inside the monitor view that require a live session to be useful:
+        // the dashboard/logs surface live server telemetry, and chat can't talk to
+        // anything without an attached or spawned server. With no session these are
+        // dead ends, so they fall back to the welcome screen.
+        const needsSessionRoute =
+            path === '/server' || path === '/logs' ||
+            path === '/chat' || path.startsWith('/chat/');
+
+        if (data?.status === 'Running') {
+            // A session is live, so restore the monitor view instead of leaving
+            // the user stranded on the welcome screen after a hard refresh. Only
+            // auto-restore when the user landed on '/' (the welcome route) — an
+            // explicit deep link like /chat or /logs must be respected.
+            if (setupViewState.view === 'setup' &&
+                (location.pathname === '/' || location.pathname === '')) {
                 switchView('monitor');
                 try { history.replaceState({ path: '/server' }, '', '/server'); } catch {}
             }
             showTunePanel();
+        } else if (needsSessionRoute) {
+            // No active session (e.g. a hard refresh that restored a dashboard
+            // URL like /server with nothing attached or spawned). The monitor
+            // view has nothing to show, so fall back to the welcome screen the
+            // same way a fresh session always did before SPA routing existed.
+            if (setupViewState.view === 'monitor') switchView('setup');
+            try { history.replaceState({ path: '/' }, '', '/'); } catch {}
         }
     } catch (err) {
         console.error('Failed to initialize attach/detach buttons:', err);
@@ -586,6 +605,7 @@ export function initAttachDetach() {
         Router.navigate('/spawn');
     });
 
-    // Initialize button states
-    initAttachDetachButtons();
+    // Note: initAttachDetachButtons() is awaited by bootstrap just before
+    // Router.init() so the initial view/URL is reconciled with the live session
+    // state before the router dispatches the restored path.
 }
