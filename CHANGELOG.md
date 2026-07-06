@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.6.0...v1.7.0) (2026-07-06)
+
+
+### Features
+
+* **models:** add HF VRAM pre-download estimate, chat template lifecycle tracking, tool_call_format, and download fixes ([9b2408b](https://github.com/nmorgowicz-org/llama-monitor/commit/9b2408b2dfe1afc5c636e27dc9ed2c4845d45943))
+
+
+### Bug Fixes
+
+* **deps:** update rust crate aes-gcm to 0.11 ([#291](https://github.com/nmorgowicz-org/llama-monitor/issues/291)) ([25b1dba](https://github.com/nmorgowicz-org/llama-monitor/commit/25b1dba7bd37b78a6349828118f2d396aafd0159))
+* **download:** fix stuck downloads, resume, cooldown, idle timeout, and lock safety ([9b2408b](https://github.com/nmorgowicz-org/llama-monitor/commit/9b2408b2dfe1afc5c636e27dc9ed2c4845d45943))
+
 ## [1.6.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.5.3...v1.6.0) (2026-06-27)
 
 
