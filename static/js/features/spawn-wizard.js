@@ -1,4 +1,5 @@
 import { buildArchitectureLabel, isMoEEligible } from './setup-view.js';
+import { readLastStatus } from './template-autoupdater.js';
 
 // ── Spawn Wizard Module ───────────────────────────────────────────────────────
 // Spawn Llama-Server V2 — complete guided wizard.
@@ -3061,7 +3062,22 @@ async function autoInstallChatTemplate(force = false) {
       // Cache the template metadata for this family (avoids re-downloading for
       // other models of the same family in the same session)
       _installedTemplateCache[tplForFamily.name] = data;
-      _renderChatTemplateStatus('installed', family, tplForFamily, data);
+
+      // Mark a force-refresh so the UI can show "Updated!" briefly
+      const displayData = force
+        ? { ...data, _forceRefresh: true }
+        : data;
+
+      _renderChatTemplateStatus('installed', family, tplForFamily, displayData);
+
+      if (force) {
+        showToast(
+          tplForFamily.display + ' re-downloaded',
+          'success',
+          'Template has been refreshed from its upstream source',
+          3000
+        );
+      }
     } else {
       _renderChatTemplateStatus('error', family, tplForFamily, data);
     }
@@ -3242,13 +3258,25 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
   }
 
   if (state === 'installed') {
+    const isForceRefresh = !!data?._forceRefresh;
     const installedDate = data?.installed_at
       ? new Date(data.installed_at).toLocaleString()
       : null;
 
     if (statusEl) {
-      statusEl.textContent = data?.already_existed ? '✓ Cached' : '✓ Installed';
-      statusEl.className = 'ct-status ct-ok';
+      if (isForceRefresh) {
+        statusEl.textContent = 'Updated!';
+        statusEl.className = 'ct-status ct-ok';
+        // Briefly highlight the update, then fall back to standard text
+        setTimeout(() => {
+          if (!statusEl.textContent || statusEl.textContent === 'Updated!') {
+            statusEl.textContent = '✓ Installed';
+          }
+        }, 2200);
+      } else {
+        statusEl.textContent = data?.already_existed ? '✓ Cached' : '✓ Installed';
+        statusEl.className = 'ct-status ct-ok';
+      }
     }
     if (bodyEl) {
       bodyEl.textContent = '';
@@ -3264,15 +3292,64 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       bodyEl.appendChild(descEl);
       if (link) bodyEl.appendChild(link);
 
-      // Staleness hint
+      // Helpers to sync with template-autoupdater lastStatus
+      const STORAGE_KEY = 'template_autoupdater_lastStatus';
+      function _readAutoStatus() {
+        try {
+          const v = localStorage.getItem(STORAGE_KEY);
+          if (!v) return { templates_with_updates: [] };
+          const obj = JSON.parse(v);
+          if (!obj || !Array.isArray(obj.templates_with_updates)) {
+            return { templates_with_updates: [] };
+          }
+          return obj;
+        } catch {
+          return { templates_with_updates: [] };
+        }
+      }
+      function _writeAutoStatus(status) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(status)); } catch { /* ignore */ }
+      }
+      function _markTemplateChanged(path, tplData) {
+        if (!path) return;
+        const s = _readAutoStatus();
+        if (!s.templates_with_updates.some(t => t.path === path)) {
+          s.templates_with_updates.push({
+            name: tplData?.name || tpl?.display || '',
+            path,
+            source_url: tplData?.source_url || tpl?.sourceUrl || '',
+          });
+          _writeAutoStatus(s);
+        }
+      }
+      function _clearTemplateChanged(path) {
+        if (!path) return;
+        const s = _readAutoStatus();
+        s.templates_with_updates = s.templates_with_updates.filter(t => t.path !== path);
+        _writeAutoStatus(s);
+      }
+
+      // Staleness / update hint (no misleading "may have changed" by default)
       const hint = document.createElement('div');
       hint.style.fontSize = '10px';
       hint.style.color = 'var(--color-text-muted)';
       hint.style.marginTop = '4px';
       const hintSpan = document.createElement('span');
-      hintSpan.textContent = installedDate
-        ? `Installed ${installedDate}. Upstream may have changed since.`
-        : 'Upstream may have changed since install.';
+      const tplPath = data?.path;
+      const autoStatus = _readAutoStatus();
+      const hasUpstreamChange = tplPath && autoStatus.templates_with_updates.some(t => t.path === tplPath);
+
+      if (hasUpstreamChange) {
+        // Auto-checker or previous "Check for updates" detected change.
+        hintSpan.textContent = installedDate
+          ? `Installed ${installedDate}. Upstream has changed since install.`
+          : 'Template installed. Upstream has changed since install.';
+      } else {
+        // No known upstream change.
+        hintSpan.textContent = installedDate
+          ? `Installed ${installedDate}.`
+          : 'Template installed.';
+      }
       hint.appendChild(hintSpan);
 
       // "Check for updates" button
@@ -3287,7 +3364,7 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       checkBtn.style.textDecoration = 'underline';
       checkBtn.textContent = 'Check for updates';
       checkBtn.addEventListener('click', async () => {
-        const path = data?.path;
+        const path = tplPath;
         if (!path) return;
         const origText = checkBtn.textContent;
         checkBtn.disabled = true;
@@ -3311,22 +3388,52 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
             }),
           });
           const result = resp.ok ? await resp.json() : { ok: false };
+          const now = new Date().toLocaleString();
+
           if (resp.ok && result.ok === true) {
             if (result.changed) {
-              showToast('Upstream template has changed since this install', 'warn',
-                'Use Recommended to re-download the latest version', 6000);
+              // Upstream changed: update hint text and mark in auto-status.
+              hintSpan.textContent = `Checked on ${now} · upstream has changed.`;
+              _markTemplateChanged(path, tpl);
+              showToast(
+                'Upstream template has changed since this install',
+                'warn',
+                'Use Recommended to re-download the latest version',
+                6000
+              );
+              // Button still available so they can re-check after updating
+              checkBtn.textContent = 'Check again';
             } else {
-              showToast('Template is up to date', 'success',
-                installedDate ? `Installed ${installedDate}` : 'No changes upstream');
+              // Up to date: update hint text and clear auto-status for this template.
+              hintSpan.textContent = `Checked on ${now} · up to date.`;
+              _clearTemplateChanged(path);
+              showToast('Template is up to date', 'success', null, 2400);
+              checkBtn.textContent = 'Check again';
             }
           } else {
             showToast(result.error || 'Failed to check for updates', 'error');
+            // Restore original text on failure
+            hintSpan.textContent = hasUpstreamChange
+              ? (installedDate
+                  ? `Installed ${installedDate}. Upstream has changed since install.`
+                  : 'Template installed. Upstream has changed since install.')
+              : (installedDate
+                  ? `Installed ${installedDate}.`
+                  : 'Template installed.');
+            checkBtn.textContent = origText;
           }
         } catch (err) {
           showToast('Check failed: ' + (err.message || String(err)), 'error');
+          hintSpan.textContent = hasUpstreamChange
+            ? (installedDate
+                ? `Installed ${installedDate}. Upstream has changed since install.`
+                : 'Template installed. Upstream has changed since install.')
+            : (installedDate
+                ? `Installed ${installedDate}.`
+                : 'Template installed.');
+          checkBtn.textContent = origText;
         } finally {
           checkBtn.disabled = false;
-          checkBtn.textContent = origText;
         }
       });
 
@@ -3379,20 +3486,43 @@ let communityPicksData = null;
 let communityPicksActiveCat = 0;
 
 async function loadCommunityPicks() {
+  // Attach the accordion toggle once, regardless of whether data loads.
+  {
+    const toggle = document.getElementById('hf-cp-toggle');
+    const body = document.getElementById('hf-cp-body');
+    if (toggle && body) {
+      toggle.addEventListener('click', () => {
+        const open = toggle.getAttribute('aria-expanded') === 'true';
+        toggle.setAttribute('aria-expanded', String(!open));
+        body.style.display = open ? 'none' : '';
+      });
+    }
+  }
+
   try {
     const headers = window.authHeaders ? window.authHeaders() : {};
     const panel = document.getElementById('hf-community-picks');
+    const list = document.getElementById('hf-cp-list');
+
+    // Show panel + skeleton while loading
     if (panel) {
       panel.style.display = '';
-      const list = document.getElementById('hf-cp-list');
       if (list) {
         list.innerHTML = '<div class="hf-cp-skeleton"><span class="hf-cp-skeleton-item"></span><span class="hf-cp-skeleton-item"></span><span class="hf-cp-skeleton-item"></span></div>';
       }
     }
+
     const resp = await fetch('/api/hf/community-picks', { headers });
-    if (!resp.ok) return;
+    if (!resp.ok) {
+      if (panel) panel.style.display = 'none';
+      return;
+    }
     const json = await resp.json();
-    if (!json.ok || !json.data) return;
+    if (!json.ok || !json.data) {
+      // No data available (missing or invalid community-picks.json)
+      if (panel) panel.style.display = 'none';
+      return;
+    }
 
     communityPicksData = json.data;
     if (!panel) return;
@@ -3410,16 +3540,11 @@ async function loadCommunityPicks() {
     panel.style.display = '';
     renderCommunityPicksTabs(cats);
     renderCommunityPicksList(cats[0]);
-
-    document.getElementById('hf-cp-toggle')?.addEventListener('click', () => {
-      const body = document.getElementById('hf-cp-body');
-      const toggle = document.getElementById('hf-cp-toggle');
-      if (!body || !toggle) return;
-      const open = toggle.getAttribute('aria-expanded') === 'true';
-      toggle.setAttribute('aria-expanded', String(!open));
-      body.style.display = open ? 'none' : '';
-    });
-  } catch {}
+  } catch {
+    // Hide panel on unexpected errors
+    const panel = document.getElementById('hf-community-picks');
+    if (panel) panel.style.display = 'none';
+  }
 }
 
 function renderCommunityPicksTabs(cats) {
@@ -3454,7 +3579,11 @@ function renderCommunityPicksList(cat) {
     const strong = document.createElement('strong');
     strong.textContent = 'No picks in this category yet';
     emptyDiv.appendChild(strong);
-    emptyDiv.appendChild(document.createTextNode('Run the Hermes community-picks cron to populate it.'));
+    emptyDiv.appendChild(
+      document.createTextNode(
+        'Community picks are populated by an external curation process. See docs/reference/community-picks.md for details.'
+      )
+    );
     list.appendChild(emptyDiv);
     return;
   }

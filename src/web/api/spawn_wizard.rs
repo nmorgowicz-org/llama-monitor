@@ -815,6 +815,82 @@ fn api_chat_template_install_url(
         })
 }
 
+// 7) GET /api/chat-template/active
+// Returns all installed community templates (those with a valid meta.json),
+// used by the frontend auto-updater to know which templates to check.
+fn api_chat_template_active(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "active")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let Some(home) = dirs::home_dir() else {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Could not determine home directory"
+                        })),
+                    ));
+                };
+
+                let dir = home
+                    .join(".config")
+                    .join("llama-monitor")
+                    .join("chat-templates");
+
+                let mut list: Vec<serde_json::Value> = Vec::new();
+                if let Ok(entries) = std::fs::read_dir(&dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if !path.is_file()
+                            || !path
+                                .extension()
+                                .map(|e| e == "jinja")
+                                .unwrap_or(false)
+                        {
+                            continue;
+                        }
+                        let meta_path = template_meta_path(&path);
+                        let Some(meta) = read_template_install_meta(&meta_path) else {
+                            continue;
+                        };
+                        if meta.fetch_url.is_empty() {
+                            continue;
+                        }
+                        let name = path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_default();
+
+                        list.push(serde_json::json!({
+                            "name": name,
+                            "path": path.to_string_lossy().to_string(),
+                            "fetch_url": meta.fetch_url,
+                            "source_url": meta.source_url,
+                            "installed_sha256": meta.sha256,
+                            "installed_at": meta.installed_at
+                        }));
+                    }
+                }
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "templates": list
+                    }),
+                )))
+            }
+        })
+}
+
 // 8) POST /api/chat-template/check-update
 fn api_chat_template_check_update(
     _state: AppState,
@@ -1016,6 +1092,13 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r
         .or(api_chat_template_install_url(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_chat_template_active(
+            state.clone(),
+            config.clone(),
+        ))
         .unify()
         .boxed();
     r = r
