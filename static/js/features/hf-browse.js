@@ -477,6 +477,7 @@ export async function hfStartDownload({
   onComplete,
   onValidationError,
   onClearValidationError,
+  companionId,
 }) {
   if (!repoId || !filePath) {
     if (onValidationError) onValidationError('Select a GGUF file first.');
@@ -518,7 +519,7 @@ export async function hfStartDownload({
     const fileEl = panelEl.querySelector('#hf-dlp-progress-file');
     if (fileEl) fileEl.textContent = shortName;
     _dlSetState(panelEl, 'progress');
-    hfPollDownload(downloadId, panelEl, { onComplete, onValidationError, onClearValidationError });
+    hfPollDownload(downloadId, panelEl, { onComplete, onValidationError, onClearValidationError, companionId });
     return data;
   } catch (err) {
     if (btn) {
@@ -599,25 +600,67 @@ export async function hfStartCompanionDownload({ repoId, filePath, saveAs }) {
 // Poll download status and update progress in panelEl.
 // Caller owns state updates via onComplete/onValidationError.
 
-export function hfPollDownload(downloadId, panelEl, { onComplete, onValidationError, onClearValidationError }) {
+export function hfPollDownload(downloadId, panelEl, { onComplete, onValidationError, onClearValidationError, companionId }) {
   if (!panelEl) return;
   _dlCancelPoll(panelEl);
 
   const headers = getAuthHeaders();
+  let consecutiveErrors = 0;
+  const maxConsecutiveErrors = 5;
+  let companionResolved = !companionId;
+
+  async function checkCompanion() {
+    if (!companionId || companionResolved) return;
+    try {
+      const cRes = await fetch(`/api/models/download/${companionId}/status`, { headers });
+      if (!cRes.ok) return;
+      const cData = await cRes.json().catch(() => ({}));
+      const cStatus = cData?.status?.status || cData?.status;
+      if (!cStatus) return;
+      const { status: cStatusVal, message: cMessage } = cStatus;
+      companionResolved = true;
+
+      if (cStatusVal === 'completed') {
+        const cName = (cStatus.local_path || '').split('/').pop() || 'mmproj';
+        showToast('Also downloaded: ' + cName, 'info');
+      } else if (cStatusVal === 'failed' || cStatusVal === 'cancelled') {
+        const reason = cMessage || 'Companion download failed.';
+        showToast('mmproj download issue: ' + reason, 'error');
+      }
+    } catch {
+      // non-fatal
+    }
+  }
 
   async function poll() {
     try {
       const res = await fetch(`/api/models/download/${downloadId}/status`, { headers });
       if (!res.ok) {
+        consecutiveErrors++;
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          _dlCancelPoll(panelEl);
+          _dlSetState(panelEl, 'idle');
+          if (onValidationError) onValidationError('Unable to check download status. It may have failed or been cancelled.');
+          return;
+        }
         _dlSchedulePoll(panelEl, poll, 1000);
         return;
       }
       const data = await res.json();
       const s = data.status;
       if (!s) {
+        consecutiveErrors++;
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          _dlCancelPoll(panelEl);
+          _dlSetState(panelEl, 'idle');
+          if (onValidationError) onValidationError('Unable to check download status. It may have failed or been cancelled.');
+          return;
+        }
         _dlSchedulePoll(panelEl, poll, 1000);
         return;
       }
+
+      consecutiveErrors = 0;
 
       const { status, bytes_downloaded = 0, total_bytes = 0, speed = 0, eta = 0 } = s;
       const pct = total_bytes > 0 ? Math.round(bytes_downloaded / total_bytes * 100) : 0;
@@ -639,6 +682,11 @@ export function hfPollDownload(downloadId, panelEl, { onComplete, onValidationEr
         statsEl.textContent = `${mb} MB${tot}${spd}${etaStr}`;
       }
 
+      // Also check companion status while main is running
+      if (status === 'running' && companionId && !companionResolved) {
+        checkCompanion();
+      }
+
       if (status === 'completed') {
         _dlCancelPoll(panelEl);
         _dlSetState(panelEl, 'complete');
@@ -651,15 +699,15 @@ export function hfPollDownload(downloadId, panelEl, { onComplete, onValidationEr
         _dlCancelPoll(panelEl);
         _dlSetState(panelEl, 'idle');
         const reason = s.message || 'Download failed.';
-        // Extract short name from status or file path
         const shortName = data.status?.local_path
             ? (data.status.local_path.split('/').pop() || reason)
             : null;
-        // Show a toast if the failure looks transient or network-related
-        if (reason.toLowerCase().includes('connection') ||
+        const retryable = reason.toLowerCase().includes('connection') ||
             reason.toLowerCase().includes('timed out') ||
-            reason.toLowerCase().includes('error')) {
-            showToast('Download failed: ' + (shortName ? shortName + ' — ' : '') + reason + ' You can retry.', 'error');
+            reason.toLowerCase().includes('retry') ||
+            reason.toLowerCase().includes('error');
+        if (retryable) {
+          showToast('Download failed: ' + (shortName ? shortName + ' — ' : '') + reason + ' You can retry.', 'error');
         }
         if (onValidationError) onValidationError(reason);
         return;
@@ -669,7 +717,15 @@ export function hfPollDownload(downloadId, panelEl, { onComplete, onValidationEr
         _dlSetState(panelEl, 'idle');
         return;
       }
-    } catch { /* network glitch — keep polling */ }
+    } catch {
+      consecutiveErrors++;
+      if (consecutiveErrors >= maxConsecutiveErrors) {
+        _dlCancelPoll(panelEl);
+        _dlSetState(panelEl, 'idle');
+        if (onValidationError) onValidationError('Lost connection while checking download status.');
+        return;
+      }
+    }
     _dlSchedulePoll(panelEl, poll, 1000);
   }
 
@@ -795,6 +851,13 @@ function _dlSetState(panelEl, state) {
     const el = panelEl.querySelector(`#hf-dlp-${s}`);
     if (el) el.style.display = s === state ? '' : 'none';
   });
+  if (state === 'idle') {
+    const btn = panelEl.querySelector('#hf-dlp-download-btn');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Download to models folder';
+    }
+  }
 }
 
 function _dlSchedulePoll(panelEl, fn, ms) {

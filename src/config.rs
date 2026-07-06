@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use aes_gcm::aead::generic_array::GenericArray;
+use aes_gcm::aead::array::Array;
 use aes_gcm::{
     Aes256Gcm,
     aead::{Aead, KeyInit},
@@ -165,9 +165,9 @@ pub(crate) fn encrypt_value(plaintext: &str) -> String {
         None => return plaintext.to_string(),
     };
 
-    let key = GenericArray::<u8, _>::from(key_bytes);
+    let key = Array::<u8, _>::from(key_bytes);
     let cipher = Aes256Gcm::new(&key);
-    let nonce = aes_gcm::Nonce::clone_from_slice(&random_nonce());
+    let nonce = aes_gcm::Nonce::from(random_nonce());
 
     let ct = match cipher.encrypt(&nonce, plaintext.as_ref()) {
         Ok(c) => c,
@@ -218,8 +218,14 @@ pub(crate) fn decrypt_value(ciphertext: &str) -> String {
     }
 
     let (nonce_bytes, ct_bytes) = payload.split_at(12);
-    let nonce = aes_gcm::Nonce::clone_from_slice(nonce_bytes);
-    let key = GenericArray::<u8, _>::from(key_bytes);
+    let nonce = match aes_gcm::Nonce::try_from(nonce_bytes) {
+        Ok(n) => n,
+        Err(_) => {
+            eprintln!("[warn] Encrypted value has invalid nonce length");
+            return ciphertext.to_string();
+        }
+    };
+    let key = Array::<u8, _>::from(key_bytes);
     let cipher = Aes256Gcm::new(&key);
 
     let pt = match cipher.decrypt(&nonce, ct_bytes) {

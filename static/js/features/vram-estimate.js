@@ -14,8 +14,10 @@ function buildEstimateBody(state) {
     ? (Number.isFinite(Number(hw.gpuLayersManual)) ? Number(hw.gpuLayersManual) : -1)
     : -1;
 
-  return {
-    model_path: m.path || m.localPath || '',
+  const modelPath = m.path || m.localPath || '';
+
+  const body = {
+    model_path: modelPath,
     n_ctx: hw.contextSize || 4096,
     parallel_slots: hw.parallelSlots || 1,
     ubatch_size: hw.ubatchSize || 2048,
@@ -29,12 +31,21 @@ function buildEstimateBody(state) {
     mmproj_path: m.mmprojPath || '',
     mmproj_bytes: m.mmprojBytes || 0,
   };
+
+  if (!modelPath && m.originRepo && m.hfFile) {
+    body.hf_repo_id = m.originRepo;
+    body.hf_file_path = m.hfFile;
+    body.model_size_bytes = m.modelBytes || 0;
+  }
+
+  return body;
 }
 
 // Fetch VRAM estimate from backend.
 async function fetchEstimate(state) {
   const body = buildEstimateBody(state);
-  if (!body.model_path) return null;
+  const hasHfCoords = body.hf_repo_id && body.hf_file_path;
+  if (!body.model_path && !hasHfCoords) return null;
 
   try {
     const headers = (window.authHeaders

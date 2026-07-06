@@ -776,6 +776,7 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         max_tokens: None,
         enable_thinking: None,
         preserve_thinking: None,
+        tool_call_format: None,
         reasoning: None,
         reasoning_budget: None,
         reasoning_budget_message: None,

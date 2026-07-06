@@ -92,6 +92,7 @@ struct DownloadTask {
     status: String,
     message: String,
     start_time: std::time::Instant,
+    last_accessed: std::time::Instant,
     /// Absolute path on disk where the file is/will be written.
     local_path: std::path::PathBuf,
     /// Source repo and file path (for duplicate detection).
@@ -101,6 +102,8 @@ struct DownloadTask {
     bytes_downloaded: Arc<AtomicU64>,
     /// Total expected bytes from Content-Length; set once response headers arrive.
     total_bytes: Arc<AtomicU64>,
+    /// Bytes already on disk before this download session started (for resume).
+    resume_from: u64,
     /// Signal the streaming loop to abort.
     cancel: Arc<Notify>,
 }
@@ -117,13 +120,20 @@ impl DownloadManager {
     }
 
     /// Evict completed/failed/cancelled tasks older than 1 hour.
-    /// Called on every new download start so the map doesn't grow unbounded.
+    /// Also keep tasks that have been accessed (status read) within the last 5 minutes
+    /// to avoid race with frontend polling.
     fn evict_stale(&mut self) {
-        let cutoff = std::time::Instant::now() - std::time::Duration::from_secs(3600);
+        let now = std::time::Instant::now();
+        let stale_cutoff = now - std::time::Duration::from_secs(3600);
+        let active_cutoff = now - std::time::Duration::from_secs(300); // 5 minutes
         self.tasks.retain(|_, task| {
             if let Ok(t) = task.lock() {
                 let terminal = matches!(t.status.as_str(), "completed" | "failed" | "cancelled");
-                !(terminal && t.start_time < cutoff)
+                let recently_accessed = t.last_accessed >= active_cutoff;
+                if terminal && !recently_accessed && t.start_time < stale_cutoff {
+                    return false; // evict
+                }
+                true
             } else {
                 false
             }
@@ -133,6 +143,11 @@ impl DownloadManager {
 
 static MODEL_DOWNLOAD_MANAGER: std::sync::LazyLock<Mutex<DownloadManager>> =
     std::sync::LazyLock::new(|| Mutex::new(DownloadManager::new()));
+
+/// Track when the last download failed so the HF download endpoint can
+/// skip its cooldown and allow immediate retry.
+pub(crate) static MODEL_DOWNLOAD_LAST_FAILED: std::sync::LazyLock<std::sync::atomic::AtomicU64> =
+    std::sync::LazyLock::new(|| std::sync::atomic::AtomicU64::new(0));
 
 /// Start an async HuggingFace download. Returns a download ID immediately.
 /// `save_as` overrides the local filename (useful for renaming companion files like mmproj).
@@ -156,9 +171,13 @@ pub fn start_download(
 
     // Evict stale tasks and run pre-flight checks.
     {
-        let mut mgr = MODEL_DOWNLOAD_MANAGER
-            .lock()
-            .expect("MODEL_DOWNLOAD_MANAGER lock poisoned");
+        let mut mgr = match MODEL_DOWNLOAD_MANAGER.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                eprintln!("[error] start_download: manager lock poisoned; recovering");
+                poisoned.into_inner()
+            }
+        };
         mgr.evict_stale();
 
         // Duplicate guard: reject if a running task exists for same (repo, file).
@@ -177,7 +196,7 @@ pub fn start_download(
             }
         }
 
-        // Existing-file guard: if the target already exists and is not a .part,
+        // Existing-file guard: if the target already exists (complete, not partial),
         // assume the user already has this download.
         if local_path.exists() && local_path.extension().is_none_or(|ext| ext != "part") {
             return Err(DownloadStartError::AlreadyExists(
@@ -203,7 +222,20 @@ pub fn start_download(
         )));
     }
 
-    let bytes_downloaded = Arc::new(AtomicU64::new(0));
+    // Restore .part to real name so run_download can resume from existing file.
+    if !local_path.exists() {
+        let part_path = local_path.with_extension("part");
+        if part_path.exists() {
+            let _ = std::fs::rename(&part_path, &local_path);
+        }
+    }
+
+    // Capture resume_from before creating the task (used later by get_download_status).
+    let resume_from = local_path.metadata().ok().map(|m| m.len()).unwrap_or(0);
+
+    // Initialize bytes_downloaded to existing file size so progress bar reflects
+    // previously downloaded data instead of jumping from zero.
+    let bytes_downloaded = Arc::new(AtomicU64::new(resume_from));
     let total_bytes = Arc::new(AtomicU64::new(0));
     let cancel = Arc::new(Notify::new());
 
@@ -211,18 +243,24 @@ pub fn start_download(
         status: "running".into(),
         message: "Starting download...".into(),
         start_time: std::time::Instant::now(),
+        last_accessed: std::time::Instant::now(),
         local_path: local_path.clone(),
         repo_id: repo_id_owned.clone(),
         file_path: file_path_owned.clone(),
         bytes_downloaded: bytes_downloaded.clone(),
         total_bytes: total_bytes.clone(),
+        resume_from,
         cancel: cancel.clone(),
     }));
 
     {
-        let mut mgr = MODEL_DOWNLOAD_MANAGER
-            .lock()
-            .expect("MODEL_DOWNLOAD_MANAGER lock poisoned");
+        let mut mgr = match MODEL_DOWNLOAD_MANAGER.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                eprintln!("[error] start_download: manager lock poisoned on insert; recovering");
+                poisoned.into_inner()
+            }
+        };
         mgr.tasks.insert(download_id.clone(), task.clone());
     }
 
@@ -267,6 +305,19 @@ async fn run_download(
     total_atom: Arc<AtomicU64>,
     cancel: Arc<Notify>,
 ) {
+    // Read resume_from from the task (pre-computed by start_download).
+    let resume_from = match task.lock() {
+        Ok(guard) => guard.resume_from,
+        Err(poisoned) => {
+            eprintln!(
+                "[error] download: task lock poisoned on resume_from read for {}",
+                file_path
+            );
+            let guard = poisoned.into_inner();
+            guard.resume_from
+        }
+    };
+
     // Resolve the HF download URL via hf-hub.
     let api = match ApiBuilder::new().with_token(hf_token.clone()).build() {
         Ok(a) => a,
@@ -287,13 +338,10 @@ async fn run_download(
         return;
     }
 
-    // Determine resume offset from any existing partial file.
-    let resume_from = local_path.metadata().ok().map(|m| m.len()).unwrap_or(0);
-
-    // Build the HTTP request — use connect_timeout only; no total timeout so large
-    // files can stream for as long as needed without being killed mid-transfer.
+    // Build the HTTP request.
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(30))
+        .tcp_keepalive(std::time::Duration::from_secs(60))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
     let mut req = client.get(&url);
@@ -319,8 +367,50 @@ async fn run_download(
     }
 
     // Populate total_bytes from Content-Length so the status endpoint can compute ETA.
-    let total_expected = if let Some(cl) = resp.content_length() {
-        let total = resume_from.saturating_add(cl);
+    let content_length = resp.content_length();
+
+    // When resuming, perform a basic sanity check to avoid corrupting the file
+    // if the server-side content changed or our partial is invalid.
+    if resume_from > 0 {
+        // Ensure partial file actually exists and matches our expected size.
+        match local_path.metadata() {
+            Ok(meta) if meta.len() == resume_from => { /* OK */ }
+            Ok(meta) => {
+                eprintln!(
+                    "[warn] download: partial size mismatch (have={}, expected={}); restarting",
+                    meta.len(),
+                    resume_from
+                );
+                let _ = tokio::fs::remove_file(&local_path).await;
+                // Restart fresh (resume_from becomes 0).
+                std::mem::drop(bytes_atom.clone());
+                bytes_atom.store(0, Ordering::Relaxed);
+            }
+            Err(e) => {
+                eprintln!(
+                    "[warn] download: cannot read partial metadata: {}; restarting",
+                    e
+                );
+                bytes_atom.store(0, Ordering::Relaxed);
+            }
+        }
+    }
+
+    // Recompute resume_from if we restarted above.
+    let resume_from = bytes_atom.load(Ordering::Relaxed);
+
+    let total_expected = if let Some(cl) = content_length {
+        // If we are resuming but server reports no remaining bytes, restart fresh.
+        if resume_from > 0 && cl == 0 {
+            eprintln!(
+                "[warn] download: server reports 0 remaining bytes while resuming; restarting"
+            );
+            let _ = tokio::fs::remove_file(&local_path).await;
+            bytes_atom.store(0, Ordering::Relaxed);
+            // We'll re-request without Range after adjusting.
+        }
+        let final_resume = bytes_atom.load(Ordering::Relaxed);
+        let total = final_resume.saturating_add(cl);
         total_atom.store(total, Ordering::Relaxed);
         total
     } else {
@@ -372,16 +462,36 @@ async fn run_download(
     let stream_start = std::time::Instant::now();
     let mut last_render: Option<std::time::Instant> = None; // None → render on first chunk
 
+    // Idle timeout: kill the download if no data received for 120 seconds.
+    let mut idle_timeout_after = std::time::Instant::now();
+
     // Pin the cancel future once so `notify_one()` is never lost between iterations.
     let cancel_signal = cancel.notified();
     tokio::pin!(cancel_signal);
 
     loop {
+        // Idle-timeout future: fires once after 120s of no data.
+        let idle_deadline = idle_timeout_after
+            .checked_add(std::time::Duration::from_secs(120))
+            .unwrap_or_else(|| std::time::Instant::now() + std::time::Duration::from_secs(120));
+        let idle_sleep_dur = idle_deadline.saturating_duration_since(std::time::Instant::now());
+        let idle_future = tokio::time::sleep(idle_sleep_dur);
+
         let chunk = tokio::select! {
             biased;
             _ = &mut cancel_signal => {
                 // cancel_download() already updated status/message; just stop.
-                if is_tty { eprintln!(); } // leave progress bar line
+                if is_tty { eprintln!(); }
+                // Rename any partial file so it is not mistaken for complete.
+                if local_path.exists() {
+                    let part_path = local_path.with_extension("part");
+                    let _ = std::fs::rename(&local_path, &part_path);
+                }
+                return;
+            }
+            _ = idle_future => {
+                if is_tty { eprint!("\r\x1b[K"); }
+                set_failed(&task, "Idle timeout: no data for 120 seconds. You can retry to resume.".into());
                 return;
             }
             chunk = stream.next() => chunk,
@@ -389,6 +499,8 @@ async fn run_download(
 
         match chunk {
             Some(Ok(data)) => {
+                idle_timeout_after = std::time::Instant::now();
+
                 if let Err(e) = file.write_all(&data).await {
                     if is_tty {
                         eprint!("\r\x1b[K");
@@ -446,7 +558,13 @@ async fn run_download(
         }
     }
 
-    let mut t = task.lock().expect("DownloadTask lock poisoned");
+    let mut t = match task.lock() {
+        Ok(g) => g,
+        Err(poisoned) => {
+            eprintln!("[error] run_download: lock poisoned on completion; recovering");
+            poisoned.into_inner()
+        }
+    };
     t.status = "completed".into();
     t.message = "Download completed.".into();
     if is_tty {
@@ -472,8 +590,34 @@ async fn run_download(
     }
 }
 
+fn is_transient_error(msg: &str) -> bool {
+    let s = msg.to_ascii_lowercase();
+    s.contains("connection dropped")
+        || s.contains("timed out")
+        || s.contains("idle timeout")
+        || s.contains("connection reset")
+        || s.contains("eof while reading")
+        || s.contains("broken pipe")
+        || s.contains("write error")
+}
+
 fn set_failed(task: &Arc<Mutex<DownloadTask>>, msg: String) {
-    let mut t = task.lock().expect("DownloadTask lock poisoned");
+    use std::sync::atomic::Ordering;
+    let now = std::time::SystemTime::UNIX_EPOCH
+        .elapsed()
+        .unwrap_or_default()
+        .as_secs();
+    MODEL_DOWNLOAD_LAST_FAILED.store(now, Ordering::Relaxed);
+
+    let is_transient = is_transient_error(&msg);
+
+    let mut t = match task.lock() {
+        Ok(g) => g,
+        Err(poisoned) => {
+            eprintln!("[error] set_failed: lock poisoned; recovering");
+            poisoned.into_inner()
+        }
+    };
     // Don't overwrite a cancel that raced us here.
     if t.status != "cancelled" {
         // Clear any in-progress progress bar line before printing the error.
@@ -488,10 +632,13 @@ fn set_failed(task: &Arc<Mutex<DownloadTask>>, msg: String) {
         t.message = msg;
     }
 
-    // Rename partial file to .part so it is not mistaken for a complete download.
-    // The partial can be resumed later if the error looks transient.
     let path = t.local_path.clone();
-    if path.exists() {
+    if !path.exists() {
+        return;
+    }
+
+    if is_transient {
+        // Rename to .part so it can be resumed later.
         let part_path = path.with_extension("part");
         eprintln!(
             "[warn] renaming partial download  from={}  to={}",
@@ -499,6 +646,13 @@ fn set_failed(task: &Arc<Mutex<DownloadTask>>, msg: String) {
             part_path.display()
         );
         let _ = std::fs::rename(&path, &part_path);
+    } else {
+        // Non-retryable: remove partial to avoid stale garbage.
+        eprintln!(
+            "[info] removing partial download (non-retryable)  path={}",
+            path.display()
+        );
+        let _ = std::fs::remove_file(&path);
     }
 }
 
@@ -535,18 +689,51 @@ fn classify_stream_error(err: &reqwest::Error) -> String {
 }
 
 pub fn get_download_status(download_id: &str) -> Option<DownloadStatus> {
-    let mgr = MODEL_DOWNLOAD_MANAGER
-        .lock()
-        .expect("MODEL_DOWNLOAD_MANAGER lock poisoned");
+    let mgr = match MODEL_DOWNLOAD_MANAGER.lock() {
+        Ok(g) => g,
+        Err(_poisoned) => {
+            eprintln!("[error] get_download_status: manager lock poisoned; recovering");
+            return Some(DownloadStatus {
+                download_id: download_id.to_string(),
+                status: "failed".into(),
+                bytes_downloaded: 0,
+                total_bytes: 0,
+                speed: 0.0,
+                eta: 0,
+                message: "Internal error: lock poisoned".into(),
+                local_path: String::new(),
+            });
+        }
+    };
     let task = mgr.tasks.get(download_id)?;
-    let t = task.lock().expect("DownloadTask lock poisoned");
+    let mut t = match task.lock() {
+        Ok(g) => g,
+        Err(poisoned) => {
+            eprintln!("[error] get_download_status: task lock poisoned for {download_id}");
+            let inner = poisoned.into_inner();
+            return Some(DownloadStatus {
+                download_id: download_id.to_string(),
+                status: "failed".into(),
+                bytes_downloaded: 0,
+                total_bytes: 0,
+                speed: 0.0,
+                eta: 0,
+                message: format!("Internal error: lock poisoned (was {})", inner.message),
+                local_path: inner.local_path.to_string_lossy().into_owned(),
+            });
+        }
+    };
+    // Update last_accessed so evict_stale does not remove tasks being actively polled.
+    t.last_accessed = std::time::Instant::now();
 
     let bytes = t.bytes_downloaded.load(Ordering::Relaxed);
     let total = t.total_bytes.load(Ordering::Relaxed);
     let elapsed = t.start_time.elapsed().as_secs_f64();
 
-    let speed = if elapsed > 0.0 {
-        bytes as f64 / elapsed
+    // Use only bytes transferred since session start for speed, not total bytes.
+    let bytes_transferred = bytes.saturating_sub(t.resume_from) as f64;
+    let speed = if elapsed > 0.1 {
+        bytes_transferred / elapsed
     } else {
         0.0
     };
@@ -633,11 +820,21 @@ fn render_progress(file_path: &str, written: u64, total: u64, bps: f64) -> Strin
 /// Mark a download as cancelled and signal the streaming loop to stop.
 /// Returns false if the download is not found or already finished.
 pub fn cancel_download(download_id: &str) -> bool {
-    let mgr = MODEL_DOWNLOAD_MANAGER
-        .lock()
-        .expect("MODEL_DOWNLOAD_MANAGER lock poisoned");
+    let mgr = match MODEL_DOWNLOAD_MANAGER.lock() {
+        Ok(g) => g,
+        Err(_poisoned) => {
+            eprintln!("[error] cancel_download: manager lock poisoned");
+            return false;
+        }
+    };
     if let Some(task) = mgr.tasks.get(download_id) {
-        let mut t = task.lock().expect("DownloadTask lock poisoned");
+        let mut t = match task.lock() {
+            Ok(g) => g,
+            Err(_poisoned) => {
+                eprintln!("[error] cancel_download: task lock poisoned for {download_id}");
+                return false;
+            }
+        };
         if t.status == "running" {
             t.status = "cancelled".into();
             t.message = "Cancelled by user.".into();
