@@ -320,6 +320,14 @@ export function initSpawnWizard() {
       panelEl: dlPanel,
     });
     _dlCurrentId = null;
+    // Also cancel companion mmproj download if running.
+    if (_mmprojCompanionId) {
+      hfCancelDownload({
+        downloadId: _mmprojCompanionId,
+        panelEl: dlPanel,
+      });
+      _mmprojCompanionId = null;
+    }
   });
 
   document.getElementById('hf-dlp-open-settings')?.addEventListener('click', () => {

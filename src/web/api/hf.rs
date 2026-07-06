@@ -720,22 +720,33 @@ fn api_hf_download(
 
                 // Cooldown between starts: 10 seconds. Companion downloads (e.g.
                 // mmproj alongside a model) are exempt so both can start together.
+                // If the previous download failed, allow immediate retry (no cooldown).
                 if !companion {
                     let now = std::time::SystemTime::UNIX_EPOCH
                         .elapsed()
                         .unwrap_or_default()
                         .as_secs();
-                    let (dl_ok, _) = try_cooldown(&HF_DOWNLOAD_LAST_START, now, 10);
-                    if !dl_ok {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::with_status(
-                                warp::reply::json(&serde_json::json!({
-                                    "ok": false,
-                                    "error": "Too soon; please wait 10 seconds between downloads."
-                                })),
-                                StatusCode::TOO_MANY_REQUESTS,
-                            ),
-                        ));
+
+                    // Skip cooldown if the previous download failed (same or different file).
+                    use std::sync::atomic::Ordering;
+                    let last_failed = crate::model_download::MODEL_DOWNLOAD_LAST_FAILED
+                        .load(Ordering::Relaxed);
+                    let cooldown_ok = last_failed > 0
+                        && now.saturating_sub(last_failed) < 60;
+
+                    if !cooldown_ok {
+                        let (dl_ok, _) = try_cooldown(&HF_DOWNLOAD_LAST_START, now, 10);
+                        if !dl_ok {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({
+                                        "ok": false,
+                                        "error": "Too soon; please wait 10 seconds between downloads."
+                                    })),
+                                    StatusCode::TOO_MANY_REQUESTS,
+                                ),
+                            ));
+                        }
                     }
                 }
 

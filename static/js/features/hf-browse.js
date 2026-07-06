@@ -604,20 +604,38 @@ export function hfPollDownload(downloadId, panelEl, { onComplete, onValidationEr
   _dlCancelPoll(panelEl);
 
   const headers = getAuthHeaders();
+  let consecutiveErrors = 0;
+  const maxConsecutiveErrors = 5;
 
   async function poll() {
     try {
       const res = await fetch(`/api/models/download/${downloadId}/status`, { headers });
       if (!res.ok) {
+        consecutiveErrors++;
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          _dlCancelPoll(panelEl);
+          _dlSetState(panelEl, 'idle');
+          if (onValidationError) onValidationError('Unable to check download status. It may have failed or been cancelled.');
+          return;
+        }
         _dlSchedulePoll(panelEl, poll, 1000);
         return;
       }
       const data = await res.json();
       const s = data.status;
       if (!s) {
+        consecutiveErrors++;
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          _dlCancelPoll(panelEl);
+          _dlSetState(panelEl, 'idle');
+          if (onValidationError) onValidationError('Unable to check download status. It may have failed or been cancelled.');
+          return;
+        }
         _dlSchedulePoll(panelEl, poll, 1000);
         return;
       }
+
+      consecutiveErrors = 0;
 
       const { status, bytes_downloaded = 0, total_bytes = 0, speed = 0, eta = 0 } = s;
       const pct = total_bytes > 0 ? Math.round(bytes_downloaded / total_bytes * 100) : 0;
@@ -651,15 +669,15 @@ export function hfPollDownload(downloadId, panelEl, { onComplete, onValidationEr
         _dlCancelPoll(panelEl);
         _dlSetState(panelEl, 'idle');
         const reason = s.message || 'Download failed.';
-        // Extract short name from status or file path
         const shortName = data.status?.local_path
             ? (data.status.local_path.split('/').pop() || reason)
             : null;
-        // Show a toast if the failure looks transient or network-related
-        if (reason.toLowerCase().includes('connection') ||
+        const retryable = reason.toLowerCase().includes('connection') ||
             reason.toLowerCase().includes('timed out') ||
-            reason.toLowerCase().includes('error')) {
-            showToast('Download failed: ' + (shortName ? shortName + ' — ' : '') + reason + ' You can retry.', 'error');
+            reason.toLowerCase().includes('retry') ||
+            reason.toLowerCase().includes('error');
+        if (retryable) {
+          showToast('Download failed: ' + (shortName ? shortName + ' — ' : '') + reason + ' You can retry.', 'error');
         }
         if (onValidationError) onValidationError(reason);
         return;
@@ -669,7 +687,15 @@ export function hfPollDownload(downloadId, panelEl, { onComplete, onValidationEr
         _dlSetState(panelEl, 'idle');
         return;
       }
-    } catch { /* network glitch — keep polling */ }
+    } catch {
+      consecutiveErrors++;
+      if (consecutiveErrors >= maxConsecutiveErrors) {
+        _dlCancelPoll(panelEl);
+        _dlSetState(panelEl, 'idle');
+        if (onValidationError) onValidationError('Lost connection while checking download status.');
+        return;
+      }
+    }
     _dlSchedulePoll(panelEl, poll, 1000);
   }
 
