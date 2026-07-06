@@ -143,6 +143,7 @@ Write as if feature always existed.
 - CI triggers: PR has `ready-to-test` label, dependabot, or `static/**`/`tests/ui/**` changes.
 - PR title: must be conventional commit format.
 - Releases: release-please on `feat:`/`fix:` merged to `main`.
+- NEVER add the `ready-to-test` label to a PR. This label is only set by the human.
 
 ## Security (MANDATORY — Summary)
 
