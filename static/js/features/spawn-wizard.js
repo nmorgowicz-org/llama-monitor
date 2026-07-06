@@ -3270,9 +3270,12 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       const checkBtn = document.createElement('button');
       checkBtn.type = 'button';
       checkBtn.className = 'btn-wizard-tertiary';
-      checkBtn.style.fontSize = '10px';
+      checkBtn.style.fontSize = '11px';
+      checkBtn.style.fontWeight = '700';
       checkBtn.style.marginLeft = '6px';
-      checkBtn.style.padding = '1px 6px';
+      checkBtn.style.padding = '2px 8px';
+      checkBtn.style.color = 'var(--color-accent)';
+      checkBtn.style.textDecoration = 'underline';
       checkBtn.textContent = 'Check for updates';
       checkBtn.addEventListener('click', async () => {
         const path = data?.path;
@@ -3290,7 +3293,7 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
             body: JSON.stringify({ path }),
           });
           const result = resp.ok ? await resp.json() : { ok: false };
-          if (resp.ok && result.ok !== undefined) {
+          if (resp.ok && result.ok === true) {
             if (result.changed) {
               showToast('Upstream template has changed since this install', 'warn',
                 'Use Recommended to re-download the latest version', 6000);

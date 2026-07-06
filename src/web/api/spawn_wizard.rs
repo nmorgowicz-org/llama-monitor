@@ -837,7 +837,7 @@ fn api_chat_template_check_update(
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::json(&serde_json::json!({
                                 "ok": false,
-                                "error": "No install metadata found for this template"
+                                "error": "No update history for this install (predates update tracking). Use \"Use Recommended\" to reinstall and enable checks."
                             })),
                         ));
                     }
