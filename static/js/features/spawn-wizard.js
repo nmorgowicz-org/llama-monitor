@@ -2981,7 +2981,7 @@ async function detectModelFamilyAsync(identityName, localPath, timeoutMs) {
   return detectModelFamily(identityName || localPath || '');
 }
 
-async function autoInstallChatTemplate() {
+async function autoInstallChatTemplate(force = false) {
   const { source, path, hfRepo } = wizardState.model;
   const identityName = source === 'hf' ? hfRepo : path;
 
@@ -3034,8 +3034,8 @@ async function autoInstallChatTemplate() {
     return;
   }
 
-  // Cache hit: template already installed for this family
-  const cached = _installedTemplateCache[tplForFamily.name];
+  // Cache hit: template already installed for this family (skip when forcing a re-fetch)
+  const cached = !force && _installedTemplateCache[tplForFamily.name];
   if (cached) {
     wizardState.model.chatTemplatePath = cached.path;
     wizardState.model.chatTemplateMode = 'auto';
@@ -3049,7 +3049,7 @@ async function autoInstallChatTemplate() {
     const headers = window.authHeaders
       ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
       : { 'Content-Type': 'application/json' };
-    const install = buildCommunityTemplateInstallRequest(tplForFamily);
+    const install = buildCommunityTemplateInstallRequest(tplForFamily, force);
     const resp = await fetch(install.endpoint, {
       method: 'POST', headers,
       body: JSON.stringify(install.body),
@@ -3088,11 +3088,20 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       recommendedBtn.className = 'btn-wizard-tertiary ct-action-btn';
       const isUsing = wizardState.model.chatTemplateMode === 'auto';
       const familyLabel = family ? ` (${family} family)` : '';
-      recommendedBtn.textContent = isUsing ? `Using Recommended${familyLabel}` : `Use ${tpl.display}${familyLabel}`;
-      recommendedBtn.disabled = wizardState.model.chatTemplateMode === 'auto';
+      recommendedBtn.textContent = isUsing
+        ? `Re-fetch Recommended${familyLabel}`
+        : `Use ${tpl.display}${familyLabel}`;
+      recommendedBtn.title = isUsing
+        ? 'Force re-download this template from source, even if already installed'
+        : '';
       recommendedBtn.addEventListener('click', async () => {
+        // If already on this template, treat the click as an explicit force
+        // re-fetch (bypasses both the session cache and the on-disk shortcut) —
+        // this is the only way to pick up upstream changes when "Check for
+        // updates" isn't available or reports a false negative.
+        const wasUsing = wizardState.model.chatTemplateMode === 'auto';
         wizardState.model.chatTemplateMode = 'auto';
-        await autoInstallChatTemplate();
+        await autoInstallChatTemplate(wasUsing);
       });
       actionsEl.appendChild(recommendedBtn);
     }
