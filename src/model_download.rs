@@ -92,6 +92,7 @@ struct DownloadTask {
     status: String,
     message: String,
     start_time: std::time::Instant,
+    last_accessed: std::time::Instant,
     /// Absolute path on disk where the file is/will be written.
     local_path: std::path::PathBuf,
     /// Source repo and file path (for duplicate detection).
@@ -119,13 +120,20 @@ impl DownloadManager {
     }
 
     /// Evict completed/failed/cancelled tasks older than 1 hour.
-    /// Called on every new download start so the map doesn't grow unbounded.
+    /// Also keep tasks that have been accessed (status read) within the last 5 minutes
+    /// to avoid race with frontend polling.
     fn evict_stale(&mut self) {
-        let cutoff = std::time::Instant::now() - std::time::Duration::from_secs(3600);
+        let now = std::time::Instant::now();
+        let stale_cutoff = now - std::time::Duration::from_secs(3600);
+        let active_cutoff = now - std::time::Duration::from_secs(300); // 5 minutes
         self.tasks.retain(|_, task| {
             if let Ok(t) = task.lock() {
                 let terminal = matches!(t.status.as_str(), "completed" | "failed" | "cancelled");
-                !(terminal && t.start_time < cutoff)
+                let recently_accessed = t.last_accessed >= active_cutoff;
+                if terminal && !recently_accessed && t.start_time < stale_cutoff {
+                    return false; // evict
+                }
+                true
             } else {
                 false
             }
@@ -235,6 +243,7 @@ pub fn start_download(
         status: "running".into(),
         message: "Starting download...".into(),
         start_time: std::time::Instant::now(),
+        last_accessed: std::time::Instant::now(),
         local_path: local_path.clone(),
         repo_id: repo_id_owned.clone(),
         file_path: file_path_owned.clone(),
@@ -245,7 +254,13 @@ pub fn start_download(
     }));
 
     {
-        let mut mgr = MODEL_DOWNLOAD_MANAGER.lock().expect("MODEL_DOWNLOAD_MANAGER lock poisoned");
+        let mut mgr = match MODEL_DOWNLOAD_MANAGER.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                eprintln!("[error] start_download: manager lock poisoned on insert; recovering");
+                poisoned.into_inner()
+            }
+        };
         mgr.tasks.insert(download_id.clone(), task.clone());
     }
 
@@ -352,8 +367,50 @@ async fn run_download(
     }
 
     // Populate total_bytes from Content-Length so the status endpoint can compute ETA.
-    let total_expected = if let Some(cl) = resp.content_length() {
-        let total = resume_from.saturating_add(cl);
+    let content_length = resp.content_length();
+
+    // When resuming, perform a basic sanity check to avoid corrupting the file
+    // if the server-side content changed or our partial is invalid.
+    if resume_from > 0 {
+        // Ensure partial file actually exists and matches our expected size.
+        match local_path.metadata() {
+            Ok(meta) if meta.len() == resume_from => { /* OK */ }
+            Ok(meta) => {
+                eprintln!(
+                    "[warn] download: partial size mismatch (have={}, expected={}); restarting",
+                    meta.len(),
+                    resume_from
+                );
+                let _ = tokio::fs::remove_file(&local_path).await;
+                // Restart fresh (resume_from becomes 0).
+                std::mem::drop(bytes_atom.clone());
+                bytes_atom.store(0, Ordering::Relaxed);
+            }
+            Err(e) => {
+                eprintln!(
+                    "[warn] download: cannot read partial metadata: {}; restarting",
+                    e
+                );
+                bytes_atom.store(0, Ordering::Relaxed);
+            }
+        }
+    }
+
+    // Recompute resume_from if we restarted above.
+    let resume_from = bytes_atom.load(Ordering::Relaxed);
+
+    let total_expected = if let Some(cl) = content_length {
+        // If we are resuming but server reports no remaining bytes, restart fresh.
+        if resume_from > 0 && cl == 0 {
+            eprintln!(
+                "[warn] download: server reports 0 remaining bytes while resuming; restarting"
+            );
+            let _ = tokio::fs::remove_file(&local_path).await;
+            bytes_atom.store(0, Ordering::Relaxed);
+            // We'll re-request without Range after adjusting.
+        }
+        let final_resume = bytes_atom.load(Ordering::Relaxed);
+        let total = final_resume.saturating_add(cl);
         total_atom.store(total, Ordering::Relaxed);
         total
     } else {
@@ -650,7 +707,7 @@ pub fn get_download_status(download_id: &str) -> Option<DownloadStatus> {
         }
     };
     let task = mgr.tasks.get(download_id)?;
-    let t = match task.lock() {
+    let mut t = match task.lock() {
         Ok(g) => g,
         Err(poisoned) => {
             eprintln!("[error] get_download_status: task lock poisoned for {download_id}");
@@ -667,6 +724,8 @@ pub fn get_download_status(download_id: &str) -> Option<DownloadStatus> {
             });
         }
     };
+    // Update last_accessed so evict_stale does not remove tasks being actively polled.
+    t.last_accessed = std::time::Instant::now();
 
     let bytes = t.bytes_downloaded.load(Ordering::Relaxed);
     let total = t.total_bytes.load(Ordering::Relaxed);

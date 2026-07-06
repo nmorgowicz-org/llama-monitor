@@ -477,6 +477,7 @@ export async function hfStartDownload({
   onComplete,
   onValidationError,
   onClearValidationError,
+  companionId,
 }) {
   if (!repoId || !filePath) {
     if (onValidationError) onValidationError('Select a GGUF file first.');
@@ -518,7 +519,7 @@ export async function hfStartDownload({
     const fileEl = panelEl.querySelector('#hf-dlp-progress-file');
     if (fileEl) fileEl.textContent = shortName;
     _dlSetState(panelEl, 'progress');
-    hfPollDownload(downloadId, panelEl, { onComplete, onValidationError, onClearValidationError });
+    hfPollDownload(downloadId, panelEl, { onComplete, onValidationError, onClearValidationError, companionId });
     return data;
   } catch (err) {
     if (btn) {
@@ -599,13 +600,37 @@ export async function hfStartCompanionDownload({ repoId, filePath, saveAs }) {
 // Poll download status and update progress in panelEl.
 // Caller owns state updates via onComplete/onValidationError.
 
-export function hfPollDownload(downloadId, panelEl, { onComplete, onValidationError, onClearValidationError }) {
+export function hfPollDownload(downloadId, panelEl, { onComplete, onValidationError, onClearValidationError, companionId }) {
   if (!panelEl) return;
   _dlCancelPoll(panelEl);
 
   const headers = getAuthHeaders();
   let consecutiveErrors = 0;
   const maxConsecutiveErrors = 5;
+  let companionResolved = !companionId;
+
+  async function checkCompanion() {
+    if (!companionId || companionResolved) return;
+    try {
+      const cRes = await fetch(`/api/models/download/${companionId}/status`, { headers });
+      if (!cRes.ok) return;
+      const cData = await cRes.json().catch(() => ({}));
+      const cStatus = cData?.status?.status || cData?.status;
+      if (!cStatus) return;
+      const { status: cStatusVal, message: cMessage } = cStatus;
+      companionResolved = true;
+
+      if (cStatusVal === 'completed') {
+        const cName = (cStatus.local_path || '').split('/').pop() || 'mmproj';
+        showToast('Also downloaded: ' + cName, 'info');
+      } else if (cStatusVal === 'failed' || cStatusVal === 'cancelled') {
+        const reason = cMessage || 'Companion download failed.';
+        showToast('mmproj download issue: ' + reason, 'error');
+      }
+    } catch {
+      // non-fatal
+    }
+  }
 
   async function poll() {
     try {
@@ -655,6 +680,11 @@ export function hfPollDownload(downloadId, panelEl, { onComplete, onValidationEr
           ? ` \u00b7 ETA ${eta < 60 ? eta + 's' : Math.round(eta / 60) + 'm'}`
           : '';
         statsEl.textContent = `${mb} MB${tot}${spd}${etaStr}`;
+      }
+
+      // Also check companion status while main is running
+      if (status === 'running' && companionId && !companionResolved) {
+        checkCompanion();
       }
 
       if (status === 'completed') {

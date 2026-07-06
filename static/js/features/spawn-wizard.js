@@ -289,25 +289,31 @@ export function initSpawnWizard() {
   document.getElementById('hf-dlp-download-btn')?.addEventListener('click', () => {
     const { hfRepo, hfFile, mmprojHfFile, mmprojHfRepo } = wizardState.model;
     if (!hfRepo || !hfFile) return;
-    hfStartDownload({
-      repoId: hfRepo,
-      filePath: hfFile,
-      panelEl: dlPanel,
-      onComplete: (downloadId, localPath) => {
-        onHfDownloadComplete(downloadId, localPath);
-      },
-      onValidationError: (msg) => {
-        showValidationError(msg);
-      },
-      onClearValidationError: () => {
-        clearValidationError();
-      },
-    });
 
     // Companion mmproj download (bypasses cooldown)
     if (mmprojHfFile) {
       _startCompanionMmprojDownload(mmprojHfRepo || hfRepo, mmprojHfFile, hfFile);
     }
+
+    hfStartDownload({
+      repoId: hfRepo,
+      filePath: hfFile,
+      panelEl: dlPanel,
+      companionId: _mmprojCompanionId || null,
+      onComplete: (downloadId, localPath) => {
+        onHfDownloadComplete(downloadId, localPath);
+      },
+      onValidationError: (msg) => {
+        showValidationError(msg);
+        // If main failed but companion already exists, associate it so retry is not blocked.
+        if (_mmprojCompanionLocalPath) {
+          _maybeAssociateCompanionOnMainFailure(_mmprojCompanionLocalPath);
+        }
+      },
+      onClearValidationError: () => {
+        clearValidationError();
+      },
+    });
   });
 
   document.getElementById('hf-dlp-use-hf-btn')?.addEventListener('click', () => {
@@ -1846,6 +1852,35 @@ async function _startCompanionMmprojDownload(repo, mmprojHfPath, modelHfPath) {
       _mmprojCompanionLocalPath = data.local_path;
     }
   } catch { /* companion download failure is non-fatal */ }
+}
+
+// If the main GGUF download failed but the companion mmproj already exists on disk,
+// associate it into wizardState so that retrying the main download is not blocked.
+async function _maybeAssociateCompanionOnMainFailure(mmprojLocalPath) {
+  if (!mmprojLocalPath) return;
+
+  // Check if companion is completed via the backend
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const res = await fetch(`/api/models/download/${_mmprojCompanionId || ''}/status`, { headers });
+    if (!res.ok) return;
+    const data = await res.json().catch(() => ({}));
+    const s = data?.status?.status || data?.status;
+    if (s?.status !== 'completed') return;
+  } catch {
+    return;
+  }
+
+  // Associate into wizardState.
+  if (!wizardState.model.mmprojPath) {
+    const mmprojName = mmprojLocalPath.split(/[\\/]/).pop() || mmprojLocalPath;
+    wizardState.model.mmprojPath = mmprojLocalPath;
+    wizardState.model.mmprojFiles = [{
+      path: mmprojLocalPath, name: mmprojName,
+      size: wizardState.arch.mmprojBytes || 0, is_mmproj: true,
+    }];
+    renderMmprojSection?.();
+  }
 }
 
 // Wrapper for hfSearch used by wizard (wires callbacks)
