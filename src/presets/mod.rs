@@ -198,6 +198,8 @@ pub struct ModelPreset {
     #[serde(default)]
     pub preserve_thinking: Option<bool>,
     #[serde(default)]
+    pub tool_call_format: Option<String>,
+    #[serde(default)]
     pub reasoning: Option<String>,
     #[serde(default)]
     pub reasoning_budget: Option<i32>,
@@ -615,6 +617,7 @@ mod tests {
             reasoning_budget_message: Some("\nFinal Answer:".into()),
             enable_thinking: Some(true),
             preserve_thinking: Some(true),
+            tool_call_format: Some("json".into()),
             presence_penalty: Some(1.5),
             ..Default::default()
         };
@@ -628,6 +631,7 @@ mod tests {
         );
         assert_eq!(decoded.enable_thinking, Some(true));
         assert_eq!(decoded.preserve_thinking, Some(true));
+        assert_eq!(decoded.tool_call_format.as_deref(), Some("json"));
         assert_eq!(decoded.presence_penalty, Some(1.5));
     }
 

@@ -213,6 +213,9 @@ pub struct ServerConfig {
     pub enable_thinking: Option<bool>,
     #[serde(default)]
     pub preserve_thinking: Option<bool>,
+    /// --chat-template-kwargs {"tool_call_format": ...}
+    #[serde(default)]
+    pub tool_call_format: Option<String>,
     /// --reasoning on|off|auto
     #[serde(default)]
     pub reasoning: Option<String>,
@@ -693,6 +696,11 @@ pub async fn start_server(
         }
         if let Some(pt) = config.preserve_thinking {
             kwargs.insert("preserve_thinking".into(), serde_json::json!(pt));
+        }
+        if let Some(ref tcf) = config.tool_call_format
+            && !tcf.is_empty()
+        {
+            kwargs.insert("tool_call_format".into(), serde_json::json!(tcf));
         }
         if !kwargs.is_empty() {
             let json = serde_json::to_string(&kwargs).unwrap_or_default();

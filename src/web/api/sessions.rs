@@ -745,6 +745,7 @@ fn api_spawn_session_with_preset(
                     benchmark_mode: preset.benchmark_mode,
                     enable_thinking: preset.enable_thinking,
                     preserve_thinking: preset.preserve_thinking,
+                    tool_call_format: preset.tool_call_format.clone(),
                     reasoning: preset.reasoning.clone(),
                     reasoning_budget: preset.reasoning_budget,
                     reasoning_budget_message: preset.reasoning_budget_message.clone(),

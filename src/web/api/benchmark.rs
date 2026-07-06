@@ -337,6 +337,7 @@ fn api_model_defaults(
                         "max_tokens": defaults.max_tokens,
                         "enable_thinking": defaults.enable_thinking,
                         "preserve_thinking": defaults.preserve_thinking,
+                        "tool_call_format": defaults.tool_call_format,
                         "reasoning": defaults.reasoning,
                         "reasoning_budget": defaults.reasoning_budget,
                         "reasoning_budget_message": defaults.reasoning_budget_message,

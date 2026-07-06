@@ -7,6 +7,52 @@ use crate::state::AppState;
 
 use super::common::{ApiCtx, ApiRoute, check_api_token, unauthorized_api_token};
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ChatTemplateInstallMeta {
+    source_url: String,
+    fetch_url: String,
+    installed_at: String,
+    sha256: String,
+}
+
+fn template_meta_path(dest: &std::path::Path) -> std::path::PathBuf {
+    dest.with_extension("jinja.meta.json")
+}
+
+fn sha256_hex(content: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(content);
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>()
+}
+
+fn write_template_install_meta(
+    dest: &std::path::Path,
+    source_url: &str,
+    fetch_url: &str,
+    content: &[u8],
+) {
+    let meta = ChatTemplateInstallMeta {
+        source_url: source_url.to_string(),
+        fetch_url: fetch_url.to_string(),
+        installed_at: chrono::Utc::now().to_rfc3339(),
+        sha256: sha256_hex(content),
+    };
+    if let Ok(json) = serde_json::to_vec_pretty(&meta) {
+        let _ = std::fs::write(template_meta_path(dest), json);
+    }
+}
+
+fn read_template_install_meta(path: &std::path::Path) -> Option<ChatTemplateInstallMeta> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+}
+
 // 1) POST /api/spawn-wizard/mtp-draft-check
 fn api_spawn_wizard_mtp_draft_check(
     _state: AppState,
@@ -475,11 +521,16 @@ fn api_chat_template_install_hf(
 
                 // Return cached file if it already exists and force is not set
                 if dest.exists() && !force {
+                    let existing_meta = read_template_install_meta(&template_meta_path(&dest));
+                    let source_url = existing_meta.as_ref().map(|m| m.source_url.clone());
+                    let installed_at = existing_meta.as_ref().map(|m| m.installed_at.clone());
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
                             "ok": true,
                             "path": dest.to_string_lossy(),
-                            "already_existed": true
+                            "already_existed": true,
+                            "source_url": source_url,
+                            "installed_at": installed_at
                         })),
                     ));
                 }
@@ -541,6 +592,8 @@ fn api_chat_template_install_hf(
                     }
                 };
 
+                let source_url = format!("https://huggingface.co/{repo}/blob/main/{file}");
+
                 if let Some(parent) = dest.parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }
@@ -553,11 +606,14 @@ fn api_chat_template_install_hf(
                     ));
                 }
 
+                write_template_install_meta(&dest, &source_url, &url, content.as_bytes());
+
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
                         "ok": true,
                         "path": dest.to_string_lossy(),
-                        "already_existed": false
+                        "already_existed": false,
+                        "source_url": source_url
                     }),
                 )))
             }
@@ -641,11 +697,16 @@ fn api_chat_template_install_url(
                 };
 
                 if dest.exists() && !force {
+                    let existing_meta = read_template_install_meta(&template_meta_path(&dest));
+                    let source_url = existing_meta.as_ref().map(|m| m.source_url.clone());
+                    let installed_at = existing_meta.as_ref().map(|m| m.installed_at.clone());
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
                             "ok": true,
                             "path": dest.to_string_lossy(),
-                            "already_existed": true
+                            "already_existed": true,
+                            "source_url": source_url,
+                            "installed_at": installed_at
                         })),
                     ));
                 }
@@ -728,11 +789,125 @@ fn api_chat_template_install_url(
                     ));
                 }
 
+                write_template_install_meta(&dest, &source, &source, &content);
+
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
                         "ok": true,
                         "path": dest.to_string_lossy(),
-                        "already_existed": false
+                        "already_existed": false,
+                        "source_url": source
+                    }),
+                )))
+            }
+        })
+}
+
+// 8) POST /api/chat-template/check-update
+fn api_chat_template_check_update(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "check-update")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let path_str = body["path"].as_str().unwrap_or("").to_string();
+                if path_str.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Missing 'path' field in request body"
+                        })),
+                    ));
+                }
+
+                let path = std::path::Path::new(&path_str);
+                let meta_path = template_meta_path(path);
+                let meta = match read_template_install_meta(&meta_path) {
+                    Some(m) => m,
+                    None => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "No install metadata found for this template"
+                            })),
+                        ));
+                    }
+                };
+
+                let client = match reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(15))
+                    .user_agent("llama-monitor/1.0")
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("HTTP client error: {e}")
+                            })),
+                        ));
+                    }
+                };
+
+                let mut req = client.get(&meta.fetch_url);
+                if meta.fetch_url.contains("huggingface.co")
+                    && let Some(ref tok) = crate::hf::hf_load_token()
+                    && !tok.is_empty()
+                {
+                    req = req.header("Authorization", format!("Bearer {tok}"));
+                }
+
+                let new_sha = match req.send().await {
+                    Ok(resp) if resp.status().is_success() => match resp.bytes().await {
+                        Ok(bytes) => sha256_hex(&bytes),
+                        Err(e) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": format!("Failed to read response: {e}")
+                                })),
+                            ));
+                        }
+                    },
+                    Ok(resp) => {
+                        let status = resp.status().as_u16();
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("HTTP {status} from upstream")
+                            })),
+                        ));
+                    }
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Network error: {e}")
+                            })),
+                        ));
+                    }
+                };
+
+                let changed = new_sha != meta.sha256;
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "changed": changed,
+                        "installed_at": meta.installed_at,
+                        "source_url": meta.source_url,
+                        "installed_sha256": meta.sha256,
+                        "current_sha256": new_sha
                     }),
                 )))
             }
@@ -768,6 +943,13 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r
         .or(api_chat_template_install_url(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_chat_template_check_update(
+            state.clone(),
+            config.clone(),
+        ))
         .unify()
         .boxed();
     r

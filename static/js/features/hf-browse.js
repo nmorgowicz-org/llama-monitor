@@ -851,6 +851,13 @@ function _dlSetState(panelEl, state) {
     const el = panelEl.querySelector(`#hf-dlp-${s}`);
     if (el) el.style.display = s === state ? '' : 'none';
   });
+  if (state === 'idle') {
+    const btn = panelEl.querySelector('#hf-dlp-download-btn');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Download to models folder';
+    }
+  }
 }
 
 function _dlSchedulePoll(panelEl, fn, ms) {

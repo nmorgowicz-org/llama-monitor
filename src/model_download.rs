@@ -474,8 +474,7 @@ async fn run_download(
         let idle_deadline = idle_timeout_after
             .checked_add(std::time::Duration::from_secs(120))
             .unwrap_or_else(|| std::time::Instant::now() + std::time::Duration::from_secs(120));
-        let idle_sleep_dur = idle_deadline
-            .saturating_duration_since(std::time::Instant::now());
+        let idle_sleep_dur = idle_deadline.saturating_duration_since(std::time::Instant::now());
         let idle_future = tokio::time::sleep(idle_sleep_dur);
 
         let chunk = tokio::select! {

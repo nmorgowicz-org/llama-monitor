@@ -865,6 +865,12 @@ mod tests {
             Some("{}")
         ),
         (
+            route_chat_template_check_update,
+            "POST",
+            "/api/chat-template/check-update",
+            Some("{}")
+        ),
+        (
             route_vram_estimate,
             "POST",
             "/api/vram/estimate",

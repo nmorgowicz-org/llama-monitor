@@ -2562,8 +2562,9 @@
                                 <label class="pe-label" for="modal-chat-template-file" title="Path to a chat template file. Wizard-created presets can auto-install one for models that need a custom template.">Chat Template File (--chat-template-file)</label>
                                 <div class="pe-input-row">
                                     <input type="text" class="pe-input" id="modal-chat-template-file" placeholder="/path/to/chat_template.jinja">
-                                    <button type="button" class="btn-sm btn-preset" id="preset-recommended-chat-template-btn" title="Download the recommended community template for the selected Qwen or Gemma 4 model">Recommended</button>
-                                    <button type="button" class="btn-sm btn-preset" id="preset-browse-chat-template-btn" title="Choose an existing template from the local template library">Library</button>
+                                     <button type="button" class="btn-sm btn-preset" id="preset-recommended-chat-template-btn" title="Download the recommended community template for the selected Qwen or Gemma 4 model">Recommended</button>
+                                     <button type="button" class="btn-sm btn-preset" id="preset-check-chat-template-update-btn" title="Check whether the installed template has changed upstream since it was installed">Check for updates</button>
+                                     <button type="button" class="btn-sm btn-preset" id="preset-browse-chat-template-btn" title="Choose an existing template from the local template library">Library</button>
                                     <button type="button" class="btn-sm btn-preset" id="preset-upload-chat-template-btn" title="Upload a new Jinja template from your browser">Upload</button>
                                     <button type="button" class="btn-sm btn-preset" id="preset-clear-chat-template-btn" title="Clear chat template override and use the model default">Clear</button>
                                 </div>
@@ -2839,15 +2840,22 @@
                                      <label class="pe-label" for="modal-reasoning-budget" title="Maximum number of tokens the model can use for its reasoning steps before answering. Higher = more thorough thinking but slower. Default: 16384.">Reasoning Budget</label>
                                      <input type="number" class="pe-input" id="modal-reasoning-budget" step="1" placeholder="16384">
                                  </div>
-                                 <div class="pe-field">
-                                 <label class="pe-label" for="modal-reasoning-budget-message" title="Text that appears after the reasoning block and before the final answer. Use \n for a newline. Example: \nFinal Answer:">Reasoning Budget Message</label>
-                                  <input type="text" class="pe-input" id="modal-reasoning-budget-message" placeholder="\nFinal Answer:">
-                                 </div>
-                             </div>
-                        </div>
-                    </div>
+                                  <div class="pe-field">
+                                  <label class="pe-label" for="modal-reasoning-budget-message" title="Text that appears after the reasoning block and before the final answer. Use \n for a newline. Example: \nFinal Answer:">Reasoning Budget Message</label>
+                                   <input type="text" class="pe-input" id="modal-reasoning-budget-message" placeholder="\nFinal Answer:">
+                                  </div>
+                                  <div class="pe-field">
+                                      <label class="pe-label" for="modal-tool-call-format" title="Chat-template-level switch — only change if your template docs require JSON tool calls.">Tool Call Format</label>
+                                      <select class="pe-select" id="modal-tool-call-format">
+                                          <option value="">(default)</option>
+                                          <option value="json">json</option>
+                                      </select>
+                                  </div>
+                              </div>
+                         </div>
+                     </div>
 
-                    <!-- 5: GPU Distribution -->
+                     <!-- 5: GPU Distribution -->
                     <div class="preset-editor-section" data-section="gpu">
                         <div class="pe-section-header">
                             <span class="pe-section-accent" style="--accent: rgba(245,158,11,0.7)"></span>
@@ -4199,12 +4207,22 @@
                                  </div>
                              </div>
 
-                             <div class="field-hint hw-field-warning" style="margin-top:6px;">⚠ Leave on <strong>freeform</strong> unless you specifically need structured output. GBNF grammar and JSON schema will break normal chat behavior.</div>
-                         </div>
-                    </div>
+                              <div class="field-hint hw-field-warning" style="margin-top:6px;">⚠ Leave on <strong>freeform</strong> unless you specifically need structured output. GBNF grammar and JSON schema will break normal chat behavior.</div>
 
-                    <div class="sampling-params-section" style="margin-top:14px;">
-                        <div class="hw-section-divider">Network exposure</div>
+                              <div class="hw-row" style="margin-top:8px;">
+                                  <div class="hardware-field">
+                                      <label for="spawn-tool-call-format" title="--chat-template-kwargs {&quot;tool_call_format&quot;:&quot;json&quot;}. Chat-template-level switch; most templates default to XML. Only change if your template docs require JSON (e.g. froggeric's Qwen-Fixed-Chat-Templates).">Tool call format</label>
+                                      <select id="spawn-tool-call-format" title="Leave as template default unless its docs call for JSON.">
+                                          <option value="">template default</option>
+                                          <option value="json">json</option>
+                                      </select>
+                                  </div>
+                              </div>
+                          </div>
+                     </div>
+
+                     <div class="sampling-params-section" style="margin-top:14px;">
+                         <div class="hw-section-divider">Network exposure</div>
                         <div class="sampling-params-grid">
                             <div class="sampling-field">
                                 <label for="spawn-port">Port</label>

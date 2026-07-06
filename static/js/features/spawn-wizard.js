@@ -220,6 +220,7 @@ export const wizardState = {
     outputMode: '',
     enableThinking: null,
     preserveThinking: null,
+    toolCallFormat: null,
     reasoningBudget: null,
     reasoningMode: null,
     reasoningBudgetMessage: null,
@@ -301,9 +302,11 @@ export function initSpawnWizard() {
       panelEl: dlPanel,
       companionId: _mmprojCompanionId || null,
       onComplete: (downloadId, localPath) => {
+        _dlCurrentId = null;
         onHfDownloadComplete(downloadId, localPath);
       },
       onValidationError: (msg) => {
+        _dlCurrentId = null;
         showValidationError(msg);
         // If main failed but companion already exists, associate it so retry is not blocked.
         if (_mmprojCompanionLocalPath) {
@@ -313,6 +316,8 @@ export function initSpawnWizard() {
       onClearValidationError: () => {
         clearValidationError();
       },
+    }).then((data) => {
+      _dlCurrentId = data?.download_id || null;
     });
   });
 
@@ -495,6 +500,7 @@ function resetWizardState() {
   wizardState.hardware.mtpDraftNMax = null;
   wizardState.hardware.enableThinking = null;
   wizardState.hardware.preserveThinking = null;
+  wizardState.hardware.toolCallFormat = null;
   wizardState.hardware.reasoningMode = null;
   wizardState.hardware.reasoningBudget = null;
   wizardState.hardware.reasoningBudgetMessage = null;
@@ -3031,9 +3037,9 @@ async function autoInstallChatTemplate() {
   // Cache hit: template already installed for this family
   const cached = _installedTemplateCache[tplForFamily.name];
   if (cached) {
-    wizardState.model.chatTemplatePath = cached;
+    wizardState.model.chatTemplatePath = cached.path;
     wizardState.model.chatTemplateMode = 'auto';
-    _renderChatTemplateStatus('installed', family, tplForFamily, { path: cached, already_existed: true });
+    _renderChatTemplateStatus('installed', family, tplForFamily, cached);
     return;
   }
 
@@ -3052,9 +3058,9 @@ async function autoInstallChatTemplate() {
     if (data.ok && data.path) {
       wizardState.model.chatTemplatePath = data.path;
       wizardState.model.chatTemplateMode = 'auto';
-      // Cache the template path for this family (avoids re-downloading for
+      // Cache the template metadata for this family (avoids re-downloading for
       // other models of the same family in the same session)
-      _installedTemplateCache[tplForFamily.name] = data.path;
+      _installedTemplateCache[tplForFamily.name] = data;
       _renderChatTemplateStatus('installed', family, tplForFamily, data);
     } else {
       _renderChatTemplateStatus('error', family, tplForFamily, data);
@@ -3227,6 +3233,10 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
   }
 
   if (state === 'installed') {
+    const installedDate = data?.installed_at
+      ? new Date(data.installed_at).toLocaleString()
+      : null;
+
     if (statusEl) {
       statusEl.textContent = data?.already_existed ? '✓ Cached' : '✓ Installed';
       statusEl.className = 'ct-status ct-ok';
@@ -3237,12 +3247,70 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       nameEl.textContent = tpl.display;
       const descEl = document.createElement('span');
       descEl.textContent = ` — ${tpl.description}`;
-      const link = document.createElement('a');
-      link.href = tpl.sourceUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
-      link.textContent = ' ↗'; link.className = 'ct-hf-link';
+      const sourceUrl = data?.source_url || tpl?.sourceUrl;
+      const link = sourceUrl
+        ? (() => { const a = document.createElement('a'); a.href = sourceUrl; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = ' ↗'; a.className = 'ct-hf-link'; return a; })()
+        : null;
       bodyEl.appendChild(nameEl);
       bodyEl.appendChild(descEl);
-      bodyEl.appendChild(link);
+      if (link) bodyEl.appendChild(link);
+
+      // Staleness hint
+      const hint = document.createElement('div');
+      hint.style.fontSize = '10px';
+      hint.style.color = 'var(--color-text-muted)';
+      hint.style.marginTop = '4px';
+      const hintSpan = document.createElement('span');
+      hintSpan.textContent = installedDate
+        ? `Installed ${installedDate}. Upstream may have changed since.`
+        : 'Upstream may have changed since install.';
+      hint.appendChild(hintSpan);
+
+      // "Check for updates" button
+      const checkBtn = document.createElement('button');
+      checkBtn.type = 'button';
+      checkBtn.className = 'btn-wizard-tertiary';
+      checkBtn.style.fontSize = '10px';
+      checkBtn.style.marginLeft = '6px';
+      checkBtn.style.padding = '1px 6px';
+      checkBtn.textContent = 'Check for updates';
+      checkBtn.addEventListener('click', async () => {
+        const path = data?.path;
+        if (!path) return;
+        const origText = checkBtn.textContent;
+        checkBtn.disabled = true;
+        checkBtn.textContent = 'Checking…';
+        try {
+          const resp = await fetch('/api/chat-template/check-update', {
+            method: 'POST',
+            headers: {
+              ...(window.authHeaders ? window.authHeaders() : {}),
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ path }),
+          });
+          const result = resp.ok ? await resp.json() : { ok: false };
+          if (resp.ok && result.ok !== undefined) {
+            if (result.changed) {
+              showToast('Upstream template has changed since this install', 'warn',
+                'Use Recommended to re-download the latest version', 6000);
+            } else {
+              showToast('Template is up to date', 'success',
+                installedDate ? `Installed ${installedDate}` : 'No changes upstream');
+            }
+          } else {
+            showToast(result.error || 'Failed to check for updates', 'error');
+          }
+        } catch (err) {
+          showToast('Check failed: ' + (err.message || String(err)), 'error');
+        } finally {
+          checkBtn.disabled = false;
+          checkBtn.textContent = origText;
+        }
+      });
+
+      hint.appendChild(checkBtn);
+      bodyEl.appendChild(hint);
     }
     return;
   }
@@ -4614,6 +4682,7 @@ function updateVramDisplay() {
       } else {
         dom.vramPanelTotal.textContent = isUnifiedMemory() ? 'Unified memory unknown' : 'GPU VRAM unknown';
       }
+      dom.vramPanelTotal.title = note;
     }
 
     // Update bar segments (width as % of availVram or total, whichever is larger)
@@ -7581,8 +7650,9 @@ function _applyPresetToHardware(preset) {
     ? preset.presence_penalty : null;
   h.maxTokens = preset.max_tokens != null ? preset.max_tokens : null;
   h.enableThinking   = preset.enable_thinking   ?? null;
-  h.preserveThinking = preset.preserve_thinking ?? null;
-  h.reasoningBudget  = preset.reasoning_budget  ?? null;
+   h.preserveThinking = preset.preserve_thinking ?? null;
+   h.toolCallFormat = preset.tool_call_format ?? null;
+   h.reasoningBudget  = preset.reasoning_budget  ?? null;
   h.reasoningMode = typeof preset.reasoning === 'boolean'
     ? (preset.reasoning ? 'on' : 'off')
     : (preset.reasoning || null);
@@ -8003,8 +8073,10 @@ function _syncThinkingFields() {
   if (sel) sel.value = h.reasoningMode || '';
   const budgetEl = document.getElementById('spawn-reasoning-budget');
   if (budgetEl) budgetEl.value = h.reasoningBudget != null ? String(h.reasoningBudget) : '';
-  const msgEl = document.getElementById('spawn-reasoning-budget-message');
-  if (msgEl) msgEl.value = (h.reasoningBudgetMessage || '').replace(/\n/g, '\\n');
+   const msgEl = document.getElementById('spawn-reasoning-budget-message');
+   if (msgEl) msgEl.value = (h.reasoningBudgetMessage || '').replace(/\n/g, '\\n');
+   const tcfEl = document.getElementById('spawn-tool-call-format');
+   if (tcfEl) tcfEl.value = h.toolCallFormat || '';
 }
 
 function _bindThinkingFields() {
@@ -8061,6 +8133,7 @@ function _bindThinkingFields() {
       wizardState.hardware.reasoningBudgetMessage = raw === '' ? null : raw.replace(/\\n/g, '\n');
     });
   }
+  bindSel('spawn-tool-call-format', 'toolCallFormat');
 }
 
 function _bindSamplingFields() {
@@ -8755,10 +8828,11 @@ export function buildSpawnPayload() {
     presence_penalty: h.presencePenalty != null && h.presencePenalty > 0 ? h.presencePenalty : null,
     max_tokens: h.maxTokens != null ? h.maxTokens : null,
     seed: h.seed != null ? h.seed : null,
-    // Thinking / reasoning
-    enable_thinking: h.enableThinking,
-    preserve_thinking: h.preserveThinking,
-    reasoning_budget: h.reasoningBudget,
+     // Thinking / reasoning
+     enable_thinking: h.enableThinking,
+     preserve_thinking: h.preserveThinking,
+     tool_call_format: h.toolCallFormat || null,
+     reasoning_budget: h.reasoningBudget,
     reasoning: h.reasoningMode || null,
     reasoning_budget_message: h.reasoningBudgetMessage || null,
     grammar: h.grammar.trim() ? h.grammar.trim() : null,

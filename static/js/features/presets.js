@@ -1052,6 +1052,7 @@ export function openPresetModal(mode, section) {
         numOrEmpty('modal-presence-penalty', p.presence_penalty);
         setOpt('modal-enable-thinking', p.enable_thinking == null ? '' : String(!!p.enable_thinking));
         setOpt('modal-preserve-thinking', p.preserve_thinking == null ? '' : String(!!p.preserve_thinking));
+        setOpt('modal-tool-call-format', p.tool_call_format || '');
         setOpt('modal-reasoning', p.reasoning || '');
         numOrEmpty('modal-reasoning-budget', p.reasoning_budget);
         setVal('modal-reasoning-budget-message', (p.reasoning_budget_message || '').replace(/\n/g, '\\n'));
@@ -1542,6 +1543,7 @@ function _buildFormPreset(existing) {
         presence_penalty: floatOrNull('modal-presence-penalty'),
         enable_thinking: nullableBoolOpt('modal-enable-thinking'),
         preserve_thinking: nullableBoolOpt('modal-preserve-thinking'),
+        tool_call_format: strVal('modal-tool-call-format') || null,
         reasoning: strVal('modal-reasoning') || null,
         reasoning_budget: intOrNull('modal-reasoning-budget'),
         reasoning_budget_message: (document.getElementById('modal-reasoning-budget-message').value || '').replace(/\\n/g, '\n') || null,
@@ -1598,6 +1600,7 @@ const CHANGE_LABELS = {
     temperature: 'Temperature', top_p: 'Top-P', top_k: 'Top-K',
     min_p: 'Min-P', repeat_penalty: 'Repeat Penalty', presence_penalty: 'Presence Penalty',
     enable_thinking: 'Thinking Mode', preserve_thinking: 'Preserve Thinking',
+    tool_call_format: 'Tool Call Format',
     reasoning: 'Reasoning', reasoning_budget: 'Reasoning Budget',
     reasoning_budget_message: 'Reasoning Budget Message',
     tensor_split: 'Tensor Split', split_mode: 'Split Mode', main_gpu: 'Main GPU',
@@ -1945,6 +1948,7 @@ async function _suggestGenerationDefaults(modelPath, fillEmpty = true) {
             fill('modal-max-tokens', defaults.max_tokens ?? null);
             _fillSelectIfEmpty('modal-enable-thinking', defaults.enable_thinking);
             _fillSelectIfEmpty('modal-preserve-thinking', defaults.preserve_thinking);
+            _fillSelectIfEmpty('modal-tool-call-format', defaults.tool_call_format);
             _fillSelectIfEmpty('modal-reasoning', defaults.reasoning ? 'on' : 'off');
             fill('modal-reasoning-budget', defaults.reasoning_budget ?? null);
             const msgEl = document.getElementById('modal-reasoning-budget-message');
@@ -2007,6 +2011,7 @@ function _applyGenerationPreset(preset) {
     numOrEmpty('modal-max-tokens', preset.max_tokens);
     setOpt('modal-enable-thinking', preset.enable_thinking == null ? '' : String(!!preset.enable_thinking));
     setOpt('modal-preserve-thinking', preset.preserve_thinking == null ? '' : String(!!preset.preserve_thinking));
+    setOpt('modal-tool-call-format', preset.tool_call_format || '');
     setOpt('modal-reasoning', preset.reasoning ? 'on' : 'off');
     numOrEmpty('modal-reasoning-budget', preset.reasoning_budget);
     setVal('modal-reasoning-budget-message', (preset.reasoning_budget_message || '').replace(/\n/g, '\\n'));
@@ -2094,6 +2099,7 @@ async function _restartServerWithPreset(presetId) {
         presence_penalty: p.presence_penalty ?? null,
         enable_thinking: p.enable_thinking ?? null,
         preserve_thinking: p.preserve_thinking ?? null,
+        tool_call_format: p.tool_call_format || null,
         reasoning: p.reasoning || null,
         reasoning_budget: p.reasoning_budget ?? null,
         reasoning_budget_message: p.reasoning_budget_message || null,
@@ -2318,6 +2324,49 @@ export function initPresets() {
         'click',
         installRecommendedChatTemplateForPreset,
     );
+    document.getElementById('preset-check-chat-template-update-btn')?.addEventListener('click', async () => {
+        const path = (document.getElementById('modal-chat-template-file')?.value || '').trim();
+        if (!path) {
+            showToast('No template selected to check', 'warn');
+            return;
+        }
+        const button = document.getElementById('preset-check-chat-template-update-btn');
+        const origText = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Checking…';
+        try {
+            const headers = window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' };
+            const resp = await fetch('/api/chat-template/check-update', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ path }),
+            });
+            if (!resp.ok) {
+                showToast('Check failed: ' + (resp.statusText || 'Unexpected response'), 'error');
+                return;
+            }
+            const data = await resp.json();
+            if (data.changed) {
+                showToast(
+                    'Upstream template has changed since this install',
+                    'warn',
+                    'Use Recommended to re-download the latest version',
+                );
+            } else {
+                const hint = data.installed_at
+                    ? 'Installed ' + new Date(data.installed_at).toLocaleString()
+                    : 'No changes upstream';
+                showToast('Template is up to date', 'success', hint);
+            }
+        } catch (err) {
+            showToast('Check failed: ' + (err.message || String(err)), 'error');
+        } finally {
+            button.disabled = false;
+            button.textContent = origText;
+        }
+    });
     document.getElementById('preset-upload-chat-template-btn')?.addEventListener('click', async () => {
         try {
             const uploaded = await uploadChatTemplateFromBrowser();
