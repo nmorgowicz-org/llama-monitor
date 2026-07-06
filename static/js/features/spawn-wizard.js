@@ -3284,13 +3284,22 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
         checkBtn.disabled = true;
         checkBtn.textContent = 'Checking…';
         try {
+          // Fallback fetch/source URLs for legacy installs that predate update-tracking
+          // metadata (no meta.json on disk yet) — lets the backend still diff against
+          // upstream instead of just erroring.
+          const fallbackFetchUrl = tpl?.url
+            || (tpl?.repo && tpl?.file ? `https://huggingface.co/${tpl.repo}/raw/main/${tpl.file}` : undefined);
           const resp = await fetch('/api/chat-template/check-update', {
             method: 'POST',
             headers: {
               ...(window.authHeaders ? window.authHeaders() : {}),
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ path }),
+            body: JSON.stringify({
+              path,
+              fetch_url: fallbackFetchUrl,
+              source_url: tpl?.sourceUrl,
+            }),
           });
           const result = resp.ok ? await resp.json() : { ok: false };
           if (resp.ok && result.ok === true) {
