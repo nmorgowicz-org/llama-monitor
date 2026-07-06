@@ -1948,7 +1948,9 @@ async function _suggestGenerationDefaults(modelPath, fillEmpty = true) {
             fill('modal-max-tokens', defaults.max_tokens ?? null);
             _fillSelectIfEmpty('modal-enable-thinking', defaults.enable_thinking);
             _fillSelectIfEmpty('modal-preserve-thinking', defaults.preserve_thinking);
-            _fillSelectIfEmpty('modal-tool-call-format', defaults.tool_call_format);
+            // tool_call_format is intentionally never auto-filled from model-family
+            // defaults — it's a template-level opt-in, left blank unless the user
+            // explicitly selects "json".
             _fillSelectIfEmpty('modal-reasoning', defaults.reasoning ? 'on' : 'off');
             fill('modal-reasoning-budget', defaults.reasoning_budget ?? null);
             const msgEl = document.getElementById('modal-reasoning-budget-message');
