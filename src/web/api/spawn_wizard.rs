@@ -851,10 +851,7 @@ fn api_chat_template_active(
                     for entry in entries.flatten() {
                         let path = entry.path();
                         if !path.is_file()
-                            || !path
-                                .extension()
-                                .map(|e| e == "jinja")
-                                .unwrap_or(false)
+                            || !path.extension().map(|e| e == "jinja").unwrap_or(false)
                         {
                             continue;
                         }
@@ -1095,10 +1092,7 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .boxed();
     r = r
-        .or(api_chat_template_active(
-            state.clone(),
-            config.clone(),
-        ))
+        .or(api_chat_template_active(state.clone(), config.clone()))
         .unify()
         .boxed();
     r = r
