@@ -200,15 +200,10 @@ function _renderUnifiedBar(segs, labels, purgeBtn, metalCapBytes, freeNow, recla
     _setBarSegment(document.getElementById('setup-mem-bar-seg-avail'), availPct);
     _setBarSegment(document.getElementById('setup-mem-bar-seg-freeable'), freeablePct);
 
-    // Build left label
+    // Build left label (now fully prepared by caller with clear wording)
     if (labels) {
         const availEl = document.getElementById('setup-mem-bar-avail');
-        if (freeablePct >= 2) {
-            const freeableGb = Math.round(reclaimable / (1024 ** 3));
-            availEl.textContent = availLabel + ' · ' + freeableGb + ' GB freeable cache';
-        } else {
-            availEl.textContent = availLabel;
-        }
+        availEl.textContent = availLabel;
     }
 
     // Show "Free cache" button if reclaimable is meaningful
@@ -216,6 +211,12 @@ function _renderUnifiedBar(segs, labels, purgeBtn, metalCapBytes, freeNow, recla
         purgeBtn.style.display = 'inline-flex';
     } else if (purgeBtn) {
         purgeBtn.style.display = 'none';
+    }
+
+    // Show/hide freeable cache legend item depending on significance
+    const freeableLegend = document.querySelector('.setup-mem-bar-legend-item--freeable');
+    if (freeableLegend) {
+        freeableLegend.style.display = (freeablePct >= 2) ? 'inline-flex' : 'none';
     }
 }
 
@@ -340,11 +341,21 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
     const availPct = (Math.max(0, freeNow) / ramTotalBytes) * 100;
     const freeablePct = (reclaimableBytes / ramTotalBytes) * 100;
 
-    // Labels
+    // Labels: clear and aligned with card budgets
     const availGb = availNow > 0 ? Math.round(availNow / (1024 ** 3)) : 0;
-    const availLabel = (availGb > 0
-        ? availGb + ' GB available for inference'
-        : 'Very little memory available');
+    const ifPurgedGb = availIfPurged > 0 ? Math.round(availIfPurged / (1024 ** 3)) : 0;
+
+    let availLabel;
+    if (availGb > 0) {
+        if (ifPurgedGb > availGb && reclaimableBytes >= 3 * 1024 ** 3) {
+            availLabel = availGb + ' GB available now · Up to ' + ifPurgedGb + ' GB after freeing cache';
+        } else {
+            availLabel = availGb + ' GB available now';
+        }
+    } else {
+        availLabel = 'Very little memory available';
+    }
+
     const totalLabel = _fmtGb(ramTotalBytes) + ' GB unified';
 
     _renderUnifiedBar(

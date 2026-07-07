@@ -3072,6 +3072,54 @@ body.setup-active .sidebar-nav {
       color-mix(in srgb, var(--color-accent) 70%, transparent) 100%);
 }
 
+/* Small legend line under the segmented memory bar */
+.setup-mem-bar-legend {
+  display: flex;
+  gap: 10px;
+  font-size: 9px;
+  color: var(--color-text-muted);
+  margin-top: 1px;
+}
+
+.setup-mem-bar-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  opacity: 0.9;
+}
+
+.setup-mem-bar-legend-chip {
+  width: 8px;
+  height: 4px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.setup-mem-bar-legend-chip--inuse {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.setup-mem-bar-legend-chip--avail {
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-light, var(--color-accent)));
+}
+
+.setup-mem-bar-legend-chip--freeable {
+  background: linear-gradient(90deg,
+      var(--color-accent),
+      color-mix(in srgb, var(--color-accent) 70%, transparent));
+  opacity: 0.8;
+}
+
+/* Only show freeable legend when meaningful (toggled via JS) */
+.setup-mem-bar-legend-item--freeable {
+  display: none;
+}
+
+/* Light theme tweaks */
+[data-theme="light"] .setup-mem-bar-legend-chip--inuse {
+  background: rgba(0, 0, 0, 0.08);
+}
+
 /* ── Drop zone ───────────────────────────────────────────────────────────────── */
 
 .setup-drop-zone {
