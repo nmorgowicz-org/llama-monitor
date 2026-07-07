@@ -2992,6 +2992,11 @@ body.setup-active .sidebar-nav {
   transition: width 0.4s ease;
 }
 
+/* "GPU limit" segment (macOS unified memory, non-GPU-usable) */
+.setup-mem-bar-seg--gpulimit {
+  background: rgba(255, 255, 255, 0.04);
+}
+
 /* "In use" segment */
 .setup-mem-bar-seg--inuse {
   background: rgba(255, 255, 255, 0.12);

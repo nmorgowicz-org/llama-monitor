@@ -354,16 +354,21 @@
                         <!-- Inference memory bar (segmented; populated by JS after /metrics fetch) -->
                         <div id="setup-mem-bar" class="setup-mem-bar" style="display:none;" aria-label="Inference memory budget">
                             <div class="setup-mem-bar-track" aria-hidden="true">
+                                <!-- GPU limit segment (macOS unified memory, shows non-GPU-usable portion) -->
+                                <div class="setup-mem-bar-seg setup-mem-bar-seg--gpulimit" id="setup-mem-bar-seg-gpulimit">
+                                    <span class="setup-mem-bar-seg-label" id="setup-mem-bar-seg-gpulimit-label"></span>
+                                </div>
+                                <div class="setup-mem-bar-sep" id="setup-mem-bar-sep1"></div>
                                 <!-- In use segment -->
                                 <div class="setup-mem-bar-seg setup-mem-bar-seg--inuse" id="setup-mem-bar-seg-inuse">
                                     <span class="setup-mem-bar-seg-label" id="setup-mem-bar-seg-inuse-label"></span>
                                 </div>
-                                <div class="setup-mem-bar-sep"></div>
+                                <div class="setup-mem-bar-sep" id="setup-mem-bar-sep2"></div>
                                 <!-- Available segment -->
                                 <div class="setup-mem-bar-seg setup-mem-bar-seg--avail" id="setup-mem-bar-seg-avail">
                                     <span class="setup-mem-bar-seg-label" id="setup-mem-bar-seg-avail-label"></span>
                                 </div>
-                                <div class="setup-mem-bar-sep"></div>
+                                <div class="setup-mem-bar-sep" id="setup-mem-bar-sep3"></div>
                                 <!-- Freeable cache segment -->
                                 <div class="setup-mem-bar-seg setup-mem-bar-seg--freeable" id="setup-mem-bar-seg-freeable">
                                     <span class="setup-mem-bar-seg-label" id="setup-mem-bar-seg-freeable-label"></span>

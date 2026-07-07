@@ -191,7 +191,23 @@ function _setBarSegment(el, pct) {
 }
 
 function _renderUnifiedBar(segs, labels, purgeBtn, metalCapBytes, freeNow, reclaimable, availLabel, totalLabel) {
-    // Segments represent full RAM: in_use + available + freeable = 100%
+    // Segments now: GPU limit | In use | Available | Freeable
+    // GPU limit is the non-GPU-usable portion (total - Metal cap).
+    const gpuLimitEl = document.getElementById('setup-mem-bar-seg-gpulimit');
+    const gpuLimitLabelEl = document.getElementById('setup-mem-bar-seg-gpulimit-label');
+    const sep1 = document.getElementById('setup-mem-bar-sep1');
+
+    if (segs.gpuLimitGb > 0) {
+        _setBarSegment(gpuLimitEl, segs.gpuLimitPct);
+        const fmt = (v) => (v >= 10 ? Math.round(v) : Math.round(v * 10) / 10);
+        gpuLimitLabelEl.textContent = fmt(segs.gpuLimitGb) + ' GB GPU limit';
+        if (sep1) sep1.style.display = '';
+    } else {
+        _setBarSegment(gpuLimitEl, 0);
+        gpuLimitLabelEl.textContent = '';
+        if (sep1) sep1.style.display = 'none';
+    }
+
     _setBarSegment(document.getElementById('setup-mem-bar-seg-inuse'), segs.inuse);
     _setBarSegment(document.getElementById('setup-mem-bar-seg-avail'), segs.avail);
     _setBarSegment(document.getElementById('setup-mem-bar-seg-freeable'), segs.freeable);
@@ -318,32 +334,40 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
     const cap = _metalCap(ramTotalBytes, metalGpuLimitMb);
     const osReserve = _osReserveForUnified(ramTotalBytes);
 
+    // GPU limit is the non-GPU-usable portion: total - Metal cap.
+    const gpuLimitBytes = (cap < ramTotalBytes) ? (ramTotalBytes - cap) : 0;
+    const gpuLimitPct = (gpuLimitBytes / ramTotalBytes) * 100;
+    const gpuLimitGb = gpuLimitBytes / (1024 ** 3);
+
     // Derive segments: in_use (actual + wired), available_now, freeable_cache.
     // macOS "ram_used_gb" = total - available; includes cache that is reclaimable.
     const nonReclaimUsed = Math.max(0, ramUsedBytes - reclaimableBytes);
-    const inUseBytes = Math.max(nonReclaimUsed, (sysData && sysData.memory_wired_gb > 0)
+    let inUseBytes = Math.max(nonReclaimUsed, (sysData && sysData.memory_wired_gb > 0)
         ? (sysData.memory_wired_gb * 1024 ** 3)
         : nonReclaimUsed);
 
-    // Free right now (true free, not counting reclaimable as guaranteed)
-    const freeNow = Math.max(0, ramTotalBytes - inUseBytes - reclaimableBytes);
+    // Constrain inUse + reclaimable within the GPU-usable cap so the bar
+    // partitions 100%: GPU limit + inUse + available + freeable = total.
+    if (inUseBytes > cap) inUseBytes = cap;
+    let reclaimableWithinCap = Math.min(reclaimableBytes, cap - inUseBytes);
+    const freeNow = cap - inUseBytes - reclaimableWithinCap;
 
     // "Available now" = what we can realistically allocate for inference without purging:
     //   min(metal_cap, freeNow + partial_reclaimable) - reserve
     // We don't want to assume all reclaimable will be freed unless user purges, so
     // take a fraction (60%) as "likely reclaimable under pressure".
-    const likelyReclaimable = reclaimableBytes * 0.6;
+    const likelyReclaimable = reclaimableWithinCap * 0.6;
     const safeLimit = Math.min(cap, ramTotalBytes - osReserve);
     const availNow = Math.max(0, Math.min(safeLimit, freeNow + likelyReclaimable - _MEM_SAFETY_MARGIN));
 
     // If user purges: all reclaimable becomes free; new "available" =:
-    const totalAfterPurge = Math.max(0, ramTotalBytes - inUseBytes);
+    const totalAfterPurge = cap - inUseBytes; // only GPU-usable matters
     const availIfPurged = Math.max(0, Math.min(safeLimit, totalAfterPurge - _MEM_SAFETY_MARGIN));
 
-    // Segmented bar: represent total RAM as 100%
+    // Percentages of total RAM for bar segments.
     const inusePct = (inUseBytes / ramTotalBytes) * 100;
     const availPct = (Math.max(0, freeNow) / ramTotalBytes) * 100;
-    const freeablePct = (reclaimableBytes / ramTotalBytes) * 100;
+    const freeablePct = (reclaimableWithinCap / ramTotalBytes) * 100;
 
     // Labels: clear and aligned with card budgets
     const availGb = availNow > 0 ? Math.round(availNow / (1024 ** 3)) : 0;
@@ -364,6 +388,8 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
 
     _renderUnifiedBar(
         {
+            gpuLimitPct,
+            gpuLimitGb,
             inuse: inusePct,
             avail: availPct,
             freeable: freeablePct,
