@@ -36,10 +36,22 @@ fn write_template_install_meta(
     fetch_url: &str,
     content: &[u8],
 ) {
+    write_template_install_meta_at(dest, source_url, fetch_url, content, None);
+}
+
+/// Like `write_template_install_meta`, but allows backdating `installed_at` (e.g. to a
+/// legacy install's file mtime when backfilling metadata that never existed).
+fn write_template_install_meta_at(
+    dest: &std::path::Path,
+    source_url: &str,
+    fetch_url: &str,
+    content: &[u8],
+    installed_at_override: Option<String>,
+) {
     let meta = ChatTemplateInstallMeta {
         source_url: source_url.to_string(),
         fetch_url: fetch_url.to_string(),
-        installed_at: chrono::Utc::now().to_rfc3339(),
+        installed_at: installed_at_override.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
         sha256: sha256_hex(content),
     };
     if let Ok(json) = serde_json::to_vec_pretty(&meta) {
@@ -803,6 +815,79 @@ fn api_chat_template_install_url(
         })
 }
 
+// 7) GET /api/chat-template/active
+// Returns all installed community templates (those with a valid meta.json),
+// used by the frontend auto-updater to know which templates to check.
+fn api_chat_template_active(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "active")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let Some(home) = dirs::home_dir() else {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Could not determine home directory"
+                        })),
+                    ));
+                };
+
+                let dir = home
+                    .join(".config")
+                    .join("llama-monitor")
+                    .join("chat-templates");
+
+                let mut list: Vec<serde_json::Value> = Vec::new();
+                if let Ok(entries) = std::fs::read_dir(&dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if !path.is_file()
+                            || !path.extension().map(|e| e == "jinja").unwrap_or(false)
+                        {
+                            continue;
+                        }
+                        let meta_path = template_meta_path(&path);
+                        let Some(meta) = read_template_install_meta(&meta_path) else {
+                            continue;
+                        };
+                        if meta.fetch_url.is_empty() {
+                            continue;
+                        }
+                        let name = path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_default();
+
+                        list.push(serde_json::json!({
+                            "name": name,
+                            "path": path.to_string_lossy().to_string(),
+                            "fetch_url": meta.fetch_url,
+                            "source_url": meta.source_url,
+                            "installed_sha256": meta.sha256,
+                            "installed_at": meta.installed_at
+                        }));
+                    }
+                }
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "templates": list
+                    }),
+                )))
+            }
+        })
+}
+
 // 8) POST /api/chat-template/check-update
 fn api_chat_template_check_update(
     _state: AppState,
@@ -831,17 +916,52 @@ fn api_chat_template_check_update(
 
                 let path = std::path::Path::new(&path_str);
                 let meta_path = template_meta_path(path);
-                let meta = match read_template_install_meta(&meta_path) {
-                    Some(m) => m,
-                    None => {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": "No install metadata found for this template"
-                            })),
-                        ));
-                    }
-                };
+                let existing_meta = read_template_install_meta(&meta_path);
+
+                // Legacy installs (from before update-tracking metadata existed) have no
+                // meta.json. Rather than refusing to check, fall back to the fetch_url the
+                // caller already knows for this template (from the community-template
+                // registry) and diff upstream against the sha256 of the file on disk. If
+                // the file is unchanged, backfill meta.json so future checks use it directly.
+                let fallback_fetch_url = body["fetch_url"].as_str().map(|s| s.to_string());
+                let fallback_source_url = body["source_url"].as_str().map(|s| s.to_string());
+
+                let (fetch_url, baseline_sha, baseline_installed_at, baseline_source_url) =
+                    match existing_meta {
+                        Some(ref m) => (
+                            m.fetch_url.clone(),
+                            m.sha256.clone(),
+                            Some(m.installed_at.clone()),
+                            m.source_url.clone(),
+                        ),
+                        None => {
+                            let Some(fetch_url) = fallback_fetch_url else {
+                                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                    warp::reply::json(&serde_json::json!({
+                                        "ok": false,
+                                        "error": "No update history for this install (predates update tracking). Use \"Use Recommended\" to reinstall and enable checks."
+                                    })),
+                                ));
+                            };
+                            let local_bytes = match std::fs::read(path) {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                        warp::reply::json(&serde_json::json!({
+                                            "ok": false,
+                                            "error": format!("Failed to read installed template: {e}")
+                                        })),
+                                    ));
+                                }
+                            };
+                            (
+                                fetch_url.clone(),
+                                sha256_hex(&local_bytes),
+                                None,
+                                fallback_source_url.unwrap_or(fetch_url),
+                            )
+                        }
+                    };
 
                 let client = match reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(15))
@@ -859,8 +979,8 @@ fn api_chat_template_check_update(
                     }
                 };
 
-                let mut req = client.get(&meta.fetch_url);
-                if meta.fetch_url.contains("huggingface.co")
+                let mut req = client.get(&fetch_url);
+                if fetch_url.contains("huggingface.co")
                     && let Some(ref tok) = crate::hf::hf_load_token()
                     && !tok.is_empty()
                 {
@@ -898,16 +1018,42 @@ fn api_chat_template_check_update(
                     }
                 };
 
-                let changed = new_sha != meta.sha256;
+                let changed = new_sha != baseline_sha;
+
+                // Backfill meta.json for legacy installs once we have a confirmed baseline,
+                // so subsequent checks no longer need the fallback fields from the client.
+                // Approximate the original install date with the file's mtime, since the
+                // true install time was never recorded.
+                let mtime_rfc3339 = std::fs::metadata(path)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
+
+                if existing_meta.is_none()
+                    && let Ok(local_bytes) = std::fs::read(path)
+                {
+                    write_template_install_meta_at(
+                        path,
+                        &baseline_source_url,
+                        &fetch_url,
+                        &local_bytes,
+                        mtime_rfc3339.clone(),
+                    );
+                }
+
+                let installed_at = baseline_installed_at
+                    .or(mtime_rfc3339)
+                    .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
                         "ok": true,
                         "changed": changed,
-                        "installed_at": meta.installed_at,
-                        "source_url": meta.source_url,
-                        "installed_sha256": meta.sha256,
-                        "current_sha256": new_sha
+                        "installed_at": installed_at,
+                        "source_url": baseline_source_url,
+                        "installed_sha256": baseline_sha,
+                        "current_sha256": new_sha,
+                        "backfilled": existing_meta.is_none()
                     }),
                 )))
             }
@@ -943,6 +1089,10 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r
         .or(api_chat_template_install_url(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_chat_template_active(state.clone(), config.clone()))
         .unify()
         .boxed();
     r = r

@@ -92,6 +92,8 @@ pub const FEATURES_SPAWN_READINESS_JS: &str =
 pub const FEATURES_SPAWN_WIZARD_JS: &str = include_str!("../../static/js/features/spawn-wizard.js");
 pub const FEATURES_TELEMETRY_GRADE_JS: &str =
     include_str!("../../static/js/features/telemetry-grade.js");
+pub const FEATURES_TEMPLATE_AUTOUPDATER_JS: &str =
+    include_str!("../../static/js/features/template-autoupdater.js");
 pub const FEATURES_TOAST_JS: &str = include_str!("../../static/js/features/toast.js");
 pub const FEATURES_TUNE_PANEL_JS: &str = include_str!("../../static/js/features/tune-panel.js");
 pub const FEATURES_TUNING_CARDS_JS: &str = include_str!("../../static/js/features/tuning-cards.js");

@@ -25,9 +25,10 @@ export function detectCommunityTemplateFamily(name) {
   return null;
 }
 
-export function buildCommunityTemplateInstallRequest(template) {
+export function buildCommunityTemplateInstallRequest(template, force = false) {
   const body = template.url
     ? { url: template.url, name: template.name }
     : { repo: template.repo, file: template.file, name: template.name };
+  if (force) body.force = true;
   return { endpoint: template.installEndpoint, body };
 }
