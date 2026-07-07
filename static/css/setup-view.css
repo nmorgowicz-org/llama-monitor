@@ -2956,25 +2956,39 @@ body.setup-active .sidebar-nav {
 .vram-fit-legend-dot--conditional { background: var(--color-accent); opacity: 0.9; }
 .vram-fit-legend-dot--risk       { background: var(--color-error); }
 
-/* ── Memory bar (segmented) ─────────────────────────────────────────────────── */
+/* ── Memory bar (segmented with labels) ──────────────────────────────────────── */
 
 .setup-mem-bar {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   padding: 10px 4px 4px;
+  font-size: 9px;
+  color: var(--color-text-muted, rgba(255, 255, 255, 0.45));
 }
 
+/* Track: thin segmented bar spanning full width = total memory */
 .setup-mem-bar-track {
   height: 4px;
   background: rgba(255, 255, 255, 0.08);
   border-radius: 2px;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
+  gap: 1px;
+  position: relative;
 }
 
+/* Separator between segments */
+.setup-mem-bar-sep {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.22);
+  align-self: stretch;
+}
+
+/* Segment base */
 .setup-mem-bar-seg {
   height: 100%;
+  position: relative;
   transition: width 0.4s ease;
 }
 
@@ -2994,26 +3008,34 @@ body.setup-active .sidebar-nav {
       var(--color-accent) 0%,
       color-mix(in srgb, var(--color-accent) 70%, transparent) 100%);
   opacity: 0.7;
-  /* subtle pattern: thin repeating dashes */
-  background-image:
-    repeating-linear-gradient(
-      to right,
-      transparent,
-      transparent 2px,
-      rgba(0,0,0,0.18) 2px,
-      rgba(0,0,0,0.18) 3px
-    ),
-    linear-gradient(90deg,
-      var(--color-accent) 0%,
-      color-mix(in srgb, var(--color-accent) 70%, transparent) 100%);
 }
 
+/* Tiny labels above segments */
+.setup-mem-bar-seg-label {
+  position: absolute;
+  top: -13px;
+  left: 0;
+  right: 0;
+  font-size: 8px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  text-align: center;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+/* Ensure labels are visible */
+.setup-mem-bar-seg {
+  min-width: 0;
+}
+
+/* Bottom labels row */
 .setup-mem-bar-labels {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--color-text-muted, rgba(255, 255, 255, 0.45));
 }
 
@@ -3054,22 +3076,16 @@ body.setup-active .sidebar-nav {
   background: rgba(0, 0, 0, 0.08);
 }
 
+[data-theme="light"] .setup-mem-bar-sep {
+  background: rgba(0, 0, 0, 0.22);
+}
+
 [data-theme="light"] .setup-mem-bar-seg--inuse {
   background: rgba(0, 0, 0, 0.08);
 }
 
-[data-theme="light"] .setup-mem-bar-seg--freeable {
-  background-image:
-    repeating-linear-gradient(
-      to right,
-      transparent,
-      transparent 2px,
-      rgba(0,0,0,0.08) 2px,
-      rgba(0,0,0,0.08) 3px
-    ),
-    linear-gradient(90deg,
-      var(--color-accent) 0%,
-      color-mix(in srgb, var(--color-accent) 70%, transparent) 100%);
+[data-theme="light"] .setup-mem-bar-seg-label {
+  color: var(--color-text-muted);
 }
 
 /* Small legend line under the segmented memory bar */

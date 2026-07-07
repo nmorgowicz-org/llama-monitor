@@ -354,9 +354,20 @@
                         <!-- Inference memory bar (segmented; populated by JS after /metrics fetch) -->
                         <div id="setup-mem-bar" class="setup-mem-bar" style="display:none;" aria-label="Inference memory budget">
                             <div class="setup-mem-bar-track" aria-hidden="true">
-                                <div class="setup-mem-bar-seg setup-mem-bar-seg--inuse" id="setup-mem-bar-seg-inuse" style="width:0" data-tooltip="In use by OS and apps"></div>
-                                <div class="setup-mem-bar-seg setup-mem-bar-seg--avail" id="setup-mem-bar-seg-avail" style="width:0" data-tooltip="Available for inference"></div>
-                                <div class="setup-mem-bar-seg setup-mem-bar-seg--freeable" id="setup-mem-bar-seg-freeable" style="width:0" data-tooltip="Freeable cache (flush to reclaim)"></div>
+                                <!-- In use segment -->
+                                <div class="setup-mem-bar-seg setup-mem-bar-seg--inuse" id="setup-mem-bar-seg-inuse">
+                                    <span class="setup-mem-bar-seg-label" id="setup-mem-bar-seg-inuse-label"></span>
+                                </div>
+                                <div class="setup-mem-bar-sep"></div>
+                                <!-- Available segment -->
+                                <div class="setup-mem-bar-seg setup-mem-bar-seg--avail" id="setup-mem-bar-seg-avail">
+                                    <span class="setup-mem-bar-seg-label" id="setup-mem-bar-seg-avail-label"></span>
+                                </div>
+                                <div class="setup-mem-bar-sep"></div>
+                                <!-- Freeable cache segment -->
+                                <div class="setup-mem-bar-seg setup-mem-bar-seg--freeable" id="setup-mem-bar-seg-freeable">
+                                    <span class="setup-mem-bar-seg-label" id="setup-mem-bar-seg-freeable-label"></span>
+                                </div>
                             </div>
                             <div class="setup-mem-bar-labels">
                                 <span id="setup-mem-bar-avail"></span>
@@ -364,11 +375,6 @@
                                     <button class="setup-mem-bar-purge" id="setup-mem-bar-purge" type="button" style="display:none;" title="Flush system caches to free memory">Free cache</button>
                                     <span id="setup-mem-bar-total"></span>
                                 </div>
-                            </div>
-                            <div class="setup-mem-bar-legend">
-                                <span class="setup-mem-bar-legend-item"><span class="setup-mem-bar-legend-chip setup-mem-bar-legend-chip--inuse"></span>In use by OS and apps</span>
-                                <span class="setup-mem-bar-legend-item"><span class="setup-mem-bar-legend-chip setup-mem-bar-legend-chip--avail"></span>Available</span>
-                                <span class="setup-mem-bar-legend-item setup-mem-bar-legend-item--freeable"><span class="setup-mem-bar-legend-chip setup-mem-bar-legend-chip--freeable"></span>Freeable cache</span>
                             </div>
                         </div>
 

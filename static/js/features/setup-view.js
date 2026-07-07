@@ -191,14 +191,16 @@ function _setBarSegment(el, pct) {
 }
 
 function _renderUnifiedBar(segs, labels, purgeBtn, metalCapBytes, freeNow, reclaimable, availLabel, totalLabel) {
-    const totalPct = 100;
-    const inusePct = (segs.inuse / totalPct) * totalPct;
-    const availPct = (segs.avail / totalPct) * totalPct;
-    const freeablePct = (segs.freeable / totalPct) * totalPct;
+    // Segments represent full RAM: in_use + available + freeable = 100%
+    _setBarSegment(document.getElementById('setup-mem-bar-seg-inuse'), segs.inuse);
+    _setBarSegment(document.getElementById('setup-mem-bar-seg-avail'), segs.avail);
+    _setBarSegment(document.getElementById('setup-mem-bar-seg-freeable'), segs.freeable);
 
-    _setBarSegment(document.getElementById('setup-mem-bar-seg-inuse'), inusePct);
-    _setBarSegment(document.getElementById('setup-mem-bar-seg-avail'), availPct);
-    _setBarSegment(document.getElementById('setup-mem-bar-seg-freeable'), freeablePct);
+    // Inline labels in segments using actual GB
+    const fmt = (v) => (v >= 10 ? Math.round(v) : Math.round(v * 10) / 10);
+    document.getElementById('setup-mem-bar-seg-inuse-label').textContent = fmt(segs.inuseGb) + ' GB in use';
+    document.getElementById('setup-mem-bar-seg-avail-label').textContent = fmt(segs.availGb) + ' GB available';
+    document.getElementById('setup-mem-bar-seg-freeable-label').textContent = fmt(segs.freeableGb) + ' GB freeable';
 
     // Build left label (now fully prepared by caller with clear wording)
     if (labels) {
@@ -212,19 +214,21 @@ function _renderUnifiedBar(segs, labels, purgeBtn, metalCapBytes, freeNow, recla
     } else if (purgeBtn) {
         purgeBtn.style.display = 'none';
     }
-
-    // Show/hide freeable cache legend item depending on significance
-    const freeableLegend = document.querySelector('.setup-mem-bar-legend-item--freeable');
-    if (freeableLegend) {
-        freeableLegend.style.display = (freeablePct >= 2) ? 'inline-flex' : 'none';
-    }
 }
 
 function _renderDiscreteBar(segs, labels, purgeBtn, availLabel, totalLabel) {
-    // Discrete GPU bar: in_use + available only.
+    // Discrete GPU bar: in_use + available (VRAM only)
     _setBarSegment(document.getElementById('setup-mem-bar-seg-inuse'), segs.inuse);
     _setBarSegment(document.getElementById('setup-mem-bar-seg-avail'), segs.avail);
     _setBarSegment(document.getElementById('setup-mem-bar-seg-freeable'), 0);
+
+    // Inline labels in segments (e.g., "1.5 GB in use")
+    const inuseGb = segs.inuseGb != null ? (segs.inuseGb >= 10 ? Math.round(segs.inuseGb) : segs.inuseGb.toFixed(1)) : 0;
+    const availGb = segs.availGb != null ? (segs.availGb >= 10 ? Math.round(segs.availGb) : segs.availGb.toFixed(1)) : 0;
+
+    document.getElementById('setup-mem-bar-seg-inuse-label').textContent = inuseGb + ' GB in use';
+    document.getElementById('setup-mem-bar-seg-avail-label').textContent = availGb + ' GB available';
+    document.getElementById('setup-mem-bar-seg-freeable-label').textContent = '';
 
     if (labels) {
         const availEl = document.getElementById('setup-mem-bar-avail');
@@ -359,7 +363,14 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
     const totalLabel = _fmtGb(ramTotalBytes) + ' GB unified';
 
     _renderUnifiedBar(
-        { inuse: inusePct, avail: availPct, freeable: freeablePct },
+        {
+            inuse: inusePct,
+            avail: availPct,
+            freeable: freeablePct,
+            inuseGb: inUseBytes / (1024 ** 3),
+            availGb: Math.max(0, freeNow) / (1024 ** 3),
+            freeableGb: reclaimableBytes / (1024 ** 3),
+        },
         true,
         purgeBtn,
         cap,
@@ -446,7 +457,12 @@ async function _renderDiscreteMemoryBar(bar, purgeBtn, vramTotalBytes, vramUsedB
         _fmtGb(ramTotalBytes) + ' GB system RAM';
 
     _renderDiscreteBar(
-        { inuse: inusePct, avail: availPct },
+        {
+            inuse: inusePct,
+            avail: availPct,
+            inuseGb: vramUsedBytes / (1024 ** 3),
+            availGb: vramFree / (1024 ** 3),
+        },
         true,
         purgeBtn,
         availLabel,
