@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.8.0...v1.8.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* **ui:** add 4-state card fit logic (fit / tight / conditional / no-fit) ([61d2f4c](https://github.com/nmorgowicz-org/llama-monitor/commit/61d2f4c208d3ae326c2626e1d52f856dda15a78c))
+* **ui:** add macOS "Free cache" button on welcome screen ([61d2f4c](https://github.com/nmorgowicz-org/llama-monitor/commit/61d2f4c208d3ae326c2626e1d52f856dda15a78c))
+* **ui:** clarify inference memory bar and add segmented memory UI ([61d2f4c](https://github.com/nmorgowicz-org/llama-monitor/commit/61d2f4c208d3ae326c2626e1d52f856dda15a78c))
+
 ## [1.8.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.7.0...v1.8.0) (2026-07-07)
 
 
