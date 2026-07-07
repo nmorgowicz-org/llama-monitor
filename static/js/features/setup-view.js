@@ -147,13 +147,32 @@ const launchFilters = {
     collection: null,
     groupByFamily: false
 };
-// ── Memory bar ────────────────────────────────────────────────────────────────
-// Same Metal cap logic as effectiveAvailBytes() in spawn-wizard.js.
+// ── Memory bar (segmented, platform-aware) ─────────────────────────────────────
+// Unified (macOS): single pool, Metal cap, reclaimable cache.
+// Discrete GPU (Win/Linux): VRAM + system RAM as overflow.
 
-const _MEM_OS_RESERVE = 512 * 1024 * 1024; // 512 MB
+const _MEM_SAFETY_MARGIN = 512 * 1024 * 1024; // 512 MB safety margin for allocations
 
 // Cached memory state shared between the memory bar and card VRAM estimates.
-let _memState = { availBytes: 0, availRamBytes: 0, isUnified: false };
+let _memState = {
+    availBytes: 0,
+    budgetIfPurgedBytes: 0,
+    metalCapBytes: 0,
+    availRamBytes: 0,
+    isUnified: false,
+    reclaimableBytes: 0,
+};
+
+function _osReserveForUnified(ramTotalBytes) {
+    // OS reserve: how much of total RAM must never be treated as usable for inference.
+    // On unified memory, the GPU and OS share one pool; if Metal takes too much,
+    // the system starves. We keep a realistic reserve so "available" isn't a lie.
+    const gb = ramTotalBytes / (1024 ** 3);
+    if (gb >= 96) return 8 * 1024 ** 3;
+    if (gb >= 48) return 6 * 1024 ** 3;
+    if (gb >= 32) return 5 * 1024 ** 3;
+    return 4 * 1024 ** 3; // default for smaller machines
+}
 
 function _metalCap(totalBytes, metalGpuLimitMb) {
     if (metalGpuLimitMb > 0) return metalGpuLimitMb * 1024 * 1024;
@@ -166,9 +185,60 @@ function _fmtGb(bytes) {
     return gb >= 10 ? gb.toFixed(0) : gb.toFixed(1);
 }
 
+function _setBarSegment(el, pct) {
+    if (!el) return;
+    el.style.width = pct + '%';
+}
+
+function _renderUnifiedBar(segs, labels, purgeBtn, metalCapBytes, freeNow, reclaimable, availLabel, totalLabel) {
+    const totalPct = 100;
+    const inusePct = (segs.inuse / totalPct) * totalPct;
+    const availPct = (segs.avail / totalPct) * totalPct;
+    const freeablePct = (segs.freeable / totalPct) * totalPct;
+
+    _setBarSegment(document.getElementById('setup-mem-bar-seg-inuse'), inusePct);
+    _setBarSegment(document.getElementById('setup-mem-bar-seg-avail'), availPct);
+    _setBarSegment(document.getElementById('setup-mem-bar-seg-freeable'), freeablePct);
+
+    // Build left label
+    if (labels) {
+        const availEl = document.getElementById('setup-mem-bar-avail');
+        if (freeablePct >= 2) {
+            const freeableGb = Math.round(reclaimable / (1024 ** 3));
+            availEl.textContent = availLabel + ' · ' + freeableGb + ' GB freeable cache';
+        } else {
+            availEl.textContent = availLabel;
+        }
+    }
+
+    // Show "Free cache" button if reclaimable is meaningful
+    if (purgeBtn && reclaimable >= 3 * 1024 ** 3) {
+        purgeBtn.style.display = 'inline-flex';
+    } else if (purgeBtn) {
+        purgeBtn.style.display = 'none';
+    }
+}
+
+function _renderDiscreteBar(segs, labels, purgeBtn, availLabel, totalLabel) {
+    // Discrete GPU bar: in_use + available only.
+    _setBarSegment(document.getElementById('setup-mem-bar-seg-inuse'), segs.inuse);
+    _setBarSegment(document.getElementById('setup-mem-bar-seg-avail'), segs.avail);
+    _setBarSegment(document.getElementById('setup-mem-bar-seg-freeable'), 0);
+
+    if (labels) {
+        const availEl = document.getElementById('setup-mem-bar-avail');
+        availEl.textContent = availLabel;
+    }
+
+    if (purgeBtn) purgeBtn.style.display = 'none';
+}
+
 export async function fetchAndRenderMemoryBar() {
     const bar = document.getElementById('setup-mem-bar');
     if (!bar) return;
+
+    const purgeBtn = document.getElementById('setup-mem-bar-purge');
+
     try {
         const headers = window.authHeaders ? window.authHeaders() : {};
         const [sysResp, gpuResp, platResp, limResp] = await Promise.all([
@@ -184,11 +254,14 @@ export async function fetchAndRenderMemoryBar() {
         let metalGpuLimitMb = 0;
         let isUnified = false;
         let vramUsedBytes = 0;
+        let reclaimableBytes = 0;
 
+        let sysData = null;
         if (sysResp.ok) {
-            const d = await sysResp.json();
-            ramTotalBytes = (d.ram_total_gb || 0) * 1024 ** 3;
-            ramUsedBytes = (d.ram_used_gb || 0) * 1024 ** 3;
+            sysData = await sysResp.json();
+            ramTotalBytes = (sysData.ram_total_gb || 0) * 1024 ** 3;
+            ramUsedBytes = (sysData.ram_used_gb || 0) * 1024 ** 3;
+            reclaimableBytes = (sysData.memory_reclaimable_gb || 0) * 1024 ** 3;
         }
 
         if (gpuResp.ok) {
@@ -221,44 +294,169 @@ export async function fetchAndRenderMemoryBar() {
             }
         }
 
-        let availBytes, fillPct, availLabel, totalLabel;
-
-        let vramEstimateBytes;
-        let availableRamBytes = 0;
         if (isUnified) {
-            if (!ramTotalBytes) return;
-            const cap = _metalCap(ramTotalBytes, metalGpuLimitMb);
-            availBytes = Math.max(0, Math.min(cap, ramTotalBytes) - _MEM_OS_RESERVE);
-            fillPct = Math.round((availBytes / ramTotalBytes) * 100);
-            availLabel = _fmtGb(availBytes) + ' GB available for inference';
-            totalLabel = _fmtGb(ramTotalBytes) + ' GB unified';
-            // Card estimates use current free RAM so high system load shows as risk
-            vramEstimateBytes = ramUsedBytes > 0
-                ? Math.max(0, Math.min(cap, ramTotalBytes - ramUsedBytes) - _MEM_OS_RESERVE)
-                : availBytes;
+            await _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalBytes, ramUsedBytes, reclaimableBytes, sysData);
+        } else if (vramTotalBytes > 0) {
+            await _renderDiscreteMemoryBar(bar, purgeBtn, vramTotalBytes, vramUsedBytes, ramTotalBytes, ramUsedBytes);
         } else {
-            if (!vramTotalBytes) return;
-            availBytes = Math.max(0, vramTotalBytes - vramUsedBytes);
-            availableRamBytes = Math.max(0, ramTotalBytes - ramUsedBytes);
-            fillPct = Math.round((availBytes / vramTotalBytes) * 100);
-            availLabel = _fmtGb(availBytes) + ' GB VRAM free';
-            totalLabel = _fmtGb(vramTotalBytes) + ' GB total';
-            vramEstimateBytes = availBytes;
+            // no usable metrics
         }
-
-        const fill = document.getElementById('setup-mem-bar-fill');
-        if (fill) fill.style.width = fillPct + '%';
-        const availEl = document.getElementById('setup-mem-bar-avail');
-        if (availEl) availEl.textContent = availLabel;
-        const totalEl = document.getElementById('setup-mem-bar-total');
-        if (totalEl) totalEl.textContent = totalLabel;
-        bar.style.display = '';
-
-        _memState = { availBytes, availRamBytes: availableRamBytes, isUnified };
-        _fetchCardVramEstimates(vramEstimateBytes, availableRamBytes, isUnified);
     } catch {
         // leave bar hidden if metrics unavailable
     }
+}
+
+// Unified (macOS) path: single pool, Metal cap, reclaimable cache.
+async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalBytes, ramUsedBytes, reclaimableBytes, sysData) {
+    if (!ramTotalBytes) return;
+
+    const cap = _metalCap(ramTotalBytes, metalGpuLimitMb);
+    const osReserve = _osReserveForUnified(ramTotalBytes);
+
+    // Derive segments: in_use (actual + wired), available_now, freeable_cache.
+    // macOS "ram_used_gb" = total - available; includes cache that is reclaimable.
+    const nonReclaimUsed = Math.max(0, ramUsedBytes - reclaimableBytes);
+    const inUseBytes = Math.max(nonReclaimUsed, (sysData && sysData.memory_wired_gb > 0)
+        ? (sysData.memory_wired_gb * 1024 ** 3)
+        : nonReclaimUsed);
+
+    // Free right now (true free, not counting reclaimable as guaranteed)
+    const freeNow = Math.max(0, ramTotalBytes - inUseBytes - reclaimableBytes);
+
+    // "Available now" = what we can realistically allocate for inference without purging:
+    //   min(metal_cap, freeNow + partial_reclaimable) - reserve
+    // We don't want to assume all reclaimable will be freed unless user purges, so
+    // take a fraction (60%) as "likely reclaimable under pressure".
+    const likelyReclaimable = reclaimableBytes * 0.6;
+    const safeLimit = Math.min(cap, ramTotalBytes - osReserve);
+    const availNow = Math.max(0, Math.min(safeLimit, freeNow + likelyReclaimable - _MEM_SAFETY_MARGIN));
+
+    // If user purges: all reclaimable becomes free; new "available" =:
+    const totalAfterPurge = Math.max(0, ramTotalBytes - inUseBytes);
+    const availIfPurged = Math.max(0, Math.min(safeLimit, totalAfterPurge - _MEM_SAFETY_MARGIN));
+
+    // Segmented bar: represent total RAM as 100%
+    const inusePct = (inUseBytes / ramTotalBytes) * 100;
+    const availPct = (Math.max(0, freeNow) / ramTotalBytes) * 100;
+    const freeablePct = (reclaimableBytes / ramTotalBytes) * 100;
+
+    // Labels
+    const availGb = availNow > 0 ? Math.round(availNow / (1024 ** 3)) : 0;
+    const availLabel = (availGb > 0
+        ? availGb + ' GB available for inference'
+        : 'Very little memory available');
+    const totalLabel = _fmtGb(ramTotalBytes) + ' GB unified';
+
+    _renderUnifiedBar(
+        { inuse: inusePct, avail: availPct, freeable: freeablePct },
+        true,
+        purgeBtn,
+        cap,
+        freeNow,
+        reclaimableBytes,
+        availLabel,
+        totalLabel,
+    );
+
+    if (document.getElementById('setup-mem-bar-total')) {
+        document.getElementById('setup-mem-bar-total').textContent = totalLabel;
+    }
+    bar.style.display = '';
+
+    // Wire "Free cache" button (macOS only)
+    if (purgeBtn && reclaimableBytes >= 3 * 1024 ** 3) {
+        purgeBtn.onclick = async () => {
+            if (!confirm('Flush system caches to free memory?\nThis will not affect running apps, but some data may reload slightly slower.')) return;
+            try {
+                const token = await _fetchDbAdminTokenForSystemAction();
+                if (!token) { showToast('Unable to authorize memory purge.'); return; }
+                const resp = await fetch('/system/purge', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token,
+                    },
+                    body: JSON.stringify({ confirm: 'purge-memory' }),
+                });
+                const out = await resp.json().catch(() => null);
+                if (!resp.ok || out?.error) {
+                    showToast(out?.error || 'Memory purge failed.');
+                } else {
+                    showToast('System caches flushed.');
+                    // Re-render bar + cards to reflect new free memory.
+                    setTimeout(fetchAndRenderMemoryBar, 600);
+                }
+            } catch {
+                showToast('Error while attempting to flush caches.');
+            }
+        };
+    }
+
+    _memState = {
+        availBytes: availNow,
+        budgetIfPurgedBytes: availIfPurged,
+        metalCapBytes: cap,
+        availRamBytes: 0,
+        isUnified: true,
+        reclaimableBytes,
+    };
+
+    // Card VRAM estimates use:
+    //   - budgetNow (availNow)
+    //   - budgetIfPurged (for "Free cache to run this" state)
+    _fetchCardVramEstimates(availNow, 0, true, availIfPurged);
+}
+
+// Helper used by the "Free cache" button to call /system/purge.
+async function _fetchDbAdminTokenForSystemAction() {
+    try {
+        const tokenResp = await fetch('/api/db/admin-token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        if (!tokenResp.ok) return null;
+        const tokenData = await tokenResp.json().catch(() => ({}));
+        return tokenData.token || null;
+    } catch {
+        return null;
+    }
+}
+
+// Discrete GPU path (Win/Linux): VRAM bar + system RAM as overflow.
+async function _renderDiscreteMemoryBar(bar, purgeBtn, vramTotalBytes, vramUsedBytes, ramTotalBytes, ramUsedBytes) {
+    const vramFree = Math.max(0, vramTotalBytes - vramUsedBytes);
+    const ramFreeBytes = Math.max(0, ramTotalBytes - ramUsedBytes);
+
+    const inusePct = vramTotalBytes > 0 ? ((vramUsedBytes / vramTotalBytes) * 100) : 0;
+    const availPct = 100 - inusePct;
+
+    const availLabel = _fmtGb(vramFree) + ' GB available';
+    const totalLabel =
+        _fmtGb(vramTotalBytes) + ' GB VRAM · ' +
+        _fmtGb(ramTotalBytes) + ' GB system RAM';
+
+    _renderDiscreteBar(
+        { inuse: inusePct, avail: availPct },
+        true,
+        purgeBtn,
+        availLabel,
+        totalLabel,
+    );
+
+    if (document.getElementById('setup-mem-bar-total')) {
+        document.getElementById('setup-mem-bar-total').textContent = totalLabel;
+    }
+    bar.style.display = '';
+
+    _memState = {
+        availBytes: vramFree,
+        budgetIfPurgedBytes: vramFree,
+        metalCapBytes: 0,
+        availRamBytes: ramFreeBytes,
+        isUnified: false,
+        reclaimableBytes: 0,
+    };
+
+    _fetchCardVramEstimates(vramFree, ramFreeBytes, false, vramFree);
 }
 
 // ── Drop zone ─────────────────────────────────────────────────────────────────
@@ -744,9 +942,9 @@ function _buildLaunchCard(preset, activePresetId) {
     return card;
 }
 
-// ── Card VRAM estimates ───────────────────────────────────────────────────────
+// ── Card VRAM estimates (4-state: fit / tight / conditional / no-fit) ──────────
 
-async function _fetchCardVramEstimates(availBytes, availRamBytes, isUnified) {
+async function _fetchCardVramEstimates(availBytes, availRamBytes, isUnified, budgetIfPurgedBytes) {
     const cards = document.querySelectorAll('.launch-card[data-preset-id]');
     const presets = sessionState.presets || [];
 
@@ -780,14 +978,14 @@ async function _fetchCardVramEstimates(availBytes, availRamBytes, isUnified) {
             if (!data.ok) return;
             // Guard: card may have been re-rendered while awaiting
             if (!document.contains(vramEl)) return;
-            _renderCardVram(vramEl, data, availBytes, availRamBytes, isUnified);
+            _renderCardVram(vramEl, data, availBytes, availRamBytes, isUnified, budgetIfPurgedBytes);
         } catch {
             // silently skip — VRAM row stays in loading state
         }
     }));
 }
 
-function _renderCardVram(el, data, availBytes, availRamBytes, isUnified) {
+function _renderCardVram(el, data, availBytes, availRamBytes, isUnified, budgetIfPurgedBytes) {
     const hasAvail = availBytes > 0;
     const totalGb = data.total_bytes / 1e9;
     const weightsGb = data.weights_bytes / 1e9;
@@ -795,17 +993,77 @@ function _renderCardVram(el, data, availBytes, availRamBytes, isUnified) {
     const extrasBytes = (data.mmproj_bytes || 0) + (data.mtp_bytes || 0) +
                         (data.linear_attn_state_bytes || 0) + (data.overhead_bytes || 0);
 
-    const rec = data.recommendation || 'risk';
-    const dotClass = rec === 'fit' ? 'fit' : rec === 'tight' ? 'tight' : 'risk';
+    // Determine 4-state classification.
+    let state; // 'fit' | 'tight' | 'conditional' | 'nofit'
+    let dotClass; // CSS class
+    let hint; // short human-readable hint
+    let dotTitle;
 
-    // Every card uses the same machine budget as its denominator, so bar lengths
-    // remain directly comparable across models and context sizes.
+    if (isUnified) {
+        const metalCap = _memState.metalCapBytes || 0;
+        if (hasAvail && data.total_bytes <= (availBytes * 0.82)) {
+            state = 'fit';
+        } else if (hasAvail && data.total_bytes <= availBytes) {
+            state = 'tight';
+        } else if (budgetIfPurgedBytes > 0 &&
+                   data.total_bytes > availBytes &&
+                   data.total_bytes <= (budgetIfPurgedBytes * 0.85) &&
+                   data.total_bytes <= metalCap) {
+            // Fits after purging
+            state = 'conditional';
+        } else {
+            state = 'nofit';
+        }
+    } else {
+        // Discrete GPU: fit / tight / slower / nofit
+        if (hasAvail && data.total_bytes <= (availBytes * 0.82)) {
+            state = 'fit';
+        } else if (hasAvail && data.total_bytes <= availBytes) {
+            state = 'tight';
+        } else if (availRamBytes > 0 &&
+                   data.total_bytes > availBytes &&
+                   data.total_bytes <= (availBytes + availRamBytes * 0.8)) {
+            // Overflows to system RAM, but still fits
+            state = 'conditional';
+        } else {
+            state = 'nofit';
+        }
+    }
+
+    switch (state) {
+        case 'fit':
+            dotClass = 'fit';
+            hint = '';
+            dotTitle = 'Fits comfortably in memory';
+            break;
+        case 'tight':
+            dotClass = 'tight';
+            hint = 'Tight — may be slow or unstable';
+            dotTitle = 'Tight fit — may work but leaves little headroom';
+            break;
+        case 'conditional':
+            dotClass = 'conditional';
+            if (isUnified) {
+                hint = 'Free cache to run this';
+                dotTitle = 'Will fit after flushing system caches';
+            } else {
+                hint = 'Runs slower — uses system RAM';
+                dotTitle = 'Will run, but some layers use system memory and it will be slower';
+            }
+            break;
+        default:
+            dotClass = 'risk';
+            hint = 'Over memory limit';
+            dotTitle = 'Exceeds available memory — consider a smaller model or context';
+            break;
+    }
+
+    // Denominator for bar: machine budget or reasonable fallback.
     const fitsInBudget = hasAvail && data.total_bytes <= availBytes;
     const denominator = hasAvail ? availBytes : data.total_bytes * 1.25;
     const toWidth = (b) => Math.min(100, (b / denominator) * 100).toFixed(1) + '%';
 
-    // Explicit free-headroom segment — colored per fit/tight status so it reads from
-    // the same success/warning palette as the dot indicator.
+    // Free headroom segment (for fit/tight)
     const freeBytes = fitsInBudget ? (availBytes - data.total_bytes) : 0;
     const freeSegment = freeBytes > 0
         ? `<div class="launch-card-vram-seg launch-card-vram-seg--free launch-card-vram-seg--free-${dotClass}" style="width:${toWidth(freeBytes)}"></div>`
@@ -833,6 +1091,7 @@ function _renderCardVram(el, data, availBytes, availRamBytes, isUnified) {
         ? ` (+${((data.total_bytes - availBytes) / 1e9).toFixed(1)} GB)`
         : '';
 
+    // RAM row (discrete GPU)
     const ramBytes = data.ram_bytes || 0;
     const ramDenominator = availRamBytes > 0 ? availRamBytes : ramBytes;
     const ramWidth = ramDenominator > 0
@@ -852,11 +1111,10 @@ function _renderCardVram(el, data, availBytes, availRamBytes, isUnified) {
         </div>`
         : '';
 
-    const dotTitle = dotClass === 'fit'
-        ? 'Fits comfortably in VRAM'
-        : dotClass === 'tight'
-            ? 'Tight fit — may work but leaves little headroom'
-            : 'May exceed available VRAM — consider reducing context or KV quant';
+    // Hint row (for conditional / nofit)
+    const hintRow = hint
+        ? `<div class="launch-card-memory-hint" title="${dotTitle}">${hint}</div>`
+        : '';
 
     el.classList.remove('launch-card-vram--loading');
     el.title = parts.join(' · ');
@@ -874,8 +1132,9 @@ function _renderCardVram(el, data, availBytes, availRamBytes, isUnified) {
                 <span class="launch-card-vram-dot launch-card-vram-dot--${dotClass}" title="${dotTitle}"></span>
             </div>
             <div class="launch-card-memory-total-row">
-                <span class="launch-card-vram-total" title="Approximate total VRAM: ${parts.join(' · ')}">${totalLabel}${overflowLabel}</span>
+                <span class="launch-card-vram-total" title="Approximate total memory: ${parts.join(' · ')}">${totalLabel}${overflowLabel}</span>
             </div>
+            ${hintRow}
             ${ramRow}
         </div>
     `;

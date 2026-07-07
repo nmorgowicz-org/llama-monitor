@@ -351,14 +351,19 @@
                             </button>
                         </div>
 
-                        <!-- VRAM bar (moved up from bottom; populated by JS after /metrics fetch) -->
+                        <!-- Inference memory bar (segmented; populated by JS after /metrics fetch) -->
                         <div id="setup-mem-bar" class="setup-mem-bar" style="display:none;" aria-label="Inference memory budget">
                             <div class="setup-mem-bar-track" aria-hidden="true">
-                                <div class="setup-mem-bar-fill" id="setup-mem-bar-fill"></div>
+                                <div class="setup-mem-bar-seg setup-mem-bar-seg--inuse" id="setup-mem-bar-seg-inuse" style="width:0"></div>
+                                <div class="setup-mem-bar-seg setup-mem-bar-seg--avail" id="setup-mem-bar-seg-avail" style="width:0"></div>
+                                <div class="setup-mem-bar-seg setup-mem-bar-seg--freeable" id="setup-mem-bar-seg-freeable" style="width:0"></div>
                             </div>
                             <div class="setup-mem-bar-labels">
                                 <span id="setup-mem-bar-avail"></span>
-                                <span id="setup-mem-bar-total"></span>
+                                <div class="setup-mem-bar-right">
+                                    <button class="setup-mem-bar-purge" id="setup-mem-bar-purge" type="button" style="display:none;" title="Flush system caches to free memory">Free cache</button>
+                                    <span id="setup-mem-bar-total"></span>
+                                </div>
                             </div>
                         </div>
 
@@ -418,6 +423,7 @@
                         <div class="vram-fit-legend">
                             <span class="vram-fit-legend-item"><span class="vram-fit-legend-dot vram-fit-legend-dot--fit"></span>Fits in memory</span>
                             <span class="vram-fit-legend-item"><span class="vram-fit-legend-dot vram-fit-legend-dot--tight"></span>Tight fit</span>
+                            <span class="vram-fit-legend-item"><span class="vram-fit-legend-dot vram-fit-legend-dot--conditional"></span>Needs cache cleared or slower (uses RAM)</span>
                             <span class="vram-fit-legend-item"><span class="vram-fit-legend-dot vram-fit-legend-dot--risk"></span>May exceed memory</span>
                         </div>
 

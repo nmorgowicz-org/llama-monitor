@@ -2854,6 +2854,15 @@ body.setup-active .sidebar-nav {
   margin-top: 1px;
 }
 
+/* Small inline hint row under VRAM total (e.g. "Free cache to run this") */
+.launch-card-memory-hint {
+  font-size: 9px;
+  color: var(--color-accent);
+  opacity: 0.95;
+  margin-top: 1px;
+  letter-spacing: 0.02em;
+}
+
 .launch-card-vram-total {
   font-size: 10px;
   font-weight: 600;
@@ -2875,9 +2884,10 @@ body.setup-active .sidebar-nav {
   transition: background 0.3s ease;
 }
 
-.launch-card-vram-dot--fit    { background: var(--color-success); box-shadow: 0 0 4px color-mix(in srgb, var(--color-success) 40%, transparent); }
-.launch-card-vram-dot--tight  { background: var(--color-warning); box-shadow: 0 0 4px color-mix(in srgb, var(--color-warning) 40%, transparent); }
-.launch-card-vram-dot--risk   { background: var(--color-error); box-shadow: 0 0 4px color-mix(in srgb, var(--color-error) 40%, transparent); }
+.launch-card-vram-dot--fit        { background: var(--color-success); box-shadow: 0 0 4px color-mix(in srgb, var(--color-success) 40%, transparent); }
+.launch-card-vram-dot--tight      { background: var(--color-warning); box-shadow: 0 0 4px color-mix(in srgb, var(--color-warning) 40%, transparent); }
+.launch-card-vram-dot--conditional{ background: var(--color-accent); box-shadow: 0 0 4px color-mix(in srgb, var(--color-accent) 50%, transparent); opacity: 0.9; }
+.launch-card-vram-dot--risk       { background: var(--color-error); box-shadow: 0 0 4px color-mix(in srgb, var(--color-error) 40%, transparent); }
 
 /* ── Architecture label on launch cards ──────────────────────────────────────── */
 
@@ -2941,11 +2951,12 @@ body.setup-active .sidebar-nav {
   flex-shrink: 0;
 }
 
-.vram-fit-legend-dot--fit   { background: var(--color-success); }
-.vram-fit-legend-dot--tight { background: var(--color-warning); }
-.vram-fit-legend-dot--risk  { background: var(--color-error); }
+.vram-fit-legend-dot--fit        { background: var(--color-success); }
+.vram-fit-legend-dot--tight      { background: var(--color-warning); }
+.vram-fit-legend-dot--conditional { background: var(--color-accent); opacity: 0.9; }
+.vram-fit-legend-dot--risk       { background: var(--color-error); }
 
-/* ── Memory bar ─────────────────────────────────────────────────────────────── */
+/* ── Memory bar (segmented) ─────────────────────────────────────────────────── */
 
 .setup-mem-bar {
   display: flex;
@@ -2959,24 +2970,106 @@ body.setup-active .sidebar-nav {
   background: rgba(255, 255, 255, 0.08);
   border-radius: 2px;
   overflow: hidden;
+  display: flex;
 }
 
-.setup-mem-bar-fill {
+.setup-mem-bar-seg {
   height: 100%;
-  background: linear-gradient(90deg, var(--color-accent) 0%, var(--color-accent-light, var(--color-accent)) 100%);
-  border-radius: 2px;
   transition: width 0.4s ease;
+}
+
+/* "In use" segment */
+.setup-mem-bar-seg--inuse {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* "Available" segment */
+.setup-mem-bar-seg--avail {
+  background: linear-gradient(90deg, var(--color-accent) 0%, var(--color-accent-light, var(--color-accent)) 100%);
+}
+
+/* "Freeable cache" segment (subtly distinct) */
+.setup-mem-bar-seg--freeable {
+  background: linear-gradient(90deg,
+      var(--color-accent) 0%,
+      color-mix(in srgb, var(--color-accent) 70%, transparent) 100%);
+  opacity: 0.7;
+  /* subtle pattern: thin repeating dashes */
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.18) 2px,
+      rgba(0,0,0,0.18) 3px
+    ),
+    linear-gradient(90deg,
+      var(--color-accent) 0%,
+      color-mix(in srgb, var(--color-accent) 70%, transparent) 100%);
 }
 
 .setup-mem-bar-labels {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 8px;
   font-size: 11px;
   color: var(--color-text-muted, rgba(255, 255, 255, 0.45));
 }
 
+.setup-mem-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* "Free cache" button */
+.setup-mem-bar-purge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-accent);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.setup-mem-bar-purge:hover {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  border-color: var(--color-accent);
+}
+
+.setup-mem-bar-purge:active {
+  transform: translateY(1px);
+}
+
 [data-theme="light"] .setup-mem-bar-track {
   background: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .setup-mem-bar-seg--inuse {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .setup-mem-bar-seg--freeable {
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 3px
+    ),
+    linear-gradient(90deg,
+      var(--color-accent) 0%,
+      color-mix(in srgb, var(--color-accent) 70%, transparent) 100%);
 }
 
 /* ── Drop zone ───────────────────────────────────────────────────────────────── */
