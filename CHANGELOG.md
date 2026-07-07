@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.7.0...v1.8.0) (2026-07-07)
+
+
+### Features
+
+* **wizard:** add chat template auto-updater (Qwen/Gemma/future) ([3339657](https://github.com/nmorgowicz-org/llama-monitor/commit/3339657d65fb3998f1c8210de0e47e76411d4b5a))
+
+
+### Bug Fixes
+
+* **wizard:** add clear feedback for “Re-fetch Recommended” ([3339657](https://github.com/nmorgowicz-org/llama-monitor/commit/3339657d65fb3998f1c8210de0e47e76411d4b5a))
+* **wizard:** clean up chat template “Check for updates” UX ([3339657](https://github.com/nmorgowicz-org/llama-monitor/commit/3339657d65fb3998f1c8210de0e47e76411d4b5a))
+* **wizard:** hide community picks panel when data is missing ([3339657](https://github.com/nmorgowicz-org/llama-monitor/commit/3339657d65fb3998f1c8210de0e47e76411d4b5a))
+
 ## [1.7.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.6.0...v1.7.0) (2026-07-06)
 
 
