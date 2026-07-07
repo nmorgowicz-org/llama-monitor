@@ -2854,6 +2854,15 @@ body.setup-active .sidebar-nav {
   margin-top: 1px;
 }
 
+/* Small inline hint row under VRAM total (e.g. "Free cache to run this") */
+.launch-card-memory-hint {
+  font-size: 9px;
+  color: var(--color-accent);
+  opacity: 0.95;
+  margin-top: 1px;
+  letter-spacing: 0.02em;
+}
+
 .launch-card-vram-total {
   font-size: 10px;
   font-weight: 600;
@@ -2875,9 +2884,10 @@ body.setup-active .sidebar-nav {
   transition: background 0.3s ease;
 }
 
-.launch-card-vram-dot--fit    { background: var(--color-success); box-shadow: 0 0 4px color-mix(in srgb, var(--color-success) 40%, transparent); }
-.launch-card-vram-dot--tight  { background: var(--color-warning); box-shadow: 0 0 4px color-mix(in srgb, var(--color-warning) 40%, transparent); }
-.launch-card-vram-dot--risk   { background: var(--color-error); box-shadow: 0 0 4px color-mix(in srgb, var(--color-error) 40%, transparent); }
+.launch-card-vram-dot--fit        { background: var(--color-success); box-shadow: 0 0 4px color-mix(in srgb, var(--color-success) 40%, transparent); }
+.launch-card-vram-dot--tight      { background: var(--color-warning); box-shadow: 0 0 4px color-mix(in srgb, var(--color-warning) 40%, transparent); }
+.launch-card-vram-dot--conditional{ background: var(--color-accent); box-shadow: 0 0 4px color-mix(in srgb, var(--color-accent) 50%, transparent); opacity: 0.9; }
+.launch-card-vram-dot--risk       { background: var(--color-error); box-shadow: 0 0 4px color-mix(in srgb, var(--color-error) 40%, transparent); }
 
 /* ── Architecture label on launch cards ──────────────────────────────────────── */
 
@@ -2941,41 +2951,193 @@ body.setup-active .sidebar-nav {
   flex-shrink: 0;
 }
 
-.vram-fit-legend-dot--fit   { background: var(--color-success); }
-.vram-fit-legend-dot--tight { background: var(--color-warning); }
-.vram-fit-legend-dot--risk  { background: var(--color-error); }
+.vram-fit-legend-dot--fit        { background: var(--color-success); }
+.vram-fit-legend-dot--tight      { background: var(--color-warning); }
+.vram-fit-legend-dot--conditional { background: var(--color-accent); opacity: 0.9; }
+.vram-fit-legend-dot--risk       { background: var(--color-error); }
 
-/* ── Memory bar ─────────────────────────────────────────────────────────────── */
+/* ── Memory bar (segmented with labels) ──────────────────────────────────────── */
 
 .setup-mem-bar {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   padding: 10px 4px 4px;
+  font-size: 9px;
+  color: var(--color-text-muted, rgba(255, 255, 255, 0.45));
 }
 
+/* Track: thin segmented bar spanning full width = total memory */
 .setup-mem-bar-track {
   height: 4px;
   background: rgba(255, 255, 255, 0.08);
   border-radius: 2px;
-  overflow: hidden;
+  overflow: visible;
+  display: flex;
+  gap: 1px;
+  position: relative;
 }
 
-.setup-mem-bar-fill {
+/* Separator between segments */
+.setup-mem-bar-sep {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.22);
+  align-self: stretch;
+}
+
+/* Segment base */
+.setup-mem-bar-seg {
   height: 100%;
-  background: linear-gradient(90deg, var(--color-accent) 0%, var(--color-accent-light, var(--color-accent)) 100%);
-  border-radius: 2px;
+  position: relative;
   transition: width 0.4s ease;
 }
 
+/* "GPU limit" segment (macOS unified memory, non-GPU-usable) */
+.setup-mem-bar-seg--gpulimit {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* "In use" segment */
+.setup-mem-bar-seg--inuse {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* "Available" segment */
+.setup-mem-bar-seg--avail {
+  background: linear-gradient(90deg, var(--color-accent) 0%, var(--color-accent-light, var(--color-accent)) 100%);
+}
+
+/* "Freeable cache" segment (subtly distinct) */
+.setup-mem-bar-seg--freeable {
+  background: linear-gradient(90deg,
+      var(--color-accent) 0%,
+      color-mix(in srgb, var(--color-accent) 70%, transparent) 100%);
+  opacity: 0.7;
+}
+
+/* Tiny labels above segments */
+.setup-mem-bar-seg-label {
+  position: absolute;
+  top: -13px;
+  left: 0;
+  right: 0;
+  font-size: 8px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  text-align: center;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+/* Ensure labels are visible */
+.setup-mem-bar-seg {
+  min-width: 0;
+}
+
+/* Bottom labels row */
 .setup-mem-bar-labels {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
   color: var(--color-text-muted, rgba(255, 255, 255, 0.45));
 }
 
+.setup-mem-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* "Free cache" button */
+.setup-mem-bar-purge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-accent);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.setup-mem-bar-purge:hover {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  border-color: var(--color-accent);
+}
+
+.setup-mem-bar-purge:active {
+  transform: translateY(1px);
+}
+
 [data-theme="light"] .setup-mem-bar-track {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .setup-mem-bar-sep {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+[data-theme="light"] .setup-mem-bar-seg--inuse {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .setup-mem-bar-seg-label {
+  color: var(--color-text-muted);
+}
+
+/* Small legend line under the segmented memory bar */
+.setup-mem-bar-legend {
+  display: flex;
+  gap: 10px;
+  font-size: 9px;
+  color: var(--color-text-muted);
+  margin-top: 1px;
+}
+
+.setup-mem-bar-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  opacity: 0.9;
+}
+
+.setup-mem-bar-legend-chip {
+  width: 8px;
+  height: 4px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.setup-mem-bar-legend-chip--inuse {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.setup-mem-bar-legend-chip--avail {
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-light, var(--color-accent)));
+}
+
+.setup-mem-bar-legend-chip--freeable {
+  background: linear-gradient(90deg,
+      var(--color-accent),
+      color-mix(in srgb, var(--color-accent) 70%, transparent));
+  opacity: 0.8;
+}
+
+/* Only show freeable legend when meaningful (toggled via JS) */
+.setup-mem-bar-legend-item--freeable {
+  display: none;
+}
+
+/* Light theme tweaks */
+[data-theme="light"] .setup-mem-bar-legend-chip--inuse {
   background: rgba(0, 0, 0, 0.08);
 }
 

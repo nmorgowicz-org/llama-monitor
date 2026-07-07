@@ -1,5 +1,20 @@
 # Llama Monitor Project Rules
 
+## UI/UX Collaboration
+
+For all UI/UX work (bars, cards, modals, layout changes, visual polish), use the screenshot harness to iterate with the user, not just code descriptions.
+
+- Always run:
+  - `cargo build --release`
+  - `node tests/ui/capture.mjs --scenario <scenario>`
+- Use this to:
+  - Confirm proposed designs in real UI.
+  - Validate text, spacing, colors, and behavior.
+- Use whichever scenario matches the area being changed (e.g., welcome, chat, spawn-wizard, dashboard, settings, sidebar, panels, models-v2, etc.).
+- If new capabilities require new capture scenarios, add them to `capture.mjs` and update its usage docs.
+- Never rely on screenshots from other environments or imagined renders.
+- Treat screenshots as the single source of truth for "what this will look like."
+
 ## Conventional Commits
 
 All commits MUST follow [Conventional Commits](https://www.conventionalcommits.org/):
