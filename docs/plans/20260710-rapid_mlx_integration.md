@@ -317,6 +317,8 @@ flags.
 | Sampling | default sampling controls |
 | Access | API key or `RAPID_MLX_API_KEY`, rate limit |
 | Multimodal | MLLM enable/disable behavior |
+| Utility | `rapid-mlx doctor`, `rapid-mlx jlens`, `rapid-mlx telemetry`, `rapid-mlx launch` |
+| Speculation | MTP, suffix decoding, and DFlash controls; `--mtp-sidecar` |
 
 Mutual-exclusion rules at the baseline:
 
@@ -419,6 +421,8 @@ the same components and validation. The flow becomes:
    - Summarize engine, runtime version/source, model, network exposure, capabilities,
      and non-default tuning.
    - Surface blocking validation before the user presses Launch.
+   - **Memory Safety Warning**: If unified memory allocation exceeds 75%, warn the user that the system may become unstable or crash.
+   - **Wired Memory Notice**: Inform users that increasing context window size increases "Wired Memory" (non-pageable), which can lead to abrupt OOMs.
 
 Changing engines preserves shared values where semantics match, including host, port,
 API-key intent, temperature, top-p, and token limit. Backend-only values remain stored
@@ -527,10 +531,8 @@ Managed installation procedure:
 
 1. Validate Apple Silicon macOS and a supported Python interpreter.
 2. Fetch available release metadata.
-3. Create a new version directory and virtual environment.
-4. Install the exact user-selected Rapid-MLX release and selected extras into that
-   environment. Exact version selection here is an installation action, not an app
-   compatibility pin.
+3. Use `uv tool install rapid-mlx@latest` (or specific version) to create a dedicated, isolated runtime environment.
+4. Use `uv tool install gguf2mlx` to ensure the conversion tool is present in a compatible isolation layer.
 5. Run core and feature probes against the new executable.
 6. Write metadata.
 7. Atomically update `current.json` only after all required probes succeed.
@@ -662,7 +664,10 @@ Detect independently:
 - MCP;
 - cache telemetry;
 - cancellation;
-- status memory telemetry.
+- status memory telemetry;
+- self-diagnostic (doctor);
+- interpretability (jlens);
+- one-shot launch
 
 The UI only exposes a control when the active runtime proves the corresponding
 capability. Missing extras receive a specific installation/remediation action.
@@ -764,6 +769,8 @@ impl BackendAdapter {
     pub async fn await_ready(&self, port: u16, deadline: Instant) -> Result<()>;
     /// Fetch a normalized metrics snapshot. Called by the shared poller loop.
     pub async fn poll_metrics(&self, port: u16) -> Result<InferenceMetricsSnapshot>;
+    /// Native request cancellation.
+    pub async fn cancel_request(&self, port: u16, request_id: &str) -> Result<()>;
     /// Return the static capability set for the active runtime profile.
     pub fn capabilities(&self) -> &CapabilitySet;
 }
@@ -784,7 +791,9 @@ pub enum LlamaCppLaunchMode {
 ```
 
 The adapter picks the right arg-builder based on this enum. The supervisor, the
-session layer, and the UI never need to know which mode is active.
+    session layer, and the UI never need to know which mode is active.
+    The `llama_cpp` adapter must implement port-prefix log routing and SSE subscription to `/models/sse` for router-mode lifecycle tracking.
+
 
 **Ownership summary:**
 
@@ -987,7 +996,8 @@ Rapid-MLX:
 
 1. process remains alive;
 2. `/health` reports a loaded/healthy model;
-3. `/health/ready` succeeds;
+3. `/health/ready` succeeds. This is flipped only after the internal sequence: 
+   `install_signal_observability()` $\rightarrow$ `GC threshold adjustment` $\rightarrow$ `engine.start()` $\rightarrow$ `Metal shader JIT (generate_warmup)` $\rightarrow$ `_load_prefix_cache_from_disk()` $\rightarrow$ `init_mcp()` $\rightarrow$ `deep_probe_audio_lane()` completes.
 4. `/v1/models` resolves the served model when authentication is configured;
 5. timeout produces a precise error with redacted recent logs.
 
@@ -1027,11 +1037,12 @@ The shared chat layer remains OpenAI-compatible, with a backend capability matri
 |---|---:|---:|
 | Streaming chat | Yes | Yes |
 | Usage chunks | Existing behavior | Finish or dedicated usage chunk |
-| Reasoning content | Existing parser rules | Accept `reasoning_content` |
+| Reasoning content | Existing parser rules | Accept `reasoning` field and `delta.reasoning` |
 | Tools | Capability-driven | Capability-driven |
 | Structured response | Capability-driven | `response_format` when proven |
 | Request seed | Existing behavior | Hidden unless proven |
 | Cancellation | Existing behavior | Native endpoint when proven |
+| Reasoning depth | Not supported | `reasoning_effort` parameter |
 
 Request construction sends only fields supported by the active backend profile.
 Unsupported saved fields remain preserved in the preset but are not transmitted.
@@ -1086,6 +1097,12 @@ pub struct InferenceMetricsSnapshot {
     pub completed_requests_total:       Option<u64>,
     pub prompt_tokens_total:            Option<u64>,
     pub completion_tokens_total:        Option<u64>,
+    pub steps_executed:                 Option<u64>,
+    pub global_cache_hit_rate:           Option<f64>,
+    pub global_cache_entries:            Option<u64>,
+    pub ttft:                            Option<f64>,
+    pub speculative_acceptance_rate:     Option<f64>,
+
     // Memory (always in bytes, regardless of backend source unit)
     pub active_memory_bytes:            Option<u64>,
     pub peak_memory_bytes:              Option<u64>,
@@ -1128,6 +1145,8 @@ remain reachable through selectors, accessibility trees, and stale event handler
 
 ### Initial Rapid-MLX cards
 
+Note: Metrics like `ttft` and `speculative_acceptance_rate` are provided by `llama.cpp` but omitted for `Rapid-MLX` unless natively supported.
+
 Render these only when their required data exists:
 
 | Card | Required data | Notes |
@@ -1139,6 +1158,8 @@ Render these only when their required data exists:
 | Runtime memory | any valid Metal active/peak/cache value | Label as Metal/runtime memory, not VRAM |
 | Prefix/cache state | recognized, semantically mapped cache statistic | No generic cache card from unknown fields |
 | Totals | any valid request/token total | Clearly cumulative |
+| Thinking UI | `delta.reasoning` stream | Render as an expandable accordion |
+| Live Progress | `/v1/status` $\rightarrow$ `progress` | Render as a real-time progress bar |
 
 Do not render these llama.cpp cards for Rapid-MLX unless a future native metric is
 explicitly mapped:
@@ -1205,6 +1226,10 @@ Validate:
 When the user selects a `.gguf` file under Rapid-MLX, treat it as "GGUF to be
 converted to MLX via gguf2mlx" instead of rejecting it.
 
+**Priority Source**: If the original Hugging Face `config.json` for the model is
+available, it MUST be used as the source of truth. GGUF metadata should be used
+only as a fallback.
+
 Behavior:
 
 - Treat the GGUF as candidate source for Rapid-MLX.
@@ -1219,6 +1244,12 @@ Behavior:
 - If conversion fails or the architecture is unsupported:
   - show a clear explanation (no silent GGUF rejection);
   - allow the user to fallback to llama.cpp with the same GGUF.
+
+**Conversion Risks**:
+- **Tokenizer Fidelity**: High risk of broken special tokens (BOS/EOS) during GGUF $\rightarrow$ HF conversion.
+- **Architecture Drift**: Risk of incorrect `config.json` generation via GGUF metadata guessing.
+- **Mapping Errors**: Risk of incorrect tensor transposition (GGUF `[out, in]` vs MLX `[in, out]`) or tensor naming re-maps.
+- **Precision Loss**: Artifacts introduced during dequantization of GGUF blobs to float16.
 
 ### Hugging Face
 

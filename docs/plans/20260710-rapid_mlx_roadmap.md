@@ -1,0 +1,254 @@
+# Rapid-MLX Implementation Manual
+
+This document transforms the high-level roadmap into a comprehensive technical implementation manual. It serves as the primary guide for sub-agents implementing the Rapid-MLX backend.
+
+## Phase 1: Infrastructure & Backend Neutrality
+
+### Phase Objective
+Establish a backend-agnostic orchestration layer in `src/inference` to support multiple inference engines (llama.cpp and Rapid-MLX) without leaking backend-specific logic into session or UI code.
+
+### Precise Scope
+**Files to Create**:
+- `src/inference/mod.rs`: Module root and public API exports.
+- `src/inference/backend.rs`: Core `BackendAdapter` enum and interface definitions.
+- `src/inference/capabilities.rs`: `CapabilitySet` and `CapabilityProfile` definitions.
+- `src/inference/metrics.rs`: Normalized `InferenceMetricsSnapshot` and telemetry types.
+- `src/inference/supervisor.rs`: Process supervision logic, `SupervisedLaunch`, and `BackendObserver`.
+
+**Logic to Port/Implement**:
+- Move the concept of "server running" and "server stopping" from `src/llama/server.rs` to the `supervisor.rs`.
+- Replace the `LlamaMetrics` struct with a backend-neutral `InferenceMetricsSnapshot`.
+
+### Implementation Steps
+1. **Define the Backend Identity**: Implement `InferenceBackend` enum with `LlamaCpp` and `RapidMlx` variants.
+2. **Implement the Supervisor**:
+    - Create `SupervisedLaunch` struct to hold `program`, `args`, `env`, `cwd`, `port`, and `redacted_summary`.
+    - Create `BackendObserver` trait with `on_log_line` and `on_crash` methods.
+    - Implement the supervisor loop that handles `tokio::process::Child` lifecycle.
+3. **Define the Adapter Interface**:
+    - Implement `BackendAdapter` enum dispatching to `LlamaCppAdapter` and `RapidMlxAdapter`.
+    - Define the required methods: `validate()`, `build_launch()`, `await_ready()`, `poll_metrics()`, `cancel_request()`, and `capabilities()`.
+4. **Implement Normalized Telemetry**:
+    - In `src/inference/metrics.rs`, create `InferenceMetricsSnapshot` where all telemetry fields (Tps, Memory, etc.) are `Option<T>`.
+    - Implement `HealthState` enum (`Ok`, `Degraded`, `NotLoaded`, `Unreachable`).
+5. **Establish Capability Mapping**:
+    - Implement `CapabilitySet` to track supported features (e.g., `vision`, `mtp`, `cancellation`).
+
+### Hard Gates (Verification)
+- **Telemetry Neutrality**: Verify that `InferenceMetricsSnapshot` contains no llama.cpp-specific fields (like `slots_idle`) as top-level requirements; these must be in `backend_details` or omitted.
+- **Supervisor Isolation**: Verify that `SupervisedLaunch` is the only way a process is started and that it never logs the `env` vector.
+- **Interface Exhaustiveness**: Verify that `BackendAdapter` is an enum and that all match arms are handled in the session layer.
+
+### Known Pitfalls & Constraints
+- **Async Trait Complexity**: Avoid `async_trait` if possible; use enum dispatch for zero-overhead and better compile times.
+- **Observer Lifecycle**: `BackendObserver` must be `Send + Sync + 'static` to be safely moved into the supervisor's log-streaming tasks.
+
+---
+
+## Phase 2: Llama.cpp Adapter Port
+
+### Phase Objective
+Migrate existing llama.cpp logic from `src/llama` into the new adapter architecture to ensure no regressions in behavior.
+
+### Precise Scope
+**Files to Create**:
+- `src/inference/llama_cpp.rs`: The full implementation of `LlamaCppAdapter`.
+
+**Files to Modify**:
+- `src/llama/server.rs`: Replace `start_server` and `stop_server` with `BackendAdapter` calls.
+- `src/llama/poller.rs`: Replace `llama_metrics_poller` with `BackendAdapter::poll_metrics` calls.
+- `src/llama/metrics.rs`: Port `LlamaMetrics` and parsing logic to `src/inference/metrics.rs` and `llama_cpp.rs`.
+
+**Logic to Port**:
+- **Command Construction**: Port `append_fit_args`, `append_kv_cache_args`, and the main `TokioCommand` builder from `src/llama/server.rs` to `LlamaCppAdapter::build_launch`.
+- **Readiness Polling**: Port the `/health` check logic from `src/llama/poller.rs` to `LlamaCppAdapter::await_ready`.
+- **Metrics Polling**: Port the Prometheus (`/metrics`) and Slot (`/slots`) parsing logic to `LlamaCppAdapter::poll_metrics`.
+
+### Implementation Steps
+1. **Implement `LlamaCppAdapter`**: Create the struct and implement the `BackendAdapter` interface.
+2. **Port Command Builder**:
+    - Implement `build_launch` to replicate the exact argument sequence in `src/llama/server.rs:413-802`.
+    - Ensure `redacted_summary` accurately describes the model and port.
+3. **Port Readiness Logic**:
+    - Implement `await_ready` to poll `/health` and verify a success response.
+4. **Port Metrics Logic**:
+    - Implement `poll_metrics` to fetch `/metrics` and `/slots`.
+    - Map `LlamaMetrics` fields to the normalized `InferenceMetricsSnapshot`.
+5. **Refactor the Session Layer**:
+    - Update `src/llama/server.rs` and `src/llama/poller.rs` to use the `BackendAdapter::LlamaCpp` variant.
+
+### Hard Gates (Verification)
+- **Command Parity**: Verify that `LlamaCppAdapter::build_launch` produces a command identical to the one currently generated in `src/llama/server.rs`.
+- **Telemetry Parity**: Verify that `LlamaCppAdapter::poll_metrics` returns a snapshot that results in the same dashboard values as the current `poller.rs`.
+- **Behavioral Integrity**: Verify that llama.cpp servers still spawn, reach readiness, and respond to chat requests without changes in timing or output.
+
+### Known Pitfalls & Constraints
+- **SillyTavern Integration**: Ensure that the shift to the supervisor does not interrupt prompt forwarding or the existing SSE `model_status` updates.
+- **Path Lookups**: Maintain the existing `app_config.llama_server_path` validation logic during the port.
+
+---
+
+## Phase 3: Rapid-MLX Basic Launch & Readiness
+
+### Phase Objective
+Implement the ability to discover the Rapid-MLX runtime, construct its launch command, and verify its readiness.
+
+### Precise Scope
+**Files to Create**:
+- `src/inference/rapid_mlx/mod.rs`: `RapidMlxAdapter` implementation.
+- `src/inference/rapid_mlx/command.rs`: Command construction for `rapid-mlx serve`.
+- `src/inference/rapid_mlx/runtime.rs`: Runtime identification and metadata.
+- `src/inference/rapid_mlx/discovery.rs`: Logic to find `rapid-mlx` on `PATH` or in managed envs.
+
+**Logic to Implement**:
+- Platform validation (Apple Silicon macOS only).
+- Command construction: `rapid-mlx serve <model-or-path>`.
+- Readiness check: Poll `/health/ready` for HTTP 200.
+
+### Implementation Steps
+1. **Implement Runtime Discovery**:
+    - In `discovery.rs`, implement logic to resolve the `rapid-mlx` binary via explicit path, managed env, or `PATH`.
+    - Implement a core probe (`rapid-mlx --version`) to verify the binary is usable.
+2. **Implement Command Construction**:
+    - In `command.rs`, implement the builder for `rapid-mlx serve`.
+    - Ensure all baseline flags (host, port, etc.) from the specification are supported.
+3. **Implement the Adapter**:
+    - Create `RapidMlxAdapter` and implement `validate()` (check macOS + Silicon).
+    - Implement `build_launch()` using the command builder.
+4. **Implement Readiness Polling**:
+    - Implement `await_ready()` to poll `/health/ready`.
+    - **Critical**: Do not mark ready based on TCP port open; only on HTTP 200 from `/health/ready`.
+
+### Hard Gates (Verification)
+- **Platform Gate**: Verify that `RapidMlxAdapter::validate()` returns an error on Linux or Windows.
+- **Binary Resolution**: Verify that the adapter correctly identifies `rapid-mlx` installations from Homebrew and Pip.
+- **Readiness Accuracy**: Verify that the session is marked "Ready" only after `/health/ready` returns 200, not when the process first spawns.
+
+### Known Pitfalls & Constraints
+- **Binary Aliases**: Do not hardcode `vllm-mlx`; detect and use whichever binary is on `PATH` (preferring `rapid-mlx`).
+- **Timeout Handling**: Rapid-MLX warmup (JIT/Cache) can be slow; ensure `await_ready` has a generous timeout (e.g., 300s).
+
+---
+
+## Phase 4: Telemetry Normalization & Dashboard Cards
+
+### Phase Objective
+Implement normalized metrics polling for Rapid-MLX and update the UI to render cards dynamically based on available telemetry.
+
+### Precise Scope
+**Files to Create**:
+- `src/inference/rapid_mlx/poller.rs`: Rapid-MLX specific telemetry fetching logic.
+
+**Files to Modify**:
+- `src/inference/metrics.rs`: Update normalization logic.
+- `static/js/` (Dashboard components): Update card rendering logic.
+
+**Logic to Implement**:
+- Polling of `/v1/status` and `/v1/cache/stats`.
+- Conversion of Rapid-MLX GB values to bytes for the normalized snapshot.
+- Dynamic UI card mounting based on `Option<T>` presence.
+
+### Implementation Steps
+1. **Implement the Rapid-MLX Poller**:
+    - In `rapid_mlx/poller.rs`, implement logic to fetch JSON from `/v1/status` and `/v1/cache/stats`.
+    - Map `generation_tps` and `prompt_tps` directly to the normalized snapshot.
+2. **Perform Unit Conversion**:
+    - Convert `metal.active_memory_gb`, `peak_memory_gb`, and `cache_memory_gb` to bytes by multiplying by `1_073_741_824`.
+3. **Update the Frontend Card Registry**:
+    - Modify the JS dashboard to check for the presence of required metrics before mounting a card.
+    - Implement the "Stale Data" policy: keep a card for 3 poll intervals after the metric disappears, then remove it.
+4. **Integrate Polling**:
+    - Wire `RapidMlxAdapter::poll_metrics` into the shared poller loop.
+
+### Hard Gates (Verification)
+- **Unit Accuracy**: Verify that a `metal.active_memory_gb` value of `1.0` in the API results in `1073741824` bytes in the normalized snapshot.
+- **UI Dynamism**: Verify that when switching from llama.cpp to Rapid-MLX, llama.cpp-specific cards (e.g., Slot occupancy) are removed from the DOM, not just hidden.
+- **Zero vs None**: Verify that `generation_tps: 0.0` renders as "0", while a missing field results in no throughput card.
+
+### Known Pitfalls & Constraints
+- **Telemetry Schema**: Rapid-MLX telemetry may vary by release; use tolerant JSON parsing that ignores unknown fields.
+- **Card Symmetry**: Do not maintain a "grid" of cards; the UI must reflow cleanly when cards are added or removed.
+
+---
+
+## Phase 5: Model Resolution & GGUF Conversion
+
+### Phase Objective
+Implement the Rapid-MLX model source resolver to support MLX directories, Hugging Face repos, and automated GGUF conversion.
+
+### Precise Scope
+**Files to Create**:
+- `src/inference/rapid_mlx/model_resolver.rs`: The full `RapidMlxModelSource` resolution pipeline.
+
+**Logic to Implement**:
+- Resolver pipeline: `Input` $\rightarrow$ `Validate` $\rightarrow$ `Convert (if GGUF)` $\rightarrow$ `ResolvedLaunchModel`.
+- Orchestration of the `gguf2mlx` tool.
+- Conversion cache management.
+
+### Implementation Steps
+1. **Define Model Sources**: Implement the `RapidMlxModelSource` enum (`MlxDirectory`, `HuggingFaceRepo`, `Alias`, `GgufFile`).
+2. **Implement the Resolution Pipeline**:
+    - Validate local MLX directories and HF repo IDs.
+    - Resolve aliases via the runtime catalog.
+3. **Implement GGUF Conversion**:
+    - When a `.gguf` file is provided, check the conversion cache.
+    - If not cached, invoke `gguf2mlx` in a subprocess.
+    - Store the resulting MLX directory in the cache.
+4. **Implement the Resolved Output**:
+    - Create `ResolvedRapidMlxLaunchModel` which contains the final path to pass to `rapid-mlx serve`.
+5. **Wire to Adapter**: Ensure `RapidMlxAdapter::build_launch` consumes only the `ResolvedRapidMlxLaunchModel`.
+
+### Hard Gates (Verification)
+- **Conversion Flow**: Verify that selecting a `.gguf` file for Rapid-MLX triggers the `gguf2mlx` process and launches the server using the converted directory.
+- **Cache Efficiency**: Verify that a second launch of the same GGUF file skips the conversion step and uses the cache.
+- **Resolver Isolation**: Verify that the `RapidMlxAdapter` does not know about `gguf2mlx`; it only sees the `ResolvedRapidMlxLaunchModel`.
+
+### Known Pitfalls & Constraints
+- **Disk Space**: Implement a pre-check for disk space before starting a GGUF conversion.
+- **Sentinel Files**: Use `.converting` sentinel files to prevent concurrent conversions of the same model.
+
+---
+
+## Phase 6: UI/UX Polish & Management
+
+### Phase Objective
+Integrate backend selection into the Spawn Wizard and implement full Rapid-MLX runtime management in Settings.
+
+### Precise Scope
+**Files to Modify**:
+- `static/js/` (Spawn Wizard, Settings, Nav Bar).
+- `src/inference/backend.rs`: Deterministic recommendation logic.
+
+**Files to Create**:
+- `src/inference/rapid_mlx/updater.rs`: Installation and upgrade logic.
+
+**Logic to Implement**:
+- Engine selection cards in the wizard.
+- Active engine indicator in the nav bar.
+- Runtime management via `uv tool install`.
+- Deterministic engine recommendation.
+
+### Implementation Steps
+1. **Implement the Runtime Manager**:
+    - In `updater.rs`, implement `install`, `upgrade`, and `repair` using `uv tool install rapid-mlx`.
+    - Implement a version manager that fetches releases from GitHub.
+2. **Update the Spawn Wizard**:
+    - Add "Engine" selection cards.
+    - Implement shared value preservation (temperature, port) when switching engines.
+    - Add the "Memory Safety Warning" for >75% unified memory usage.
+3. **Implement the Nav Bar Indicator**:
+    - Create the indicator: `Engine · Model ●`.
+    - Wire it to update based on the active session's backend and model.
+4. **Implement Recommendation Logic**:
+    - GGUF file $\rightarrow$ recommend llama.cpp.
+    - MLX dir/HF repo $\rightarrow$ recommend Rapid-MLX.
+    - No selection on macOS $\rightarrow$ recommend Rapid-MLX (if probe passes).
+
+### Hard Gates (Verification)
+- **Round-trip Presets**: Verify that a preset saved under Rapid-MLX can be opened, edited, and launched without losing backend-specific flags.
+- **Visual Indicator**: Verify that the nav bar correctly displays `Rapid-MLX · <model> ●` only when a Rapid-MLX session is active.
+- **Runtime Isolation**: Verify that installing a new Rapid-MLX version via the manager does not mutate the environment of a currently running server.
+
+### Known Pitfalls & Constraints
+- **User Overrides**: An explicit user choice of engine must never be overridden by the recommendation logic.
+- **Managed Environments**: Ensure that `uv` managed environments are stored in the dedicated `~/.config/llama-monitor/runtimes/rapid-mlx/` directory.
