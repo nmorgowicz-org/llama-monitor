@@ -1,24 +1,41 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct CapabilitySet {
     pub vision: bool,
-    pub dflash: bool,
+    pub mtp: bool,
+    pub cancellation: bool,
     pub embeddings: bool,
     pub guided_generation: bool,
     pub audio: bool,
-    pub chat_extras: bool,
-    pub mtp: bool,
-    pub suffix_decoding: bool,
-    pub kv_quantization: bool,
-    pub turbo_quant: bool,
     pub tool_parsing: bool,
-    pub auto_tool_choice: bool,
+    pub automatic_tool_choice: bool,
     pub reasoning_parser: bool,
+    pub thinking_controls: bool,
     pub mcp: bool,
     pub cache_telemetry: bool,
-    pub cancellation: bool,
-    pub status_memory: bool,
-    pub doctor: bool,
-    pub jlens: bool,
+    pub status_memory_telemetry: bool,
+    pub self_diagnostic: bool,
+    pub interpretability: bool,
+    pub one_shot_launch: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CapabilityProfile {
+    pub version_range: String,
+    pub source_commit: String,
+    pub core_cli_flags: Vec<String>,
+    pub endpoint_schemas: Vec<String>,
+    pub optional_feature_flags: Vec<String>,
+    pub known_incompatibilities: Vec<String>,
+    pub fixture_identifiers: Vec<String>,
+    pub classification: ProfileClassification,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ProfileClassification {
+    Verified,
+    Provisional,
+    Legacy,
+    Incompatible,
 }
