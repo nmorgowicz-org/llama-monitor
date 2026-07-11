@@ -6,6 +6,7 @@ use crate::inference::capabilities::CapabilitySet;
 use crate::inference::metrics::InferenceMetricsSnapshot;
 use crate::inference::supervisor::SupervisedLaunch;
 use crate::inference::llama_cpp::LlamaCppAdapter;
+use crate::inference::rapid_mlx::RapidMlxAdapter;
 
 /// The BackendAdapter is an enum to ensure exhaustive and zero-overhead dispatch
 /// to the specific implementation for each inference engine.
@@ -67,23 +68,3 @@ impl BackendAdapter {
     }
 }
 
-// Placeholder structs for the adapters to satisfy the compiler.
-// LlamaCppAdapter is now fully implemented in llama_cpp.rs.
-pub struct RapidMlxAdapter {
-    // Fields to be added in Phase 3
-}
-
-impl RapidMlxAdapter {
-    pub async fn validate(&self) -> Result<()> { Ok(()) }
-    pub async fn build_launch(&self) -> Result<SupervisedLaunch> { 
-        Err(anyhow::anyhow!("RapidMlxAdapter::build_launch not implemented")) 
-    }
-    pub async fn await_ready(&self, _port: u16, _deadline: Instant) -> Result<()> { Ok(()) }
-    pub async fn poll_metrics(&self, _port: u16, _session_id: &str) -> Result<InferenceMetricsSnapshot> { 
-        Err(anyhow::anyhow!("RapidMlxAdapter::poll_metrics not implemented")) 
-    }
-    pub async fn cancel_request(&self, _port: u16, _request_id: &str) -> Result<()> { Ok(()) }
-    pub fn capabilities(&self) -> &CapabilitySet { 
-        unimplemented!("RapidMlxAdapter::capabilities not implemented") 
-    }
-}
