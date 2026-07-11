@@ -22,6 +22,7 @@ import {
     setWsData,
     setLastServerState,
     setLastLlamaMetrics,
+    setLastRapidMlxMetrics,
     setContextCapacityTokens,
     setLastSystemMetrics,
     setLastGpuMetrics,
@@ -87,6 +88,7 @@ const LOG_TAIL_LINES_MIN = 1;
 const LOG_TAIL_LINES_MAX = 6;
 
 // ── Badge change detection — skip DOM writes when badge content is unchanged ──
+var cardStaleness = { throughput: 0, generation: 0, context: 0 };
 let prevBadgeState = { server: null, chat: null, logs: null };
 
 // ── Power optimization: Page Visibility API throttling ─────────────────────────
@@ -763,7 +765,7 @@ function updateServerState(d) {
 
     setLastServerState(d.server_running);
     setLastLlamaMetrics(d.llama);
-
+    setLastRapidMlxMetrics(d.rapid_mlx || null);
     // Normalize context capacity to the actual loaded limit.
     // KV-only reports can be stale; prefer reported capacity, then KV max, then a
     // safe default so context-pressure math is consistent across telemetry and chat.
@@ -810,8 +812,10 @@ function updateServerState(d) {
 
 function updateInferenceMetrics(d) {
     const l = lastLlamaMetrics;
+    const rm = lastRapidMlxMetrics;
     const hasActiveEndpoint = !!d.active_session_id;
     const ce = cachedElements;
+    const backend = d.backend || (l ? 'llama' : (rm ? 'rapid_mlx' : 'unknown'));
 
     const promptEl = ce.mPrompt;
     const genEl = ce.mGen;
@@ -827,16 +831,20 @@ function updateInferenceMetrics(d) {
     const promptDeltaEl = ce.mPromptDelta;
     const genDeltaEl = ce.mGenDelta;
 
-    const promptRate = l?.prompt_tokens_per_sec || 0;
-    const genRate = l?.generation_tokens_per_sec || 0;
-    const promptDisplayRate = promptRate > 0 ? promptRate : (l?.last_prompt_tokens_per_sec || 0);
-    const genDisplayRate = genRate > 0 ? genRate : (l?.last_generation_tokens_per_sec || 0);
+    const promptRate = (backend === 'llama' ? l?.prompt_tokens_per_sec : rm?.generation_tokens_per_second) || 0;
+    const genRate = (backend === 'llama' ? l?.generation_tokens_per_sec : rm?.generation_tps) || 0;
+    const promptDisplayRate = promptRate > 0 ? promptRate : (backend === 'llama' ? l?.last_prompt_tokens_per_sec : 0) || 0;
+    const genDisplayRate = genRate > 0 ? genRate : (backend === 'llama' ? l?.last_generation_tokens_per_sec : 0) || 0;
     const promptAgeMs = l?.last_prompt_throughput_unix_ms || 0;
     const genAgeMs = l?.last_generation_throughput_unix_ms || 0;
-    const latestThroughputMs = Math.max(promptAgeMs, genAgeMs);
+    const latestThroughputMs = (backend === 'llama') ? Math.max(l?.last_prompt_throughput_unix_ms || 0, l?.last_generation_throughput_unix_ms || 0) : 0;
     const throughputActive = promptRate > 0 || genRate > 0;
 
-    setCardState(throughputCard, !hasActiveEndpoint ? 'dormant' : throughputActive ? 'live' : 'idle');
+    if (!throughputActive) cardStaleness.throughput++;
+    else cardStaleness.throughput = 0;
+
+    const throughputVisible = hasActiveEndpoint && (throughputActive || cardStaleness.throughput < 3);
+    setCardState(throughputCard, !hasActiveEndpoint ? 'dormant' : throughputVisible ? (throughputActive ? 'live' : 'idle') : 'dormant');
     setEmptyState(ce.mThroughputEmpty, !hasActiveEndpoint);
     setChipState(throughputState, throughputActive ? 'live' : 'idle', throughputActive ? 'live' : 'idle');
 
@@ -926,14 +934,25 @@ function updateInferenceMetrics(d) {
     updateRequestActivity(taskId, generationActive, generated, nowMs);
     renderActivityRail(generationActive);
     renderRecentTask();
-    renderSlotGrid(l, hasActiveEndpoint);
-    renderSlotUtilization(l);
-    renderBatchEfficiency(l);
+    if (backend === 'llama') {
+        renderSlotGrid(l, hasActiveEndpoint);
+        renderSlotUtilization(l);
+        renderBatchEfficiency(l);
+    } else {
+        if (ce.mSlotsState) ce.mSlotsState.textContent = '';
+        if (ce.mActivityState) ce.mActivityState.textContent = '';
+        renderSlotGrid(null, false);
+        renderSlotUtilization(null);
+        renderBatchEfficiency(null);
+    }
     renderRequestStats();
     renderDecodingConfig(l, hasActiveEndpoint, generationActive);
     renderLiveSparkline('m-live-output-spark', metricSeries.liveOutput);
 
-    setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : generationActive ? 'live' : generationAvailable ? 'idle' : 'unavailable');
+    if (!generationActive) cardStaleness.generation++;
+    else cardStaleness.generation = 0;
+    const genVisible = hasActiveEndpoint && (generationActive || cardStaleness.generation < 3);
+    setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : genVisible ? (generationActive ? 'live' : 'idle') : 'dormant');
     setEmptyState(ce.mGenEmpty, !hasActiveEndpoint);
     setChipState(generationState, generationActive ? 'generating' : 'idle', generationActive ? 'live' : 'idle');
     setChipState(ce.mSlotsState, generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');

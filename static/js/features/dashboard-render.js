@@ -444,7 +444,7 @@ function getPrimarySlot(l) {
 function renderSlotUtilization(l) {
     const utilBar = document.getElementById('m-slot-util-bar');
     const utilValue = document.getElementById('m-slot-util');
-    if (!l || !l.slots_processing !== undefined && l.slots_idle !== undefined) {
+    if (!l || l.slots_processing === undefined || l.slots_idle === undefined) {
         if (utilBar) utilBar.style.transform = 'scaleX(0)';
         if (utilValue) utilValue.textContent = '\u2014';
         return;

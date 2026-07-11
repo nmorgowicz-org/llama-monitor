@@ -1,5 +1,6 @@
 pub mod command;
 pub mod discovery;
+pub mod poller;
 pub mod runtime;
 
 use anyhow::{Result, anyhow};
@@ -21,6 +22,7 @@ pub struct RapidMlxAdapter {
 }
 
 impl RapidMlxAdapter {
+    #[allow(dead_code)]
     pub fn new(runtime: RuntimeMetadata, model_path: PathBuf) -> Self {
         Self {
             runtime,
@@ -90,8 +92,9 @@ impl RapidMlxAdapter {
         }
     }
 
-    pub async fn poll_metrics(&self, _port: u16, _session_id: &str) -> Result<InferenceMetricsSnapshot> {
-        Err(anyhow!("RapidMlxAdapter::poll_metrics not implemented (Phase 4)"))
+    pub async fn poll_metrics(&self, port: u16, _session_id: &str) -> Result<InferenceMetricsSnapshot> {
+        let poller = self::poller::RapidMlxPoller::new(&self.host, port);
+        poller.poll().await
     }
 
     pub async fn cancel_request(&self, _port: u16, _request_id: &str) -> Result<()> {
