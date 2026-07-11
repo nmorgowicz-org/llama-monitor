@@ -1,18 +1,22 @@
 use anyhow::Result;
 use std::time::Instant;
+use std::sync::Arc;
 
-use crate::inference::InferenceBackend;
 use crate::inference::capabilities::CapabilitySet;
 use crate::inference::metrics::InferenceMetricsSnapshot;
 use crate::inference::supervisor::SupervisedLaunch;
+use crate::inference::llama_cpp::LlamaCppAdapter;
 
 /// The BackendAdapter is an enum to ensure exhaustive and zero-overhead dispatch
 /// to the specific implementation for each inference engine.
+#[allow(dead_code)]
+#[derive(Clone)]
 pub enum BackendAdapter {
-    LlamaCpp(LlamaCppAdapter),
-    RapidMlx(RapidMlxAdapter),
+    LlamaCpp(Arc<LlamaCppAdapter>),
+    RapidMlx(Arc<RapidMlxAdapter>),
 }
 
+#[allow(dead_code)]
 impl BackendAdapter {
     /// Validate platform, runtime, model source, and flag conflicts before launch.
     pub async fn validate(&self) -> Result<()> {
@@ -39,10 +43,10 @@ impl BackendAdapter {
     }
 
     /// Fetch a normalized metrics snapshot. Called by the shared poller loop.
-    pub async fn poll_metrics(&self, port: u16) -> Result<InferenceMetricsSnapshot> {
+    pub async fn poll_metrics(&self, port: u16, session_id: &str) -> Result<InferenceMetricsSnapshot> {
         match self {
-            Self::LlamaCpp(adapter) => adapter.poll_metrics(port).await,
-            Self::RapidMlx(adapter) => adapter.poll_metrics(port).await,
+            Self::LlamaCpp(adapter) => adapter.poll_metrics(port, session_id).await,
+            Self::RapidMlx(adapter) => adapter.poll_metrics(port, session_id).await,
         }
     }
 
@@ -64,26 +68,7 @@ impl BackendAdapter {
 }
 
 // Placeholder structs for the adapters to satisfy the compiler.
-// These will be fully implemented in Phase 2 and 3.
-pub struct LlamaCppAdapter {
-    // Fields to be added in Phase 2
-}
-
-impl LlamaCppAdapter {
-    pub async fn validate(&self) -> Result<()> { Ok(()) }
-    pub async fn build_launch(&self) -> Result<SupervisedLaunch> { 
-        Err(anyhow::anyhow!("LlamaCppAdapter::build_launch not implemented")) 
-    }
-    pub async fn await_ready(&self, _port: u16, _deadline: Instant) -> Result<()> { Ok(()) }
-    pub async fn poll_metrics(&self, _port: u16) -> Result<InferenceMetricsSnapshot> { 
-        Err(anyhow::anyhow!("LlamaCppAdapter::poll_metrics not implemented")) 
-    }
-    pub async fn cancel_request(&self, _port: u16, _request_id: &str) -> Result<()> { Ok(()) }
-    pub fn capabilities(&self) -> &CapabilitySet { 
-        unimplemented!("LlamaCppAdapter::capabilities not implemented") 
-    }
-}
-
+// LlamaCppAdapter is now fully implemented in llama_cpp.rs.
 pub struct RapidMlxAdapter {
     // Fields to be added in Phase 3
 }
@@ -94,7 +79,7 @@ impl RapidMlxAdapter {
         Err(anyhow::anyhow!("RapidMlxAdapter::build_launch not implemented")) 
     }
     pub async fn await_ready(&self, _port: u16, _deadline: Instant) -> Result<()> { Ok(()) }
-    pub async fn poll_metrics(&self, _port: u16) -> Result<InferenceMetricsSnapshot> { 
+    pub async fn poll_metrics(&self, _port: u16, _session_id: &str) -> Result<InferenceMetricsSnapshot> { 
         Err(anyhow::anyhow!("RapidMlxAdapter::poll_metrics not implemented")) 
     }
     pub async fn cancel_request(&self, _port: u16, _request_id: &str) -> Result<()> { Ok(()) }

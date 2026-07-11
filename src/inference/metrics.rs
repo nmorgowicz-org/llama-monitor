@@ -3,6 +3,7 @@ use std::time::SystemTime;
 use crate::inference::InferenceBackend;
 
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub enum HealthState {
     Ok,
     Degraded,
@@ -11,6 +12,7 @@ pub enum HealthState {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub struct InferenceMetricsSnapshot {
     pub sampled_at:                     SystemTime,
     pub backend:                        InferenceBackend,

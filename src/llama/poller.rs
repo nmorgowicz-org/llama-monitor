@@ -3,55 +3,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::state::AppState;
 
-use super::metrics::{PrometheusValues, parse_prometheus_metrics, parse_slot_metrics};
-
-#[derive(Debug, Clone, Default)]
-struct CounterSnapshot {
-    prompt_tokens_total: f64,
-    prompt_seconds_total: f64,
-    predicted_tokens_total: f64,
-    predicted_seconds_total: f64,
-}
-
-// NOTE: Blocked state detection is disabled because we cannot reliably distinguish
-// "blocked on tool call" from "processing big context" using only n_decoded stagnation.
-// Both show is_processing=true, output_active=false, and stagnant n_decoded.
-// Re-enable when llama-server exposes a tool-calling state in /slots.
-
-impl CounterSnapshot {
-    fn from_prometheus(values: &PrometheusValues) -> Self {
-        Self {
-            prompt_tokens_total: values.prompt_tokens_total,
-            prompt_seconds_total: values.prompt_seconds_total,
-            predicted_tokens_total: values.predicted_tokens_total,
-            predicted_seconds_total: values.predicted_seconds_total,
-        }
-    }
-}
-
-fn counter_rate(
-    current_tokens: f64,
-    previous_tokens: f64,
-    current_seconds: f64,
-    previous_seconds: f64,
-) -> f64 {
-    let token_delta = current_tokens - previous_tokens;
-    let second_delta = current_seconds - previous_seconds;
-
-    if token_delta > 0.0 && second_delta > 0.0 {
-        token_delta / second_delta
-    } else {
-        0.0
-    }
-}
-
-fn unix_time_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
 pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
@@ -67,8 +18,6 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
     };
 
     let mut enabled = false;
-    let mut previous_counters: Option<CounterSnapshot> = None;
-    let mut previous_counter_session: Option<String> = None;
 
     loop {
         if !enabled {
@@ -79,8 +28,6 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
         let active_id = { state.active_session_id.lock().unwrap().clone() };
         if active_id.is_empty() {
             enabled = false;
-            previous_counters = None;
-            previous_counter_session = None;
             tokio::time::sleep(Duration::from_secs(poll_interval)).await;
             continue;
         }
@@ -101,8 +48,6 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
                 }
             } else {
                 enabled = false;
-                previous_counters = None;
-                previous_counter_session = None;
                 tokio::time::sleep(Duration::from_secs(poll_interval)).await;
                 continue;
             }
@@ -159,101 +104,98 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
         if !server_reachable {
             // Don't reset metrics when server is temporarily unavailable
             // Just continue with the last known metrics
-            previous_counters = None;
-            previous_counter_session = None;
             tokio::time::sleep(Duration::from_secs(poll_interval)).await;
             continue;
         }
 
-        if let Ok(resp) = with_auth(client.get(format!("{base}/metrics")), &api_key)
-            .send()
-            .await
-            && let Ok(body) = resp.text().await
-        {
-            let prom = parse_prometheus_metrics(&body);
-            let current_counters = CounterSnapshot::from_prometheus(&prom);
-
-            let (prompt_tps, gen_tps) = if previous_counter_session.as_deref()
-                == Some(active_id.as_str())
-                && let Some(previous) = &previous_counters
-            {
-                (
-                    counter_rate(
-                        current_counters.prompt_tokens_total,
-                        previous.prompt_tokens_total,
-                        current_counters.prompt_seconds_total,
-                        previous.prompt_seconds_total,
-                    ),
-                    counter_rate(
-                        current_counters.predicted_tokens_total,
-                        previous.predicted_tokens_total,
-                        current_counters.predicted_seconds_total,
-                        previous.predicted_seconds_total,
-                    ),
-                )
+        // Use the backend adapter to poll normalized metrics
+        let backend = state.backend.lock().unwrap().clone();
+        if let Some(backend) = backend {
+            let port = if let Some(sess) = {
+                let sessions = state.sessions.lock().unwrap();
+                sessions.iter().find(|s| s.id == active_id).cloned()
+            } {
+                match sess.mode {
+                    crate::state::SessionMode::Spawn { port, .. } => port,
+                    crate::state::SessionMode::Attach { endpoint, .. } => {
+                        endpoint.split(':').next_back().and_then(|p| p.parse().ok()).unwrap_or(0)
+                    }
+                }
             } else {
-                (0.0, 0.0)
+                0
             };
 
-            previous_counters = Some(current_counters);
-            previous_counter_session = Some(active_id.clone());
+            if port != 0 && let Ok(snapshot) = backend.poll_metrics(port, &active_id).await {
+                let now_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
 
-            let mut m = state.llama_metrics.lock().unwrap();
-            m.prompt_tokens_per_sec = prompt_tps;
-            m.generation_tokens_per_sec = gen_tps;
-            m.throughput_source = "interval_delta".to_string();
-            m.prompt_throughput_active = prompt_tps > 0.0;
-            m.generation_throughput_active = gen_tps > 0.0;
-            let now_ms = unix_time_ms();
-            if prompt_tps > 0.0 {
-                m.last_prompt_tokens_per_sec = prompt_tps;
-                m.last_prompt_throughput_unix_ms = now_ms;
-            }
-            if gen_tps > 0.0 {
-                m.last_generation_tokens_per_sec = gen_tps;
-                m.last_generation_throughput_unix_ms = now_ms;
-            }
-            m.prompt_tokens_total = prom.prompt_tokens_total as u64;
-            m.predicted_tokens_total = prom.predicted_tokens_total as u64;
-            m.generation_tokens_total = prom.predicted_tokens_total as u64;
-            m.kv_cache_high_water = prom.n_tokens_max;
-            m.context_high_water_tokens = prom.n_tokens_max;
-            m.requests_processing = prom.requests_processing;
-            m.n_busy_slots_per_decode = prom.n_busy_slots_per_decode;
-            m.tokens_per_decode = prom.tokens_per_decode;
-        }
-
-        // Poll /slots — get per-slot processing state + total context
-        if let Ok(resp) = with_auth(client.get(format!("{base}/slots")), &api_key)
-            .send()
-            .await
-            && let Ok(body) = resp.text().await
-            && let Some(slots) = parse_slot_metrics(&body)
-        {
-            let mut m = state.llama_metrics.lock().unwrap();
-            m.slots_idle = slots.slots_idle;
-            m.slots_processing = slots.slots_processing;
-            m.kv_cache_max = slots.kv_cache_max;
-            m.kv_cache_tokens = slots.kv_cache_tokens;
-            m.kv_cache_tokens_available = slots.kv_cache_tokens_available;
-            m.kv_cache_tokens_source = slots.kv_cache_tokens_source;
-            m.context_capacity_tokens = slots.kv_cache_max;
-            m.context_live_tokens = slots.kv_cache_tokens;
-            m.context_live_tokens_available = slots.kv_cache_tokens_available;
-            m.context_live_tokens_source = m.kv_cache_tokens_source.clone();
-            m.active_task_id = slots.active_task_id;
-            if slots.last_task_id.is_some() {
-                m.last_task_id = slots.last_task_id;
-            }
-            m.slot_generation_tokens = slots.slot_generation_tokens;
-            m.slot_generation_remaining = slots.slot_generation_remaining;
-            m.slot_generation_limit = slots.slot_generation_limit;
-            m.slot_generation_active = slots.slot_generation_active;
-            m.slot_generation_available = slots.slot_generation_available;
-            m.slots = slots.slots;
-            if !m.kv_cache_tokens_available && m.requests_processing == 0 {
-                m.kv_cache_tokens = 0;
-                m.context_live_tokens = 0;
+                let mut m = state.llama_metrics.lock().unwrap();
+                
+                if let Some(prompt_tps) = snapshot.prompt_tokens_per_second {
+                    m.prompt_tokens_per_sec = prompt_tps;
+                    m.prompt_throughput_active = prompt_tps > 0.0;
+                    if prompt_tps > 0.0 {
+                        m.last_prompt_tokens_per_sec = prompt_tps;
+                        m.last_prompt_throughput_unix_ms = now_ms;
+                    }
+                }
+                
+                if let Some(gen_tps) = snapshot.generation_tokens_per_second {
+                    m.generation_tokens_per_sec = gen_tps;
+                    m.generation_throughput_active = gen_tps > 0.0;
+                    if gen_tps > 0.0 {
+                        m.last_generation_tokens_per_sec = gen_tps;
+                        m.last_generation_throughput_unix_ms = now_ms;
+                    }
+                }
+                
+                m.throughput_source = "backend_poll".to_string();
+                
+                if let Some(prompt_total) = snapshot.prompt_tokens_total {
+                    m.prompt_tokens_total = prompt_total;
+                }
+                if let Some(completion_total) = snapshot.completion_tokens_total {
+                    m.predicted_tokens_total = completion_total;
+                    m.generation_tokens_total = completion_total;
+                }
+                if let Some(running) = snapshot.running_requests {
+                    m.requests_processing = running as u32;
+                }
+                if let Some(details) = snapshot.backend_details {
+                    if let Some(idle) = details.get("slots_idle").and_then(|v| v.as_u64()) {
+                        m.slots_idle = idle as u32;
+                    }
+                    if let Some(processing) = details.get("slots_processing").and_then(|v| v.as_u64()) {
+                        m.slots_processing = processing as u32;
+                    }
+                    if let Some(max) = details.get("kv_cache_max").and_then(|v| v.as_u64()) {
+                        m.kv_cache_max = max;
+                        m.context_capacity_tokens = max;
+                    }
+                    if let Some(tokens) = details.get("kv_cache_tokens").and_then(|v| v.as_u64()) {
+                        m.kv_cache_tokens = tokens;
+                        m.context_live_tokens = tokens;
+                    }
+                    if let Some(avail) = details.get("kv_cache_tokens_available").and_then(|v| v.as_bool()) {
+                        m.kv_cache_tokens_available = avail;
+                        m.context_live_tokens_available = avail;
+                    }
+                    if let Some(source) = details.get("kv_cache_tokens_source").and_then(|v| v.as_str()) {
+                        m.kv_cache_tokens_source = source.to_string();
+                        m.context_live_tokens_source = source.to_string();
+                    }
+                    if let Some(active) = details.get("active_task_id").and_then(|v| v.as_u64()) {
+                        m.active_task_id = Some(active);
+                    }
+                    if let Some(last) = details.get("last_task_id").and_then(|v| v.as_u64()) {
+                        m.last_task_id = Some(last);
+                    }
+                }
+                if let Some(model) = snapshot.model {
+                    m.model_name = model;
+                }
             }
         }
 

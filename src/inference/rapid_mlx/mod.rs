@@ -8,15 +8,17 @@ pub mod updater;
 use anyhow::Result;
 use std::time::Instant;
 use crate::inference::supervisor::SupervisedLaunch;
-use crate::inference::metrics::{InferenceMetricsSnapshot, HealthState};
+use crate::inference::metrics::{InferenceMetricsSnapshot};
 use crate::inference::capabilities::CapabilitySet;
 use crate::config::AppConfig;
 
+#[allow(dead_code)]
 pub struct RapidMlxAdapter {
     pub app_config: std::sync::Arc<AppConfig>,
     // Other config fields to be added
 }
 
+#[allow(dead_code)]
 impl RapidMlxAdapter {
     pub async fn validate(&self) -> Result<()> {
         Ok(())
@@ -26,15 +28,15 @@ impl RapidMlxAdapter {
         unimplemented!()
     }
 
-    pub async fn await_ready(&self, port: u16, deadline: Instant) -> Result<()> {
+    pub async fn await_ready(&self, _port: u16, _deadline: Instant) -> Result<()> {
         unimplemented!()
     }
 
-    pub async fn poll_metrics(&self, port: u16) -> Result<InferenceMetricsSnapshot> {
+    pub async fn poll_metrics(&self, _port: u16) -> Result<InferenceMetricsSnapshot> {
         unimplemented!()
     }
 
-    pub async fn cancel_request(&self, port: u16, request_id: &str) -> Result<()> {
+    pub async fn cancel_request(&self, _port: u16, _request_id: &str) -> Result<()> {
         unimplemented!()
     }
 

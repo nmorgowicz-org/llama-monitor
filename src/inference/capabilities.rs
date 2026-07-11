@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[allow(dead_code)]
 pub struct CapabilitySet {
     pub vision: bool,
     pub mtp: bool,
@@ -21,6 +22,7 @@ pub struct CapabilitySet {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct CapabilityProfile {
     pub version_range: String,
     pub source_commit: String,
@@ -33,6 +35,7 @@ pub struct CapabilityProfile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ProfileClassification {
     Verified,
     Provisional,

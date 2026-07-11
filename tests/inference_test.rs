@@ -2,8 +2,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::sleep;
 use llama_monitor::inference::supervisor::{Supervisor, SupervisedLaunch, BackendObserver};
-use std::ffi::OsString;
+use llama_monitor::state::AppState;
 use std::path::PathBuf;
+
 
 struct MockObserver {
     logs: Mutex<Vec<String>>,
@@ -31,8 +32,7 @@ impl BackendObserver for MockObserver {
 #[tokio::test]
 async fn test_supervisor_spawn_and_log() {
     let observer = Arc::new(MockObserver::new());
-    let supervisor = Supervisor::new(observer.clone());
-
+    let state = Arc::new(AppState::default());
     let launch = SupervisedLaunch {
         program: PathBuf::from("sh"),
         args: vec!["-c".into(), "echo 'hello world'".into()],
@@ -41,23 +41,23 @@ async fn test_supervisor_spawn_and_log() {
         port: 8000,
         redacted_summary: "test".to_string(),
     };
-
-    let mut child = supervisor.spawn(launch).await.expect("Failed to spawn");
+    let supervisor = Arc::new(Supervisor::new(launch.clone(), observer.clone(), state));
+    
+    supervisor.clone().start().await.expect("Failed to start supervisor");
     
     // Give it a moment to run and capture output
-    sleep(Duration::from_millis(200)).await;
+    sleep(Duration::from_millis(500)).await;
     
     let logs = observer.logs.lock().unwrap();
     assert!(logs.contains(&"hello world".to_string()));
     
-    let _ = child.kill().await;
+    supervisor.stop().await.expect("Failed to stop supervisor");
 }
 
 #[tokio::test]
 async fn test_supervisor_crash_detection() {
     let observer = Arc::new(MockObserver::new());
-    let supervisor = Supervisor::new(observer.clone());
-
+    let state = Arc::new(AppState::default());
     let launch = SupervisedLaunch {
         program: PathBuf::from("sh"),
         args: vec!["-c".into(), "echo 'crashing...'; exit 1".into()],
@@ -66,15 +66,12 @@ async fn test_supervisor_crash_detection() {
         port: 8001,
         redacted_summary: "test crash".to_string(),
     };
-
-    let mut child = supervisor.spawn(launch).await.expect("Failed to spawn");
+    let supervisor = Arc::new(Supervisor::new(launch.clone(), observer.clone(), state));
     
-    // Monitor the process. 
-    // is_intentional returns false because we want to detect the crash.
-    supervisor.monitor_death(
-        child, 
-        Arc::new(|| false), 
-    ).await;
+    supervisor.clone().start().await.expect("Failed to start supervisor");
+    
+    // Wait for process to exit and monitor to fire
+    sleep(Duration::from_millis(500)).await;
     
     let crash = observer.crash.lock().unwrap();
     assert!(crash.is_some());
@@ -86,8 +83,7 @@ async fn test_supervisor_crash_detection() {
 #[tokio::test]
 async fn test_supervisor_intentional_stop() {
     let observer = Arc::new(MockObserver::new());
-    let supervisor = Supervisor::new(observer.clone());
-
+    let state = Arc::new(AppState::default());
     let launch = SupervisedLaunch {
         program: PathBuf::from("sh"),
         args: vec!["-c".into(), "sleep 10".into()],
@@ -96,17 +92,18 @@ async fn test_supervisor_intentional_stop() {
         port: 8002,
         redacted_summary: "test stop".to_string(),
     };
-
-    let mut child = supervisor.spawn(launch).await.expect("Failed to spawn");
+    let supervisor = Arc::new(Supervisor::new(launch.clone(), observer.clone(), state.clone()));
     
-    // We simulate an intentional stop by killing the child and setting is_intentional to true.
-    let _ = child.kill().await;
+    supervisor.clone().start().await.expect("Failed to start supervisor");
     
-    supervisor.monitor_death(
-        child, 
-        Arc::new(|| true), 
-    ).await;
+    // Simulate an intentional stop
+    state.server_stopping.store(true, std::sync::atomic::Ordering::Relaxed);
+    supervisor.stop().await.expect("Failed to stop supervisor");
+    
+    // Wait for monitor to finish
+    sleep(Duration::from_millis(500)).await;
     
     let crash = observer.crash.lock().unwrap();
     assert!(crash.is_none(), "Crash should not be recorded for intentional stop");
 }
+
