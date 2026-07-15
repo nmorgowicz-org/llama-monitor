@@ -1,0 +1,447 @@
+use crate::inference::rapid_mlx::runtime::RuntimeSource;
+use anyhow::{Context, Result, anyhow};
+use std::collections::BTreeSet;
+use std::path::Path;
+use std::process::ExitStatus;
+use std::time::Duration;
+use tokio::io::AsyncReadExt;
+use tokio::process::Command;
+
+pub const MINIMUM_VERIFIED_VERSION: (u64, u64, u64) = (0, 10, 9);
+pub const CURRENT_VERIFIED_VERSION: (u64, u64, u64) = (0, 10, 9);
+const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_PROBE_OUTPUT_BYTES: usize = 256 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompatibilityState {
+    Verified,
+    Provisional,
+}
+
+impl CompatibilityState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Verified => "verified",
+            Self::Provisional => "provisional",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ServeCapabilities {
+    flags: BTreeSet<String>,
+}
+
+impl ServeCapabilities {
+    pub fn from_help(help: &str) -> Self {
+        let flags = help
+            .split_whitespace()
+            .filter_map(|token| {
+                let token = token.trim_matches(|c: char| matches!(c, ',' | '[' | ']' | '(' | ')'));
+                let flag = token.split_once('=').map_or(token, |(flag, _)| flag);
+                flag.starts_with("--").then(|| flag.to_string())
+            })
+            .collect();
+        Self { flags }
+    }
+
+    pub fn contains(&self, flag: &str) -> bool {
+        self.flags.contains(flag)
+    }
+
+    pub fn require(&self, flag: &str) -> Result<()> {
+        if self.contains(flag) {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "Installed Rapid-MLX does not support configured option {flag}; select a compatible runtime or remove that option"
+            ))
+        }
+    }
+
+    pub fn verified_baseline() -> Self {
+        Self::from_help(
+            "--host --port --log-level --served-model-name --timeout --max-cache-blocks",
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompatibilityProfile {
+    pub state: CompatibilityState,
+    pub version: String,
+    pub capabilities: ServeCapabilities,
+}
+
+impl CompatibilityProfile {
+    pub fn verified_baseline() -> Self {
+        Self {
+            state: CompatibilityState::Verified,
+            version: "0.10.9".to_string(),
+            capabilities: ServeCapabilities::verified_baseline(),
+        }
+    }
+}
+
+pub async fn probe(binary: &Path, source: RuntimeSource) -> Result<CompatibilityProfile> {
+    probe_with_limits(binary, source, PROBE_TIMEOUT, MAX_PROBE_OUTPUT_BYTES).await
+}
+
+async fn probe_with_limits(
+    binary: &Path,
+    source: RuntimeSource,
+    timeout: Duration,
+    max_output_bytes: usize,
+) -> Result<CompatibilityProfile> {
+    let version_output =
+        run_probe(binary, &["--version"], timeout, max_output_bytes, "version").await?;
+    if !version_output.status.success() {
+        anyhow::bail!(
+            "Rapid-MLX version probe failed for {} with status {}",
+            binary.display(),
+            version_output.status
+        );
+    }
+    let version_text = output_text(&version_output.stdout, &version_output.stderr);
+    let parsed_version = parse_version(&version_text).ok_or_else(|| {
+        anyhow!(
+            "Rapid-MLX returned an unrecognized version from {}: {}",
+            binary.display(),
+            version_text.trim()
+        )
+    })?;
+    let version = parsed_version.numbers;
+    if version < MINIMUM_VERIFIED_VERSION {
+        anyhow::bail!(
+            "Rapid-MLX {} is unsupported; version 0.10.9 or newer is required",
+            format_version(version)
+        );
+    }
+    if source == RuntimeSource::Managed
+        && (version != CURRENT_VERIFIED_VERSION || !parsed_version.stable)
+    {
+        anyhow::bail!(
+            "Managed Rapid-MLX runtime is {}; this build requires the exact stable verified managed version 0.10.9",
+            version_text.trim()
+        );
+    }
+
+    let help_output = run_probe(
+        binary,
+        &["serve", "--help"],
+        timeout,
+        max_output_bytes,
+        "capability",
+    )
+    .await?;
+    if !help_output.status.success() {
+        anyhow::bail!(
+            "Rapid-MLX capability probe failed for {} with status {}",
+            binary.display(),
+            help_output.status
+        );
+    }
+    let help = output_text(&help_output.stdout, &help_output.stderr);
+    let capabilities = ServeCapabilities::from_help(&help);
+    for required in ["--host", "--port"] {
+        capabilities.require(required).with_context(|| {
+            format!(
+                "Rapid-MLX {} failed its required serve capability probe",
+                format_version(version)
+            )
+        })?;
+    }
+
+    Ok(CompatibilityProfile {
+        state: if source == RuntimeSource::Managed {
+            CompatibilityState::Verified
+        } else {
+            CompatibilityState::Provisional
+        },
+        version: format_version(version),
+        capabilities,
+    })
+}
+
+struct ProbeOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+async fn run_probe(
+    binary: &Path,
+    args: &[&str],
+    timeout: Duration,
+    max_output_bytes: usize,
+    name: &str,
+) -> Result<ProbeOutput> {
+    let mut command = Command::new(binary);
+    command
+        .args(args)
+        .kill_on_drop(true)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("Failed to execute {} {} probe", binary.display(), name))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("Failed to capture Rapid-MLX {name} probe stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("Failed to capture Rapid-MLX {name} probe stderr"))?;
+
+    let capture = async move {
+        let stdout_reader = read_bounded(stdout, max_output_bytes);
+        let stderr_reader = read_bounded(stderr, max_output_bytes);
+        let (stdout, stderr, status) = tokio::join!(stdout_reader, stderr_reader, child.wait());
+        Ok::<_, anyhow::Error>(ProbeOutput {
+            status: status.context("Failed waiting for Rapid-MLX probe")?,
+            stdout: stdout?,
+            stderr: stderr?,
+        })
+    };
+
+    tokio::time::timeout(timeout, capture)
+        .await
+        .with_context(|| {
+            format!(
+                "Rapid-MLX {name} probe timed out after {:.1}s for {}",
+                timeout.as_secs_f64(),
+                binary.display()
+            )
+        })?
+}
+
+async fn read_bounded<R>(reader: R, max_output_bytes: usize) -> Result<Vec<u8>>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut bytes = Vec::with_capacity(max_output_bytes.min(8192));
+    reader
+        .take((max_output_bytes + 1) as u64)
+        .read_to_end(&mut bytes)
+        .await
+        .context("Failed reading Rapid-MLX probe output")?;
+    if bytes.len() > max_output_bytes {
+        anyhow::bail!(
+            "Rapid-MLX probe output exceeded the {} byte safety limit",
+            max_output_bytes
+        );
+    }
+    Ok(bytes)
+}
+
+fn output_text(stdout: &[u8], stderr: &[u8]) -> String {
+    let stdout = String::from_utf8_lossy(stdout);
+    let stderr = String::from_utf8_lossy(stderr);
+    match (stdout.trim().is_empty(), stderr.trim().is_empty()) {
+        (false, false) => format!("{}\n{}", stdout.trim(), stderr.trim()),
+        (false, true) => stdout.trim().to_string(),
+        (true, false) => stderr.trim().to_string(),
+        (true, true) => String::new(),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ParsedVersion {
+    numbers: (u64, u64, u64),
+    stable: bool,
+}
+
+fn parse_version(text: &str) -> Option<ParsedVersion> {
+    let bytes = text.as_bytes();
+    for start in 0..bytes.len() {
+        if !bytes[start].is_ascii_digit() {
+            continue;
+        }
+        let mut cursor = start;
+        let Some(major) = parse_number(bytes, &mut cursor) else {
+            continue;
+        };
+        if bytes.get(cursor) != Some(&b'.') {
+            continue;
+        }
+        cursor += 1;
+        let Some(minor) = parse_number(bytes, &mut cursor) else {
+            continue;
+        };
+        if bytes.get(cursor) != Some(&b'.') {
+            continue;
+        }
+        cursor += 1;
+        let Some(patch) = parse_number(bytes, &mut cursor) else {
+            continue;
+        };
+        let stable = !bytes.get(cursor).is_some_and(|next| {
+            next.is_ascii_alphanumeric() || matches!(next, b'.' | b'+' | b'-' | b'_')
+        });
+        return Some(ParsedVersion {
+            numbers: (major, minor, patch),
+            stable,
+        });
+    }
+    None
+}
+
+fn parse_number(bytes: &[u8], cursor: &mut usize) -> Option<u64> {
+    let start = *cursor;
+    while bytes.get(*cursor).is_some_and(u8::is_ascii_digit) {
+        *cursor += 1;
+    }
+    (start != *cursor)
+        .then(|| {
+            std::str::from_utf8(&bytes[start..*cursor])
+                .ok()?
+                .parse()
+                .ok()
+        })
+        .flatten()
+}
+
+fn format_version(version: (u64, u64, u64)) -> String {
+    format!("{}.{}.{}", version.0, version.1, version.2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_cli_version_variants() {
+        let stable = |numbers| {
+            Some(ParsedVersion {
+                numbers,
+                stable: true,
+            })
+        };
+        assert_eq!(parse_version("rapid-mlx 0.10.9"), stable((0, 10, 9)));
+        assert_eq!(
+            parse_version("Rapid-MLX version v0.11.2\n"),
+            stable((0, 11, 2))
+        );
+        assert_eq!(parse_version("development"), None);
+        for version in ["0.10.9.dev1", "0.10.9rc1", "0.10.9+local"] {
+            assert_eq!(parse_version(version).unwrap().stable, false, "{version}");
+        }
+    }
+
+    #[test]
+    fn help_tokens_are_exact() {
+        let capabilities = ServeCapabilities::from_help(
+            "--host TEXT --port INTEGER --timeout=1800 --max-cache-blocks INTEGER",
+        );
+        assert!(capabilities.contains("--timeout"));
+        assert!(capabilities.contains("--max-cache-blocks"));
+        assert!(!capabilities.contains("--request-timeout"));
+        assert!(!capabilities.contains("--max-blocks"));
+    }
+
+    #[cfg(unix)]
+    fn fixture_runtime(version: &str, help: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("rapid-mlx");
+        std::fs::write(
+            &binary,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'rapid-mlx {version}'; exit 0; fi\nif [ \"$1\" = \"serve\" ] && [ \"$2\" = \"--help\" ]; then echo '{help}'; exit 0; fi\nexit 2\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (dir, binary)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn live_probe_distinguishes_verified_and_provisional_profiles() {
+        let (_dir, binary) = fixture_runtime("0.10.9", "--host --port --timeout");
+        let profile = probe(&binary, RuntimeSource::Custom).await.unwrap();
+        assert_eq!(profile.state, CompatibilityState::Provisional);
+        assert!(profile.capabilities.contains("--timeout"));
+
+        let profile = probe(&binary, RuntimeSource::Managed).await.unwrap();
+        assert_eq!(profile.state, CompatibilityState::Verified);
+
+        let (_dir, binary) = fixture_runtime("0.11.0", "--host --port");
+        let profile = probe(&binary, RuntimeSource::Homebrew).await.unwrap();
+        assert_eq!(profile.state, CompatibilityState::Provisional);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn managed_and_required_capability_probes_fail_closed() {
+        let (_dir, binary) = fixture_runtime("0.11.0", "--host --port");
+        let error = probe(&binary, RuntimeSource::Managed).await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("exact stable verified managed version")
+        );
+
+        let (_dir, binary) = fixture_runtime("0.10.9", "--host");
+        let error = probe(&binary, RuntimeSource::Custom).await.unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("--port"));
+
+        for version in ["0.10.9.dev1", "0.10.9rc1", "0.10.9+local"] {
+            let (_dir, binary) = fixture_runtime(version, "--host --port");
+            let error = probe(&binary, RuntimeSource::Managed).await.unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("exact stable verified managed version"),
+                "{version}: {error:#}"
+            );
+
+            let profile = probe(&binary, RuntimeSource::Custom).await.unwrap();
+            assert_eq!(profile.state, CompatibilityState::Provisional, "{version}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn hung_probe_is_terminated_by_deadline() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("rapid-mlx");
+        std::fs::write(&binary, "#!/bin/sh\nsleep 5\n").unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let started = std::time::Instant::now();
+        let error = probe_with_limits(
+            &binary,
+            RuntimeSource::Custom,
+            Duration::from_millis(75),
+            1024,
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn oversized_probe_output_fails_at_bound() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let binary = dir.path().join("rapid-mlx");
+        std::fs::write(
+            &binary,
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then while :; do printf x; done; fi\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = probe_with_limits(&binary, RuntimeSource::Custom, Duration::from_secs(1), 1024)
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("exceeded the 1024 byte safety limit"));
+    }
+}

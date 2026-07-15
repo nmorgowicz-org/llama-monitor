@@ -1,47 +1,31 @@
+use crate::inference::rapid_mlx::compatibility::ServeCapabilities;
 use crate::inference::supervisor::SupervisedLaunch;
+use anyhow::Result;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-#[allow(dead_code)]
 pub struct RapidMlxCommandBuilder {
     model_path: PathBuf,
     served_model_name: Option<String>,
     host: String,
     port: u16,
-    log_level: String,
-    max_num_seqs: u32,
-    max_concurrent_requests: u32,
-    prefill_batch_size: u32,
-    completion_batch_size: u32,
-    stream_interval: u32,
-    max_tokens: u32,
-    request_timeout: u32,
-    gpu_memory_utilization: f32,
-    paged_cache_block_size: u32,
-    max_blocks: u32,
-    prefill_step_size: u32,
+    log_level: Option<String>,
+    timeout: Option<u32>,
+    max_cache_blocks: Option<u32>,
+    api_key: Option<String>,
 }
 
-#[allow(dead_code)]
 impl RapidMlxCommandBuilder {
     pub fn new(model_path: PathBuf) -> Self {
         Self {
             model_path,
             served_model_name: None,
-            host: "0.0.0.0".to_string(),
+            host: "127.0.0.1".to_string(),
             port: 8000,
-            log_level: "INFO".to_string(),
-            max_num_seqs: 256,
-            max_concurrent_requests: 256,
-            prefill_batch_size: 8,
-            completion_batch_size: 32,
-            stream_interval: 1,
-            max_tokens: 32768,
-            request_timeout: 1800,
-            gpu_memory_utilization: 0.90,
-            paged_cache_block_size: 64,
-            max_blocks: 1000,
-            prefill_step_size: 2048,
+            log_level: None,
+            timeout: None,
+            max_cache_blocks: None,
+            api_key: None,
         }
     }
 
@@ -61,122 +45,78 @@ impl RapidMlxCommandBuilder {
     }
 
     pub fn log_level(mut self, level: String) -> Self {
-        self.log_level = level;
+        self.log_level = Some(level);
         self
     }
 
-    pub fn max_num_seqs(mut self, seqs: u32) -> Self {
-        self.max_num_seqs = seqs;
+    pub fn timeout(mut self, timeout: u32) -> Self {
+        self.timeout = Some(timeout);
         self
     }
 
-    pub fn max_concurrent_requests(mut self, requests: u32) -> Self {
-        self.max_concurrent_requests = requests;
+    pub fn max_cache_blocks(mut self, blocks: u32) -> Self {
+        self.max_cache_blocks = Some(blocks);
         self
     }
 
-    pub fn prefill_batch_size(mut self, size: u32) -> Self {
-        self.prefill_batch_size = size;
+    pub fn api_key(mut self, api_key: String) -> Self {
+        self.api_key = Some(api_key);
         self
     }
 
-    pub fn completion_batch_size(mut self, size: u32) -> Self {
-        self.completion_batch_size = size;
-        self
-    }
-
-    pub fn stream_interval(mut self, interval: u32) -> Self {
-        self.stream_interval = interval;
-        self
-    }
-
-    pub fn max_tokens(mut self, tokens: u32) -> Self {
-        self.max_tokens = tokens;
-        self
-    }
-
-    pub fn request_timeout(mut self, timeout: u32) -> Self {
-        self.request_timeout = timeout;
-        self
-    }
-
-    pub fn gpu_memory_utilization(mut self, util: f32) -> Self {
-        self.gpu_memory_utilization = util;
-        self
-    }
-
-    pub fn paged_cache_block_size(mut self, size: u32) -> Self {
-        self.paged_cache_block_size = size;
-        self
-    }
-
-    pub fn max_blocks(mut self, blocks: u32) -> Self {
-        self.max_blocks = blocks;
-        self
-    }
-
-    pub fn prefill_step_size(mut self, size: u32) -> Self {
-        self.prefill_step_size = size;
-        self
-    }
-
-    pub fn build(self, binary_path: PathBuf) -> SupervisedLaunch {
+    pub fn build(
+        self,
+        binary_path: PathBuf,
+        capabilities: &ServeCapabilities,
+    ) -> Result<SupervisedLaunch> {
         let mut args = vec!["serve".to_string()];
         args.push(self.model_path.to_string_lossy().into_owned());
 
         if let Some(name) = self.served_model_name {
+            capabilities.require("--served-model-name")?;
             args.push("--served-model-name".to_string());
             args.push(name);
         }
 
+        capabilities.require("--host")?;
         args.push("--host".to_string());
         args.push(self.host);
 
+        capabilities.require("--port")?;
         args.push("--port".to_string());
         args.push(self.port.to_string());
 
-        args.push("--log-level".to_string());
-        args.push(self.log_level);
+        if let Some(log_level) = self.log_level {
+            capabilities.require("--log-level")?;
+            args.push("--log-level".to_string());
+            args.push(log_level);
+        }
 
-        args.push("--max-num-seqs".to_string());
-        args.push(self.max_num_seqs.to_string());
+        if let Some(timeout) = self.timeout {
+            capabilities.require("--timeout")?;
+            args.push("--timeout".to_string());
+            args.push(timeout.to_string());
+        }
 
-        args.push("--max-concurrent-requests".to_string());
-        args.push(self.max_concurrent_requests.to_string());
-
-        args.push("--prefill-batch-size".to_string());
-        args.push(self.prefill_batch_size.to_string());
-
-        args.push("--completion-batch-size".to_string());
-        args.push(self.completion_batch_size.to_string());
-
-        args.push("--stream-interval".to_string());
-        args.push(self.stream_interval.to_string());
-
-        args.push("--max-tokens".to_string());
-        args.push(self.max_tokens.to_string());
-
-        args.push("--request-timeout".to_string());
-        args.push(self.request_timeout.to_string());
-
-        args.push("--gpu-memory-utilization".to_string());
-        args.push(self.gpu_memory_utilization.to_string());
-
-        args.push("--paged-cache-block-size".to_string());
-        args.push(self.paged_cache_block_size.to_string());
-
-        args.push("--max-blocks".to_string());
-        args.push(self.max_blocks.to_string());
-
-        args.push("--prefill-step-size".to_string());
-        args.push(self.prefill_step_size.to_string());
+        if let Some(blocks) = self.max_cache_blocks {
+            capabilities.require("--max-cache-blocks")?;
+            args.push("--max-cache-blocks".to_string());
+            args.push(blocks.to_string());
+        }
 
         let os_args: Vec<OsString> = args.into_iter().map(OsString::from).collect();
 
-        SupervisedLaunch {
+        // Prevent Rapid-MLX's first-run telemetry question from blocking an
+        // unattended app launch. The user can opt in outside this process.
+        let mut env = vec![(OsString::from("RAPID_MLX_TELEMETRY"), OsString::from("0"))];
+        if let Some(key) = self.api_key {
+            env.push((OsString::from("RAPID_MLX_API_KEY"), OsString::from(key)));
+        }
+
+        Ok(SupervisedLaunch {
             program: binary_path,
             args: os_args,
-            env: Vec::new(),
+            env,
             cwd: None,
             port: self.port,
             redacted_summary: format!(
@@ -184,6 +124,71 @@ impl RapidMlxCommandBuilder {
                 self.model_path.display(),
                 self.port
             ),
-        }
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(launch: &SupervisedLaunch) -> Vec<String> {
+        launch
+            .args
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn secure_defaults_omit_upstream_default_tuning_flags() {
+        let launch = RapidMlxCommandBuilder::new("model".into())
+            .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+            .unwrap();
+        assert_eq!(
+            args(&launch),
+            ["serve", "model", "--host", "127.0.0.1", "--port", "8000"]
+        );
+        assert!(
+            launch
+                .env
+                .iter()
+                .any(|(name, value)| { name == "RAPID_MLX_TELEMETRY" && value == "0" })
+        );
+    }
+
+    #[test]
+    fn current_flag_names_and_secret_environment_are_used() {
+        let launch = RapidMlxCommandBuilder::new("model".into())
+            .timeout(90)
+            .max_cache_blocks(200)
+            .api_key("do-not-log".into())
+            .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+            .unwrap();
+        let args = args(&launch);
+        assert!(args.windows(2).any(|pair| pair == ["--timeout", "90"]));
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--max-cache-blocks", "200"])
+        );
+        assert!(!args.iter().any(|arg| arg == "--request-timeout"));
+        assert!(!args.iter().any(|arg| arg == "--max-blocks"));
+        assert!(
+            launch
+                .env
+                .iter()
+                .any(|(name, value)| { name == "RAPID_MLX_API_KEY" && value == "do-not-log" })
+        );
+        assert!(!launch.redacted_summary.contains("do-not-log"));
+    }
+
+    #[test]
+    fn explicitly_configured_unsupported_option_fails_closed() {
+        let capabilities = ServeCapabilities::from_help("--host --port");
+        let error = RapidMlxCommandBuilder::new("model".into())
+            .timeout(90)
+            .build("rapid-mlx".into(), &capabilities)
+            .unwrap_err();
+        assert!(error.to_string().contains("--timeout"));
     }
 }

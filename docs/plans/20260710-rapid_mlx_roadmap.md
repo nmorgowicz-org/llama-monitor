@@ -253,6 +253,72 @@ Implement the ability to discover the Rapid-MLX runtime, construct its launch co
 
 ---
 
+## Phase 3 Checkpoint and Handoff — 2026-07-15
+
+**Status: Complete. Stop point requested before Phase 3.5.**
+
+Phase 3 passed the Builder → Verifier gate. The implementation now provides:
+
+- explicit path, managed-path, `rapid-mlx`, and deprecated `vllm-mlx` discovery with
+  source classification;
+- exact stable managed `0.10.9` verification and live `--version` plus
+  `serve --help` capability probing;
+- Provisional handling for compatible external/newer/nightly/local runtimes, while
+  older versions and missing core flags fail closed;
+- five-second probe deadlines, child cleanup, concurrent stdout/stderr draining, and
+  256 KiB per-stream output limits;
+- secure loopback defaults and an API-key requirement for non-loopback binds;
+- current `--timeout` and `--max-cache-blocks` mappings, with configured unsupported
+  options rejected before spawn;
+- `RAPID_MLX_API_KEY` secret transport, authenticated operational polling, and no
+  secret persistence, argv exposure, or diagnostic leakage;
+- `RAPID_MLX_TELEMETRY=0` on app-managed launches so first-run consent cannot block an
+  unattended spawn;
+- `/health/ready` HTTP-200 readiness and backend-neutral early-exit propagation;
+- Unix SIGTERM with a ten-second drain window and SIGKILL fallback, while preserving
+  the Windows `taskkill /F` implementation.
+
+### Verification evidence
+
+- Independent verifier sign-off with `cargo test`: 780 passed, 6 ignored.
+- `cargo clippy -- -D warnings`, `cargo check`, formatting/whitespace checks, and
+  `cargo check --target x86_64-pc-windows-gnu` passed.
+- Fixture coverage includes bounded/hung probes, stable/prerelease/local version
+  classification, discovery → probe → spawn → loading → ready → stop, actionable
+  exit-before-ready logs, correct/wrong/missing API keys, SIGTERM, and forced SIGKILL.
+- Real Apple Silicon runtime:
+  - Python `3.12.13`;
+  - Rapid-MLX `0.10.9` at
+    `~/.config/llama-monitor/runtimes/rapid-mlx/0.10.9/venv/bin/rapid-mlx`;
+  - `mlx-community/Qwen3-0.6B-4bit`, downloaded to the normal Hugging Face cache.
+- Rebuilt llama-monitor app smoke on isolated ports `17779`/`18081`:
+  - direct `backend: rapid_mlx` spawn succeeded;
+  - the recorded command contained only `serve`, model, `--host 127.0.0.1`, and
+    `--port 18081`;
+  - `/health/ready` returned HTTP 200 with `ready: true`;
+  - `/v1/status` returned the expected model identity;
+  - the authenticated app stop route triggered the Rapid-MLX prefix-cache save path
+    and a clean intentional supervisor exit.
+
+An initial app smoke accidentally used a release binary that finished rebuilding after
+the smoke process had already started and therefore reproduced the stale
+`--request-timeout`/`--max-blocks` failure. The process start time and binary mtime
+identified the stale executable. Re-running with the completed build produced the
+successful evidence above; current source and final binary contain only the verified
+flag names.
+
+### Resume point
+
+Do not redo Phase 3. Start at **Phase 3.5: Chat Routing, Streaming & Cancellation**.
+That phase must route the real llama-monitor chat path through the active backend,
+authenticate `/v1/*` requests, filter backend-specific request fields, validate SSE
+reasoning/usage shapes, and implement capability-aware cancellation. Do not fold the
+later runtime installer/version-manager UI (Phase 6), telemetry-card completion
+(Phase 4), model resolver (Phase 5), or Experimental GGUF Import Lab (Phase 5.5) into
+Phase 3.5.
+
+---
+
 ## Phase 3.5: Chat Routing, Streaming & Cancellation
 
 ### Phase Objective

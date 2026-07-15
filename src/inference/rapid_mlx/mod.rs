@@ -1,9 +1,11 @@
 pub mod command;
+pub mod compatibility;
 pub mod discovery;
 pub mod poller;
 pub mod runtime;
 
 use self::command::RapidMlxCommandBuilder;
+use self::compatibility::CompatibilityProfile;
 use self::runtime::RuntimeMetadata;
 use crate::inference::capabilities::CapabilitySet;
 use crate::inference::metrics::InferenceMetricsSnapshot;
@@ -28,10 +30,18 @@ pub struct RapidMlxConfig {
     pub port: u16,
     #[serde(default = "default_log_level")]
     pub log_level: String,
+    #[serde(default)]
+    pub timeout: Option<u32>,
+    #[serde(default)]
+    pub max_cache_blocks: Option<u32>,
+    /// Accepted only on launch input. Secrets are never serialized into presets,
+    /// sessions, or diagnostics.
+    #[serde(default, skip_serializing)]
+    pub api_key: Option<String>,
 }
 
 fn default_host() -> String {
-    "0.0.0.0".into()
+    "127.0.0.1".into()
 }
 
 fn default_port() -> u16 {
@@ -52,7 +62,30 @@ impl Default for RapidMlxConfig {
             host: default_host(),
             port: default_port(),
             log_level: default_log_level(),
+            timeout: None,
+            max_cache_blocks: None,
+            api_key: None,
         }
+    }
+}
+
+impl RapidMlxConfig {
+    pub fn validate_access(&self, fallback_api_key: Option<&str>) -> Result<()> {
+        let loopback = matches!(
+            self.host.as_str(),
+            "127.0.0.1" | "localhost" | "::1" | "[::1]"
+        );
+        let has_key = self
+            .api_key
+            .as_deref()
+            .or(fallback_api_key)
+            .is_some_and(|key| !key.is_empty());
+        if !loopback && !has_key {
+            return Err(anyhow!(
+                "Rapid-MLX LAN exposure requires an API key; use 127.0.0.1 or configure authenticated access"
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -63,6 +96,10 @@ pub struct RapidMlxAdapter {
     pub host: String,
     pub port: u16,
     pub log_level: String,
+    pub timeout: Option<u32>,
+    pub max_cache_blocks: Option<u32>,
+    api_key: Option<String>,
+    compatibility: CompatibilityProfile,
 }
 
 impl RapidMlxAdapter {
@@ -72,10 +109,23 @@ impl RapidMlxAdapter {
             runtime,
             model_path,
             served_model_name: None,
-            host: "0.0.0.0".to_string(),
+            host: "127.0.0.1".to_string(),
             port: 8000,
             log_level: "INFO".to_string(),
+            timeout: None,
+            max_cache_blocks: None,
+            api_key: None,
+            compatibility: CompatibilityProfile::verified_baseline(),
         }
+    }
+
+    pub fn configure_runtime(
+        &mut self,
+        compatibility: CompatibilityProfile,
+        api_key: Option<String>,
+    ) {
+        self.compatibility = compatibility;
+        self.api_key = api_key.filter(|key| !key.is_empty());
     }
 
     pub async fn validate(&self) -> Result<()> {
@@ -102,15 +152,34 @@ impl RapidMlxAdapter {
         if self.model_path.as_os_str().is_empty() {
             return Err(anyhow!("Rapid-MLX requires a model path"));
         }
+        RapidMlxConfig {
+            host: self.host.clone(),
+            api_key: self.api_key.clone(),
+            ..Default::default()
+        }
+        .validate_access(None)?;
 
         Ok(())
     }
 
     pub async fn build_launch(&self) -> Result<SupervisedLaunch> {
-        let builder = RapidMlxCommandBuilder::new(self.model_path.clone())
+        let mut builder = RapidMlxCommandBuilder::new(self.model_path.clone())
             .host(self.host.clone())
-            .port(self.port)
-            .log_level(self.log_level.clone());
+            .port(self.port);
+
+        if self.log_level != "INFO" {
+            builder = builder.log_level(self.log_level.clone());
+        }
+        if let Some(timeout) = self.timeout {
+            builder = builder.timeout(timeout);
+        }
+        if let Some(blocks) = self.max_cache_blocks {
+            builder = builder.max_cache_blocks(blocks);
+        }
+
+        if let Some(key) = &self.api_key {
+            builder = builder.api_key(key.clone());
+        }
 
         let builder = if let Some(name) = &self.served_model_name {
             builder.served_model_name(name.clone())
@@ -118,7 +187,16 @@ impl RapidMlxAdapter {
             builder
         };
 
-        Ok(builder.build(self.runtime.executable_path.clone()))
+        let mut launch = builder.build(
+            self.runtime.executable_path.clone(),
+            &self.compatibility.capabilities,
+        )?;
+        launch.redacted_summary.push_str(&format!(
+            " ({}, {})",
+            self.compatibility.version,
+            self.compatibility.state.label()
+        ));
+        Ok(launch)
     }
 
     pub async fn await_ready(&self, port: u16, deadline: Instant) -> Result<()> {
@@ -129,6 +207,7 @@ impl RapidMlxAdapter {
 
         let readiness_host = match self.host.as_str() {
             "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
+            "::1" => "[::1]",
             host => host,
         };
         let url = format!("http://{readiness_host}:{port}/health/ready");
@@ -155,7 +234,7 @@ impl RapidMlxAdapter {
         port: u16,
         _session_id: &str,
     ) -> Result<InferenceMetricsSnapshot> {
-        let poller = self::poller::RapidMlxPoller::new(&self.host, port);
+        let poller = self::poller::RapidMlxPoller::new(&self.host, port, self.api_key.as_deref());
         poller.poll().await
     }
 

@@ -2,7 +2,6 @@
 use crate::inference::rapid_mlx::runtime::RuntimeSource;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[allow(dead_code)]
 pub struct Discovery;
@@ -17,23 +16,37 @@ impl Discovery {
         explicit_path: Option<&Path>,
         managed_path: Option<&Path>,
     ) -> io::Result<(PathBuf, RuntimeSource)> {
-        if let Some(path) = explicit_path
-            && path.exists()
-        {
-            return Ok((path.to_path_buf(), RuntimeSource::Custom));
+        if let Some(path) = explicit_path {
+            if path.is_file() {
+                return Ok((path.to_path_buf(), RuntimeSource::Custom));
+            }
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "configured Rapid-MLX executable is not a file: {}",
+                    path.display()
+                ),
+            ));
         }
 
-        if let Some(path) = managed_path
-            && path.exists()
-        {
-            return Ok((path.to_path_buf(), RuntimeSource::Managed));
+        if let Some(path) = managed_path {
+            if path.is_file() {
+                return Ok((path.to_path_buf(), RuntimeSource::Managed));
+            }
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "managed Rapid-MLX executable is not a file: {}",
+                    path.display()
+                ),
+            ));
         }
 
-        // Fallback to PATH
-        if let Ok(path) = which::which("rapid-mlx") {
-            // Try to determine if it's homebrew or pip
-            let source = Self::determine_source(&path).await;
-            return Ok((path, source));
+        for binary in ["rapid-mlx", "vllm-mlx"] {
+            if let Ok(path) = which::which(binary) {
+                let source = Self::classify_source(&path);
+                return Ok((path, source));
+            }
         }
 
         Err(io::Error::new(
@@ -42,29 +55,22 @@ impl Discovery {
         ))
     }
 
-    async fn determine_source(path: &Path) -> RuntimeSource {
+    pub fn classify_source(path: &Path) -> RuntimeSource {
         let path_str = path.to_string_lossy();
-        if path_str.contains("homebrew") || path_str.contains("/opt/homebrew") {
+        if path_str.contains("/opt/homebrew")
+            || path_str.contains("/home/linuxbrew")
+            || path_str.contains("/Cellar/")
+        {
             RuntimeSource::Homebrew
-        } else if path_str.contains("site-packages") || path_str.contains(".local/bin") {
+        } else if path_str.contains("/pipx/venvs/") || path_str.contains("/.local/pipx/") {
+            RuntimeSource::Pipx
+        } else if path_str.contains("site-packages")
+            || path_str.contains("/.venv/bin/")
+            || path_str.contains("/venv/bin/")
+        {
             RuntimeSource::Pip
         } else {
             RuntimeSource::PathUnknown
-        }
-    }
-
-    /// Probes the binary to ensure it is usable.
-    pub async fn probe_version(binary_path: &Path) -> io::Result<String> {
-        let output = Command::new(binary_path).arg("--version").output()?;
-
-        if output.status.success() {
-            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            Ok(version)
-        } else {
-            Err(io::Error::other(format!(
-                "rapid-mlx --version failed with status: {}",
-                output.status
-            )))
         }
     }
 }

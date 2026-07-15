@@ -2,6 +2,7 @@ use crate::config::AppConfig;
 use crate::inference::InferenceBackend;
 use crate::inference::backend::BackendAdapter;
 use crate::inference::llama_cpp::{LlamaCppAdapter, ServerConfig};
+use crate::inference::rapid_mlx::compatibility;
 use crate::inference::rapid_mlx::discovery::Discovery;
 use crate::inference::rapid_mlx::runtime::RuntimeMetadata;
 use crate::inference::rapid_mlx::{RapidMlxAdapter, RapidMlxConfig};
@@ -45,7 +46,7 @@ impl LocalLaunchRequest {
     pub fn api_key(&self) -> Option<String> {
         match self {
             Self::LlamaCpp(config) => config.api_key.clone(),
-            Self::RapidMlx(_) => None,
+            Self::RapidMlx(config) => config.api_key.clone(),
         }
     }
 
@@ -63,8 +64,9 @@ impl LocalLaunchRequest {
     /// Clone a launch request for session persistence without credentials.
     pub fn for_persistence(&self) -> Self {
         let mut persisted = self.clone();
-        if let Self::LlamaCpp(config) = &mut persisted {
-            config.api_key = None;
+        match &mut persisted {
+            Self::LlamaCpp(config) => config.api_key = None,
+            Self::RapidMlx(config) => config.api_key = None,
         }
         persisted
     }
@@ -99,6 +101,7 @@ pub fn request_from_api_payload(payload: &serde_json::Value) -> Result<LocalLaun
             if config.port == 0 {
                 anyhow::bail!("Rapid-MLX launch requires a non-zero port");
             }
+            config.validate_access(None)?;
             Ok(LocalLaunchRequest::RapidMlx(config))
         }
     }
@@ -117,6 +120,12 @@ pub fn validate_preset_backend_config(preset: &ModelPreset) -> Result<()> {
                     preset.name
                 )
             })?;
+            if rapid.api_key.is_some() {
+                anyhow::bail!(
+                    "Rapid-MLX preset '{}' must store its API key in the protected top-level api_key field, not rapid_mlx.api_key",
+                    preset.name
+                );
+            }
             if rapid.model_path.trim().is_empty() {
                 anyhow::bail!("Rapid-MLX preset '{}' requires a model_path", preset.name);
             }
@@ -126,6 +135,7 @@ pub fn validate_preset_backend_config(preset: &ModelPreset) -> Result<()> {
                     preset.name
                 );
             }
+            rapid.validate_access(preset.api_key.as_deref())?;
             Ok(())
         }
         InferenceBackend::LlamaCpp => Ok(()),
@@ -145,6 +155,7 @@ pub fn request_from_preset(
                     preset.name
                 )
             })?;
+            config.api_key = preset.api_key.clone();
             if let Some(port) = port_override {
                 config.port = port;
             }
@@ -265,16 +276,18 @@ pub fn request_from_session(
         if request.backend() != session.backend {
             anyhow::bail!("Persisted session backend does not match its launch envelope");
         }
-        if let LocalLaunchRequest::LlamaCpp(config) = &mut request {
-            config.api_key = transient_api_key
-                .filter(|key| !key.is_empty())
-                .map(str::to_string)
-                .or(session_api_key);
-            if session.launch_requires_api_key && config.api_key.is_none() {
-                anyhow::bail!(
-                    "This restored session requires its llama.cpp API key to be entered again"
-                );
-            }
+        let restored_key = transient_api_key
+            .filter(|key| !key.is_empty())
+            .map(str::to_string)
+            .or(session_api_key);
+        match &mut request {
+            LocalLaunchRequest::LlamaCpp(config) => config.api_key = restored_key,
+            LocalLaunchRequest::RapidMlx(config) => config.api_key = restored_key,
+        }
+        if session.launch_requires_api_key && request.api_key().is_none() {
+            anyhow::bail!(
+                "This restored session requires its inference API key to be entered again"
+            );
         }
         return Ok(request);
     }
@@ -293,15 +306,14 @@ pub fn request_from_session(
     if request.backend() != session.backend {
         anyhow::bail!("Restored session backend no longer matches its preset backend");
     }
-    if let LocalLaunchRequest::LlamaCpp(config) = &mut request {
-        if let Some(key) = transient_api_key.filter(|key| !key.is_empty()) {
-            config.api_key = Some(key.to_string());
+    if let Some(key) = transient_api_key.filter(|key| !key.is_empty()) {
+        match &mut request {
+            LocalLaunchRequest::LlamaCpp(config) => config.api_key = Some(key.to_string()),
+            LocalLaunchRequest::RapidMlx(config) => config.api_key = Some(key.to_string()),
         }
-        if session.launch_requires_api_key && config.api_key.is_none() {
-            anyhow::bail!(
-                "This restored session requires its llama.cpp API key to be entered again"
-            );
-        }
+    }
+    if session.launch_requires_api_key && request.api_key().is_none() {
+        anyhow::bail!("This restored session requires its inference API key to be entered again");
     }
     Ok(request)
 }
@@ -325,6 +337,7 @@ pub async fn construct_adapter(
             if config.model_path.trim().is_empty() {
                 anyhow::bail!("Rapid-MLX requires a model_path");
             }
+            config.validate_access(None)?;
 
             let (executable_path, source) = Discovery::resolve_binary(
                 config.executable_path.as_deref(),
@@ -334,14 +347,15 @@ pub async fn construct_adapter(
             .with_context(|| {
                 "Rapid-MLX runtime was not found. Install rapid-mlx or configure an executable path"
             })?;
-            let version = Discovery::probe_version(&executable_path)
+            let profile = compatibility::probe(&executable_path, source)
                 .await
                 .with_context(|| {
                     format!(
-                        "Rapid-MLX runtime at {} is not executable",
+                        "Rapid-MLX runtime at {} is incompatible",
                         executable_path.display()
                     )
                 })?;
+            let version = profile.version.clone();
             let mut adapter = RapidMlxAdapter::new(
                 RuntimeMetadata {
                     executable_path,
@@ -354,6 +368,9 @@ pub async fn construct_adapter(
             adapter.host = config.host.clone();
             adapter.port = config.port;
             adapter.log_level = config.log_level.clone();
+            adapter.timeout = config.timeout;
+            adapter.max_cache_blocks = config.max_cache_blocks;
+            adapter.configure_runtime(profile, config.api_key.clone());
             Ok(BackendAdapter::RapidMlx(Arc::new(adapter)))
         }
     }
@@ -457,7 +474,11 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let runtime = dir.path().join("rapid-mlx");
-        std::fs::write(&runtime, "#!/bin/sh\necho rapid-mlx-test\n").unwrap();
+        std::fs::write(
+            &runtime,
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'rapid-mlx 0.10.9'; else echo '--host --port --log-level'; fi\n",
+        )
+        .unwrap();
         std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o755)).unwrap();
         let config = test_app_config(dir.path());
         let state = AppState::default();
@@ -493,6 +514,48 @@ mod tests {
     }
 
     #[test]
+    fn rapid_preset_hydrates_protected_top_level_api_key_transiently() {
+        let preset = ModelPreset {
+            name: "Protected Rapid".into(),
+            backend: InferenceBackend::RapidMlx,
+            api_key: Some("preset-secret".into()),
+            rapid_mlx: Some(RapidMlxConfig {
+                model_path: "/models/rapid".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let request = request_from_preset(&preset, None).unwrap();
+        assert_eq!(request.api_key().as_deref(), Some("preset-secret"));
+        assert!(
+            !serde_json::to_string(&request)
+                .unwrap()
+                .contains("preset-secret")
+        );
+    }
+
+    #[test]
+    fn rapid_preset_rejects_nested_api_key() {
+        let preset = ModelPreset {
+            name: "Invalid protected Rapid".into(),
+            backend: InferenceBackend::RapidMlx,
+            rapid_mlx: Some(RapidMlxConfig {
+                model_path: "/models/rapid".into(),
+                api_key: Some("wrong-secret-location".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let error = request_from_preset(&preset, None).unwrap_err();
+        assert!(error.to_string().contains("protected top-level api_key"));
+        assert!(
+            !serde_json::to_string(&preset)
+                .unwrap()
+                .contains("wrong-secret-location")
+        );
+    }
+
+    #[test]
     fn direct_rapid_payload_rejects_zero_port() {
         let error = request_from_api_payload(&serde_json::json!({
             "backend": "rapid_mlx",
@@ -503,6 +566,35 @@ mod tests {
         }))
         .unwrap_err();
         assert!(error.to_string().contains("non-zero port"));
+    }
+
+    #[test]
+    fn rapid_lan_bind_requires_authenticated_access() {
+        let error = request_from_api_payload(&serde_json::json!({
+            "backend": "rapid_mlx",
+            "rapid_mlx": {
+                "model_path": "/models/rapid",
+                "host": "0.0.0.0"
+            }
+        }))
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("LAN exposure requires an API key")
+        );
+
+        assert!(
+            request_from_api_payload(&serde_json::json!({
+                "backend": "rapid_mlx",
+                "rapid_mlx": {
+                    "model_path": "/models/rapid",
+                    "host": "0.0.0.0",
+                    "api_key": "protected"
+                }
+            }))
+            .is_ok()
+        );
     }
 
     #[test]
@@ -527,16 +619,23 @@ mod tests {
 
     #[test]
     fn persisted_launch_envelope_scrubs_api_key_and_restores_backend() {
-        let request = LocalLaunchRequest::LlamaCpp(Box::new(ServerConfig {
+        let llama = LocalLaunchRequest::LlamaCpp(Box::new(ServerConfig {
             model_path: "/models/private.gguf".into(),
             port: 8001,
             api_key: Some("do-not-persist".into()),
             ..Default::default()
         }));
-        let persisted = request.for_persistence();
-        let json = serde_json::to_string(&persisted).unwrap();
-        assert!(!json.contains("do-not-persist"));
-        assert!(matches!(persisted, LocalLaunchRequest::LlamaCpp(_)));
+        let rapid = LocalLaunchRequest::RapidMlx(RapidMlxConfig {
+            model_path: "/models/private-mlx".into(),
+            api_key: Some("also-do-not-persist".into()),
+            ..Default::default()
+        });
+        for request in [llama, rapid] {
+            let persisted = request.for_persistence();
+            let json = serde_json::to_string(&persisted).unwrap();
+            assert!(!json.contains("do-not-persist"));
+            assert!(persisted.api_key().is_none());
+        }
     }
 
     #[test]
@@ -579,6 +678,7 @@ mod tests {
         let request = LocalLaunchRequest::RapidMlx(RapidMlxConfig {
             model_path: "/models/rapid".into(),
             port: 8123,
+            api_key: Some("rapid-original-secret".into()),
             ..Default::default()
         });
         let mut session = Session::new_spawn_with_backend(
@@ -587,14 +687,24 @@ mod tests {
             8123,
             String::new(),
             Some("0.0.0.0".into()),
-            None,
+            Some("rapid-original-secret".into()),
             InferenceBackend::RapidMlx,
             Some("/models/rapid".into()),
         );
         session.launch = Some(request.for_persistence());
 
-        let restored = request_from_session(&session, &[], None).unwrap();
+        let json = serde_json::to_string(&session).unwrap();
+        assert!(!json.contains("rapid-original-secret"));
+        let session: Session = serde_json::from_str(&json).unwrap();
+        assert!(request_from_session(&session, &[], None).is_err());
+        let restored = request_from_session(&session, &[], Some("rapid-transient-key")).unwrap();
         assert!(matches!(restored, LocalLaunchRequest::RapidMlx(_)));
         assert_eq!(restored.port(), 8123);
+        assert_eq!(restored.api_key().as_deref(), Some("rapid-transient-key"));
+        assert!(
+            !serde_json::to_string(&session)
+                .unwrap()
+                .contains("rapid-transient-key")
+        );
     }
 }

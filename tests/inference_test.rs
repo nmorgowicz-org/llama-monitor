@@ -185,6 +185,69 @@ async fn test_supervisor_intentional_stop() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn test_supervisor_graceful_stop_delivers_sigterm() {
+    let observer = Arc::new(MockObserver::new());
+    let state = Arc::new(AppState::default());
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("terminated");
+    let launch = SupervisedLaunch {
+        program: PathBuf::from("sh"),
+        args: vec![
+            "-c".into(),
+            "trap 'printf terminated > \"$TERM_MARKER\"; exit 0' TERM; while :; do sleep 0.05; done"
+                .into(),
+        ],
+        env: vec![("TERM_MARKER".into(), marker.as_os_str().to_owned())],
+        cwd: None,
+        port: 8010,
+        redacted_summary: "graceful stop fixture".to_string(),
+    };
+    let supervisor = Arc::new(Supervisor::new(launch, observer.clone(), state, 0));
+    supervisor.clone().start().await.unwrap();
+    sleep(Duration::from_millis(50)).await;
+    supervisor.stop().await.unwrap();
+
+    assert_eq!(std::fs::read_to_string(marker).unwrap(), "terminated");
+    assert!(observer.crash.lock().unwrap().is_none());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_supervisor_forces_kill_after_grace_period() {
+    let observer = Arc::new(MockObserver::new());
+    let state = Arc::new(AppState::default());
+    let launch = SupervisedLaunch {
+        program: PathBuf::from("sh"),
+        args: vec![
+            "-c".into(),
+            "trap '' TERM; while :; do sleep 0.05; done".into(),
+        ],
+        env: vec![],
+        cwd: None,
+        port: 8011,
+        redacted_summary: "forced stop fixture".to_string(),
+    };
+    let supervisor = Arc::new(
+        Supervisor::new(launch, observer.clone(), state.clone(), 0)
+            .with_graceful_stop_timeout(Duration::from_millis(75)),
+    );
+    supervisor.clone().start().await.unwrap();
+    sleep(Duration::from_millis(25)).await;
+    supervisor.stop().await.unwrap();
+
+    assert!(
+        state
+            .server_logs
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|line| line.contains("sending SIGKILL"))
+    );
+    assert!(observer.crash.lock().unwrap().is_none());
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn test_stop_cancels_process_while_readiness_is_pending() {
     let observer = Arc::new(MockObserver::new());
     let state = Arc::new(AppState::default());

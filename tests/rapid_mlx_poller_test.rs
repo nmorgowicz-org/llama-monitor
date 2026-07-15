@@ -27,7 +27,7 @@ async fn test_rapid_mlx_poller_unit_conversion() {
         )
         .create();
 
-    let poller = RapidMlxPoller::new(&host, port);
+    let poller = RapidMlxPoller::new(&host, port, None);
     let snapshot = poller.poll().await.expect("Poll should succeed");
 
     assert_eq!(snapshot.active_memory_bytes, Some(1_073_741_824));
@@ -60,10 +60,37 @@ async fn test_rapid_mlx_poller_zero_vs_none() {
         )
         .create();
 
-    let poller = RapidMlxPoller::new(&host, port);
+    let poller = RapidMlxPoller::new(&host, port, None);
     let snapshot = poller.poll().await.expect("Poll should succeed");
 
     assert_eq!(snapshot.generation_tokens_per_second, Some(0.0));
     assert_eq!(snapshot.prompt_tokens_per_second, Some(0.0));
     assert_eq!(snapshot.active_memory_bytes, None);
+}
+
+#[tokio::test]
+async fn test_cache_error_status_degrades_to_absent() {
+    let mut server = Server::new_async().await;
+    let url = server.url().parse::<url::Url>().expect("Invalid URL");
+    let host = url.host_str().expect("No host").to_string();
+    let port = url.port().expect("No port");
+
+    let _status = server
+        .mock("GET", "/v1/status")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(json!({"status": "idle"}).to_string())
+        .create();
+    let _cache = server
+        .mock("GET", "/v1/cache/stats")
+        .with_status(401)
+        .with_header("content-type", "application/json")
+        .with_body(json!({"error": "unauthorized"}).to_string())
+        .create();
+
+    let snapshot = RapidMlxPoller::new(&host, port, None)
+        .poll()
+        .await
+        .expect("required status remains usable");
+    assert!(snapshot.cache_metrics.is_none());
 }

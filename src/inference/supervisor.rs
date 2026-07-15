@@ -35,6 +35,7 @@ pub struct Supervisor {
     exited: tokio::sync::Notify,
     generation: u64,
     intentional_stop: AtomicBool,
+    graceful_stop_timeout: std::time::Duration,
 }
 
 impl Supervisor {
@@ -53,7 +54,16 @@ impl Supervisor {
             exited: tokio::sync::Notify::new(),
             generation,
             intentional_stop: AtomicBool::new(false),
+            graceful_stop_timeout: std::time::Duration::from_secs(10),
         }
+    }
+
+    /// Override the graceful drain window. Production uses ten seconds; a
+    /// shorter value is useful for deterministic fixture runtimes.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_graceful_stop_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.graceful_stop_timeout = timeout;
+        self
     }
 
     /// Spawn the configured process and begin log/death monitoring.
@@ -241,12 +251,33 @@ impl Supervisor {
             #[cfg(unix)]
             {
                 let status = Command::new("kill")
-                    .args(["-9", &pid.to_string()])
+                    .args(["-TERM", &pid.to_string()])
                     .status()
                     .await
-                    .with_context(|| format!("Failed to terminate supervised process pid={pid}"))?;
+                    .with_context(|| {
+                        format!("Failed to request graceful stop for supervised process pid={pid}")
+                    })?;
                 if !status.success() && self.pid.lock().unwrap().is_some() {
-                    anyhow::bail!("Failed to terminate supervised process pid={pid}");
+                    anyhow::bail!("Failed to request graceful stop for supervised process pid={pid}");
+                }
+
+                if tokio::time::timeout(self.graceful_stop_timeout, self.wait_for_exit())
+                    .await
+                    .is_err()
+                {
+                    self.state.push_log(format!(
+                        "[monitor] process supervisor: pid={pid} did not exit after SIGTERM; sending SIGKILL"
+                    ));
+                    let status = Command::new("kill")
+                        .args(["-KILL", &pid.to_string()])
+                        .status()
+                        .await
+                        .with_context(|| {
+                            format!("Failed to force-stop supervised process pid={pid}")
+                        })?;
+                    if !status.success() && self.pid.lock().unwrap().is_some() {
+                        anyhow::bail!("Failed to force-stop supervised process pid={pid}");
+                    }
                 }
             }
             #[cfg(windows)]

@@ -33,34 +33,43 @@ struct MetalMetrics {
 pub struct RapidMlxPoller {
     client: reqwest::Client,
     base_url: String,
+    api_key: Option<String>,
 }
 
 impl RapidMlxPoller {
-    pub fn new(host: &str, port: u16) -> Self {
+    pub fn new(host: &str, port: u16, api_key: Option<&str>) -> Self {
+        let host = match host {
+            "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
+            "::1" => "[::1]",
+            host => host,
+        };
         Self {
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(2))
                 .build()
                 .unwrap_or_default(),
             base_url: format!("http://{}:{}", host, port),
+            api_key: api_key.map(str::to_string),
         }
     }
 
     pub async fn poll(&self) -> Result<InferenceMetricsSnapshot> {
         let status_url = format!("{}/v1/status", self.base_url);
         let status_resp: StatusResponse = self
-            .client
-            .get(&status_url)
+            .authenticated_get(&status_url)
             .send()
             .await?
+            .error_for_status()
+            .context("Rapid-MLX /v1/status returned an error status")?
             .json()
             .await
             .context("Failed to parse /v1/status JSON")?;
 
         let cache_url = format!("{}/v1/cache/stats", self.base_url);
-        let cache_metrics = match self.client.get(&cache_url).send().await {
-            Ok(resp) => resp.json::<serde_json::Value>().await.ok(),
+        let cache_metrics = match self.authenticated_get(&cache_url).send().await {
+            Ok(resp) if resp.status().is_success() => resp.json::<serde_json::Value>().await.ok(),
             Err(_) => None,
+            Ok(_) => None,
         };
 
         let gb_to_bytes = 1_073_741_824u64;
@@ -109,5 +118,13 @@ impl RapidMlxPoller {
             active_requests: status_resp.requests,
             backend_details: None,
         })
+    }
+
+    fn authenticated_get(&self, url: &str) -> reqwest::RequestBuilder {
+        let request = self.client.get(url);
+        match &self.api_key {
+            Some(key) => request.bearer_auth(key),
+            None => request,
+        }
     }
 }
