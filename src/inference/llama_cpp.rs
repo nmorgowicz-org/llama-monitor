@@ -1,17 +1,52 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
+use reqwest::Client;
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tokio::process::Command as TokioCommand;
-use reqwest::Client;
 
 use crate::config::AppConfig;
-use crate::inference::capabilities::CapabilitySet;
+use crate::gpu::env::{GpuEnv, build_nvidia_env, build_rocm_env};
 use crate::inference::InferenceBackend;
-use crate::inference::metrics::{InferenceMetricsSnapshot, HealthState};
+use crate::inference::capabilities::CapabilitySet;
+use crate::inference::metrics::{HealthState, InferenceMetricsSnapshot};
 use crate::inference::supervisor::SupervisedLaunch;
 use crate::llama::metrics::{parse_prometheus_metrics, parse_slot_metrics};
+
+fn describe_process_status(status: std::process::ExitStatus) -> String {
+    if let Some(code) = status.code() {
+        return format!("exit code {code}");
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return format!("signal {signal}");
+        }
+    }
+
+    "exit status unknown".to_string()
+}
+
+fn readiness_host(bind_host: Option<&str>) -> &str {
+    match bind_host.unwrap_or("127.0.0.1") {
+        "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
+        host => host,
+    }
+}
+
+fn launch_environment(gpu_backend: &str, gpu_env: &GpuEnv, cwd: &str) -> Vec<(OsString, OsString)> {
+    match gpu_backend {
+        "nvidia" => build_nvidia_env(gpu_env),
+        "none" => Vec::new(),
+        _ => build_rocm_env(gpu_env, cwd),
+    }
+    .into_iter()
+    .map(|(key, value)| (key.into(), value.into()))
+    .collect()
+}
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct SpecDecodeConfig {
@@ -159,6 +194,10 @@ pub struct ServerConfig {
     #[serde(default)]
     pub json_schema: Option<String>,
     #[serde(default)]
+    pub cache_type_k: Option<String>,
+    #[serde(default)]
+    pub cache_type_v: Option<String>,
+    #[serde(default)]
     pub max_tokens: Option<u64>,
     #[serde(default)]
     pub api_key: Option<String>,
@@ -209,27 +248,20 @@ fn counter_rate(
 pub struct LlamaCppAdapter {
     pub app_config: AppConfig,
     pub config: ServerConfig,
+    gpu_env: GpuEnv,
     previous_counters: Mutex<Option<CounterSnapshot>>,
     previous_counter_session: Mutex<Option<String>>,
 }
 
-impl crate::inference::supervisor::BackendObserver for LlamaCppAdapter {
-    fn on_log_line(&self, _line: &str) {
-        // Implementation for on_log_line
-    }
-    fn on_crash(&self, _exit_status: std::process::ExitStatus, _tail: Vec<String>) {
-        // Implementation for on_crash
-    }
-}
-
 #[allow(dead_code)]
 impl LlamaCppAdapter {
-    pub fn new(app_config: AppConfig, config: ServerConfig) -> Self {
-        Self { 
-            app_config, 
-            config, 
-            previous_counters: Mutex::new(None), 
-            previous_counter_session: Mutex::new(None) 
+    pub fn new(app_config: AppConfig, config: ServerConfig, gpu_env: GpuEnv) -> Self {
+        Self {
+            app_config,
+            config,
+            gpu_env,
+            previous_counters: Mutex::new(None),
+            previous_counter_session: Mutex::new(None),
         }
     }
 
@@ -246,7 +278,9 @@ impl LlamaCppAdapter {
         let has_model_path = !self.config.model_path.is_empty();
 
         if use_hf && has_model_path {
-            return Err(anyhow!("Cannot use both model_path and hf_repo. Choose one."));
+            return Err(anyhow!(
+                "Cannot use both model_path and hf_repo. Choose one."
+            ));
         }
 
         if !use_hf && has_model_path {
@@ -254,10 +288,52 @@ impl LlamaCppAdapter {
                 return Err(anyhow!("Model file not found: {}", self.config.model_path));
             }
         } else if !use_hf && !has_model_path {
-            return Err(anyhow!("No model source specified. Provide model_path or hf_repo."));
+            return Err(anyhow!(
+                "No model source specified. Provide model_path or hf_repo."
+            ));
         }
 
-        Ok(())
+        self.validate_binary().await
+    }
+
+    async fn validate_binary(&self) -> Result<()> {
+        let bin_path = &self.app_config.llama_server_path;
+
+        #[cfg(target_os = "macos")]
+        if let Some(bin_dir) = bin_path.parent() {
+            let _ = std::process::Command::new("xattr")
+                .args(["-rd", "com.apple.quarantine"])
+                .arg(bin_dir)
+                .output();
+        }
+
+        let output = tokio::time::timeout(Duration::from_secs(10), async {
+            TokioCommand::new(bin_path)
+                .arg("--help")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
+                .output()
+                .await
+        })
+        .await
+        .map_err(|_| anyhow!("llama-server did not respond to its health check within 10 seconds"))?
+        .map_err(|error| anyhow!("Failed to execute llama-server health check: {error}"))?;
+
+        if output.status.success() {
+            return Ok(());
+        }
+
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let status = describe_process_status(output.status);
+        if detail.is_empty() {
+            Err(anyhow!(
+                "llama-server health check failed ({status}). The binary may be corrupted or incompatible."
+            ))
+        } else {
+            Err(anyhow!(
+                "llama-server health check failed ({status}): {detail}"
+            ))
+        }
     }
 
     pub async fn build_launch(&self) -> Result<SupervisedLaunch> {
@@ -265,15 +341,6 @@ impl LlamaCppAdapter {
         crate::platform::no_window_tokio(&mut cmd);
         cmd.current_dir(&self.app_config.llama_server_cwd);
 
-        // GPU environment (simplified for port, normally handled by state)
-        // Note: In a real implementation, we would pass the GPU env from state.
-        // For now, we assume it's handled or provided in a way that doesn't break build_launch.
-        // Since SupervisedLaunch takes a Vec<(OsString, OsString)>, we should compute it here.
-        // But wait, build_launch in backend.rs returns SupervisedLaunch.
-        // I'll add a placeholder for env for now, or assume the caller handles it?
-        // No, SupervisedLaunch.env is required. 
-        // I will leave it empty for now or implement basic logic.
-        
         let use_hf = self.config.hf_repo.as_ref().is_some_and(|r| !r.is_empty());
         if use_hf {
             if let Some(ref repo) = self.config.hf_repo {
@@ -290,7 +357,8 @@ impl LlamaCppAdapter {
         cmd.arg("-ngl").arg(&ngl_str);
         cmd.arg("-ctk").arg(&self.config.ctk);
         cmd.arg("-ctv").arg(&self.config.ctv);
-        cmd.arg("--host").arg(self.config.bind_host.as_deref().unwrap_or("127.0.0.1"));
+        cmd.arg("--host")
+            .arg(self.config.bind_host.as_deref().unwrap_or("127.0.0.1"));
         cmd.arg("--port").arg(self.config.port.to_string());
         if self.config.context_size > 0 {
             cmd.arg("-c").arg(self.config.context_size.to_string());
@@ -315,7 +383,11 @@ impl LlamaCppAdapter {
             cmd.arg("--mlock");
         }
 
-        let fa_value = if self.config.flash_attn == "off" { "off" } else { "on" };
+        let fa_value = if self.config.flash_attn == "off" {
+            "off"
+        } else {
+            "on"
+        };
         cmd.arg("-fa").arg(fa_value);
 
         if !self.config.tensor_split.is_empty() {
@@ -328,10 +400,14 @@ impl LlamaCppAdapter {
             cmd.arg("-mg").arg(mg.to_string());
         }
 
-        if let Some(t) = self.config.threads && (t == -1 || t > 0) {
+        if let Some(t) = self.config.threads
+            && (t == -1 || t > 0)
+        {
             cmd.arg("-t").arg(t.to_string());
         }
-        if let Some(tb) = self.config.threads_batch && (tb == -1 || tb > 0) {
+        if let Some(tb) = self.config.threads_batch
+            && (tb == -1 || tb > 0)
+        {
             cmd.arg("-tb").arg(tb.to_string());
         }
 
@@ -459,7 +535,8 @@ impl LlamaCppAdapter {
         }
 
         if self.config.parallel_slots > 0 {
-            cmd.arg("--parallel").arg(self.config.parallel_slots.to_string());
+            cmd.arg("--parallel")
+                .arg(self.config.parallel_slots.to_string());
         }
 
         if let Some(t) = self.config.temperature {
@@ -488,10 +565,13 @@ impl LlamaCppAdapter {
             cmd.arg("--seed").arg(seed.to_string());
         }
         if !self.config.system_prompt_file.is_empty() {
-            cmd.arg("--system-prompt-file").arg(&self.config.system_prompt_file);
+            cmd.arg("--system-prompt-file")
+                .arg(&self.config.system_prompt_file);
         }
 
-        if let Some(ref ct) = self.config.chat_template_file && !ct.is_empty() {
+        if let Some(ref ct) = self.config.chat_template_file
+            && !ct.is_empty()
+        {
             cmd.arg("--chat-template-file").arg(ct);
         }
 
@@ -503,7 +583,9 @@ impl LlamaCppAdapter {
             if let Some(pt) = self.config.preserve_thinking {
                 kwargs.insert("preserve_thinking".into(), serde_json::json!(pt));
             }
-            if let Some(ref tcf) = self.config.tool_call_format && !tcf.is_empty() {
+            if let Some(ref tcf) = self.config.tool_call_format
+                && !tcf.is_empty()
+            {
                 kwargs.insert("tool_call_format".into(), serde_json::json!(tcf));
             }
             if !kwargs.is_empty() {
@@ -511,19 +593,25 @@ impl LlamaCppAdapter {
                 cmd.arg("--chat-template-kwargs").arg(json);
             }
         }
-        if let Some(ref mode) = self.config.reasoning && !mode.is_empty() {
+        if let Some(ref mode) = self.config.reasoning
+            && !mode.is_empty()
+        {
             cmd.arg("--reasoning").arg(mode);
         }
         if let Some(budget) = self.config.reasoning_budget {
             cmd.arg("--reasoning-budget").arg(budget.to_string());
         }
-        if let Some(ref msg) = self.config.reasoning_budget_message && !msg.is_empty() {
+        if let Some(ref msg) = self.config.reasoning_budget_message
+            && !msg.is_empty()
+        {
             cmd.arg("--reasoning-budget-message").arg(msg);
         }
 
         cmd.arg("--metrics");
 
-        if let Some(ref mp) = self.config.mmproj && !mp.is_empty() {
+        if let Some(ref mp) = self.config.mmproj
+            && !mp.is_empty()
+        {
             cmd.arg("--mmproj").arg(mp);
             if let Some(min) = self.config.image_min_tokens {
                 cmd.arg("--image-min-tokens").arg(min.to_string());
@@ -533,19 +621,27 @@ impl LlamaCppAdapter {
             }
         }
 
-        if let Some(ref g) = self.config.grammar && !g.is_empty() {
+        if let Some(ref g) = self.config.grammar
+            && !g.is_empty()
+        {
             cmd.arg("--grammar").arg(g);
         }
-        if let Some(ref js) = self.config.json_schema && !js.is_empty() {
+        if let Some(ref js) = self.config.json_schema
+            && !js.is_empty()
+        {
             cmd.arg("--json-schema").arg(js);
         }
         if let Some(mt) = self.config.max_tokens {
             cmd.arg("-n").arg(mt.to_string());
         }
-        if let Some(ref ak) = self.config.api_key && !ak.is_empty() {
+        if let Some(ref ak) = self.config.api_key
+            && !ak.is_empty()
+        {
             cmd.arg("--api-key").arg(ak);
         }
-        if let Some(ref al) = self.config.alias && !al.is_empty() {
+        if let Some(ref al) = self.config.alias
+            && !al.is_empty()
+        {
             cmd.arg("--alias").arg(al);
         }
 
@@ -559,10 +655,13 @@ impl LlamaCppAdapter {
         let args: Vec<OsString> = cmd.as_std().get_args().map(|a| a.to_owned()).collect();
         let program = PathBuf::from(cmd.as_std().get_program());
 
+        let cwd = self.app_config.llama_server_cwd.display().to_string();
+        let env = launch_environment(&self.app_config.gpu_backend, &self.gpu_env, &cwd);
+
         Ok(SupervisedLaunch {
             program,
             args,
-            env: vec![], // GPU env handled separately in current state
+            env,
             cwd: Some(self.app_config.llama_server_cwd.clone()),
             port: self.config.port,
             redacted_summary: format!(
@@ -620,11 +719,10 @@ impl LlamaCppAdapter {
     }
 
     pub async fn await_ready(&self, port: u16, deadline: Instant) -> Result<()> {
-        let client = Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()?;
-        
-        let base = format!("http://127.0.0.1:{}", port);
+        let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
+
+        let host = readiness_host(self.config.bind_host.as_deref());
+        let url = format!("http://{host}:{port}/health");
         let api_key = &self.config.api_key;
 
         loop {
@@ -633,30 +731,37 @@ impl LlamaCppAdapter {
             }
 
             let req = if let Some(key) = api_key {
-                client.get(&base).header("Authorization", format!("Bearer {}", key))
+                client
+                    .get(&url)
+                    .header("Authorization", format!("Bearer {}", key))
             } else {
-                client.get(&base)
+                client.get(&url)
             };
 
             if let Ok(resp) = req.send().await
-                && resp.status().is_success() {
-                    return Ok(());
-                }
+                && resp.status().is_success()
+            {
+                return Ok(());
+            }
 
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
     }
 
-    pub async fn poll_metrics(&self, port: u16, session_id: &str) -> Result<InferenceMetricsSnapshot> {
+    pub async fn poll_metrics(
+        &self,
+        port: u16,
+        session_id: &str,
+    ) -> Result<InferenceMetricsSnapshot> {
         let client = Client::builder()
             .timeout(Duration::from_secs(5))
             .pool_max_idle_per_host(0)
             .pool_idle_timeout(Duration::from_secs(0))
             .build()?;
-        
+
         let base = format!("http://127.0.0.1:{}", port);
         let api_key = &self.config.api_key;
-        
+
         let mut snapshot = InferenceMetricsSnapshot {
             sampled_at: std::time::SystemTime::now(),
             backend: InferenceBackend::LlamaCpp,
@@ -683,121 +788,133 @@ impl LlamaCppAdapter {
             active_requests: None,
             backend_details: None,
         };
-        
+
         // Health check
         let health_req = if let Some(key) = api_key {
-            client.get(format!("{base}/health")).header("Authorization", format!("Bearer {}", key))
+            client
+                .get(format!("{base}/health"))
+                .header("Authorization", format!("Bearer {}", key))
         } else {
             client.get(format!("{base}/health"))
         };
-        
+
         if let Ok(resp) = health_req.send().await
             && let Ok(body) = resp.text().await
-            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
-                snapshot.health = Some(match json.get("status").and_then(|v| v.as_str()) {
-                    Some("running") => HealthState::Ok,
-                    Some("degraded") => HealthState::Degraded,
-                    Some("not_loaded") => HealthState::NotLoaded,
-                    _ => HealthState::Unreachable,
-                });
-                snapshot.ready = json.get("ready").and_then(|v| v.as_bool());
-            }
-        
+            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&body)
+        {
+            snapshot.health = Some(match json.get("status").and_then(|v| v.as_str()) {
+                Some("running") => HealthState::Ok,
+                Some("degraded") => HealthState::Degraded,
+                Some("not_loaded") => HealthState::NotLoaded,
+                _ => HealthState::Unreachable,
+            });
+            snapshot.ready = json.get("ready").and_then(|v| v.as_bool());
+        }
+
         // Prometheus metrics
         let metrics_req = if let Some(key) = api_key {
-            client.get(format!("{base}/metrics")).header("Authorization", format!("Bearer {}", key))
+            client
+                .get(format!("{base}/metrics"))
+                .header("Authorization", format!("Bearer {}", key))
         } else {
             client.get(format!("{base}/metrics"))
         };
-        
+
         if let Ok(resp) = metrics_req.send().await
-            && let Ok(body) = resp.text().await {
-                let prom = parse_prometheus_metrics(&body);
-                snapshot.prompt_tokens_total = Some(prom.prompt_tokens_total as u64);
-                snapshot.completion_tokens_total = Some(prom.predicted_tokens_total as u64);
-                snapshot.running_requests = Some(prom.requests_processing as u64);
-                snapshot.steps_executed = Some(prom.n_decode_total as u64);
+            && let Ok(body) = resp.text().await
+        {
+            let prom = parse_prometheus_metrics(&body);
+            snapshot.prompt_tokens_total = Some(prom.prompt_tokens_total as u64);
+            snapshot.completion_tokens_total = Some(prom.predicted_tokens_total as u64);
+            snapshot.running_requests = Some(prom.requests_processing as u64);
+            snapshot.steps_executed = Some(prom.n_decode_total as u64);
 
-                let current_counters = CounterSnapshot {
-                    prompt_tokens_total: prom.prompt_tokens_total,
-                    prompt_seconds_total: prom.prompt_seconds_total,
-                    predicted_tokens_total: prom.predicted_tokens_total,
-                    predicted_seconds_total: prom.predicted_seconds_total,
-                };
+            let current_counters = CounterSnapshot {
+                prompt_tokens_total: prom.prompt_tokens_total,
+                prompt_seconds_total: prom.prompt_seconds_total,
+                predicted_tokens_total: prom.predicted_tokens_total,
+                predicted_seconds_total: prom.predicted_seconds_total,
+            };
 
-                let (prompt_tps, gen_tps) = {
-                    let prev_session = self.previous_counter_session.lock().unwrap();
-                    let prev_counters = self.previous_counters.lock().unwrap();
-                    
-                    if prev_session.as_deref() == Some(session_id) && prev_counters.is_some() {
-                        let prev = prev_counters.as_ref().unwrap();
-                        (
-                            counter_rate(
-                                current_counters.prompt_tokens_total,
-                                prev.prompt_tokens_total,
-                                current_counters.prompt_seconds_total,
-                                prev.prompt_seconds_total,
-                            ),
-                            counter_rate(
-                                current_counters.predicted_tokens_total,
-                                prev.predicted_tokens_total,
-                                current_counters.predicted_seconds_total,
-                                prev.predicted_seconds_total,
-                            ),
-                        )
-                    } else {
-                        (0.0, 0.0)
-                    }
-                };
+            let (prompt_tps, gen_tps) = {
+                let prev_session = self.previous_counter_session.lock().unwrap();
+                let prev_counters = self.previous_counters.lock().unwrap();
 
-                *self.previous_counters.lock().unwrap() = Some(current_counters);
-                *self.previous_counter_session.lock().unwrap() = Some(session_id.to_string());
-                
-                snapshot.prompt_tokens_per_second = Some(prompt_tps);
-                snapshot.generation_tokens_per_second = Some(gen_tps);
-            }
-        
+                if prev_session.as_deref() == Some(session_id) && prev_counters.is_some() {
+                    let prev = prev_counters.as_ref().unwrap();
+                    (
+                        counter_rate(
+                            current_counters.prompt_tokens_total,
+                            prev.prompt_tokens_total,
+                            current_counters.prompt_seconds_total,
+                            prev.prompt_seconds_total,
+                        ),
+                        counter_rate(
+                            current_counters.predicted_tokens_total,
+                            prev.predicted_tokens_total,
+                            current_counters.predicted_seconds_total,
+                            prev.predicted_seconds_total,
+                        ),
+                    )
+                } else {
+                    (0.0, 0.0)
+                }
+            };
+
+            *self.previous_counters.lock().unwrap() = Some(current_counters);
+            *self.previous_counter_session.lock().unwrap() = Some(session_id.to_string());
+
+            snapshot.prompt_tokens_per_second = Some(prompt_tps);
+            snapshot.generation_tokens_per_second = Some(gen_tps);
+        }
+
         // Slots metrics
         let slots_req = if let Some(key) = api_key {
-            client.get(format!("{base}/slots")).header("Authorization", format!("Bearer {}", key))
+            client
+                .get(format!("{base}/slots"))
+                .header("Authorization", format!("Bearer {}", key))
         } else {
             client.get(format!("{base}/slots"))
         };
-        
+
         if let Ok(resp) = slots_req.send().await
             && let Ok(body) = resp.text().await
-            && let Some(slots) = parse_slot_metrics(&body) {
-                snapshot.backend_details = Some(serde_json::json!({
-                    "slots_idle": slots.slots_idle,
-                    "slots_processing": slots.slots_processing,
-                    "kv_cache_max": slots.kv_cache_max,
-                    "kv_cache_tokens": slots.kv_cache_tokens,
-                    "kv_cache_tokens_available": slots.kv_cache_tokens_available,
-                    "kv_cache_tokens_source": slots.kv_cache_tokens_source,
-                }));
-            }
-        
+            && let Some(slots) = parse_slot_metrics(&body)
+        {
+            snapshot.backend_details = Some(serde_json::json!({
+                "slots_idle": slots.slots_idle,
+                "slots_processing": slots.slots_processing,
+                "kv_cache_max": slots.kv_cache_max,
+                "kv_cache_tokens": slots.kv_cache_tokens,
+                "kv_cache_tokens_available": slots.kv_cache_tokens_available,
+                "kv_cache_tokens_source": slots.kv_cache_tokens_source,
+            }));
+        }
+
         // Models metadata
         let models_req = if let Some(key) = api_key {
-            client.get(format!("{base}/v1/models")).header("Authorization", format!("Bearer {}", key))
+            client
+                .get(format!("{base}/v1/models"))
+                .header("Authorization", format!("Bearer {}", key))
         } else {
             client.get(format!("{base}/v1/models"))
         };
-        
+
         if let Ok(resp) = models_req.send().await
             && let Ok(body) = resp.text().await
             && let Ok(json) = serde_json::from_str::<serde_json::Value>(&body)
-            && let Some(model) = json["data"][0].get("id").and_then(|v| v.as_str()) {
-                snapshot.model = Some(model.to_string());
-            }
-        
+            && let Some(model) = json["data"][0].get("id").and_then(|v| v.as_str())
+        {
+            snapshot.model = Some(model.to_string());
+        }
+
         Ok(snapshot)
     }
 
     pub async fn cancel_request(&self, _port: u16, _request_id: &str) -> Result<()> {
-        // llama.cpp typically doesn't support native request cancellation via API in the same way Rapid-MLX does.
-        // If supported, implement here. For now, return Ok.
-        Ok(())
+        Err(anyhow!(
+            "The active llama.cpp backend does not support native request cancellation"
+        ))
     }
 
     pub fn capabilities(&self) -> &CapabilitySet {
@@ -820,5 +937,201 @@ impl LlamaCppAdapter {
             one_shot_launch: false,
         };
         &CAPS
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    async fn launch_args(config: ServerConfig) -> Vec<String> {
+        let config_dir = tempfile::tempdir().unwrap();
+        let args = crate::cli::AppArgs::parse_from([
+            "llama-monitor",
+            "--config-dir",
+            config_dir.path().to_str().unwrap(),
+            "--llama-server-path",
+            "llama-server",
+            "--gpu-backend",
+            "none",
+        ]);
+        let adapter = LlamaCppAdapter::new(AppConfig::from_args(args), config, GpuEnv::default());
+        adapter
+            .build_launch()
+            .await
+            .unwrap()
+            .args
+            .into_iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn readiness_uses_loopback_for_wildcard_bind_hosts() {
+        assert_eq!(readiness_host(None), "127.0.0.1");
+        assert_eq!(readiness_host(Some("0.0.0.0")), "127.0.0.1");
+        assert_eq!(readiness_host(Some("::")), "127.0.0.1");
+        assert_eq!(readiness_host(Some("192.168.1.10")), "192.168.1.10");
+    }
+
+    #[test]
+    fn launch_environment_preserves_gpu_selection_and_custom_values() {
+        let gpu_env = GpuEnv {
+            devices: "1,2".into(),
+            extra_env: vec![("LLAMA_TEST_ENV".into(), "present".into())],
+            ..Default::default()
+        };
+
+        let nvidia = launch_environment("nvidia", &gpu_env, "/tmp/llama");
+        assert!(nvidia.contains(&("CUDA_VISIBLE_DEVICES".into(), "1,2".into())));
+        assert!(nvidia.contains(&("LLAMA_TEST_ENV".into(), "present".into())));
+        assert!(launch_environment("none", &gpu_env, "/tmp/llama").is_empty());
+    }
+
+    #[test]
+    fn server_config_keeps_spawn_v2_cache_fields() {
+        let mut value = serde_json::to_value(ServerConfig::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.insert("cache_type_k".into(), serde_json::json!("q8_0"));
+        object.insert("cache_type_v".into(), serde_json::json!("q4_0"));
+        let config: ServerConfig = serde_json::from_value(value).unwrap();
+
+        assert_eq!(config.cache_type_k.as_deref(), Some("q8_0"));
+        assert_eq!(config.cache_type_v.as_deref(), Some("q4_0"));
+    }
+
+    #[tokio::test]
+    async fn default_launch_argv_matches_pre_refactor_contract() {
+        let args = launch_args(ServerConfig {
+            model_path: "/models/test.gguf".into(),
+            ctk: "q8_0".into(),
+            ctv: "q8_0".into(),
+            port: 8080,
+            ..Default::default()
+        })
+        .await;
+
+        assert_eq!(
+            args,
+            [
+                "-m",
+                "/models/test.gguf",
+                "-ngl",
+                "all",
+                "-ctk",
+                "q8_0",
+                "-ctv",
+                "q8_0",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8080",
+                "--no-warmup",
+                "--jinja",
+                "--webui-mcp-proxy",
+                "--no-context-shift",
+                "--ctx-checkpoints",
+                "32",
+                "--keep",
+                "-1",
+                "-fa",
+                "on",
+                "--metrics",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn optional_launch_argv_preserves_order_and_values() {
+        let args = launch_args(ServerConfig {
+            model_path: "/models/full.gguf".into(),
+            context_size: 4096,
+            ctk: "q4_0".into(),
+            ctv: "q5_0".into(),
+            tensor_split: "3,1".into(),
+            batch_size: 512,
+            ubatch_size: 128,
+            no_mmap: true,
+            port: 9090,
+            parallel_slots: 2,
+            temperature: Some(0.7),
+            top_p: Some(0.95),
+            top_k: Some(40),
+            min_p: Some(0.05),
+            repeat_penalty: Some(1.1),
+            presence_penalty: Some(0.2),
+            n_cpu_moe: Some(4),
+            gpu_layers: Some(42),
+            mlock: true,
+            flash_attn: "off".into(),
+            split_mode: "layer".into(),
+            main_gpu: Some(1),
+            threads: Some(8),
+            threads_batch: Some(12),
+            prio: Some(2),
+            prio_batch: Some(3),
+            rope_scaling: "yarn".into(),
+            rope_freq_base: Some(10_000.0),
+            rope_freq_scale: Some(0.5),
+            kv_unified: Some(true),
+            cache_idle_slots: Some(true),
+            cache_ram_mib: Some(2048),
+            fit_enabled: Some(true),
+            fit_target: Some("3072".into()),
+            seed: Some(7),
+            system_prompt_file: "/prompts/system.txt".into(),
+            extra_args: "--verbose --log-colors off".into(),
+            bind_host: Some("0.0.0.0".into()),
+            alias: Some("full-model".into()),
+            chat_template_file: Some("/templates/chat.jinja".into()),
+            mmproj: Some("/models/mmproj.gguf".into()),
+            grammar: Some("root ::= answer".into()),
+            json_schema: Some("{\"type\":\"object\"}".into()),
+            max_tokens: Some(256),
+            api_key: Some("secret".into()),
+            reasoning: Some("auto".into()),
+            reasoning_budget: Some(512),
+            reasoning_budget_message: Some("done".into()),
+            image_min_tokens: Some(280),
+            image_max_tokens: Some(560),
+            ..Default::default()
+        })
+        .await;
+
+        let expected_tail = [
+            "--api-key",
+            "secret",
+            "--alias",
+            "full-model",
+            "--kv-unified",
+            "--cache-idle-slots",
+            "--cache-ram",
+            "2048",
+            "--fit",
+            "on",
+            "--fit-target",
+            "3072",
+            "--verbose",
+            "--log-colors",
+            "off",
+        ];
+        assert!(args.ends_with(&expected_tail.map(str::to_string)));
+        for required in [
+            "--no-mmap",
+            "--mlock",
+            "--split-mode",
+            "--rope-scaling",
+            "--parallel",
+            "--chat-template-file",
+            "--reasoning-budget",
+            "--mmproj",
+            "--grammar",
+            "--json-schema",
+            "--image-min-tokens",
+            "--image-max-tokens",
+        ] {
+            assert!(args.iter().any(|arg| arg == required), "missing {required}");
+        }
     }
 }

@@ -8,8 +8,8 @@ use crate::chat_storage::ChatStorage;
 use crate::config::{TLSConfig, decrypt_value, encrypt_value};
 use crate::gpu::GpuMetrics;
 use crate::gpu::env::GpuEnv;
+use crate::inference::llama_cpp::ServerConfig;
 use crate::llama::metrics::LlamaMetrics;
-use crate::llama::server::ServerConfig;
 use crate::models::DiscoveredModel;
 use crate::presets;
 use crate::presets::ModelPreset;
@@ -111,7 +111,62 @@ fn sensor_bridge_setup_available() -> bool {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+impl crate::inference::supervisor::BackendObserver for AppState {
+    fn on_log_line(&self, line: &str) {
+        self.push_log(line.to_string());
+    }
+    fn on_crash(&self, exit_status: std::process::ExitStatus, tail: Vec<String>) {
+        let reason = if exit_status.success() {
+            "llama-server exited normally".to_string()
+        } else if let Some(code) = exit_status.code() {
+            match code {
+                137 | 9 => format!(
+                    "llama-server was terminated (code {}). This often means out-of-memory (OOM). Try a smaller context or a different model.",
+                    code
+                ),
+                _ => format!(
+                    "llama-server exited unexpectedly (code {}). Check the server logs for details.",
+                    code
+                ),
+            }
+        } else {
+            "llama-server was killed by an external signal.".to_string()
+        };
+
+        let tail_text = if tail.is_empty() {
+            "\nNo llama-server output captured before it was killed.".to_string()
+        } else {
+            format!(
+                "\nLast relevant lines from llama-server:\n{}",
+                tail.iter()
+                    .map(|l| format!("  {l}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        };
+
+        let reason_display = if exit_status.success()
+            || exit_status.code() == Some(137)
+            || exit_status.code() == Some(9)
+        {
+            reason
+        } else {
+            format!("{}{}", reason, tail_text)
+        };
+
+        self.push_log(format!("[monitor] {}", reason_display));
+        let active_id = {
+            let aid = self.active_session_id.lock().unwrap();
+            aid.clone()
+        };
+        if !active_id.is_empty() {
+            use crate::state::SessionStatus;
+            self.update_session_status(&active_id, SessionStatus::Error(reason_display));
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, Default)]
 pub struct MetricsCapabilities {
     pub inference: bool,
     pub system: bool,
@@ -655,13 +710,21 @@ pub struct AppState {
     // Stores the PID of the running llama-server child.  The Child handle itself
     // is moved directly into the death_watcher task so it can call wait(); stop_server
     // kills by PID so it never needs to hold the handle.
+    #[allow(dead_code)]
     pub server_child: Arc<tokio::sync::Mutex<Option<u32>>>,
     pub server_stopping: Arc<AtomicBool>, // True when stop_server is in progress (for death-watcher coordination)
     // Fired by the death_watcher when the child exits during an intentional stop,
     // so stop_server can unblock and know the port has been released.
+    #[allow(dead_code)]
     pub server_exit_notify: Arc<tokio::sync::Notify>,
     pub server_running: Arc<Mutex<bool>>, // Whether active endpoint is reachable (for inference)
     pub local_server_running: Arc<Mutex<bool>>, // Whether a local llama-server was spawned by this app
+    pub backend: Arc<Mutex<Option<crate::inference::backend::BackendAdapter>>>,
+    pub supervisor: Arc<tokio::sync::Mutex<Option<Arc<crate::inference::supervisor::Supervisor>>>>,
+    /// Serializes local inference process start/stop transitions.
+    pub server_lifecycle: Arc<tokio::sync::Mutex<()>>,
+    /// Monotonic ownership token for local process lifecycle operations.
+    pub server_generation: Arc<std::sync::atomic::AtomicU64>,
     pub server_config: Arc<Mutex<Option<ServerConfig>>>,
     pub llama_poll_notify: Arc<tokio::sync::Notify>,
     pub agent_poll_notify: Arc<tokio::sync::Notify>,
@@ -706,6 +769,67 @@ pub struct AppState {
     pub sleep_mode_config: Arc<Mutex<SleepModeConfig>>,
     pub sleep_notify: Arc<tokio::sync::Notify>,
     pub last_activity_at: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            gpu_metrics: Arc::new(Mutex::new(BTreeMap::new())),
+            llama_metrics: Arc::new(Mutex::new(LlamaMetrics::default())),
+            server_logs: Arc::new(Mutex::new(VecDeque::new())),
+            server_child: Arc::new(tokio::sync::Mutex::new(None)),
+            server_stopping: Arc::new(AtomicBool::new(false)),
+            server_exit_notify: Arc::new(tokio::sync::Notify::new()),
+            server_running: Arc::new(Mutex::new(false)),
+            local_server_running: Arc::new(Mutex::new(false)),
+            server_config: Arc::new(Mutex::new(None)),
+            llama_poll_notify: Arc::new(tokio::sync::Notify::new()),
+            agent_poll_notify: Arc::new(tokio::sync::Notify::new()),
+            presets: Arc::new(Mutex::new(Vec::new())),
+            presets_path: PathBuf::new(),
+            templates: Arc::new(Mutex::new(Vec::new())),
+            templates_path: PathBuf::new(),
+            discovered_models: Arc::new(Mutex::new(Vec::new())),
+            models_dir: None,
+            model_tags: Arc::new(Mutex::new(ModelTags::default())),
+            model_tags_path: PathBuf::new(),
+            preset_collections: Arc::new(Mutex::new(
+                crate::collections::PresetCollections::default(),
+            )),
+            gpu_env: Arc::new(Mutex::new(GpuEnv::default())),
+            gpu_env_path: PathBuf::new(),
+            ui_settings: Arc::new(Mutex::new(UiSettings::default())),
+            ui_settings_path: PathBuf::new(),
+            system_metrics: Arc::new(Mutex::new(SystemMetrics::default())),
+            sessions: Arc::new(Mutex::new(Vec::new())),
+            active_session_id: Arc::new(Mutex::new(String::new())),
+            sessions_path: PathBuf::new(),
+            capabilities: Arc::new(Mutex::new(MetricsCapabilities::default())),
+            endpoint_kind: Arc::new(Mutex::new(EndpointKind::Unknown)),
+            session_kind: Arc::new(Mutex::new(SessionKind::None)),
+            tray_mode: Arc::new(Mutex::new(TrayMode::Headless)),
+            remote_agent_connected: Arc::new(Mutex::new(false)),
+            remote_agent_health_reachable: Arc::new(Mutex::new(false)),
+            remote_agent_url: Arc::new(Mutex::new(None)),
+            remote_agent_version: Arc::new(Mutex::new(None)),
+            remote_agent_update_available: Arc::new(Mutex::new(false)),
+            remote_agent_protocol_version: Arc::new(Mutex::new(None)),
+            remote_agent_protocol_too_old: Arc::new(Mutex::new(false)),
+            chat_storage: Arc::new(ChatStorage::default()),
+            tls_config: Arc::new(Mutex::new(TLSConfig::default())),
+            monitor_inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
+            last_spawn_cmd: Arc::new(Mutex::new(String::new())),
+            backend: Arc::new(Mutex::new(None)),
+            supervisor: Arc::new(tokio::sync::Mutex::new(None)),
+            server_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
+            server_generation: Arc::new(AtomicU64::new(0)),
+            sleep_mode: Arc::new(AtomicU8::new(0)),
+            sleep_mode_manual: Arc::new(AtomicBool::new(false)),
+            sleep_mode_config: Arc::new(Mutex::new(SleepModeConfig::default())),
+            sleep_notify: Arc::new(tokio::sync::Notify::new()),
+            last_activity_at: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        }
+    }
 }
 
 impl AppState {
@@ -807,6 +931,10 @@ impl AppState {
             tls_config: Arc::new(Mutex::new(tls_config)),
             monitor_inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
             last_spawn_cmd: Arc::new(Mutex::new(String::new())),
+            backend: Arc::new(Mutex::new(None)),
+            supervisor: Arc::new(tokio::sync::Mutex::new(None)),
+            server_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
+            server_generation: Arc::new(AtomicU64::new(0)),
             sleep_mode: Arc::new(AtomicU8::new(0)), // 0 = Off (full monitoring)
             sleep_mode_manual: Arc::new(AtomicBool::new(false)),
             sleep_mode_config: Arc::new(Mutex::new(sleep_cfg)),

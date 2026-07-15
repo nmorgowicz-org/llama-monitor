@@ -1,12 +1,12 @@
 use anyhow::Result;
-use std::time::Instant;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::inference::capabilities::CapabilitySet;
-use crate::inference::metrics::InferenceMetricsSnapshot;
-use crate::inference::supervisor::SupervisedLaunch;
 use crate::inference::llama_cpp::LlamaCppAdapter;
+use crate::inference::metrics::InferenceMetricsSnapshot;
 use crate::inference::rapid_mlx::RapidMlxAdapter;
+use crate::inference::supervisor::SupervisedLaunch;
 
 /// The BackendAdapter is an enum to ensure exhaustive and zero-overhead dispatch
 /// to the specific implementation for each inference engine.
@@ -44,7 +44,11 @@ impl BackendAdapter {
     }
 
     /// Fetch a normalized metrics snapshot. Called by the shared poller loop.
-    pub async fn poll_metrics(&self, port: u16, session_id: &str) -> Result<InferenceMetricsSnapshot> {
+    pub async fn poll_metrics(
+        &self,
+        port: u16,
+        session_id: &str,
+    ) -> Result<InferenceMetricsSnapshot> {
         match self {
             Self::LlamaCpp(adapter) => adapter.poll_metrics(port, session_id).await,
             Self::RapidMlx(adapter) => adapter.poll_metrics(port, session_id).await,
@@ -67,4 +71,3 @@ impl BackendAdapter {
         }
     }
 }
-

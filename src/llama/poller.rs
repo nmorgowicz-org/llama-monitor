@@ -117,22 +117,26 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             } {
                 match sess.mode {
                     crate::state::SessionMode::Spawn { port, .. } => port,
-                    crate::state::SessionMode::Attach { endpoint, .. } => {
-                        endpoint.split(':').next_back().and_then(|p| p.parse().ok()).unwrap_or(0)
-                    }
+                    crate::state::SessionMode::Attach { endpoint, .. } => endpoint
+                        .split(':')
+                        .next_back()
+                        .and_then(|p| p.parse().ok())
+                        .unwrap_or(0),
                 }
             } else {
                 0
             };
 
-            if port != 0 && let Ok(snapshot) = backend.poll_metrics(port, &active_id).await {
+            if port != 0
+                && let Ok(snapshot) = backend.poll_metrics(port, &active_id).await
+            {
                 let now_ms = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as u64;
 
                 let mut m = state.llama_metrics.lock().unwrap();
-                
+
                 if let Some(prompt_tps) = snapshot.prompt_tokens_per_second {
                     m.prompt_tokens_per_sec = prompt_tps;
                     m.prompt_throughput_active = prompt_tps > 0.0;
@@ -141,7 +145,7 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
                         m.last_prompt_throughput_unix_ms = now_ms;
                     }
                 }
-                
+
                 if let Some(gen_tps) = snapshot.generation_tokens_per_second {
                     m.generation_tokens_per_sec = gen_tps;
                     m.generation_throughput_active = gen_tps > 0.0;
@@ -150,9 +154,9 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
                         m.last_generation_throughput_unix_ms = now_ms;
                     }
                 }
-                
+
                 m.throughput_source = "backend_poll".to_string();
-                
+
                 if let Some(prompt_total) = snapshot.prompt_tokens_total {
                     m.prompt_tokens_total = prompt_total;
                 }
@@ -167,7 +171,9 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
                     if let Some(idle) = details.get("slots_idle").and_then(|v| v.as_u64()) {
                         m.slots_idle = idle as u32;
                     }
-                    if let Some(processing) = details.get("slots_processing").and_then(|v| v.as_u64()) {
+                    if let Some(processing) =
+                        details.get("slots_processing").and_then(|v| v.as_u64())
+                    {
                         m.slots_processing = processing as u32;
                     }
                     if let Some(max) = details.get("kv_cache_max").and_then(|v| v.as_u64()) {
@@ -178,11 +184,17 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
                         m.kv_cache_tokens = tokens;
                         m.context_live_tokens = tokens;
                     }
-                    if let Some(avail) = details.get("kv_cache_tokens_available").and_then(|v| v.as_bool()) {
+                    if let Some(avail) = details
+                        .get("kv_cache_tokens_available")
+                        .and_then(|v| v.as_bool())
+                    {
                         m.kv_cache_tokens_available = avail;
                         m.context_live_tokens_available = avail;
                     }
-                    if let Some(source) = details.get("kv_cache_tokens_source").and_then(|v| v.as_str()) {
+                    if let Some(source) = details
+                        .get("kv_cache_tokens_source")
+                        .and_then(|v| v.as_str())
+                    {
                         m.kv_cache_tokens_source = source.to_string();
                         m.context_live_tokens_source = source.to_string();
                     }

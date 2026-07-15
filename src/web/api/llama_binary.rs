@@ -4,11 +4,12 @@ use std::sync::Arc;
 use warp::Filter;
 
 use crate::config::AppConfig;
+use crate::inference::llama_cpp::ServerConfig;
 use crate::llama::llama_cpp_downloader::{
     ReleaseQuery, cleanup_old_binaries, download_and_extract, get_release_by_tag, list_releases,
     select_assets,
 };
-use crate::llama::server::{ServerConfig, start_server, stop_server};
+use crate::llama::server::{start_server, stop_server};
 use crate::state::AppState;
 use crate::web::safe_json_body;
 
@@ -1027,7 +1028,7 @@ fn api_llama_binary_update(
                         "[monitor] llama-binary/update: restarting llama-server with previous config".into(),
                     );
 
-                    match start_server(&state, rc, &cfg).await {
+                    match start_server(Arc::new(state.clone()), rc, &cfg).await {
                         Ok(()) => {
                             state.push_log(
                                 "[monitor] llama-binary/update: llama-server restarted successfully".into(),
@@ -1141,7 +1142,7 @@ fn api_llama_restart(
                 ));
 
                 // Restart with the same config (uses the current llama_server_path)
-                if let Err(e) = start_server(&state_clone, config, &cfg).await {
+                if let Err(e) = start_server(Arc::new(state_clone.clone()), config, &cfg).await {
                     state.push_log(format!("[monitor] restart: start_server failed: {}", e));
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({

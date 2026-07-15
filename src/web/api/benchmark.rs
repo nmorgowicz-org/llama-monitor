@@ -957,7 +957,12 @@ fn api_bench_mtp_sweep(
 
                     // Start with modified config
                     if let Err(e) =
-                        crate::llama::server::start_server(&state, probe_config, &cfg).await
+                        crate::llama::server::start_server(
+                            Arc::new(state.clone()),
+                            probe_config,
+                            &cfg,
+                        )
+                        .await
                     {
                         state.push_log(format!(
                             "[mtp-sweep] start_server failed for n_max={n_max}: {e}"
@@ -1042,8 +1047,12 @@ fn api_bench_mtp_sweep(
 
                     let _ = crate::llama::server::stop_server(&state).await;
                     tokio::time::sleep(Duration::from_secs(2)).await;
-                    let _ =
-                        crate::llama::server::start_server(&state, final_config, &cfg).await;
+                    let _ = crate::llama::server::start_server(
+                        Arc::new(state.clone()),
+                        final_config,
+                        &cfg,
+                    )
+                    .await;
                 }
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(

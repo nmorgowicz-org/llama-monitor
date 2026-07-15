@@ -5,7 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use warp::Filter;
 
 use crate::config::AppConfig;
-use crate::llama::server::{ServerConfig, start_server, stop_server};
+use crate::inference::llama_cpp::ServerConfig;
+use crate::llama::server::{start_server, stop_server};
 use crate::state::{self as app_state, AppState, SessionMode, SessionStatus};
 
 use super::common::{ApiCtx, ApiError, ApiRoute, box_reply};
@@ -608,7 +609,7 @@ fn api_spawn_session_with_preset(
 
                     state.set_active_session(&session_id);
 
-                    match start_server(&state, config, &app_config).await {
+                    match start_server(Arc::new(state.clone()), config, &app_config).await {
                         Ok(()) => {
                             state.update_session_status(&session_id, SessionStatus::Running);
                             return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -692,7 +693,7 @@ fn api_spawn_session_with_preset(
                     rope_scaling: preset.rope_scaling.clone(),
                     rope_freq_base: preset.rope_freq_base,
                     rope_freq_scale: preset.rope_freq_scale,
-                    spec: crate::llama::server::SpecDecodeConfig {
+                    spec: crate::inference::llama_cpp::SpecDecodeConfig {
                         draft_model: preset.draft_model.clone(),
                         draft_min: preset.draft_min,
                         draft_max: preset.draft_max,
@@ -754,7 +755,7 @@ fn api_spawn_session_with_preset(
                     ..Default::default()
                 };
 
-                match start_server(&state, config, &app_config).await {
+                match start_server(Arc::new(state.clone()), config, &app_config).await {
                     Ok(()) => {
                         state.update_session_status(&session_id, SessionStatus::Running);
                         Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
@@ -1114,8 +1115,23 @@ fn api_kill_llama(
                 }
 
                 state.push_log("[monitor] kill-llama: kill-llama requested (best-effort)".into());
-                if let Err(e) = stop_server(&state).await {
-                    state.push_log(format!("[monitor] stop_server fallback: {}", e));
+                let had_managed_process = state.server_child.lock().await.is_some()
+                    || state.supervisor.lock().await.is_some();
+                match stop_server(&state).await {
+                    Ok(()) if had_managed_process => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({ "ok": true })),
+                        ));
+                    }
+                    Ok(()) => {
+                        state.push_log(
+                            "[monitor] kill-llama: no supervised process; trying legacy process cleanup"
+                                .into(),
+                        );
+                    }
+                    Err(e) => {
+                        state.push_log(format!("[monitor] stop_server fallback: {}", e));
+                    }
                 }
 
                 #[cfg(target_os = "windows")]

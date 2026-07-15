@@ -80,6 +80,7 @@ pub const GPU_ARCHITECTURES: &[GpuArch] = &[
 ];
 
 /// Lookup HSA_OVERRIDE_GFX_VERSION for a given architecture ID.
+#[allow(dead_code)]
 pub fn hsa_version_for_arch(arch: &str) -> Option<&'static str> {
     GPU_ARCHITECTURES
         .iter()
@@ -300,6 +301,7 @@ pub fn device_list_for_count(count: usize) -> String {
 
 // ── Build environment variables ────────────────────────────────────────────
 
+#[allow(dead_code)]
 pub fn build_rocm_env(gpu_env: &GpuEnv, llama_server_cwd: &str) -> Vec<(String, String)> {
     let rocm = &gpu_env.rocm_path;
     let mut env = vec![
@@ -347,6 +349,7 @@ pub fn build_rocm_env(gpu_env: &GpuEnv, llama_server_cwd: &str) -> Vec<(String, 
     env
 }
 
+#[allow(dead_code)]
 pub fn build_nvidia_env(gpu_env: &GpuEnv) -> Vec<(String, String)> {
     let mut env = Vec::new();
     if !gpu_env.devices.is_empty() {

@@ -1,83 +1,243 @@
-use anyhow::Result;
-use std::sync::atomic::Ordering;
 use crate::config::AppConfig;
+use crate::inference::backend::BackendAdapter;
+use crate::inference::llama_cpp::{LlamaCppAdapter, ServerConfig};
+use crate::inference::supervisor::Supervisor;
 use crate::state::AppState;
+use anyhow::Result;
 use std::sync::Arc;
-use crate::inference::llama_cpp::ServerConfig;
+use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
+
+const LLAMA_STARTUP_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub async fn start_server(
     state: Arc<AppState>,
     config: ServerConfig,
     app_config: &AppConfig,
 ) -> Result<()> {
-    let adapter = Arc::new(crate::inference::llama_cpp::LlamaCppAdapter::new(app_config.clone(), config.clone()));
+    let lifecycle = state.server_lifecycle.lock().await;
+    ensure_no_local_process(&state).await?;
+
+    state.server_stopping.store(false, Ordering::Relaxed);
+    {
+        state.server_logs.lock().unwrap().clear();
+    }
+    state.push_log(format!(
+        "[monitor] start_server: launching llama-server on port={} model={}",
+        config.port,
+        if !config.model_path.is_empty() {
+            &config.model_path
+        } else {
+            config.hf_repo.as_deref().unwrap_or("<unknown>")
+        }
+    ));
+
+    let gpu_env = state.gpu_env.lock().unwrap().clone();
+    let adapter = Arc::new(LlamaCppAdapter::new(
+        app_config.clone(),
+        config.clone(),
+        gpu_env,
+    ));
     adapter.validate().await?;
 
     let launch = adapter.build_launch().await?;
-    let supervisor = Arc::new(crate::inference::supervisor::Supervisor::new(
-        launch,
-        adapter.clone(),
-        state.clone(),
-    ));
-    supervisor.clone().start().await?;
-
-    {
-        let mut backend_lock = state.backend.lock().unwrap();
-        *backend_lock = Some(crate::inference::backend::BackendAdapter::LlamaCpp(adapter));
+    if let Ok(mut last_spawn_cmd) = state.last_spawn_cmd.lock() {
+        *last_spawn_cmd = crate::inference::supervisor::redacted_spawn_command(&launch);
     }
-    let mut supervisor_lock = state.supervisor.lock().await;
-    *supervisor_lock = Some(supervisor);
+    state.push_log(format!("[monitor] {}", launch.redacted_summary));
+    let generation = state.server_generation.fetch_add(1, Ordering::AcqRel) + 1;
+    let supervisor = Arc::new(Supervisor::new(
+        launch,
+        state.clone(),
+        state.clone(),
+        generation,
+    ));
 
+    // Register ownership before spawn so a very early process exit cannot race
+    // with registration and leave stale running state behind.
+    {
+        *state.backend.lock().unwrap() = Some(BackendAdapter::LlamaCpp(adapter.clone()));
+        *state.server_config.lock().unwrap() = Some(config.clone());
+        *state.local_server_running.lock().unwrap() = true;
+        *state.server_running.lock().unwrap() = false;
+        *state.supervisor.lock().await = Some(supervisor.clone());
+    }
+
+    let pid = match supervisor.clone().start().await {
+        Ok(pid) => pid,
+        Err(error) => {
+            clear_generation_if_current(&state, generation).await;
+            return Err(error);
+        }
+    };
+    state.push_log(format!(
+        "[monitor] start_server: llama-server spawned (pid={pid}); waiting for readiness"
+    ));
+    // Readiness may take minutes. Release the transition lock so stop_server
+    // can cancel this generation while it is loading.
+    drop(lifecycle);
+
+    let readiness = tokio::select! {
+        result = adapter.await_ready(config.port, Instant::now() + LLAMA_STARTUP_TIMEOUT) => result,
+        () = supervisor.wait_for_exit() => Err(anyhow::anyhow!(
+            "llama-server exited before becoming ready; check the captured server logs"
+        )),
+    };
+
+    let _lifecycle = state.server_lifecycle.lock().await;
+    let still_owner = owns_process(&state, generation, pid).await;
+    if let Err(error) = readiness {
+        if !still_owner {
+            return Err(anyhow::anyhow!(
+                "llama-server startup was cancelled or replaced before readiness completed"
+            ));
+        }
+        state.push_log(format!(
+            "[monitor] start_server: readiness failed for pid={pid}: {error}"
+        ));
+        state.server_stopping.store(true, Ordering::Relaxed);
+        let stop_result = supervisor.stop().await;
+        state.server_stopping.store(false, Ordering::Relaxed);
+        if let Err(stop_error) = stop_result {
+            state.push_log(format!(
+                "[monitor] start_server: failed to clean up pid={pid} after readiness failure: {stop_error}"
+            ));
+            return Err(anyhow::anyhow!(
+                "{error}; additionally failed to stop pid={pid}: {stop_error}"
+            ));
+        }
+        clear_generation_if_current(&state, generation).await;
+        return Err(error);
+    }
+
+    if !still_owner {
+        anyhow::bail!("llama-server startup was cancelled or replaced before completion");
+    }
+
+    *state.server_running.lock().unwrap() = true;
+    state.push_log(format!(
+        "[monitor] start_server: llama-server ready (pid={pid}, port={})",
+        config.port
+    ));
     state.llama_poll_notify.notify_waiters();
     Ok(())
 }
 
 pub async fn stop_server(state: &AppState) -> Result<()> {
+    let _lifecycle = state.server_lifecycle.lock().await;
+    // Invalidate any readiness waiter before terminating its process. A stale
+    // startup continuation must never clear a later generation.
+    state.server_generation.fetch_add(1, Ordering::AcqRel);
     state.server_stopping.store(true, Ordering::Relaxed);
 
-    if let Some(supervisor) = state.supervisor.lock().await.take() {
-        supervisor.stop().await?;
+    let supervisor = state.supervisor.lock().await.take();
+    let stop_result = if let Some(supervisor) = supervisor.as_ref() {
+        if let Some(pid) = *state.server_child.lock().await {
+            state.push_log(format!(
+                "[monitor] stop_server: terminating supervised process pid={pid}"
+            ));
+        }
+        supervisor.stop().await
+    } else {
+        match *state.server_child.lock().await {
+            Some(pid) => Err(anyhow::anyhow!(
+                "Cannot stop local inference server pid={pid}: process supervisor is unavailable"
+            )),
+            None => Ok(()),
+        }
+    };
+
+    state.server_stopping.store(false, Ordering::Relaxed);
+    if let Err(error) = stop_result {
+        if let Some(supervisor) = supervisor {
+            *state.supervisor.lock().await = Some(supervisor);
+        }
+        return Err(error);
     }
 
-    {
-        let mut r = state.server_running.lock().unwrap();
-        *r = false;
-    }
-    {
-        let mut local_running = state.local_server_running.lock().unwrap();
-        *local_running = false;
-    }
-    {
-        let mut cfg = state.server_config.lock().unwrap();
-        *cfg = None;
-    }
-    {
-        let mut m = state.llama_metrics.lock().unwrap();
-        *m = crate::llama::metrics::LlamaMetrics::default();
-    }
+    clear_server_state_unchecked(state).await;
+    *state.llama_metrics.lock().unwrap() = crate::llama::metrics::LlamaMetrics::default();
     state.push_log("[monitor] Server stopped.".into());
-    state.server_stopping.store(false, Ordering::Relaxed);
     Ok(())
+}
+
+async fn ensure_no_local_process(state: &AppState) -> Result<()> {
+    let pid = *state.server_child.lock().await;
+    let has_supervisor = state.supervisor.lock().await.is_some();
+    if pid.is_some() || has_supervisor {
+        anyhow::bail!(
+            "A local inference server is already running{}; stop it before starting another model",
+            pid.map(|pid| format!(" (pid={pid})")).unwrap_or_default()
+        );
+    }
+    Ok(())
+}
+
+async fn owns_process(state: &AppState, generation: u64, pid: u32) -> bool {
+    state.server_generation.load(Ordering::Acquire) == generation
+        && *state.server_child.lock().await == Some(pid)
+}
+
+/// Clear startup-owned state only if its generation is still current.
+/// Callers hold `server_lifecycle`, preventing a replacement during cleanup.
+async fn clear_generation_if_current(state: &AppState, generation: u64) -> bool {
+    if state.server_generation.load(Ordering::Acquire) != generation {
+        return false;
+    }
+    clear_server_state_unchecked(state).await;
+    true
+}
+
+async fn clear_server_state_unchecked(state: &AppState) {
+    *state.server_child.lock().await = None;
+    *state.server_running.lock().unwrap() = false;
+    *state.local_server_running.lock().unwrap() = false;
+    *state.server_config.lock().unwrap() = None;
+    *state.backend.lock().unwrap() = None;
+    *state.supervisor.lock().await = None;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn overlapping_start_is_rejected_with_existing_pid() {
+        let state = AppState::default();
+        *state.server_child.lock().await = Some(4242);
 
+        let error = ensure_no_local_process(&state).await.unwrap_err();
 
-    #[allow(dead_code)]
-    fn command_args(_config: &ServerConfig) -> Vec<String> {
-        vec![]
+        assert!(error.to_string().contains("already running (pid=4242)"));
+        assert!(error.to_string().contains("stop it before starting"));
     }
 
-    #[allow(dead_code)]
-    fn kv_command_args(_config: &ServerConfig) -> Vec<String> {
-        vec![]
+    #[tokio::test]
+    async fn stale_startup_cleanup_does_not_clear_replacement_generation() {
+        let state = AppState::default();
+        state.server_generation.store(8, Ordering::Release);
+        *state.server_child.lock().await = Some(8080);
+        *state.server_running.lock().unwrap() = true;
+        *state.local_server_running.lock().unwrap() = true;
+        *state.server_config.lock().unwrap() = Some(ServerConfig::default());
+
+        let cleared = clear_generation_if_current(&state, 7).await;
+
+        assert!(!cleared);
+        assert_eq!(*state.server_child.lock().await, Some(8080));
+        assert!(*state.server_running.lock().unwrap());
+        assert!(*state.local_server_running.lock().unwrap());
+        assert!(state.server_config.lock().unwrap().is_some());
     }
 
-    #[test]
-    fn kv_unified_supports_default_on_and_off() {
-        // tests...
+    #[tokio::test]
+    async fn process_ownership_requires_matching_generation_and_pid() {
+        let state = AppState::default();
+        state.server_generation.store(4, Ordering::Release);
+        *state.server_child.lock().await = Some(4040);
+
+        assert!(owns_process(&state, 4, 4040).await);
+        assert!(!owns_process(&state, 3, 4040).await);
+        assert!(!owns_process(&state, 4, 4041).await);
     }
 }

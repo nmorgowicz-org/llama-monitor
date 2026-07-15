@@ -9,6 +9,7 @@ pub mod collections;
 pub mod config;
 pub mod gpu;
 pub mod hf;
+pub mod inference;
 pub mod lhm;
 pub mod lhm_persistence;
 pub mod llama;
