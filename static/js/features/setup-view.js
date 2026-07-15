@@ -36,6 +36,15 @@ const FAMILY_LABEL_MAP = {
     starcoder: 'StarCoder',
 };
 
+export function confirmFreeCacheCleanup(reclaimableBytes) {
+    const reclaimableGb = (reclaimableBytes / (1024 ** 3)).toFixed(1);
+    return showConfirmDialog(
+        'Free system cache',
+        `macOS can reclaim about ${reclaimableGb} GB of cached data. Running apps are not closed, but files and apps may load a little more slowly until the cache is rebuilt.`,
+        'Free cache'
+    );
+}
+
 function classifyPreset(preset) {
     const family = preset.family || null;
     const sizeClass = preset.size_class || 'unknown';
@@ -414,10 +423,23 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
     // Wire "Free cache" button (macOS only)
     if (purgeBtn && reclaimableBytes >= 3 * 1024 ** 3) {
         purgeBtn.onclick = async () => {
-            if (!confirm('Flush system caches to free memory?\nThis will not affect running apps, but some data may reload slightly slower.')) return;
+            const confirmed = await confirmFreeCacheCleanup(reclaimableBytes);
+            if (!confirmed) return;
+
+            const originalLabel = purgeBtn.textContent;
+            purgeBtn.disabled = true;
+            purgeBtn.setAttribute('aria-busy', 'true');
+            purgeBtn.textContent = 'Freeing…';
             try {
                 const token = await _fetchDbAdminTokenForSystemAction();
-                if (!token) { showToast('Unable to authorize memory purge.'); return; }
+                if (!token) {
+                    showToast(
+                        'Could not authorize cache cleanup',
+                        'error',
+                        'Open Configuration and confirm the administrator token is available.'
+                    );
+                    return;
+                }
                 const resp = await fetch('/system/purge', {
                     method: 'POST',
                     headers: {
@@ -428,14 +450,22 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
                 });
                 const out = await resp.json().catch(() => null);
                 if (!resp.ok || out?.error) {
-                    showToast(out?.error || 'Memory purge failed.');
+                    showToast('Cache cleanup failed', 'error', out?.error || 'macOS could not free the cache.');
                 } else {
-                    showToast('System caches flushed.');
+                    showToast(
+                        'Cache cleanup complete',
+                        'success',
+                        'Memory availability is being refreshed.'
+                    );
                     // Re-render bar + cards to reflect new free memory.
                     setTimeout(fetchAndRenderMemoryBar, 600);
                 }
             } catch {
-                showToast('Error while attempting to flush caches.');
+                showToast('Cache cleanup failed', 'error', 'The system action could not be completed.');
+            } finally {
+                purgeBtn.disabled = false;
+                purgeBtn.removeAttribute('aria-busy');
+                purgeBtn.textContent = originalLabel;
             }
         };
     }

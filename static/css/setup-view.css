@@ -3077,6 +3077,18 @@ body.setup-active .sidebar-nav {
   transform: translateY(1px);
 }
 
+.setup-mem-bar-purge:disabled {
+  cursor: progress;
+  opacity: 0.72;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-mem-bar-purge {
+    transition: none;
+  }
+}
+
 [data-theme="light"] .setup-mem-bar-track {
   background: rgba(0, 0, 0, 0.08);
 }

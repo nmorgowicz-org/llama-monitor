@@ -68,6 +68,7 @@ node tests/ui/capture.mjs --list-scenarios
 | Scenario | Purpose |
 |----------|---------|
 | `welcome` | Welcome/setup screen plus form-auth shell without remote attach |
+| `free-cache` | Native Free Cache confirmation shown over the welcome/setup screen |
 | `chat` | Core chat view, telemetry overlay, and logs |
 | `guided-gen` | Context notes, suggestions, quick guide, director, surprise, explicit mode |
 | `sidebar` | Chat sidebar, message-search flyout, context menu, title filter |
@@ -85,6 +86,9 @@ node tests/ui/capture.mjs --list-scenarios
 ```bash
 # Welcome screen only
 node tests/ui/capture.mjs --scenario welcome
+
+# Free Cache confirmation
+node tests/ui/capture.mjs --scenario free-cache
 
 # Core chat / logs / telemetry
 SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario chat
