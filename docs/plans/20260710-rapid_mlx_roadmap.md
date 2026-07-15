@@ -2,6 +2,53 @@
 
 This document transforms the high-level roadmap into a comprehensive technical implementation manual. It serves as the primary guide for sub-agents implementing the Rapid-MLX backend.
 
+## Execution and Checkpoint Protocol
+
+Every phase is an independently reviewable checkpoint. A phase is not complete because
+its code compiles or its unit tests pass; it is complete only when every hard gate has
+named evidence and the Verifier has compared behavior with the source-of-truth
+specification and, where applicable, the pre-refactor llama.cpp behavior.
+
+For every phase:
+
+1. **Builder** implements only the phase scope and records files changed, tests run,
+   assumptions, and remaining risks.
+2. **Verifier** reviews the exact diff against this roadmap and the integration
+   specification. The Verifier adds or requests missing regression, contract, security,
+   and platform tests and must explicitly sign off or reject the phase.
+3. **Coordinator** runs the phase hard gates, removes accidental or stale artifacts,
+   updates the roadmap if reality invalidated an assumption, and creates one
+   Conventional Commit checkpoint only after sign-off.
+4. No later phase may be used to excuse a failed earlier gate. Restore the last healthy
+   checkpoint before continuing if a phase regresses an established backend.
+
+Required evidence at each checkpoint:
+
+- targeted tests for the changed contracts;
+- `cargo clippy -- -D warnings`, `cargo test`, and `git diff --check`;
+- command/HTTP fixtures that prove backend-specific behavior rather than mocks that only
+  mirror the implementation;
+- a real runtime smoke test whenever the phase changes discovery, launch, readiness,
+  process lifecycle, chat routing, or telemetry;
+- the screenshot harness and focused Playwright coverage whenever the phase changes UI;
+- a concise gate record in the commit message body or implementation handoff.
+
+## Recovery Gate 0: Establish a Trustworthy llama.cpp Baseline
+
+This gate is mandatory when starting from a branch where the backend-neutral refactor
+already exists. It must complete before further Rapid-MLX feature work.
+
+- Compare the generated llama.cpp program, argument order, environment, working
+  directory, logging, state transitions, readiness, crash handling, and stop behavior
+  with the last known-good implementation on `main`.
+- Remove placeholder implementations, empty lifecycle callbacks, accidental generated
+  files, transcript artifacts, and tests that assert only that code compiles.
+- Launch the configured welcome-screen preset against a real local GGUF, wait for
+  `/health`, send one chat completion, stop it, and prove the child process exited.
+- Verify that launch failure is visible in both application logs and the user flow.
+- Commit only after the llama.cpp command-parity tests, lifecycle tests, auth routing
+  tests, and real-model smoke test pass.
+
 ## Phase 1: Infrastructure & Backend Neutrality
 
 ### Phase Objective
@@ -35,9 +82,12 @@ Establish a backend-agnostic orchestration layer in `src/inference` to support m
     - Implement `CapabilitySet` to track supported features (e.g., `vision`, `mtp`, `cancellation`).
 
 ### Hard Gates (Verification)
+- **Clippy Compliance**: Run `cargo clippy -- -D warnings`. Zero warnings are allowed.
 - **Telemetry Neutrality**: Verify that `InferenceMetricsSnapshot` contains no llama.cpp-specific fields (like `slots_idle`) as top-level requirements; these must be in `backend_details` or omitted.
 - **Supervisor Isolation**: Verify that `SupervisedLaunch` is the only way a process is started and that it never logs the `env` vector.
 - **Interface Exhaustiveness**: Verify that `BackendAdapter` is an enum and that all match arms are handled in the session layer.
+- **Lifecycle Contract**: Tests must prove spawned-child ownership, graceful/forced stop, unexpected-exit reporting, log forwarding, and state cleanup. A compile-only test is insufficient.
+- **Checkpoint**: Verifier sign-off followed by `refactor(spawn): establish backend-neutral supervision` (or a corrective `fix(spawn): ...` commit on an already-refactored branch).
 
 ### Known Pitfalls & Constraints
 - **Async Trait Complexity**: Avoid `async_trait` if possible; use enum dispatch for zero-overhead and better compile times.
@@ -78,13 +128,64 @@ Migrate existing llama.cpp logic from `src/llama` into the new adapter architect
     - Update `src/llama/server.rs` and `src/llama/poller.rs` to use the `BackendAdapter::LlamaCpp` variant.
 
 ### Hard Gates (Verification)
+- **Clippy Compliance**: Run `cargo clippy -- -D warnings`. Zero warnings are allowed.
 - **Command Parity**: Verify that `LlamaCppAdapter::build_launch` produces a command identical to the one currently generated in `src/llama/server.rs`.
 - **Telemetry Parity**: Verify that `LlamaCppAdapter::poll_metrics` returns a snapshot that results in the same dashboard values as the current `poller.rs`.
 - **Behavioral Integrity**: Verify that llama.cpp servers still spawn, reach readiness, and respond to chat requests without changes in timing or output.
+- **State Parity**: Verify `server_running`, `local_server_running`, active session status, persisted server config, PID/process ownership, logs, crash reason, and stop cleanup match the pre-refactor behavior.
+- **Environment Parity**: Assert NVIDIA, ROCm, macOS quarantine/working-directory behavior, and Windows no-window handling remain intact where applicable.
+- **Real Preset Smoke Test**: Start the existing welcome-screen preset with a real GGUF, wait for health, make one chat request, stop it, and assert the port and process are gone.
+- **Checkpoint**: Verifier sign-off followed by a focused `fix(spawn): restore llama.cpp lifecycle parity` or `refactor(spawn): port llama.cpp backend adapter` commit.
 
 ### Known Pitfalls & Constraints
 - **SillyTavern Integration**: Ensure that the shift to the supervisor does not interrupt prompt forwarding or the existing SSE `model_status` updates.
 - **Path Lookups**: Maintain the existing `app_config.llama_server_path` validation logic during the port.
+
+---
+
+## Phase 2.5: Persisted Backend Routing & Shared Launch Entry Point
+
+### Phase Objective
+
+Make backend identity a backward-compatible persisted product contract and route every
+local launch surface through one backend-neutral entry point before implementing more
+Rapid-MLX-specific behavior.
+
+### Precise Scope
+
+- Add a serde-defaulted backend discriminator to presets, spawned sessions, API payloads,
+  and restored-session state. Missing values from existing files must resolve to
+  `llama_cpp` without rewriting or dropping user data.
+- Define one backend-neutral launch request/resolved-launch contract. Welcome preset
+  cards, preset editor, spawn wizard, direct spawn API, restart/update, benchmark, and
+  restored sessions must not independently reconstruct backend-specific configuration.
+- Construct `BackendAdapter::LlamaCpp` or `BackendAdapter::RapidMlx` only inside the
+  shared launch service. HTTP handlers and JavaScript must not instantiate or emulate
+  adapter-specific decisions.
+- Persist selected backend and resolved model identity on the session so polling, chat,
+  diagnostics, stop, and restore can route through the same engine.
+
+### Hard Gates (Verification)
+
+- **Backward Compatibility**: Load existing presets/sessions with no backend field and
+  prove they launch as llama.cpp with no destructive migration.
+- **Round Trip**: Save, reload, edit, duplicate, and launch both backend variants without
+  losing backend-specific configuration.
+- **Surface Parity**: Contract tests cover welcome card, wizard, preset modal, direct API,
+  restart/update, benchmark, and restored-session routing through the shared service.
+- **No Dead Adapter**: A production test must prove that selecting Rapid-MLX constructs
+  `BackendAdapter::RapidMlx`; selecting llama.cpp constructs `BackendAdapter::LlamaCpp`.
+- **Auth and Errors**: Invalid backend/model combinations return authenticated 400-class
+  errors, never 404, silent fallback, or user-data deletion.
+- **Checkpoint**: Verifier sign-off followed by
+  `refactor(spawn): unify backend launch routing`.
+
+### Known Pitfalls & Constraints
+
+- The backend default belongs in Rust serde/domain logic, not duplicated JavaScript.
+- Do not flatten every backend flag into one growing shared struct. Persist a small shared
+  envelope plus backend-owned configuration.
+- An explicit user engine choice always wins over recommendation logic.
 
 ---
 
@@ -120,9 +221,13 @@ Implement the ability to discover the Rapid-MLX runtime, construct its launch co
     - **Critical**: Do not mark ready based on TCP port open; only on HTTP 200 from `/health/ready`.
 
 ### Hard Gates (Verification)
+- **Clippy Compliance**: Run `cargo clippy -- -D warnings`. Zero warnings are allowed.
 - **Platform Gate**: Verify that `RapidMlxAdapter::validate()` returns an error on Linux or Windows.
 - **Binary Resolution**: Verify that the adapter correctly identifies `rapid-mlx` installations from Homebrew and Pip.
 - **Readiness Accuracy**: Verify that the session is marked "Ready" only after `/health/ready` returns 200, not when the process first spawns.
+- **Lifecycle Integration**: A fixture runtime must prove discovery -> validation -> spawn -> loading -> ready -> stop and an early-exit fixture must prove actionable failure propagation.
+- **Real Runtime Smoke Test**: On Apple Silicon, probe the installed Rapid-MLX CLI and launch one compatible small model or explicitly record the external runtime/model blocker. Mock-only evidence cannot mark this phase complete.
+- **Checkpoint**: Verifier sign-off followed by `feat(spawn): add Rapid-MLX launch and readiness`.
 
 ### Known Pitfalls & Constraints
 - **Binary Aliases**: Do not hardcode `vllm-mlx`; detect and use whichever binary is on `PATH` (preferring `rapid-mlx`).
@@ -161,9 +266,13 @@ Implement normalized metrics polling for Rapid-MLX and update the UI to render c
     - Wire `RapidMlxAdapter::poll_metrics` into the shared poller loop.
 
 ### Hard Gates (Verification)
+- **Clippy Compliance**: Run `cargo clippy -- -D warnings`. Zero warnings are allowed.
 - **Unit Accuracy**: Verify that a `metal.active_memory_gb` value of `1.0` in the API results in `1073741824` bytes in the normalized snapshot.
 - **UI Dynamism**: Verify that when switching from llama.cpp to Rapid-MLX, llama.cpp-specific cards (e.g., Slot occupancy) are removed from the DOM, not just hidden.
 - **Zero vs None**: Verify that `generation_tps: 0.0` renders as "0", while a missing field results in no throughput card.
+- **Schema Drift Fixtures**: Cover unknown fields, missing optional objects, authenticated status, text-only cache fallback, malformed payloads, and transient endpoint failure.
+- **Rendered UI Evidence**: Run `cargo build --release` and the matching dashboard screenshot scenario; verify dark/light themes and reduced motion, and ensure unsupported cards are removed from the DOM.
+- **Checkpoint**: Verifier sign-off followed by `feat(ui): render backend-capability telemetry`.
 
 ### Known Pitfalls & Constraints
 - **Telemetry Schema**: Rapid-MLX telemetry may vary by release; use tolerant JSON parsing that ignores unknown fields.
@@ -199,9 +308,13 @@ Implement the Rapid-MLX model source resolver to support MLX directories, Huggin
 5. **Wire to Adapter**: Ensure `RapidMlxAdapter::build_launch` consumes only the `ResolvedRapidMlxLaunchModel`.
 
 ### Hard Gates (Verification)
+- **Clippy Compliance**: Run `cargo clippy -- -D warnings`. Zero warnings are allowed.
 - **Conversion Flow**: Verify that selecting a `.gguf` file for Rapid-MLX triggers the `gguf2mlx` process and launches the server using the converted directory.
 - **Cache Efficiency**: Verify that a second launch of the same GGUF file skips the conversion step and uses the cache.
 - **Resolver Isolation**: Verify that the `RapidMlxAdapter` does not know about `gguf2mlx`; it only sees the `ResolvedRapidMlxLaunchModel`.
+- **Failure Safety**: Prove insufficient disk, interrupted conversion, duplicate conversion, stale sentinel, invalid output, and cache-key changes cannot yield a launchable corrupt cache entry.
+- **End-to-End Resolution**: Resolve and launch at least one local MLX directory and one supported HF identifier; exercise GGUF conversion when the installed runtime exposes `gguf2mlx`.
+- **Checkpoint**: Verifier sign-off followed by `feat(models): resolve Rapid-MLX model sources`.
 
 ### Known Pitfalls & Constraints
 - **Disk Space**: Implement a pre-check for disk space before starting a GGUF conversion.
@@ -245,10 +358,42 @@ Integrate backend selection into the Spawn Wizard and implement full Rapid-MLX r
     - No selection on macOS $\rightarrow$ recommend Rapid-MLX (if probe passes).
 
 ### Hard Gates (Verification)
+- **Clippy Compliance**: Run `cargo clippy -- -D warnings`. Zero warnings are allowed.
 - **Round-trip Presets**: Verify that a preset saved under Rapid-MLX can be opened, edited, and launched without losing backend-specific flags.
 - **Visual Indicator**: Verify that the nav bar correctly displays `Rapid-MLX · <model> ●` only when a Rapid-MLX session is active.
 - **Runtime Isolation**: Verify that installing a new Rapid-MLX version via the manager does not mutate the environment of a currently running server.
+- **Unified Flow**: Welcome preset cards, preset editor, spawn wizard, restored sessions, and direct spawn API must all preserve and route the backend discriminator through one shared validation path.
+- **Action Feedback**: Launch, conversion, installation, loading, ready, stopping, and failure states must be visible and actionable; no native `alert`, `confirm`, or `prompt` dialogs are permitted.
+- **Visual Verification**: Run `cargo build --release`, the relevant screenshot scenarios, dark/light theme checks, reduced-motion checks, and the isolated CI-equivalent Playwright suite.
+- **Checkpoint**: Verifier sign-off followed by `feat(ui): add unified inference engine experience`.
 
 ### Known Pitfalls & Constraints
 - **User Overrides**: An explicit user choice of engine must never be overridden by the recommendation logic.
 - **Managed Environments**: Ensure that `uv` managed environments are stored in the dedicated `~/.config/llama-monitor/runtimes/rapid-mlx/` directory.
+
+---
+
+## Phase 7: Cross-Backend Release Gate
+
+### Phase Objective
+
+Prove that the feature is releasable as one coherent multi-engine product and that
+llama.cpp remains a first-class, regression-free backend.
+
+### Hard Gates (Verification)
+
+- Run the mandatory pre-PR checks in `AGENTS.md` in their exact order.
+- Run the isolated full Playwright suite and all auth routing tests.
+- Run real llama.cpp preset launch -> ready -> chat -> telemetry -> stop.
+- Run real Rapid-MLX discovery -> launch -> ready -> chat -> telemetry -> stop on a
+  supported Apple Silicon host, or keep the PR draft with the missing evidence named.
+- Verify preset round trips for both backends and backward compatibility for presets and
+  sessions that have no backend discriminator.
+- Complete the security checklist: authentication, secret handling, path validation,
+  subprocess arguments/environment, timeouts/rate limits, and diagnostics redaction.
+- Inspect the repository tree and diff for transcript files, generated junk, placeholder
+  comments, dead adapters, stale compatibility branches, or unrelated changes.
+- Capture final welcome, spawn-wizard, running dashboard, settings/runtime-management,
+  and failure-state screenshots. Record any UX follow-ups that are intentionally deferred.
+- Create the final checkpoint only after Verifier sign-off; do not add the
+  `ready-to-test` label.
