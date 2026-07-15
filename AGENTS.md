@@ -56,6 +56,16 @@ fix(gpu): correct AMD temperature reading
 END_COMMIT_OVERRIDE
 ```
 
+## Feature Implementation Loop
+
+For complex features (e.g., Rapid-MLX integration), use a Pipelined Implementation Loop to maximize context efficiency and stability.
+
+- **The Builder (General Agent)**: Responsible for the "How". Implements a specific phase of the roadmap. Focuses on code correctness, trait implementation, and meeting the phase's "Hard Gates".
+- **The Verifier (General Agent)**: Responsible for the "What". Validates the Builder's work against the original specification. Writes integration tests, performs security reviews, and provides final sign-off for the phase.
+- **The Coordinator (Lead Agent)**: Orchestrates the loop. Manages the roadmap, handles git commits/pushes, ensures a clean handoff between Builder and Verifier, and triggers the next phase only after sign-off.
+
+This separation prevents "looping" where an agent tries to fix a bug it introduced while simultaneously implementing a feature, ensuring a higher quality bar for every merge.
+
 ## Build & Test Commands
 
 ```bash
