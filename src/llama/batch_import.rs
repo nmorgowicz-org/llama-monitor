@@ -684,6 +684,8 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
     };
 
     ModelPreset {
+        backend: crate::inference::InferenceBackend::LlamaCpp,
+        rapid_mlx: None,
         id: crate::presets::next_id(),
         name,
         model_path,
@@ -781,6 +783,8 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         reasoning_budget: None,
         reasoning_budget_message: None,
         api_key: None,
+        api_key_configured: false,
+        clear_api_key: false,
         alias: None,
         benchmark_mode: false,
         tags: Vec::new(),

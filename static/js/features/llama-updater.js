@@ -334,6 +334,8 @@ async function installRelease(btn, release) {
     // skip the explicit restart call to avoid a double-restart that kills the new process.
     if (data.server_restarted) {
       showToast(`Installed ${tag}`, 'success', 'Server restarted. Chat may reconnect shortly.');
+    } else if (data.restart_applicable === false) {
+      showToast(`Installed ${tag}`, 'success', sha || 'llama.cpp binary updated.');
     } else {
       showToast(`Installed ${tag}`, 'success', sha || 'Installed. Click to restart server.');
 

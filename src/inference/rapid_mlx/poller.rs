@@ -1,8 +1,8 @@
-use anyhow::{Result, Context};
+use crate::inference::InferenceBackend;
+use crate::inference::metrics::{HealthState, InferenceMetricsSnapshot};
+use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::time::SystemTime;
-use crate::inference::metrics::{InferenceMetricsSnapshot, HealthState};
-use crate::inference::InferenceBackend;
 
 #[derive(Deserialize)]
 struct StatusResponse {
@@ -48,7 +48,9 @@ impl RapidMlxPoller {
 
     pub async fn poll(&self) -> Result<InferenceMetricsSnapshot> {
         let status_url = format!("{}/v1/status", self.base_url);
-        let status_resp: StatusResponse = self.client.get(&status_url)
+        let status_resp: StatusResponse = self
+            .client
+            .get(&status_url)
             .send()
             .await?
             .json()
@@ -88,9 +90,21 @@ impl RapidMlxPoller {
             global_cache_entries: None,
             ttft: None,
             speculative_acceptance_rate: None,
-            active_memory_bytes: status_resp.metal.as_ref().and_then(|m| m.active_memory_gb).map(|gb| (gb * gb_to_bytes as f64) as u64),
-            peak_memory_bytes: status_resp.metal.as_ref().and_then(|m| m.peak_memory_gb).map(|gb| (gb * gb_to_bytes as f64) as u64),
-            cache_memory_bytes: status_resp.metal.as_ref().and_then(|m| m.cache_memory_gb).map(|gb| (gb * gb_to_bytes as f64) as u64),
+            active_memory_bytes: status_resp
+                .metal
+                .as_ref()
+                .and_then(|m| m.active_memory_gb)
+                .map(|gb| (gb * gb_to_bytes as f64) as u64),
+            peak_memory_bytes: status_resp
+                .metal
+                .as_ref()
+                .and_then(|m| m.peak_memory_gb)
+                .map(|gb| (gb * gb_to_bytes as f64) as u64),
+            cache_memory_bytes: status_resp
+                .metal
+                .as_ref()
+                .and_then(|m| m.cache_memory_gb)
+                .map(|gb| (gb * gb_to_bytes as f64) as u64),
             cache_metrics,
             active_requests: status_resp.requests,
             backend_details: None,

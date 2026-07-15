@@ -3,14 +3,58 @@ pub mod discovery;
 pub mod poller;
 pub mod runtime;
 
+use self::command::RapidMlxCommandBuilder;
+use self::runtime::RuntimeMetadata;
+use crate::inference::capabilities::CapabilitySet;
+use crate::inference::metrics::InferenceMetricsSnapshot;
+use crate::inference::supervisor::SupervisedLaunch;
 use anyhow::{Result, anyhow};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use crate::inference::supervisor::SupervisedLaunch;
-use self::command::RapidMlxCommandBuilder;
-use self::runtime::RuntimeMetadata;
-use crate::inference::metrics::InferenceMetricsSnapshot;
-use crate::inference::capabilities::CapabilitySet;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RapidMlxConfig {
+    #[serde(default)]
+    pub model_path: String,
+    #[serde(default)]
+    pub served_model_name: Option<String>,
+    #[serde(default)]
+    pub executable_path: Option<PathBuf>,
+    #[serde(default)]
+    pub managed_runtime_path: Option<PathBuf>,
+    #[serde(default = "default_host")]
+    pub host: String,
+    #[serde(default = "default_port")]
+    pub port: u16,
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
+}
+
+fn default_host() -> String {
+    "0.0.0.0".into()
+}
+
+fn default_port() -> u16 {
+    8000
+}
+
+fn default_log_level() -> String {
+    "INFO".into()
+}
+
+impl Default for RapidMlxConfig {
+    fn default() -> Self {
+        Self {
+            model_path: String::new(),
+            served_model_name: None,
+            executable_path: None,
+            managed_runtime_path: None,
+            host: default_host(),
+            port: default_port(),
+            log_level: default_log_level(),
+        }
+    }
+}
 
 pub struct RapidMlxAdapter {
     pub runtime: RuntimeMetadata,
@@ -49,6 +93,16 @@ impl RapidMlxAdapter {
             ));
         }
 
+        if !self.runtime.executable_path.is_file() {
+            return Err(anyhow!(
+                "Rapid-MLX executable does not exist: {}",
+                self.runtime.executable_path.display()
+            ));
+        }
+        if self.model_path.as_os_str().is_empty() {
+            return Err(anyhow!("Rapid-MLX requires a model path"));
+        }
+
         Ok(())
     }
 
@@ -73,7 +127,11 @@ impl RapidMlxAdapter {
             .build()
             .map_err(|e| anyhow!(e))?;
 
-        let url = format!("http://{}:{}/health/ready", self.host, port);
+        let readiness_host = match self.host.as_str() {
+            "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
+            host => host,
+        };
+        let url = format!("http://{readiness_host}:{port}/health/ready");
 
         loop {
             if Instant::now() > deadline {
@@ -92,16 +150,40 @@ impl RapidMlxAdapter {
         }
     }
 
-    pub async fn poll_metrics(&self, port: u16, _session_id: &str) -> Result<InferenceMetricsSnapshot> {
+    pub async fn poll_metrics(
+        &self,
+        port: u16,
+        _session_id: &str,
+    ) -> Result<InferenceMetricsSnapshot> {
         let poller = self::poller::RapidMlxPoller::new(&self.host, port);
         poller.poll().await
     }
 
     pub async fn cancel_request(&self, _port: u16, _request_id: &str) -> Result<()> {
-        Err(anyhow!("RapidMlxAdapter::cancel_request not implemented (Phase 4)"))
+        Err(anyhow!(
+            "RapidMlxAdapter::cancel_request not implemented (Phase 4)"
+        ))
     }
 
     pub fn capabilities(&self) -> &CapabilitySet {
-        unimplemented!("RapidMlxAdapter::capabilities not implemented (Phase 4)")
+        static CAPS: CapabilitySet = CapabilitySet {
+            vision: false,
+            mtp: false,
+            cancellation: false,
+            embeddings: false,
+            guided_generation: false,
+            audio: false,
+            tool_parsing: false,
+            automatic_tool_choice: false,
+            reasoning_parser: false,
+            thinking_controls: false,
+            mcp: false,
+            cache_telemetry: false,
+            status_memory_telemetry: true,
+            self_diagnostic: false,
+            interpretability: false,
+            one_shot_launch: true,
+        };
+        &CAPS
     }
 }

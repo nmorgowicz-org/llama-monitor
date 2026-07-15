@@ -19,6 +19,7 @@
  * Quick examples:
  *   node tests/ui/capture.mjs --list-scenarios
  *   node tests/ui/capture.mjs --scenario welcome
+ *   node tests/ui/capture.mjs --scenario rapid-preset
  *   SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario chat
  *   SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario guided-gen
  *   SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
@@ -220,6 +221,26 @@ function seedConfig() {
             fs.copyFileSync(cpExample, cpDest);
         }
     }
+}
+
+function seedRapidMlxCapturePreset() {
+    const preset = [{
+        id: 'capture-rapid-mlx',
+        name: 'Qwen 3.6 · Rapid-MLX',
+        backend: 'rapid_mlx',
+        rapid_mlx: {
+            model_path: 'mlx-community/Qwen3-30B-A3B-4bit',
+            served_model_name: 'qwen3-rapid',
+            host: '127.0.0.1',
+            port: 9123,
+            log_level: 'INFO',
+        },
+        model_path: '',
+        port: 9123,
+        context_size: 131072,
+    }];
+    fs.mkdirSync(TEMP_APP_CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(join(TEMP_APP_CONFIG_DIR, 'presets.json'), JSON.stringify(preset, null, 2));
 }
 
 function cleanupTempHome() {
@@ -1049,6 +1070,45 @@ async function scenarioFreeCache(ctx) {
     });
     await sleep(200);
     await captureShot(page, 'welcome-free-cache-confirm-light.png', { fullPage: true });
+}
+
+async function scenarioRapidPreset(ctx) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    await page.waitForSelector('.launch-card[data-preset-id="capture-rapid-mlx"]', {
+        visible: true,
+        timeout: 10000,
+    });
+    await sleep(250);
+    await captureShot(page, 'welcome-rapid-mlx-preset.png', { fullPage: true });
+
+    await page.click('.launch-card[data-preset-id="capture-rapid-mlx"] .launch-card-btn-edit');
+    await page.waitForSelector('#preset-modal.open.preset-editor--rapid-mlx', { visible: true });
+    await sleep(200);
+    await captureShot(page, 'rapid-mlx-preset-editor.png', { fullPage: true });
+    await page.click('#preset-modal-close');
+
+    const promptState = await page.evaluate(async () => {
+        const { showPromptDialog } = await import('/js/features/toast.js');
+        void showPromptDialog(
+            'Restore protected model',
+            'Enter the API key for this session. It is used only for this launch and is not saved.',
+            '',
+            { type: 'password', confirmLabel: 'Restore' },
+        );
+        const input = document.querySelector('.modal-overlay .modal input[type="password"]');
+        return { shown: !!input, inputType: input?.type || null };
+    });
+    if (!promptState.shown || promptState.inputType !== 'password') {
+        throw new Error(`Protected restore modal did not open correctly: ${JSON.stringify(promptState)}`);
+    }
+    await sleep(250);
+    await captureShot(page, 'welcome-rapid-mlx-restore-key.png', { fullPage: true });
+    await page.evaluate(() => {
+        document.documentElement.dataset.theme = 'light';
+    });
+    await sleep(200);
+    await captureShot(page, 'welcome-rapid-mlx-restore-key-light.png', { fullPage: true });
 }
 
 // ── Core Chat ───────────────────────────────────────────────────────────────────
@@ -3730,6 +3790,7 @@ const SCENARIOS = {
     // Core
     welcome: scenarioWelcome,
     'free-cache': scenarioFreeCache,
+    'rapid-preset': scenarioRapidPreset,
     chat: scenarioChat,
     // Chat features
     'guided-gen': scenarioGuidedGen,
@@ -3790,6 +3851,9 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
         console.log(`[CAPTURE] Using running llama-monitor at ${baseUrl} for scenario "${scenarioName}"...`);
     } else {
         seedConfig();
+        if (scenarioName === 'rapid-preset') {
+            seedRapidMlxCapturePreset();
+        }
         const port = await findAvailablePort();
         const extraArgs = [];
 

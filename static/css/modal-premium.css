@@ -2275,6 +2275,20 @@
   display: block;
 }
 
+/* Rapid-MLX currently exposes only the launch fields the adapter can persist.
+   Keep llama.cpp-only controls out of sight so edits can never be silently lost. */
+#preset-modal.preset-editor--rapid-mlx .preset-nav-item:not([data-section="model"]):not([data-section="advanced"]),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-field:not(:has(#modal-name)):not(:has(#modal-model-path)),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-row,
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-toggles,
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .preset-memory-warning,
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] > .pe-section-body > :not(.pe-row:has(#modal-port)),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] .pe-field:not(:has(#modal-port)),
+#preset-modal.preset-editor--rapid-mlx #preset-browse-model-btn,
+#preset-modal.preset-editor--rapid-mlx #preset-vram-strip {
+  display: none !important;
+}
+
 @keyframes pe-section-enter {
   0%   { opacity: 0; transform: translateX(8px); }
   100% { opacity: 1; transform: translateX(0); }

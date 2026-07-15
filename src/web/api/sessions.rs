@@ -5,8 +5,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use warp::Filter;
 
 use crate::config::AppConfig;
-use crate::inference::llama_cpp::ServerConfig;
-use crate::llama::server::{start_server, stop_server};
+use crate::inference::launch::{
+    launch_local, request_from_api_payload, request_from_preset, request_from_session,
+};
+use crate::llama::server::stop_server;
 use crate::state::{self as app_state, AppState, SessionMode, SessionStatus};
 
 use super::common::{ApiCtx, ApiError, ApiRoute, box_reply};
@@ -538,16 +540,11 @@ fn api_spawn_session_with_preset(
                 }
                 LAST_SPAWN_SESSION.store(now, Ordering::Release);
 
-                let port: u16 = match payload.get("port") {
-                    Some(v) => {
-                        if let Some(p) = v.as_u64() {
-                            p as u16
-                        } else {
-                            8001
-                        }
-                    }
-                    None => 8001,
-                };
+                let requested_port = payload
+                    .get("port")
+                    .and_then(|value| value.as_u64())
+                    .and_then(|port| u16::try_from(port).ok());
+                let port = requested_port.unwrap_or(8001);
                 let name: String = match payload.get("name") {
                     Some(v) => {
                         if let Some(s) = v.as_str() {
@@ -559,17 +556,71 @@ fn api_spawn_session_with_preset(
                     None => format!("Session on port {}", port),
                 };
 
+                if let Some(restored_id) = payload.get("session_id").and_then(|v| v.as_str()) {
+                    let session = state
+                        .get_sessions()
+                        .into_iter()
+                        .find(|session| session.id == restored_id);
+                    let Some(session) = session else {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"ok": false, "error": "Restored session not found"})),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ),
+                        ));
+                    };
+                    let presets = state.presets.lock().unwrap().clone();
+                    let transient_api_key = payload.get("api_key").and_then(|v| v.as_str());
+                    let request = match request_from_session(&session, &presets, transient_api_key) {
+                        Ok(request) => request,
+                        Err(error) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({"ok": false, "error": error.to_string()})),
+                                    warp::http::StatusCode::BAD_REQUEST,
+                                ),
+                            ));
+                        }
+                    };
+                    let response_backend = request.backend();
+                    let response_port = request.port();
+                    let previous_active_id = state.active_session_id.lock().unwrap().clone();
+                    state.set_active_session(restored_id);
+                    return match launch_local(Arc::new(state.clone()), request, &app_config).await {
+                        Ok(()) => {
+                            state.update_session_status(restored_id, SessionStatus::Running);
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({"ok": true, "session_id": restored_id, "backend": response_backend, "port": response_port})),
+                            ))
+                        }
+                        Err(error) => {
+                            restore_active_session_after_failed_launch(
+                                &state,
+                                restored_id,
+                                &previous_active_id,
+                            );
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({"ok": false, "error": error.to_string()})),
+                                    warp::http::StatusCode::BAD_REQUEST,
+                                ),
+                            ))
+                        }
+                    };
+                }
+
                 let Some(preset_id) = payload
                     .get("preset_id")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
                 else {
-                    let config: ServerConfig = match serde_json::from_value(payload.clone()) {
-                        Ok(config) => config,
+                    let request = match request_from_api_payload(&payload) {
+                        Ok(request) => request,
                         Err(e) => {
                             return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                warp::reply::json(
-                                    &serde_json::json!({"ok": false, "error": format!("Invalid spawn payload: {}", e)}),
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
+                                    warp::http::StatusCode::BAD_REQUEST,
                                 ),
                             ));
                         }
@@ -577,27 +628,29 @@ fn api_spawn_session_with_preset(
 
                     let session_name = if name != format!("Session on port {}", port) {
                         name.clone()
-                    } else if !config.model_path.is_empty() {
-                        let filename = std::path::Path::new(&config.model_path)
+                    } else if !request.model_identity().is_empty() {
+                        let identity = request.model_identity();
+                        let filename = std::path::Path::new(&identity)
                             .file_name()
                             .and_then(|s| s.to_str())
-                            .unwrap_or(&config.model_path);
+                            .unwrap_or(&identity);
                         format!("Local: {}", filename)
-                    } else if let Some(repo) = config.hf_repo.as_ref() {
-                        format!("HF: {}", repo)
                     } else {
                         name.clone()
                     };
 
                     let session_id = app_state::generate_session_id();
-                    let session = app_state::Session::new_spawn(
+                    let mut session = app_state::Session::new_spawn_with_backend(
                         session_id.clone(),
                         session_name,
-                        config.port,
+                        request.port(),
                         String::new(),
-                        config.bind_host.clone(),
-                        config.api_key.clone(),
+                        request.bind_host(),
+                        request.api_key(),
+                        request.backend(),
+                        Some(request.model_identity()),
                     );
+                    session.launch = Some(request.for_persistence());
 
                     if !state.add_session(session) {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -608,21 +661,24 @@ fn api_spawn_session_with_preset(
                     }
 
                     state.set_active_session(&session_id);
+                    let response_backend = request.backend();
+                    let response_port = request.port();
 
-                    match start_server(Arc::new(state.clone()), config, &app_config).await {
+                    match launch_local(Arc::new(state.clone()), request, &app_config).await {
                         Ok(()) => {
                             state.update_session_status(&session_id, SessionStatus::Running);
                             return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                                 warp::reply::json(
-                                    &serde_json::json!({"ok": true, "session_id": session_id}),
+                                    &serde_json::json!({"ok": true, "session_id": session_id, "backend": response_backend, "port": response_port}),
                                 ),
                             ));
                         }
                         Err(e) => {
                             state.remove_session(&session_id);
                             return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                warp::reply::json(
-                                    &serde_json::json!({"ok": false, "error": e.to_string()}),
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
+                                    warp::http::StatusCode::BAD_REQUEST,
                                 ),
                             ));
                         }
@@ -641,15 +697,29 @@ fn api_spawn_session_with_preset(
                     }
                 };
 
+                let request = match request_from_preset(&preset, requested_port) {
+                    Ok(request) => request,
+                    Err(error) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"ok": false, "error": error.to_string()})),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ),
+                        ));
+                    }
+                };
                 let session_id = app_state::generate_session_id();
-                let session = app_state::Session::new_spawn(
+                let mut session = app_state::Session::new_spawn_with_backend(
                     session_id.clone(),
                     name.clone(),
-                    port,
+                    request.port(),
                     preset_id,
-                    preset.bind_host.clone(),
-                    preset.api_key.clone(),
+                    request.bind_host(),
+                    request.api_key(),
+                    request.backend(),
+                    Some(request.model_identity()),
                 );
+                session.launch = Some(request.for_persistence());
 
                 if !state.add_session(session) {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
@@ -658,119 +728,92 @@ fn api_spawn_session_with_preset(
                 }
 
                 state.set_active_session(&session_id);
+                let response_backend = request.backend();
+                let response_port = request.port();
 
-                let config = ServerConfig {
-                    model_path: preset.model_path.clone(),
-                    hf_repo: preset.hf_repo.clone(),
-                    context_size: preset.context_size,
-                    ctk: preset.ctk.clone(),
-                    ctv: preset.ctv.clone(),
-                    tensor_split: preset.tensor_split.clone(),
-                    batch_size: preset.batch_size,
-                    ubatch_size: preset.ubatch_size,
-        no_mmap: if cfg!(target_os = "macos") && preset.mlock {
-            false
-        } else {
-            preset.no_mmap
-        },
-                    port,
-                    ngram_spec: preset.ngram_spec,
-                    parallel_slots: preset.parallel_slots,
-                    temperature: preset.temperature,
-                    top_p: preset.top_p,
-                    top_k: preset.top_k,
-                    min_p: preset.min_p,
-                    repeat_penalty: preset.repeat_penalty,
-                    presence_penalty: preset.presence_penalty,
-                    n_cpu_moe: preset.n_cpu_moe,
-                    gpu_layers: preset.gpu_layers,
-                    mlock: preset.mlock,
-                    flash_attn: preset.flash_attn.clone(),
-                    split_mode: preset.split_mode.clone(),
-                    main_gpu: preset.main_gpu,
-                    threads: preset.threads,
-                    threads_batch: preset.threads_batch,
-                    rope_scaling: preset.rope_scaling.clone(),
-                    rope_freq_base: preset.rope_freq_base,
-                    rope_freq_scale: preset.rope_freq_scale,
-                    spec: crate::inference::llama_cpp::SpecDecodeConfig {
-                        draft_model: preset.draft_model.clone(),
-                        draft_min: preset.draft_min,
-                        draft_max: preset.draft_max,
-                        spec_ngram_size: preset.spec_ngram_size,
-                        spec_type: preset.spec_type.clone(),
-                        spec_default: preset.spec_default,
-                        spec_draft_n_max: preset.spec_draft_n_max,
-                        spec_draft_n_min: preset.spec_draft_n_min,
-                        spec_draft_p_split: preset.spec_draft_p_split,
-                        spec_draft_p_min: preset.spec_draft_p_min,
-                        spec_draft_ngl: preset.spec_draft_ngl,
-                        spec_draft_device: preset.spec_draft_device.clone(),
-                        spec_draft_cpu_moe: preset.spec_draft_cpu_moe,
-                        spec_draft_n_cpu_moe: preset.spec_draft_n_cpu_moe,
-                        spec_draft_type_k: preset.spec_draft_type_k.clone(),
-                        spec_draft_type_v: preset.spec_draft_type_v.clone(),
-                        spec_ngram_mod_n_min: preset.spec_ngram_mod_n_min,
-                        spec_ngram_mod_n_max: preset.spec_ngram_mod_n_max,
-                        spec_ngram_mod_n_match: preset.spec_ngram_mod_n_match,
-                        spec_ngram_simple_size_n: preset.spec_ngram_simple_size_n,
-                        spec_ngram_simple_size_m: preset.spec_ngram_simple_size_m,
-                        spec_ngram_simple_min_hits: preset.spec_ngram_simple_min_hits,
-                        spec_ngram_map_k_size_n: preset.spec_ngram_map_k_size_n,
-                        spec_ngram_map_k_size_m: preset.spec_ngram_map_k_size_m,
-                        spec_ngram_map_k_min_hits: preset.spec_ngram_map_k_min_hits,
-                        spec_ngram_map_k4v_size_n: preset.spec_ngram_map_k4v_size_n,
-                        spec_ngram_map_k4v_size_m: preset.spec_ngram_map_k4v_size_m,
-                        spec_ngram_map_k4v_min_hits: preset.spec_ngram_map_k4v_min_hits,
-                    },
-                    kv_unified: preset.kv_unified,
-                    cache_idle_slots: preset.cache_idle_slots,
-                    cache_ram_mib: preset.cache_ram_mib,
-                    fit_enabled: preset.fit_enabled,
-                    fit_ctx: preset.fit_ctx,
-                    fit_target: preset.fit_target.clone(),
-                    fit_print: preset.fit_print,
-                    seed: preset.seed,
-                    system_prompt_file: preset.system_prompt_file.clone(),
-                    extra_args: preset.extra_args.clone(),
-                    bind_host: preset.bind_host.clone(),
-                    chat_template_file: preset.chat_template_file.clone(),
-                    mmproj: preset.mmproj.clone(),
-                    grammar: preset.grammar.clone(),
-                    json_schema: preset.json_schema.clone(),
-                    cache_type_k: preset.cache_type_k.clone(),
-                    cache_type_v: preset.cache_type_v.clone(),
-                    max_tokens: preset.max_tokens,
-                    api_key: preset.api_key.clone(),
-                    alias: preset.alias.clone(),
-                    benchmark_mode: preset.benchmark_mode,
-                    enable_thinking: preset.enable_thinking,
-                    preserve_thinking: preset.preserve_thinking,
-                    tool_call_format: preset.tool_call_format.clone(),
-                    reasoning: preset.reasoning.clone(),
-                    reasoning_budget: preset.reasoning_budget,
-                    reasoning_budget_message: preset.reasoning_budget_message.clone(),
-                    image_min_tokens: preset.image_min_tokens,
-                    image_max_tokens: preset.image_max_tokens,
-                    ..Default::default()
-                };
-
-                match start_server(Arc::new(state.clone()), config, &app_config).await {
+                match launch_local(Arc::new(state.clone()), request, &app_config).await {
                     Ok(()) => {
                         state.update_session_status(&session_id, SessionStatus::Running);
                         Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                            &serde_json::json!({"ok": true, "session_id": session_id}),
+                            &serde_json::json!({"ok": true, "session_id": session_id, "backend": response_backend, "port": response_port}),
                         )))
                     }
                     Err(e) => {
                         state.remove_session(&session_id);
-                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": e.to_string()}),
-                        )))
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ),
+                        ))
                     }
                 }
             }
         })
+}
+
+fn restore_active_session_after_failed_launch(
+    state: &AppState,
+    failed_session_id: &str,
+    previous_active_id: &str,
+) {
+    let failed_session_is_still_active =
+        state.active_session_id.lock().unwrap().as_str() == failed_session_id;
+    if failed_session_is_still_active {
+        state.set_active_session(previous_active_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_restore_rolls_back_active_session() {
+        let state = AppState::default();
+        assert!(state.add_session(app_state::Session::new_spawn(
+            "previous".into(),
+            "Previous".into(),
+            8001,
+            String::new(),
+            None,
+            None,
+        )));
+        assert!(state.add_session(app_state::Session::new_spawn(
+            "failed".into(),
+            "Failed".into(),
+            8002,
+            String::new(),
+            None,
+            None,
+        )));
+        assert!(state.set_active_session("previous"));
+        assert!(state.set_active_session("failed"));
+
+        restore_active_session_after_failed_launch(&state, "failed", "previous");
+
+        assert_eq!(state.active_session_id.lock().unwrap().as_str(), "previous");
+    }
+
+    #[test]
+    fn failed_restore_does_not_overwrite_newer_active_selection() {
+        let state = AppState::default();
+        for id in ["previous", "failed", "newer"] {
+            assert!(state.add_session(app_state::Session::new_spawn(
+                id.into(),
+                id.into(),
+                8001,
+                String::new(),
+                None,
+                None,
+            )));
+        }
+        assert!(state.set_active_session("newer"));
+
+        restore_active_session_after_failed_launch(&state, "failed", "previous");
+
+        assert_eq!(state.active_session_id.lock().unwrap().as_str(), "newer");
+    }
 }
 
 fn api_attach(

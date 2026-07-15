@@ -1,3 +1,5 @@
+use crate::inference::InferenceBackend;
+use crate::inference::rapid_mlx::RapidMlxConfig;
 use anyhow::Result;
 use std::path::Path;
 
@@ -15,6 +17,13 @@ pub struct ModelPreset {
     #[serde(default = "next_id")]
     pub id: String,
     pub name: String,
+    /// Missing in legacy presets; serde defaults those to llama.cpp.
+    #[serde(default)]
+    pub backend: InferenceBackend,
+    /// Backend-owned Rapid-MLX launch settings. Llama.cpp retains the legacy
+    /// flat fields until the explicit preset-schema migration phase.
+    #[serde(default)]
+    pub rapid_mlx: Option<RapidMlxConfig>,
     #[serde(default)]
     pub model_path: String,
     #[serde(default, deserialize_with = "null_as_zero_u64")]
@@ -205,8 +214,14 @@ pub struct ModelPreset {
     pub reasoning_budget: Option<i32>,
     #[serde(default)]
     pub reasoning_budget_message: Option<String>,
+    /// Persisted in the protected preset file; API responses always redact it.
     #[serde(default)]
     pub api_key: Option<String>,
+    #[serde(default)]
+    pub api_key_configured: bool,
+    /// API input control: explicitly remove an existing key. Never persisted.
+    #[serde(default, skip_serializing)]
+    pub clear_api_key: bool,
     #[serde(default)]
     pub alias: Option<String>,
     #[serde(default)]
@@ -604,6 +619,41 @@ mod tests {
         assert_eq!(deserialized.len(), presets.len());
         assert_eq!(deserialized[0].name, presets[0].name);
         assert_eq!(deserialized[0].id, "default-1");
+    }
+
+    #[test]
+    fn legacy_preset_without_backend_defaults_to_llama_cpp() {
+        let preset: ModelPreset = serde_json::from_value(serde_json::json!({
+            "name": "Legacy",
+            "model_path": "/models/legacy.gguf"
+        }))
+        .unwrap();
+
+        assert_eq!(preset.backend, InferenceBackend::LlamaCpp);
+        assert!(preset.rapid_mlx.is_none());
+    }
+
+    #[test]
+    fn rapid_mlx_preset_roundtrips_backend_owned_config() {
+        let preset = ModelPreset {
+            name: "Rapid".into(),
+            backend: InferenceBackend::RapidMlx,
+            rapid_mlx: Some(RapidMlxConfig {
+                model_path: "/models/rapid".into(),
+                served_model_name: Some("rapid-model".into()),
+                port: 8123,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let decoded: ModelPreset =
+            serde_json::from_str(&serde_json::to_string(&preset).unwrap()).unwrap();
+        assert_eq!(decoded.backend, InferenceBackend::RapidMlx);
+        let rapid = decoded.rapid_mlx.unwrap();
+        assert_eq!(rapid.model_path, "/models/rapid");
+        assert_eq!(rapid.served_model_name.as_deref(), Some("rapid-model"));
+        assert_eq!(rapid.port, 8123);
     }
 
     #[test]

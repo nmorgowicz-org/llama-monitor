@@ -1,6 +1,7 @@
 use crate::config::AppConfig;
 use crate::inference::backend::BackendAdapter;
-use crate::inference::llama_cpp::{LlamaCppAdapter, ServerConfig};
+use crate::inference::launch::{LocalLaunchRequest, launch_local};
+use crate::inference::llama_cpp::ServerConfig;
 use crate::inference::supervisor::Supervisor;
 use crate::state::AppState;
 use anyhow::Result;
@@ -15,6 +16,22 @@ pub async fn start_server(
     config: ServerConfig,
     app_config: &AppConfig,
 ) -> Result<()> {
+    launch_local(
+        state,
+        LocalLaunchRequest::LlamaCpp(Box::new(config)),
+        app_config,
+    )
+    .await
+}
+
+pub(crate) async fn start_backend(
+    state: Arc<AppState>,
+    adapter: BackendAdapter,
+    launch_request: LocalLaunchRequest,
+    port: u16,
+    model_identity: String,
+    legacy_llama_config: Option<ServerConfig>,
+) -> Result<()> {
     let lifecycle = state.server_lifecycle.lock().await;
     ensure_no_local_process(&state).await?;
 
@@ -23,20 +40,7 @@ pub async fn start_server(
         state.server_logs.lock().unwrap().clear();
     }
     state.push_log(format!(
-        "[monitor] start_server: launching llama-server on port={} model={}",
-        config.port,
-        if !config.model_path.is_empty() {
-            &config.model_path
-        } else {
-            config.hf_repo.as_deref().unwrap_or("<unknown>")
-        }
-    ));
-
-    let gpu_env = state.gpu_env.lock().unwrap().clone();
-    let adapter = Arc::new(LlamaCppAdapter::new(
-        app_config.clone(),
-        config.clone(),
-        gpu_env,
+        "[monitor] start_server: launching local inference backend on port={port} model={model_identity}"
     ));
     adapter.validate().await?;
 
@@ -56,8 +60,9 @@ pub async fn start_server(
     // Register ownership before spawn so a very early process exit cannot race
     // with registration and leave stale running state behind.
     {
-        *state.backend.lock().unwrap() = Some(BackendAdapter::LlamaCpp(adapter.clone()));
-        *state.server_config.lock().unwrap() = Some(config.clone());
+        *state.backend.lock().unwrap() = Some(adapter.clone());
+        *state.local_launch_request.lock().unwrap() = Some(launch_request);
+        *state.server_config.lock().unwrap() = legacy_llama_config;
         *state.local_server_running.lock().unwrap() = true;
         *state.server_running.lock().unwrap() = false;
         *state.supervisor.lock().await = Some(supervisor.clone());
@@ -71,16 +76,16 @@ pub async fn start_server(
         }
     };
     state.push_log(format!(
-        "[monitor] start_server: llama-server spawned (pid={pid}); waiting for readiness"
+        "[monitor] start_server: local inference process spawned (pid={pid}); waiting for readiness"
     ));
     // Readiness may take minutes. Release the transition lock so stop_server
     // can cancel this generation while it is loading.
     drop(lifecycle);
 
     let readiness = tokio::select! {
-        result = adapter.await_ready(config.port, Instant::now() + LLAMA_STARTUP_TIMEOUT) => result,
+        result = adapter.await_ready(port, Instant::now() + LLAMA_STARTUP_TIMEOUT) => result,
         () = supervisor.wait_for_exit() => Err(anyhow::anyhow!(
-            "llama-server exited before becoming ready; check the captured server logs"
+            "Local inference process exited before becoming ready; check the captured server logs"
         )),
     };
 
@@ -89,7 +94,7 @@ pub async fn start_server(
     if let Err(error) = readiness {
         if !still_owner {
             return Err(anyhow::anyhow!(
-                "llama-server startup was cancelled or replaced before readiness completed"
+                "Local inference startup was cancelled or replaced before readiness completed"
             ));
         }
         state.push_log(format!(
@@ -111,13 +116,13 @@ pub async fn start_server(
     }
 
     if !still_owner {
-        anyhow::bail!("llama-server startup was cancelled or replaced before completion");
+        anyhow::bail!("Local inference startup was cancelled or replaced before completion");
     }
 
     *state.server_running.lock().unwrap() = true;
     state.push_log(format!(
-        "[monitor] start_server: llama-server ready (pid={pid}, port={})",
-        config.port
+        "[monitor] start_server: local inference backend ready (pid={pid}, port={})",
+        port
     ));
     state.llama_poll_notify.notify_waiters();
     Ok(())
@@ -194,6 +199,7 @@ async fn clear_server_state_unchecked(state: &AppState) {
     *state.local_server_running.lock().unwrap() = false;
     *state.server_config.lock().unwrap() = None;
     *state.backend.lock().unwrap() = None;
+    *state.local_launch_request.lock().unwrap() = None;
     *state.supervisor.lock().await = None;
 }
 

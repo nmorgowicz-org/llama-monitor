@@ -17,65 +17,14 @@ import { waitForSpawnReadiness } from './spawn-readiness.js';
 
 export function getConfig() {
     const id = document.getElementById('preset-select').value;
-    const p = sessionState.presets.find(pr => pr.id === id) || {};
+    return { preset_id: id };
+}
 
-    return {
-        preset_id: id,
-        model_path: p.model_path || '',
-        hf_repo: p.hf_repo || null,
-        context_size: p.context_size || 128000,
-        ctk: p.ctk || 'q8_0',
-        ctv: p.ctv || 'f16',
-        tensor_split: p.tensor_split || '',
-        batch_size: p.batch_size || 2048,
-        ubatch_size: p.ubatch_size || p.batch_size || 2048,
-        no_mmap: !!p.no_mmap,
-        port: p.port || 8001,
-        ngram_spec: !!p.ngram_spec,
-        parallel_slots: p.parallel_slots || 1,
-        // Generation
-        temperature: p.temperature,
-        top_p: p.top_p,
-        top_k: p.top_k,
-        min_p: p.min_p,
-        repeat_penalty: p.repeat_penalty,
-        presence_penalty: p.presence_penalty ?? null,
-        enable_thinking: p.enable_thinking ?? null,
-        preserve_thinking: p.preserve_thinking ?? null,
-        reasoning: p.reasoning || null,
-        reasoning_budget: p.reasoning_budget ?? null,
-        reasoning_budget_message: p.reasoning_budget_message || null,
-        n_cpu_moe: p.n_cpu_moe,
-        gpu_layers: p.gpu_layers ?? null,
-        mlock: !!p.mlock,
-        flash_attn: p.flash_attn || '',
-        split_mode: p.split_mode || '',
-        main_gpu: p.main_gpu ?? null,
-        threads: p.threads ?? null,
-        threads_batch: p.threads_batch ?? null,
-        rope_scaling: p.rope_scaling || '',
-        rope_freq_base: p.rope_freq_base ?? null,
-        rope_freq_scale: p.rope_freq_scale ?? null,
-        spec_type: p.spec_type || null,
-        kv_unified: p.kv_unified ?? null,
-        cache_ram_mib: p.cache_ram_mib ?? null,
-        draft_model: p.draft_model || '',
-        draft_min: p.draft_min ?? null,
-        draft_max: p.draft_max ?? null,
-        spec_ngram_size: p.spec_ngram_size ?? null,
-        spec_draft_n_max: p.spec_draft_n_max ?? null,
-        seed: p.seed ?? null,
-        mmproj: p.mmproj || null,
-        chat_template_file: p.chat_template_file || null,
-        alias: p.alias || null,
-        max_tokens: p.max_tokens ?? null,
-        fit_enabled: p.fit_enabled ?? null,
-        fit_target: p.fit_target || null,
-        system_prompt_file: p.system_prompt_file || '',
-        extra_args: p.extra_args || '',
-        bind_host: p.bind_host || '127.0.0.1',
-        api_key: p.api_key || null,
-    };
+function hasModelSource(config) {
+    if (config.backend === 'rapid_mlx') {
+        return !!config.rapid_mlx?.model_path;
+    }
+    return !!(config.model_path || config.hf_repo);
 }
 
 // ── Start / Stop ───────────────────────────────────────────────────────────────
@@ -87,6 +36,25 @@ async function _fetchDbAdminToken() {
     });
     const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
     return tokenData.token || null;
+}
+
+export async function doRestoreSession(sessionId, apiKey = null) {
+    const adminToken = await _fetchDbAdminToken();
+    if (!adminToken) throw new Error('Authentication required');
+    const body = { session_id: sessionId };
+    if (apiKey) body.api_key = apiKey;
+    const response = await fetch('/api/sessions/spawn', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify(body),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) throw new Error(data.error || 'Restore failed');
+    await waitForSpawnReadiness(data.port);
+    return data;
 }
 
 // Disable start buttons for N seconds, showing countdown.
@@ -111,7 +79,11 @@ function applyCooldown(seconds, button) {
 export async function doStart(cooldownBtn, options = {}) {
     const buttonArg = cooldownBtn instanceof Event ? null : cooldownBtn;
     const config = getConfig();
-    if (!config.model_path && !config.hf_repo) {
+    const preset = sessionState.presets.find(item => item.id === config.preset_id);
+    const hasSource = preset?.backend === 'rapid_mlx'
+        ? !!preset.rapid_mlx?.model_path
+        : !!(preset?.model_path || preset?.hf_repo);
+    if (!hasSource) {
         showToast('No model source set. Edit the preset to select a local model or HuggingFace repo.', 'error');
         return;
     }
@@ -120,7 +92,7 @@ export async function doStart(cooldownBtn, options = {}) {
 
 export async function doStartWithConfig(config, options = {}, buttonArg = null) {
     const { skipRunningConfirm = false } = options;
-    if (!config.model_path && !config.hf_repo) {
+    if (!config.preset_id && !hasModelSource(config)) {
         showToast('No model source set.', 'error');
         return;
     }
@@ -204,15 +176,24 @@ export async function doStartWithConfig(config, options = {}, buttonArg = null) 
             return;
         }
 
-        showToast('Starting llama-server…', 'info', 'Loading model on port ' + config.port, { duration: 12000 });
-        await waitForSpawnReadiness(config.port);
+        const backendLabel = data.backend === 'rapid_mlx' ? 'Rapid-MLX' : 'llama-server';
+        const launchPort = data.port ?? config.port;
+        showToast(`Starting ${backendLabel}…`, 'info', 'Loading model on port ' + launchPort, { duration: 12000 });
+        await waitForSpawnReadiness(launchPort);
 
-        showToast('llama-server is running', 'success', '', { duration: 6000 });
-        setTuneConfig(config);
-        setHeaderMode('Spawn:' + config.port);
+        showToast(`${backendLabel} is running`, 'success', '', { duration: 6000 });
+        const resolvedPreset = config.preset_id
+            ? sessionState.presets.find(item => item.id === config.preset_id)
+            : null;
+        if (data.backend === 'rapid_mlx') {
+            hideTunePanel();
+        } else {
+            setTuneConfig(resolvedPreset || config);
+            showTunePanel();
+        }
+        setHeaderMode('Spawn:' + launchPort);
         Router.navigate('/server');
         hideConnectingState();
-        showTunePanel();
         saveSettings();
         setTimeout(() => restorePreviousPosition(), 600);
     } catch (e) {

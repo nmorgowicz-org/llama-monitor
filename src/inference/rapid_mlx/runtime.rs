@@ -13,6 +13,8 @@ pub enum RuntimeSource {
 
 pub struct RuntimeMetadata {
     pub executable_path: std::path::PathBuf,
+    #[allow(dead_code)]
     pub source: RuntimeSource,
+    #[allow(dead_code)]
     pub version: String,
 }

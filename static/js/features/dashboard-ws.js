@@ -23,6 +23,7 @@ import {
     setLastServerState,
     setLastLlamaMetrics,
     setLastRapidMlxMetrics,
+    getLastRapidMlxMetrics,
     setContextCapacityTokens,
     setLastSystemMetrics,
     setLastGpuMetrics,
@@ -765,7 +766,7 @@ function updateServerState(d) {
 
     setLastServerState(d.server_running);
     setLastLlamaMetrics(d.llama);
-    setLastRapidMlxMetrics(d.rapid_mlx || null);
+    setLastRapidMlxMetrics(d.rapid_mlx ?? null);
     // Normalize context capacity to the actual loaded limit.
     // KV-only reports can be stale; prefer reported capacity, then KV max, then a
     // safe default so context-pressure math is consistent across telemetry and chat.
@@ -812,7 +813,7 @@ function updateServerState(d) {
 
 function updateInferenceMetrics(d) {
     const l = lastLlamaMetrics;
-    const rm = lastRapidMlxMetrics;
+    const rm = getLastRapidMlxMetrics();
     const hasActiveEndpoint = !!d.active_session_id;
     const ce = cachedElements;
     const backend = d.backend || (l ? 'llama' : (rm ? 'rapid_mlx' : 'unknown'));

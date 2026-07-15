@@ -185,6 +185,7 @@ impl Supervisor {
             *self.state.local_server_running.lock().unwrap() = false;
             *self.state.server_config.lock().unwrap() = None;
             *self.state.backend.lock().unwrap() = None;
+            *self.state.local_launch_request.lock().unwrap() = None;
         }
         *self.state.supervisor.lock().await = None;
 

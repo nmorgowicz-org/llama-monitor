@@ -117,27 +117,27 @@ impl crate::inference::supervisor::BackendObserver for AppState {
     }
     fn on_crash(&self, exit_status: std::process::ExitStatus, tail: Vec<String>) {
         let reason = if exit_status.success() {
-            "llama-server exited normally".to_string()
+            "Local inference backend exited normally".to_string()
         } else if let Some(code) = exit_status.code() {
             match code {
                 137 | 9 => format!(
-                    "llama-server was terminated (code {}). This often means out-of-memory (OOM). Try a smaller context or a different model.",
+                    "Local inference backend was terminated (code {}). This often means out-of-memory (OOM). Try a smaller context or a different model.",
                     code
                 ),
                 _ => format!(
-                    "llama-server exited unexpectedly (code {}). Check the server logs for details.",
+                    "Local inference backend exited unexpectedly (code {}). Check the server logs for details.",
                     code
                 ),
             }
         } else {
-            "llama-server was killed by an external signal.".to_string()
+            "Local inference backend was killed by an external signal.".to_string()
         };
 
         let tail_text = if tail.is_empty() {
-            "\nNo llama-server output captured before it was killed.".to_string()
+            "\nNo backend output captured before it was killed.".to_string()
         } else {
             format!(
-                "\nLast relevant lines from llama-server:\n{}",
+                "\nLast relevant backend log lines:\n{}",
                 tail.iter()
                     .map(|l| format!("  {l}"))
                     .collect::<Vec<_>>()
@@ -423,10 +423,12 @@ pub enum SessionMode {
         #[serde(default)]
         bind_host: Option<String>,
         #[serde(default)]
+        #[serde(skip_serializing)]
         api_key: Option<String>,
     },
     Attach {
         endpoint: String,
+        #[serde(default, skip_serializing)]
         api_key: Option<String>,
     },
 }
@@ -448,6 +450,15 @@ pub struct Session {
     pub id: String,
     #[serde(default)]
     pub name: String,
+    #[serde(default)]
+    pub backend: crate::inference::InferenceBackend,
+    #[serde(default)]
+    pub model_identity: Option<String>,
+    /// Secret-scrubbed backend-owned request used to restore direct spawns.
+    #[serde(default)]
+    pub launch: Option<crate::inference::launch::LocalLaunchRequest>,
+    #[serde(default)]
+    pub launch_requires_api_key: bool,
     #[serde(default)]
     pub mode: SessionMode,
     #[serde(default)]
@@ -482,10 +493,38 @@ impl Session {
         bind_host: Option<String>,
         api_key: Option<String>,
     ) -> Self {
+        Self::new_spawn_with_backend(
+            id,
+            name,
+            port,
+            preset_id,
+            bind_host,
+            api_key,
+            crate::inference::InferenceBackend::LlamaCpp,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_spawn_with_backend(
+        id: String,
+        name: String,
+        port: u16,
+        preset_id: String,
+        bind_host: Option<String>,
+        api_key: Option<String>,
+        backend: crate::inference::InferenceBackend,
+        model_identity: Option<String>,
+    ) -> Self {
         let now = Self::now();
+        let launch_requires_api_key = api_key.as_ref().is_some_and(|key| !key.is_empty());
         Self {
             id,
             name,
+            backend,
+            model_identity,
+            launch: None,
+            launch_requires_api_key,
             mode: SessionMode::Spawn {
                 port,
                 bind_host,
@@ -503,9 +542,14 @@ impl Session {
 
     pub fn new_attach(id: String, name: String, endpoint: String, api_key: Option<String>) -> Self {
         let now = Self::now();
+        let launch_requires_api_key = api_key.as_ref().is_some_and(|key| !key.is_empty());
         Self {
             id,
             name,
+            backend: crate::inference::InferenceBackend::LlamaCpp,
+            model_identity: None,
+            launch: None,
+            launch_requires_api_key,
             mode: SessionMode::Attach { endpoint, api_key },
             status: SessionStatus::Disconnected,
             preset_id: String::new(),
@@ -721,6 +765,7 @@ pub struct AppState {
     pub local_server_running: Arc<Mutex<bool>>, // Whether a local llama-server was spawned by this app
     pub backend: Arc<Mutex<Option<crate::inference::backend::BackendAdapter>>>,
     pub supervisor: Arc<tokio::sync::Mutex<Option<Arc<crate::inference::supervisor::Supervisor>>>>,
+    pub local_launch_request: Arc<Mutex<Option<crate::inference::launch::LocalLaunchRequest>>>,
     /// Serializes local inference process start/stop transitions.
     pub server_lifecycle: Arc<tokio::sync::Mutex<()>>,
     /// Monotonic ownership token for local process lifecycle operations.
@@ -821,6 +866,7 @@ impl Default for AppState {
             last_spawn_cmd: Arc::new(Mutex::new(String::new())),
             backend: Arc::new(Mutex::new(None)),
             supervisor: Arc::new(tokio::sync::Mutex::new(None)),
+            local_launch_request: Arc::new(Mutex::new(None)),
             server_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
             server_generation: Arc::new(AtomicU64::new(0)),
             sleep_mode: Arc::new(AtomicU8::new(0)),
@@ -933,6 +979,7 @@ impl AppState {
             last_spawn_cmd: Arc::new(Mutex::new(String::new())),
             backend: Arc::new(Mutex::new(None)),
             supervisor: Arc::new(tokio::sync::Mutex::new(None)),
+            local_launch_request: Arc::new(Mutex::new(None)),
             server_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
             server_generation: Arc::new(AtomicU64::new(0)),
             sleep_mode: Arc::new(AtomicU8::new(0)), // 0 = Off (full monitoring)
@@ -1809,6 +1856,84 @@ mod tests {
         assert!(!state.calculate_capabilities().host_metrics);
 
         let _ = std::fs::remove_file(sessions_path);
+    }
+
+    #[test]
+    fn legacy_spawn_session_without_backend_defaults_to_llama_cpp() {
+        let session: Session = serde_json::from_value(serde_json::json!({
+            "id": "legacy",
+            "name": "Legacy",
+            "mode": { "Spawn": { "port": 8001 } }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            session.backend,
+            crate::inference::InferenceBackend::LlamaCpp
+        );
+        assert!(session.model_identity.is_none());
+    }
+
+    #[test]
+    fn session_serialization_never_persists_endpoint_api_keys() {
+        let mut session = Session::new_spawn(
+            "private".into(),
+            "Private".into(),
+            8001,
+            String::new(),
+            None,
+            Some("do-not-write".into()),
+        );
+        session.model_identity = Some("/models/private.gguf".into());
+        session.launch = Some(
+            crate::inference::launch::LocalLaunchRequest::LlamaCpp(Box::new(
+                crate::inference::llama_cpp::ServerConfig {
+                    model_path: "/models/private.gguf".into(),
+                    port: 8001,
+                    api_key: Some("do-not-write".into()),
+                    ..Default::default()
+                },
+            ))
+            .for_persistence(),
+        );
+        let json = serde_json::to_string(&session).unwrap();
+        assert!(!json.contains("do-not-write"));
+        assert!(json.contains("launch_requires_api_key"));
+
+        let restored: Session = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            restored.backend,
+            crate::inference::InferenceBackend::LlamaCpp
+        );
+        assert_eq!(
+            restored.model_identity.as_deref(),
+            Some("/models/private.gguf")
+        );
+        assert!(restored.launch_requires_api_key);
+        assert!(matches!(
+            restored.launch,
+            Some(crate::inference::launch::LocalLaunchRequest::LlamaCpp(_))
+        ));
+        assert!(matches!(
+            restored.mode,
+            SessionMode::Spawn { api_key: None, .. }
+        ));
+
+        let attached = Session::new_attach(
+            "private-attach".into(),
+            "Private attach".into(),
+            "http://127.0.0.1:9000".into(),
+            Some("attach-secret".into()),
+        );
+        let json = serde_json::to_string(&attached).unwrap();
+        assert!(!json.contains("attach-secret"));
+        assert!(attached.launch_requires_api_key);
+        let restored: Session = serde_json::from_str(&json).unwrap();
+        assert!(restored.launch_requires_api_key);
+        assert!(matches!(
+            restored.mode,
+            SessionMode::Attach { api_key: None, .. }
+        ));
     }
 
     #[test]

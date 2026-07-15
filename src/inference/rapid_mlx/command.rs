@@ -1,7 +1,8 @@
+use crate::inference::supervisor::SupervisedLaunch;
 use std::ffi::OsString;
 use std::path::PathBuf;
-use crate::inference::supervisor::SupervisedLaunch;
 
+#[allow(dead_code)]
 pub struct RapidMlxCommandBuilder {
     model_path: PathBuf,
     served_model_name: Option<String>,
@@ -21,6 +22,7 @@ pub struct RapidMlxCommandBuilder {
     prefill_step_size: u32,
 }
 
+#[allow(dead_code)]
 impl RapidMlxCommandBuilder {
     pub fn new(model_path: PathBuf) -> Self {
         Self {

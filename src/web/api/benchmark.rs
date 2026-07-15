@@ -837,6 +837,22 @@ fn api_bench_mtp_sweep(
                     ));
                 }
 
+                let is_llama_cpp = matches!(
+                    state.local_launch_request.lock().unwrap().as_ref(),
+                    Some(crate::inference::launch::LocalLaunchRequest::LlamaCpp(_))
+                );
+                if !is_llama_cpp {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "MTP sweep is only supported by the llama.cpp backend."
+                            })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ),
+                    ));
+                }
+
                 // Read the current server config before we touch anything
                 let base_config = {
                     let guard = state.server_config.lock().unwrap();

@@ -58,6 +58,11 @@ function isRunningStatus(status) {
     return String(status || '').toLowerCase() === 'running';
 }
 
+function presetModelSource(preset) {
+    if (preset?.backend === 'rapid_mlx') return preset.rapid_mlx?.model_path || '';
+    return preset?.model_path || preset?.hf_repo || '';
+}
+
 export function syncSelectedPresetSelection(presetId, options = {}) {
     const id = presetId || '';
     const {
@@ -242,7 +247,7 @@ export async function loadPresets(selectId) {
     sel.innerHTML = '';
     sessionState.presets.forEach(p => {
         // Skip built-in/example presets that have no model (they are templates, not usable)
-        if (!p.model_path && !p.hf_repo) return;
+        if (!presetModelSource(p)) return;
         const opt = document.createElement('option');
         opt.value = p.id;
         opt.textContent = p.name;
@@ -378,7 +383,7 @@ function syncPresetDisplay(sel) {
     const preset = (sessionState.presets || []).find(p => p.id === sel.value);
     if (!preset) return;
 
-    const fullName = preset.name || (preset.model_path || preset.hf_repo || '').split('/').pop() || '';
+    const fullName = preset.name || presetModelSource(preset).split('/').pop() || '';
     const displayName = buildShortPresetName(preset, fullName);
 
     labelEl.textContent = displayName;
@@ -396,7 +401,7 @@ function syncPresetDisplay(sel) {
 }
 
 function buildShortPresetName(p, fullName) {
-    const base = fullName || p.name || (p.model_path || p.hf_repo || '').split('/').pop() || '';
+    const base = fullName || p.name || presetModelSource(p).split('/').pop() || '';
     if (!base) return '';
     // Normalize underscores to hyphens; CSS text-overflow handles truncation.
     return base.replace(/_/g, '-').replace(/-{2,}/g, '-').trim();
@@ -404,7 +409,7 @@ function buildShortPresetName(p, fullName) {
 
 function buildPresetChips(p) {
     const chips = [];
-    const name = p.name || (p.model_path || p.hf_repo || '').split('/').pop() || '';
+    const name = p.name || presetModelSource(p).split('/').pop() || '';
 
     // Quant chip
     const qMatch = name.match(/(Q\d+[_-]?[A-Z0-9]+)/i);
@@ -1018,7 +1023,7 @@ export function openPresetModal(mode, section) {
         // Prefill model field:
         // - If model_path present, treat as local file.
         // - Else if hf_repo present, treat as HF repo.
-        const modelValue = p.model_path || p.hf_repo || '';
+        const modelValue = presetModelSource(p);
         setVal('modal-model-path', modelValue);
         _renderPresetArchInfo(p);
         setVal('modal-alias', p.alias || '');
@@ -1149,7 +1154,7 @@ export function openPresetModal(mode, section) {
         setVal('modal-chat-template-file', p.chat_template_file || '');
         // Advanced
         setOpt('modal-bind-host', p.bind_host || '');
-        numOrEmpty('modal-port', p.port);
+        numOrEmpty('modal-port', p.backend === 'rapid_mlx' ? p.rapid_mlx?.port : p.port);
         setVal('modal-api-key', p.api_key || '');
         numOrEmpty('modal-max-tokens', p.max_tokens);
         numOrEmpty('modal-seed', p.seed);
@@ -1164,6 +1169,7 @@ export function openPresetModal(mode, section) {
         numOrEmpty('modal-spec-draft-p-split', p.spec_draft_p_split);
         numOrEmpty('modal-image-min-tokens', qwenVLImageTokens(p).min_tokens);
         numOrEmpty('modal-image-max-tokens', p.image_max_tokens);
+        _configureBackendPresetEditor(p);
     } else {
         title.textContent = 'New Preset';
         if (subtitle) subtitle.textContent = 'New model profile';
@@ -1177,6 +1183,7 @@ export function openPresetModal(mode, section) {
         _toggleFitTarget(false);
         _toggleSpecFields('');
         setStructuredOutputMode('');
+        _configureBackendPresetEditor(null);
     }
 
     const presetModel = document.getElementById('modal-model-path')?.value.trim();
@@ -1259,9 +1266,7 @@ function _renderPresetsPanel() {
     if (!body) return;
     body.innerHTML = '';
 
-    const presets = (sessionState.presets || []).filter(
-        p => p.model_path || p.hf_repo
-    );
+    const presets = (sessionState.presets || []).filter(presetModelSource);
     if (!presets.length) {
         const empty = document.createElement('div');
         empty.className = 'presets-panel-empty';
@@ -1288,7 +1293,10 @@ function _renderPresetsPanel() {
         info.appendChild(name);
 
         const metaParts = [];
-        if (preset.model_path) metaParts.push(preset.model_path.split(/[/\\]/).pop() || preset.model_path);
+        if (preset.backend === 'rapid_mlx' && preset.rapid_mlx?.model_path) {
+            metaParts.push(preset.rapid_mlx.model_path.split(/[/\\]/).pop() || preset.rapid_mlx.model_path);
+            metaParts.push('Rapid-MLX');
+        } else if (preset.model_path) metaParts.push(preset.model_path.split(/[/\\]/).pop() || preset.model_path);
         else if (preset.hf_repo) metaParts.push(preset.hf_repo);
         if (preset.bind_host === '0.0.0.0') metaParts.push('LAN');
         if (preset.context_size) metaParts.push(`${Math.round(preset.context_size / 1024)}k context`);
@@ -1505,7 +1513,64 @@ function _hideSummary() {
     if (saveBtn) { saveBtn.textContent = 'Save'; saveBtn.dataset.confirmed = ''; }
 }
 
+function _configureBackendPresetEditor(preset) {
+    const modal = document.getElementById('preset-modal');
+    const isRapid = preset?.backend === 'rapid_mlx';
+    modal?.classList.toggle('preset-editor--rapid-mlx', isRapid);
+
+    const modelLabel = document.querySelector('label[for="modal-model-path"]');
+    const modelInput = document.getElementById('modal-model-path');
+    const portLabel = document.querySelector('label[for="modal-port"]');
+    const modelSection = modal?.querySelector('.preset-editor-section[data-section="model"]');
+    const modelTitle = modelSection?.querySelector('.pe-section-title');
+    const modelDescription = modelSection?.querySelector('.pe-section-desc');
+    const advancedSection = modal?.querySelector('.preset-editor-section[data-section="advanced"]');
+    const advancedNavLabel = modal?.querySelector('.preset-nav-item[data-section="advanced"] .pni-label');
+    const advancedTitle = advancedSection?.querySelector('.pe-section-title');
+    const advancedDescription = advancedSection?.querySelector('.pe-section-desc');
+    if (modelTitle) modelTitle.textContent = isRapid ? 'Rapid-MLX Model' : 'Model & Memory';
+    if (modelDescription) {
+        modelDescription.textContent = isRapid
+            ? 'MLX model directory or Hugging Face repository'
+            : 'Model file path, GPU offloading, memory locking';
+    }
+    if (advancedTitle) advancedTitle.textContent = isRapid ? 'Rapid-MLX Server' : 'Advanced';
+    if (advancedNavLabel) advancedNavLabel.textContent = isRapid ? 'Server' : 'Advanced';
+    if (advancedDescription) {
+        advancedDescription.textContent = isRapid
+            ? 'Local server port'
+            : 'Server access, fit-to-VRAM, seed, and extra CLI flags';
+    }
+    if (modelLabel) {
+        modelLabel.firstChild.textContent = isRapid ? 'MLX Model Path ' : 'Model Path ';
+        modelLabel.title = isRapid
+            ? 'Local MLX model directory or Hugging Face MLX repository id'
+            : 'Absolute path to the .gguf model file on disk';
+    }
+    if (modelInput) {
+        modelInput.placeholder = isRapid ? 'mlx-community/model-name or /path/to/model' : '';
+    }
+    if (portLabel) {
+        portLabel.title = isRapid
+            ? 'TCP port Rapid-MLX listens on.'
+            : 'TCP port llama-server listens on. Default 8001. Change if you run multiple servers simultaneously.';
+    }
+}
+
 function _buildFormPreset(existing) {
+    if (existing.backend === 'rapid_mlx') {
+        const rapidPort = intOrNull('modal-port');
+        return {
+            ...existing,
+            name: strVal('modal-name'),
+            port: rapidPort,
+            rapid_mlx: existing.rapid_mlx ? {
+                ...existing.rapid_mlx,
+                model_path: strVal('modal-model-path'),
+                port: rapidPort,
+            } : null,
+        };
+    }
     const modelSource = normalizeModelSourceInput(strVal('modal-model-path'));
     const fitEnabled = nullableBoolOpt('modal-fit-enabled');
     return {
@@ -1655,8 +1720,15 @@ export async function savePreset(event) {
         markFieldError('modal-name', 'Preset name is required.');
         valid = false;
     }
-    if (!preset.model_path && !preset.hf_repo) {
+    const hasModelSource = preset.backend === 'rapid_mlx'
+        ? !!preset.rapid_mlx?.model_path
+        : !!(preset.model_path || preset.hf_repo);
+    if (!hasModelSource) {
         markFieldError('modal-model-path', 'Model path or HuggingFace repo is required.');
+        valid = false;
+    }
+    if (preset.backend === 'rapid_mlx' && !preset.rapid_mlx?.port) {
+        markFieldError('modal-port', 'Rapid-MLX requires a valid server port.');
         valid = false;
     }
     const gpuLayers = parseInt(document.getElementById('modal-gpu-layers').value, 10);
@@ -2027,14 +2099,14 @@ function _offerRestartAfterPresetSave(presetId) {
     showToastWithActions(
         'Apply changes?',
         'info',
-        'Restart llama-server to load the updated preset.',
+        'Restart the local model server to load the updated preset.',
         [
             {
                 id: 'restart',
                 label: 'Restart Now',
                 primary: true,
                 handler: async () => {
-                    showToast('Restarting llama-server…', 'info');
+                    showToast('Restarting local model server…', 'info');
                     try {
                         await _restartServerWithPreset(presetId);
                     } catch (e) {
@@ -2078,64 +2150,8 @@ async function _restartServerWithPreset(presetId) {
         throw new Error('Failed to stop server: ' + (e.message || e));
     }
 
-    // Build config from preset
-    const config = {
-        preset_id: presetId,
-        model_path: p.model_path || '',
-        hf_repo: p.hf_repo || null,
-        context_size: p.context_size || 128000,
-        ctk: p.ctk || 'q8_0',
-        ctv: p.ctv || 'f16',
-        tensor_split: p.tensor_split || '',
-        batch_size: p.batch_size || 2048,
-        ubatch_size: p.ubatch_size || p.batch_size || 2048,
-        no_mmap: !!p.no_mmap,
-        port: p.port || 8001,
-        ngram_spec: !!p.ngram_spec,
-        parallel_slots: p.parallel_slots || 1,
-        temperature: p.temperature,
-        top_p: p.top_p,
-        top_k: p.top_k,
-        min_p: p.min_p,
-        repeat_penalty: p.repeat_penalty,
-        presence_penalty: p.presence_penalty ?? null,
-        enable_thinking: p.enable_thinking ?? null,
-        preserve_thinking: p.preserve_thinking ?? null,
-        tool_call_format: p.tool_call_format || null,
-        reasoning: p.reasoning || null,
-        reasoning_budget: p.reasoning_budget ?? null,
-        reasoning_budget_message: p.reasoning_budget_message || null,
-        n_cpu_moe: p.n_cpu_moe,
-        gpu_layers: p.gpu_layers ?? null,
-        mlock: !!p.mlock,
-        flash_attn: p.flash_attn || '',
-        split_mode: p.split_mode || '',
-        main_gpu: p.main_gpu ?? null,
-        threads: p.threads ?? null,
-        threads_batch: p.threads_batch ?? null,
-        rope_scaling: p.rope_scaling || '',
-        rope_freq_base: p.rope_freq_base ?? null,
-        rope_freq_scale: p.rope_freq_scale ?? null,
-        spec_type: p.spec_type || null,
-        kv_unified: p.kv_unified ?? null,
-        cache_ram_mib: p.cache_ram_mib ?? null,
-        draft_model: p.draft_model || '',
-        draft_min: p.draft_min ?? null,
-        draft_max: p.draft_max ?? null,
-        spec_ngram_size: p.spec_ngram_size ?? null,
-        spec_draft_n_max: p.spec_draft_n_max ?? null,
-        seed: p.seed ?? null,
-        mmproj: p.mmproj || null,
-        chat_template_file: p.chat_template_file || null,
-        alias: p.alias || null,
-        max_tokens: p.max_tokens ?? null,
-        fit_enabled: p.fit_enabled ?? null,
-        fit_target: p.fit_target || null,
-        system_prompt_file: p.system_prompt_file || '',
-        extra_args: p.extra_args || '',
-        bind_host: p.bind_host || '127.0.0.1',
-        api_key: p.api_key || null,
-    };
+    // Rust owns backend selection, native config, and the resolved launch port.
+    const config = { preset_id: presetId };
 
     // Spawn new server
     const adminToken = await (async () => {
@@ -2168,14 +2184,16 @@ async function _restartServerWithPreset(presetId) {
     }
 
     // Wait for server to be ready
-    showToast('Starting llama-server…', 'info', 'Loading model on port ' + config.port, { duration: 12000 });
+    const backendLabel = data.backend === 'rapid_mlx' ? 'Rapid-MLX' : 'llama-server';
+    const launchPort = data.port;
+    showToast(`Starting ${backendLabel}…`, 'info', 'Loading model on port ' + launchPort, { duration: 12000 });
     try {
-        await (await import('./spawn-readiness.js')).waitForSpawnReadiness(config.port);
+        await (await import('./spawn-readiness.js')).waitForSpawnReadiness(launchPort);
     } catch (e) {
         throw new Error('Server did not become ready: ' + (e.message || e));
     }
 
-    showToast('llama-server restarted', 'success', '', { duration: 6000 });
+    showToast(`${backendLabel} restarted`, 'success', '', { duration: 6000 });
 }
 
 // ── Model architecture info (preset editor) ───────────────────────────────────

@@ -1,11 +1,13 @@
 #![allow(clippy::collapsible_if)]
+use crate::inference::rapid_mlx::runtime::RuntimeSource;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::io;
-use crate::inference::rapid_mlx::runtime::RuntimeSource;
 
+#[allow(dead_code)]
 pub struct Discovery;
 
+#[allow(dead_code)]
 impl Discovery {
     /// Resolves the rapid-mlx binary based on precedence:
     /// 1. Explicit path
@@ -16,14 +18,16 @@ impl Discovery {
         managed_path: Option<&Path>,
     ) -> io::Result<(PathBuf, RuntimeSource)> {
         if let Some(path) = explicit_path
-            && path.exists() {
-                return Ok((path.to_path_buf(), RuntimeSource::Custom));
-            }
+            && path.exists()
+        {
+            return Ok((path.to_path_buf(), RuntimeSource::Custom));
+        }
 
         if let Some(path) = managed_path
-            && path.exists() {
-                return Ok((path.to_path_buf(), RuntimeSource::Managed));
-            }
+            && path.exists()
+        {
+            return Ok((path.to_path_buf(), RuntimeSource::Managed));
+        }
 
         // Fallback to PATH
         if let Ok(path) = which::which("rapid-mlx") {
@@ -51,9 +55,7 @@ impl Discovery {
 
     /// Probes the binary to ensure it is usable.
     pub async fn probe_version(binary_path: &Path) -> io::Result<String> {
-        let output = Command::new(binary_path)
-            .arg("--version")
-            .output()?;
+        let output = Command::new(binary_path).arg("--version").output()?;
 
         if output.status.success() {
             let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
