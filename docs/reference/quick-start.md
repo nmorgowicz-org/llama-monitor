@@ -21,7 +21,8 @@ hardware memory, and get started.
 The setup wizard is recommended but optional. You can:
 
 - Use the wizard to choose a model and tune settings, or
-- Attach directly to an existing llama-server by entering its URL.
+- Attach directly to an existing llama.cpp or Rapid-MLX server by choosing its engine
+  and entering its URL.
 
 Click **Open setup wizard** on the dashboard to begin.
 

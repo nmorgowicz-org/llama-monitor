@@ -230,6 +230,15 @@ telemetry are not llama.cpp-compatible.
 | `POST /v1/requests/{id}/cancel` | API key when configured | Request cancellation |
 | `DELETE /v1/requests/{id}` | API key when configured | Cancellation alias (no `/cancel` suffix) |
 
+Rapid-MLX `0.10.9` does not expose a usable external request-ID contract for those
+cancellation routes. Streaming chunks contain a public `chatcmpl-*` response ID, while
+the routes expect a separate private scheduler ID held only inside the server's
+`request_id_holder`. Therefore the `0.10.9` compatibility profile advertises native
+cancellation as unavailable. Stopping chat immediately drops llama-monitor's upstream
+response, which triggers Rapid-MLX's disconnect guard and scheduler abort. A future
+profile may enable the native route only after an authenticated public scheduler-ID
+contract is verified; the endpoint's existence alone is insufficient.
+
 Additional probe-only aliases that bypass authentication (intentional — auth would break
 Kubernetes liveness probes): `/healthz` (delegates to `/health`), `/readyz` (delegates to
 `/health/ready`), `/livez` (returns `{ status }`).
@@ -1079,7 +1088,7 @@ The shared chat layer remains OpenAI-compatible, with a backend capability matri
 | Tools | Capability-driven | Capability-driven |
 | Structured response | Capability-driven | `response_format` when proven |
 | Request seed | Existing behavior | Hidden unless proven |
-| Cancellation | Existing behavior | Native endpoint when proven |
+| Cancellation | Existing behavior | Disconnect abort; native endpoint only with a proven public request ID |
 | Reasoning depth | Not supported | `reasoning_effort` parameter |
 
 Request construction sends only fields supported by the active backend profile.

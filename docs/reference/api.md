@@ -270,29 +270,41 @@ Request:
 
 ```json
 {
-  "endpoint": "http://192.168.1.50:8001"
+  "endpoint": "http://192.168.1.50:8001",
+  "backend": "rapid_mlx",
+  "model_identity": "served-model-name",
+  "api_key": "optional-runtime-key"
 }
 ```
+
+`backend` defaults to `llama_cpp` for compatibility. Rapid-MLX attach uses
+`/health/ready`, authenticates `/v1/models` and `/v1/status` when a key is supplied,
+and discovers `model_identity` from `/v1/models` when it is omitted. API keys remain
+transient and are never serialized with the session.
 
 Success response:
 
 ```json
 {
   "ok": true,
+  "backend": "rapid_mlx",
+  "model_identity": "served-model-name",
   "warning": null
 }
 ```
 
-Before attaching, the server checks that the endpoint is reachable by sending a GET request to the endpoint URL. If the server cannot be reached, attach fails with:
+Before attaching, llama-monitor performs the selected backend's non-mutating readiness
+check. It does not guess the backend from an OpenAI-compatible response.
 
 ```json
 {
   "ok": false,
-  "error": "Cannot reach llama-server at <endpoint>. Is it running?"
+  "error": "Cannot reach the selected inference runtime at <endpoint>. Is it ready?"
 }
 ```
 
-If the server is reachable but `/health` is unavailable, attach still succeeds and `warning` explains that Performance & metrics will be missing.
+If the runtime is ready but its diagnostics endpoint is unavailable, attach still
+succeeds and `warning` explains that diagnostics are unavailable.
 
 ### `POST /api/detach`
 Auth: api-token.
@@ -1077,11 +1089,28 @@ Inference admission behavior:
 
 ### `POST /api/chat/abort`
 Auth: api-token.
-Current no-op acknowledgement endpoint:
+Accepts an optional upstream request ID and attempts native cancellation only when the
+active backend advertises a verified compatible contract. Browser Stop closes local
+forwarding independently.
+
+Request body (optional for backward compatibility):
 
 ```json
-{ "ok": true }
+{ "request_id": "chatcmpl-123" }
 ```
+
+Runtimes without verified native cancellation return an explicit local-only result:
+
+```json
+{
+  "ok": true,
+  "cancelled": false,
+  "mode": "local_only",
+  "reason": "native cancellation is unavailable for this runtime"
+}
+```
+
+When native cancellation succeeds, `cancelled` is `true` and `mode` is `native`.
 
 ### `POST /api/chat/suggestions`
 Auth: api-token.

@@ -8,7 +8,6 @@ use std::time::{Duration, Instant};
 use tempfile::tempdir;
 use warp::Filter;
 
-#[cfg(all(unix, target_os = "macos", target_arch = "aarch64"))]
 use llama_monitor::inference::rapid_mlx::compatibility;
 #[cfg(all(unix, target_os = "macos", target_arch = "aarch64"))]
 use llama_monitor::inference::supervisor::{BackendObserver, Supervisor};
@@ -200,6 +199,86 @@ async fn test_rapid_mlx_status_uses_api_key() {
         .await
         .unwrap_err();
     assert!(format!("{no_key:#}").contains("401"));
+}
+
+#[tokio::test]
+async fn rapid_native_cancellation_degrades_without_a_public_request_id_contract() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    let requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let cancel = warp::path!("v1" / "requests" / String / "cancel")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .map({
+            let requests = requests.clone();
+            move |request_id: String, authorization: Option<String>| {
+                requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if request_id == "chatcmpl-fixture"
+                    && authorization.as_deref() == Some("Bearer cancel-secret")
+                {
+                    warp::reply::with_status("cancelled", warp::http::StatusCode::OK)
+                } else {
+                    warp::reply::with_status("unauthorized", warp::http::StatusCode::UNAUTHORIZED)
+                }
+            }
+        });
+    tokio::spawn(warp::serve(cancel).run(([127, 0, 0, 1], port)));
+    tokio::time::sleep(Duration::from_millis(25)).await;
+
+    let runtime = RuntimeMetadata {
+        executable_path: "rapid-mlx".into(),
+        version: "0.10.9".into(),
+        source: RuntimeSource::Managed,
+    };
+    let mut supported = RapidMlxAdapter::new(runtime, "model".into());
+    supported.host = "127.0.0.1".into();
+    supported.configure_runtime(
+        compatibility::CompatibilityProfile::verified_baseline(),
+        Some("cancel-secret".into()),
+    );
+    assert!(
+        supported
+            .cancel_request(port, "chatcmpl-fixture")
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("unavailable")
+    );
+    assert_eq!(requests.load(std::sync::atomic::Ordering::Relaxed), 0);
+    assert!(
+        supported
+            .cancel_request(port, "../escape")
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("invalid request ID")
+    );
+    assert!(
+        supported
+            .cancel_request(port, &"x".repeat(129))
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("invalid request ID")
+    );
+
+    supported.configure_runtime(
+        compatibility::CompatibilityProfile {
+            state: compatibility::CompatibilityState::Provisional,
+            version: "0.10.9+nightly".into(),
+            capabilities: compatibility::ServeCapabilities::verified_baseline(),
+        },
+        Some("cancel-secret".into()),
+    );
+    assert!(
+        supported
+            .cancel_request(port, "chatcmpl-fixture")
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("unavailable")
+    );
 }
 
 #[cfg(all(unix, target_os = "macos", target_arch = "aarch64"))]

@@ -364,6 +364,7 @@ test.describe('preset flow', () => {
     expect(state.attachPayloads[0]).toEqual({
       endpoint: 'http://127.0.0.1:9000',
       api_key: 'attach-transient',
+      backend: 'llama_cpp',
     });
   });
 });

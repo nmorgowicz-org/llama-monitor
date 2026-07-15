@@ -90,9 +90,11 @@ Several appearance and chat behaviors are configurable via Settings and are appl
 
 ## Messaging
 
-- **Streaming** — Real-time SSE streaming via `POST /api/chat`, which relays to the connected llama.cpp server at `/v1/chat/completions`
+- **Streaming** — Real-time SSE streaming via `POST /api/chat`, which routes to the active llama.cpp or Rapid-MLX session at `/v1/chat/completions`
+- **Backend-safe controls** — llama.cpp requests retain their existing wire shape; Rapid-MLX requests are filtered and renamed against the active compatibility profile, with usage streaming enabled when supported
 - **Markdown rendering** — Assistant output is rendered with Markdown, syntax-highlighted code blocks, and per-block copy controls
 - **Thinking blocks** — If the upstream model sends `reasoning_content`, the UI renders it in an expandable thinking block during the active browser session
+- **Stop behavior** — Stop immediately closes local forwarding. Rapid-MLX aborts the scheduler request through its disconnect guard; native cancel routes are used only by profiles with a verified public request-ID contract
 - **Token estimates** — The composer shows a rough `~N tok` estimate with warning colors at higher counts
 - **Smart scroll** — Auto-scroll stays on only while you are near the bottom; scrolling upward during generation disables follow mode until you jump back down
 - **Unread badge** — New assistant replies increment a scroll-to-bottom unread badge when you are reading older content
@@ -572,7 +574,8 @@ Purely device-specific presentation choices such as chat style and font scale re
 
 ## Sessions and Attachment
 
-llama-monitor manages one or more backend llama.cpp sessions and routes all chat traffic through them.
+llama-monitor manages one or more llama.cpp or Rapid-MLX sessions and routes chat
+traffic through the active session's persisted backend and model identity.
 
 Key session endpoints:
 
@@ -582,7 +585,7 @@ Key session endpoints:
 - `DELETE /api/sessions/:id` — remove a session (requires db-admin-token)
 - `POST /api/sessions/active` — switch active session by ID
 - `POST /api/sessions/spawn` — spawn a new llama-server from a preset or inline config (requires db-admin-token)
-- `POST /api/attach` — attach to an existing llama-server endpoint
+- `POST /api/attach` — explicitly attach to an existing llama.cpp or Rapid-MLX endpoint
 - `POST /api/detach` — detach from the current attach-style active session
 - `GET /api/sessions/recent` — last 10 sessions, sorted by recent use
 - `GET /api/sessions/restore-hint` — lightweight hint for restore/attach suggestions
@@ -635,9 +638,10 @@ Note: Many supporting endpoints now exist (guided chat, tab management, search, 
 ## Data Flow
 
 ```text
-User message -> llama-monitor POST /api/chat (SSE relay) -> Upstream llama.cpp /v1/chat/completions
-                                                        -> Browser renders tokens live
-                                                        -> Chat telemetry updates from live metrics
+User message -> llama-monitor POST /api/chat
+             -> active backend request mapping + transient runtime auth
+             -> upstream /v1/chat/completions SSE
+             -> browser renders content, reasoning, and usage live
 ```
 
 ## Persistence

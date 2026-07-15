@@ -341,7 +341,9 @@ fn api_get_active_session(
                                 "mode": mode_str,
                                 "status": s.status,
                                 "last_active": s.last_active,
-                                "preset_id": s.preset_id
+                                "preset_id": s.preset_id,
+                                "backend": s.backend,
+                                "model_identity": s.model_identity
                             })),
                         ))
                     }
@@ -380,8 +382,13 @@ fn api_get_active_session_readiness(
                 };
 
                 let (endpoint, api_key) = match session.mode {
-                    SessionMode::Spawn { port, api_key, .. } => {
-                        (format!("http://127.0.0.1:{port}"), api_key)
+                    SessionMode::Spawn {
+                        port,
+                        bind_host,
+                        api_key,
+                    } => {
+                        let host = super::upstream::local_connect_host(bind_host.as_deref());
+                        (format!("http://{host}:{port}"), api_key)
                     }
                     SessionMode::Attach { endpoint, api_key } => (endpoint, api_key),
                 };
@@ -398,12 +405,22 @@ fn api_get_active_session_readiness(
                     req
                 };
 
-                let root_ok = with_auth(client.get(&endpoint)).send().await.is_ok();
-                let health_ok = with_auth(client.get(format!("{endpoint}/health")))
-                    .send()
-                    .await
-                    .is_ok();
-                let ready = root_ok || health_ok;
+                let ready = match session.backend {
+                    crate::inference::InferenceBackend::RapidMlx => {
+                        with_auth(client.get(format!("{endpoint}/health/ready")))
+                            .send()
+                            .await
+                            .is_ok_and(|response| response.status().is_success())
+                    }
+                    crate::inference::InferenceBackend::LlamaCpp => {
+                        let root_ok = with_auth(client.get(&endpoint)).send().await.is_ok();
+                        let health_ok = with_auth(client.get(format!("{endpoint}/health")))
+                            .send()
+                            .await
+                            .is_ok();
+                        root_ok || health_ok
+                    }
+                };
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
@@ -411,6 +428,8 @@ fn api_get_active_session_readiness(
                         "ready": ready,
                         "endpoint": endpoint,
                         "status": session.status,
+                        "backend": session.backend,
+                        "model_identity": session.model_identity,
                     }),
                 )))
             }
@@ -438,6 +457,30 @@ fn api_get_capabilities(
                 let endpoint_kind = state.current_endpoint_kind();
                 let session_kind = state.current_session_kind();
                 let tray_mode = state.tray_mode.lock().unwrap().clone();
+                let active_session = state.get_active_session();
+                let backend = active_session.as_ref().map(|session| session.backend);
+                let model_identity = active_session
+                    .as_ref()
+                    .and_then(|session| session.model_identity.clone());
+                let inference_features = match active_session.as_ref() {
+                    Some(session) if matches!(session.mode, SessionMode::Spawn { .. }) => state
+                        .backend
+                        .lock()
+                        .ok()
+                        .and_then(|backend| match (session.backend, backend.as_ref()) {
+                            (
+                                crate::inference::InferenceBackend::LlamaCpp,
+                                Some(crate::inference::backend::BackendAdapter::LlamaCpp(adapter)),
+                            ) => Some(adapter.capabilities().clone()),
+                            (
+                                crate::inference::InferenceBackend::RapidMlx,
+                                Some(crate::inference::backend::BackendAdapter::RapidMlx(adapter)),
+                            ) => Some(adapter.capabilities().clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default(),
+                    _ => crate::inference::capabilities::CapabilitySet::default(),
+                };
 
                 let (system_reason, gpu_reason, cpu_temp_reason) =
                     state.calculate_availability_reasons();
@@ -447,6 +490,9 @@ fn api_get_capabilities(
                         "capabilities": capabilities,
                         "endpoint_kind": endpoint_kind,
                         "session_kind": session_kind,
+                        "inference_backend": backend,
+                        "model_identity": model_identity,
+                        "inference_features": inference_features,
                         "tray_mode": tray_mode,
                         "availability": {
                             "system": system_reason,
@@ -764,6 +810,14 @@ fn restore_active_session_after_failed_launch(
     }
 }
 
+fn is_private_or_loopback_ip(ip: std::net::IpAddr) -> bool {
+    ip.is_loopback()
+        || matches!(ip, std::net::IpAddr::V4(v4)
+            if v4.octets()[0] == 10
+                || (v4.octets()[0] == 172 && (16..=31).contains(&v4.octets()[1]))
+                || (v4.octets()[0] == 192 && v4.octets()[1] == 168))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -814,6 +868,181 @@ mod tests {
 
         assert_eq!(state.active_session_id.lock().unwrap().as_str(), "newer");
     }
+
+    #[tokio::test]
+    async fn rapid_model_discovery_supports_open_and_protected_endpoints() {
+        let route = warp::path!("v1" / "models")
+            .and(warp::header::optional::<String>("authorization"))
+            .map(|authorization: Option<String>| {
+                if authorization
+                    .as_deref()
+                    .is_some_and(|value| value != "Bearer correct-key")
+                {
+                    warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({"error": "unauthorized"})),
+                        warp::http::StatusCode::UNAUTHORIZED,
+                    )
+                } else {
+                    warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "data": [{"id": "served-rapid-model"}]
+                        })),
+                        warp::http::StatusCode::OK,
+                    )
+                }
+            });
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        tokio::spawn(warp::serve(route).run(([127, 0, 0, 1], port)));
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        let endpoint = format!("http://127.0.0.1:{port}");
+        let client = reqwest::Client::new();
+
+        assert_eq!(
+            discover_rapid_model_identity(&client, &endpoint, None)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("served-rapid-model")
+        );
+        assert_eq!(
+            discover_rapid_model_identity(&client, &endpoint, Some("correct-key"))
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("served-rapid-model")
+        );
+        assert!(
+            discover_rapid_model_identity(&client, &endpoint, Some("wrong-key"))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn rapid_diagnostics_require_a_successful_authenticated_status() {
+        let route = warp::path!("v1" / "status")
+            .and(warp::header::optional::<String>("authorization"))
+            .map(|authorization: Option<String>| {
+                let status = if authorization.as_deref() == Some("Bearer correct-key") {
+                    warp::http::StatusCode::OK
+                } else {
+                    warp::http::StatusCode::UNAUTHORIZED
+                };
+                warp::reply::with_status(warp::reply::json(&serde_json::json!({})), status)
+            });
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        tokio::spawn(warp::serve(route).run(([127, 0, 0, 1], port)));
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        let endpoint = format!("http://127.0.0.1:{port}");
+        let client = reqwest::Client::new();
+
+        assert!(
+            inference_diagnostics_available(
+                &client,
+                &endpoint,
+                crate::inference::InferenceBackend::RapidMlx,
+                Some("correct-key"),
+            )
+            .await
+        );
+        assert!(
+            !inference_diagnostics_available(
+                &client,
+                &endpoint,
+                crate::inference::InferenceBackend::RapidMlx,
+                Some("wrong-key"),
+            )
+            .await
+        );
+    }
+
+    #[test]
+    fn attach_ip_policy_uses_the_full_rfc1918_172_range() {
+        for ip in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.1",
+            "172.31.255.254",
+            "192.168.1.2",
+        ] {
+            assert!(is_private_or_loopback_ip(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in [
+            "172.4.0.1",
+            "172.11.0.1",
+            "172.15.255.254",
+            "172.32.0.1",
+            "8.8.8.8",
+        ] {
+            assert!(!is_private_or_loopback_ip(ip.parse().unwrap()), "{ip}");
+        }
+    }
+}
+
+async fn discover_rapid_model_identity(
+    client: &reqwest::Client,
+    endpoint: &str,
+    api_key: Option<&str>,
+) -> Result<Option<String>, ()> {
+    use futures_util::StreamExt;
+
+    const MAX_MODELS_RESPONSE_BYTES: usize = 64 * 1024;
+    let mut request = client.get(format!("{endpoint}/v1/models"));
+    if let Some(key) = api_key.filter(|key| !key.is_empty()) {
+        request = request.bearer_auth(key);
+    }
+    let response = request.send().await.map_err(|_| ())?;
+    if !response.status().is_success() {
+        return Err(());
+    }
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| ())?;
+        if body.len().saturating_add(chunk.len()) > MAX_MODELS_RESPONSE_BYTES {
+            return Err(());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let value = serde_json::from_slice::<serde_json::Value>(&body).map_err(|_| ())?;
+    let identity = value
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|models| models.first())
+        .and_then(|model| model.get("id"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    Ok(identity)
+}
+
+async fn inference_diagnostics_available(
+    client: &reqwest::Client,
+    endpoint: &str,
+    backend: crate::inference::InferenceBackend,
+    api_key: Option<&str>,
+) -> bool {
+    let diagnostics_path = match backend {
+        crate::inference::InferenceBackend::LlamaCpp => "/health",
+        crate::inference::InferenceBackend::RapidMlx => "/v1/status",
+    };
+    let mut request = client.get(format!(
+        "{}{diagnostics_path}",
+        endpoint.trim_end_matches('/')
+    ));
+    if let Some(key) = api_key.filter(|key| !key.is_empty()) {
+        request = request.bearer_auth(key);
+    }
+    match backend {
+        crate::inference::InferenceBackend::RapidMlx => request
+            .send()
+            .await
+            .is_ok_and(|response| response.status().is_success()),
+        crate::inference::InferenceBackend::LlamaCpp => request.send().await.is_ok(),
+    }
 }
 
 fn api_attach(
@@ -826,6 +1055,7 @@ fn api_attach(
         .and(warp::path::end())
         .and(warp::post())
         .and(warp::header::headers_cloned())
+        .and(warp::body::content_length_limit(16 * 1024))
         .and(warp::body::json())
         .and(with_app_config(app_config))
         .and_then(move |headers: warp::http::HeaderMap,
@@ -875,18 +1105,14 @@ fn api_attach(
                                 ));
                             }
                             if let Some(host) = parsed.host_str()
-                                && let Ok(ip) = host.parse::<std::net::IpAddr>() {
-                                    let private = matches!(ip, std::net::IpAddr::V4(v4)
-                                        if v4.octets()[0] == 10
-                                            || (v4.octets()[0] == 172 && (4..=11).contains(&v4.octets()[1]))
-                                            || (v4.octets()[0] == 192 && v4.octets()[1] == 168));
-                                    if !ip.is_loopback() && !private {
-                                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
-                                            warp::reply::json(&serde_json::json!({"ok": false, "error": "Endpoint must be on a private network"})),
-                                            warp::http::StatusCode::OK,
-                                        ));
-                                    }
-                                }
+                                && let Ok(ip) = host.parse::<std::net::IpAddr>()
+                                && !is_private_or_loopback_ip(ip)
+                            {
+                                return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({"ok": false, "error": "Endpoint must be on a private network"})),
+                                    warp::http::StatusCode::OK,
+                                ));
+                            }
                             s.to_string()
                         } else {
                             return Ok::<_, warp::Rejection>(warp::reply::with_status(
@@ -907,6 +1133,29 @@ fn api_attach(
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_string());
+                let backend = match payload.get("backend") {
+                    Some(value) => match serde_json::from_value::<
+                        crate::inference::InferenceBackend,
+                    >(value.clone()) {
+                        Ok(backend) => backend,
+                        Err(_) => {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "backend must be llama_cpp or rapid_mlx"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+                    },
+                    None => crate::inference::InferenceBackend::LlamaCpp,
+                };
+                let mut model_identity = payload
+                    .get("model_identity")
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string);
 
                 let (api_key, _spawn_match_id) = {
                     let mut effective_key = caller_api_key.clone();
@@ -958,18 +1207,26 @@ fn api_attach(
                     }
                 };
 
-                eprintln!("[info] Health-checking llama-server at {}", endpoint);
-                let mut health_req = client.get(&endpoint);
+                eprintln!("[info] Health-checking inference runtime at {}", endpoint);
+                let health_url = match backend {
+                    crate::inference::InferenceBackend::LlamaCpp => endpoint.clone(),
+                    crate::inference::InferenceBackend::RapidMlx => {
+                        format!("{}/health/ready", endpoint.trim_end_matches('/'))
+                    }
+                };
+                let mut health_req = client.get(&health_url);
                 if let Some(ref key) = api_key {
                     health_req = health_req.header("Authorization", format!("Bearer {}", key));
                 }
                 let server_up = match health_req.send().await {
-                    Ok(resp) => {
-                        eprintln!("[info] llama-server health check status: {}", resp.status());
-                        true
-                    }
+                    Ok(resp) => match backend {
+                        crate::inference::InferenceBackend::LlamaCpp => true,
+                        crate::inference::InferenceBackend::RapidMlx => {
+                            resp.status().is_success()
+                        }
+                    },
                     Err(e) => {
-                        eprintln!("[warn] llama-server health check failed: {}", e);
+                        eprintln!("[warn] inference runtime health check failed: {}", e);
                         false
                     }
                 };
@@ -977,23 +1234,58 @@ fn api_attach(
                     return Ok::<_, warp::Rejection>(warp::reply::with_status(
                         warp::reply::json(&serde_json::json!({
                             "ok": false,
-                            "error": format!("Cannot reach llama-server at {}. Is it running?", endpoint)
+                            "error": format!("Cannot reach the selected inference runtime at {}. Is it ready?", endpoint)
                         })),
                         warp::http::StatusCode::OK,
                     ));
                 }
 
-                let mut metrics_req = client.get(format!("{}/health", endpoint.trim_end_matches('/')));
-                if let Some(ref key) = api_key {
-                    metrics_req = metrics_req.header("Authorization", format!("Bearer {}", key));
+                if backend == crate::inference::InferenceBackend::RapidMlx {
+                    let discovered_model = match discover_rapid_model_identity(
+                        &client,
+                        endpoint.trim_end_matches('/'),
+                        api_key.as_deref(),
+                    )
+                    .await
+                    {
+                        Ok(identity) => identity,
+                        Err(()) => {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Rapid-MLX model discovery failed; verify the endpoint and API key"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+                    };
+                    if model_identity.is_none() {
+                        model_identity = discovered_model;
+                    }
+                    if model_identity.is_none() {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Rapid-MLX model identity could not be discovered; enter its served model name"
+                            })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ));
+                    }
                 }
-                let metrics_available = metrics_req.send().await.is_ok();
+
+                let metrics_available = inference_diagnostics_available(
+                    &client,
+                    &endpoint,
+                    backend,
+                    api_key.as_deref(),
+                )
+                .await;
 
                 let existing_session_id = {
                     let sessions = state.sessions.lock().unwrap();
                     let mut id = sessions.iter().find(|s| {
                         if let SessionMode::Attach { endpoint: ep, .. } = &s.mode {
-                            *ep == endpoint
+                            *ep == endpoint && s.backend == backend
                         } else {
                             false
                         }
@@ -1009,7 +1301,7 @@ fn api_attach(
                                     port,
                                     ..
                                 } = &s.mode {
-                                    *port == port_num
+                                    *port == port_num && s.backend == backend
                                 } else {
                                     false
                                 }
@@ -1024,12 +1316,14 @@ fn api_attach(
                     id
                 } else {
                     let session_id = crate::state::generate_session_id();
-                    let session = crate::state::Session::new_attach(
+                    let mut session = crate::state::Session::new_attach(
                         session_id.clone(),
                         format!("Attached: {}", endpoint),
                         endpoint,
                         api_key.clone(),
                     );
+                    session.backend = backend;
+                    session.model_identity = model_identity.clone();
                     if !state.add_session(session) {
                         return Ok::<_, warp::Rejection>(warp::reply::with_status(
                             warp::reply::json(&serde_json::json!({"ok": false, "error": "Maximum sessions reached"})),
@@ -1042,6 +1336,16 @@ fn api_attach(
                 {
                     let mut sessions = state.sessions.lock().unwrap();
                     if let Some(s) = sessions.iter_mut().find(|s| s.id == session_id) {
+                        s.backend = backend;
+                        s.model_identity = model_identity.clone();
+                        s.launch_requires_api_key = api_key.is_some();
+                        if let SessionMode::Attach {
+                            api_key: session_key,
+                            ..
+                        } = &mut s.mode
+                        {
+                            *session_key = api_key.clone();
+                        }
                         s.last_connected_at = now;
                         s.connect_count += 1;
                         s.last_error = None;
@@ -1053,8 +1357,10 @@ fn api_attach(
                 Ok::<_, warp::Rejection>(warp::reply::with_status(
                     warp::reply::json(&serde_json::json!({
                         "ok": true,
+                        "backend": backend,
+                        "model_identity": model_identity,
                         "warning": if !metrics_available {
-                            Some("llama-server is running but metrics endpoint (/health) is unavailable. Inference metrics will not be available. Start llama-server with --metrics flag to enable metrics.")
+                            Some("The inference runtime is ready, but its diagnostics endpoint is unavailable.")
                         } else {
                             None
                         }

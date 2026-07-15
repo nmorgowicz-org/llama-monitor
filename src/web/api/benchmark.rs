@@ -68,7 +68,7 @@ fn api_benchmark(
                         Err(_) => {
                             return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                                 Box::new(warp::reply::json(&serde_json::json!({
-                                    "error": "No llama-server is currently running."
+                                    "error": "No inference runtime is currently running."
                                 }))),
                             );
                         }
@@ -76,30 +76,16 @@ fn api_benchmark(
                     if !running {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                             Box::new(warp::reply::json(&serde_json::json!({
-                                "error": "No llama-server is currently running."
+                                "error": "No inference runtime is currently running."
                             }))),
                         );
                     }
 
-                    // Build upstream URL
-                    let session = match state.get_active_session() {
-                        Some(s) => s,
-                        None => {
-                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                                Box::new(warp::reply::json(&serde_json::json!({
-                                    "error": "No active session."
-                                }))),
-                            );
-                        }
+                    let prepared = match super::upstream::prepare_inference_request(&state).await {
+                        Ok(prepared) => prepared,
+                        Err(error) => return Err(error),
                     };
-                    let url = match &session.mode {
-                        crate::state::SessionMode::Spawn { port, .. } => {
-                            format!("http://127.0.0.1:{port}/v1/chat/completions")
-                        }
-                        crate::state::SessionMode::Attach { endpoint, .. } => {
-                            format!("{endpoint}/v1/chat/completions")
-                        }
-                    };
+                    let url = prepared.url.clone();
 
                     let prompt =
                         "Explain in one sentence what llama.cpp is used for.";
@@ -113,6 +99,11 @@ fn api_benchmark(
                         // Disable thinking mode so Qwen3 reasoning tokens don't inflate TTFT
                         "chat_template_kwargs": {"enable_thinking": false},
                     });
+                    let payload = prepared.map_chat_body(
+                        &serde_json::to_vec(&payload).map_err(|error| {
+                            warp::reject::custom(super::ApiError::internal(error.to_string()))
+                        })?,
+                    )?;
 
                     let client = match reqwest::Client::builder()
                         .timeout(Duration::from_secs(55))
@@ -137,10 +128,13 @@ fn api_benchmark(
                             let mut generated_tokens = 0u64;
                             let mut prompt_tokens_reported = 0u64;
 
-                            let resp = match client
-                                .post(&url)
-                                .header("Content-Type", "application/json")
-                                .json(&payload)
+                            let resp = match prepared
+                                .authenticate(
+                                    client
+                                        .post(&url)
+                                        .header("Content-Type", "application/json")
+                                        .body(payload.clone()),
+                                )
                                 .send()
                                 .await
                             {

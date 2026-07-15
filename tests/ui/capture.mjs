@@ -998,8 +998,17 @@ async function scenarioWelcome(ctx, options) {
     // Shot 1: the arrival screen with both cards visible.
     await captureShot(page, 'welcome-welcome.png', { fullPage: true });
 
-    // Shot 2: Open setup wizard and capture step 0 so the
-    // two screenshots tell a clear before→after story.
+    // Shot 2: verify the backend-specific Rapid-MLX attach fields in place.
+    const backendSelect = await page.$('#setup-endpoint-backend');
+    if (backendSelect) {
+        await page.select('#setup-endpoint-backend', 'rapid_mlx');
+        await sleep(200);
+        await captureShot(page, 'welcome-rapid-mlx-attach.png', { fullPage: true });
+        await page.select('#setup-endpoint-backend', 'llama_cpp');
+    }
+
+    // Shot 3: Open setup wizard and capture step 0 so the screenshots
+    // tell a clear before→after story.
     const spawnBtn = await page.$('#setup-spawn-wizard-btn');
     if (spawnBtn) {
         try {

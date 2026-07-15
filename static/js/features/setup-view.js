@@ -1348,7 +1348,7 @@ export function renderRecentEndpoints(sessions, activeId) {
 
         const metaEl = document.createElement('div');
         metaEl.className = 'setup-endpoint-meta';
-        const metaParts = [];
+        const metaParts = [session.backend === 'rapid_mlx' ? 'Rapid-MLX' : 'llama.cpp'];
         if (activeId && session.id === activeId) metaParts.push('Active workspace');
         else if (session.status === 'Running') metaParts.push('Last seen running');
         else if (session.status === 'Disconnected') metaParts.push('Ready to reconnect');
@@ -1384,6 +1384,13 @@ export function renderRecentEndpoints(sessions, activeId) {
             if (urlInput) urlInput.value = endpoint;
             const apiKeyInput = document.getElementById('setup-endpoint-api-key');
             if (apiKeyInput) apiKeyInput.value = reconnectApiKey;
+            const backendInput = document.getElementById('setup-endpoint-backend');
+            if (backendInput) {
+                backendInput.value = session.backend === 'rapid_mlx' ? 'rapid_mlx' : 'llama_cpp';
+                backendInput.dispatchEvent(new Event('change'));
+            }
+            const modelInput = document.getElementById('setup-endpoint-model');
+            if (modelInput) modelInput.value = session.model_identity || '';
             await doAttachFromSetup();
         };
 

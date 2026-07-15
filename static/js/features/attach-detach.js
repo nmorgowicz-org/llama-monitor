@@ -330,7 +330,7 @@ export async function doKillLlamaInternal() {
 
 // ── Attach / Detach ────────────────────────────────────────────────────────────
 
-export async function doAttach() {
+export async function doAttach(options = {}) {
     const endpointInput = document.getElementById('server-endpoint');
     const endpoint = endpointInput.value.trim();
 
@@ -343,12 +343,19 @@ export async function doAttach() {
     const apiKeyInput = document.getElementById('setup-endpoint-api-key');
     const apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
 
+    const backend = options.backend || 'llama_cpp';
+    const modelIdentity = options.modelIdentity?.trim() || '';
     const resp = await fetch('/api/attach', {
         method: 'POST',
         headers: (typeof window.authHeaders === 'function')
             ? window.authHeaders({ 'Content-Type': 'application/json' })
             : { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint, api_key: apiKey || undefined }),
+        body: JSON.stringify({
+            endpoint,
+            api_key: apiKey || undefined,
+            backend,
+            model_identity: modelIdentity || undefined,
+        }),
     });
     const data = await resp.json();
 
@@ -448,7 +455,9 @@ export async function doAttachFromSetup() {
     }
 
     showConnectingState();
-    await doAttach();
+    const backend = document.getElementById('setup-endpoint-backend')?.value || 'llama_cpp';
+    const modelIdentity = document.getElementById('setup-endpoint-model')?.value || '';
+    await doAttach({ backend, modelIdentity });
 
     if (btn) {
         btn.disabled = false;
@@ -545,6 +554,13 @@ export function initAttachDetach() {
     // Bind setup page buttons
     const setupAttach = document.getElementById('setup-attach-btn');
     if (setupAttach) setupAttach.addEventListener('click', doAttachFromSetup);
+    const setupBackend = document.getElementById('setup-endpoint-backend');
+    const setupModel = document.getElementById('setup-endpoint-model');
+    const syncAttachBackendFields = () => {
+        if (setupModel) setupModel.hidden = setupBackend?.value !== 'rapid_mlx';
+    };
+    if (setupBackend) setupBackend.addEventListener('change', syncAttachBackendFields);
+    syncAttachBackendFields();
 
     // Setup wizard button — opens the spawn wizard overlay from the welcome screen
     const setupWizardBtn = document.getElementById('setup-spawn-wizard-btn');

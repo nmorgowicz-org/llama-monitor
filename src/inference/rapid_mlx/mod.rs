@@ -11,6 +11,7 @@ use crate::inference::capabilities::CapabilitySet;
 use crate::inference::metrics::InferenceMetricsSnapshot;
 use crate::inference::supervisor::SupervisedLaunch;
 use anyhow::{Result, anyhow};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -100,6 +101,8 @@ pub struct RapidMlxAdapter {
     pub max_cache_blocks: Option<u32>,
     api_key: Option<String>,
     compatibility: CompatibilityProfile,
+    capabilities: CapabilitySet,
+    chat_fields: BTreeSet<&'static str>,
 }
 
 impl RapidMlxAdapter {
@@ -116,6 +119,8 @@ impl RapidMlxAdapter {
             max_cache_blocks: None,
             api_key: None,
             compatibility: CompatibilityProfile::verified_baseline(),
+            capabilities: verified_capabilities(),
+            chat_fields: verified_chat_fields(),
         }
     }
 
@@ -124,6 +129,17 @@ impl RapidMlxAdapter {
         compatibility: CompatibilityProfile,
         api_key: Option<String>,
     ) {
+        let verified = compatibility.state == self::compatibility::CompatibilityState::Verified;
+        self.capabilities = if verified {
+            verified_capabilities()
+        } else {
+            provisional_capabilities()
+        };
+        self.chat_fields = if verified {
+            verified_chat_fields()
+        } else {
+            provisional_chat_fields()
+        };
         self.compatibility = compatibility;
         self.api_key = api_key.filter(|key| !key.is_empty());
     }
@@ -239,30 +255,233 @@ impl RapidMlxAdapter {
     }
 
     pub async fn cancel_request(&self, _port: u16, _request_id: &str) -> Result<()> {
-        Err(anyhow!(
-            "RapidMlxAdapter::cancel_request not implemented (Phase 4)"
-        ))
+        if _request_id.is_empty()
+            || _request_id.len() > 128
+            || !_request_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        {
+            return Err(anyhow!("Rapid-MLX returned an invalid request ID"));
+        }
+        if !self.capabilities.cancellation {
+            return Err(anyhow!(
+                "Rapid-MLX native request cancellation is unavailable because the active runtime does not expose a compatible public request ID"
+            ));
+        }
+        let host = match self.host.as_str() {
+            "0.0.0.0" | "::" | "[::]" => "127.0.0.1",
+            "::1" => "[::1]",
+            host => host,
+        };
+        let url = format!("http://{host}:{}/v1/requests/{}/cancel", _port, _request_id);
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()?;
+        let mut request = client.post(url);
+        if let Some(key) = &self.api_key {
+            request = request.bearer_auth(key);
+        }
+        let response = request.send().await?;
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "Rapid-MLX cancellation returned HTTP {}",
+                response.status()
+            ));
+        }
+        Ok(())
     }
 
     pub fn capabilities(&self) -> &CapabilitySet {
-        static CAPS: CapabilitySet = CapabilitySet {
-            vision: false,
-            mtp: false,
-            cancellation: false,
-            embeddings: false,
-            guided_generation: false,
-            audio: false,
-            tool_parsing: false,
-            automatic_tool_choice: false,
-            reasoning_parser: false,
-            thinking_controls: false,
-            mcp: false,
-            cache_telemetry: false,
-            status_memory_telemetry: true,
-            self_diagnostic: false,
-            interpretability: false,
-            one_shot_launch: true,
+        &self.capabilities
+    }
+
+    pub fn map_chat_request(&self, body: &[u8]) -> Result<Vec<u8>> {
+        map_chat_request_with_fields(body, &self.chat_fields)
+    }
+}
+
+pub fn map_provisional_chat_request(body: &[u8]) -> Result<Vec<u8>> {
+    map_chat_request_with_fields(body, &provisional_chat_fields())
+}
+
+fn map_chat_request_with_fields(body: &[u8], fields: &BTreeSet<&'static str>) -> Result<Vec<u8>> {
+    let value: serde_json::Value = serde_json::from_slice(body)
+        .map_err(|error| anyhow!("Invalid chat request JSON: {error}"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("Chat request must be a JSON object"))?;
+    let mut mapped = serde_json::Map::new();
+    for (key, value) in object {
+        let output_key = if key == "repeat_penalty" {
+            "repetition_penalty"
+        } else {
+            key.as_str()
         };
-        &CAPS
+        if fields.contains(output_key) {
+            mapped.insert(output_key.to_string(), value.clone());
+        }
+    }
+    if !mapped.contains_key("messages") {
+        return Err(anyhow!("Rapid-MLX chat requests require messages"));
+    }
+    if fields.contains("stream_options")
+        && mapped.get("stream").and_then(serde_json::Value::as_bool) == Some(true)
+    {
+        match mapped.get_mut("stream_options") {
+            Some(serde_json::Value::Object(options)) => {
+                options
+                    .entry("include_usage".to_string())
+                    .or_insert(serde_json::Value::Bool(true));
+            }
+            None => {
+                mapped.insert(
+                    "stream_options".to_string(),
+                    serde_json::json!({"include_usage": true}),
+                );
+            }
+            Some(_) => return Err(anyhow!("Rapid-MLX stream_options must be a JSON object")),
+        }
+    }
+    Ok(serde_json::to_vec(&mapped)?)
+}
+
+fn provisional_capabilities() -> CapabilitySet {
+    CapabilitySet {
+        status_memory_telemetry: true,
+        one_shot_launch: true,
+        ..Default::default()
+    }
+}
+
+fn verified_capabilities() -> CapabilitySet {
+    CapabilitySet {
+        // 0.10.9 exposes a cancellation endpoint for its private scheduler ID,
+        // but that ID is not exposed in OpenAI SSE chunks or response headers.
+        // The public chatcmpl-* response ID is not a compatible contract.
+        cancellation: false,
+        guided_generation: true,
+        tool_parsing: true,
+        automatic_tool_choice: true,
+        reasoning_parser: true,
+        thinking_controls: true,
+        status_memory_telemetry: true,
+        one_shot_launch: true,
+        ..Default::default()
+    }
+}
+
+fn provisional_chat_fields() -> BTreeSet<&'static str> {
+    [
+        "messages",
+        "model",
+        "stream",
+        "temperature",
+        "top_p",
+        "top_k",
+        "min_p",
+        "max_tokens",
+        "max_completion_tokens",
+        "stop",
+        "repetition_penalty",
+    ]
+    .into_iter()
+    .collect()
+}
+
+fn verified_chat_fields() -> BTreeSet<&'static str> {
+    let mut fields = provisional_chat_fields();
+    fields.extend([
+        "stream_options",
+        "presence_penalty",
+        "frequency_penalty",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "response_format",
+        "logprobs",
+        "timeout",
+        "enable_thinking",
+        "chat_template_kwargs",
+        "reasoning_effort",
+    ]);
+    fields
+}
+
+#[cfg(test)]
+mod chat_tests {
+    use super::*;
+
+    fn adapter() -> RapidMlxAdapter {
+        RapidMlxAdapter::new(
+            RuntimeMetadata {
+                executable_path: "rapid-mlx".into(),
+                source: runtime::RuntimeSource::Managed,
+                version: "0.10.9".into(),
+            },
+            "model".into(),
+        )
+    }
+
+    #[test]
+    fn verified_mapping_filters_llama_fields_and_preserves_supported_controls() {
+        let mapped = adapter()
+            .map_chat_request(
+                br#"{
+                    "messages":[{"role":"user","content":"hi"}],
+                    "stream":true,
+                    "repeat_penalty":1.1,
+                    "seed":42,
+                    "cache_prompt":true,
+                    "thinking_budget_tokens":2048,
+                    "stream_options":{"include_usage":true},
+                    "tools":[{"type":"function"}],
+                    "reasoning_effort":"high"
+                }"#,
+            )
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&mapped).unwrap();
+        assert_eq!(value["repetition_penalty"], 1.1);
+        assert_eq!(value["stream_options"]["include_usage"], true);
+        assert!(value["tools"].is_array());
+        assert_eq!(value["reasoning_effort"], "high");
+        assert!(value.get("repeat_penalty").is_none());
+        assert!(value.get("seed").is_none());
+        assert!(value.get("cache_prompt").is_none());
+        assert!(value.get("thinking_budget_tokens").is_none());
+    }
+
+    #[test]
+    fn provisional_mapping_omits_unproven_optional_fields() {
+        let mapped = map_provisional_chat_request(
+            br#"{"messages":[],"stream":true,"tools":[],"response_format":{"type":"json_object"},"top_k":20}"#,
+        )
+        .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&mapped).unwrap();
+        assert_eq!(value["top_k"], 20);
+        assert!(value.get("tools").is_none());
+        assert!(value.get("response_format").is_none());
+    }
+
+    #[test]
+    fn verified_stream_mapping_requests_usage_without_overriding_user_choice() {
+        let mapped = adapter()
+            .map_chat_request(br#"{"messages":[],"stream":true}"#)
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&mapped).unwrap();
+        assert_eq!(value["stream_options"]["include_usage"], true);
+
+        let mapped = adapter()
+            .map_chat_request(
+                br#"{"messages":[],"stream":true,"stream_options":{"include_usage":false}}"#,
+            )
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&mapped).unwrap();
+        assert_eq!(value["stream_options"]["include_usage"], false);
+    }
+
+    #[test]
+    fn rapid_mapping_rejects_malformed_or_message_less_requests() {
+        assert!(adapter().map_chat_request(b"not json").is_err());
+        assert!(adapter().map_chat_request(br#"{"stream":true}"#).is_err());
     }
 }

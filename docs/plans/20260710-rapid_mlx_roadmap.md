@@ -351,10 +351,78 @@ cancellation. Launch success alone is not backend integration.
   Rapid-MLX never receives llama.cpp-only generation or model-load controls.
 - **Cancellation**: Supported cancellation is tested end to end; unsupported runtimes
   degrade explicitly without treating the server as failed.
+- **Rapid-MLX 0.10.9 note**: its public SSE `chatcmpl-*` ID is not the private scheduler
+  ID required by the advertised cancellation routes. Keep native cancellation disabled
+  for this profile and prove immediate disconnect-driven scheduler abort instead.
 - **Real Chat Smoke**: On Apple Silicon, launch a small verified model, wait for ready,
   obtain an exact deterministic response through llama-monitor's chat route, then stop.
 - **Checkpoint**: Verifier sign-off followed by
   `feat(chat): route Rapid-MLX conversations and cancellation`.
+
+---
+
+## Phase 3.5 Checkpoint and Handoff — 2026-07-15
+
+**Status: Complete. Stop point requested before Phase 4.**
+
+Phase 3.5 passed the Builder → Verifier gate. The implementation now routes main chat,
+guided chat, notes, suggestions, and benchmarks through the active backend while
+preserving llama.cpp request bodies byte-for-byte. Rapid-MLX requests are filtered by
+the active compatibility profile, translate `repeat_penalty` to
+`repetition_penalty`, inject the persisted model identity, and use transient bearer
+authentication without persisting or logging runtime secrets.
+
+The proxy accepts bounded streaming and non-streaming responses, preserves reasoning,
+tool, and usage fields, handles malformed or unterminated SSE input, and stops local
+forwarding immediately when the browser disconnects. Attach and restored-session flows
+now retain explicit backend and model identity, with legacy attach payloads continuing
+to default to llama.cpp.
+
+### Verification evidence
+
+- Independent verifier sign-off covered 42 Rapid-focused tests, 7 upstream contract
+  tests, 6 stream tests, and authenticated Rapid attach/model-discovery fixtures.
+- Full repository gates passed: `cargo clippy -- -D warnings`; `cargo test` with 817
+  passed and 6 ignored; JavaScript syntax and lint checks; release build; whitespace
+  checks; and `cargo check --target x86_64-pc-windows-gnu`.
+- Isolated Playwright completed with 201 passed, 1 skipped, and 1 transient module-count
+  flake; the focused rerun passed at the unchanged 55-module baseline. The welcome
+  screenshot harness also passed with the Rapid-MLX attach state.
+- Real Apple Silicon app smoke used llama-monitor on `127.0.0.1:17779`, verified
+  managed Rapid-MLX `0.10.9` on `127.0.0.1:18081`, and
+  `mlx-community/Qwen3-0.6B-4bit`.
+- `/api/sessions/spawn` reached ready state with persisted `backend: rapid_mlx` and the
+  expected model identity. A deterministic streaming request sent through
+  llama-monitor's `/api/chat` returned exactly `PHASE35_OK`.
+- The terminal dedicated usage chunk reported 26 prompt tokens, 6 completion tokens,
+  and 32 total tokens. `/api/capabilities` reported the verified Rapid feature profile
+  with native cancellation disabled.
+- The authenticated stop path saved Rapid-MLX's prefix cache and produced a clean
+  intentional supervisor exit. Both isolated processes were stopped after the smoke.
+
+### Cancellation compatibility decision
+
+Rapid-MLX `0.10.9` exposes cancellation routes, but its public SSE `chatcmpl-*` ID is
+not the private scheduler ID those routes require. Native cancellation therefore
+remains disabled for the verified profile. Stop-generation closes the upstream
+response immediately, and Rapid-MLX's disconnect guard aborts scheduler work. Do not
+enable native cancellation until a future runtime exposes and documents a public ID
+contract that is proven end to end.
+
+### Security follow-up
+
+This checkpoint corrected the attach allowlist's RFC1918 `172.16.0.0/12` range. Attach
+URLs that use DNS hostnames still need a separate DNS-resolution and address-pinning
+design to prevent rebinding while preserving friendly LAN hostnames; track that as a
+security hardening item rather than silently rejecting existing hostname-based setups.
+
+### Resume point
+
+Do not redo Phase 3 or Phase 3.5. Commit this checkpoint as
+`feat(chat): route Rapid-MLX conversations and cancellation`, then begin **Phase 4:
+Telemetry Normalization & Dashboard Cards** only when explicitly requested. Keep the
+Phase 5 model resolver, Phase 5.5 Experimental GGUF Import Lab, and Phase 6 runtime
+installer/version manager out of Phase 4.
 
 ---
 

@@ -326,7 +326,12 @@
                             <span class="setup-section-title">Manual</span>
                         </div>
                         <div class="setup-card-form">
+                            <select class="setup-input setup-select" id="setup-endpoint-backend" aria-label="Inference engine">
+                                <option value="llama_cpp">llama.cpp</option>
+                                <option value="rapid_mlx">Rapid-MLX</option>
+                            </select>
                             <input type="url" class="setup-input" id="setup-endpoint-url" placeholder="http://192.168.x.x:8080" autocomplete="off" required aria-label="Server URL">
+                            <input type="text" class="setup-input" id="setup-endpoint-model" placeholder="Model name (auto-detect)" autocomplete="off" aria-label="Served model name" hidden>
                             <input type="password" class="setup-input" id="setup-endpoint-api-key" placeholder="API key (optional)" aria-label="API key (optional)">
                             <button class="setup-btn setup-btn-primary setup-btn-connect" id="setup-attach-btn">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>

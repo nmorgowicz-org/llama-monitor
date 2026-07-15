@@ -61,7 +61,7 @@ fn api_analyze_context_notes(
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
                 }
-                let (url, _permit) = prepare_inference_request(&state).await?;
+                let prepared = prepare_inference_request(&state).await?;
 
                 let recent: Vec<_> = req.messages.iter().rev().take(20).rev().collect();
                 let convo_text = recent
@@ -127,12 +127,20 @@ fn api_analyze_context_notes(
                     "temperature": 0.4,
                     "max_tokens": 1024,
                 });
+                let payload = prepared.map_chat_body(
+                    &serde_json::to_vec(&payload).map_err(|error| {
+                        warp::reject::custom(ApiError::internal(error.to_string()))
+                    })?,
+                )?;
+                let url = prepared.url.clone();
 
                 let response = send_upstream_request_with_retry(|| {
-                    client
-                        .post(&url)
-                        .header("Content-Type", "application/json")
-                        .json(&payload)
+                    prepared.authenticate(
+                        client
+                            .post(&url)
+                            .header("Content-Type", "application/json")
+                            .body(payload.clone()),
+                    )
                 })
                 .await?;
 
