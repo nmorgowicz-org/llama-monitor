@@ -143,6 +143,7 @@ Scenarios:
     filebrowser      File browser modal (Browse buttons in Config modal, modal open)
     panels           Chat config panels (behavior, model, style, debug)
     dashboard        Server tab, GPU section
+    dashboard-rapid-mlx  Deterministic Rapid-MLX telemetry cards (dark and light)
 
   Setup wizard
      spawn-wizard           Steps 1–6: profiles, model, VRAM, parameters, summary, start/close
@@ -1925,6 +1926,54 @@ async function scenarioDashboard(ctx, options) {
         console.log('[CAPTURE] Hardware section not visible; capturing at current scroll position.');
     }
     await captureShot(page, 'dashboard-gpu-section.png');
+}
+
+async function scenarioDashboardRapidMlx(ctx) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    await page.evaluate(async () => {
+        const { switchView } = await import('/js/features/setup-view.js');
+        const { renderRapidMlxCards } = await import('/js/features/rapid-mlx-cards.js');
+        switchView('monitor');
+        document.querySelectorAll('.sidebar-btn').forEach(button => {
+            button.classList.toggle('active', button.dataset.tab === 'server');
+        });
+        document.querySelectorAll('.page').forEach(pageElement => {
+            pageElement.classList.toggle('active', pageElement.id === 'page-server');
+        });
+        renderRapidMlxCards({
+            health: 'Ok', ready: true, model: 'mlx-community/Qwen3-30B-A3B-4bit', uptime_seconds: 3723,
+            prompt_tokens_per_second: 812.4, generation_tokens_per_second: 38.7,
+            running_requests: 1, waiting_requests: 0,
+            active_memory_bytes: 12884901888, peak_memory_bytes: 15032385536, cache_memory_bytes: 536870912,
+            global_cache_hit_rate: 0.82, global_cache_entries: 184,
+            cache_metrics: { hit_rate: 0.82, entry_count: 184, current_memory_bytes: 536870912 },
+            completed_requests_total: 247, prompt_tokens_total: 182430, completion_tokens_total: 58420,
+        }, 1, false, 'capture-rapid');
+        const ids = [...document.querySelectorAll('#rapid-mlx-card-grid [data-card-id]')].map(card => card.dataset.cardId);
+        const expected = ['runtime', 'throughput', 'queue', 'memory', 'cache', 'totals'];
+        if (JSON.stringify(ids) !== JSON.stringify(expected)) throw new Error('Unexpected full Rapid card composition: ' + ids.join(','));
+    });
+    // Allow the shared premium card entrance sequence to settle before the dark still.
+    await sleep(1200);
+    await captureElementScreenshot(page, '#inference-section', 'dashboard-rapid-mlx-dark.png', { padding: 24 });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(300);
+    await captureElementScreenshot(page, '#inference-section', 'dashboard-rapid-mlx-light.png', { padding: 24 });
+    await page.evaluate(async () => {
+        const { renderRapidMlxCards } = await import('/js/features/rapid-mlx-cards.js');
+        document.documentElement.dataset.theme = 'dark';
+        renderRapidMlxCards({
+            health: 'Ok', ready: true, model: 'mlx-community/Small-4bit',
+            running_requests: 0, waiting_requests: 0,
+            active_memory_bytes: 1073741824,
+        }, 1, false, 'capture-rapid-partial');
+        const ids = [...document.querySelectorAll('#rapid-mlx-card-grid [data-card-id]')].map(card => card.dataset.cardId);
+        const expected = ['runtime', 'queue', 'memory'];
+        if (JSON.stringify(ids) !== JSON.stringify(expected)) throw new Error('Unexpected partial Rapid card composition: ' + ids.join(','));
+    });
+    await sleep(300);
+    await captureElementScreenshot(page, '#inference-section', 'dashboard-rapid-mlx-partial.png', { padding: 24 });
 }
 
 // Validation pass for sparkline layouts and clipped section captures.
@@ -3815,6 +3864,7 @@ const SCENARIOS = {
     panels: scenarioPanels,
     models: scenarioModels,
     dashboard: scenarioDashboard,
+    'dashboard-rapid-mlx': scenarioDashboardRapidMlx,
     // Setup wizard
     'spawn-wizard': scenarioSpawnWizard,
     'spawn-wizard-gif': scenarioSpawnWizardGif,

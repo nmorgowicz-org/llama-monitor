@@ -1,0 +1,10 @@
+{
+  "status": "generating",
+  "model": "mlx-community/Qwen3-0.6B-4bit",
+  "generation_tps": 38.25,
+  "prompt_tps": 842.5,
+  "num_running": 1,
+  "num_waiting": 2,
+  "requests": [{ "request_id": "req-1", "status": "generating" }],
+  "progress": { "current": 25, "total": 100 }
+}

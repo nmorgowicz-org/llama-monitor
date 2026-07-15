@@ -79,6 +79,8 @@ pub const FEATURES_NAV_JS: &str = include_str!("../../static/js/features/nav.js"
 pub const FEATURES_NETWORK_DETECTION_JS: &str =
     include_str!("../../static/js/features/network-detection.js");
 pub const FEATURES_PRESETS_JS: &str = include_str!("../../static/js/features/presets.js");
+pub const FEATURES_RAPID_MLX_CARDS_JS: &str =
+    include_str!("../../static/js/features/rapid-mlx-cards.js");
 pub const FEATURES_REMOTE_AGENT_JS: &str = include_str!("../../static/js/features/remote-agent.js");
 pub const FEATURES_ROUTER_JS: &str = include_str!("../../static/js/features/router.js");
 pub const FEATURES_SENSOR_BRIDGE_JS: &str =

@@ -750,6 +750,12 @@ pub fn generate_session_id() -> String {
 pub struct AppState {
     pub gpu_metrics: Arc<Mutex<BTreeMap<String, GpuMetrics>>>,
     pub llama_metrics: Arc<Mutex<LlamaMetrics>>,
+    /// Latest backend-neutral inference sample. Cleared when the active backend changes.
+    pub inference_metrics: Arc<Mutex<Option<crate::inference::metrics::InferenceMetricsSnapshot>>>,
+    pub inference_poll_sequence: Arc<std::sync::atomic::AtomicU64>,
+    pub inference_poll_failed: Arc<AtomicBool>,
+    pub inference_metrics_session_id: Arc<Mutex<String>>,
+    pub inference_poll_failures: Arc<std::sync::atomic::AtomicU64>,
     pub server_logs: Arc<Mutex<VecDeque<String>>>,
     // Stores the PID of the running llama-server child.  The Child handle itself
     // is moved directly into the death_watcher task so it can call wait(); stop_server
@@ -821,6 +827,11 @@ impl Default for AppState {
         Self {
             gpu_metrics: Arc::new(Mutex::new(BTreeMap::new())),
             llama_metrics: Arc::new(Mutex::new(LlamaMetrics::default())),
+            inference_metrics: Arc::new(Mutex::new(None)),
+            inference_poll_sequence: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            inference_poll_failed: Arc::new(AtomicBool::new(false)),
+            inference_metrics_session_id: Arc::new(Mutex::new(String::new())),
+            inference_poll_failures: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             server_logs: Arc::new(Mutex::new(VecDeque::new())),
             server_child: Arc::new(tokio::sync::Mutex::new(None)),
             server_stopping: Arc::new(AtomicBool::new(false)),
@@ -936,6 +947,11 @@ impl AppState {
         let state = Self {
             gpu_metrics: Arc::new(Mutex::new(BTreeMap::new())),
             llama_metrics: Arc::new(Mutex::new(LlamaMetrics::default())),
+            inference_metrics: Arc::new(Mutex::new(None)),
+            inference_poll_sequence: Arc::new(AtomicU64::new(0)),
+            inference_poll_failed: Arc::new(AtomicBool::new(false)),
+            inference_metrics_session_id: Arc::new(Mutex::new(String::new())),
+            inference_poll_failures: Arc::new(AtomicU64::new(0)),
             server_logs: Arc::new(Mutex::new(VecDeque::new())),
             server_child: Arc::new(tokio::sync::Mutex::new(None)),
             server_stopping: Arc::new(AtomicBool::new(false)),

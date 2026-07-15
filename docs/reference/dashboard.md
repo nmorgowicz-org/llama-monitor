@@ -710,3 +710,20 @@ Open the shortcuts modal with `Ctrl+/`.
 | `Escape` | Close the active modal |
 
 ![Keyboard Shortcuts](../screenshots/panels-keyboard-shortcuts.png)
+# Backend-aware inference telemetry
+
+The performance dashboard selects its inference cards from the active runtime's
+normalized telemetry contract. llama.cpp retains its native throughput, generation,
+context, slot, speculative-decoding, and sampler views. Rapid-MLX instead exposes only
+metrics its server reports natively: runtime/model state, prompt and generation
+throughput, request queue, Metal runtime memory, recognized cache statistics,
+cumulative totals, recognized request activity, and optional progress.
+
+Missing metrics do not become zero or permanent `N/A` placeholders. A reported
+`0.0` throughput is displayed as zero. Optional cards retain their last valid sample
+with a visible last-seen age for two subsequent missing polls and are removed on the
+third. Runtime state remains visible as degraded when telemetry disconnects, while
+recognized live progress uses an accessible progress bar. Unsupported cards are
+removed from the document so the grid reflows and stale controls are not exposed to
+keyboard or accessibility navigation. Before Rapid-MLX's first successful status
+sample, the region shows one compact loading status.

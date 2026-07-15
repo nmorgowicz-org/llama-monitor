@@ -226,6 +226,10 @@ pub fn ws_route(
                                         Default::default()
                                     };
                                     let llama = s.llama_metrics.lock().unwrap().clone();
+                                    let inference = s.inference_metrics.lock().unwrap().clone();
+                                    let inference_session_id =
+                                        s.inference_metrics_session_id.lock().unwrap().clone();
+                                    let inference_poll_sequence = s.inference_poll_sequence.load(Ordering::Relaxed);
                                     let system = if host_metrics_available {
                                         Some(s.system_metrics.lock().unwrap().clone())
                                     } else {
@@ -240,6 +244,18 @@ pub fn ws_route(
                                         .collect();
                                     let active_session_id =
                                         s.active_session_id.lock().unwrap().clone();
+                                    let inference_matches_session =
+                                        inference_session_id == active_session_id;
+                                    let inference = inference.filter(|_| inference_matches_session);
+                                    let inference_poll_failed = inference_matches_session
+                                        && s.inference_poll_failed.load(Ordering::Relaxed);
+                                    let inference_sampled_at_unix_ms = inference.as_ref().and_then(|sample| {
+                                        sample
+                                            .sampled_at
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .ok()
+                                            .map(|duration| duration.as_millis() as u64)
+                                    });
 
                                     let sessions = s.sessions.lock().unwrap();
                                     let session_mode = sessions
@@ -264,6 +280,10 @@ pub fn ws_route(
                                             }
                                         })
                                         .unwrap_or_default();
+                                    let active_backend = sessions
+                                        .iter()
+                                        .find(|ss| ss.id == active_session_id)
+                                        .map(|ss| ss.backend);
                                     drop(sessions);
 
                                     let capabilities = s.calculate_capabilities();
@@ -325,6 +345,11 @@ pub fn ws_route(
                                         "sleep_mode_manual": is_manual,
                                         "gpu": gpu,
                                         "llama": llama,
+                                        "backend": active_backend.or_else(|| inference.as_ref().map(|sample| sample.backend)),
+                                        "inference": inference.clone(),
+                                        "inference_sampled_at_unix_ms": inference_sampled_at_unix_ms,
+                                        "inference_poll_sequence": inference_poll_sequence,
+                                        "inference_poll_failed": inference_poll_failed,
                                         "system": system,
                                         "logs": logs,
                                         "last_spawn_cmd": last_spawn_cmd,

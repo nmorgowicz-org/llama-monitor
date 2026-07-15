@@ -72,6 +72,7 @@ import { hideConnectingState, switchView } from './setup-view.js';
 import Router from './router.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { loadPresets, syncSelectedPresetSelection } from './presets.js';
+import { renderRapidMlxCards, restoreLlamaCards } from './rapid-mlx-cards.js';
 
 // ── Cached DOM elements (populated at init time to avoid repeated queries) ──
 let cachedElements = null;
@@ -766,7 +767,7 @@ function updateServerState(d) {
 
     setLastServerState(d.server_running);
     setLastLlamaMetrics(d.llama);
-    setLastRapidMlxMetrics(d.rapid_mlx ?? null);
+    setLastRapidMlxMetrics(d.backend === 'rapid_mlx' ? (d.inference ?? null) : null);
     // Normalize context capacity to the actual loaded limit.
     // KV-only reports can be stale; prefer reported capacity, then KV max, then a
     // safe default so context-pressure math is consistent across telemetry and chat.
@@ -816,7 +817,22 @@ function updateInferenceMetrics(d) {
     const rm = getLastRapidMlxMetrics();
     const hasActiveEndpoint = !!d.active_session_id;
     const ce = cachedElements;
-    const backend = d.backend || (l ? 'llama' : (rm ? 'rapid_mlx' : 'unknown'));
+    const backend = d.backend || (rm ? 'rapid_mlx' : (l ? 'llama_cpp' : 'unknown'));
+
+    if (backend === 'rapid_mlx') {
+        renderRapidMlxCards(
+            rm,
+            d.inference_poll_sequence,
+            d.inference_poll_failed === true,
+            d.active_session_id,
+            d.inference_sampled_at_unix_ms
+        );
+        const hostMetricsVisible = d.host_metrics_available === true;
+        setMetricSectionVisibility('gpu-card', hostMetricsVisible && !!d.capabilities?.gpu, 'gpu-section');
+        setMetricSectionVisibility('system-card', hostMetricsVisible && !!d.capabilities?.system, 'system-section');
+        return;
+    }
+    restoreLlamaCards();
 
     const promptEl = ce.mPrompt;
     const genEl = ce.mGen;
@@ -832,13 +848,13 @@ function updateInferenceMetrics(d) {
     const promptDeltaEl = ce.mPromptDelta;
     const genDeltaEl = ce.mGenDelta;
 
-    const promptRate = (backend === 'llama' ? l?.prompt_tokens_per_sec : rm?.generation_tokens_per_second) || 0;
-    const genRate = (backend === 'llama' ? l?.generation_tokens_per_sec : rm?.generation_tps) || 0;
-    const promptDisplayRate = promptRate > 0 ? promptRate : (backend === 'llama' ? l?.last_prompt_tokens_per_sec : 0) || 0;
-    const genDisplayRate = genRate > 0 ? genRate : (backend === 'llama' ? l?.last_generation_tokens_per_sec : 0) || 0;
+    const promptRate = l?.prompt_tokens_per_sec || 0;
+    const genRate = l?.generation_tokens_per_sec || 0;
+    const promptDisplayRate = promptRate > 0 ? promptRate : l?.last_prompt_tokens_per_sec || 0;
+    const genDisplayRate = genRate > 0 ? genRate : l?.last_generation_tokens_per_sec || 0;
     const promptAgeMs = l?.last_prompt_throughput_unix_ms || 0;
     const genAgeMs = l?.last_generation_throughput_unix_ms || 0;
-    const latestThroughputMs = (backend === 'llama') ? Math.max(l?.last_prompt_throughput_unix_ms || 0, l?.last_generation_throughput_unix_ms || 0) : 0;
+    const latestThroughputMs = Math.max(l?.last_prompt_throughput_unix_ms || 0, l?.last_generation_throughput_unix_ms || 0);
     const throughputActive = promptRate > 0 || genRate > 0;
 
     if (!throughputActive) cardStaleness.throughput++;
@@ -935,7 +951,7 @@ function updateInferenceMetrics(d) {
     updateRequestActivity(taskId, generationActive, generated, nowMs);
     renderActivityRail(generationActive);
     renderRecentTask();
-    if (backend === 'llama') {
+    if (backend === 'llama_cpp') {
         renderSlotGrid(l, hasActiveEndpoint);
         renderSlotUtilization(l);
         renderBatchEfficiency(l);

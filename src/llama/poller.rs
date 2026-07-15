@@ -3,6 +3,54 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::state::AppState;
 
+fn spawned_base_url(port: u16, bind_host: Option<&str>) -> String {
+    let host = crate::web::api::upstream::local_connect_host(bind_host);
+    format!("http://{host}:{port}")
+}
+
+fn reset_inference_poll_state_if_session_changed(
+    state: &AppState,
+    active_id: &str,
+    session_backend: crate::inference::InferenceBackend,
+) {
+    let mut current = state.inference_metrics.lock().unwrap();
+    let mut sampled_session = state.inference_metrics_session_id.lock().unwrap();
+    let session_changed = current
+        .as_ref()
+        .is_some_and(|snapshot| snapshot.backend != session_backend)
+        || *sampled_session != active_id;
+    if session_changed {
+        *current = None;
+        *sampled_session = active_id.to_string();
+        state
+            .inference_poll_failed
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        state
+            .inference_poll_failures
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+fn record_rapid_poll_liveness(state: &AppState, succeeded: bool) {
+    state
+        .inference_poll_failed
+        .store(!succeeded, std::sync::atomic::Ordering::Relaxed);
+    if succeeded {
+        state
+            .inference_poll_failures
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        *state.server_running.lock().unwrap() = true;
+        return;
+    }
+    let failures = state
+        .inference_poll_failures
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        + 1;
+    if failures >= 3 {
+        *state.server_running.lock().unwrap() = false;
+    }
+}
+
 pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
@@ -33,7 +81,7 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
         }
 
         // Determine endpoint and optional API key from active session
-        let (base, api_key) = {
+        let (base, api_key, session_backend) = {
             let session = {
                 let sessions = state.sessions.lock().unwrap();
                 sessions.iter().find(|s| s.id == active_id).cloned()
@@ -41,10 +89,18 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
 
             if let Some(sess) = session {
                 match sess.mode {
-                    crate::state::SessionMode::Spawn { port, api_key, .. } => {
-                        (format!("http://127.0.0.1:{}", port), api_key)
+                    crate::state::SessionMode::Spawn {
+                        port,
+                        bind_host,
+                        api_key,
+                    } => (
+                        spawned_base_url(port, bind_host.as_deref()),
+                        api_key,
+                        sess.backend,
+                    ),
+                    crate::state::SessionMode::Attach { endpoint, api_key } => {
+                        (endpoint, api_key, sess.backend)
                     }
-                    crate::state::SessionMode::Attach { endpoint, api_key } => (endpoint, api_key),
                 }
             } else {
                 enabled = false;
@@ -52,6 +108,7 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
                 continue;
             }
         };
+        reset_inference_poll_state_if_session_changed(&state, &active_id, session_backend);
 
         // Helper to add auth header if API key is set
         fn with_auth(
@@ -64,10 +121,23 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             req
         }
 
-        // First check if server is up at all
-        let server_up = with_auth(client.get(&base), &api_key).send().await.is_ok();
+        // llama.cpp retains its historical root + /health liveness probes. Rapid-MLX
+        // performs its endpoint-specific /health probe inside the normalized poll.
+        let server_up = if matches!(
+            session_backend,
+            crate::inference::InferenceBackend::RapidMlx
+        ) {
+            true
+        } else {
+            with_auth(client.get(&base), &api_key).send().await.is_ok()
+        };
 
-        let server_reachable = if server_up {
+        let server_reachable = if matches!(
+            session_backend,
+            crate::inference::InferenceBackend::RapidMlx
+        ) {
+            true
+        } else if server_up {
             // Try /health for detailed status
             match with_auth(client.get(format!("{base}/health")), &api_key)
                 .send()
@@ -93,8 +163,12 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             false
         };
 
-        // Update server_running state with hysteresis (only change on state transition)
-        {
+        // llama.cpp retains its historical liveness update. Rapid-MLX is updated only
+        // after a normalized poll so a failed poll cannot briefly flip it back online.
+        if matches!(
+            session_backend,
+            crate::inference::InferenceBackend::LlamaCpp
+        ) {
             let mut running = state.server_running.lock().unwrap();
             if server_reachable != *running {
                 *running = server_reachable;
@@ -108,9 +182,11 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             continue;
         }
 
-        // Use the backend adapter to poll normalized metrics
+        // Use the backend adapter to poll normalized metrics. Attached Rapid-MLX
+        // sessions construct a transient poller from their protected session key;
+        // they do not have a spawned adapter in state.backend.
         let backend = state.backend.lock().unwrap().clone();
-        if let Some(backend) = backend {
+        {
             let port = if let Some(sess) = {
                 let sessions = state.sessions.lock().unwrap();
                 sessions.iter().find(|s| s.id == active_id).cloned()
@@ -127,9 +203,45 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
                 0
             };
 
-            if port != 0
-                && let Ok(snapshot) = backend.poll_metrics(port, &active_id).await
-            {
+            let snapshot_result = if matches!(
+                session_backend,
+                crate::inference::InferenceBackend::RapidMlx
+            ) {
+                crate::inference::rapid_mlx::poller::RapidMlxPoller::from_base_url(
+                    base.clone(),
+                    api_key.as_deref(),
+                )
+                .poll()
+                .await
+            } else if let (Some(backend), true) = (backend, port != 0) {
+                backend.poll_metrics(port, &active_id).await
+            } else {
+                Err(anyhow::anyhow!("active backend adapter unavailable"))
+            };
+
+            state
+                .inference_poll_sequence
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if matches!(
+                session_backend,
+                crate::inference::InferenceBackend::RapidMlx
+            ) {
+                record_rapid_poll_liveness(&state, snapshot_result.is_ok());
+            }
+            if let Ok(snapshot) = snapshot_result {
+                if matches!(
+                    session_backend,
+                    crate::inference::InferenceBackend::LlamaCpp
+                ) {
+                    state
+                        .inference_poll_failed
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                    state
+                        .inference_poll_failures
+                        .store(0, std::sync::atomic::Ordering::Relaxed);
+                }
+                *state.inference_metrics.lock().unwrap() = Some(snapshot.clone());
+                *state.inference_metrics_session_id.lock().unwrap() = active_id.clone();
                 let now_ms = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -212,7 +324,10 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
         }
 
         // Poll /v1/models — get model name and metadata
-        if let Ok(resp) = with_auth(client.get(format!("{base}/v1/models")), &api_key)
+        if matches!(
+            session_backend,
+            crate::inference::InferenceBackend::LlamaCpp
+        ) && let Ok(resp) = with_auth(client.get(format!("{base}/v1/models")), &api_key)
             .send()
             .await
             && let Ok(body) = resp.text().await
@@ -241,5 +356,68 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             poll_interval
         };
         tokio::time::sleep(Duration::from_secs(interval_secs)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        record_rapid_poll_liveness, reset_inference_poll_state_if_session_changed, spawned_base_url,
+    };
+    use crate::inference::InferenceBackend;
+    use crate::state::AppState;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn spawned_polling_uses_a_connectable_bind_host() {
+        assert_eq!(spawned_base_url(8080, None), "http://127.0.0.1:8080");
+        assert_eq!(
+            spawned_base_url(8080, Some("0.0.0.0")),
+            "http://127.0.0.1:8080"
+        );
+        assert_eq!(spawned_base_url(8080, Some("::1")), "http://[::1]:8080");
+        assert_eq!(
+            spawned_base_url(8080, Some("192.168.1.5")),
+            "http://192.168.1.5:8080"
+        );
+    }
+
+    #[test]
+    fn switching_sessions_resets_telemetry_failure_hysteresis() {
+        let state = AppState::default();
+        *state.inference_metrics_session_id.lock().unwrap() = "session-a".to_string();
+        state.inference_poll_failed.store(true, Ordering::Relaxed);
+        state.inference_poll_failures.store(2, Ordering::Relaxed);
+
+        reset_inference_poll_state_if_session_changed(
+            &state,
+            "session-b",
+            InferenceBackend::RapidMlx,
+        );
+
+        assert_eq!(
+            state.inference_metrics_session_id.lock().unwrap().as_str(),
+            "session-b"
+        );
+        assert!(!state.inference_poll_failed.load(Ordering::Relaxed));
+        assert_eq!(state.inference_poll_failures.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn sustained_rapid_poll_failure_does_not_flip_back_to_running() {
+        let state = AppState::default();
+        *state.server_running.lock().unwrap() = true;
+
+        record_rapid_poll_liveness(&state, false);
+        record_rapid_poll_liveness(&state, false);
+        assert!(*state.server_running.lock().unwrap());
+        record_rapid_poll_liveness(&state, false);
+        assert!(!*state.server_running.lock().unwrap());
+        record_rapid_poll_liveness(&state, false);
+        assert!(!*state.server_running.lock().unwrap());
+
+        record_rapid_poll_liveness(&state, true);
+        assert!(*state.server_running.lock().unwrap());
+        assert_eq!(state.inference_poll_failures.load(Ordering::Relaxed), 0);
     }
 }

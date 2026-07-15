@@ -473,6 +473,58 @@ Implement normalized metrics polling for Rapid-MLX and update the UI to render c
 
 ---
 
+## Phase 4 Checkpoint and Handoff — 2026-07-15
+
+**Status: Complete. Stop point requested before Phase 5.**
+
+Phase 4 passed the Builder → Verifier gate after a corrective audit. The shared poller
+now produces backend-neutral inference snapshots for spawned and attached Rapid-MLX
+sessions. It authenticates `/health`, `/v1/status`, and optional `/v1/cache/stats`
+requests, applies endpoint-specific deadlines and body limits, converts GiB values
+exactly, and tolerates missing or future fields without converting absence into zero.
+Only semantically recognized cache, request-identity, and progress fields cross the
+WebSocket boundary; opaque request content and unknown cache payloads are discarded.
+
+The dashboard now mounts cards from available capabilities instead of preserving a
+llama.cpp-shaped grid. Rapid-MLX can render runtime, throughput, queue, Metal runtime
+memory, prefix/cache, totals, recognized request activity, and accessible live progress.
+Unsupported llama.cpp cards are removed from the DOM and restored on backend switch.
+Cards preserve real zero values, show a last-seen age while stale, disappear after the
+third missing poll, and reset between sessions. Failed polling leaves runtime identity
+visible as degraded and cannot repeatedly flip a disconnected session back online.
+
+### Verification evidence
+
+- Independent verification first rejected eight contract gaps. Corrections added
+  stable failure hysteresis, per-session failure reset, explicit bind-host/IPv6 polling,
+  degraded runtime state, strict runtime-card requirements, an ARIA progress bar,
+  semantic cache normalization, a generic-only WebSocket contract, and last-seen age.
+- Rapid poller fixtures cover authentication, unknown/missing fields, malformed required
+  status, optional cache failure, invalid cache shapes, stripped opaque request fields,
+  exact GiB conversion, zero-versus-missing values, and recognized multimodal cache.
+- Focused dashboard Playwright covers capability mounting, XSS-safe text, true zero
+  rendering, three-poll staleness, session reset, DOM restoration, degraded telemetry,
+  and progress-bar semantics.
+- The screenshot harness produced and visually verified dark, light, and partial
+  `dashboard-rapid-mlx` compositions. The cards use theme tokens, responsive auto-fit,
+  and reduced-motion behavior.
+- Real Apple Silicon smoke used llama-monitor on `127.0.0.1:17779`, Rapid-MLX `0.10.9`
+  on `127.0.0.1:18081`, and `mlx-community/Qwen3-0.6B-4bit`. Live DOM values included
+  zero throughput/queue, Metal allocation, cache entries, and zero cumulative totals;
+  llama.cpp generation, context, and slot cards were absent. Both processes stopped
+  cleanly with Rapid-MLX prefix-cache persistence.
+- Full repository clippy, Rust tests, JavaScript validation/lint, whitespace check,
+  release build, formatting, isolated Playwright, and Windows cross-check gates passed.
+
+### Resume point
+
+Do not redo Phase 4. Commit this checkpoint as
+`feat(ui): render backend-capability telemetry`, then begin **Phase 5: Native MLX and
+Authoritative Safetensors Resolution** only when explicitly requested. Phase 5.5 GGUF
+import exploration and Phase 6 runtime management remain separate later gates.
+
+---
+
 ## Phase 5: Native MLX and Authoritative Safetensors Resolution
 
 ### Phase Objective

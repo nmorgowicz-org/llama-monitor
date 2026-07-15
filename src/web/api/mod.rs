@@ -29,7 +29,7 @@ mod spawn_wizard;
 mod templates;
 mod tls;
 mod tokens;
-mod upstream;
+pub(crate) mod upstream;
 mod vram;
 
 pub(crate) use common::ApiError;
