@@ -751,6 +751,11 @@ quantization family at a time based on real parity evidence.
   active `v0.10.9` runtime or any external Brew/Pip installation. A manual isolated
   harness is acceptable in Phase 5.5 if the production updater is not yet implemented;
   Phase 6 remains responsible for the user-facing runtime manager.
+- Complete the R0.75 runtime/transport hardening defined in the detailed research plan:
+  offload blocking model hashing/scans, add backend-aware bounded concurrency, bound SSE
+  backpressure, reuse HTTP/poller clients, and preserve a raw Rapid-MLX SSE fast path.
+- Fold inventory/platform caching and incremental Rapid-MLX telemetry rendering into the
+  R4 Import Lab UX rather than shipping another full-refetch/full-DOM-rebuild flow.
 
 ### Hard Gates (Verification)
 
@@ -780,6 +785,11 @@ quantization family at a time based on real parity evidence.
   profile, readiness, deterministic chat, telemetry, stop, atomic activation, retained
   last-known-good `v0.10.9`, and rollback for Rapid-MLX `v0.10.10`. Any failure leaves
   the prior runtime active with bounded, redacted diagnostics.
+- **Transport Hardening**: Large hashing/scans do not block Tokio workers; llama.cpp
+  remains serialized; Rapid-MLX gains bounded concurrent requests without stale-session
+  routing; slow SSE consumers remain memory-bounded and clean up upstream work.
+- **UI Efficiency**: Search/filter/sort/view changes reuse the in-memory inventory and
+  shared platform state, while telemetry updates preserve stable accessible card DOM.
 - **Checkpoint**: Verifier sign-off followed by
   `feat(models): add verified experimental GGUF import`.
 

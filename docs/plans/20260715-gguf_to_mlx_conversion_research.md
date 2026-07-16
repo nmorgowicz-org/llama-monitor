@@ -8,7 +8,7 @@
 | Initial host | Apple Silicon macOS |
 | Verified native runtime baseline | Rapid-MLX `v0.10.10` current, `v0.10.9` retained rollback / mlx-lm |
 | First upgrade qualification | Rapid-MLX `v0.10.10` at `5ca536275e89ddf0de3b49bd6f55fad80e42656e` |
-| Candidate reverse converter | `barrontang/gguf2mlx` at audited SHA `6a0da6529f233df79362cbf62dd96221c895351f` |
+| Reverse-converter research seed | Minimal llama-monitor fork of `barrontang/gguf2mlx` at audited SHA `6a0da6529f233df79362cbf62dd96221c895351f`; never run unmodified |
 
 ## Executive Decision
 
@@ -518,6 +518,120 @@ Remaining Phase 6 follow-through:
 - Gate: written selection with primary-source citations and rejected alternatives.
 - Checkpoint: `docs(models): select GGUF recovery toolchain`.
 
+#### R0 evidence matrix and selection (2026-07-16)
+
+Status: **complete**. No inspected general-purpose converter is safe to invoke
+unmodified. R1 may build the metadata-only inspector; R2 must use the pinned,
+profile-scoped fork and wrapper contract selected below.
+
+| Candidate | Identity, license, activity, distribution | CLI/API and claimed coverage | Source truth, tests, and failure semantics | Security / supply-chain fit | R0 decision |
+|---|---|---|---|---|---|
+| `barrontang/gguf2mlx` | `main` and audited snapshot are `6a0da6529f233df79362cbf62dd96221c895351f`, merged 2026-07-09. No Git tag or GitHub release existed. `pyproject.toml` declares version `2.0.2` and MIT, but the repository has no tracked `LICENSE` file and GitHub reports no detected license. The named PyPI project endpoint returned 404 during this survey, so there is no PyPI artifact/provenance to pin. The merge commit is GitHub-verified. | Importable Python `convert()` plus `gguf2mlx` CLI with `--input`, `--output`, `--dtype`, and `--skip-weights`. README claims every quant from Q2_K through F16 and 45+ architectures. Source explicitly handles F32/F16/F64/integer tensors and delegates every other enum to the installed `gguf.quants.dequantize`; `gguf>=0.18.0` is only a lower bound. Architecture entries and config generation are mappings/heuristics, not load or parity evidence. | Unknown metadata/name falls back to `llama`; config invents defaults such as 32 layers, 4096 hidden size, 32 heads, and 4096 context. Per-tensor dequantization or processing exceptions increment `skipped` and continue; orphaned split tensors can be discarded; any non-empty tensor set is sharded and the tool prints `Conversion complete` even when tensors were skipped. Main contains five smoke/unit test functions. Its test header refers to opt-in `tests/test_e2e.py`, but that file is absent. There is no checked-in real-model corpus, runtime-load gate, tokenizer parity gate, cancellation test, or malformed-input corpus. | No checked-in CI workflow or dependency lock. README installation tracks mutable Git `main`; dependencies use floors. The caller chooses an arbitrary existing output directory, which is created/written in place before conversion is known good. Logs are free-form and unbounded for an app protocol. | **Fork as a seed, reject upstream execution.** Preserve attribution and the declared MIT terms in our snapshot. Pin the Git tree and every Python artifact by hash. Retain only audited GGUF reading/dequantization and profile-needed mapping code; patch fail-open behavior before R2. |
+| `acampkin95/gguf-to-mlx` | Current `main` is unsigned `cc2177738694902444a824ea3ee441dd9e9929ad` from 2026-07-07. The only tag/release is `v1.1.0` at `e44960ab7f44730dd17c54fb4be98dce3dc1dc4e`; current docs call HEAD `v1.4.0`, while `pyproject.toml` still says `1.0.0`. MIT text is tracked. The named PyPI endpoint also returned 404. | `cpmm`/`convert.py` supplies guided menus, scanning, Hugging Face download, resource estimates, 2/4/8-bit mlx-lm re-quantization, validation, and optional source deletion. It vendors a divergent older `gguf2mlx` core rather than independently reconstructing models. Dependencies including `gguf`, `mlx`, `mlx-lm`, `transformers`, and `requests` are broad minimums. | The vendored core also defaults unknown architectures to `llama`, skips `None` mappings, continues after dequantization/processing errors, and succeeds with a partial tensor set. Its `validate_output()` catches load/config failures, warns, and explicitly never blocks the pipeline. The test file has 326 test functions and the project reports 326 passing tests, but inspected GGUF-reader/download/conversion paths are mocked or synthetic; there is no checked-in real-GGUF end-to-end corpus or behavioral parity gate. | Much larger surface than needed: interactive prompts, network search/download, config/token persistence, mutable output overwrite, and `--delete-gguf`. No checked-in CI workflow or dependency lock; HEAD is not release-identical or version-identical. These features duplicate app-owned policy and expand the trust boundary. | **Reject.** Useful UX ideas do not compensate for the same unsafe conversion core, non-blocking validation, version ambiguity, and unnecessary network/deletion surface. Do not vendor or shell out to it. |
+| `chaosste/local-mlx-tune` | Unsigned `5bbdc251916497f7b751384d9aee2595c5a34cf6`, 2026-05-31; no tag/release. | Shell workflow installs `barrontang/gguf2mlx` from mutable Git `main`, invokes its CLI, then optionally runs `mlx_lm.convert`. | It is not an independent converter. The repository adds a Gemma 3 post-hoc config patch containing further defaults and explicitly describes the GGUF/Gemma path as unreliable. It adds no strict tensor-closure or real conversion corpus for our profiles. | Unpinned Git dependency and shell orchestration violate the managed, hash-pinned adapter boundary. | **Reject as a tool.** Keep only as corroborating evidence that plausible config output still needs model-specific repair. |
+| `duoyuncloud/ModelConverterTool` | Unsigned `dcac0a0fdf0153c1d4b52bbc3af4438b91a67c38`, last pushed 2025-08-15; no inspected tag/release or detected license. | Advertises many input/output formats, including GGUF and MLX. | Source implements Hugging Face/model-object -> official `mlx_lm.convert` and Hugging Face -> llama.cpp GGUF export. It does not implement arbitrary GGUF -> recovered HF/MLX weights. Its MLX validation checks config/weight presence, with optional one-token inference, rather than reverse-mapping closure/parity. | It may clone mutable `mlx-examples` HEAD at runtime and removes/replaces output directories. That is incompatible with pinned offline execution and app-owned atomic staging. | **Reject.** It is a forward multi-format wrapper, not a reverse converter. |
+| `kuotient/hy-mt2-mlx` | Unsigned `cc3b9ce816a3ea40aa470361ec71e43d4104d7a9`, 2026-07-03; Apache-2.0 with tracked license/notice; no tag/release. | Converts one Hy-MT2 1.25-bit/STQ1_0 architecture to an MLX model using an authoritative reference directory. | Not general-purpose, but its source demonstrates the correct profile model: exact tensor-name allowlist, asserted quant types, per-tensor round-trip checks, exactly 224 linear tensors, required authoritative config plus tokenizer assets sourced from the same reference directory, real-GGUF opt-in tests, and a llama.cpp-vs-MLX greedy parity harness. Individual missing tokenizer files are silently skipped, so the stricter R2 asset-closure gate remains necessary. It still writes directly to the chosen output and uses assertions in conversion code, so it is not reusable unchanged. | Dependencies use minimum versions and there is no release artifact, but the narrow mapping and explicit corpus greatly reduce semantic ambiguity. | **Reject as a dependency; accept as design evidence.** Its architecture-specific, exact-count, real-fixture approach validates this plan's profile-by-profile strategy. |
+
+Repository/code search found no maintained official llama.cpp, mlx-lm, or Rapid-MLX
+GGUF -> Hugging Face/MLX reverse path. Other results were model managers, inference
+engines, forward exporters, or one-model experiments rather than credible general
+reverse converters. Absence from this bounded survey is not proof that no private or
+future converter exists; R5 must re-run this evidence check before each new family is
+promoted.
+
+##### Selected R1/R2 toolchain
+
+1. **R1 is llama-monitor-native and converter-free.** Reuse the app's pinned GGUF
+   parser/metadata knowledge to select an explicit versioned architecture profile.
+   Unknown architecture, missing metadata, unsupported quant types/assets, and any
+   heuristic-only match return `Unsupported`; there is no model-name or `llama`
+   fallback.
+2. **R2 starts from an internal minimal fork of Barron Tang's exact Git snapshot
+   `6a0da6529f233df79362cbf62dd96221c895351f`.** Record the exact snapshot source URL
+   and its downloaded artifact SHA-256 in the R2 provenance note; GitHub's codeload,
+   API tarball, and zipball are distinct byte artifacts even at one commit. The
+   2026-07-16 codeload tarball at
+   `https://codeload.github.com/barrontang/gguf2mlx/tar.gz/6a0da6529f233df79362cbf62dd96221c895351f`
+   has SHA-256
+   `a4d4bb8d9c673ebbec348cf32a40b95aa051ebccd5e761bbad107286d11006fc`; the
+   upstream `pyproject.toml` blob SHA-256
+   `71c3903cbf8040862a4d8299489ecec10ace73fc0293b6d884395b1c939a209c` in the fork
+   provenance note. The Git SHA, not upstream's `2.0.2` string, is its identity.
+3. **Forking is required for the selected R2 implementation, not left as an optional
+   post-process wrapper.** Atomic staging plus exact closure validation could prevent a
+   partial upstream result from being promoted, but it would detect failure only after
+   partial shards had already been emitted and would retain an unnecessarily broad,
+   fail-open execution path. The minimal fork must remove architecture guessing/config
+   defaults, abort on the first unknown, duplicate, skipped, non-finite,
+   shape-mismatched, or failed tensor, and return a bounded machine-readable report
+   containing the complete input/output inventory.
+4. **The llama-monitor adapter owns policy.** It passes only an R1-approved profile and
+   canonical staged paths, never discovers a converter from `PATH`, never uses a shell,
+   pins exact dependency wheels/hashes in an app-scoped environment, enforces resource
+   limits/cancellation, and validates tensor/config/tokenizer closure before the
+   profile-specific mlx-lm and Rapid-MLX runtime/parity gates.
+5. **Profiles own config and assets.** Do not call upstream's heuristic
+   `build_config()` for accepted imports. Prefer authoritative config/tokenizer assets;
+   otherwise every reconstructed value must be required and proven by the versioned
+   profile. Dequantization support is the intersection of the pinned `gguf` library,
+   the selected profile, and a real fixture test—not the upstream README's broad quant
+   claim.
+6. **Nothing from R0 is production-launchable.** The fork snapshot, patch set,
+   dependency lock, license/attribution, malformed fixtures, and first successful real
+   corpus must be reviewed at R2. Only atomically promoted output bearing a complete
+   provenance manifest may enter the model inventory.
+
+R0 gate result: **passed for research selection**. The chosen path is a pinned minimal
+fork plus a strict llama-monitor-owned profile adapter; every inspected unmodified
+tool is rejected. This checkpoint authorizes R1 research/implementation only and does
+not claim that any architecture can yet be converted safely.
+
+### R0.75 — Runtime and transport hardening
+
+Complete the high-leverage cross-backend improvements identified in the Phase 5
+post-implementation review before adding conversion workloads:
+
+- Move recursive model scans, complete-file hashing, manifest validation, and other
+  blocking filesystem/JSON work off Tokio workers with bounded `spawn_blocking` tasks.
+  Preserve full content verification and fail-closed tamper detection; do not replace it
+  with an unsafe time-only cache.
+- Avoid duplicate safetensors/index walks inside one resolution operation. Reuse an
+  explicitly invalidated validation snapshot only when its file identity rules preserve
+  the complete manifest contract.
+- Replace the global single-permit inference bottleneck with a backend-aware policy:
+  retain llama.cpp's safe serialization while allowing bounded concurrent requests to
+  the active Rapid-MLX target. Session/backend changes while waiting must be detected and
+  rerouted safely rather than sending to a stale target.
+- Replace unbounded chat SSE queues with bounded backpressure. A slow or disconnected
+  client must bound memory, drop the upstream stream promptly, release its permit, and
+  leave no orphan generation owned by llama-monitor.
+- Reuse long-lived upstream and Rapid-MLX polling clients with per-request deadlines.
+  Do not create a new poller/client for every metrics cycle or disable pooling without a
+  measured correctness reason.
+- Pass Rapid-MLX SSE data through byte-for-byte when it contains no reasoning field that
+  requires normalization; preserve the existing reasoning/tool/usage/finish mapping and
+  llama.cpp byte-exact behavior.
+
+Hard gates:
+
+- Tests prove llama.cpp remains serialized, Rapid-MLX accepts the configured bounded
+  concurrency, queued work cannot cross a session/backend switch, and permits are always
+  released on success, error, timeout, and client disconnect.
+- A deliberately slow SSE consumer demonstrates a fixed queue bound and upstream
+  cleanup. Fast consumers retain streaming order with no dropped events.
+- Large fixture hashing and recursive validation execute outside Tokio workers while
+  cancellation, path containment, manifest closure, and cache-tamper rejection remain
+  intact.
+- Client-reuse tests or observable connection evidence cover chat retries and the three
+  Rapid-MLX telemetry endpoints without weakening authentication or timeouts.
+- Full Rust tests, clippy, auth routing, Windows GNU cross-check, and verifier sign-off.
+- Checkpoint: `perf(api): harden concurrent inference transport`.
+
+The review intentionally does **not** authorize a wholesale `Mutex` -> `RwLock` rewrite,
+session `Vec` -> `HashMap` conversion (sessions are capped at ten), or dynamic import of
+the approximately 13 KiB Rapid-MLX card module. Revisit those only with profiling or a
+larger product need.
+
 ### R1 — Strict metadata-only inspector
 
 - Reuse llama-monitor's GGUF metadata knowledge where possible.
@@ -547,8 +661,18 @@ Remaining Phase 6 follow-through:
 - App-native compatibility report, resource estimate, progress, cancellation,
   diagnostics, cleanup, and engine fallback.
 - Show `Verified`, `Experimental`, or `Unsupported` before conversion begins.
+- Keep one in-memory typed model inventory while the library is open. Search, filter,
+  sort, and view-mode changes render locally; refetch only on open, explicit refresh, or
+  a known mutation such as download, migration, conversion, tag update, or deletion.
+- Fetch platform/Rapid-MLX availability through one shared cached state/promise rather
+  than independently from models, presets, setup, and wizard flows. Explicitly
+  invalidate it after runtime installation or platform-relevant configuration changes.
+- Preserve stable telemetry card DOM and update values/states incrementally for each
+  poll instead of rebuilding all eight Rapid-MLX cards. Preserve focus, accessible live
+  regions, reduced-motion behavior, stale-card history, and backend switching.
 - Gate: release build, dark/light screenshots, reduced motion, isolated Playwright,
-  security review, and no native dialogs.
+  security review, no native dialogs, and tests proving UI-only inventory controls do
+  not refetch `/api/models` or `/api/llama-binary/platform-info`.
 - Checkpoint: `feat(ui): add experimental GGUF import lab`.
 
 ### R5 — Architecture promotion
@@ -598,8 +722,30 @@ Remaining Phase 6 follow-through:
   <https://github.com/barrontang/gguf2mlx/blob/6a0da6529f233df79362cbf62dd96221c895351f/src/gguf2mlx/gguf2mlx.py#L1040-L1231>
 - Candidate config heuristics:
   <https://github.com/barrontang/gguf2mlx/blob/6a0da6529f233df79362cbf62dd96221c895351f/src/gguf2mlx/gguf2mlx.py#L302-L425>
-- Alternative wrapper under review:
-  <https://github.com/acampkin95/gguf-to-mlx>
+- Candidate unsafe architecture fallback:
+  <https://github.com/barrontang/gguf2mlx/blob/6a0da6529f233df79362cbf62dd96221c895351f/src/gguf2mlx/gguf2mlx.py#L194-L212>
+- Candidate tests (including the absent E2E-file reference):
+  <https://github.com/barrontang/gguf2mlx/blob/6a0da6529f233df79362cbf62dd96221c895351f/tests/test_smoke.py>
+- Candidate package/dependency floors and declared license:
+  <https://github.com/barrontang/gguf2mlx/blob/6a0da6529f233df79362cbf62dd96221c895351f/pyproject.toml>
+- `acampkin95/gguf-to-mlx` audited source:
+  <https://github.com/acampkin95/gguf-to-mlx/tree/cc2177738694902444a824ea3ee441dd9e9929ad>
+- Alternative's vendored fail-open tensor loop:
+  <https://github.com/acampkin95/gguf-to-mlx/blob/cc2177738694902444a824ea3ee441dd9e9929ad/gguf2mlx/core.py#L921-L1052>
+- Alternative's explicitly non-blocking validation:
+  <https://github.com/acampkin95/gguf-to-mlx/blob/cc2177738694902444a824ea3ee441dd9e9929ad/convert.py#L1957-L1985>
+- Alternative `v1.1.0` release:
+  <https://github.com/acampkin95/gguf-to-mlx/releases/tag/v1.1.0>
+- `local-mlx-tune` mutable upstream converter dependency:
+  <https://github.com/chaosste/local-mlx-tune/blob/5bbdc251916497f7b751384d9aee2595c5a34cf6/pyproject.toml>
+- `ModelConverterTool` forward-only MLX engine:
+  <https://github.com/duoyuncloud/ModelConverterTool/blob/dcac0a0fdf0153c1d4b52bbc3af4438b91a67c38/model_converter_tool/engine/mlx.py#L46-L77>
+- Architecture-specific strictness precedent (`hy-mt2-mlx`):
+  <https://github.com/kuotient/hy-mt2-mlx/blob/cc3b9ce816a3ea40aa470361ec71e43d4104d7a9/src/sherry_mlx/convert.py#L72-L169>
+- Architecture-specific real-fixture/parity evidence:
+  <https://github.com/kuotient/hy-mt2-mlx/blob/cc3b9ce816a3ea40aa470361ec71e43d4104d7a9/tests/test_stq.py>
+  and
+  <https://github.com/kuotient/hy-mt2-mlx/blob/cc3b9ce816a3ea40aa470361ec71e43d4104d7a9/scripts/parity.py>
 
 ## Documentation Closeout
 
