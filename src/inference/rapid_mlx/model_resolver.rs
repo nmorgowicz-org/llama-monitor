@@ -7,10 +7,17 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Arc, OnceLock};
+
+const MAX_BLOCKING_RESOLVER_TASKS: usize = 2;
 
 pub const PINNED_MLX_LM_VERSION: &str = "0.31.3";
 const MANIFEST_NAME: &str = "llama-monitor-conversion.json";
 const COMPLETE_NAME: &str = ".complete";
+#[cfg(test)]
+thread_local! {
+    static SAFETENSORS_INDEX_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -246,15 +253,80 @@ pub fn preview(source: &RapidMlxModelSource, context: &RapidMlxResolveContext) -
     }
 }
 
+pub async fn preview_async(
+    source: RapidMlxModelSource,
+    context: RapidMlxResolveContext,
+) -> Result<ResolverPreview> {
+    run_resolver_blocking(move || Ok(preview(&source, &context))).await
+}
+
+async fn run_resolver_blocking<T, F>(operation: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T> + Send + 'static,
+{
+    static GATE: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
+    let gate = GATE
+        .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(MAX_BLOCKING_RESOLVER_TASKS)))
+        .clone();
+    let permit = gate
+        .acquire_owned()
+        .await
+        .map_err(|_| anyhow!("Model resolver blocking worker gate was closed"))?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        operation()
+    })
+    .await
+    .context("Model resolver blocking worker failed")?
+}
+
 pub async fn resolve(
     source: RapidMlxModelSource,
     context: &RapidMlxResolveContext,
 ) -> Result<ResolvedRapidMlxLaunchModel> {
-    validate_source(&source, context)?;
+    let validated_mlx = if let RapidMlxModelSource::MlxDirectory { path } = &source {
+        let path = path.clone();
+        let validation_context = context.clone();
+        Some(
+            run_resolver_blocking(move || {
+                if validation_context.models_dir.as_os_str().is_empty() {
+                    bail!("A configured models_dir is required");
+                }
+                let canonical = canonical_model_directory(&path, &local_model_allowed_root(&path))?;
+                reject_app_staging_directory(&canonical, &validation_context.models_dir)?;
+                validate_if_app_conversion(&canonical, &validation_context.models_dir)?;
+                Ok(canonical)
+            })
+            .await?,
+        )
+    } else if let RapidMlxModelSource::AuthoritativeSafetensors {
+        source: AuthoritativeSafetensorsSource::LocalDirectory { .. },
+        revision_or_hash,
+        ..
+    } = &source
+    {
+        if revision_or_hash.trim().len() < 7 || revision_or_hash.len() > 128 {
+            bail!(
+                "Authoritative safetensors requires a stable 7-128 character revision or content hash"
+            );
+        }
+        if context.models_dir.as_os_str().is_empty() {
+            bail!("A configured models_dir is required");
+        }
+        None
+    } else {
+        let validation_source = source.clone();
+        let validation_context = context.clone();
+        run_resolver_blocking(move || validate_source(&validation_source, &validation_context))
+            .await?;
+        None
+    };
     let mut environment = hugging_face_environment(context)?;
     let result = match &source {
-        RapidMlxModelSource::MlxDirectory { path } => {
-            let canonical = canonical_model_directory(path, &local_model_allowed_root(path))?;
+        RapidMlxModelSource::MlxDirectory { path: _ } => {
+            let canonical =
+                validated_mlx.expect("MLX directory validation always returns a canonical path");
             resolved(
                 canonical.to_string_lossy().into_owned(),
                 display_name(&source),
@@ -265,7 +337,12 @@ pub async fn resolve(
         RapidMlxModelSource::HuggingFaceRepo { repo_id, revision } => {
             let snapshot =
                 resolve_hf_snapshot(repo_id, revision, &source, context, &environment).await?;
-            validate_model_directory(&snapshot, &context.models_dir)?;
+            let validation_path = snapshot.clone();
+            let validation_root = context.models_dir.clone();
+            run_resolver_blocking(move || {
+                validate_model_directory(&validation_path, &validation_root)
+            })
+            .await?;
             let mut output = resolved(
                 snapshot.to_string_lossy().into_owned(),
                 repo_id.clone(),
@@ -311,8 +388,12 @@ pub async fn resolve(
             }
             let local_source = match conversion_source {
                 AuthoritativeSafetensorsSource::LocalDirectory { path } => {
-                    validate_model_directory(path, path)?;
-                    path.canonicalize()?
+                    let path = path.clone();
+                    run_resolver_blocking(move || {
+                        path.canonicalize()
+                            .context("Failed to canonicalize authoritative model directory")
+                    })
+                    .await?
                 }
                 AuthoritativeSafetensorsSource::HuggingFaceRepo { repo_id, revision } => {
                     resolve_hf_snapshot(repo_id, revision, &source, context, &environment).await?
@@ -471,6 +552,13 @@ fn validate_transformers_directory(path: &Path) -> Result<()> {
 }
 
 pub(crate) fn validate_model_directory(path: &Path, allowed_symlink_root: &Path) -> Result<()> {
+    validate_model_directory_assets(path, allowed_symlink_root).map(|_| ())
+}
+
+fn validate_model_directory_assets(
+    path: &Path,
+    allowed_symlink_root: &Path,
+) -> Result<Vec<PathBuf>> {
     if !path.is_dir() {
         bail!(
             "Model source is not a readable directory: {}",
@@ -506,8 +594,7 @@ pub(crate) fn validate_model_directory(path: &Path, allowed_symlink_root: &Path)
     ) {
         validate_child(path, &asset, allowed_symlink_root)?;
     }
-    safetensors_files(path, allowed_symlink_root)?;
-    Ok(())
+    safetensors_files(path, allowed_symlink_root)
 }
 
 fn validate_child(model_root: &Path, path: &Path, allowed_symlink_root: &Path) -> Result<()> {
@@ -532,6 +619,8 @@ fn validate_child(model_root: &Path, path: &Path, allowed_symlink_root: &Path) -
 fn safetensors_files(path: &Path, allowed_symlink_root: &Path) -> Result<Vec<PathBuf>> {
     let index_path = path.join("model.safetensors.index.json");
     let mut files = if index_path.is_file() {
+        #[cfg(test)]
+        SAFETENSORS_INDEX_SCANS.with(|count| count.set(count.get() + 1));
         validate_child(path, &index_path, allowed_symlink_root)?;
         let index: serde_json::Value = serde_json::from_reader(fs::File::open(&index_path)?)
             .context("Safetensors index is invalid JSON")?;
@@ -709,8 +798,10 @@ async fn convert_authoritative(
     environment: &BTreeMap<OsString, OsString>,
 ) -> Result<(PathBuf, ConversionProvenance)> {
     verify_pinned_mlx_lm(&context.python_executable).await?;
-    validate_model_directory(&local_source, &context.models_dir)?;
-    let source_content_sha256 = model_content_hash(&local_source, &context.models_dir)?;
+    let hash_source = local_source.clone();
+    let hash_root = context.models_dir.clone();
+    let source_content_sha256 =
+        run_resolver_blocking(move || model_content_hash(&hash_source, &hash_root)).await?;
     let key = conversion_key(&source, &revision, &source_content_sha256, recipe)?;
     let converted_root = context.models_dir.join("mlx/converted");
     let staging_root = context.models_dir.join(".staging/conversions");
@@ -729,7 +820,10 @@ async fn convert_authoritative(
         cache_key: key,
     };
     if final_path.exists() {
-        validate_published_conversion(&final_path, &provenance)?;
+        let validation_path = final_path.clone();
+        let expected = provenance.clone();
+        run_resolver_blocking(move || validate_published_conversion(&validation_path, &expected))
+            .await?;
         return Ok((final_path, provenance));
     }
     let staging = tempfile::Builder::new()
@@ -746,27 +840,44 @@ async fn convert_authoritative(
     run_plan(&plan)
         .await
         .context("Pinned official mlx-lm conversion failed")?;
-    validate_transformers_directory(&output).context("Converted MLX output is incomplete")?;
+    let validation_output = output.clone();
+    run_resolver_blocking(move || validate_transformers_directory(&validation_output))
+        .await
+        .context("Converted MLX output is incomplete")?;
     validate_mlx_load(&context.python_executable, &output, environment).await?;
-    let manifest = ConversionManifest {
-        schema_version: 1,
-        provenance: provenance.clone(),
-        files: manifest_files(&output)?,
-    };
-    atomic_json(&output.join(MANIFEST_NAME), &manifest)?;
-    fs::File::create(output.join(COMPLETE_NAME))?.sync_all()?;
+    let publish_output = output.clone();
+    let publish_provenance = provenance.clone();
+    run_resolver_blocking(move || {
+        let manifest = ConversionManifest {
+            schema_version: 1,
+            provenance: publish_provenance,
+            files: manifest_files(&publish_output)?,
+        };
+        atomic_json(&publish_output.join(MANIFEST_NAME), &manifest)?;
+        fs::File::create(publish_output.join(COMPLETE_NAME))?.sync_all()?;
+        Ok(())
+    })
+    .await?;
     let kept = staging.keep();
     let kept_output = kept.join("model");
     if let Err(error) = fs::rename(&kept_output, &final_path) {
         if final_path.exists() {
-            validate_published_conversion(&final_path, &provenance)
-                .context("Concurrent conversion published a mismatched cache entry")?;
+            let validation_path = final_path.clone();
+            let expected = provenance.clone();
+            run_resolver_blocking(move || {
+                validate_published_conversion(&validation_path, &expected)
+            })
+            .await
+            .context("Concurrent conversion published a mismatched cache entry")?;
         } else {
             return Err(error).context("Atomic promotion of converted MLX model failed");
         }
     }
     let _ = fs::remove_dir(&kept);
-    validate_published_conversion(&final_path, &provenance)?;
+    let validation_path = final_path.clone();
+    let expected = provenance.clone();
+    run_resolver_blocking(move || validate_published_conversion(&validation_path, &expected))
+        .await?;
     Ok((final_path, provenance))
 }
 
@@ -1072,8 +1183,7 @@ fn hash_file(path: &Path) -> Result<String> {
 }
 
 pub(crate) fn model_content_hash(path: &Path, allowed_root: &Path) -> Result<String> {
-    validate_model_directory(path, allowed_root)?;
-    let mut assets = safetensors_files(path, allowed_root)?;
+    let mut assets = validate_model_directory_assets(path, allowed_root)?;
     for name in [
         "config.json",
         "tokenizer.json",
@@ -1274,6 +1384,57 @@ mod tests {
         assert!(validate_transformers_directory(temp.path()).is_err());
         fs::write(temp.path().join("model-00002-of-00002.safetensors"), b"two").unwrap();
         assert!(validate_transformers_directory(temp.path()).is_ok());
+    }
+
+    #[test]
+    fn content_hash_validates_and_reads_the_safetensors_index_once() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("config.json"), r#"{"model_type":"test"}"#).unwrap();
+        fs::write(temp.path().join("tokenizer.json"), "{}").unwrap();
+        fs::write(
+            temp.path().join("model-00001-of-00001.safetensors"),
+            b"weights",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("model.safetensors.index.json"),
+            r#"{"weight_map":{"a":"model-00001-of-00001.safetensors"}}"#,
+        )
+        .unwrap();
+        SAFETENSORS_INDEX_SCANS.with(|count| count.set(0));
+        let hash = model_content_hash(temp.path(), temp.path()).unwrap();
+        assert_eq!(hash.len(), 64);
+        assert_eq!(SAFETENSORS_INDEX_SCANS.with(std::cell::Cell::get), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resolver_blocking_work_does_not_stall_tokio_and_is_bounded() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let runtime_thread = std::thread::current().id();
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let operations = (0..3).map(|_| {
+            let active = active.clone();
+            let maximum = maximum.clone();
+            run_resolver_blocking(move || {
+                assert_ne!(std::thread::current().id(), runtime_thread);
+                let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                maximum.fetch_max(current, Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                active.fetch_sub(1, Ordering::SeqCst);
+                Ok(())
+            })
+        });
+        let heartbeat = async {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            true
+        };
+        let (results, heartbeat) =
+            tokio::join!(futures_util::future::join_all(operations), heartbeat);
+        assert!(heartbeat);
+        assert!(results.into_iter().all(|result| result.is_ok()));
+        assert_eq!(maximum.load(Ordering::SeqCst), MAX_BLOCKING_RESOLVER_TASKS);
     }
 
     #[test]

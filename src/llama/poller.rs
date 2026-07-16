@@ -66,6 +66,7 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
     };
 
     let mut enabled = false;
+    let mut rapid_poller: Option<crate::inference::rapid_mlx::poller::RapidMlxPoller> = None;
 
     loop {
         if !enabled {
@@ -207,13 +208,24 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
                 session_backend,
                 crate::inference::InferenceBackend::RapidMlx
             ) {
-                crate::inference::rapid_mlx::poller::RapidMlxPoller::from_base_url(
-                    base.clone(),
-                    api_key.as_deref(),
-                )
-                .poll()
-                .await
+                let matches = rapid_poller
+                    .as_ref()
+                    .is_some_and(|poller| poller.matches_target(&base, api_key.as_deref()));
+                if !matches {
+                    rapid_poller = Some(
+                        crate::inference::rapid_mlx::poller::RapidMlxPoller::from_base_url(
+                            base.clone(),
+                            api_key.as_deref(),
+                        ),
+                    );
+                }
+                rapid_poller
+                    .as_ref()
+                    .expect("poller initialized")
+                    .poll()
+                    .await
             } else if let (Some(backend), true) = (backend, port != 0) {
+                rapid_poller = None;
                 backend.poll_metrics(port, &active_id).await
             } else {
                 Err(anyhow::anyhow!("active backend adapter unavailable"))

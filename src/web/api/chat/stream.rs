@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures_util::StreamExt;
 use warp::Filter;
 
 use crate::config::AppConfig;
@@ -10,6 +11,9 @@ use super::super::common::{ApiCtx, ApiRoute, box_reply, check_api_token, unautho
 use super::super::upstream::{
     build_upstream_client, prepare_inference_request, send_upstream_request_with_retry,
 };
+
+const CHAT_SSE_QUEUE_CAPACITY: usize = 32;
+type ChatSseSender = tokio::sync::mpsc::Sender<String>;
 
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let chat = api_chat(ctx.state.clone(), ctx.config.clone());
@@ -38,7 +42,7 @@ fn api_chat(
                     return Ok(unauthorized_api_token());
                 }
                 let prepared = prepare_inference_request(&state).await?;
-                let client = build_upstream_client(std::time::Duration::from_secs(120))?;
+                let client = build_upstream_client()?;
                 let request_body = prepared.map_chat_body(&body)?;
                 let url = prepared.url.clone();
 
@@ -46,6 +50,7 @@ fn api_chat(
                     prepared.authenticate(
                         client
                             .post(&url)
+                            .timeout(std::time::Duration::from_secs(120))
                             .header("Content-Type", "application/json")
                             .body(request_body.clone()),
                     )
@@ -59,8 +64,9 @@ fn api_chat(
                 let backend = prepared.backend;
                 let permit = prepared.permit;
 
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
+                let (tx, rx) = tokio::sync::mpsc::channel(CHAT_SSE_QUEUE_CAPACITY);
+                let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
+                    .map(|data| Ok::<_, warp::Error>(warp::sse::Event::default().data(data)));
 
                 tokio::spawn(async move {
                     let _permit = permit;
@@ -76,17 +82,16 @@ fn api_chat(
                                     body.extend_from_slice(&bytes);
                                 }
                                 Ok(_) => {
-                                    let _ = tx.send(Ok::<_, warp::Error>(
-                                        warp::sse::Event::default().data(
-                                            r#"{"error":"Non-streaming response exceeded 2 MiB"}"#,
-                                        ),
-                                    ));
+                                    send_event(
+                                        &tx,
+                                        r#"{"error":"Non-streaming response exceeded 2 MiB"}"#
+                                            .into(),
+                                    )
+                                    .await;
                                     return;
                                 }
                                 Err(error) => {
-                                    let _ = tx.send(Ok::<_, warp::Error>(
-                                        warp::sse::Event::default().data(error_event_data(&error)),
-                                    ));
+                                    send_event(&tx, error_event_data(&error)).await;
                                     return;
                                 }
                             }
@@ -96,11 +101,10 @@ fn api_chat(
                                 r#"{"error":"Upstream returned malformed non-streaming JSON"}"#
                                     .to_string()
                             });
-                        let _ =
-                            tx.send(Ok::<_, warp::Error>(warp::sse::Event::default().data(data)));
-                        let _ = tx.send(Ok::<_, warp::Error>(
-                            warp::sse::Event::default().data("[DONE]"),
-                        ));
+                        if !send_event(&tx, data).await {
+                            return;
+                        }
+                        send_event(&tx, "[DONE]".into()).await;
                         return;
                     }
 
@@ -118,11 +122,11 @@ fn api_chat(
 
                                 buf.push_str(&String::from_utf8_lossy(&bytes));
                                 if buf.len() > MAX_SSE_BUFFER_BYTES {
-                                    let _ = tx.send(Ok::<_, warp::Error>(
-                                        warp::sse::Event::default().data(
-                                            r#"{"error":"Upstream SSE event exceeded 2 MiB"}"#,
-                                        ),
-                                    ));
+                                    send_event(
+                                        &tx,
+                                        r#"{"error":"Upstream SSE event exceeded 2 MiB"}"#.into(),
+                                    )
+                                    .await;
                                     return;
                                 }
 
@@ -130,17 +134,15 @@ fn api_chat(
                                     let line = buf[..pos].to_string();
                                     buf = buf[pos + 1..].to_string();
 
-                                    if let Some(data) = normalize_sse_line(backend, &line) {
-                                        let _ = tx.send(Ok::<_, warp::Error>(
-                                            warp::sse::Event::default().data(data),
-                                        ));
+                                    if let Some(data) = normalize_sse_line(backend, &line)
+                                        && !send_event(&tx, data).await
+                                    {
+                                        return;
                                     }
                                 }
                             }
                             Err(e) => {
-                                let _ = tx.send(Ok::<_, warp::Error>(
-                                    warp::sse::Event::default().data(error_event_data(&e)),
-                                ));
+                                send_event(&tx, error_event_data(&e)).await;
                                 break;
                             }
                         }
@@ -148,8 +150,7 @@ fn api_chat(
                     if !buf.is_empty()
                         && let Some(data) = normalize_sse_line(backend, &buf)
                     {
-                        let _ =
-                            tx.send(Ok::<_, warp::Error>(warp::sse::Event::default().data(data)));
+                        send_event(&tx, data).await;
                     }
                 });
 
@@ -250,6 +251,18 @@ fn normalize_sse_data(backend: crate::inference::InferenceBackend, data: &str) -
         return Some(data.to_string());
     }
     let mut value: serde_json::Value = serde_json::from_str(data).ok()?;
+    let needs_reasoning_normalization = value
+        .get("choices")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("delta"))
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|delta| {
+            delta.contains_key("reasoning") || delta.contains_key("reasoning_text")
+        });
+    if !needs_reasoning_normalization {
+        return Some(data.to_string());
+    }
     if let Some(delta) = value
         .get_mut("choices")
         .and_then(|choices| choices.as_array_mut())
@@ -287,7 +300,7 @@ fn normalize_non_stream_response(
 }
 
 async fn next_chunk_or_disconnect<S, T>(
-    sender: &tokio::sync::mpsc::UnboundedSender<T>,
+    sender: &tokio::sync::mpsc::Sender<T>,
     stream: &mut S,
 ) -> Option<S::Item>
 where
@@ -298,6 +311,10 @@ where
         () = sender.closed() => None,
         chunk = stream.next() => chunk,
     }
+}
+
+async fn send_event(sender: &ChatSseSender, data: String) -> bool {
+    sender.send(data).await.is_ok()
 }
 
 fn error_event_data(error: &impl std::fmt::Display) -> String {
@@ -359,6 +376,34 @@ mod tests {
         .unwrap();
         let usage: serde_json::Value = serde_json::from_str(&usage_only).unwrap();
         assert_eq!(usage["usage"]["prompt_tokens"], 4);
+    }
+
+    #[test]
+    fn rapid_sse_without_reasoning_is_passed_through_byte_exact() {
+        let data = r#"{ "choices": [{"delta":{"content":"hi","tool_calls":[]},"finish_reason":"stop"}], "usage": {"completion_tokens":1} }"#;
+        assert_eq!(
+            normalize_sse_data(crate::inference::InferenceBackend::RapidMlx, data).as_deref(),
+            Some(data)
+        );
+        let already_normalized = r#"{"choices":[{"delta":{"reasoning_content":"kept"}}]}"#;
+        assert_eq!(
+            normalize_sse_data(
+                crate::inference::InferenceBackend::RapidMlx,
+                already_normalized
+            )
+            .as_deref(),
+            Some(already_normalized)
+        );
+        let reasoning_in_content =
+            r#"{ "choices": [{"delta":{"content":"plain reasoning text"}}] }"#;
+        assert_eq!(
+            normalize_sse_data(
+                crate::inference::InferenceBackend::RapidMlx,
+                reasoning_in_content
+            )
+            .as_deref(),
+            Some(reasoning_in_content)
+        );
     }
 
     #[test]
@@ -430,7 +475,7 @@ mod tests {
 
     #[tokio::test]
     async fn receiver_disconnect_stops_waiting_on_upstream_immediately() {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let (sender, receiver) = tokio::sync::mpsc::channel::<()>(1);
         let mut upstream = futures_util::stream::pending::<Result<bytes::Bytes, reqwest::Error>>();
         drop(receiver);
         let result = tokio::time::timeout(
@@ -440,6 +485,63 @@ mod tests {
         .await
         .expect("disconnect must not wait for another upstream byte");
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn bounded_sse_queue_backpressures_slow_consumers_and_preserves_order() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(CHAT_SSE_QUEUE_CAPACITY);
+        for index in 0..CHAT_SSE_QUEUE_CAPACITY {
+            assert!(send_event(&sender, index.to_string()).await);
+        }
+        let blocked_sender = sender.clone();
+        let blocked = tokio::spawn(async move {
+            send_event(&blocked_sender, CHAT_SSE_QUEUE_CAPACITY.to_string()).await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert!(
+            !blocked.is_finished(),
+            "the fixed queue must apply backpressure"
+        );
+
+        for expected in 0..=CHAT_SSE_QUEUE_CAPACITY {
+            let value =
+                tokio::time::timeout(std::time::Duration::from_millis(100), receiver.recv())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(value, expected.to_string());
+        }
+        assert!(blocked.await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn disconnect_unblocks_backpressured_sender_and_drops_upstream_owner() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct DropProbe(std::sync::Arc<AtomicBool>);
+        impl Drop for DropProbe {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let dropped = std::sync::Arc::new(AtomicBool::new(false));
+        let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = gate.clone().acquire_owned().await.unwrap();
+        let (sender, receiver) = tokio::sync::mpsc::channel(1);
+        assert!(send_event(&sender, "first".into()).await);
+        let producer_dropped = dropped.clone();
+        let producer = tokio::spawn(async move {
+            let _permit = permit;
+            let _upstream_owner = DropProbe(producer_dropped);
+            send_event(&sender, "blocked".into()).await
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert!(!producer.is_finished());
+        drop(receiver);
+        assert!(!producer.await.unwrap());
+        assert!(dropped.load(Ordering::SeqCst));
+        assert_eq!(gate.available_permits(), 1);
     }
 
     #[test]

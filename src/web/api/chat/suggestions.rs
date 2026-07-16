@@ -192,7 +192,7 @@ fn api_generate_keywords(
                     req.category
                 );
 
-                let client = build_upstream_client(std::time::Duration::from_secs(30))?;
+                let client = build_upstream_client()?;
                 let payload = serde_json::json!({
                     "messages": [
                         {"role": "system", "content": "You generate focus keywords. Return only the keywords, comma-separated, with no explanation."},
@@ -215,6 +215,7 @@ fn api_generate_keywords(
                     prepared.authenticate(
                         client
                             .post(&url)
+                            .timeout(std::time::Duration::from_secs(30))
                             .header("Content-Type", "application/json")
                             .body(payload.clone()),
                     )
@@ -398,7 +399,7 @@ fn api_chat_suggestions(
                 ];
 
                 let prepared = prepare_inference_request(&state).await?;
-                let client = build_upstream_client(std::time::Duration::from_secs(30))?;
+                let client = build_upstream_client()?;
                 let payload = serde_json::json!({
                     "messages": suggestion_messages,
                     "stream": true,
@@ -420,6 +421,7 @@ fn api_chat_suggestions(
                     prepared.authenticate(
                         client
                             .post(&url)
+                            .timeout(std::time::Duration::from_secs(30))
                             .header("Content-Type", "application/json")
                             .body(payload.clone()),
                     )

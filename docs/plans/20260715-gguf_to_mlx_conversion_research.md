@@ -627,6 +627,68 @@ Hard gates:
 - Full Rust tests, clippy, auth routing, Windows GNU cross-check, and verifier sign-off.
 - Checkpoint: `perf(api): harden concurrent inference transport`.
 
+#### R0.75 checkpoint evidence (2026-07-16)
+
+Status: **Builder complete; independent Verifier approved.**
+
+Delivered design:
+
+- llama.cpp retains one application inference permit. Rapid-MLX has a separate fixed
+  four-permit gate so continuous batching is usable without allowing an unbounded app
+  queue. A request snapshots the complete active target before waiting and compares it
+  again after permit acquisition and capacity waiting; any session, backend, endpoint,
+  model, or protected-key change drops the old permit and retries against the current
+  target.
+- Chat SSE delivery uses a 32-event bounded channel. Backpressure waits instead of
+  allocating without limit; receiver closure ends the producer, drops the upstream
+  response stream, and releases the inference permit through RAII. Valid Rapid-MLX SSE
+  JSON without `reasoning` or `reasoning_text` is forwarded byte-for-byte. Chunks that
+  need reasoning normalization retain tool, usage, and finish fields, malformed chunks
+  remain rejected, and llama.cpp payload forwarding remains byte-exact.
+- Chat routes share one long-lived pooled `reqwest::Client`; every call still applies
+  its route-specific 30/60/120-second request deadline. Rapid-MLX polling retains one
+  poller/client per active endpoint and protected key, applies individual endpoint
+  deadlines, and replaces the poller only when the target changes. Adapter polling also
+  caches by port and invalidates on runtime/API-key reconfiguration.
+- Resolver preview, recursive model validation, complete-file hashing, and conversion
+  manifest closure validation run through a two-task bounded `spawn_blocking` gate.
+  Source validation returns the canonical MLX path to avoid a second launch-time walk,
+  and content hashing now validates and reads a safetensors index once while preserving
+  path containment, complete-file SHA-256, symlink, staging, and tamper rejection.
+
+Verification evidence:
+
+- Focused tests cover llama.cpp serialization, the four-request Rapid-MLX bound,
+  permit release after routing failure/cancellation/disconnect, active-target switching,
+  bounded slow-consumer backpressure, fast-consumer ordering, upstream-owner cleanup,
+  raw/normalized/malformed SSE behavior, singleton upstream client identity and request
+  deadlines, retained authenticated polling across `/health`, `/v1/status`, and
+  `/v1/cache/stats`, adapter poller reuse, bounded blocking-worker concurrency, Tokio
+  responsiveness, and the one-pass safetensors-index contract.
+- Full Rust suite: **900 passed / 6 ignored**. The restricted sandbox denied localhost
+  binds for existing and new mock-server tests; the required unsandboxed loopback rerun
+  passed completely.
+- `cargo clippy -- -D warnings`, the 39-test `auth_routing` suite,
+  `cargo check --target x86_64-pc-windows-gnu`, formatting, and `git diff --check`
+  passed.
+
+Remaining caveats for later profiling/product work:
+
+- Four concurrent Rapid-MLX requests is an intentionally conservative app bound, not a
+  claim about every model's optimal continuous-batching depth.
+- Rapid-MLX still exposes no compatible public request ID for native cancellation.
+  Disconnect now promptly drops llama-monitor's upstream stream and permit; runtime-side
+  work stops according to Rapid-MLX's HTTP disconnect behavior.
+- An already-running filesystem syscall cannot be preempted by Tokio cancellation, but
+  resolver work is capped at two blocking workers and no longer occupies Tokio workers.
+
+Independent verification found and corrected two issues before sign-off. Protected
+Rapid-MLX keys used by queued-target and poller-reuse checks now use constant-time
+comparison instead of ordinary string equality, including an explicit key-rotation
+rerouting test. The raw Rapid-MLX SSE path now detects actual delta field names after
+one successful parse, so ordinary content containing the word `reasoning` remains
+byte-exact while malformed JSON still fails closed.
+
 The review intentionally does **not** authorize a wholesale `Mutex` -> `RwLock` rewrite,
 session `Vec` -> `HashMap` conversion (sessions are capped at ten), or dynamic import of
 the approximately 13 KiB Rapid-MLX card module. Revisit those only with profiling or a

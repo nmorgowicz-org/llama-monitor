@@ -168,9 +168,15 @@ fn api_rapid_model_resolver_preview(
                     verified_aliases: Vec::new(),
                     execute_conversion: false,
                 };
-                Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
-                    &crate::inference::rapid_mlx::model_resolver::preview(&source, &context),
-                )) as Box<dyn warp::reply::Reply>)
+                let preview =
+                    crate::inference::rapid_mlx::model_resolver::preview_async(source, context)
+                        .await
+                        .map_err(|error| {
+                            warp::reject::custom(super::ApiError::internal(error.to_string()))
+                        })?;
+                Ok::<_, warp::Rejection>(
+                    Box::new(warp::reply::json(&preview)) as Box<dyn warp::reply::Reply>
+                )
             }
         })
 }

@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use warp::http::StatusCode;
@@ -23,13 +24,35 @@ pub(crate) struct PreparedInferenceRequest {
     adapter: Option<BackendAdapter>,
 }
 
+#[derive(Clone)]
 struct ActiveInferenceTarget {
+    session_id: String,
     url: String,
     backend: InferenceBackend,
     model_identity: Option<String>,
     api_key: Option<String>,
     local_spawn: bool,
 }
+
+impl PartialEq for ActiveInferenceTarget {
+    fn eq(&self, other: &Self) -> bool {
+        use subtle::ConstantTimeEq;
+
+        let api_key_matches = match (&self.api_key, &other.api_key) {
+            (Some(left), Some(right)) => left.as_bytes().ct_eq(right.as_bytes()).into(),
+            (None, None) => true,
+            _ => false,
+        };
+        self.session_id == other.session_id
+            && self.url == other.url
+            && self.backend == other.backend
+            && self.model_identity == other.model_identity
+            && api_key_matches
+            && self.local_spawn == other.local_spawn
+    }
+}
+
+impl Eq for ActiveInferenceTarget {}
 
 pub(crate) fn adapter_matches_backend(backend: InferenceBackend, adapter: &BackendAdapter) -> bool {
     matches!(
@@ -116,6 +139,7 @@ fn active_inference_target(state: &AppState) -> Result<ActiveInferenceTarget, wa
         ),
     };
     Ok(ActiveInferenceTarget {
+        session_id: session.id,
         url,
         backend: session.backend,
         model_identity: session.model_identity,
@@ -124,7 +148,10 @@ fn active_inference_target(state: &AppState) -> Result<ActiveInferenceTarget, wa
     })
 }
 
-fn upstream_has_capacity(state: &AppState) -> Result<bool, warp::Rejection> {
+fn upstream_has_capacity(
+    state: &AppState,
+    backend: InferenceBackend,
+) -> Result<bool, warp::Rejection> {
     let server_running = *state.server_running.lock().map_err(|e| {
         warp::reject::custom(ApiError::internal(format!(
             "Failed to read server state: {e}"
@@ -134,6 +161,9 @@ fn upstream_has_capacity(state: &AppState) -> Result<bool, warp::Rejection> {
         return Err(warp::reject::custom(ApiError::gateway(
             "Cannot reach the active inference runtime.",
         )));
+    }
+    if backend == InferenceBackend::RapidMlx {
+        return Ok(true);
     }
 
     let metrics = state.llama_metrics.lock().map_err(|e| {
@@ -148,11 +178,13 @@ fn upstream_has_capacity(state: &AppState) -> Result<bool, warp::Rejection> {
     Ok(metrics.slots_processing < total_slots)
 }
 
-async fn wait_for_upstream_capacity(state: &AppState) -> Result<(), warp::Rejection> {
-    let deadline = tokio::time::Instant::now() + UPSTREAM_BUSY_WAIT_TIMEOUT;
-
+async fn wait_for_upstream_capacity(
+    state: &AppState,
+    backend: InferenceBackend,
+    deadline: tokio::time::Instant,
+) -> Result<(), warp::Rejection> {
     loop {
-        if upstream_has_capacity(state)? {
+        if upstream_has_capacity(state, backend)? {
             return Ok(());
         }
 
@@ -168,10 +200,17 @@ async fn wait_for_upstream_capacity(state: &AppState) -> Result<(), warp::Reject
 
 async fn acquire_inference_permit(
     state: &AppState,
+    backend: InferenceBackend,
+    deadline: tokio::time::Instant,
 ) -> Result<tokio::sync::OwnedSemaphorePermit, warp::Rejection> {
+    let gate = match backend {
+        InferenceBackend::LlamaCpp => state.monitor_inference_gate.clone(),
+        InferenceBackend::RapidMlx => state.rapid_mlx_inference_gate.clone(),
+    };
+    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
     tokio::time::timeout(
-        MONITOR_INFERENCE_QUEUE_TIMEOUT,
-        state.monitor_inference_gate.clone().acquire_owned(),
+        remaining,
+        gate.acquire_owned(),
     )
     .await
     .map_err(|_| {
@@ -185,39 +224,64 @@ async fn acquire_inference_permit(
 pub(crate) async fn prepare_inference_request(
     state: &AppState,
 ) -> Result<PreparedInferenceRequest, warp::Rejection> {
-    let permit = acquire_inference_permit(state).await?;
-    wait_for_upstream_capacity(state).await?;
-    // Snapshot routing only after queueing. A request that waited behind another
-    // generation must not retain the session/backend that was active before it
-    // acquired the inference permit.
-    let target = active_inference_target(state)?;
-    let adapter = state
-        .backend
-        .lock()
-        .map_err(|error| {
-            warp::reject::custom(ApiError::internal(format!(
-                "Failed to read active backend: {error}"
-            )))
-        })?
-        .clone()
-        .filter(|adapter| target.local_spawn && adapter_matches_backend(target.backend, adapter));
-    Ok(PreparedInferenceRequest {
-        url: target.url,
-        permit,
-        backend: target.backend,
-        model_identity: target.model_identity,
-        api_key: target.api_key,
-        adapter,
-    })
+    let queue_deadline = tokio::time::Instant::now() + MONITOR_INFERENCE_QUEUE_TIMEOUT;
+    loop {
+        let target_before_wait = active_inference_target(state)?;
+        let permit =
+            acquire_inference_permit(state, target_before_wait.backend, queue_deadline).await?;
+        let target = active_inference_target(state)?;
+        if target != target_before_wait {
+            drop(permit);
+            continue;
+        }
+
+        let capacity_deadline = std::cmp::min(
+            queue_deadline,
+            tokio::time::Instant::now() + UPSTREAM_BUSY_WAIT_TIMEOUT,
+        );
+        wait_for_upstream_capacity(state, target.backend, capacity_deadline).await?;
+        // Capacity polling can also outlive a session switch. Never use the permit
+        // or route captured for the old target in that case.
+        if active_inference_target(state)? != target {
+            drop(permit);
+            continue;
+        }
+
+        let adapter = state
+            .backend
+            .lock()
+            .map_err(|error| {
+                warp::reject::custom(ApiError::internal(format!(
+                    "Failed to read active backend: {error}"
+                )))
+            })?
+            .clone()
+            .filter(|adapter| {
+                target.local_spawn && adapter_matches_backend(target.backend, adapter)
+            });
+        return Ok(PreparedInferenceRequest {
+            url: target.url,
+            permit,
+            backend: target.backend,
+            model_identity: target.model_identity,
+            api_key: target.api_key,
+            adapter,
+        });
+    }
 }
 
-pub(crate) fn build_upstream_client(timeout: Duration) -> Result<reqwest::Client, warp::Rejection> {
-    reqwest::Client::builder()
-        .timeout(timeout)
-        .build()
-        .map_err(|e| {
+pub(crate) fn build_upstream_client() -> Result<&'static reqwest::Client, warp::Rejection> {
+    static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .build()
+                .map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map_err(|error| {
             warp::reject::custom(ApiError::internal(format!(
-                "Failed to create HTTP client: {e}"
+                "Failed to create HTTP client: {error}"
             )))
         })
 }
@@ -295,6 +359,24 @@ mod tests {
     use crate::inference::rapid_mlx::RapidMlxAdapter;
     use crate::inference::rapid_mlx::runtime::{RuntimeMetadata, RuntimeSource};
     use crate::state::Session;
+
+    fn state_with_backend(backend: InferenceBackend, id: &str, port: u16) -> AppState {
+        let state = AppState::default();
+        let session = Session::new_spawn_with_backend(
+            id.into(),
+            id.into(),
+            port,
+            String::new(),
+            Some("127.0.0.1".into()),
+            None,
+            backend,
+            Some(format!("{id}-model")),
+        );
+        assert!(state.add_session(session));
+        state.set_active_session(id);
+        *state.server_running.lock().unwrap() = true;
+        state
+    }
 
     async fn prepared(
         backend: InferenceBackend,
@@ -450,5 +532,146 @@ mod tests {
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(value.get("tools").is_none());
+    }
+
+    #[tokio::test]
+    async fn llama_is_serialized_and_rapid_mlx_uses_a_fixed_bound() {
+        let llama = state_with_backend(InferenceBackend::LlamaCpp, "llama", 8101);
+        let first = prepare_inference_request(&llama).await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), prepare_inference_request(&llama))
+                .await
+                .is_err()
+        );
+        drop(first);
+        assert!(prepare_inference_request(&llama).await.is_ok());
+
+        let rapid = state_with_backend(InferenceBackend::RapidMlx, "rapid", 8102);
+        let mut permits = Vec::new();
+        for _ in 0..4 {
+            permits.push(prepare_inference_request(&rapid).await.unwrap());
+        }
+        assert_eq!(rapid.rapid_mlx_inference_gate.available_permits(), 0);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), prepare_inference_request(&rapid))
+                .await
+                .is_err()
+        );
+        drop(permits.pop());
+        assert!(prepare_inference_request(&rapid).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn queued_request_reroutes_after_active_backend_switch() {
+        let state = state_with_backend(InferenceBackend::LlamaCpp, "old-llama", 8111);
+        let blocker = prepare_inference_request(&state).await.unwrap();
+        let queued_state = state.clone();
+        let queued = tokio::spawn(async move { prepare_inference_request(&queued_state).await });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let replacement = Session::new_spawn_with_backend(
+            "new-rapid".into(),
+            "new-rapid".into(),
+            8112,
+            String::new(),
+            Some("127.0.0.1".into()),
+            None,
+            InferenceBackend::RapidMlx,
+            Some("new-model".into()),
+        );
+        assert!(state.add_session(replacement));
+        state.set_active_session("new-rapid");
+        drop(blocker);
+
+        let prepared = tokio::time::timeout(Duration::from_secs(1), queued)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(prepared.backend, InferenceBackend::RapidMlx);
+        assert!(prepared.url.contains(":8112/"));
+    }
+
+    #[tokio::test]
+    async fn queued_request_revalidates_a_rotated_protected_key() {
+        let state = state_with_backend(InferenceBackend::RapidMlx, "rapid", 8113);
+        {
+            let mut sessions = state.sessions.lock().unwrap();
+            let session = sessions
+                .iter_mut()
+                .find(|session| session.id == "rapid")
+                .unwrap();
+            if let SessionMode::Spawn { api_key, .. } = &mut session.mode {
+                *api_key = Some("old-secret".into());
+            }
+        }
+        let held: Vec<_> = futures_util::future::join_all(
+            (0..4).map(|_| state.rapid_mlx_inference_gate.clone().acquire_owned()),
+        )
+        .await
+        .into_iter()
+        .map(Result::unwrap)
+        .collect();
+        let queued_state = state.clone();
+        let queued = tokio::spawn(async move { prepare_inference_request(&queued_state).await });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        {
+            let mut sessions = state.sessions.lock().unwrap();
+            let session = sessions
+                .iter_mut()
+                .find(|session| session.id == "rapid")
+                .unwrap();
+            if let SessionMode::Spawn { api_key, .. } = &mut session.mode {
+                *api_key = Some("new-secret".into());
+            }
+        }
+        drop(held);
+
+        let prepared = tokio::time::timeout(Duration::from_secs(1), queued)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(prepared.api_key.as_deref(), Some("new-secret"));
+        assert_eq!(state.rapid_mlx_inference_gate.available_permits(), 3);
+        drop(prepared);
+        assert_eq!(state.rapid_mlx_inference_gate.available_permits(), 4);
+    }
+
+    #[tokio::test]
+    async fn inference_permits_release_on_routing_error_and_cancellation() {
+        let state = state_with_backend(InferenceBackend::RapidMlx, "rapid", 8120);
+        *state.server_running.lock().unwrap() = false;
+        assert!(prepare_inference_request(&state).await.is_err());
+        assert_eq!(state.rapid_mlx_inference_gate.available_permits(), 4);
+
+        *state.server_running.lock().unwrap() = true;
+        let held: Vec<_> = futures_util::future::join_all(
+            (0..4).map(|_| state.rapid_mlx_inference_gate.clone().acquire_owned()),
+        )
+        .await
+        .into_iter()
+        .map(Result::unwrap)
+        .collect();
+        let cancelled =
+            tokio::time::timeout(Duration::from_millis(20), prepare_inference_request(&state))
+                .await;
+        assert!(cancelled.is_err());
+        drop(held);
+        assert_eq!(state.rapid_mlx_inference_gate.available_permits(), 4);
+    }
+
+    #[test]
+    fn upstream_http_client_is_reused() {
+        let first = build_upstream_client().unwrap();
+        let second = build_upstream_client().unwrap();
+        assert!(std::ptr::eq(first, second));
+        let request = first
+            .get("http://127.0.0.1:1")
+            .timeout(Duration::from_millis(25))
+            .build()
+            .unwrap();
+        assert_eq!(request.timeout().copied(), Some(Duration::from_millis(25)));
     }
 }

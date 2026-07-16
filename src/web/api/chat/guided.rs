@@ -173,7 +173,7 @@ fn api_chat_guided(
                     return Ok(unauthorized_api_token());
                 }
                 let prepared = prepare_inference_request(&state).await?;
-                let client = build_upstream_client(std::time::Duration::from_secs(120))?;
+                let client = build_upstream_client()?;
                 let mut request_body = body.to_vec();
 
                 if let Ok(mut val) = serde_json::from_slice::<serde_json::Value>(&request_body) {
@@ -194,6 +194,7 @@ fn api_chat_guided(
                     prepared.authenticate(
                         client
                             .post(&url)
+                            .timeout(std::time::Duration::from_secs(120))
                             .header("Content-Type", "application/json")
                             .body(request_body.clone()),
                     )

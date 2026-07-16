@@ -115,7 +115,7 @@ fn api_analyze_context_notes(
                     {{\"sections\":[{{\"section\":\"<name>\",\"suggested\":\"<note text>\",\"status\":\"new|current|stale\",\"reason\":\"<only if stale>\"}}]}}"
                 );
 
-                let client = build_upstream_client(std::time::Duration::from_secs(60))?;
+                let client = build_upstream_client()?;
                 let payload = serde_json::json!({
                     "messages": [
                         {"role": "system", "content": system_msg},
@@ -138,6 +138,7 @@ fn api_analyze_context_notes(
                     prepared.authenticate(
                         client
                             .post(&url)
+                            .timeout(std::time::Duration::from_secs(60))
                             .header("Content-Type", "application/json")
                             .body(payload.clone()),
                     )

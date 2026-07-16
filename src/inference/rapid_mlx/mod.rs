@@ -14,6 +14,7 @@ use crate::inference::metrics::InferenceMetricsSnapshot;
 use crate::inference::supervisor::SupervisedLaunch;
 use anyhow::{Result, anyhow};
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -131,9 +132,27 @@ pub struct RapidMlxAdapter {
     compatibility: CompatibilityProfile,
     capabilities: CapabilitySet,
     chat_fields: BTreeSet<&'static str>,
+    pollers: std::sync::Mutex<HashMap<u16, std::sync::Arc<self::poller::RapidMlxPoller>>>,
 }
 
 impl RapidMlxAdapter {
+    fn poller_for(&self, port: u16) -> Result<std::sync::Arc<self::poller::RapidMlxPoller>> {
+        let mut pollers = self
+            .pollers
+            .lock()
+            .map_err(|error| anyhow!("Rapid-MLX poller cache lock failed: {error}"))?;
+        Ok(pollers
+            .entry(port)
+            .or_insert_with(|| {
+                std::sync::Arc::new(self::poller::RapidMlxPoller::new(
+                    &self.host,
+                    port,
+                    self.api_key.as_deref(),
+                ))
+            })
+            .clone())
+    }
+
     pub fn from_resolved(
         runtime: RuntimeMetadata,
         resolved_model: ResolvedRapidMlxLaunchModel,
@@ -151,6 +170,7 @@ impl RapidMlxAdapter {
             compatibility: CompatibilityProfile::verified_baseline(),
             capabilities: verified_capabilities(),
             chat_fields: verified_chat_fields(),
+            pollers: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -172,6 +192,10 @@ impl RapidMlxAdapter {
         };
         self.compatibility = compatibility;
         self.api_key = api_key.filter(|key| !key.is_empty());
+        self.pollers
+            .get_mut()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
     }
 
     pub async fn validate(&self) -> Result<()> {
@@ -268,7 +292,7 @@ impl RapidMlxAdapter {
         port: u16,
         _session_id: &str,
     ) -> Result<InferenceMetricsSnapshot> {
-        let poller = self::poller::RapidMlxPoller::new(&self.host, port, self.api_key.as_deref());
+        let poller = self.poller_for(port)?;
         poller.poll().await
     }
 
@@ -404,6 +428,29 @@ fn provisional_chat_fields() -> BTreeSet<&'static str> {
     ]
     .into_iter()
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::inference::rapid_mlx::runtime::RuntimeSource;
+
+    #[test]
+    fn adapter_reuses_poller_per_port_and_separates_ports() {
+        let adapter = RapidMlxAdapter::from_resolved(
+            RuntimeMetadata {
+                executable_path: "rapid-mlx".into(),
+                source: RuntimeSource::Managed,
+                version: "0.10.10".into(),
+            },
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        );
+        let first = adapter.poller_for(8000).unwrap();
+        let second = adapter.poller_for(8000).unwrap();
+        let other = adapter.poller_for(8001).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        assert!(!std::sync::Arc::ptr_eq(&first, &other));
+    }
 }
 
 fn verified_chat_fields() -> BTreeSet<&'static str> {

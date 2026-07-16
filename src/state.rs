@@ -810,7 +810,11 @@ pub struct AppState {
     pub remote_agent_protocol_too_old: Arc<Mutex<bool>>,
     pub chat_storage: Arc<ChatStorage>,
     pub tls_config: Arc<Mutex<TLSConfig>>,
+    /// Retains llama.cpp's single-request safety contract.
     pub monitor_inference_gate: Arc<tokio::sync::Semaphore>,
+    /// Rapid-MLX supports continuous batching, but llama-monitor keeps a fixed
+    /// application-side bound so one client cannot create an unbounded queue.
+    pub rapid_mlx_inference_gate: Arc<tokio::sync::Semaphore>,
     pub last_spawn_cmd: Arc<Mutex<String>>,
 
     // Sleep/low-power mode (T-042/T-043)
@@ -874,6 +878,7 @@ impl Default for AppState {
             chat_storage: Arc::new(ChatStorage::default()),
             tls_config: Arc::new(Mutex::new(TLSConfig::default())),
             monitor_inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
+            rapid_mlx_inference_gate: Arc::new(tokio::sync::Semaphore::new(4)),
             last_spawn_cmd: Arc::new(Mutex::new(String::new())),
             backend: Arc::new(Mutex::new(None)),
             supervisor: Arc::new(tokio::sync::Mutex::new(None)),
@@ -992,6 +997,7 @@ impl AppState {
             chat_storage,
             tls_config: Arc::new(Mutex::new(tls_config)),
             monitor_inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
+            rapid_mlx_inference_gate: Arc::new(tokio::sync::Semaphore::new(4)),
             last_spawn_cmd: Arc::new(Mutex::new(String::new())),
             backend: Arc::new(Mutex::new(None)),
             supervisor: Arc::new(tokio::sync::Mutex::new(None)),

@@ -58,13 +58,22 @@ impl RapidMlxPoller {
 
     pub fn from_base_url(base_url: String, api_key: Option<&str>) -> Self {
         Self {
-            client: reqwest::Client::builder()
-                .pool_max_idle_per_host(0)
-                .build()
-                .unwrap_or_default(),
+            client: reqwest::Client::new(),
             base_url: base_url.trim_end_matches('/').to_string(),
-            api_key: api_key.map(str::to_string),
+            api_key: api_key.filter(|key| !key.is_empty()).map(str::to_string),
         }
+    }
+
+    pub fn matches_target(&self, base_url: &str, api_key: Option<&str>) -> bool {
+        use subtle::ConstantTimeEq;
+
+        let candidate_key = api_key.filter(|key| !key.is_empty());
+        let key_matches = match (self.api_key.as_deref(), candidate_key) {
+            (Some(left), Some(right)) => left.as_bytes().ct_eq(right.as_bytes()).into(),
+            (None, None) => true,
+            _ => false,
+        };
+        self.base_url == base_url.trim_end_matches('/') && key_matches
     }
 
     pub async fn poll(&self) -> Result<InferenceMetricsSnapshot> {
@@ -322,4 +331,49 @@ fn recognized_progress(value: Value) -> Option<Value> {
     let total = object.get("total").and_then(Value::as_f64)?;
     (current.is_finite() && total.is_finite() && current >= 0.0 && total > 0.0 && current <= total)
         .then(|| json!({ "current": current, "total": total }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn one_poller_reuses_client_across_all_authenticated_telemetry_calls() {
+        let mut server = mockito::Server::new_async().await;
+        let health = server
+            .mock("GET", "/health")
+            .match_header("authorization", "Bearer secret")
+            .with_status(200)
+            .expect(2)
+            .create_async()
+            .await;
+        let status = server
+            .mock("GET", "/v1/status")
+            .match_header("authorization", "Bearer secret")
+            .with_status(200)
+            .with_body(r#"{"status":"idle","model":"fixture"}"#)
+            .expect(2)
+            .create_async()
+            .await;
+        let cache = server
+            .mock("GET", "/v1/cache/stats")
+            .match_header("authorization", "Bearer secret")
+            .with_status(200)
+            .with_body(r#"{"multimodal_kv_cache":{}}"#)
+            .expect(2)
+            .create_async()
+            .await;
+
+        let poller = RapidMlxPoller::from_base_url(server.url(), Some("secret"));
+        assert!(poller.matches_target(&server.url(), Some("secret")));
+        assert!(!poller.matches_target(&server.url(), Some("wrong")));
+        for _ in 0..2 {
+            let snapshot = poller.poll().await.unwrap();
+            assert_eq!(snapshot.model.as_deref(), Some("fixture"));
+            assert!(matches!(snapshot.health, Some(HealthState::Ok)));
+        }
+        health.assert_async().await;
+        status.assert_async().await;
+        cache.assert_async().await;
+    }
 }
