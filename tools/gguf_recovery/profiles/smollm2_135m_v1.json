@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "profile_id": "smollm2-135m-instruct-llama-v1",
+  "architecture": "llama",
+  "model_class": "LlamaForCausalLM",
+  "authoritative_source": {
+    "repo_id": "HuggingFaceTB/SmolLM2-135M-Instruct",
+    "revision": "12fd25f77366fa6b3b4b768ec3050bf629380bac",
+    "weight_file": "model.safetensors",
+    "weight_sha256": "5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c",
+    "files": {
+      "config.json": "8eb740e8bbe4cff95ea7b4588d17a2432deb16e8075bc5828ff7ba9be94d982a",
+      "generation_config.json": "87b916edaaab66b3899b9d0dd0752727dff6666686da0504d89ae0a6e055a013",
+      "merges.txt": "0b54e8aa4e53d5383e2e4bc635a56b43f9647f7b13832d5d9ecd8f82dac4f510",
+      "model.safetensors": "5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c",
+      "special_tokens_map.json": "2b7379f3ae813529281a5c602bc5a11c1d4e0a99107aaa597fe936c1e813ca52",
+      "tokenizer.json": "9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c",
+      "tokenizer_config.json": "4ec77d44f62efeb38d7e044a1db318f6a939438425312dfa333b8382dbad98df",
+      "vocab.json": "82b84012e3add4d01d12ba14442026e49b8cbbaead1f79ecf3d919784f82dc79"
+    }
+  },
+  "gguf_source": {
+    "repo_id": "unsloth/SmolLM2-135M-Instruct-GGUF",
+    "revision": "9e6855bc4be717fca1ef21360a1db4b29d5c559a",
+    "tiers": {
+      "f16": {
+        "filename": "SmolLM2-135M-Instruct-F16.gguf",
+        "size": 270885952,
+        "sha256": "5157ca60744d21631818364854ac8e4452e1b8022d2ab4c8a2f9cda2344afb30",
+        "allowed_quant_types": ["F32", "F16"],
+        "quant_inventory": {"F16": 211, "F32": 61},
+        "tensor_inventory_sha256": "d7488865ca0cf1a23af4e6e066b220f6c5d36f232dd7620254cf63ec3a99a898"
+      },
+      "q8_0": {
+        "filename": "SmolLM2-135M-Instruct-Q8_0.gguf",
+        "size": 144811072,
+        "sha256": "c4a3dd037301b6ecea31d6da37f5cd793ead920dd5ddfe6d589294628d6ce66a",
+        "allowed_quant_types": ["F32", "Q8_0"],
+        "quant_inventory": {"F32": 61, "Q8_0": 211},
+        "tensor_inventory_sha256": "3b74f8b761c6d3b732785703a4decf9556fd42d25be158467cc507aac508c840"
+      },
+      "q6_k": {
+        "filename": "SmolLM2-135M-Instruct-Q6_K.gguf",
+        "size": 138382912,
+        "sha256": "1b4cac34723e9f710d661d5c26f658d81c0d35d10c34e104b4d094ad0e89bdd2",
+        "allowed_quant_types": ["F32", "Q6_K", "Q8_0"],
+        "quant_inventory": {"F32": 61, "Q6_K": 30, "Q8_0": 181},
+        "tensor_inventory_sha256": "1df67a861d9b6105c4a1aa7b4ede40d114cb43c4c7a5d7667e335b8c7a75ea31"
+      },
+      "q4_k_m": {
+        "filename": "SmolLM2-135M-Instruct-Q4_K_M.gguf",
+        "size": 105454144,
+        "sha256": "ed5fa30c487b282ec156c29062f1222e5c20875a944ac98289dbd242e947f747",
+        "allowed_quant_types": ["F32", "Q4_K", "Q5_0", "Q6_K", "Q8_0"],
+        "quant_inventory": {"F32": 61, "Q4_K": 16, "Q5_0": 166, "Q6_K": 14, "Q8_0": 15},
+        "tensor_inventory_sha256": "24d7d1c45ce7c5b3fc2652552632409ea1cbdd7c93a32da5ceb695aa280e61c6"
+      }
+    }
+  },
+  "config_contract": {
+    "model_type": "llama",
+    "architectures": ["LlamaForCausalLM"],
+    "hidden_size": 576,
+    "intermediate_size": 1536,
+    "num_hidden_layers": 30,
+    "num_attention_heads": 9,
+    "num_key_value_heads": 3,
+    "vocab_size": 49152,
+    "max_position_embeddings": 8192,
+    "rope_theta": 100000,
+    "rope_interleaved": false,
+    "rms_norm_eps": 0.00001,
+    "attention_bias": false,
+    "mlp_bias": false,
+    "tie_word_embeddings": true,
+    "bos_token_id": 1,
+    "eos_token_id": 2,
+    "pad_token_id": 2
+  },
+  "required_assets": [
+    "config.json",
+    "generation_config.json",
+    "merges.txt",
+    "special_tokens_map.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "vocab.json"
+  ],
+  "expected_tensor_count": 272,
+  "max_tensor_count": 512,
+  "max_report_bytes": 1048576,
+  "output_dtype": "float16",
+  "qk_permutation": "llama_rope_inverse_v1"
+}

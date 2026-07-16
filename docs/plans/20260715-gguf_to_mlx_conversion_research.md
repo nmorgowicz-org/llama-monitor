@@ -772,6 +772,169 @@ Independent Verifier evidence:
   disk-failure cleanup.
 - Checkpoint: `feat(models): validate experimental GGUF recovery pipeline`.
 
+#### R2 checkpoint (2026-07-16)
+
+Status: **complete; independent Verifier approved after remediation and detached-host
+semantic validation.** This checkpoint authorizes later R3 research only. The recovered
+cache remains experimental and non-launchable; production/UI promotion remains
+unauthorized.
+
+Selected corpus and provenance:
+
+- Authoritative model: `HuggingFaceTB/SmolLM2-135M-Instruct` at revision
+  `12fd25f77366fa6b3b4b768ec3050bf629380bac`; its BF16 safetensors SHA-256 is
+  `5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c`.
+- GGUF source: `unsloth/SmolLM2-135M-Instruct-GGUF` at revision
+  `9e6855bc4be717fca1ef21360a1db4b29d5c559a`. F16, Q8_0, Q6_K, and Q4_K_M
+  source size and SHA-256 are pinned by the versioned profile.
+- The approximately 937 MiB corpus lives only below
+  `~/.config/llama-monitor/models/experimental/import-lab/fixtures/smollm2-135m-v1/`;
+  Hugging Face's default cache is not used.
+- The converter seed is the audited `barrontang/gguf2mlx` Git snapshot
+  `6a0da6529f233df79362cbf62dd96221c895351f`. The minimal fork retains attribution
+  and records that upstream declares MIT in `pyproject.toml` but does not track a
+  standalone license file. Exact direct dependencies are installed from a hash-locked
+  requirements file into the app-owned `r2-v1` environment: `gguf==0.19.0`,
+  `numpy==2.5.1`, and `safetensors==0.8.0`.
+
+Delivered safety contract:
+
+- One explicit SmolLM2/Llama profile owns source hashes, architecture/config/assets,
+  tensor count, source-tier quant inventories, output dtype, and Q/K RoPE mapping.
+  There is no architecture guessing, model-name fallback, skipped tensor, or network
+  path in the worker.
+- The Apple-Silicon-only executor accepts library-relative source/reference paths,
+  rejects traversal and symlinks, verifies the isolated dependency environment,
+  bounds report/diagnostic/output/disk use, supports active cancellation, cleans failed
+  staging, and atomically promotes only a completely hashed cache.
+- Worker directories bind the worker, profile, dependency lock, and third-party notice
+  identities. Profile evolution therefore creates a new immutable worker directory
+  instead of colliding with an older embedded asset.
+- Every R2 result is permanently `launchable: false` with status
+  `experimental_structurally_validated`. It is outside production model inventory and
+  cannot be selected by Rapid-MLX.
+
+Tensor evidence:
+
+| Source tier | Exact observed quant inventory | Tensor closure | Global max absolute delta vs authoritative BF16 | Global minimum cosine |
+|---|---|---:|---:|---:|
+| F16 | F16/F32 as pinned | 272/272 | `2.9802322387695312e-08` | `0.9999998807907104` |
+| Q8_0 | F32/Q8_0 as pinned | 272/272 | `0.03564453125` | `0.9999547004699707` |
+| Q6_K | 61 F32, 30 Q6_K, 181 Q8_0 | 272/272 | `0.09423828125` | `0.9998226165771484` |
+| Q4_K_M | 61 F32, 16 Q4_K, 166 Q5_0, 14 Q6_K, 15 Q8_0 | 272/272 | `0.28662109375` | `0.9971904754638672` |
+
+All four reports have zero skipped, unknown, duplicate, shape-mismatched, or
+non-finite tensors. The parity reader decodes the documented BF16 safetensors
+representation directly and has no MLX/Metal dependency. This exposed and corrected a
+critical defect inherited from the audited seed: with `gguf==0.19.0`, unquantized
+`tensor.data` is already in logical Hugging Face order. Reshaping it through GGML
+dimension order scrambled the F16 model even though it remained loadable. The fork now
+uses unquantized data directly and applies only the explicit inverse Llama RoPE
+permutation to Q/K weights.
+
+Failure evidence:
+
+- Focused tests reject every nonzero failure counter, output mutation, promoted-cache
+  mutation, traversal/symlinks, and materialized-asset identity drift.
+- A live child-process test cancels an actively sleeping worker, writes the sentinel,
+  kills/reaps the child, and returns in under five seconds. Real-corpus pre-cancel and
+  one-byte output-bound failures leave `.staging` empty.
+- Mixed-quant tier profiles use the exact real-file inventories above. The initial
+  narrower Q6_K profile rejected Q8_0 fail-closed; no broad allow-all fallback was
+  added.
+
+R2 remediation after independent review:
+
+- Managed runtime, worker, imports, staging, and final-cache paths are now created one
+  component at a time below canonical app roots. Preexisting symlinks/non-directories
+  fail before writes, the cache root itself cannot be a symlink, and final promotion
+  rejects any path that appeared after preflight.
+- Complete source hashing, recursive cache hashing/validation, asset materialization,
+  report closure, and promotion validation run through the existing two-permit bounded
+  blocking-worker contract rather than on Tokio workers.
+- The toolchain probe has a 30-second deadline, cleared environment, concurrently
+  drained 16 KiB output bounds, and a persisted identity covering all 10 installed
+  distributions plus 1,176 non-bytecode installed files. Package version strings alone
+  are no longer accepted.
+- Worker stdout/stderr drain concurrently from process start. Output overflow,
+  cancellation, and timeout terminate and reap the worker process group on Unix;
+  unsupported off-Apple execution retains an explicit portable direct-child stub.
+  Post-exit pipe draining is also deadline-bound: a descendant that inherits pipes is
+  terminated even after its direct parent exits, and the group receives SIGKILL after
+  the grace interval even when the leader has already been reaped.
+- The worker rehashes the GGUF and every authoritative reference asset after conversion.
+  Rust independently validates typed source/reference/tensor provenance, exact profile
+  worker/tier/count/quant/tensor-inventory identities, and complete file hashes before
+  promotion and cache reuse. The embedded profile pins every authoritative config,
+  tokenizer, generation, vocabulary, merges, special-token, and weight asset hash; a
+  mutable reference manifest cannot bless substituted assets.
+- The request limit now applies to actual complete FP16 directory bytes, including the
+  safetensors header and copied assets, both at promotion and cache reuse. The complete
+  MIT permission/warranty text is retained in the third-party notice. Environment-lock
+  and notice hashes participate in worker and cache identities, so older results cannot
+  collide with the remediated cache.
+- Cache manifest and validation JSON are rejected through non-following metadata checks
+  and fixed size bounds before any parse or hash; `.complete` must be an empty,
+  non-symlink regular file. Rust applies the same bounded pre-open check to the
+  authoritative reference manifest.
+- The remediated F16 cache is
+  `a21cca76ec236c3c71ea2bf5eb6f78716602b90fb16d78c3aef4da51e1ff4177`.
+  Fresh parity remains 272 tensors, global max absolute delta
+  `2.9802322387695312e-08`, and global minimum cosine `0.9999998807907104`.
+  It remains permanently non-launchable; passing R2 does not promote it into the model
+  inventory.
+
+Detached runtime and independent Verifier evidence:
+
+- The one-time normal-Terminal gate loaded the exact recovered F16 cache through pinned
+  mlx-lm in **0.955 seconds**, returning `Model` and `TokenizerWrapper` with exit code
+  zero and no timeout.
+- Rapid-MLX `0.10.10` loaded the recovered cache as `r2-smollm2-f16`.
+  `/health/ready`, authenticated `/v1/models`, `/v1/status`, and `/v1/cache/stats` all
+  succeeded. Two identical greedy 32-token requests produced byte-identical text,
+  finish reason `length`, and usage of 41 prompt plus 32 completion tokens. The second
+  request also exercised a 41-token prefix-cache hit.
+- The managed llama-server loaded the pinned F16 GGUF and completed the matching
+  request with the same 41 prompt and 32 completion tokens. Both backends selected
+  `The` as the first token and returned the same ordered top-five candidates:
+  `The`, `\"`, `In`, `A`, and `When`. The winning logprob was `-0.171875` in
+  Rapid-MLX versus `-0.1745922863` in llama-server; the largest absolute delta across
+  the five candidates was approximately `0.0209`.
+- Full 32-token text diverged after the shared opening, which is acceptable cross-kernel
+  greedy behavior here: the exact prompt-token count and ordered first-token logits
+  establish chat-template/tokenization and semantic compatibility, while both outputs
+  remained coherent. Rapid-MLX also used its documented default int4 KV cache, unlike
+  the llama-server execution path. R2 never required byte-identical full generation.
+- Bounded logs contained no runtime error, traceback, crash, hang, or non-finite score.
+  Rapid-MLX's SIGTERM stack dump was its expected signal-observability output during
+  intentional shutdown and was followed by complete engine/server cleanup. Both owned
+  process groups stopped, and ports `18082` and `18083` were closed.
+- Independent rereview passed the 14-test focused recovery suite, the live complete
+  toolchain-identity test, the real one-byte cache/output-bound test, Clippy with
+  warnings denied, and `git diff --check`. The Verifier approved the code, corpus
+  provenance, failure semantics, tensor evidence, runtime semantics, and cleanup state.
+- The bounded machine report and logs are retained locally at
+  `/tmp/llama-monitor-r2-host-gate/` for this checkpoint; they are evidence artifacts,
+  not shipped application data.
+- Eight superseded non-launchable caches remain cleanup debt and were not deleted:
+  `f1c445614ffebf3aecfb4fac68e3bbf71b18c4b086a5324bc160e614afb38f06`
+  (known-corrupt pre-fix F16),
+  `3380a94ba4fd3051e68b025dfd9f38b055d3d0030066d6f63807952d7733eb97`
+  (superseded F16 profile), and
+  `32e1551e889bc055260bb83c3a55c3d5632cb3468ae487676020bcaae4ea6f67`
+  (superseded Q8_0 profile), and
+  `31593ba6879e2f601b0a6f079e27503005d751bb768c0fd56060c192d58c0e52`
+  (pre-remediation final-profile F16),
+  `063a8d96739d3c8e1f3dcff11fb00b8f5941c80a6d609c82bd1cd9fe37d94733`
+  (pre-remediation Q8_0),
+  `2f9f5c8709e4e586f7814f406f2099e3dd118994a1f28eb00b6bf79b6c7dc3ef`
+  (pre-remediation Q6_K), and
+  `cfba79ce6db8dd07aeead1375c944b5ea155f94077e94b496e3d3f52b9484d79`
+  (pre-remediation Q4_K_M), and
+  `390a32bf103be00e7e35fd36c78e3def327b4f7e2953dc84b8b0a24c69ffbc98`
+  (superseded before authoritative asset closure was profile-pinned). They must be
+  removed explicitly after review; R2 never treats them as launchable.
+
 ### R3 — Optional MLX re-quantization
 
 - Use pinned official mlx-lm on the validated recovered FP16 result.
