@@ -3340,6 +3340,23 @@
             <!-- Step 2: Model -->
             <div class="wizard-step" id="wizard-step-1">
                 <div class="wizard-main">
+                    <section class="wizard-engine-section" aria-labelledby="wizard-engine-title">
+                        <div class="wizard-section-title" id="wizard-engine-title">Choose your inference engine</div>
+                        <div class="wizard-section-desc">Pick the runtime that matches your model. We’ll recommend one as soon as the model source is clear, without replacing a choice you make.</div>
+                        <div class="wizard-engine-cards" role="radiogroup" aria-label="Inference engine">
+                            <button type="button" class="wizard-engine-card selected" data-engine="llama_cpp" role="radio" aria-checked="true">
+                                <span class="wizard-engine-mark">L</span>
+                                <span class="wizard-engine-copy"><strong>llama.cpp</strong><small>Native GGUF · widest platform support</small></span>
+                                <span class="wizard-engine-badge" data-engine-badge="llama_cpp">Recommended for GGUF</span>
+                            </button>
+                            <button type="button" class="wizard-engine-card" data-engine="rapid_mlx" role="radio" aria-checked="false">
+                                <span class="wizard-engine-mark rapid">R</span>
+                                <span class="wizard-engine-copy"><strong>Rapid-MLX</strong><small>Native MLX · optimized for Apple Silicon</small></span>
+                                <span class="wizard-engine-badge" data-engine-badge="rapid_mlx">Checking runtime…</span>
+                            </button>
+                        </div>
+                        <div class="wizard-engine-reason" id="wizard-engine-reason" role="status">Select a model and we’ll explain the best engine.</div>
+                    </section>
                     <div>
                         <div class="wizard-section-title">Select your model</div>
                         <div class="wizard-section-desc">
@@ -3574,6 +3591,14 @@
 
             <!-- Step 3: Hardware -->
             <div class="wizard-step" id="wizard-step-2" tabindex="-1">
+                <div class="rapid-hardware-panel" id="rapid-hardware-panel" hidden>
+                    <div class="rapid-hardware-orb">R</div>
+                    <div class="rapid-hardware-content">
+                        <div class="wizard-section-title">Backend-specific memory controls</div>
+                        <p>Rapid-MLX owns Metal placement, cache blocks, and batching for this launch. These runtime controls remain separate from llama.cpp configuration.</p>
+                        <div class="rapid-hardware-note">No llama.cpp GPU-layer, KV quantization, mmap, or speculative-decoding flags will be included.</div>
+                    </div>
+                </div>
                 <div class="wizard-main">
                     <div>
                         <div class="wizard-section-title">Configure hardware</div>

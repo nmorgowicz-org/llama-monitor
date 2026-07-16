@@ -157,6 +157,13 @@ export function showSpawnRoute(path) {
 // Exposed for testing/screenshot scripts; internal state is mutable.
 export const wizardState = {
   currentStep: 0,
+  engine: {
+    selected: 'llama_cpp',
+    explicit: false,
+    recommendation: null,
+    rapidMlxLocalAvailable: false,
+    rapidMlxRuntimeCompatible: false,
+  },
   profile: 'balanced',
   useCase: 'general',    // 'agentic' | 'general' | 'roleplay'
   mode: 'guided',
@@ -166,6 +173,7 @@ export const wizardState = {
     hfRepo: '',
     hfFile: '',
     hfTokenSet: false,
+    rapidMlxSource: null,
     delivery: 'local_file', // 'local_file' | 'imported_local' | 'stream_hf' | 'downloaded_hf'
     originRepo: '',
     originFile: '',
@@ -259,6 +267,7 @@ export function initSpawnWizard() {
   restoreProfile();
   applyProfileVisibility();
   updateProfileHint();
+  refreshEngineAvailability();
 
   // HF discover pills
   const discoverPillsEl = document.getElementById('hf-discover-pills');
@@ -394,8 +403,32 @@ export function openSpawnWizard(opts = {}) {
     if (t.temperature != null)   wizardState.hardware.temperature   = t.temperature;
     if (t.top_p != null)         wizardState.hardware.topP          = t.top_p;
     if (t.top_k != null)         wizardState.hardware.topK          = t.top_k;
+    if (t.min_p != null)         wizardState.hardware.minP          = t.min_p;
     if (t.repeat_penalty != null) wizardState.hardware.repeatPenalty = t.repeat_penalty;
+    if (t.presence_penalty != null) wizardState.hardware.presencePenalty = t.presence_penalty;
     if (t.max_tokens != null)    wizardState.hardware.maxTokens     = t.max_tokens;
+    if (t.seed != null)          wizardState.hardware.seed          = t.seed;
+    if (t.backend === 'rapid_mlx' && t.rapid_mlx) {
+      const rapid = t.rapid_mlx;
+      const source = rapid.model_source || null;
+      wizardState.engine.selected = 'rapid_mlx';
+      wizardState.engine.explicit = true;
+      wizardState.model.rapidMlxSource = source;
+      wizardState.access.port = rapid.port || t.port || 8001;
+      wizardState.access.bindHost = rapid.host || t.bind_host || '127.0.0.1';
+      wizardState.hardware.alias = rapid.served_model_name || '';
+      const authoritativeHf = source?.kind === 'authoritative_safetensors'
+        && source.source?.kind === 'hugging_face_repo';
+      if (source?.kind === 'hugging_face_repo' || authoritativeHf) {
+        wizardState.model.source = 'hf';
+        wizardState.model.hfRepo = source.repo_id || source.source?.repo_id || '';
+        wizardState.model.hfFile = '';
+      } else {
+        wizardState.model.source = 'local';
+        wizardState.model.path = source?.path || source?.source?.path || source?.value || rapid.model_path || '';
+        wizardState.model.localMeta = source ? { source_kind: source.kind, model_source: source } : null;
+      }
+    }
   }
 
   if (opts.localPath) {
@@ -406,6 +439,7 @@ export function openSpawnWizard(opts = {}) {
     wizardState.model.hfFile = '';
     wizardState.model.delivery = 'local_file';
     wizardState.model.localMeta = opts.localModel || null;
+    wizardState.model.modelBytes = Number(opts.localModel?.size_bytes) || 0;
     if (dom.modelPathInput) dom.modelPathInput.value = opts.localPath;
     if (dom.hfRepoInput) dom.hfRepoInput.value = '';
     // Select the "local" source card visually.
@@ -415,12 +449,24 @@ export function openSpawnWizard(opts = {}) {
     updateModelInputVisibility();
     renderLocalModelHint();
     showStep(1); // step 1 = Model (0-indexed)
-  } else {
+  } else if (opts.templatePreset?.backend !== 'rapid_mlx') {
     wizardState.model.source = 'local';
     updateModelInputVisibility();
     renderLocalModelHint();
     showStep(0);
+  } else {
+    if (dom.modelPathInput) dom.modelPathInput.value = wizardState.model.path;
+    if (dom.hfRepoInput) dom.hfRepoInput.value = wizardState.model.hfRepo;
+    dom.modelSourceCards?.forEach(c => {
+      c.classList.toggle('selected', c.dataset.source === wizardState.model.source);
+    });
+    updateModelInputVisibility();
+    renderLocalModelHint();
+    showStep(1);
   }
+
+  renderEngineSelection();
+  refreshEngineRecommendation();
 
   setupWizardEscape();
 }
@@ -467,6 +513,7 @@ function resetWizardState() {
   wizardState.model.mmprojFiles = [];
   wizardState.model.quantFiles = [];
   wizardState.model.hfTokenSet = false;
+  wizardState.model.rapidMlxSource = null;
   wizardState.model._quantSwapRepo = '';
 
   // Clear module-level quant-swap search state so next open starts fresh
@@ -514,6 +561,8 @@ function resetWizardState() {
   wizardState.hardware.draftModelPath = '';
   wizardState.hardware.grammar = '';
   wizardState.hardware.jsonSchema = '';
+  wizardState.hardware.alias = '';
+  wizardState.hardware.extraArgs = '';
 
   // Reset architecture
   wizardState.arch.nLayers = 0;
@@ -534,6 +583,9 @@ function resetWizardState() {
 
   // Reset UI state
   wizardState.currentStep = 0;
+  wizardState.engine.selected = 'llama_cpp';
+  wizardState.engine.explicit = false;
+  wizardState.engine.recommendation = null;
   wizardState.useCase = 'general';
   wizardState.profile = 'balanced';
   wizardState.mode = 'guided';
@@ -576,6 +628,9 @@ function cacheDom() {
   dom.usecaseCards  = dom.overlay?.querySelectorAll('.usecase-card[data-usecase]');
 
   // Step 2
+  dom.engineCards = dom.overlay?.querySelectorAll('.wizard-engine-card[data-engine]');
+  dom.engineReason = document.getElementById('wizard-engine-reason');
+  dom.rapidHardwarePanel = document.getElementById('rapid-hardware-panel');
   dom.modelSourceCards = dom.overlay?.querySelectorAll('.model-source-card[data-source]');
   dom.modelInputLocal  = document.getElementById('model-input-local');
   dom.modelInputHf     = document.getElementById('model-input-hf');
@@ -810,10 +865,15 @@ function bindEvents() {
   });
 
   // Model source cards
+  dom.engineCards?.forEach(card => {
+    card.addEventListener('click', () => selectWizardEngine(card.dataset.engine, true));
+  });
+
   dom.modelSourceCards?.forEach(card => {
     card.setAttribute('tabindex', '0'); card.setAttribute('role', 'button');
     card.addEventListener('click', () => {
       wizardState.model.source = card.dataset.source;
+      wizardState.model.rapidMlxSource = null;
       if (card.dataset.source === 'local' && !wizardState.model.delivery) wizardState.model.delivery = 'local_file';
       if (card.dataset.source === 'import') wizardState.model.delivery = 'imported_local';
       if (card.dataset.source === 'hf') wizardState.model.delivery = 'stream_hf';
@@ -824,6 +884,7 @@ function bindEvents() {
       renderLocalModelHint();
       clearValidationError();
       if (card.dataset.source === 'import') loadThirdPartyModels();
+      refreshEngineRecommendation();
       refreshStepGuardrails();
     });
     card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } });
@@ -848,7 +909,8 @@ function bindEvents() {
       parts.pop();
       defaultPath = parts.join(sep) || (defaultPath.includes('\\') ? 'C:\\' : '/');
     }
-    openDeferredFileBrowser('spawn-model-path', 'gguf', defaultPath, 'model');
+    const rapid = wizardState.engine.selected === 'rapid_mlx';
+    openDeferredFileBrowser('spawn-model-path', rapid ? 'dir' : 'gguf', defaultPath, rapid ? '' : 'model');
   });
   dom.importBrowseBtn?.addEventListener('click', () => openModelFileBrowser('spawn-import-path', 'gguf', null, 'model'));
 
@@ -856,6 +918,7 @@ function bindEvents() {
     wizardState.model.path = dom.modelPathInput.value.trim();
     wizardState.model.source = 'local';
     wizardState.model.delivery = 'local_file';
+    wizardState.model.rapidMlxSource = null;
     if (wizardState.model.localMeta?.path && wizardState.model.localMeta.path !== wizardState.model.path) {
       wizardState.model.localMeta = null;
     }
@@ -901,6 +964,8 @@ function bindEvents() {
   dom.hfRepoInput?.addEventListener('input', () => {
     wizardState.model.hfRepo = dom.hfRepoInput.value.trim();
     if (!wizardState.model.hfRepo) wizardState.model.hfFile = '';
+    wizardState.model.rapidMlxSource = null;
+    refreshEngineRecommendation();
     refreshStepGuardrails();
   });
   dom.hfRepoInput?.addEventListener('blur', () => triggerHfFileFetch());
@@ -1103,6 +1168,7 @@ function bindEvents() {
     const qf = wizardState.model.quantFiles?.find(q => (q.path || q.name) === fpath);
     if (qf) {
       wizardState.model.hfFile = fpath;
+      refreshEngineRecommendation();
       // Always reset modelBytes so getModelBytes() re-estimates from the new filename
       // if the file size is unknown — stale size from a different quant would corrupt the math.
       wizardState.model.modelBytes = Number(qf.size) || 0;
@@ -1273,10 +1339,31 @@ function getStepGuardState(step = wizardState.currentStep) {
 
   if (step === 1) {
     const { source, path, hfRepo, hfFile } = wizardState.model;
+    const rapid = wizardState.engine.selected === 'rapid_mlx';
+    const artifactKind = classifyWizardArtifact();
+    if (rapid && !wizardState.engine.rapidMlxLocalAvailable) {
+      return error('Local Rapid-MLX launch requires Apple Silicon macOS. Remote Rapid-MLX endpoints can still be attached from the welcome screen.');
+    }
+    if (rapid && wizardState.engine.recommendation?.state === 'checking') {
+      return error('Checking the selected Rapid-MLX runtime compatibility…');
+    }
+    if (rapid && wizardState.engine.recommendation?.state === 'runtime_required') {
+      return error('Install a compatible Rapid-MLX runtime in Settings before launching this engine.');
+    }
+    if (rapid && artifactKind === 'gguf') {
+      return error('GGUF runs with llama.cpp. Switch engines or choose a validated MLX source.', dom.modelPathInput || dom.hfFileList);
+    }
+    if (!rapid && ['mlx_directory', 'authoritative_safetensors', 'rapid_mlx_alias', 'rapid_mlx_hf_repository'].includes(artifactKind)) {
+      return error('This typed model source requires Rapid-MLX. Switch engines to continue.', dom.modelPathInput || dom.hfRepoInput);
+    }
     if (source === 'local') {
+      if (rapid && artifactKind === 'authoritative_safetensors'
+          && !(wizardState.model.rapidMlxSource || wizardState.model.localMeta?.model_source)) {
+        return error('Choose this safetensors model from the model library so its verified source revision and conversion recipe are preserved.', dom.modelPathInput);
+      }
       return path
-        ? info('Local model selected. Continue to tune hardware and context settings.')
-        : error('Choose a local GGUF file to continue.', dom.modelPathInput);
+        ? info(rapid ? 'MLX model selected. Continue to review backend-specific launch settings.' : 'Local model selected. Continue to tune hardware and context settings.')
+        : error(rapid ? 'Enter a validated local MLX model directory to continue.' : 'Choose a local GGUF file to continue.', dom.modelPathInput);
     }
     if (source === 'import') {
       return path
@@ -1286,13 +1373,16 @@ function getStepGuardState(step = wizardState.currentStep) {
     if (!hfRepo) {
       return error('Enter a Hugging Face repo ID or pick a discover result to continue.', dom.hfRepoInput);
     }
-    if (!hfFile) {
+    if (!hfFile && !rapid) {
       return error('Choose a GGUF file from the selected Hugging Face repo to continue.', dom.hfFileList || dom.hfRepoInput);
     }
     return info('Hugging Face model selected. Continue to review its hardware fit.');
   }
 
   if (step === 2) {
+    if (wizardState.engine.selected === 'rapid_mlx') {
+      return info('Rapid-MLX backend controls remain isolated from llama.cpp memory and speculation flags.');
+    }
     if (wizardState.hardware.gpuLayers === 'manual' && wizardState.hardware.gpuLayersManual == null) {
       return error('Enter a GPU layer count or switch GPU layers back to Auto.', dom.gpuLayersManualInput);
     }
@@ -1927,6 +2017,7 @@ function hfSearchForWizard({ query, author, sort, limit }) {
       if (dom.hfSearchResults) dom.hfSearchResults.style.display = 'none';
       dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('active'));
       fetchHfFiles(m.id);
+      refreshEngineRecommendation();
       if (m.param_b > 0) triggerQuantAdvisor();
       clearValidationError();
       refreshStepGuardrails();
@@ -1983,29 +2074,35 @@ function showStep(index) {
     _loadModelDirSwitcher();
   }
   if (index === 2) {
-    // Entering hardware step — refresh VRAM, then render model context + new sections
-    updateCtxModelMaxHint();
-    Promise.all([fetchGpuVram(), fetchMetalGpuLimit(), fetchSystemRam()]).then(() => {
-      scheduleVramUpdate();
-      renderHardwareModelHeader();
-      _populateKvCacheOptions();
-    });
-    // Auto-hint thread count from system P-core count (Apple Silicon)
-    _refreshThreadsHint();
-    // When no active session the WS doesn't broadcast system metrics — fetch directly.
-    if (!lastSystemMetrics) {
-      _fetchSystemInfoAndRefreshHints();
+    const rapid = wizardState.engine.selected === 'rapid_mlx';
+    if (!rapid) {
+      updateCtxModelMaxHint();
+      Promise.all([fetchGpuVram(), fetchMetalGpuLimit(), fetchSystemRam()]).then(() => {
+        scheduleVramUpdate();
+        renderHardwareModelHeader();
+        _populateKvCacheOptions();
+      });
     }
-    renderMmprojSection();
-    renderMtpSection();
+    if (!rapid) {
+      // Auto-hint thread count from system P-core count (Apple Silicon)
+      _refreshThreadsHint();
+      // When no active session the WS doesn't broadcast system metrics — fetch directly.
+      if (!lastSystemMetrics) {
+        _fetchSystemInfoAndRefreshHints();
+      }
+    }
+    if (!rapid) {
+      renderMmprojSection();
+      renderMtpSection();
+    }
     // Auto-default spec type if the user hasn't made an explicit choice.
     // MTP-named models get draft-mtp+ngram-mod; all others get ngram-mod (free perf gains).
-    if (dom.specTypeSelect && !dom.specTypeSelect.value) {
+    if (!rapid && dom.specTypeSelect && !dom.specTypeSelect.value) {
       const modelName = (wizardState.model.localPath || wizardState.model.hfRepo || wizardState.model.hfFile || '').toLowerCase();
       dom.specTypeSelect.value = modelName.includes('mtp') ? 'draft-mtp,ngram-mod' : 'ngram-mod';
       dom.specTypeSelect.dispatchEvent(new Event('change'));
     }
-    _updateSpecHint(dom.specTypeSelect?.value || '');
+    if (!rapid) _updateSpecHint(dom.specTypeSelect?.value || '');
     // Trigger download panel now (moved from file-select to hardware step entry)
     const dlPanel = document.getElementById('hf-download-panel');
     if (wizardState.model.source === 'hf' && wizardState.model.hfFile) {
@@ -2139,6 +2236,183 @@ function updateModelInputVisibility() {
   dom.modelInputImport?.classList.toggle('visible', src === 'import');
 }
 
+let engineRecommendationSequence = 0;
+
+export function classifyWizardArtifact(model = wizardState.model) {
+  const path = (model.path || '').trim();
+  const file = (model.hfFile || '').trim();
+  const typedSource = model.rapidMlxSource || model.localMeta?.model_source || null;
+  const typedKind = typedSource?.kind || model.localMeta?.source_kind || model.localMeta?.format || '';
+  const hasGgufInventory = (model.quantFiles || []).some(item => /\.gguf$/i.test(item.path || item.name || ''));
+  if (/\.gguf$/i.test(path) || /\.gguf$/i.test(file) || hasGgufInventory) return 'gguf';
+  if (typedKind === 'authoritative_safetensors') return 'authoritative_safetensors';
+  if (typedKind === 'alias') return 'rapid_mlx_alias';
+  if (typedKind === 'hugging_face_repo') return 'rapid_mlx_hf_repository';
+  if (typedKind === 'mlx_directory' || /mlx/i.test(typedKind)) return 'mlx_directory';
+  return 'unknown';
+}
+
+async function refreshEngineAvailability() {
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const [platform, statusResponse] = await Promise.all([
+      getPlatformInfo().catch(() => null),
+      fetch('/api/rapid-mlx/runtime/status', { headers }).catch(() => null),
+    ]);
+    _platformInfo = platform || _platformInfo;
+    const status = statusResponse?.ok ? await statusResponse.json().catch(() => ({})) : {};
+    wizardState.engine.rapidMlxLocalAvailable = !!platform?.rapid_mlx_local_available;
+    // Managed status describes only app-owned environments. Compatibility for
+    // custom, Brew, Pip, and Pipx installs comes from the recommendation probe.
+    wizardState.engine.rapidMlxRuntimeCompatible = !!status.runtime?.active;
+  } finally {
+    renderEngineSelection();
+    refreshEngineRecommendation();
+  }
+}
+
+async function refreshEngineRecommendation() {
+  let artifactKind = classifyWizardArtifact();
+  const explicitRapidRepo = wizardState.engine.explicit
+    && wizardState.engine.selected === 'rapid_mlx'
+    && wizardState.model.source === 'hf'
+    && wizardState.model.hfRepo
+    && !wizardState.model.hfFile;
+  const explicitRapidDirectory = wizardState.engine.explicit
+    && wizardState.engine.selected === 'rapid_mlx'
+    && wizardState.model.source === 'local'
+    && wizardState.model.path;
+  if (artifactKind === 'unknown' && explicitRapidRepo) artifactKind = 'rapid_mlx_hf_repository';
+  if (artifactKind === 'unknown' && explicitRapidDirectory) artifactKind = 'mlx_directory';
+  const sequence = ++engineRecommendationSequence;
+  if (artifactKind === 'unknown') {
+    wizardState.engine.recommendation = {
+      recommended_backend: null,
+      state: 'manual_selection',
+      reason: 'Choose an engine manually until the model source is specific enough to recommend one.',
+    };
+    renderEngineSelection();
+    refreshStepGuardrails();
+    return;
+  }
+  wizardState.engine.recommendation = {
+    recommended_backend: null,
+    state: 'checking',
+    reason: 'Checking model and runtime compatibility…',
+  };
+  renderEngineSelection();
+  refreshStepGuardrails();
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+    const response = await fetch('/api/rapid-mlx/recommend', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ artifact_kind: artifactKind }),
+    });
+    const recommendation = response.ok ? await response.json() : null;
+    if (sequence !== engineRecommendationSequence || !recommendation) return;
+    wizardState.engine.recommendation = recommendation;
+    if (artifactKind !== 'gguf') {
+      if (recommendation.state === 'ready') wizardState.engine.rapidMlxRuntimeCompatible = true;
+      if (recommendation.state === 'runtime_required') wizardState.engine.rapidMlxRuntimeCompatible = false;
+      if (recommendation.state === 'platform_unavailable') wizardState.engine.rapidMlxLocalAvailable = false;
+    }
+    if (!wizardState.engine.explicit && recommendation.recommended_backend) {
+      wizardState.engine.selected = recommendation.recommended_backend;
+      _checkBinaryPrereq();
+    }
+  } catch {
+    if (sequence !== engineRecommendationSequence) return;
+    wizardState.engine.recommendation = null;
+  }
+  renderEngineSelection();
+  refreshStepGuardrails();
+}
+
+function selectWizardEngine(engine, explicit) {
+  if (!['llama_cpp', 'rapid_mlx'].includes(engine)) return;
+  wizardState.engine.selected = engine;
+  if (explicit) wizardState.engine.explicit = true;
+  if (engine === 'rapid_mlx' && wizardState.model.source === 'import') {
+    wizardState.model.source = 'local';
+    wizardState.model.path = '';
+    wizardState.model.localMeta = null;
+    wizardState.model.delivery = 'local_file';
+    if (dom.modelPathInput) dom.modelPathInput.value = '';
+    dom.modelSourceCards?.forEach(card => {
+      card.classList.toggle('selected', card.dataset.source === 'local');
+    });
+    updateModelInputVisibility();
+  }
+  renderEngineSelection();
+  clearValidationError();
+  refreshStepGuardrails();
+  _checkBinaryPrereq();
+  refreshEngineRecommendation();
+}
+
+function renderEngineSelection() {
+  const selected = wizardState.engine.selected;
+  if (selected === 'rapid_mlx' && dom.binaryPrereq) {
+    dom.binaryPrereq.style.display = 'none';
+  }
+  dom.engineCards?.forEach(card => {
+    const active = card.dataset.engine === selected;
+    card.classList.toggle('selected', active);
+    card.setAttribute('aria-checked', String(active));
+    if (card.dataset.engine === 'rapid_mlx') {
+      card.classList.toggle('is-unavailable', !wizardState.engine.rapidMlxLocalAvailable);
+    }
+  });
+  dom.overlay?.classList.toggle('engine-rapid-mlx', selected === 'rapid_mlx');
+  if (dom.rapidHardwarePanel) dom.rapidHardwarePanel.hidden = selected !== 'rapid_mlx';
+  const rapidBadge = dom.overlay?.querySelector('[data-engine-badge="rapid_mlx"]');
+  if (rapidBadge) {
+    rapidBadge.textContent = !wizardState.engine.rapidMlxLocalAvailable
+      ? 'Local launch · Apple Silicon only'
+      : wizardState.engine.rapidMlxRuntimeCompatible
+        ? 'Runtime ready'
+        : 'Runtime setup required';
+  }
+  const recommendation = wizardState.engine.recommendation;
+  if (dom.engineReason) {
+    const override = wizardState.engine.explicit && recommendation?.recommended_backend
+      && recommendation.recommended_backend !== selected;
+    dom.engineReason.textContent = override
+      ? `${recommendation.reason} Your manual ${selected === 'rapid_mlx' ? 'Rapid-MLX' : 'llama.cpp'} choice is preserved.`
+      : (recommendation?.reason || 'Select a model and we’ll explain the best engine.');
+  }
+  document.querySelector('.model-source-card[data-source="import"]')?.toggleAttribute('hidden', selected === 'rapid_mlx');
+  const modelDescription = document.querySelector('#wizard-step-1 .wizard-main > div:not(.wizard-engine-section) .wizard-section-desc');
+  if (modelDescription) {
+    modelDescription.textContent = selected === 'rapid_mlx'
+      ? 'Choose a validated MLX directory or a Rapid-MLX Hugging Face repository.'
+      : 'Choose where your GGUF model comes from.';
+  }
+  const localName = document.querySelector('.model-source-card[data-source="local"] .model-source-name');
+  const localDescription = document.querySelector('.model-source-card[data-source="local"] .model-source-desc');
+  const hfDescription = document.querySelector('.model-source-card[data-source="hf"] .model-source-desc');
+  if (localName) localName.textContent = selected === 'rapid_mlx' ? 'Select local MLX model' : 'Select local model';
+  if (localDescription) {
+    localDescription.textContent = selected === 'rapid_mlx'
+      ? 'Browse to a validated MLX model directory.'
+      : 'Browse your filesystem for an existing GGUF file.';
+  }
+  if (hfDescription) {
+    hfDescription.textContent = selected === 'rapid_mlx'
+      ? 'Enter a Rapid-MLX-compatible Hugging Face repository ID.'
+      : 'Enter a HF repo ID and we’ll list available GGUF files.';
+  }
+  if (dom.modelPathInput) {
+    dom.modelPathInput.placeholder = selected === 'rapid_mlx'
+      ? 'MLX model directory (e.g. /models/my-mlx-model)'
+      : 'Model path (e.g. /models/my-model.gguf)';
+  }
+  _updateSpawnBtnForPrereq();
+}
+
 function updateSelectedModelDisplay() {
   const { source, path, hfRepo, hfFile } = wizardState.model;
   let name = '', meta = '';
@@ -2241,6 +2515,17 @@ function updateSelectedModelArchLabel() {
 function onModelPathChanged() {
   updateSelectedModelDisplay();
   clearValidationError();
+  refreshEngineRecommendation();
+
+  const artifactKind = classifyWizardArtifact();
+  const rapidLocalSource = wizardState.engine.selected === 'rapid_mlx'
+    && (artifactKind === 'mlx_directory'
+      || artifactKind === 'authoritative_safetensors'
+      || (wizardState.engine.explicit && artifactKind === 'unknown'));
+  if (rapidLocalSource) {
+    refreshStepGuardrails();
+    return;
+  }
 
   const path = wizardState.model.path;
   if (path) {
@@ -3913,6 +4198,7 @@ async function fetchHfFiles(repo) {
       if (wizardState.model.paramB > 0) triggerQuantAdvisor();
       scheduleVramUpdate();
       autoInstallChatTemplate();
+      refreshEngineRecommendation();
       refreshStepGuardrails();
     },
   });
@@ -6640,6 +6926,7 @@ async function _autoDiscoverLocalModelQuants(userTriggered = false) {
         const match = rawFiles.find(f =>
           (f.rfilename || f.path || '').split('/').pop().toLowerCase() === currentLower);
         if (match) wizardState.model.hfFile = match.rfilename || match.path || '';
+        refreshEngineRecommendation();
 
         if (userTriggered) {
           // User explicitly asked: open the dropdown immediately.
@@ -6701,6 +6988,7 @@ function _showQuantSwapCandidateList(candidates) {
     const match = candidate.ggufFiles.find(f =>
       (f.rfilename || f.path || '').split('/').pop().toLowerCase() === currentLower);
     if (match) wizardState.model.hfFile = match.rfilename || match.path || '';
+    refreshEngineRecommendation();
 
     const statusEl = document.getElementById('hw-quant-local-status');
     if (statusEl) statusEl.textContent = `${candidate.ggufFiles.length} quants selected`;
@@ -6863,6 +7151,7 @@ function _renderQuantSwapActions(quantPath, repoId) {
     actionsRow.style.display = 'none';
     showToast('Switched to HF stream', 'success', quantName);
     scheduleVramUpdate();
+    refreshEngineRecommendation();
   });
 
   actionsRow.appendChild(dlBtn);
@@ -7943,6 +8232,7 @@ async function renderSummary() {
    }
 
   const m = wizardState.model, hw = wizardState.hardware;
+  const rapid = wizardState.engine.selected === 'rapid_mlx';
   const arch = getSizingArch();
   const availVram = effectiveAvailBytes();
   const modelBytes = getModelBytes();
@@ -7965,6 +8255,7 @@ async function renderSummary() {
 
   const ctxK = hw.cacheTypeK || 'q8_0', ctxV = hw.cacheTypeV || 'q8_0';
   const kvSize = await (async () => {
+    if (rapid) return 0;
     if (!modelBytes) return 0;
     try {
       const headers = (window.authHeaders ? window.authHeaders() : {});
@@ -7994,13 +8285,16 @@ async function renderSummary() {
     }
   })();
 
-  const rows = [
+  const sharedRows = [
+    { label: 'Engine',        value: rapid ? 'Rapid-MLX' : 'llama.cpp' },
     { label: 'Use case',      value: { agentic: 'Agentic / RAG', general: 'General chat', roleplay: 'Roleplay / creative' }[wizardState.useCase] || wizardState.useCase },
     { label: 'Profile',       value: wizardState.profile },
     { label: 'Acquisition',   value: acquisition },
     { label: 'Port',          value: String(wizardState.access.port || 8001) },
     { label: 'Model',         value: modelDisplay },
     { label: 'Bind host',     value: wizardState.access.bindHost === '0.0.0.0' ? '0.0.0.0 (LAN visible)' : '127.0.0.1 only' },
+  ];
+  const rows = rapid ? sharedRows : [...sharedRows,
     { label: 'Context size',  value: `${hw.contextSize.toLocaleString()} tokens` },
     { label: 'GPU layers',    value: hw.gpuLayers === 'manual' ? String(hw.gpuLayersManual ?? '—') : hw.gpuLayers },
     { label: 'KV quant (K/V)', value: `${ctxK.toUpperCase()} / ${ctxV.toUpperCase()}` },
@@ -8008,16 +8302,16 @@ async function renderSummary() {
     { label: 'Batch / ubatch', value: `${hw.batchSize} / ${hw.ubatchSize}` },
     ...(hw.fitTarget ? [{ label: '--fit-target', value: String(hw.fitTarget) }] : []),
   ];
-  if (hw.flashAttn && hw.flashAttn !== 'auto') rows.push({ label: 'Flash Attn', value: hw.flashAttn });
-  if (hw.kvUnified != null) rows.push({ label: 'KV unified', value: hw.kvUnified ? 'On' : 'Off' });
-  if (hw.fitEnabled != null) rows.push({ label: 'Fit', value: hw.fitEnabled ? 'On' : 'Off' });
-  if (hw.mlock) rows.push({ label: 'mlock', value: 'Yes' });
-  if (hw.prio != null) rows.push({ label: 'Priority', value: ['Normal', 'Medium', 'High', 'Realtime'][hw.prio] ?? String(hw.prio) });
-  if (hw.nCpuMoe > 0 && arch.nExperts > 0) rows.push({ label: 'MoE CPU offload', value: `${hw.nCpuMoe} of ${arch.nLayers} layers` });
-  if (hw.tensorSplit) rows.push({ label: 'Tensor split', value: hw.tensorSplit });
-  if (arch.mmprojBytes > 0) rows.push({ label: 'mmproj', value: formatGB(arch.mmprojBytes) });
+  if (!rapid && hw.flashAttn && hw.flashAttn !== 'auto') rows.push({ label: 'Flash Attn', value: hw.flashAttn });
+  if (!rapid && hw.kvUnified != null) rows.push({ label: 'KV unified', value: hw.kvUnified ? 'On' : 'Off' });
+  if (!rapid && hw.fitEnabled != null) rows.push({ label: 'Fit', value: hw.fitEnabled ? 'On' : 'Off' });
+  if (!rapid && hw.mlock) rows.push({ label: 'mlock', value: 'Yes' });
+  if (!rapid && hw.prio != null) rows.push({ label: 'Priority', value: ['Normal', 'Medium', 'High', 'Realtime'][hw.prio] ?? String(hw.prio) });
+  if (!rapid && hw.nCpuMoe > 0 && arch.nExperts > 0) rows.push({ label: 'MoE CPU offload', value: `${hw.nCpuMoe} of ${arch.nLayers} layers` });
+  if (!rapid && hw.tensorSplit) rows.push({ label: 'Tensor split', value: hw.tensorSplit });
+  if (!rapid && arch.mmprojBytes > 0) rows.push({ label: 'mmproj', value: formatGB(arch.mmprojBytes) });
   const hasExternalDraft = !!(m.selectedDraftPath || '').trim();
-  if (arch.mtpDepth > 0 || hasExternalDraft) {
+  if (!rapid && (arch.mtpDepth > 0 || hasExternalDraft)) {
     const mtpActive = hw.mtpEnabled || hasExternalDraft;
     const nMaxDisplay = hw.mtpDraftNMax ?? (hasExternalDraft ? 4 : 2);
     rows.push({ label: 'MTP', value: mtpActive ? `enabled · draft ${nMaxDisplay} tokens/step · --parallel 1` : 'disabled' });
@@ -8027,15 +8321,15 @@ async function renderSummary() {
   }
   const tplPath = wizardState.model.chatTemplatePath;
   const tplFamily = detectModelFamily(m.hfRepo || m.path || '');
-  if (tplPath) {
+  if (!rapid && tplPath) {
     const tplName = tplPath.split(/[/\\]/).pop() || tplPath;
     rows.push({ label: 'Chat template', value: tplName });
-  } else if (tplFamily) {
+  } else if (!rapid && tplFamily) {
     rows.push({ label: 'Chat template', value: 'Embedded (from model file)' });
   }
 
   const specType = dom.specTypeSelect?.value || '';
-    if (specType) {
+    if (!rapid && specType) {
       let sv = { 'ngram-mod': 'N-gram (fast)', 'draft-model': 'Draft model' }[specType] || specType;
       // Show draft model filename for draft-model or MTP modes with external draft model
       if (dom.draftModelInput?.value) {
@@ -8045,8 +8339,8 @@ async function renderSummary() {
       }
       rows.push({ label: 'Speculative', value: sv });
     }
-  if (hw.fitTarget) rows.push({ label: '--fit-target', value: `${hw.fitTarget} MB` });
-  if (hw.cacheRam !== null && hw.cacheRam !== undefined) {
+  if (!rapid && hw.fitTarget) rows.push({ label: '--fit-target', value: `${hw.fitTarget} MB` });
+  if (!rapid && hw.cacheRam !== null && hw.cacheRam !== undefined) {
     const cramDisplay = hw.cacheRam < 0 ? 'no limit' : hw.cacheRam === 0 ? 'disabled' : `${hw.cacheRam} MiB`;
     rows.push({ label: '-cram', value: cramDisplay });
   }
@@ -8449,11 +8743,25 @@ async function saveAsPreset() {
   }
 }
 
-function buildPresetPayload() {
+export function buildPresetPayload() {
   const spawnPayload = buildSpawnPayload();
+  const h = wizardState.hardware;
+  if (spawnPayload.backend === 'rapid_mlx') {
+    const { api_key: protectedApiKey, ...rapidMlx } = spawnPayload.rapid_mlx;
+    spawnPayload.rapid_mlx = rapidMlx;
+    if (protectedApiKey) spawnPayload.api_key = protectedApiKey;
+  }
   return {
     name: 'Setup wizard preset',
     ...spawnPayload,
+    temperature: h.temperature != null ? h.temperature : null,
+    top_p: h.topP != null ? h.topP : null,
+    top_k: h.topK != null ? h.topK : null,
+    min_p: h.minP != null ? h.minP : null,
+    repeat_penalty: h.repeatPenalty != null ? h.repeatPenalty : null,
+    presence_penalty: h.presencePenalty != null ? h.presencePenalty : null,
+    max_tokens: h.maxTokens != null ? h.maxTokens : null,
+    seed: h.seed != null ? h.seed : null,
   };
 }
 
@@ -8499,6 +8807,7 @@ function _renderPresetParamsStep() {
   if (dom.savedPresetName) dom.savedPresetName.style.display = 'none';
 
   const h = wizardState.hardware, m = wizardState.model;
+  const rapid = wizardState.engine.selected === 'rapid_mlx';
   const arch = getSizingArch();
 
   const modelDisplay = m.source === 'hf'
@@ -8517,13 +8826,14 @@ function _renderPresetParamsStep() {
     {
       label: 'Model',
       rows: [
-        { label: 'File', value: modelDisplay },
+        { label: 'Engine', value: rapid ? 'Rapid-MLX' : 'llama.cpp' },
+        { label: rapid ? 'Source' : 'File', value: modelDisplay },
         ...(m.source === 'hf' ? [{ label: 'HF repo', value: m.hfRepo || '—' }] : []),
         ...(m.mmprojPath ? [{ label: 'mmproj', value: m.mmprojPath.split(/[\\/]/).pop() || m.mmprojPath }] : []),
         ...(wizardState.model.chatTemplatePath ? [{ label: 'Chat template', value: wizardState.model.chatTemplatePath.split(/[\\/]/).pop() || wizardState.model.chatTemplatePath }] : []),
       ],
     },
-    {
+    ...(!rapid ? [{
       label: 'Hardware',
       rows: [
         { label: 'GPU layers', value: gpuDisplay },
@@ -8542,7 +8852,7 @@ function _renderPresetParamsStep() {
         ...(h.fitTarget ? [{ label: '--fit-target', value: `${h.fitTarget} MB` }] : []),
         ...(h.cacheRam != null ? [{ label: '--cache-ram', value: h.cacheRam < 0 ? 'no limit' : h.cacheRam === 0 ? 'disabled' : `${h.cacheRam} MiB` }] : []),
       ],
-    },
+    }] : []),
     {
       label: 'Sampling',
       rows: [
@@ -8595,7 +8905,7 @@ function _renderPresetParamsStep() {
   });
 
   const specType = dom.specTypeSelect?.value || '';
-  if (specType) {
+  if (!rapid && specType) {
       const rows = [{ label: 'Type', value: specType }];
       // Show draft model info for draft-model or MTP modes with external draft model
       if (dom.draftModelInput?.value) {
@@ -8606,7 +8916,7 @@ function _renderPresetParamsStep() {
       sections.push({ label: 'Speculative Decoding', rows });
     }
 
-  if (h.extraArgs) {
+  if (!rapid && h.extraArgs) {
     sections.push({ label: 'Extra', rows: [{ label: 'Extra command-line arguments', value: h.extraArgs }] });
   }
 
@@ -8667,6 +8977,7 @@ async function _renderSpawnConfigCard() {
   const card = document.getElementById('spawn-config-card');
   const sidebar = document.getElementById('spawn-sidebar-config');
   const m = wizardState.model, hw = wizardState.hardware, acc = wizardState.access;
+  const rapid = wizardState.engine.selected === 'rapid_mlx';
 
   const modelName = m.source === 'hf'
     ? (m.hfFile ? m.hfFile.split('/').pop() : (m.hfRepo || '—'))
@@ -8720,7 +9031,13 @@ async function _renderSpawnConfigCard() {
     }
 
     const grid = mk('div', 'spawn-config-grid');
-    const items = [
+    const items = rapid ? [
+      ['Engine',  'Rapid-MLX'],
+      ['Port',    String(port)],
+      ['Host',    bind],
+      ['Served as', alias],
+    ] : [
+      ['Engine',  'llama.cpp'],
       ['Port',    String(port)],
       ['Host',    bind],
       ['Context', ctx],
@@ -8763,7 +9080,7 @@ async function _renderSpawnConfigCard() {
 
 async function spawnServer() {
   if (wizardState.spawn.inFlight) return;
-  if (!_binaryReady) {
+  if (wizardState.engine.selected === 'llama_cpp' && !_binaryReady) {
     showErrorText('llama.cpp binary not found. Download it using the banner above.');
     return;
   }
@@ -8773,7 +9090,7 @@ async function spawnServer() {
   setStatusText('Preparing configuration…'); setProgress(10); clearStatusMessages();
   try {
     const payload = buildSpawnPayload();
-    setStatusText('Starting llama-server…'); setProgress(30);
+    setStatusText(wizardState.engine.selected === 'rapid_mlx' ? 'Starting Rapid-MLX…' : 'Starting llama-server…'); setProgress(30);
     // /api/sessions/spawn requires the db-admin-token, not the llama-server API token.
     const tokenResp = await fetch('/api/db/admin-token', {
       headers: window.authHeaders ? window.authHeaders() : {},
@@ -8820,18 +9137,19 @@ async function spawnServer() {
     if (!data?.ok) throw new Error(data?.error || 'Spawn request failed.');
     setStatusText('Server process started. Waiting for endpoint…');
     setProgress(75);
-    await waitForSpawnReadiness(payload.port);
+    const launchPort = launchPortForPayload(payload);
+    await waitForSpawnReadiness(launchPort);
     setProgress(100); setStatusText('Server started.');
     showSuccessText('Server is running.');
     showToast('Server started', 'success', '', { duration: 8000 });
-    setTuneConfig(payload);
+    if (supportsTunePanelForPayload(payload)) setTuneConfig(payload);
     setTimeout(() => {
       closeSpawnWizard();
-      setHeaderMode('Spawn:' + (payload.port || 8001));
+      setHeaderMode('Spawn:' + launchPort);
       if (document.body.classList.contains('setup-active')) {
         Router.navigate('/server');
       }
-      showTunePanel();
+      if (supportsTunePanelForPayload(payload)) showTunePanel();
       // Select the preset that was saved during this wizard run (if any)
       if (wizardState.savedPresetId) {
         import('./presets.js').then(({ loadPresets }) => {
@@ -8848,6 +9166,14 @@ async function spawnServer() {
     wizardState.spawn.inFlight = false;
     if (dom.spawnServerBtn) dom.spawnServerBtn.disabled = false;
   }
+}
+
+export function launchPortForPayload(payload) {
+  return (payload?.backend === 'rapid_mlx' ? payload.rapid_mlx?.port : payload?.port) || 8001;
+}
+
+export function supportsTunePanelForPayload(payload) {
+  return payload?.backend === 'llama_cpp';
 }
 
 async function waitForSpawnReadiness(port, timeoutMs = 30000) {
@@ -8872,7 +9198,8 @@ async function waitForSpawnReadiness(port, timeoutMs = 30000) {
     await new Promise(r => setTimeout(r, 800));
   }
 
-  throw new Error(`llama-server started but did not become reachable on port ${port} in time.`);
+  const engineName = wizardState.engine.selected === 'rapid_mlx' ? 'Rapid-MLX' : 'llama-server';
+  throw new Error(`${engineName} started but did not become reachable on port ${port} in time.`);
 }
 
 // Clamp a value that must be a u32 (non-negative integer). Returns null if absent or negative.
@@ -8894,6 +9221,22 @@ function _threadsValue(v) {
 
 export function buildSpawnPayload() {
   const h = wizardState.hardware, m = wizardState.model;
+  if (wizardState.engine.selected === 'rapid_mlx') {
+    const preservedSource = m.rapidMlxSource || m.localMeta?.model_source || null;
+    const modelSource = preservedSource || (m.source === 'hf'
+      ? { kind: 'hugging_face_repo', repo_id: m.hfRepo || '', revision: 'main' }
+      : { kind: 'mlx_directory', path: m.path || '' });
+    return {
+      backend: 'rapid_mlx',
+      rapid_mlx: {
+        model_source: modelSource,
+        served_model_name: h.alias || null,
+        host: wizardState.access.bindHost || '127.0.0.1',
+        port: wizardState.access.port || 8001,
+        api_key: wizardState.access.apiKey || null,
+      },
+    };
+  }
   const arch = getEffectiveArch();
   const gpuLayers = h.gpuLayers === 'manual' ? (h.gpuLayersManual ?? -1) : (h.gpuLayers === 'all' ? -1 : null);
 
@@ -8933,6 +9276,7 @@ export function buildSpawnPayload() {
     : undefined;
 
   return {
+    backend: 'llama_cpp',
     model_path: m.source !== 'hf' ? (m.path || '') : '',
     hf_repo: m.source === 'hf' ? (m.hfRepo || null) : null,
     hf_file: m.source === 'hf' ? (m.hfFile || null) : null,
@@ -9125,6 +9469,11 @@ let _mtpUserConfigured = false;
 
 async function _checkBinaryPrereq() {
   if (!dom.binaryPrereq) return;
+  if (wizardState.engine.selected === 'rapid_mlx') {
+    dom.binaryPrereq.style.display = 'none';
+    _updateSpawnBtnForPrereq();
+    return;
+  }
   try {
     const headers = window.authHeaders ? window.authHeaders() : {};
 
@@ -9136,6 +9485,15 @@ async function _checkBinaryPrereq() {
 
     const vData = vResp.ok ? await vResp.json() : {};
     _platformInfo = platformInfo;
+
+    // The recommendation can switch engines while the llama.cpp prerequisite
+    // requests are in flight. Never let that stale response restore the
+    // llama.cpp banner over a Rapid-MLX flow.
+    if (wizardState.engine.selected === 'rapid_mlx') {
+      dom.binaryPrereq.style.display = 'none';
+      _updateSpawnBtnForPrereq();
+      return;
+    }
 
     if (_selectedBackend === null && _platformInfo) {
       _selectedBackend = _platformInfo.auto_backend;
@@ -9266,7 +9624,11 @@ function _showPrereqState(state) {
 
 function _updateSpawnBtnForPrereq() {
   if (!dom.spawnServerBtn) return;
-  if (!_binaryReady) {
+  if (wizardState.engine.selected === 'rapid_mlx') {
+    const ready = wizardState.engine.rapidMlxLocalAvailable && wizardState.engine.rapidMlxRuntimeCompatible;
+    dom.spawnServerBtn.disabled = !ready;
+    dom.spawnServerBtn.title = ready ? '' : 'Rapid-MLX requires Apple Silicon and a compatible managed or external runtime';
+  } else if (!_binaryReady) {
     dom.spawnServerBtn.disabled = true;
     dom.spawnServerBtn.title = 'llama.cpp binary required — download it above first';
   } else {

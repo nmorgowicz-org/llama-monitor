@@ -1,6 +1,8 @@
 # Setup Wizard Reference
 
-The Setup wizard is a 6-step guided flow for configuring and launching a llama-server instance. It handles hardware detection, VRAM-aware parameter selection, model acquisition (local, HuggingFace, third-party), and binary management.
+The Setup wizard is a 6-step guided flow for configuring and launching either a
+llama.cpp or Rapid-MLX local inference server. It handles engine recommendation,
+hardware detection, model acquisition, backend-owned settings, and runtime prerequisites.
 
 ## Welcome Screen
 
@@ -50,7 +52,27 @@ arguments, **On** passes `--fit on` with the selected target margin, and **Off**
 
 ### Step 2 — Model
 
-The user picks a model source. Three source types:
+The user first chooses an inference engine, then picks a compatible model source. The
+engine cards distinguish an automatic recommendation from an explicit user choice. A
+later model or runtime check may update an automatic selection, but never replaces an
+explicit choice.
+
+The recommendation is deterministic:
+
+| Model source | Recommendation |
+|---|---|
+| GGUF file or GGUF repository inventory | llama.cpp |
+| Validated MLX directory | Rapid-MLX when Apple Silicon and a compatible runtime are available |
+| Typed Rapid-MLX Hugging Face repository or alias | Rapid-MLX when locally available |
+| Authoritative safetensors source with revision/hash and conversion recipe | Rapid-MLX when locally available |
+| Bare or ambiguous Hugging Face repository | No automatic switch; the user chooses |
+
+Compatible managed, custom, Homebrew, Pip, and Pipx Rapid-MLX installations can satisfy
+the runtime check. Llama Monitor never mutates user-owned runtimes. Unsupported systems
+explain that local Rapid-MLX requires Apple Silicon macOS and retain remote attachment as
+an option.
+
+llama.cpp exposes three model-source types:
 
 ![Step 2 — Model source selection](../screenshots/spawn-wizard-step2-source-cards.png)
 
@@ -59,6 +81,16 @@ The user picks a model source. Three source types:
 - Parameter count (`param_b`) is inferred from the filename using `infer_param_b_from_name()`.
 - Architecture heuristics are applied via `ModelArch::from_name_and_params()`.
 - When launched from the local Models library, the wizard carries over discovered metadata and shows a small reminder card with filename, quant, and estimated size/parameter hints.
+
+#### Rapid-MLX model sources
+
+Rapid-MLX accepts validated local MLX directories, explicitly selected compatible
+Hugging Face repositories, verified aliases, and authoritative safetensors sources.
+Typed source metadata is preserved unchanged through preset save and restore. A loose
+safetensors path is not promoted into a launch configuration because it lacks the
+revision/hash and conversion recipe required for reproducibility.
+
+GGUF remains first-class under llama.cpp and is not converted during this flow.
 
 #### HuggingFace Hub
 See [HuggingFace Integration](#huggingface-integration) below.
@@ -239,17 +271,27 @@ Displays every flag that will be saved with the preset in a table format. The us
 - **Save as Preset** — stores all parameters for quick reuse from the setup screen
 - Presets can be saved for different models or configurations
 - Saving is optional — click Next to go straight to launch
+- Rapid-MLX presets retain shared sampling and non-secret access values, including host,
+  port, temperature, top-p/top-k/min-p, penalties, max tokens, and seed. An API key is
+  preserved while switching engines and stored only in the preset's protected top-level
+  secret field; API responses redact it and it is never nested in `rapid_mlx`.
+  Backend-owned configuration remains exclusive: Rapid-MLX presets do not gain
+  llama.cpp launch fields, and llama.cpp presets do not gain a `rapid_mlx` object.
 
 ---
 
 ### Step 6 — Start server
 
-One-click launch. Shows live status (starting → waiting for endpoint → running / error). On success the wizard closes and the new model profile appears in the list.
+One-click launch. Shows engine-aware live status (starting → waiting for endpoint →
+running / error). On success the wizard closes and the new model profile appears in the
+list.
 
 ![Step 6 — Spawn](../screenshots/spawn-wizard-step6-spawn.png)
 
 
-- The launched `llama-server` process is started with `--no-warmup`.
+- A launched `llama-server` process is started with `--no-warmup`.
+- Rapid-MLX launches use the selected typed model source and compatible discovered
+  runtime without carrying llama.cpp-only flags.
 - Readiness is confirmed by a backend probe against the active session, so launches with a server API key still report status correctly.
 
 ---

@@ -879,7 +879,7 @@ Integrate backend selection into the Spawn Wizard and implement full Rapid-MLX r
   unsupported-platform tests plus Windows compilation.
 - Checkpoint: `feat(binary): manage Rapid-MLX runtimes`.
 
-#### 6B — Engine-aware launch UX
+#### 6B1 — Engine-aware launch UX
 
 - Add premium engine cards before model selection. The recommendation is deterministic:
   GGUF selects llama.cpp; validated MLX directories, authoritative safetensors, and
@@ -890,12 +890,47 @@ Integrate backend selection into the Spawn Wizard and implement full Rapid-MLX r
   temperature, top-p/top-k, penalties, max tokens, and seed). Backend-owned fields stay
   isolated and llama.cpp-only memory/speculation controls are hidden or disabled for
   Rapid-MLX, never serialized into its configuration.
+- Gate: preset round-trip, backend payload exclusivity, recommendation cases, unsupported
+  platform states, dark/light/narrow/reduced-motion engine selection, and isolated
+  Spawn Wizard Playwright.
+
+#### 6B2 — Authoritative MLX memory estimator
+
+- Extend the Rust estimator and its introspection contract so GGUF and MLX use one
+  backend-neutral API and one normalized breakdown. JavaScript must only render the
+  backend result; it must not maintain an independent MLX formula.
+- Introspect MLX `config.json`, safetensors indexes/files, quantization metadata, model
+  architecture, attention pattern, layer/head dimensions, experts, vision/projector
+  components, and any draft/MTP/speculative sidecars required by the selected Rapid-MLX
+  configuration. Unknown metadata produces an explicit degraded estimate, never a
+  silently invented architecture.
+- Model active-request KV at its actual compute dtype. Rapid-MLX prefix-cache compression
+  (`int4`/`int8`) is a separate stored-cache budget because cached entries are decompressed
+  before active use; it must not reduce active-context KV in the estimate. Include context,
+  batch/concurrency, runtime/cache overhead, unified-memory headroom, and architecture-
+  specific rules with cited fixtures and measured calibration where formulas are not
+  sufficient.
+- The same normalized estimate drives the Spawn Wizard, preset editor, welcome-screen
+  preset cards, and model/preset previews. Every model type receives the same first-class
+  capacity bar, breakdown, warnings, and degraded-evidence treatment.
+- Gate: architecture fixtures, exact weight accounting, active-KV and compressed-prefix-
+  cache separation, vision/sidecar fixtures, context/concurrency scaling, HF/local typed
+  sources, cache invalidation, auth/path/timeout tests, cross-surface contract tests, and
+  Apple-Silicon measurement validation.
+
+#### 6B3 — Runtime management and active engine identity
+
 - Add Settings runtime management and an active `Engine · Model ●` indicator. Runtime
   operations use app-native confirmation/progress/result surfaces; no browser dialogs.
   Installing or upgrading does not restart or reroute an active inference session.
-- Gate: preset round-trip, backend payload exclusivity, recommendation cases, unsupported
-  platform states, install/upgrade/repair/rollback UI, active-session indicator, dark and
-  light desktop, narrow layout, reduced motion, and isolated Playwright.
+- Gate: install/upgrade/repair/rollback UI, active-session indicator, dark and light
+  desktop, narrow layout, reduced motion, and isolated Playwright.
+
+#### 6B4 — Product verification and checkpoint
+
+- Independently verify engine selection, estimator precision/degraded states, every
+  estimate consumer, runtime management, accessibility, and absence of stale llama-only
+  assumptions before checkpointing.
 - Checkpoint: `feat(wizard): add engine-aware Rapid-MLX management`.
 
 #### 6C — Phase verification

@@ -147,6 +147,7 @@ Scenarios:
 
   Setup wizard
      spawn-wizard           Steps 1–6: profiles, model, VRAM, parameters, summary, start/close
+     spawn-wizard-engines   llama.cpp/Rapid-MLX engine cards and Rapid-MLX hardware handoff
      spawn-wizard-gif       Animated GIF walking through all setup wizard steps (1→2→3→4→5→6)
      spawn-wizard-hf-download  HF download panel: idle options and simulated progress
 
@@ -179,6 +180,7 @@ Examples:
   SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
   SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario settings --close-up
   SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario spawn-wizard --no-attach
+  SCREENSHOT_PORT=8898 node tests/ui/capture.mjs --scenario spawn-wizard-engines --no-attach
   SCREENSHOT_PORT=8897 node tests/ui/capture.mjs --scenario spawn-wizard-gif --no-attach
   SCREENSHOT_PORT=8900 node tests/ui/capture.mjs --scenario tune-panel
   SCREENSHOT_PORT=8901 node tests/ui/capture.mjs --scenario llama-updater
@@ -3485,6 +3487,80 @@ async function scenarioSpawnWizard(ctx, options) {
     await sleep(400);
 }
 
+async function scenarioSpawnWizardEngines(ctx) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+
+    await page.evaluate(() => {
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (input, init) => {
+            const url = new URL(typeof input === 'string' ? input : input.url, window.location.origin);
+            if (url.pathname === '/api/rapid-mlx/runtime/status') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    runtime: { supported: true, active: { version: '0.10.10' } },
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/rapid-mlx/recommend') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    recommended_backend: 'rapid_mlx',
+                    state: 'ready',
+                    reason: 'This source is native to the verified Rapid-MLX resolution path.',
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            return originalFetch(input, init);
+        };
+    });
+
+    await page.evaluate(async () => {
+        const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+        openSpawnWizard({
+            localPath: '/models/mlx-community/Qwen3.5-9B-MLX-4bit',
+            localModel: {
+                path: '/models/mlx-community/Qwen3.5-9B-MLX-4bit',
+                size_bytes: 6_450_000_000,
+                source_kind: 'mlx_directory',
+                model_source: {
+                    kind: 'mlx_directory',
+                    path: '/models/mlx-community/Qwen3.5-9B-MLX-4bit',
+                },
+            },
+        });
+    });
+    await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 10000 });
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
+        { timeout: 5000 }
+    );
+    await page.waitForFunction(
+        () => document.querySelector('.wizard-engine-card[data-engine="rapid_mlx"]')?.classList.contains('selected'),
+        { timeout: 5000 }
+    );
+    await sleep(350);
+
+    await captureShot(page, 'spawn-wizard-engines-dark.png', { fullPage: true });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(250);
+    await captureShot(page, 'spawn-wizard-engines-light.png', { fullPage: true });
+
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+    await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
+    await sleep(250);
+    await captureShot(page, 'spawn-wizard-engines-reduced-narrow.png', { fullPage: true });
+
+    await page.setViewport(DEFAULT_VIEWPORT);
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
+        { timeout: 5000 }
+    );
+    await sleep(300);
+    await captureShot(page, 'spawn-wizard-rapid-mlx-hardware.png', { fullPage: true });
+
+    console.log('[CAPTURE] Scenario "spawn-wizard-engines" complete.');
+}
+
 // Setup wizard HF download panel: idle options + simulated progress.
 async function scenarioSpawnWizardHfDownload(ctx, options) {
     const { page, baseUrl } = ctx;
@@ -3996,6 +4072,7 @@ const SCENARIOS = {
     'dashboard-rapid-mlx': scenarioDashboardRapidMlx,
     // Setup wizard
     'spawn-wizard': scenarioSpawnWizard,
+    'spawn-wizard-engines': scenarioSpawnWizardEngines,
     'spawn-wizard-gif': scenarioSpawnWizardGif,
     'spawn-wizard-hf-download': scenarioSpawnWizardHfDownload,
     // New features (spawn-llama-server-v2)
