@@ -123,3 +123,74 @@ R2 is complete only after the detached runtime evidence and an independent Verif
 approve the full code, corpus provenance, failure semantics, tensor evidence, and
 cleanup state. R2 completion authorizes R3 research only; it does not authorize a
 production import flow or a `Verified` architecture profile.
+
+## R3 optional MLX re-quantization
+
+R3 accepts only the final remediated R2 F16 cache. It uses official pinned mlx-lm to
+produce three uniform affine/group-64 experimental recipes. Keep the artifact labels
+distinct:
+
+```text
+original: GGUF F16
+recovery: MLX-compatible FP16 safetensors, R2 cache a21cca76...
+output:   MLX quantized safetensors, affine_4bit_g64 / affine_6bit_g64 / affine_8bit_g64
+```
+
+Run one structural recipe at a time only when its pinned environment and R2 cache
+exist:
+
+```bash
+rtk env LLAMA_MONITOR_R3_RECIPE=affine_4bit_g64 cargo test --lib models::gguf_recovery::tests::real_smollm2_r3_selected_recipe -- --ignored --exact --nocapture
+rtk env LLAMA_MONITOR_R3_RECIPE=affine_6bit_g64 cargo test --lib models::gguf_recovery::tests::real_smollm2_r3_selected_recipe -- --ignored --exact --nocapture
+rtk env LLAMA_MONITOR_R3_RECIPE=affine_8bit_g64 cargo test --lib models::gguf_recovery::tests::real_smollm2_r3_selected_recipe -- --ignored --exact --nocapture
+```
+
+Results remain non-launchable below
+`~/.config/llama-monitor/models/rapid-mlx/requantized/`. Never copy one into the normal
+MLX model directory or add it to inventory.
+
+### One-time detached R3 host gate
+
+Direct Python launched from a headless/sandboxed executor may have no Metal device.
+After all three structural caches exist, open a normal interactive Terminal in the
+repository and run exactly once:
+
+```bash
+rtk proxy /Users/nick/.config/llama-monitor/runtimes/rapid-mlx/.staging/0.10.10-qualification/venv/bin/python -I tools/mlx_requantize/run_host_gate.py --output /tmp/llama-monitor-r3-host-gate/report.json
+```
+
+No supplied secret is needed. The harness creates a different ephemeral API key for
+each loopback Rapid-MLX process, never writes keys to its report, forces offline and
+telemetry-disabled execution, bounds subprocess/HTTP/report data, and stops process
+groups and listeners between targets. It evaluates:
+
+- managed llama-server with the pinned source F16 GGUF;
+- Rapid-MLX with recovered FP16 and each 4/6/8-bit R3 output;
+- exact dequantized tensor fidelity of each recipe against recovered FP16;
+- load latency, size, readiness, identity, telemetry/cache state, deterministic greedy
+  text, usage, finish reason, first-token top-five, and completion throughput.
+
+Review every generated text for coherence; the report records that human review is
+required. Any missing tensor, non-finite value, load/readiness error, unstable greedy
+response, incoherent output, unexplained first-token/logprob drift, timeout, cleanup
+failure, or unbounded diagnostic keeps R3 open.
+
+### Recorded R3 result (2026-07-16)
+
+The one-time host gate completed successfully. All four Rapid-MLX targets were
+deterministic and coherent; the 4-bit output remained grammatical at the token limit,
+6-bit produced a concise natural stop, and 8-bit matched recovered FP16 text exactly.
+Fidelity improved monotonically from minimum cosine `0.993535` (4-bit), to `0.999611`
+(6-bit), to `0.999955` (8-bit). Every recipe kept exact 272-tensor dequantized key and
+shape closure. The 8-bit ordered top-five matched recovered FP16; 6-bit retained all
+five with a different order; 4-bit retained the winner and four shared candidates.
+
+Measured completion rates were 218.40 tok/s for recovered FP16, 188.25 for 4-bit,
+174.03 for 6-bit, 192.98 for 8-bit, and 304.29 for llama-server's source F16 GGUF.
+This is one cold sequential 135M-model sample: quantization overhead dominates at this
+size, so it is not evidence that larger quantized MLX models are slower. Do not rerun
+unless the quantizer, profile, cache, runtime, prompt, or acceptance contract changes.
+The complete report remains at `/tmp/llama-monitor-r3-host-gate/report.json`.
+
+R3 completion authorizes discussion of R4 only. It never changes an R2/R3 cache to
+launchable and never promotes this profile to `Verified`.

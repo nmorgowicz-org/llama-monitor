@@ -942,6 +942,116 @@ Detached runtime and independent Verifier evidence:
 - Gate: recorded fidelity/performance/size results and clear source/output labels.
 - Checkpoint: `feat(models): add validated MLX quantization recipes`.
 
+#### R3 checkpoint (2026-07-16)
+
+Status: **complete; independent Verifier approved after hardening and detached-host
+validation.** This authorizes R4 implementation only. Every production/`Verified`
+promotion remains unauthorized.
+
+Pinned quantizer:
+
+- Official `mlx-lm==0.31.3` wheel `mlx_lm-0.31.3-py3-none-any.whl` (408,890 bytes,
+  SHA-256 `758cfddf1180053b7613db76fad3d246a331a2a905808e1164a275621fc983b8`).
+- Apple-Silicon `mlx==0.32.0` wheel
+  `mlx-0.32.0-cp312-cp312-macosx_15_0_arm64.whl` (558,890 bytes, SHA-256
+  `e5f778001562ccce26cf6e5be1050d2afc78e2902bad206201ab9f5a6d0f886a`).
+- Execution uses the retained app-owned Rapid-MLX `0.10.10` qualification venv. Its
+  exact 65-package, 6,770-file non-bytecode closure is pinned by environment SHA-256
+  `a0a97c14483e1e24ba4e4dbac7505b54c8e686e90b8b77df32eb1f83f39f556a`.
+
+Input and policy:
+
+- The only accepted input is remediated R2 F16 cache
+  `a21cca76ec236c3c71ea2bf5eb6f78716602b90fb16d78c3aef4da51e1ff4177`.
+  Its manifest, report, weight, 272-tensor closure, and original GGUF `f16` tier are
+  pinned and revalidated before and after quantization.
+- R3 invokes official `mlx_lm.convert` offline with `dtype=float16`, uniform affine
+  weight quantization, group size 64, no mixed predicate, and no remote code. Exactly
+  three recipes exist: 4-, 6-, and 8-bit. Unknown recipes fail closed.
+- Official `tokenizer.save_pretrained()` normalizes this fast-tokenizer layout by
+  dropping merges/vocabulary/special-token files, extracting the chat template, and
+  adding a model card. The wrapper rejects that ambiguity: it removes generated-only
+  card/template files and restores all six R2 tokenizer/generation assets byte-for-byte.
+- R3 directly reuses R2 canonical paths, immutable worker assets, complete environment
+  verification, bounded blocking gate, offline process-group runner, cancellation,
+  time/diagnostic/output/disk bounds, staging cleanup, recursive hashes, tamper checks,
+  and atomic promotion. Outputs live below `models/rapid-mlx/requantized/`, remain
+  outside inventory, use status `experimental_requantized_structurally_validated`, and
+  are always `launchable: false`.
+
+Structural and size evidence:
+
+| Recipe | Immutable cache | Quantized modules | Output tensors | Complete bytes | Size vs recovered FP16 | Quantizer seconds |
+|---|---|---:|---:|---:|---:|---:|
+| affine 4-bit, group 64 | `bd494370cb354097bc67e714deb0f91d5ef6bb001e4cc8b4d695a0a6962e4522` | 211 | 694 | 79,216,280 | 29.1% | 0.657 |
+| affine 6-bit, group 64 | `40244bc4b24630c490a003a615d33a8c7705e12aec2268b7646e2ec81e4038ab` | 211 | 694 | 112,836,563 | 41.4% | 0.715 |
+| affine 8-bit, group 64 | `08f132594443be6efcfbb4b3d85c5c870e2c28048c06b702c16926e0384c5b29` | 211 | 694 | 146,456,727 | 53.8% | 0.727 |
+
+Each recipe has exactly 211 scale and 211 quantization-bias tensors, exact config
+metadata, finite floating tensors, complete hashes, and the exact R2 tokenizer identity.
+Recovered FP16 is 272,437,300 bytes. Failed initial tokenizer-closure attempts removed
+their output and left R3 staging empty; no partial cache was promoted.
+
+Validation design:
+
+- `tools/mlx_requantize/validate_fidelity.py` dequantizes each recipe through pinned
+  mlx-lm, requires exact 272-key/shape closure against recovered FP16, and records
+  max/mean absolute error, minimum cosine, worst tensors, and load time.
+- `tools/mlx_requantize/run_host_gate.py` runs that check plus managed llama-server F16
+  and recovered-FP16/4/6/8 Rapid-MLX targets sequentially. It records size, load,
+  readiness/model/status/cache, two fixed greedy chats, usage/finish/text/top-five,
+  throughput, deterministic behavior, candidate compatibility, and bounded diagnostics.
+  It creates ephemeral API keys, forces offline/telemetry-disabled execution, tears down
+  each process group, proves each port can be rebound, and requires human coherence
+  review.
+- Run the harness once in a normal interactive Terminal using the exact command in
+  `docs/agents/gguf-recovery.md`. Direct sandbox Python has no Metal device, so its
+  immediate failure is not fidelity evidence and must not be repeatedly retried.
+
+Independent Verifier hardening and sign-off:
+
+- Cache validation pins the exact 211 quantized modules, 694 output tensors, and each
+  recipe's complete inventory SHA. It derives the cache key again from the manifest's
+  recipe and rejects recipe substitution, cache-root symlinks, content tampering, and
+  output beyond the declared byte bound.
+- The host harness passes ephemeral API keys only through the child environment,
+  redacts diagnostics, requires the served identity plus valid usage/finish data, and
+  kills the complete process group even when the leader exits first. The fidelity
+  validator rejects empty and non-finite results explicitly.
+- Adversarial recipe-substitution and symlink tests joined the focused suite. Final
+  independent evidence was 20 focused tests passed / 7 intentionally ignored, all
+  three retained caches accepted under the stricter closure, the exact 65-package /
+  6,770-file environment accepted, the real one-byte output-bound rejection accepted,
+  and Python syntax, Clippy with warnings denied, Windows GNU, and `git diff --check`
+  clean.
+
+Detached-host evidence:
+
+- The one-shot harness exited zero and retained its bounded machine report at
+  `/tmp/llama-monitor-r3-host-gate/report.json`. It sequentially stopped every owned
+  process group and successfully rebound every port. All four Rapid-MLX targets
+  repeated byte-identical greedy output with valid usage/finish data, and human review
+  found the llama-server reference plus every Rapid-MLX output coherent. The 4-bit
+  response reached the 32-token bound but remained grammatical; 6-bit produced the
+  best concise `stop` response at 25 completion tokens; 8-bit text was identical to
+  recovered FP16.
+- Exact measured results from this single cold sequential tiny-model run:
+
+| Target | Load seconds | Completion tok/s | Fidelity vs recovered FP16: max abs / mean abs / min cosine | First-token compatibility |
+|---|---:|---:|---|---|
+| recovered FP16 | 0.0844 | 218.40 | baseline | ordered top-five matches llama GGUF; max logprob delta `0.02088` |
+| affine 4-bit | 0.0860 | 188.25 | `0.550781` / `0.0115801` / `0.993535` | winner matches; four shared; order differs; max delta vs FP16 `1.671875` |
+| affine 6-bit | 0.0872 | 174.03 | `0.136719` / `0.00277082` / `0.999611` | winner and all five candidates match; order differs; max delta `0.390625` |
+| affine 8-bit | 0.0870 | 192.98 | `0.0390625` / `0.000686215` / `0.999955` | ordered top-five matches; max delta `0.078125` |
+| llama-server source F16 GGUF | n/a | 304.29 | R2 source reference | reference |
+
+- Fidelity is monotonic in the expected direction and all recipes retain exact
+  272-source-tensor dequantized key/shape closure. This one sample does **not** show a
+  throughput win: none of the MLX recipes outperformed recovered FP16. For a 135M
+  model, fixed quantization/dequantization and dispatch overhead can dominate the
+  memory-bandwidth savings. Treat these figures as bounded recipe evidence, not a broad
+  performance ranking for larger models or production workloads.
+
 ### R4 — Experimental Import Lab UX
 
 - App-native compatibility report, resource estimate, progress, cancellation,
