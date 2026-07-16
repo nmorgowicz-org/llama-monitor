@@ -523,7 +523,7 @@ mod tests {
         let runtime = dir.path().join("rapid-mlx");
         std::fs::write(
             &runtime,
-            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'rapid-mlx 0.10.9'; else echo '--host --port --log-level'; fi\n",
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'rapid-mlx 0.10.10'; else echo '--host --port --log-level --served-model-name --timeout --max-cache-blocks'; fi\n",
         )
         .unwrap();
         std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o755)).unwrap();

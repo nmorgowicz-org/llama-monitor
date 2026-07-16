@@ -6,7 +6,7 @@
 | Status | Research plan; intentionally outside the Rapid-MLX release gate |
 | Product goal | Let users recover valuable GGUF-only finetunes for MLX without presenting reverse conversion as lossless or universally safe |
 | Initial host | Apple Silicon macOS |
-| Verified native runtime baseline | Rapid-MLX `v0.10.9` / mlx-lm |
+| Verified native runtime baseline | Rapid-MLX `v0.10.10` current, `v0.10.9` retained rollback / mlx-lm |
 | First upgrade qualification | Rapid-MLX `v0.10.10` at `5ca536275e89ddf0de3b49bd6f55fad80e42656e` |
 | Candidate reverse converter | `barrontang/gguf2mlx` at audited SHA `6a0da6529f233df79362cbf62dd96221c895351f` |
 
@@ -16,11 +16,12 @@ GGUF-only conversion remains a desired llama-monitor capability, but it is a sep
 Experimental Import Lab rather than a prerequisite for the first Rapid-MLX release.
 
 Phase 5.5 also owns one bounded runtime-upgrade qualification. Rapid-MLX `v0.10.10`
-was published on 2026-07-15 with release-artifact acceptance and publication-integrity
-hardening plus the version bump. It does not advertise an inference feature or API
-change, but release notes alone are not compatibility evidence. The lab must exercise
-an isolated managed `v0.10.9` -> `v0.10.10` upgrade before using `v0.10.10` in GGUF
-conversion parity gates. Phase 6 still owns the production updater and its app UI.
+was published on 2026-07-15. Its short release page highlights release-artifact
+acceptance hardening and the version bump, but the tag comparison contains 15 commits,
+including inference/runtime changes. Release notes alone are therefore not compatibility
+evidence. The lab must exercise an isolated managed `v0.10.9` -> `v0.10.10` upgrade
+before using `v0.10.10` in GGUF conversion parity gates. Phase 6 still owns the
+production updater and its app UI.
 
 The supported model paths remain:
 
@@ -417,6 +418,96 @@ multimodal models.
   `v0.10.9` active and produces bounded, redacted diagnostics.
 - Checkpoint: recorded `v0.10.10` compatibility and rollback evidence; no production
   updater UI is implied by this research milestone.
+
+#### R0.5 qualification evidence (2026-07-16)
+
+Status: **qualified by an isolated manual harness; managed stable compatibility policy
+implemented**. The production updater remains intentionally outside this checkpoint.
+
+Provenance:
+
+- GitHub tag `v0.10.10` resolves to verified commit
+  `5ca536275e89ddf0de3b49bd6f55fad80e42656e`; the source `pyproject.toml` declares
+  `0.10.10`.
+- The `v0.10.9...v0.10.10` comparison is 15 commits ahead. In addition to release
+  hardening, it includes model onboarding, Gemma 4 routing/KV-share changes, KV-cache
+  export/import, model-profile refactoring, and DFlash security changes. Treat this as
+  a runtime release, not a metadata-only bump.
+- PyPI published `rapid_mlx-0.10.10-py3-none-any.whl` with SHA-256
+  `4cb43a8c21b35436251023a33e51720b9a42bca0b9c76085023bcc8284ca0d71`.
+  The downloaded wheel matched that digest and its metadata declared package/version
+  `rapid-mlx==0.10.10`. PyPI's publish-provenance endpoint binds that digest to
+  `raullenchai/Rapid-MLX`, `publish.yml`, tag `v0.10.10`, and the same commit SHA.
+
+Isolation and capabilities:
+
+- The retained last-known-good runtime remained at
+  `~/.config/llama-monitor/runtimes/rapid-mlx/0.10.9/venv`; its live CLI continued to
+  report `rapid-mlx 0.10.9` before and after qualification.
+- The verified wheel was installed into
+  `~/.config/llama-monitor/runtimes/rapid-mlx/.staging/0.10.10-qualification/venv`
+  with Python `3.12.13`, `mlx-lm==0.31.3`, and `mlx==0.32.0`. No Brew, Pipx, external
+  virtual environment, or active `v0.10.9` files were changed.
+- Live `rapid-mlx --version` reported `0.10.10`. All flags used by llama-monitor were
+  present: `--host`, `--port`, `--log-level`, `--served-model-name`, `--timeout`, and
+  `--max-cache-blocks`. Relative to `0.10.9`, the only removed serve-help tokens were
+  the deprecated `--continuous-batching` and `--chunked-prefill-tokens`; llama-monitor
+  does not construct either flag.
+
+Runtime gate:
+
+- Host: Apple Silicon macOS `26.5.1`; telemetry disabled and API authentication enabled.
+- Fixture: the Phase 5 app-cache snapshot of `mlx-community/Qwen3-0.6B-4bit` at
+  revision `73e3e38d981303bc594367cd910ea6eb48349da8`, exposed as
+  `phase5-qwen3-fixture`.
+- The model loaded, `/health/ready` returned `ready: true`, authenticated `/v1/models`
+  returned the served alias, and authenticated `/v1/status` plus `/v1/cache/stats`
+  parsed successfully.
+- Three authenticated SSE chat requests completed. Two repeated greedy requests with
+  `temperature=0` and `seed=55` both produced `**PHASE55_OK**`. Post-request status
+  reported three processed requests, 63 prompt tokens, 24 completion tokens, 28 engine
+  steps, and zero running/waiting requests.
+- The server was stopped and the bounded follow-up probe confirmed no listener remained
+  on the qualification port.
+
+Manual activation and rollback contract:
+
+- Because the Phase 6 updater does not exist yet, the qualification-only app-scoped
+  `.qualification-r05/active` symlink was atomically replaced on the same filesystem
+  after all probes. It moved from retained `0.10.9` to staged `0.10.10`, then
+  atomically rolled back to `0.10.9`; each pointer target and live CLI version was
+  checked after replacement. The qualification pointer remains present and points to
+  `~/.config/llama-monitor/runtimes/rapid-mlx/0.10.9/venv/bin/rapid-mlx`.
+- A deliberately incorrect expected wheel digest was rejected before pointer
+  replacement; the qualification pointer remained on `0.10.9`. This demonstrates the
+  required fail-before-activation ordering without modifying the product's configured
+  runtime.
+
+Managed compatibility follow-through completed in R0.5:
+
+- The managed stable channel accepts Rapid-MLX versions at or above `0.10.9` only when
+  all six required serve flags pass live discovery. It deliberately avoids a
+  per-release source allowlist: a newer stable release such as `0.10.11` passes with
+  the required capabilities and fails if any required capability is absent.
+- Managed prerelease and local variants are excluded from the stable channel. They may
+  still be configured explicitly as user-owned/custom provisional runtimes.
+- `0.10.10` remains the latest directly qualified evidence baseline and `0.10.9` the
+  retained rollback version; those values are defaults/evidence, not a maximum-version
+  policy. Explicit verified aliases are version-agnostic, while uncatalogued aliases
+  remain free-form. GGUF rejection diagnostics name the selected runtime version.
+- `CompatibilityState::Verified` means only that a managed runtime passed the stable
+  version floor and live interface/capability probes. `RuntimeSource::Managed` is a
+  configured path classification, not proof of artifact authenticity or completed
+  activation qualification.
+
+Remaining Phase 6 follow-through:
+
+- Phase 6 must verify official artifact provenance and atomically switch an app-owned
+  pointer only after staged install, capability, readiness, deterministic chat, status,
+  stop, and rollback gates pass. It must persist artifact digest/provenance; version
+  output by itself remains insufficient provenance.
+- Only after those Phase 6 gates pass may the updater activate and supply the app-owned
+  managed runtime path to normal launch discovery.
 
 ### R0 — Tool survey and evidence matrix
 

@@ -434,7 +434,7 @@ mod chat_tests {
             RuntimeMetadata {
                 executable_path: "rapid-mlx".into(),
                 source: runtime::RuntimeSource::Managed,
-                version: "0.10.9".into(),
+                version: compatibility::LATEST_QUALIFIED_VERSION_TEXT.into(),
             },
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         )

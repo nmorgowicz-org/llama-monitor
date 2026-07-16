@@ -8,12 +8,16 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 pub const MINIMUM_VERIFIED_VERSION: (u64, u64, u64) = (0, 10, 9);
-pub const CURRENT_VERIFIED_VERSION: (u64, u64, u64) = (0, 10, 9);
+pub const LATEST_QUALIFIED_VERSION_TEXT: &str = "0.10.10";
+pub const QUALIFIED_ROLLBACK_VERSION_TEXT: &str = "0.10.9";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_PROBE_OUTPUT_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompatibilityState {
+    /// The managed runtime's CLI version and live interface capabilities passed.
+    /// This does not authenticate the artifact or qualify it for pointer activation;
+    /// the Phase 6 installer owns provenance and staged runtime gates.
     Verified,
     Provisional,
 }
@@ -77,7 +81,7 @@ impl CompatibilityProfile {
     pub fn verified_baseline() -> Self {
         Self {
             state: CompatibilityState::Verified,
-            version: "0.10.9".to_string(),
+            version: LATEST_QUALIFIED_VERSION_TEXT.to_string(),
             capabilities: ServeCapabilities::verified_baseline(),
         }
     }
@@ -117,12 +121,12 @@ async fn probe_with_limits(
             format_version(version)
         );
     }
-    if source == RuntimeSource::Managed
-        && (version != CURRENT_VERIFIED_VERSION || !parsed_version.stable)
-    {
+    if source == RuntimeSource::Managed && !parsed_version.stable {
         anyhow::bail!(
-            "Managed Rapid-MLX runtime is {}; this build requires the exact stable verified managed version 0.10.9",
-            version_text.trim()
+            "Managed Rapid-MLX runtime is {}; the managed channel requires a stable release at version {} or newer (latest directly qualified: {}). Configure this build explicitly as a user-owned custom runtime to probe it provisionally",
+            version_text.trim(),
+            QUALIFIED_ROLLBACK_VERSION_TEXT,
+            LATEST_QUALIFIED_VERSION_TEXT,
         );
     }
 
@@ -143,7 +147,19 @@ async fn probe_with_limits(
     }
     let help = output_text(&help_output.stdout, &help_output.stderr);
     let capabilities = ServeCapabilities::from_help(&help);
-    for required in ["--host", "--port"] {
+    let required_capabilities: &[&str] = if source == RuntimeSource::Managed {
+        &[
+            "--host",
+            "--port",
+            "--log-level",
+            "--served-model-name",
+            "--timeout",
+            "--max-cache-blocks",
+        ]
+    } else {
+        &["--host", "--port"]
+    };
+    for required in required_capabilities {
         capabilities.require(required).with_context(|| {
             format!(
                 "Rapid-MLX {} failed its required serve capability probe",
@@ -319,12 +335,18 @@ mod tests {
             })
         };
         assert_eq!(parse_version("rapid-mlx 0.10.9"), stable((0, 10, 9)));
+        assert_eq!(parse_version("rapid-mlx 0.10.10"), stable((0, 10, 10)));
         assert_eq!(
             parse_version("Rapid-MLX version v0.11.2\n"),
             stable((0, 11, 2))
         );
         assert_eq!(parse_version("development"), None);
-        for version in ["0.10.9.dev1", "0.10.9rc1", "0.10.9+local"] {
+        for version in [
+            "0.10.10.dev1",
+            "0.10.10rc1",
+            "0.10.10+local",
+            "0.10.10-local",
+        ] {
             assert_eq!(parse_version(version).unwrap().stable, false, "{version}");
         }
     }
@@ -360,13 +382,25 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn live_probe_distinguishes_verified_and_provisional_profiles() {
-        let (_dir, binary) = fixture_runtime("0.10.9", "--host --port --timeout");
+        let required = "--host --port --log-level --served-model-name --timeout --max-cache-blocks";
+        let (_dir, binary) = fixture_runtime("0.10.10", required);
         let profile = probe(&binary, RuntimeSource::Custom).await.unwrap();
         assert_eq!(profile.state, CompatibilityState::Provisional);
         assert!(profile.capabilities.contains("--timeout"));
 
         let profile = probe(&binary, RuntimeSource::Managed).await.unwrap();
         assert_eq!(profile.state, CompatibilityState::Verified);
+        assert_eq!(profile.version, "0.10.10");
+
+        let (_dir, binary) = fixture_runtime("0.10.9", required);
+        let profile = probe(&binary, RuntimeSource::Managed).await.unwrap();
+        assert_eq!(profile.state, CompatibilityState::Verified);
+        assert_eq!(profile.version, "0.10.9");
+
+        let (_dir, binary) = fixture_runtime("0.10.11", required);
+        let profile = probe(&binary, RuntimeSource::Managed).await.unwrap();
+        assert_eq!(profile.state, CompatibilityState::Verified);
+        assert_eq!(profile.version, "0.10.11");
 
         let (_dir, binary) = fixture_runtime("0.11.0", "--host --port");
         let profile = probe(&binary, RuntimeSource::Homebrew).await.unwrap();
@@ -376,32 +410,52 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn managed_and_required_capability_probes_fail_closed() {
-        let (_dir, binary) = fixture_runtime("0.11.0", "--host --port");
-        let error = probe(&binary, RuntimeSource::Managed).await.unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("exact stable verified managed version")
+        let required = "--host --port --log-level --served-model-name --timeout --max-cache-blocks";
+        let (_dir, binary) = fixture_runtime("0.10.11", required);
+        assert!(probe(&binary, RuntimeSource::Managed).await.is_ok());
+
+        let (_dir, binary) = fixture_runtime(
+            "0.10.11",
+            "--host --port --log-level --served-model-name --timeout",
         );
+        let error = probe(&binary, RuntimeSource::Managed).await.unwrap_err();
+        assert!(format!("{error:#}").contains("--max-cache-blocks"));
 
         let (_dir, binary) = fixture_runtime("0.10.9", "--host");
         let error = probe(&binary, RuntimeSource::Custom).await.unwrap_err();
         let message = format!("{error:#}");
         assert!(message.contains("--port"));
 
-        for version in ["0.10.9.dev1", "0.10.9rc1", "0.10.9+local"] {
+        for version in [
+            "0.10.10.dev1",
+            "0.10.10rc1",
+            "0.10.10+local",
+            "0.10.9+rollback-local",
+        ] {
             let (_dir, binary) = fixture_runtime(version, "--host --port");
             let error = probe(&binary, RuntimeSource::Managed).await.unwrap_err();
             assert!(
-                error
-                    .to_string()
-                    .contains("exact stable verified managed version"),
+                error.to_string().contains("requires a stable release"),
                 "{version}: {error:#}"
             );
 
             let profile = probe(&binary, RuntimeSource::Custom).await.unwrap();
             assert_eq!(profile.state, CompatibilityState::Provisional, "{version}");
         }
+
+        for version in ["0.10.11", "0.10.10", "0.10.9"] {
+            let (_dir, binary) = fixture_runtime(version, "--host --port --log-level");
+            let error = probe(&binary, RuntimeSource::Managed).await.unwrap_err();
+            assert!(format!("{error:#}").contains("--served-model-name"));
+        }
+    }
+
+    #[test]
+    fn qualified_versions_are_metadata_not_a_future_release_allowlist() {
+        let current = CompatibilityProfile::verified_baseline();
+        assert_eq!(current.version, "0.10.10");
+        assert_eq!(LATEST_QUALIFIED_VERSION_TEXT, "0.10.10");
+        assert_eq!(QUALIFIED_ROLLBACK_VERSION_TEXT, "0.10.9");
     }
 
     #[cfg(unix)]

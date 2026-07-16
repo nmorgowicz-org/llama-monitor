@@ -247,9 +247,11 @@ Implement the ability to discover the Rapid-MLX runtime, construct its launch co
 - **Binary Aliases**: Do not hardcode `vllm-mlx`; detect and use whichever binary is on `PATH` (preferring `rapid-mlx`).
 - **Timeout Handling**: Rapid-MLX warmup (JIT/Cache) can be slow; ensure `await_ready` has a generous timeout (e.g., 300s).
 - **Daily Upstream Movement**: A version string alone is not a compatibility contract.
-  Managed releases are exact-version installs; optional flags and endpoints are
-  capability-detected. Current `main` is a provisional/nightly signal, never the
-  default managed install target.
+  The managed stable channel accepts official stable releases at or above its minimum
+  version only after required live capability probes pass; it does not require a
+  llama-monitor source allowlist update per Rapid-MLX release. Current `main` and other
+  prerelease/local builds are provisional user-owned runtimes, never the default
+  managed install target.
 
 ---
 
@@ -722,9 +724,12 @@ Detailed research, local probe evidence, and the architecture-promotion program 
 This phase also qualifies Rapid-MLX `v0.10.10` as the first concrete daily-update
 exercise. The release is pinned to
 `5ca536275e89ddf0de3b49bd6f55fad80e42656e`; its notes describe release-artifact
-acceptance hardening and a version bump, not an inference contract change. Even so,
-compatibility must be proven through a staged `v0.10.9` -> `v0.10.10` install, runtime
-smoke, atomic activation, and rollback rather than inferred from release notes.
+acceptance hardening and a version bump, but the 15-commit tag comparison also includes
+substantive inference/runtime work: model onboarding, Gemma 4 routing/KV-share changes,
+KV-cache export/import, model-profile refactoring, and DFlash security changes.
+Compatibility must therefore be proven through a staged `v0.10.9` -> `v0.10.10`
+install, runtime smoke, atomic activation, and rollback rather than inferred from the
+narrow release notes.
 
 ### Phase Objective
 

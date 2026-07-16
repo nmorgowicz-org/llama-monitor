@@ -161,7 +161,9 @@ fn api_rapid_model_resolver_preview(
                     } else {
                         "python3"
                     }),
-                    runtime_version: "0.10.9".into(),
+                    runtime_version:
+                        crate::inference::rapid_mlx::compatibility::LATEST_QUALIFIED_VERSION_TEXT
+                            .into(),
                     hf_token: None,
                     verified_aliases: Vec::new(),
                     execute_conversion: false,

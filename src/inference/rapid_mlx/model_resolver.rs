@@ -281,8 +281,7 @@ pub async fn resolve(
             output
         }
         RapidMlxModelSource::Alias { value } => {
-            let verified = context.runtime_version == "0.10.9"
-                && context.verified_aliases.iter().any(|alias| alias == value);
+            let verified = context.verified_aliases.iter().any(|alias| alias == value);
             let mut output = resolved(
                 value.clone(),
                 value.clone(),
@@ -338,7 +337,8 @@ pub async fn resolve(
             output
         }
         RapidMlxModelSource::GgufFile { path } => bail!(
-            "Rapid-MLX 0.10.9 cannot load GGUF '{}'. Use llama.cpp, or explicitly enter the separate experimental Phase 5.5 import workflow when available",
+            "Rapid-MLX {} cannot load GGUF '{}'. Use llama.cpp, or explicitly enter the separate experimental Phase 5.5 import workflow when available",
+            context.runtime_version,
             path.display()
         ),
     };
@@ -408,8 +408,12 @@ fn validate_source(source: &RapidMlxModelSource, context: &RapidMlxResolveContex
                 }
             }
         }
-        RapidMlxModelSource::GgufFile { .. } => {
-            bail!("GGUF is not a native Rapid-MLX model source")
+        RapidMlxModelSource::GgufFile { path } => {
+            bail!(
+                "Rapid-MLX {} cannot load GGUF '{}'; GGUF is not a native Rapid-MLX model source",
+                context.runtime_version,
+                path.display()
+            )
         }
     }?;
     if context.models_dir.as_os_str().is_empty() {
@@ -1141,7 +1145,8 @@ fn display_name(source: &RapidMlxModelSource) -> String {
 
 fn alias_warnings(source: &RapidMlxModelSource, context: &RapidMlxResolveContext) -> Vec<String> {
     match source {
-        RapidMlxModelSource::Alias { value } if context.runtime_version != "0.10.9" || !context.verified_aliases.iter().any(|alias| alias == value) => vec!["Free-form alias will be validated by Rapid-MLX at launch; no unstable CLI catalog was scraped".into()],
+        RapidMlxModelSource::Alias { value }
+            if !context.verified_aliases.iter().any(|alias| alias == value) => vec!["Free-form alias will be validated by Rapid-MLX at launch; no unstable CLI catalog was scraped".into()],
         _ => Vec::new(),
     }
 }
@@ -1176,6 +1181,70 @@ mod tests {
             preview(&source, &context).state,
             ResolverPreviewState::UnsupportedSource
         ));
+        assert!(preview(&source, &context).warnings[0].contains("Rapid-MLX 0.10.9"));
+    }
+
+    #[tokio::test]
+    async fn explicitly_verified_aliases_are_runtime_version_agnostic() {
+        let models = tempfile::tempdir().unwrap();
+        let source = RapidMlxModelSource::Alias {
+            value: "verified-model".into(),
+        };
+        for version in ["0.10.9", "0.10.10", "0.10.11"] {
+            let context = RapidMlxResolveContext {
+                models_dir: models.path().into(),
+                python_executable: "python3".into(),
+                runtime_version: version.into(),
+                hf_token: None,
+                verified_aliases: vec!["verified-model".into()],
+                execute_conversion: false,
+            };
+            let resolved = resolve(source.clone(), &context).await.unwrap();
+            assert_eq!(
+                resolved.source_kind,
+                ResolvedRapidMlxSourceKind::VerifiedAlias,
+                "{version}"
+            );
+            assert!(resolved.warnings.is_empty(), "{version}");
+        }
+
+        let context = RapidMlxResolveContext {
+            models_dir: models.path().into(),
+            python_executable: "python3".into(),
+            runtime_version: "0.10.11".into(),
+            hf_token: None,
+            verified_aliases: vec![],
+            execute_conversion: false,
+        };
+        let resolved = resolve(source, &context).await.unwrap();
+        assert_eq!(
+            resolved.source_kind,
+            ResolvedRapidMlxSourceKind::FreeFormAlias
+        );
+        assert_eq!(resolved.warnings.len(), 1);
+    }
+
+    #[test]
+    fn gguf_rejection_names_the_selected_runtime_profile() {
+        let source = RapidMlxModelSource::GgufFile {
+            path: "/models/finetune.gguf".into(),
+        };
+        for version in ["0.10.10", "0.10.9"] {
+            let context = RapidMlxResolveContext {
+                models_dir: "/models".into(),
+                python_executable: "python3".into(),
+                runtime_version: version.into(),
+                hf_token: None,
+                verified_aliases: vec![],
+                execute_conversion: false,
+            };
+            let preview = preview(&source, &context);
+            assert!(matches!(
+                preview.state,
+                ResolverPreviewState::UnsupportedSource
+            ));
+            assert!(preview.warnings[0].contains(version), "{version}");
+        }
     }
 
     #[test]
