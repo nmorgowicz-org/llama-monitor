@@ -5103,7 +5103,15 @@ function updateVramDisplay() {
     const oh = est.overhead_bytes || 0;
     const ramBytes = est.ram_bytes || 0;
     const recommendation = est.recommendation || 'risk';
-    const note = est.note || '';
+    // Rapid-MLX overhead is a documented formula-based approximation (not yet calibrated
+    // against real Apple Silicon measurements); surface that in the tooltip rather than
+    // presenting it as precisely measured. Backend-driven — no local VRAM math here.
+    const evidenceSuffix = est.evidence === 'approximate'
+      ? ' (Rapid-MLX overhead is an approximation, not yet hardware-calibrated.)'
+      : est.evidence === 'degraded'
+        ? ' (Architecture metadata incomplete — this estimate is a rough heuristic.)'
+        : '';
+    const note = (est.note || '') + evidenceSuffix;
 
     updateMlockWarning(availVram, free);
 

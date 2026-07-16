@@ -630,6 +630,26 @@ Architecture-aware VRAM breakdown endpoint.
 - Output fields: `weights_bytes`, `kv_cache_bytes`, `linear_attn_state_bytes`, `mmproj_bytes`, `mtp_bytes`, `overhead_bytes`, `total_bytes`, `available_bytes`, `headroom_bytes`, `ram_bytes`, `available_ram_bytes`, `ram_headroom_bytes`, `recommendation`, `note`
 - Consumers: Spawn Wizard, Preset Editor, Setup view, **and the Models modal HF-browse preview bar** (`updateVramDisplay` in `static/js/features/models.js`) — all share this one endpoint, so they all get identical, GGUF-accurate numbers. There is no client-side VRAM/KV formula anymore.
 
+### Rapid-MLX backend (`backend` / `engine` field)
+
+`POST /api/vram-estimate` accepts an optional `backend` field (`#[serde(default)]`, legacy alias `engine`) selecting which inference backend the estimate is for:
+
+- `"llama_cpp"` (default, omitted = unchanged legacy behavior) — GGUF metadata path described above.
+- `"rapid_mlx"` / `"mlx"` — Rapid-MLX (Apple-Silicon/unified-memory-only) path:
+  - **Local path**: `model_path` is an MLX model *directory*; `src/inference/rapid_mlx/mlx_meta.rs` reads `config.json` (HF-transformers-style architecture fields, MoE fields, sliding-window fields, `quantization` block, draft/speculative sidecar) and `model.safetensors.index.json` for exact weight-byte accounting (`metadata.total_size` when present, otherwise the real on-disk shard file sizes).
+  - **HuggingFace path**: `hf_repo_id` (+ optional `hf_file_path`, defaults to `config.json`) fetches `config.json` directly (`crate::hf::fetch_mlx_config` — a plain GET, no range-fetch needed since the file is small). `model_size_bytes` is required, same as the GGUF HF path.
+  - Missing/unrecognized required config fields (`hidden_size`, `num_hidden_layers`, `num_attention_heads`) degrade the architecture to `ModelArch::from_name_and_params()` and are reported via the `evidence` output field (see below) — never silently guessed at as authoritative.
+  - `is_unified_memory` is forced to `true` server-side for this backend (Rapid-MLX has no discrete-GPU/CPU-spill path).
+  - Optional `mlx_prefix_cache_tokens` + `mlx_prefix_cache_bits` (4 or 8, default 8) reserve a **separate** stored budget for Rapid-MLX's compressed prefix cache. This is intentionally NOT a reduction of `kv_cache_bytes`: cached entries are decompressed back to the active compute dtype before reuse, so active-request KV is unaffected by how much prefix cache exists.
+- Two additional output fields, present for both backends (`#[serde(default)]`, always `0`/`"measured"` for GGUF):
+  - `mlx_prefix_cache_bytes` (u64) — the separate compressed prefix-cache budget described above.
+  - `evidence` (`"measured"` | `"approximate"` | `"degraded"`) — how much of the breakdown is backed by real hardware calibration vs. a formula-based approximation vs. a heuristic fallback from incomplete metadata. **Every Rapid-MLX estimate reports at best `"approximate"`**, never `"measured"` — see the next section.
+- Consumers wire the backend field through `wizardState.engine.selected` (Phase 6B1) in `static/js/features/vram-estimate.js`'s `buildEstimateBody()`; the Spawn Wizard's VRAM bar tooltip appends a plain-text note when `evidence` is `"approximate"`/`"degraded"`. No independent client-side VRAM math was added — this is still backend-driven only.
+
+### Rapid-MLX overhead — approximate, not yet hardware-calibrated
+
+Unlike llama.cpp's Metal (`metal_overhead_bytes`) and discrete-GPU (`discrete_overhead_bytes`) overhead, which are calibrated against real measured hardware footprints (see "Backend-Specific Accuracy" below), **Rapid-MLX's overhead (`mlx_overhead_bytes` in `src/llama/vram_estimator/estimate.rs`) is a documented, formula-based approximation** — same per-layer order of magnitude as the Metal calibration, inflated by a fixed 25% safety margin (base) / a 8%-of-KV fraction (vs. Metal's measured 6.5%) to compensate for the lack of a direct measurement. It is **not** derived from real Apple Silicon Rapid-MLX measurements and must not be presented as such; every estimate produced with `Backend::RapidMlx` sets `EstimateEvidence::Approximate` (or `Degraded` when the source config was incomplete). Recalibrating this against real Rapid-MLX process-footprint measurements (same methodology as "Recalibrating the discrete overhead" below) is an open follow-up.
+
 ### API helpers (`build_arch_from_body`)
 
 Used by `quant-compare` and `auto-size` endpoints when GGUF is not present or for fields not in the GGUF.

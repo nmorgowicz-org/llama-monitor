@@ -60,7 +60,7 @@ impl Supervisor {
 
     /// Override the graceful drain window. Production uses ten seconds; a
     /// shorter value is useful for deterministic fixture runtimes.
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)]
     pub fn with_graceful_stop_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.graceful_stop_timeout = timeout;
         self
@@ -318,11 +318,6 @@ impl Supervisor {
             }
             notified.await;
         }
-    }
-
-    #[cfg(test)]
-    pub fn pid(&self) -> Option<u32> {
-        *self.pid.lock().unwrap()
     }
 }
 

@@ -534,6 +534,53 @@ pub async fn fetch_gguf_header_metadata(
     Err(format!("could not parse GGUF header: {last_err}"))
 }
 
+/// Fetch and parse an MLX model's `config.json` directly from a HuggingFace repo.
+///
+/// Unlike the GGUF header (which is range-fetched because the file can be many GB), MLX's
+/// `config.json` is always small JSON, so this does a plain GET of the whole file.
+pub async fn fetch_mlx_config(
+    repo_id: &str,
+    file_path: &str,
+) -> Result<crate::inference::rapid_mlx::mlx_meta::MlxConfig, String> {
+    let api = ApiBuilder::new()
+        .with_token(hf_load_token())
+        .build()
+        .map_err(|e| format!("Failed to build HF API client: {e}"))?;
+    let url = api
+        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+        .url(file_path);
+    if url.is_empty() {
+        return Err(format!(
+            "Could not resolve HF URL for {repo_id}/{file_path}"
+        ));
+    }
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+    let mut req = client.get(&url);
+    if let Some(token) = hf_load_token() {
+        req = req.bearer_auth(token);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "HF returned HTTP {} for {file_path}",
+            resp.status()
+        ));
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("reading config.json: {e}"))?;
+    crate::inference::rapid_mlx::mlx_meta::parse_mlx_config(&bytes)
+}
+
 /// Stream-download a file from HF with optional resume.
 /// Returns total bytes written.
 #[allow(dead_code)]
@@ -1169,6 +1216,57 @@ async fn fetch_file_sizes(
     }
 
     Ok(map)
+}
+
+/// Sum total weight size for an MLX model repo from the HF tree API.
+///
+/// Used by the VRAM estimator when it receives an HF-repo-style alias as
+/// `model_path` (e.g. "mlx-community/Qwen3-30B-A3B-4bit") and no
+/// `model_size_bytes` was supplied. The huggingface-rs client's
+/// list/get-file-info helpers do not expose sizes, so this goes directly
+/// to the raw tree endpoint which does include LFS sizes.
+pub async fn resolve_mlx_repo_size_bytes(repo_id: &str) -> Result<Option<u64>> {
+    let url = format!("https://huggingface.co/api/models/{repo_id}/tree/main");
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(t) = hf_load_token() {
+        req = req.bearer_auth(t);
+    }
+
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(_) => return Ok(None),
+    };
+    if !resp.status().is_success() {
+        return Ok(None);
+    }
+
+    let items: Vec<serde_json::Value> = match resp.json().await {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+
+    let mut total: u64 = 0;
+    for item in items {
+        let path = item.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        if !path.ends_with(".safetensors") {
+            continue;
+        }
+        let size = item
+            .get("lfs")
+            .and_then(|lfs| lfs.get("size"))
+            .and_then(|v| v.as_u64())
+            .or_else(|| item.get("size").and_then(|v| v.as_u64()))
+            .unwrap_or(0);
+        if size > 0 {
+            total = total.saturating_add(size);
+        }
+    }
+
+    if total > 0 {
+        Ok(Some(total))
+    } else {
+        Ok(None)
+    }
 }
 
 /// Sort rank for quant labels (lower = higher quality / bigger file = shown first).

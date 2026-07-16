@@ -4,6 +4,7 @@
 import { setupViewState, chat, sessionState } from '../core/app-state.js';
 import { getPlatformInfo } from '../core/platform-info.js';
 import { doAttachFromSetup, doRestoreSession } from './attach-detach.js';
+import { presetModelSource } from './presets.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showConfirmDialog, showPromptDialog } from './toast.js';
 import Router from './router.js';
@@ -1039,7 +1040,9 @@ async function _fetchCardVramEstimates(availBytes, availRamBytes, isUnified, bud
 
     await Promise.all([...cards].map(async (card) => {
         const preset = presets.find(p => p.id === card.dataset.presetId);
-        if (!preset?.model_path) return;
+        const modelPath = presetModelSource(preset);
+        if (!modelPath) return;
+        const isRapidMlx = preset?.backend === 'rapid_mlx';
         const vramEl = card.querySelector('.launch-card-vram');
         if (!vramEl) return;
 
@@ -1049,7 +1052,7 @@ async function _fetchCardVramEstimates(availBytes, availRamBytes, isUnified, bud
                 method: 'POST',
                 headers: { ...headers, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    model_path: preset.model_path,
+                    model_path: modelPath,
                     n_ctx: preset.context_size || 131072,
                     ctk: preset.ctk || 'q8_0',
                     ctv: preset.ctv || 'q8_0',
@@ -1060,6 +1063,7 @@ async function _fetchCardVramEstimates(availBytes, availRamBytes, isUnified, bud
                     available_vram_bytes: availBytes,
                     available_ram_bytes: availRamBytes,
                     is_unified_memory: isUnified,
+                    ...(isRapidMlx ? { backend: 'rapid_mlx' } : {}),
                 }),
             });
             if (!resp.ok) return;

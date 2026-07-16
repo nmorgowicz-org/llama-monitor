@@ -818,171 +818,6 @@ fn is_private_or_loopback_ip(ip: std::net::IpAddr) -> bool {
                 || (v4.octets()[0] == 192 && v4.octets()[1] == 168))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn failed_restore_rolls_back_active_session() {
-        let state = AppState::default();
-        assert!(state.add_session(app_state::Session::new_spawn(
-            "previous".into(),
-            "Previous".into(),
-            8001,
-            String::new(),
-            None,
-            None,
-        )));
-        assert!(state.add_session(app_state::Session::new_spawn(
-            "failed".into(),
-            "Failed".into(),
-            8002,
-            String::new(),
-            None,
-            None,
-        )));
-        assert!(state.set_active_session("previous"));
-        assert!(state.set_active_session("failed"));
-
-        restore_active_session_after_failed_launch(&state, "failed", "previous");
-
-        assert_eq!(state.active_session_id.lock().unwrap().as_str(), "previous");
-    }
-
-    #[test]
-    fn failed_restore_does_not_overwrite_newer_active_selection() {
-        let state = AppState::default();
-        for id in ["previous", "failed", "newer"] {
-            assert!(state.add_session(app_state::Session::new_spawn(
-                id.into(),
-                id.into(),
-                8001,
-                String::new(),
-                None,
-                None,
-            )));
-        }
-        assert!(state.set_active_session("newer"));
-
-        restore_active_session_after_failed_launch(&state, "failed", "previous");
-
-        assert_eq!(state.active_session_id.lock().unwrap().as_str(), "newer");
-    }
-
-    #[tokio::test]
-    async fn rapid_model_discovery_supports_open_and_protected_endpoints() {
-        let route = warp::path!("v1" / "models")
-            .and(warp::header::optional::<String>("authorization"))
-            .map(|authorization: Option<String>| {
-                if authorization
-                    .as_deref()
-                    .is_some_and(|value| value != "Bearer correct-key")
-                {
-                    warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({"error": "unauthorized"})),
-                        warp::http::StatusCode::UNAUTHORIZED,
-                    )
-                } else {
-                    warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({
-                            "data": [{"id": "served-rapid-model"}]
-                        })),
-                        warp::http::StatusCode::OK,
-                    )
-                }
-            });
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        tokio::spawn(warp::serve(route).run(([127, 0, 0, 1], port)));
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-        let endpoint = format!("http://127.0.0.1:{port}");
-        let client = reqwest::Client::new();
-
-        assert_eq!(
-            discover_rapid_model_identity(&client, &endpoint, None)
-                .await
-                .unwrap()
-                .as_deref(),
-            Some("served-rapid-model")
-        );
-        assert_eq!(
-            discover_rapid_model_identity(&client, &endpoint, Some("correct-key"))
-                .await
-                .unwrap()
-                .as_deref(),
-            Some("served-rapid-model")
-        );
-        assert!(
-            discover_rapid_model_identity(&client, &endpoint, Some("wrong-key"))
-                .await
-                .is_err()
-        );
-    }
-
-    #[tokio::test]
-    async fn rapid_diagnostics_require_a_successful_authenticated_status() {
-        let route = warp::path!("v1" / "status")
-            .and(warp::header::optional::<String>("authorization"))
-            .map(|authorization: Option<String>| {
-                let status = if authorization.as_deref() == Some("Bearer correct-key") {
-                    warp::http::StatusCode::OK
-                } else {
-                    warp::http::StatusCode::UNAUTHORIZED
-                };
-                warp::reply::with_status(warp::reply::json(&serde_json::json!({})), status)
-            });
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        tokio::spawn(warp::serve(route).run(([127, 0, 0, 1], port)));
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-        let endpoint = format!("http://127.0.0.1:{port}");
-        let client = reqwest::Client::new();
-
-        assert!(
-            inference_diagnostics_available(
-                &client,
-                &endpoint,
-                crate::inference::InferenceBackend::RapidMlx,
-                Some("correct-key"),
-            )
-            .await
-        );
-        assert!(
-            !inference_diagnostics_available(
-                &client,
-                &endpoint,
-                crate::inference::InferenceBackend::RapidMlx,
-                Some("wrong-key"),
-            )
-            .await
-        );
-    }
-
-    #[test]
-    fn attach_ip_policy_uses_the_full_rfc1918_172_range() {
-        for ip in [
-            "127.0.0.1",
-            "10.1.2.3",
-            "172.16.0.1",
-            "172.31.255.254",
-            "192.168.1.2",
-        ] {
-            assert!(is_private_or_loopback_ip(ip.parse().unwrap()), "{ip}");
-        }
-        for ip in [
-            "172.4.0.1",
-            "172.11.0.1",
-            "172.15.255.254",
-            "172.32.0.1",
-            "8.8.8.8",
-        ] {
-            assert!(!is_private_or_loopback_ip(ip.parse().unwrap()), "{ip}");
-        }
-    }
-}
-
 async fn discover_rapid_model_identity(
     client: &reqwest::Client,
     endpoint: &str,
@@ -1557,4 +1392,169 @@ fn api_kill_llama(
                 }
             }
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_restore_rolls_back_active_session() {
+        let state = AppState::default();
+        assert!(state.add_session(app_state::Session::new_spawn(
+            "previous".into(),
+            "Previous".into(),
+            8001,
+            String::new(),
+            None,
+            None,
+        )));
+        assert!(state.add_session(app_state::Session::new_spawn(
+            "failed".into(),
+            "Failed".into(),
+            8002,
+            String::new(),
+            None,
+            None,
+        )));
+        assert!(state.set_active_session("previous"));
+        assert!(state.set_active_session("failed"));
+
+        restore_active_session_after_failed_launch(&state, "failed", "previous");
+
+        assert_eq!(state.active_session_id.lock().unwrap().as_str(), "previous");
+    }
+
+    #[test]
+    fn failed_restore_does_not_overwrite_newer_active_selection() {
+        let state = AppState::default();
+        for id in ["previous", "failed", "newer"] {
+            assert!(state.add_session(app_state::Session::new_spawn(
+                id.into(),
+                id.into(),
+                8001,
+                String::new(),
+                None,
+                None,
+            )));
+        }
+        assert!(state.set_active_session("newer"));
+
+        restore_active_session_after_failed_launch(&state, "failed", "previous");
+
+        assert_eq!(state.active_session_id.lock().unwrap().as_str(), "newer");
+    }
+
+    #[tokio::test]
+    async fn rapid_model_discovery_supports_open_and_protected_endpoints() {
+        let route = warp::path!("v1" / "models")
+            .and(warp::header::optional::<String>("authorization"))
+            .map(|authorization: Option<String>| {
+                if authorization
+                    .as_deref()
+                    .is_some_and(|value| value != "Bearer correct-key")
+                {
+                    warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({"error": "unauthorized"})),
+                        warp::http::StatusCode::UNAUTHORIZED,
+                    )
+                } else {
+                    warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "data": [{"id": "served-rapid-model"}]
+                        })),
+                        warp::http::StatusCode::OK,
+                    )
+                }
+            });
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        tokio::spawn(warp::serve(route).run(([127, 0, 0, 1], port)));
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        let endpoint = format!("http://127.0.0.1:{port}");
+        let client = reqwest::Client::new();
+
+        assert_eq!(
+            discover_rapid_model_identity(&client, &endpoint, None)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("served-rapid-model")
+        );
+        assert_eq!(
+            discover_rapid_model_identity(&client, &endpoint, Some("correct-key"))
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("served-rapid-model")
+        );
+        assert!(
+            discover_rapid_model_identity(&client, &endpoint, Some("wrong-key"))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn rapid_diagnostics_require_a_successful_authenticated_status() {
+        let route = warp::path!("v1" / "status")
+            .and(warp::header::optional::<String>("authorization"))
+            .map(|authorization: Option<String>| {
+                let status = if authorization.as_deref() == Some("Bearer correct-key") {
+                    warp::http::StatusCode::OK
+                } else {
+                    warp::http::StatusCode::UNAUTHORIZED
+                };
+                warp::reply::with_status(warp::reply::json(&serde_json::json!({})), status)
+            });
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        tokio::spawn(warp::serve(route).run(([127, 0, 0, 1], port)));
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        let endpoint = format!("http://127.0.0.1:{port}");
+        let client = reqwest::Client::new();
+
+        assert!(
+            inference_diagnostics_available(
+                &client,
+                &endpoint,
+                crate::inference::InferenceBackend::RapidMlx,
+                Some("correct-key"),
+            )
+            .await
+        );
+        assert!(
+            !inference_diagnostics_available(
+                &client,
+                &endpoint,
+                crate::inference::InferenceBackend::RapidMlx,
+                Some("wrong-key"),
+            )
+            .await
+        );
+    }
+
+    #[test]
+    fn attach_ip_policy_uses_the_full_rfc1918_172_range() {
+        for ip in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.1",
+            "172.31.255.254",
+            "192.168.1.2",
+        ] {
+            assert!(is_private_or_loopback_ip(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in [
+            "172.4.0.1",
+            "172.11.0.1",
+            "172.15.255.254",
+            "172.32.0.1",
+            "8.8.8.8",
+        ] {
+            assert!(!is_private_or_loopback_ip(ip.parse().unwrap()), "{ip}");
+        }
+    }
 }

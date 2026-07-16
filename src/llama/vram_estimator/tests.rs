@@ -35,7 +35,7 @@ fn kv_calibration_qwen3_27b() {
     );
     // Should be in the 180K–240K range
     assert!(
-        ctx >= 180_000 && ctx <= 260_000,
+        (180_000..=260_000).contains(&ctx),
         "Expected ~212K context, got {ctx}"
     );
 }
@@ -147,6 +147,7 @@ fn dense_partial_gpu_layers_reports_independent_ram_budget() {
         48_000_000_000,
         32_000_000_000,
         false,
+        EstimatorOptions::default(),
     );
 
     assert_eq!(breakdown.weights_bytes, 32_000_000_000);
@@ -854,6 +855,7 @@ fn estimate_vram_zero_context() {
         16 * 1024 * 1024 * 1024,
         0,
         false,
+        EstimatorOptions::default(),
     );
     // Should still succeed, just no KV overhead
     assert!(matches!(
@@ -878,9 +880,226 @@ fn estimate_vram_too_large_for_vram() {
         16 * 1024 * 1024 * 1024, // 16GB available
         0,
         false,
+        EstimatorOptions::default(),
     );
     assert!(matches!(
         breakdown.recommendation,
         VramRecommendation::Risk | VramRecommendation::WontFit
     ));
+}
+
+// ── Phase 6B2: Rapid-MLX backend-neutral estimator ─────────────────────────────
+
+// Architecture fields verified against
+// https://huggingface.co/mlx-community/Qwen3-0.6B-4bit/blob/main/config.json
+fn mlx_qwen3_0_6b_arch() -> ModelArch {
+    ModelArch {
+        n_layers: 28,
+        n_embd: 1024,
+        n_kv_heads: 8,
+        head_dim: 128,
+        ..Default::default()
+    }
+}
+
+// MoE architecture fields verified against
+// https://huggingface.co/mlx-community/Qwen3-30B-A3B-4bit/blob/main/config.json
+fn mlx_qwen3_30b_a3b_arch() -> ModelArch {
+    ModelArch {
+        n_layers: 48,
+        n_embd: 2048,
+        n_kv_heads: 4,
+        head_dim: 128,
+        n_experts: 128,
+        n_experts_used: 8,
+        expert_fraction: 0.65,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn mlx_backend_uses_mlx_overhead_not_metal_overhead() {
+    let arch = mlx_qwen3_0_6b_arch();
+    let mlx_breakdown = full_estimate(
+        400_000_000,
+        &arch,
+        8192,
+        "q8_0",
+        "q8_0",
+        1,
+        2048,
+        0,
+        -1,
+        16 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: 0,
+        },
+    );
+    let llama_cpp_breakdown = full_estimate(
+        400_000_000,
+        &arch,
+        8192,
+        "q8_0",
+        "q8_0",
+        1,
+        2048,
+        0,
+        -1,
+        16 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions::default(),
+    );
+    // Rapid-MLX must not reuse llama.cpp's Metal-calibrated overhead constants: the two
+    // backends should diverge even for an identical architecture/context.
+    assert_ne!(
+        mlx_breakdown.overhead_bytes,
+        llama_cpp_breakdown.overhead_bytes
+    );
+    assert_eq!(mlx_breakdown.evidence, EstimateEvidence::Approximate);
+    assert_eq!(llama_cpp_breakdown.evidence, EstimateEvidence::Measured);
+}
+
+#[test]
+fn mlx_moe_architecture_is_recognized() {
+    let arch = mlx_qwen3_30b_a3b_arch();
+    assert!(arch.is_moe());
+    let breakdown = full_estimate(
+        16_000_000_000,
+        &arch,
+        4096,
+        "q8_0",
+        "q8_0",
+        1,
+        2048,
+        0,
+        -1,
+        32 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: 0,
+        },
+    );
+    // Unified memory: weights are never CPU-split for Rapid-MLX.
+    assert_eq!(breakdown.weights_bytes, 16_000_000_000);
+    assert_eq!(breakdown.ram_bytes, 0);
+}
+
+#[test]
+fn mlx_prefix_cache_is_separate_stored_budget_not_active_kv_reduction() {
+    let arch = mlx_qwen3_0_6b_arch();
+    let kv_without_cache = kv_cache_bytes(&arch, 8192, 1, "q8_0", "q8_0");
+
+    let cache_bytes = mlx_prefix_cache_bytes(&arch, 32_768, 4);
+    assert!(cache_bytes > 0);
+
+    let breakdown = full_estimate(
+        400_000_000,
+        &arch,
+        8192,
+        "q8_0",
+        "q8_0",
+        1,
+        2048,
+        0,
+        -1,
+        16 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: cache_bytes,
+        },
+    );
+
+    // Active-request KV must be modeled exactly as before — compressing the prefix cache must
+    // NOT reduce the active-context KV footprint (cached entries are decompressed before reuse).
+    assert_eq!(breakdown.kv_cache_bytes, kv_without_cache);
+    // The compressed prefix-cache budget is reported separately and added to the total.
+    assert_eq!(breakdown.mlx_prefix_cache_bytes, cache_bytes);
+    assert!(breakdown.total_bytes >= breakdown.kv_cache_bytes + cache_bytes);
+}
+
+#[test]
+fn mlx_prefix_cache_defaults_to_zero_for_gguf_backend() {
+    let arch = qwen3_27b_arch();
+    let breakdown = full_estimate(
+        14_000_000_000,
+        &arch,
+        8192,
+        "q8_0",
+        "q8_0",
+        1,
+        2048,
+        0,
+        -1,
+        16 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions::default(),
+    );
+    assert_eq!(breakdown.mlx_prefix_cache_bytes, 0);
+    assert_eq!(breakdown.evidence, EstimateEvidence::Measured);
+}
+
+#[test]
+fn mlx_prefix_cache_compression_bits_scale_the_stored_budget() {
+    let arch = mlx_qwen3_0_6b_arch();
+    let int4 = mlx_prefix_cache_bytes(&arch, 16_384, 4);
+    let int8 = mlx_prefix_cache_bytes(&arch, 16_384, 8);
+    assert!(int4 > 0 && int8 > 0);
+    // int4 stores half the bytes per element of int8.
+    assert_eq!(int4, int8 / 2);
+}
+
+#[test]
+fn mlx_overhead_scales_with_context_via_kv_fraction() {
+    let arch = mlx_qwen3_0_6b_arch();
+    let small_ctx = full_estimate(
+        400_000_000,
+        &arch,
+        4096,
+        "q8_0",
+        "q8_0",
+        1,
+        2048,
+        0,
+        -1,
+        16 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: 0,
+        },
+    );
+    let large_ctx = full_estimate(
+        400_000_000,
+        &arch,
+        65536,
+        "q8_0",
+        "q8_0",
+        1,
+        2048,
+        0,
+        -1,
+        16 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: 0,
+        },
+    );
+    assert!(large_ctx.overhead_bytes > small_ctx.overhead_bytes);
 }

@@ -412,7 +412,7 @@ mod tests {
             "0.10.10+local",
             "0.10.10-local",
         ] {
-            assert_eq!(parse_version(version).unwrap().stable, false, "{version}");
+            assert!(!parse_version(version).unwrap().stable, "{version}");
         }
         assert!(parse_version("0.10.11rc1").unwrap().prerelease);
         assert!(parse_version("0.10.11-beta.2").unwrap().prerelease);

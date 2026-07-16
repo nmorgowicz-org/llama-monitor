@@ -508,7 +508,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config = test_app_config(dir.path());
         let state = AppState::default();
-        let request = LocalLaunchRequest::LlamaCpp(Box::new(ServerConfig::default()));
+        let request = LocalLaunchRequest::LlamaCpp(Box::default());
 
         let adapter = construct_adapter(&request, &state, &config).await.unwrap();
         assert!(matches!(adapter, BackendAdapter::LlamaCpp(_)));

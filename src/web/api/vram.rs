@@ -36,21 +36,142 @@ fn api_vram_estimate_breakdown(
                 let n_cpu_moe = body["n_cpu_moe"].as_i64().map(|v| v as i32).unwrap_or(0);
                 let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
                 let available_ram_bytes = body["available_ram_bytes"].as_u64().unwrap_or(0);
-                let is_unified_memory = body["is_unified_memory"].as_bool().unwrap_or(false);
+                let mut is_unified_memory = body["is_unified_memory"].as_bool().unwrap_or(false);
                 // mmproj_path: path to the vision projector GGUF; size read from disk.
                 // mmproj_bytes: explicit size override (used when path is unavailable).
                 let mmproj_path = body["mmproj_path"].as_str().unwrap_or("").to_string();
                 let mmproj_bytes_override = body["mmproj_bytes"].as_u64();
                 // HuggingFace coordinates for pre-download introspection: when there is no
-                // local file yet, the GGUF KV header is range-fetched so the estimate uses the
-                // model's real architecture instead of name-based guesses.
+                // local file yet, the GGUF KV header (or MLX config.json) is fetched so the
+                // estimate uses the model's real architecture instead of name-based guesses.
                 let hf_repo_id = body["hf_repo_id"].as_str().unwrap_or("").to_string();
                 let hf_file_path = body["hf_file_path"].as_str().unwrap_or("").to_string();
                 let model_size_override = body["model_size_bytes"].as_u64();
 
-                // Resolve (model_size_bytes, arch) from a local file (preferred) or, failing
-                // that, by range-fetching the GGUF header straight from HuggingFace.
-                let (model_size_bytes, mut arch) = if !model_path.is_empty() {
+                // Backend discriminator: `backend` (preferred) or legacy `engine` alias.
+                // Defaults to llama.cpp/GGUF for backward compatibility with every existing
+                // caller (Spawn Wizard, preset editor, welcome-screen cards, previews).
+                let backend_field = body["backend"]
+                    .as_str()
+                    .or_else(|| body["engine"].as_str())
+                    .unwrap_or("llama_cpp");
+                let is_rapid_mlx = matches!(backend_field, "rapid_mlx" | "mlx" | "rapid-mlx");
+
+                // Rapid-MLX prefix-cache compression budget (optional; 0 = no reservation).
+                let mlx_prefix_cache_tokens = body["mlx_prefix_cache_tokens"].as_u64().unwrap_or(0);
+                let mlx_prefix_cache_bits = body["mlx_prefix_cache_bits"].as_u64().unwrap_or(8) as u8;
+
+                // Resolve (model_size_bytes, arch, evidence) from a local file/directory
+                // (preferred) or, failing that, by fetching metadata straight from HuggingFace.
+                //
+                // For Rapid-MLX, we must handle three model_path shapes:
+                //   - a real local directory path (e.g. "/Users/.../models/...")
+                //   - an HF-repo-style alias (e.g. "mlx-community/Qwen3-30B-A3B-4bit")
+                //   - an explicit hf_repo_id
+                //
+                // We mirror model_resolver.rs: first try as local directory;
+                // if it fails and looks like an alias, treat it as an HF repo ID.
+                let (model_size_bytes, mut arch, evidence) = if is_rapid_mlx {
+                    // Rapid-MLX is Apple-Silicon/unified-memory only.
+                    is_unified_memory = true;
+
+                    // If model_path is non-empty, try to read it as a local MLX directory.
+                    let local_meta = if !model_path.is_empty() {
+                        if model_path.contains("..") {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "model_path must not contain '..' path traversal"
+                                })),
+                            ));
+                        }
+                        crate::inference::rapid_mlx::mlx_meta::read_mlx_metadata(
+                            std::path::Path::new(&model_path),
+                        )
+                        .ok() // not a local dir → maybe alias
+                    } else {
+                        None
+                    };
+
+                    // If we have a valid local directory, use it.
+                    if let Some(meta) = local_meta {
+                        let dir = std::path::Path::new(&model_path);
+                        let size = crate::inference::rapid_mlx::mlx_meta::resolve_local_weight_bytes(
+                            dir,
+                            &meta.weight_index,
+                        )
+                        .or(model_size_override)
+                        .unwrap_or(0);
+                        if size == 0 {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Could not determine MLX model size from safetensors index or model_size_bytes"
+                                })),
+                            ));
+                        }
+                        let param_b = crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85);
+                        let arch = meta.to_arch(size, param_b, &model_path);
+                        let ev = if meta.evidence
+                            == crate::inference::rapid_mlx::mlx_meta::MlxMetaEvidence::Degraded
+                        {
+                            crate::llama::vram_estimator::EstimateEvidence::Degraded
+                        } else {
+                            crate::llama::vram_estimator::EstimateEvidence::Approximate
+                        };
+                        (size, arch, ev)
+                    } else if is_mlx_hf_repo_alias(&model_path) {
+                        // model_path is not a local directory but looks like an HF-repo-style alias
+                        // (e.g. "mlx-community/Qwen3-30B-A3B-4bit"). Treat it as hf_repo_id.
+                        let effective_repo = model_path.clone();
+                        let size = resolve_mlx_hf_size(
+                            &effective_repo,
+                            model_size_override,
+                        ).await;
+                        let (size, arch, ev) = match mlx_hf_estimate_from_repo(
+                            &effective_repo,
+                            &hf_file_path,
+                            size,
+                        ).await {
+                            Ok(res) => res,
+                            Err(e) => {
+                                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                    warp::reply::json(&serde_json::json!({
+                                        "ok": false,
+                                        "error": e
+                                    })),
+                                ));
+                            }
+                        };
+                        (size, arch, ev)
+                    } else if !hf_repo_id.is_empty() {
+                        // Caller provided explicit hf_repo_id
+                        let size = resolve_mlx_hf_size(&hf_repo_id, model_size_override).await;
+                        let (size, arch, ev) = match mlx_hf_estimate_from_repo(
+                            &hf_repo_id,
+                            &hf_file_path,
+                            size,
+                        ).await {
+                            Ok(res) => res,
+                            Err(e) => {
+                                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                    warp::reply::json(&serde_json::json!({
+                                        "ok": false,
+                                        "error": e
+                                    })),
+                                ));
+                            }
+                        };
+                        (size, arch, ev)
+                    } else {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "model_path, or hf_repo_id (+ optional hf_file_path), is required"
+                            })),
+                        ));
+                    }
+                } else if !model_path.is_empty() {
                     let size = match std::fs::metadata(&model_path) {
                         Ok(m) => m.len(),
                         Err(e) => {
@@ -62,18 +183,23 @@ fn api_vram_estimate_breakdown(
                             ));
                         }
                     };
-                    let arch = match crate::llama::gguf_meta::read_gguf_metadata(
+                    let (arch, ev) = match crate::llama::gguf_meta::read_gguf_metadata(
                         std::path::Path::new(&model_path),
                     ) {
-                        Ok(meta) => meta
-                            .to_model_metadata()
-                            .to_arch(&model_path, meta.param_b().unwrap_or(0.0)),
-                        Err(_) => crate::llama::vram_estimator::ModelArch::from_name_and_params(
-                            &model_path,
-                            crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
+                        Ok(meta) => (
+                            meta.to_model_metadata()
+                                .to_arch(&model_path, meta.param_b().unwrap_or(0.0)),
+                            crate::llama::vram_estimator::EstimateEvidence::Measured,
+                        ),
+                        Err(_) => (
+                            crate::llama::vram_estimator::ModelArch::from_name_and_params(
+                                &model_path,
+                                crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
+                            ),
+                            crate::llama::vram_estimator::EstimateEvidence::Degraded,
                         ),
                     };
-                    (size, arch)
+                    (size, arch, ev)
                 } else if !hf_repo_id.is_empty() && !hf_file_path.is_empty() {
                     // Size must be supplied by the caller (from the HF file listing).
                     let size = model_size_override.unwrap_or(0);
@@ -85,20 +211,25 @@ fn api_vram_estimate_breakdown(
                             })),
                         ));
                     }
-                    let arch =
+                    let (arch, ev) =
                         match crate::hf::fetch_gguf_header_metadata(&hf_repo_id, &hf_file_path).await
                         {
-                            Ok(meta) => meta
-                                .to_model_metadata()
-                                .to_arch(&hf_file_path, meta.param_b().unwrap_or(0.0)),
+                            Ok(meta) => (
+                                meta.to_model_metadata()
+                                    .to_arch(&hf_file_path, meta.param_b().unwrap_or(0.0)),
+                                crate::llama::vram_estimator::EstimateEvidence::Measured,
+                            ),
                             // Range-fetch failed (offline / gated / no range support): fall back
                             // to the name heuristic so the caller still gets a (rougher) estimate.
-                            Err(_) => crate::llama::vram_estimator::ModelArch::from_name_and_params(
-                                &hf_file_path,
-                                crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
+                            Err(_) => (
+                                crate::llama::vram_estimator::ModelArch::from_name_and_params(
+                                    &hf_file_path,
+                                    crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
+                                ),
+                                crate::llama::vram_estimator::EstimateEvidence::Degraded,
                             ),
                         };
-                    (size, arch)
+                    (size, arch, ev)
                 } else {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
@@ -115,6 +246,26 @@ fn api_vram_estimate_breakdown(
                     arch.mmproj_bytes = std::fs::metadata(&mmproj_path).map(|m| m.len()).unwrap_or(0);
                 }
 
+                let mlx_cache_bytes = if is_rapid_mlx {
+                    crate::llama::vram_estimator::mlx_prefix_cache_bytes(
+                        &arch,
+                        mlx_prefix_cache_tokens,
+                        mlx_prefix_cache_bits,
+                    )
+                } else {
+                    0
+                };
+
+                let opts = crate::llama::vram_estimator::EstimatorOptions {
+                    backend: if is_rapid_mlx {
+                        crate::llama::vram_estimator::Backend::RapidMlx
+                    } else {
+                        crate::llama::vram_estimator::Backend::LlamaCpp
+                    },
+                    evidence,
+                    mlx_prefix_cache_bytes: mlx_cache_bytes,
+                };
+
                 let breakdown = crate::llama::vram_estimator::full_estimate(
                     model_size_bytes,
                     &arch,
@@ -128,6 +279,7 @@ fn api_vram_estimate_breakdown(
                     available_vram_bytes,
                     available_ram_bytes,
                     is_unified_memory,
+                    opts,
                 );
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
@@ -146,7 +298,9 @@ fn api_vram_estimate_breakdown(
                         "available_ram_bytes": breakdown.available_ram_bytes,
                         "ram_headroom_bytes": breakdown.ram_headroom_bytes,
                         "recommendation": serde_json::to_value(&breakdown.recommendation).unwrap_or(serde_json::Value::Null),
-                        "note": breakdown.note
+                        "note": breakdown.note,
+                        "mlx_prefix_cache_bytes": breakdown.mlx_prefix_cache_bytes,
+                        "evidence": serde_json::to_value(breakdown.evidence).unwrap_or(serde_json::Value::Null)
                     }))),
                 )
             }
@@ -796,4 +950,265 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .boxed();
     r
+}
+
+/// Returns true if value looks like an HF-repo-style alias for an MLX model
+/// (e.g. "mlx-community/Qwen3-30B-A3B-4bit").
+///
+/// Criteria mirror model_resolver.rs:
+///   - contains '/' (org/repo)
+///   - no leading '/' or '\'
+///   - no ".." segments
+///   - only safe ASCII chars (alphanumeric, -, _, ., /, :)
+fn is_mlx_hf_repo_alias(value: &str) -> bool {
+    let t = value.trim();
+    if t.is_empty() {
+        return false;
+    }
+    if !t.contains('/') {
+        return false;
+    }
+    if t.starts_with('/') || t.starts_with('\\') {
+        return false;
+    }
+    if t.contains("..") {
+        return false;
+    }
+    t.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'/' | b':'))
+}
+
+/// For Rapid-MLX HF-repo introspection: resolve the weight size.
+///
+/// If model_size_override is already set, use it.
+/// Otherwise, query the HF tree API to sum .safetensors sizes.
+/// If that fails or returns nothing, falls back to returning 0 (caller must error).
+async fn resolve_mlx_hf_size(repo_id: &str, model_size_override: Option<u64>) -> u64 {
+    if let Some(s) = model_size_override {
+        return s;
+    }
+    match crate::hf::resolve_mlx_repo_size_bytes(repo_id).await {
+        Ok(Some(s)) => s,
+        _ => 0,
+    }
+}
+
+/// Shared HF-repo introspection for MLX: fetch config, build arch, etc.
+/// Returns (size, arch, evidence) or an error string.
+async fn mlx_hf_estimate_from_repo(
+    repo_id: &str,
+    hf_file_path: &str,
+    size: u64,
+) -> Result<
+    (u64, crate::llama::vram_estimator::ModelArch, crate::llama::vram_estimator::EstimateEvidence),
+    String,
+> {
+    if size == 0 {
+        return Err(
+            String::from("model_size_bytes is required when introspecting a HuggingFace MLX model")
+        );
+    }
+    let config_file = if hf_file_path.is_empty() {
+        "config.json".to_string()
+    } else {
+        hf_file_path.to_string()
+    };
+    match crate::hf::fetch_mlx_config(repo_id, &config_file).await {
+        Ok(config) => {
+            let meta = crate::inference::rapid_mlx::mlx_meta::metadata_from_config(config);
+            let param_b = crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85);
+            let ev = if meta.evidence
+                == crate::inference::rapid_mlx::mlx_meta::MlxMetaEvidence::Degraded
+            {
+                crate::llama::vram_estimator::EstimateEvidence::Degraded
+            } else {
+                crate::llama::vram_estimator::EstimateEvidence::Approximate
+            };
+            let arch = meta.to_arch(size, param_b, repo_id);
+            Ok((size, arch, ev))
+        }
+        Err(_) => {
+            let arch = crate::llama::vram_estimator::ModelArch::from_name_and_params(
+                repo_id,
+                crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
+            );
+            Ok((size, arch, crate::llama::vram_estimator::EstimateEvidence::Degraded))
+        }
+    }
+}
+
+#[cfg(test)]
+mod mlx_estimate_tests {
+    use super::*;
+    use crate::web::auth::AuthManager;
+    use warp::http::StatusCode;
+
+    fn test_routes() -> ApiRoute {
+        let config = Arc::new(AppConfig::for_test(
+            Some("api-secret".to_string()),
+            Some("admin-secret".to_string()),
+        ));
+        routes(ApiCtx {
+            state: AppState::default(),
+            auth: AuthManager::new(None, None, &crate::config::TLSConfig::default().mode),
+            config,
+        })
+    }
+
+    /// `/api/vram-estimate` is a data-reading endpoint (it introspects local model files) and
+    /// must require `api-token` regardless of which `backend` is requested.
+    #[tokio::test]
+    async fn vram_estimate_requires_api_token_for_both_backends() {
+        for body in [
+            r#"{"model_path":"/tmp/does-not-exist.gguf"}"#,
+            r#"{"backend":"rapid_mlx","model_path":"/tmp/does-not-exist"}"#,
+        ] {
+            let response = warp::test::request()
+                .method("POST")
+                .path("/api/vram-estimate")
+                .header("content-type", "application/json")
+                .body(body)
+                .reply(&test_routes())
+                .await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{body}");
+        }
+    }
+
+    /// A `model_path` containing `..` traversal must be rejected for the Rapid-MLX directory
+    /// path (mirrors the path-safety rules used elsewhere in this file / `model_resolver.rs`).
+    #[tokio::test]
+    async fn vram_estimate_rejects_path_traversal_for_mlx_backend() {
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/vram-estimate")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body(r#"{"backend":"rapid_mlx","model_path":"../../etc/passwd"}"#)
+            .reply(&test_routes())
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(response.body()).unwrap();
+        assert_eq!(json["ok"], serde_json::json!(false));
+        assert!(json["error"].as_str().unwrap().contains(".."));
+    }
+
+    /// A malformed JSON body must return 400, never 404 (API/serialization safety rule).
+    #[tokio::test]
+    async fn vram_estimate_returns_bad_request_for_malformed_json() {
+        let routes = test_routes().recover(crate::web::handle_rejection);
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/vram-estimate")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body("{")
+            .reply(&routes)
+            .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// Requesting the Rapid-MLX backend against a real local MLX model directory produces a
+    /// normalized breakdown that carries the MLX-specific fields (`mlx_prefix_cache_bytes`,
+    /// `evidence`) and forces unified-memory semantics (Apple-Silicon-only backend).
+    #[tokio::test]
+    async fn vram_estimate_resolves_local_mlx_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.json"),
+            r#"{
+                "model_type": "qwen3",
+                "hidden_size": 1024,
+                "num_hidden_layers": 28,
+                "num_attention_heads": 16,
+                "num_key_value_heads": 8,
+                "head_dim": 128
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("model.safetensors.index.json"),
+            r#"{"weight_map":{"a":"model.safetensors"}}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("model.safetensors"), vec![0u8; 4096]).unwrap();
+
+        let body = serde_json::json!({
+            "backend": "rapid_mlx",
+            "model_path": dir.path().to_string_lossy(),
+            "n_ctx": 4096,
+            "available_vram_bytes": 32u64 * 1024 * 1024 * 1024,
+        });
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/vram-estimate")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .reply(&test_routes())
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(response.body()).unwrap();
+        assert_eq!(json["ok"], serde_json::json!(true));
+        assert_eq!(json["mlx_prefix_cache_bytes"], serde_json::json!(0));
+        assert_eq!(json["evidence"], serde_json::json!("approximate"));
+        assert!(json["weights_bytes"].as_u64().unwrap() > 0);
+    }
+
+    /// HF-source MLX estimation no longer requires an explicit model_size_bytes: when it is
+    /// missing, the endpoint resolves the total weight size from HF's tree API.
+    /// This test hits a real repo to ensure the round-trip works (requires network).
+    #[tokio::test]
+    async fn vram_estimate_mlx_hf_source_resolves_size_automatically() {
+        let body = serde_json::json!({
+            "backend": "rapid_mlx",
+            "hf_repo_id": "mlx-community/Qwen3-0.6B-4bit",
+            "n_ctx": 4096,
+            "available_vram_bytes": 24u64 * 1024 * 1024 * 1024,
+        });
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/vram-estimate")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .reply(&test_routes())
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(response.body()).unwrap();
+        assert_eq!(json["ok"], serde_json::json!(true), "{json}");
+        assert!(json["weights_bytes"].as_u64().unwrap() > 0);
+    }
+
+    /// When model_path is an HF-repo-style alias (not a local directory), and model_size_bytes
+    /// is supplied, the endpoint must treat it as an HF repo and return a valid estimate using
+    /// name-heuristic fallback (since we can't reach HF in this unit test).
+    #[tokio::test]
+    async fn vram_estimate_mlx_treats_hf_style_alias_in_model_path_as_repo() {
+        let body = serde_json::json!({
+            "backend": "rapid_mlx",
+            "model_path": "mlx-community/Qwen3-30B-A3B-4bit",
+            "model_size_bytes": 16u64 * 1024 * 1024 * 1024,
+            "n_ctx": 4096,
+            "available_vram_bytes": 48u64 * 1024 * 1024 * 1024,
+        });
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/vram-estimate")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .reply(&test_routes())
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(response.body()).unwrap();
+        assert_eq!(json["ok"], serde_json::json!(true), "{json}");
+        // Evidence is "approximate" when HF config is fetched; "degraded" when
+        // config fetch fails and we fall back to the name heuristic.
+        match json["evidence"].as_str() {
+            Some("approximate") | Some("degraded") => {}
+            Some(v) => panic!("unexpected evidence: {v}: {json}"),
+            None => panic!("missing evidence: {json}"),
+        }
+        assert!(json["weights_bytes"].as_u64().unwrap() > 0);
+    }
 }

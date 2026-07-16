@@ -1333,12 +1333,12 @@ mod tests {
         assert!(
             ggufs
                 .iter()
-                .any(|p| p.file_name().map_or(false, |n| n == "model.gguf"))
+                .any(|p| p.file_name().is_some_and(|n| n == "model.gguf"))
         );
         assert!(
             ggufs
                 .iter()
-                .any(|p| p.file_name().map_or(false, |n| n == "model2.gguf"))
+                .any(|p| p.file_name().is_some_and(|n| n == "model2.gguf"))
         );
     }
 
@@ -1353,7 +1353,7 @@ mod tests {
 
         let ggufs = find_gguf_in_dirs(&[root.to_path_buf()], false);
         assert_eq!(ggufs.len(), 1);
-        assert!(ggufs[0].file_name().map_or(false, |n| n == "model.gguf"));
+        assert!(ggufs[0].file_name().is_some_and(|n| n == "model.gguf"));
     }
 
     #[test]

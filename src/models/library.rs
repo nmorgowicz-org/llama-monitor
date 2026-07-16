@@ -1603,7 +1603,7 @@ mod tests {
         let plan = plan_migration(temp.path(), std::slice::from_ref(&presets)).unwrap();
         assert_eq!(plan.moves.len(), 2);
         assert_eq!(plan.persistence_rewrites[0].replacements, 1);
-        execute_migration(temp.path(), &[presets.clone()], &plan.plan_id).unwrap();
+        execute_migration(temp.path(), std::slice::from_ref(&presets), &plan.plan_id).unwrap();
         assert!(temp.path().join("gguf/model.gguf").is_file());
         assert!(
             temp.path()
@@ -1654,8 +1654,13 @@ mod tests {
         .unwrap();
         assert_eq!(plan.moves.len(), 1);
         assert_eq!(plan.persistence_rewrites[0].replacements, 1);
-        execute_migration_with_imports(&models, &[tags.clone()], &[config.clone()], &plan.plan_id)
-            .unwrap();
+        execute_migration_with_imports(
+            &models,
+            std::slice::from_ref(&tags),
+            std::slice::from_ref(&config),
+            &plan.plan_id,
+        )
+        .unwrap();
         assert!(models.join("gguf/27B_MTP.gguf").is_file());
         assert_eq!(
             fs::read(config.join("chat-template.jinja")).unwrap(),

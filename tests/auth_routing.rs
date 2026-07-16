@@ -359,10 +359,9 @@ fn simulate_auth_guard(
         .and_then(|h| h.strip_prefix("Bearer "))
         .map(str::trim)
         .filter(|t| !t.is_empty())
+        && check_api_token(&Some(format!("Bearer {}", token)), cfg)
     {
-        if check_api_token(&Some(format!("Bearer {}", token)), cfg) {
-            return true;
-        }
+        return true;
     }
 
     false

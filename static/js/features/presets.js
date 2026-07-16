@@ -61,9 +61,16 @@ function isRunningStatus(status) {
     return String(status || '').toLowerCase() === 'running';
 }
 
-function presetModelSource(preset) {
+export function presetModelSource(preset) {
     if (preset?.backend === 'rapid_mlx') return preset.rapid_mlx?.model_path || '';
     return preset?.model_path || preset?.hf_repo || '';
+}
+
+// Same lookup `savePreset`/`_buildFormPreset` use to find the preset currently
+// loaded in the modal — needed so VRAM estimates route to the right backend.
+function _currentModalPreset() {
+    const id = document.getElementById('modal-preset-id')?.value;
+    return id ? (sessionState.presets.find(p => p.id === id) || {}) : (newPresetSeed || {});
 }
 
 export function syncSelectedPresetSelection(presetId, options = {}) {
@@ -842,6 +849,7 @@ export function updatePresetVram() {
         const gpuLayers = parseInt(document.getElementById('modal-gpu-layers')?.value);
         const mmprojPath = document.getElementById('modal-mmproj')?.value?.trim() || '';
         const available_vram_bytes = _presetAvailBytes();
+        const isRapidMlx = _currentModalPreset()?.backend === 'rapid_mlx';
         const body = {
             model_path: modelVal,
             n_ctx: nCtx,
@@ -853,6 +861,7 @@ export function updatePresetVram() {
             available_vram_bytes,
             available_ram_bytes: _presetAvailableRamBytes(),
             is_unified_memory: !!isUnified,
+            ...(isRapidMlx ? { backend: 'rapid_mlx' } : {}),
             ...(mmprojPath ? { mmproj_path: mmprojPath } : {}),
         };
         const seq = ++_presetVramSeq;
