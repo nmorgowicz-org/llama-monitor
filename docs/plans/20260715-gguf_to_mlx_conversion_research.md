@@ -702,6 +702,67 @@ larger product need.
   profile fields; no large output is created.
 - Checkpoint: `feat(models): add GGUF import compatibility inspector`.
 
+#### R1 checkpoint evidence (2026-07-16)
+
+Status: **Builder complete; independent Verifier approved after one correction.**
+
+Delivered design:
+
+- A llama-monitor-native inspector reuses the pinned GGUF metadata reader and adds a
+  strict tensor-directory inventory. It performs no conversion, child-process launch,
+  model write, cache creation, download, or network request.
+- The versioned report records the canonical source, size, modification identity, a
+  bounded GGUF-header SHA-256 (explicitly not a full weight hash), authoritative
+  architecture, tensor count, per-type quant inventory, tokenizer/config/asset
+  observations, compatibility, exact gaps, resource warning, and remediation. Output is
+  fixed-schema and contains no vocabulary, tensor-name, or arbitrary metadata dump.
+- Inspection accepts only a library-relative regular `.gguf` inside the canonical
+  configured `models_dir`. Traversal, absolute/root-relative paths, every symlinked
+  component, missing/empty files, non-GGUF input, incomplete tensor directories, and
+  metadata/tensor directories over 64 MiB fail before policy evaluation. Reads and seeks
+  are capped during parsing, and inspection is limited to two `spawn_blocking` workers
+  with a 15-second wait/work deadline so it cannot block Tokio or create an unbounded
+  blocking queue.
+- Architecture comes only from `general.architecture`; there is no filename, unknown
+  architecture, or Llama fallback. R1 has no `Verified` conversion profile. Complete
+  text-only Llama/Qwen2/Mistral metadata can be classified `Experimental`; all missing
+  profile fields/assets fail `Unsupported`.
+- Qwen3.5/Qwen3.6 hybrid/MoE, Gemma4 alternating attention, MTP/NextN, and multimodal
+  projector inputs have explicit early-rejection reasons and exact missing contracts.
+  Unknown tensor types and Q3/Q2/IQ3-or-lower sources fail closed; IQ4 requires a
+  separate importance-aware profile; Q4/Q5 reports compounded-loss warnings.
+- The authenticated preview endpoint is
+  `POST /api/models/gguf/import/compatibility/preview`. Malformed JSON and invalid paths
+  return 400; missing or incorrect API tokens return 401.
+
+Builder evidence:
+
+- Synthetic GGUF fixtures cover the experimental text-only path, Qwen3.6 hybrid
+  MoE+MTP+projector gaps, Gemma4+MTP+projector gaps, unknown architecture, low and unknown
+  quant types, traversal, outside paths, non-GGUF extensions, symlinks, and the strict
+  header limit.
+- Read-only local probes passed against the migrated Qwen3.6 Q6_K and Gemma4 Q4_K_XL
+  fixtures under `~/.config/llama-monitor/models/gguf/`; both returned `Unsupported` with
+  their exact profile gaps and hashed only bounded header bytes. No local model changed.
+- Full Rust suite: **918 passed / 6 ignored**. The 39-test `auth_routing` suite,
+  `cargo clippy -- -D warnings`, `cargo check --target x86_64-pc-windows-gnu`, focused
+  inspector and route tests, formatting, and `git diff --check` passed. No converter,
+  network operation, runtime, or model write was used by R1 validation.
+
+Independent Verifier evidence:
+
+- Review covered auth ordering, canonical containment, symlink/traversal handling,
+  bounded reads/seeks/worker concurrency, fixed-schema output, fail-closed architecture
+  and quant policy, and the absence of production writes, subprocesses, conversion, or
+  network access.
+- One security-contract issue was corrected: the initial endpoint accepted absolute
+  paths when they canonicalized inside `models_dir`. User-supplied file paths now must be
+  library-relative and explicitly reject absolute and root-relative `/` or `\` input;
+  unit tests cover an absolute path inside the library and a backslash-rooted path.
+- Focused inspector tests passed **8/8**, the route test passed **1/1**, auth routing
+  passed **39/39**, library Clippy passed with warnings denied, focused formatting passed,
+  and `git diff --check` passed.
+
 ### R2 — Small-model recovered FP16 spike
 
 - Pin/fork/wrap the chosen converter.

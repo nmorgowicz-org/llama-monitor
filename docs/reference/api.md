@@ -711,6 +711,29 @@ it. The response state is `ready`, `conversion_required`, `unsupported_source`, 
 `invalid`, with warnings and remediation. GGUF returns `unsupported_source` and retains
 the llama.cpp recommendation.
 
+### `POST /api/models/gguf/import/compatibility/preview`
+Auth: api-token.
+
+Performs a converter-free, network-free metadata inspection for a future experimental
+GGUF-to-MLX import. `path` must be library-relative, and its canonical target must be a
+non-symlinked `.gguf` file inside the configured `models_dir`. Absolute and root-relative
+paths are rejected rather than accepted from user input.
+
+```json
+{
+  "path": "gguf/model-Q6_K.gguf"
+}
+```
+
+The versioned response includes bounded source identity, authoritative architecture,
+tensor/quant inventory, tokenizer/config/auxiliary-asset observations, compatibility,
+exact missing fields/assets, warnings, resource estimate, and remediation. A
+`bounded_gguf_header_sha256` identifies metadata plus the tensor directory; it is
+explicitly not a hash of all model weights. R1 produces no weights or launchable output.
+
+Malformed JSON, traversal, symlinks, non-GGUF files, paths outside the model library,
+incomplete headers, or metadata/tensor directories over 64 MiB return `400`.
+
 ### `POST /api/models/library/migration/preview`
 Auth: api-token.
 

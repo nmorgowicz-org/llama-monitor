@@ -181,6 +181,39 @@ fn api_rapid_model_resolver_preview(
         })
 }
 
+fn api_gguf_import_compatibility_preview(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "gguf" / "import" / "compatibility" / "preview")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<
+            crate::models::gguf_import::GgufImportPreviewRequest,
+        >())
+        .and_then(
+            move |auth: Option<String>,
+                  request: crate::models::gguf_import::GgufImportPreviewRequest| {
+                let state = state.clone();
+                let config = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &config) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let models_dir = get_effective_models_dir(&state)
+                        .unwrap_or_else(|| config.default_models_dir.clone());
+                    match crate::models::gguf_import::inspect_async(request.path, models_dir).await
+                    {
+                        Ok(report) => Ok::<_, warp::Rejection>(
+                            Box::new(warp::reply::json(&report)) as Box<dyn warp::reply::Reply>,
+                        ),
+                        Err(error) => Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error)),
+                    }
+                }
+            },
+        )
+}
+
 fn api_library_migration_preview(
     state: AppState,
     app_config: Arc<AppConfig>,
@@ -1253,6 +1286,13 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .boxed();
     r = r
+        .or(api_gguf_import_compatibility_preview(
+            state.clone(),
+            config.clone(),
+        ))
+        .unify()
+        .boxed();
+    r = r
         .or(api_library_migration_preview(state.clone(), config.clone()))
         .unify()
         .boxed();
@@ -1341,6 +1381,11 @@ mod phase5_auth_tests {
             ),
             (
                 "POST",
+                "/api/models/gguf/import/compatibility/preview",
+                Some(r#"{"path":"gguf/model.gguf"}"#),
+            ),
+            (
+                "POST",
                 "/api/models/library/migration/preview",
                 Some(r#"{}"#),
             ),
@@ -1381,5 +1426,29 @@ mod phase5_auth_tests {
             .reply(&routes)
             .await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn gguf_import_preview_returns_bad_request_for_malformed_json_and_traversal() {
+        let routes = test_routes().recover(crate::web::handle_rejection);
+        let malformed = warp::test::request()
+            .method("POST")
+            .path("/api/models/gguf/import/compatibility/preview")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body("{")
+            .reply(&routes)
+            .await;
+        assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+
+        let traversal = warp::test::request()
+            .method("POST")
+            .path("/api/models/gguf/import/compatibility/preview")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body(r#"{"path":"../outside.gguf"}"#)
+            .reply(&routes)
+            .await;
+        assert_eq!(traversal.status(), StatusCode::BAD_REQUEST);
     }
 }
