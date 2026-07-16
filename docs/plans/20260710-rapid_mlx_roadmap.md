@@ -804,6 +804,37 @@ quantization family at a time based on real parity evidence.
 - GGUF -> FP16 -> MLX quantization is approximation on approximation. It cannot recover
   precision or the original quantizer's K-block/imatrix decisions.
 
+### Phase 5.5 checkpoint and handoff (2026-07-16)
+
+Status: **the release-independent Experimental Import Lab slice is complete and
+independently verified.** The R0-R4 evidence, exact safety contracts, and visual/test
+gate are recorded in `docs/plans/20260715-gguf_to_mlx_conversion_research.md`.
+
+- Checkpoint commit: `23ab38b feat(ui): add experimental GGUF import lab`.
+- Rapid-MLX `0.10.10` is qualified in an isolated app-owned environment with retained
+  rollback evidence; the production runtime manager remains Phase 6 work.
+- GGUF inspection, exact-profile recovery, optional MLX re-quantization, authenticated
+  app-native jobs, first-class inventory badges, shared platform state, and stable
+  telemetry rendering are delivered. Every recovered/re-quantized cache remains
+  `Experimental` and `launchable: false`.
+- Final gates passed: Clippy with warnings denied, 984 Rust tests with 20 intentional
+  ignores, 39 authentication-routing tests, Windows GNU cross-check, release build,
+  JavaScript validation/lint, 216 Playwright tests with two intentional skips, and the
+  dark/light/narrow/reduced-motion screenshot review.
+- R5 remains an intentionally separate architecture-promotion program. The current
+  SmolLM2 corpus profile is source-hash-pinned and depends on authoritative reference
+  assets; it must not be relabeled as generic GGUF-finetune support. A future promotion
+  must define how arbitrary finetune config/tokenizer assets are proven or reconstructed,
+  rerun the tool survey, and pass new real-fixture runtime/parity gates. Missing R5
+  profiles do not block native Rapid-MLX release readiness.
+
+Next-session entry point:
+
+1. Confirm `23ab38b` is present and the worktree is clean.
+2. Begin Phase 6 at the runtime-manager boundary; do not mutate the retained `0.10.10`
+   qualification environment or external Brew/Pip installations.
+3. Return to R5 only as a focused conversion-research/profile-promotion task.
+
 ---
 
 ## Phase 6: UI/UX Polish & Management
