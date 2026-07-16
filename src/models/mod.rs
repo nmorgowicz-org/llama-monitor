@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 pub mod gguf_import;
+pub mod import_lab;
 // Phase 5.5 R2 is a compiled, testable research adapter with no production caller.
 // Remove this allowance only when a later gated phase deliberately wires the module.
 #[cfg_attr(not(test), allow(dead_code))]

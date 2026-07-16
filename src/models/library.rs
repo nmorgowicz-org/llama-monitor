@@ -2,6 +2,9 @@ use crate::inference::InferenceBackend;
 use crate::inference::rapid_mlx::model_resolver::{
     AuthoritativeSafetensorsSource, MlxConversionRecipe, RapidMlxModelSource,
 };
+use crate::models::gguf_recovery::{
+    ExperimentalInventoryCacheKind, validate_experimental_inventory_cache,
+};
 use crate::models::{DiscoveredModel, scan_models_dir};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
@@ -30,6 +33,8 @@ pub enum InventorySource {
     Local,
     HuggingFace,
     OfficialConversion,
+    RecoveredGguf,
+    RequantizedMlx,
     Legacy,
     Unknown,
 }
@@ -48,6 +53,7 @@ pub enum InventoryLifecycle {
 #[serde(rename_all = "snake_case")]
 pub enum InventoryCompatibility {
     Verified,
+    Experimental,
     Provisional,
     Unsupported,
     Unknown,
@@ -112,6 +118,7 @@ pub fn inventory(models_dir: &Path) -> Result<ModelInventory> {
         &mut entries,
         &mut seen,
     )?;
+    add_experimental_mlx_caches(&root, &mut entries, &mut seen)?;
     add_model_directories(
         &root,
         &root.join("mlx/converted"),
@@ -145,6 +152,75 @@ pub fn inventory(models_dir: &Path) -> Result<ModelInventory> {
         entries,
         truncated,
     })
+}
+
+fn add_experimental_mlx_caches(
+    root: &Path,
+    entries: &mut Vec<ModelInventoryEntry>,
+    seen: &mut HashSet<PathBuf>,
+) -> Result<()> {
+    for (parent, child, source, kind) in [
+        (
+            root.join("rapid-mlx/imports"),
+            "fp16",
+            InventorySource::RecoveredGguf,
+            ExperimentalInventoryCacheKind::RecoveredGguf,
+        ),
+        (
+            root.join("rapid-mlx/requantized"),
+            "model",
+            InventorySource::RequantizedMlx,
+            ExperimentalInventoryCacheKind::RequantizedMlx,
+        ),
+    ] {
+        if !parent.is_dir() {
+            continue;
+        }
+        for cache in fs::read_dir(&parent)?.take(MAX_INVENTORY_ENTRIES) {
+            let cache = cache?;
+            if cache.file_name() == ".staging"
+                || cache.file_type()?.is_symlink()
+                || !cache.file_type()?.is_dir()
+            {
+                continue;
+            }
+            let cache_path = cache.path();
+            ensure_existing_inside(root, &cache_path)?;
+            let Ok(summary) = validate_experimental_inventory_cache(&cache_path, kind) else {
+                continue;
+            };
+            let model_path = cache_path.join(child);
+            let metadata = match fs::symlink_metadata(&model_path) {
+                Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => metadata,
+                _ => continue,
+            };
+            ensure_existing_inside(root, &model_path)?;
+            let canonical = model_path.canonicalize()?;
+            if !seen.insert(canonical) {
+                continue;
+            }
+            let mut entry = directory_entry(
+                &model_path,
+                InventoryFormat::Mlx,
+                source,
+                InventoryLifecycle::Ready,
+                InventoryCompatibility::Experimental,
+                false,
+                None,
+                Some(summary.provenance),
+                root,
+            )?;
+            entry.last_modified = modified(&metadata);
+            entry.quant_type = Some(summary.quant_type);
+            entry.model_name = Some(if source == InventorySource::RecoveredGguf {
+                "Recovered FP16 (Experimental)".into()
+            } else {
+                "Re-quantized MLX (Experimental)".into()
+            });
+            entries.push(entry);
+        }
+    }
+    Ok(())
 }
 
 fn add_legacy_partial_files(
@@ -1296,6 +1372,188 @@ fn file_sha256(path: &Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write_experimental_cache(
+        library: &Path,
+        parent: &str,
+        child: &str,
+        kind: ExperimentalInventoryCacheKind,
+    ) -> PathBuf {
+        let parent = library.join(parent);
+        fs::create_dir_all(&parent).unwrap();
+        let cache = parent.join("building");
+        fs::create_dir_all(cache.join(child)).unwrap();
+        fs::write(cache.join(child).join("config.json"), b"{}").unwrap();
+        fs::write(cache.join("validation.json"), b"{}").unwrap();
+        let mut files = BTreeMap::new();
+        files.insert(
+            format!("{child}/config.json"),
+            file_sha256(&cache.join(child).join("config.json")).unwrap(),
+        );
+        files.insert(
+            "validation.json".into(),
+            file_sha256(&cache.join("validation.json")).unwrap(),
+        );
+        let (key, manifest) =
+            crate::models::gguf_recovery::inventory_test_manifest(kind, files).unwrap();
+        fs::write(
+            cache.join("manifest.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        fs::write(cache.join(".complete"), b"").unwrap();
+        let final_path = parent.join(key);
+        fs::rename(cache, &final_path).unwrap();
+        final_path
+    }
+
+    #[test]
+    fn recovered_and_requantized_caches_are_first_class_but_not_launchable() {
+        let library = tempfile::tempdir().unwrap();
+        write_experimental_cache(
+            library.path(),
+            "rapid-mlx/imports",
+            "fp16",
+            ExperimentalInventoryCacheKind::RecoveredGguf,
+        );
+        write_experimental_cache(
+            library.path(),
+            "rapid-mlx/requantized",
+            "model",
+            ExperimentalInventoryCacheKind::RequantizedMlx,
+        );
+
+        let inventory = inventory(library.path()).unwrap();
+        let recovered = inventory
+            .entries
+            .iter()
+            .find(|entry| entry.source == InventorySource::RecoveredGguf)
+            .unwrap();
+        assert_eq!(recovered.format, InventoryFormat::Mlx);
+        assert_eq!(
+            recovered.compatibility,
+            InventoryCompatibility::Experimental
+        );
+        assert_eq!(recovered.quant_type.as_deref(), Some("F16 recovered"));
+        assert!(recovered.supported_backends.is_empty());
+        assert!(recovered.model_source.is_none());
+        assert_eq!(
+            recovered
+                .provenance
+                .as_ref()
+                .and_then(|value| value.get("lineage_kind"))
+                .and_then(serde_json::Value::as_str),
+            Some("gguf_recovered_fp16")
+        );
+
+        let requantized = inventory
+            .entries
+            .iter()
+            .find(|entry| entry.source == InventorySource::RequantizedMlx)
+            .unwrap();
+        assert_eq!(requantized.quant_type.as_deref(), Some("affine_8bit_g64"));
+        assert_eq!(
+            requantized.compatibility,
+            InventoryCompatibility::Experimental
+        );
+        assert!(requantized.supported_backends.is_empty());
+        assert!(requantized.model_source.is_none());
+    }
+
+    #[test]
+    fn experimental_cache_requires_completion_and_valid_status() {
+        let library = tempfile::tempdir().unwrap();
+        let cache = write_experimental_cache(
+            library.path(),
+            "rapid-mlx/imports",
+            "fp16",
+            ExperimentalInventoryCacheKind::RecoveredGguf,
+        );
+        fs::remove_file(cache.join(".complete")).unwrap();
+        let missing_complete_inventory = inventory(library.path()).unwrap();
+        assert!(
+            missing_complete_inventory
+                .entries
+                .iter()
+                .all(|entry| entry.source != InventorySource::RecoveredGguf)
+        );
+
+        fs::write(cache.join(".complete"), b"").unwrap();
+        let mut manifest: serde_json::Value =
+            serde_json::from_reader(fs::File::open(cache.join("manifest.json")).unwrap()).unwrap();
+        manifest["status"] = serde_json::Value::String("incomplete".into());
+        fs::write(
+            cache.join("manifest.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            inventory(library.path())
+                .unwrap()
+                .entries
+                .iter()
+                .all(|entry| entry.source != InventorySource::RecoveredGguf)
+        );
+    }
+
+    #[test]
+    fn experimental_cache_rejects_files_outside_the_published_hash_closure() {
+        let library = tempfile::tempdir().unwrap();
+        let cache = write_experimental_cache(
+            library.path(),
+            "rapid-mlx/imports",
+            "fp16",
+            ExperimentalInventoryCacheKind::RecoveredGguf,
+        );
+        fs::write(
+            cache.join("fp16").join("unmanifested.safetensors"),
+            b"tampered",
+        )
+        .unwrap();
+
+        assert!(
+            inventory(library.path())
+                .unwrap()
+                .entries
+                .iter()
+                .all(|entry| entry.source != InventorySource::RecoveredGguf)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn experimental_cache_rejects_symlinked_manifest_without_disclosure() {
+        use std::os::unix::fs::symlink;
+
+        let library = tempfile::tempdir().unwrap();
+        let cache = write_experimental_cache(
+            library.path(),
+            "rapid-mlx/imports",
+            "fp16",
+            ExperimentalInventoryCacheKind::RecoveredGguf,
+        );
+        fs::remove_file(cache.join("manifest.json")).unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::write(
+            outside.path(),
+            br#"{"launchable":false,"secret":"outside"}"#,
+        )
+        .unwrap();
+        symlink(outside.path(), cache.join("manifest.json")).unwrap();
+
+        let inventory = inventory(library.path()).unwrap();
+        assert!(
+            inventory
+                .entries
+                .iter()
+                .all(|entry| entry.source != InventorySource::RecoveredGguf)
+        );
+        assert!(
+            !serde_json::to_string(&inventory)
+                .unwrap()
+                .contains("outside")
+        );
+    }
 
     #[test]
     fn legacy_partial_file_has_first_class_incomplete_inventory_entry() {

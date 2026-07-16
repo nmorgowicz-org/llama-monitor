@@ -34,6 +34,10 @@ export default async function updateBaseline() {
   try {
     await page.goto(BASE_URL, { waitUntil: 'load' });
     await page.waitForSelector('html.modules-ready', { timeout: 15000 });
+    // The update checker is intentionally imported from requestIdleCallback after
+    // modules-ready. Include that bounded deferred module so the baseline records
+    // the maximum normal cold-load closure instead of racing the idle callback.
+    await page.waitForTimeout(3500);
   } finally {
     await browser.close();
   }

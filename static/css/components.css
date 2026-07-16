@@ -1386,6 +1386,29 @@ button:disabled {
 }
 
 @media (max-width: 480px) {
+  .models-manager-header {
+    padding-inline: 8px;
+  }
+
+  .models-manager-tabs {
+    min-width: 0;
+  }
+
+  .mm-tab {
+    gap: 4px;
+    padding-inline: 8px;
+    white-space: nowrap;
+  }
+
+  .mm-tab > svg,
+  .mm-tab-beta {
+    display: none;
+  }
+
+  .models-manager-header-right {
+    gap: 4px;
+  }
+
   .mm-model-grid {
     grid-template-columns: 1fr;
     padding: 10px;
@@ -1412,6 +1435,7 @@ button:disabled {
 .mm-model-card {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   gap: 8px;
   padding: 14px;
   background:
@@ -3774,3 +3798,50 @@ button:disabled {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.9);
   color: var(--color-text-secondary);
 }
+/* Import Lab */
+.mm-tab-beta { margin-left: 5px; padding: 2px 6px; border-radius: 999px; font-size: 8px; letter-spacing: .07em; text-transform: uppercase; color: #d9cbff; background: rgba(139, 92, 246, .16); border: 1px solid rgba(167, 139, 250, .25); }
+.mm-import-lab { padding: 22px; overflow-y: auto; background: radial-gradient(circle at 85% 0%, rgba(91, 75, 180, .13), transparent 34%), var(--color-bg-primary); }
+.mm-import-hero { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; padding: 22px; border: 1px solid rgba(142, 129, 210, .22); border-radius: 18px; background: linear-gradient(145deg, rgba(34, 30, 54, .94), rgba(21, 22, 31, .96)); box-shadow: 0 18px 50px rgba(0, 0, 0, .24); }
+.mm-import-hero h3, .mm-import-jobs h3 { margin: 4px 0 7px; font-size: 18px; color: var(--color-text); }
+.mm-import-hero p { margin: 0; max-width: 720px; color: var(--color-text-muted); line-height: 1.55; }
+.mm-import-kicker { color: #ab9df6; text-transform: uppercase; font-size: 10px; font-weight: 700; letter-spacing: .13em; }
+.mm-import-platform { flex: 0 0 auto; padding: 8px 11px; border-radius: 10px; border: 1px solid rgba(91, 200, 155, .25); background: rgba(47, 158, 116, .1); color: #8ee2bc; font-size: 11px; }
+.mm-import-platform.unavailable { border-color: rgba(244, 177, 77, .28); background: rgba(207, 132, 31, .1); color: #f3c77f; }
+.mm-import-workbench { display: grid; grid-template-columns: minmax(280px, .8fr) minmax(360px, 1.2fr); gap: 16px; margin-top: 16px; }
+.mm-import-source-card, .mm-import-report, .mm-import-jobs { border: 1px solid var(--color-border); border-radius: 16px; background: color-mix(in srgb, var(--color-bg-secondary) 92%, transparent); padding: 18px; }
+.mm-import-source-card label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 650; color: var(--color-text); }
+.mm-import-source-row { display: flex; gap: 8px; }
+.mm-import-source-row input { min-width: 0; flex: 1; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-bg-primary); color: var(--color-text); padding: 10px 12px; }
+.mm-import-source-card p, .mm-import-engine-note { color: var(--color-text-muted); font-size: 11px; line-height: 1.5; }
+.mm-import-engine-note { margin-top: 14px; padding: 10px 12px; border-left: 2px solid #8b7ee8; background: rgba(117, 94, 214, .07); border-radius: 0 9px 9px 0; }
+.mm-import-report { min-height: 210px; }
+.mm-import-empty-state { color: var(--color-text-muted); font-size: 12px; padding: 16px; text-align: center; }
+.mm-import-verdict { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mm-import-verdict strong { font-size: 15px; }
+.mm-import-verdict-badge { padding: 5px 9px; border-radius: 999px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.mm-import-verdict-badge.experimental { color: #d8ccff; background: rgba(129, 92, 246, .18); }
+.mm-import-verdict-badge.unsupported { color: #f2b6b2; background: rgba(215, 74, 65, .14); }
+.mm-import-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0; }
+.mm-import-fact { padding: 10px; border-radius: 10px; background: var(--color-bg-primary); border: 1px solid var(--color-border); }
+.mm-import-fact span { display: block; color: var(--color-text-muted); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+.mm-import-fact strong { display: block; margin-top: 4px; font-size: 12px; color: var(--color-text); }
+.mm-import-reasons { margin: 10px 0; padding-left: 18px; color: var(--color-text-muted); font-size: 11px; line-height: 1.5; }
+.mm-import-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+.mm-import-jobs { margin-top: 16px; }
+.mm-import-jobs-head { display: flex; align-items: center; justify-content: space-between; }
+.mm-import-job { padding: 13px; margin-top: 10px; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-bg-primary); }
+.mm-import-job-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mm-import-job-state { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #a99cf0; }
+.mm-import-progress { height: 5px; margin: 10px 0; border-radius: 999px; overflow: hidden; background: rgba(128, 128, 150, .18); }
+.mm-import-progress > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #7566df, #55c1a7); transition: width .25s ease; }
+.mm-import-diagnostics { margin: 8px 0 0; color: var(--color-text-muted); font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+[data-theme="light"] .mm-import-hero { background: linear-gradient(145deg, #f5f2ff, #fff); box-shadow: 0 16px 42px rgba(64, 48, 110, .1); }
+[data-theme="light"] .mm-import-platform { color: #176b4d; }
+[data-theme="light"] .mm-import-platform.unavailable { color: #8a5209; }
+[data-theme="light"] .mm-tab-beta,
+[data-theme="light"] .mm-import-verdict-badge.experimental { color: #5b3fa6; background: rgba(109, 78, 190, .13); border-color: rgba(91, 63, 166, .2); }
+[data-theme="light"] .mm-import-source-row .mm-action-btn--switch,
+[data-theme="light"] .mm-import-actions .mm-action-btn--switch { color: #0f766e; border-color: rgba(13, 148, 136, .34); background: rgba(13, 148, 136, .07); }
+@media (max-width: 850px) { .mm-import-workbench { grid-template-columns: 1fr; } .mm-import-hero { flex-direction: column; } }
+@media (max-width: 600px) { .mm-import-lab { padding: 12px; } .mm-import-hero, .mm-import-source-card, .mm-import-report, .mm-import-jobs { padding: 14px; } .mm-import-source-row { flex-direction: column; } .mm-import-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .mm-import-verdict { align-items: flex-start; flex-direction: column; } }
+@media (prefers-reduced-motion: reduce) { .mm-import-progress > span { transition: none; } }

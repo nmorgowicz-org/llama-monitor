@@ -4427,8 +4427,6 @@
 </div>
 
 <!-- Models Modal -->
-
-<!-- Models Modal -->
 <div class="modal-overlay" id="models-modal">
     <div class="models-manager-shell">
         <!-- Header -->
@@ -4442,6 +4440,11 @@
                 <button class="mm-tab" type="button" data-tab="download">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                     Download
+                </button>
+                <button class="mm-tab" type="button" data-tab="import-lab">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M9 3h6"/><path d="M10 9h4"/><path d="M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/></svg>
+                    Import Lab
+                    <span class="mm-tab-beta">Experimental</span>
                 </button>
             </div>
             <div class="models-manager-header-right">
@@ -4465,6 +4468,38 @@
             <div class="mm-model-grid" id="models-list">
                 <div class="mm-loading">Scanning...</div>
             </div>
+        </div>
+
+        <div class="mm-tab-panel mm-import-lab" data-tab="import-lab" id="mm-import-lab">
+            <div class="mm-import-hero">
+                <div>
+                    <span class="mm-import-kicker">Local format recovery</span>
+                    <h3>Inspect first. Convert only when proven safe.</h3>
+                    <p>Analyze a GGUF without reading its weights. Unsupported models stay on llama.cpp; exact experimental profiles can recover a separate, non-launchable MLX copy.</p>
+                </div>
+                <div class="mm-import-platform" id="mm-import-platform" role="status">Checking local capabilities…</div>
+            </div>
+            <div class="mm-import-workbench">
+                <section class="mm-import-source-card">
+                    <label for="mm-import-source">GGUF path inside your model library</label>
+                    <div class="mm-import-source-row">
+                        <input id="mm-import-source" type="text" autocomplete="off" placeholder="gguf/My-Finetune-Q6_K.gguf" aria-describedby="mm-import-source-help">
+                        <button type="button" class="mm-action-btn mm-action-btn--switch" id="mm-import-analyze">Analyze</button>
+                    </div>
+                    <p id="mm-import-source-help">Library-relative paths only. The original GGUF is never modified.</p>
+                    <div class="mm-import-engine-note" id="mm-import-engine-note">llama.cpp remains the default engine until analysis proves an exact recovery profile.</div>
+                </section>
+                <section class="mm-import-report" id="mm-import-report" aria-live="polite">
+                    <div class="mm-import-empty-state">Choose a GGUF to see compatibility, assets, quantization, and resource headroom.</div>
+                </section>
+            </div>
+            <section class="mm-import-jobs" aria-labelledby="mm-import-jobs-title">
+                <div class="mm-import-jobs-head">
+                    <div><span class="mm-import-kicker">Recovery activity</span><h3 id="mm-import-jobs-title">Jobs and diagnostics</h3></div>
+                    <button type="button" class="mm-lib-btn mm-lib-btn--labeled" id="mm-import-jobs-refresh">Refresh</button>
+                </div>
+                <div id="mm-import-jobs-list" class="mm-import-jobs-list" aria-live="polite"><div class="mm-import-empty-state">No recovery jobs yet.</div></div>
+            </section>
         </div>
 
         <!-- Download tab (wizard-style two-column layout) -->

@@ -1,4 +1,5 @@
 import { buildArchitectureLabel, isMoEEligible } from './setup-view.js';
+import { getPlatformInfo } from '../core/platform-info.js';
 import { readLastStatus } from './template-autoupdater.js';
 
 // ── Spawn Wizard Module ───────────────────────────────────────────────────────
@@ -9128,13 +9129,13 @@ async function _checkBinaryPrereq() {
     const headers = window.authHeaders ? window.authHeaders() : {};
 
     // Fetch platform info and current version in parallel
-    const [vResp, pResp] = await Promise.all([
+    const [vResp, platformInfo] = await Promise.all([
       fetch('/api/llama-binary/version', { headers }),
-      fetch('/api/llama-binary/platform-info', { headers }),
+      getPlatformInfo().catch(() => null),
     ]);
 
     const vData = vResp.ok ? await vResp.json() : {};
-    _platformInfo = pResp.ok ? await pResp.json() : null;
+    _platformInfo = platformInfo;
 
     if (_selectedBackend === null && _platformInfo) {
       _selectedBackend = _platformInfo.auto_backend;

@@ -1,9 +1,10 @@
 # Experimental GGUF Recovery Validation
 
-Phase 5.5 R2 is a developer-only research adapter. It does not add a UI, API route,
-production model-inventory entry, or launchable Rapid-MLX model. Read the R2 checkpoint
-in `docs/plans/20260715-gguf_to_mlx_conversion_research.md` before changing its profile,
-worker, or dependency lock.
+Phase 5.5 exposes the validated R2 adapter through the Experimental GGUF Import Lab.
+The UI and authenticated API can inspect GGUFs and run the one exact SmolLM2 recovery
+profile, but no recovered or re-quantized cache is launchable. Read the R2–R4 checkpoints
+in `docs/plans/20260715-gguf_to_mlx_conversion_research.md` before changing a profile,
+worker, dependency lock, job contract, or inventory rule.
 
 ## Immutable boundaries
 
@@ -146,8 +147,9 @@ rtk env LLAMA_MONITOR_R3_RECIPE=affine_8bit_g64 cargo test --lib models::gguf_re
 ```
 
 Results remain non-launchable below
-`~/.config/llama-monitor/models/rapid-mlx/requantized/`. Never copy one into the normal
-MLX model directory or add it to inventory.
+`~/.config/llama-monitor/models/rapid-mlx/requantized/`. They appear in inventory with
+first-class `Experimental` and recipe badges but no supported backend or launch action.
+Never copy one into the normal MLX model directory or change its manifest to launchable.
 
 ### One-time detached R3 host gate
 
@@ -192,5 +194,31 @@ size, so it is not evidence that larger quantized MLX models are slower. Do not 
 unless the quantizer, profile, cache, runtime, prompt, or acceptance contract changes.
 The complete report remains at `/tmp/llama-monitor-r3-host-gate/report.json`.
 
-R3 completion authorizes discussion of R4 only. It never changes an R2/R3 cache to
-launchable and never promotes this profile to `Verified`.
+R3 evidence is consumed by the R4 Import Lab and inventory surfaces. It never changes
+an R2/R3 cache to launchable and never promotes this profile to `Verified`.
+
+## R4 application contract
+
+- The compatibility preview is converter-free. Recovery starts only after an exact
+  profile match and a separate resource estimate.
+- Resource estimates use a fail-fast two-worker blocking pool. Cheap path-syntax
+  validation runs before pool admission; saturation returns `429`, and a timed-out
+  blocking task retains its permit until the underlying work actually exits.
+- Enqueue validates the library-relative regular GGUF and every path component before
+  returning `202`; traversal and symlinks never become asynchronous jobs.
+- One in-process worker runs at a time. Job records are bounded to 32 and diagnostics
+  to 24 entries of 512 characters. Worker failures are mapped to stable, path-free
+  public diagnostics. They are operational status, not durable state.
+- Cancellation uses the R2 process-group cleanup path. Published caches are atomic;
+  `.staging` content is never inventory.
+- `rapid-mlx/imports/*/fp16` and `rapid-mlx/requantized/*/model` enter inventory only
+  after strict validation of a zero-byte completion marker, bounded non-symlink typed
+  manifest, exact embedded identities, validation-report hash, and the complete
+  recursive published-file hash closure. Inventory exposes sanitized provenance, never
+  raw manifest fields. Their source and lineage badges remain visible on every platform,
+  with no runtime action.
+- Local recovery is compiled and enabled only for Apple Silicon macOS. Compatibility
+  inspection, inventory, and remote workflows remain cross-platform.
+- Platform information is shared across frontend surfaces. R4 has no runtime-install or
+  platform-changing mutation to invalidate it; the explicit refresh path is reserved
+  for the Phase 6 installation workflow.

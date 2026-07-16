@@ -19,6 +19,18 @@ const inventory = [
     supported_backends: ['rapid_mlx'],
   },
   {
+    model_name: 'Recovered FP16 (Experimental)', filename: 'fp16',
+    path: '/models/rapid-mlx/imports/cache/fp16', quant_type: 'F16 recovered',
+    format: 'mlx', source: 'recovered_gguf', lifecycle: 'ready', compatibility: 'experimental',
+    supported_backends: [], provenance: { lineage_kind: 'gguf_recovered_fp16' },
+  },
+  {
+    model_name: 'Re-quantized MLX (Experimental)', filename: 'model',
+    path: '/models/rapid-mlx/requantized/cache/model', quant_type: 'affine_8bit_g64',
+    format: 'mlx', source: 'requantized_mlx', lifecycle: 'ready', compatibility: 'experimental',
+    supported_backends: [], provenance: { lineage_kind: 'mlx_requantized' },
+  },
+  {
     model_name: 'Legacy staged item', filename: 'legacy.part', path: '/models/.staging/legacy.part',
     format: 'unknown', source: 'legacy', lifecycle: 'incomplete', compatibility: 'unknown',
     supported_backends: [], legacy_location: true,
@@ -40,27 +52,33 @@ const inventory = [
   },
 ];
 
-async function installInventoryMocks(page, { rapidMlxAvailable = true } = {}) {
+async function installInventoryMocks(page, { rapidMlxAvailable = true, requests = null } = {}) {
   await page.route('**/api/hf/download-dir', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({ dir: '/models', configured: true }),
   }));
-  await page.route('**/api/models', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify(inventory),
-  }));
-  await page.route('**/api/llama-binary/platform-info', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      os: rapidMlxAvailable ? 'macos' : 'linux',
-      arch: rapidMlxAvailable ? 'aarch64' : 'x86_64',
-      rapid_mlx_local_available: rapidMlxAvailable,
-      rapid_mlx_local_requirement: 'Rapid-MLX local execution requires macOS on Apple Silicon',
-    }),
-  }));
+  await page.route('**/api/models', route => {
+    if (requests) requests.models += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(inventory),
+    });
+  });
+  await page.route('**/api/llama-binary/platform-info', route => {
+    if (requests) requests.platform += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        os: rapidMlxAvailable ? 'macos' : 'linux',
+        arch: rapidMlxAvailable ? 'aarch64' : 'x86_64',
+        rapid_mlx_local_available: rapidMlxAvailable,
+        rapid_mlx_local_requirement: 'Rapid-MLX local execution requires macOS on Apple Silicon',
+      }),
+    });
+  });
 }
 
 async function openInventory(page, options) {
@@ -92,9 +110,11 @@ test.describe('typed model inventory', () => {
     for (const label of [
       'Format: GGUF', 'Format: MLX', 'Format: Transformers / safetensors', 'Format: Unknown',
       'Source: Local library', 'Source: Hugging Face', 'Source: Official MLX conversion',
+      'Source: Experimental GGUF recovery', 'Source: Experimental MLX re-quantization',
       'Source: Legacy model-library location',
       'Lifecycle: Ready', 'Lifecycle: Incomplete', 'Lifecycle: Converting', 'Lifecycle: Invalid',
-      'Compatibility: Verified', 'Compatibility: Provisional', 'Compatibility: Unsupported',
+      'Compatibility: Verified', 'Compatibility: Experimental and not launchable',
+      'Compatibility: Provisional', 'Compatibility: Unsupported',
       'Compatibility: Unknown', 'Supported backend: llama.cpp', 'Supported backend: Rapid-MLX',
       'Supported backend: None', 'Companion type: Multimodal projector',
       'Companion type: Draft / MTP model',
@@ -104,6 +124,8 @@ test.describe('typed model inventory', () => {
 
     const cards = page.locator('.mm-model-card');
     await expect(cards.filter({ hasText: 'Official conversion' }).getByRole('button', { name: /wizard|configure|load/i })).toHaveCount(0);
+    await expect(cards.filter({ hasText: 'Recovered FP16' }).getByRole('button', { name: /wizard|configure|load/i })).toHaveCount(0);
+    await expect(cards.filter({ hasText: 'Re-quantized MLX' }).getByRole('button', { name: /wizard|configure|load/i })).toHaveCount(0);
     await expect(cards.filter({ hasText: 'Vision projector' }).getByText(/Vision companion —/)).toBeVisible();
     await expect(cards.filter({ hasText: 'draft.gguf' }).getByText(/Draft companion —/)).toBeVisible();
     await expect(page.locator('.mm-card-name img')).toHaveCount(0);
@@ -111,6 +133,22 @@ test.describe('typed model inventory', () => {
 
     await expect(cards.filter({ hasText: 'HF MLX' }).getByRole('button', { name: 'Delete this model from library' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Delete this model from library' })).toHaveCount(3);
+  });
+
+  test('search sort filter and view changes reuse inventory and platform state', async ({ page }) => {
+    const requests = { models: 0, platform: 0 };
+    await openInventory(page, { requests });
+    expect(requests).toEqual({ models: 1, platform: 1 });
+
+    await page.getByLabel('Search models').fill('GGUF');
+    await page.getByLabel('Search models').press('Enter');
+    await page.locator('#mm-lib-sort-select').selectOption('name-desc');
+    await page.locator('#mm-lib-view-toggle').click();
+    await page.locator('#mm-lib-filters-toggle').click();
+    await page.locator('#mm-lib-filters-panel .mm-lib-chip').first().click();
+
+    await expect(page.locator('#models-list')).toBeVisible();
+    expect(requests).toEqual({ models: 1, platform: 1 });
   });
 
   test('creates a typed Rapid-MLX preset from a ready inventory entry', async ({ page }) => {
@@ -186,7 +224,11 @@ test.describe('typed model inventory', () => {
     await openInventory(page);
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
 
-    const overflow = await page.locator('#models-list').evaluate(element => element.scrollWidth - element.clientWidth);
+    const overflow = await page.locator('#models-list').evaluate(element => {
+      const right = element.getBoundingClientRect().right;
+      return Math.max(0, ...[...element.children]
+        .map(child => child.getBoundingClientRect().right - right));
+    });
     expect(overflow).toBeLessThanOrEqual(1);
     const firstCard = page.locator('.mm-model-card').first();
     expect(await firstCard.locator('.mm-inventory-badge').count()).toBeGreaterThanOrEqual(5);

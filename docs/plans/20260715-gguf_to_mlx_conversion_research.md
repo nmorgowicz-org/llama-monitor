@@ -1061,8 +1061,9 @@ Detached-host evidence:
   sort, and view-mode changes render locally; refetch only on open, explicit refresh, or
   a known mutation such as download, migration, conversion, tag update, or deletion.
 - Fetch platform/Rapid-MLX availability through one shared cached state/promise rather
-  than independently from models, presets, setup, and wizard flows. Explicitly
-  invalidate it after runtime installation or platform-relevant configuration changes.
+  than independently from models, presets, setup, and wizard flows. R4 has no runtime
+  installation or platform-changing mutation; retain an explicit refresh mechanism for
+  the Phase 6 installation workflow rather than exporting an unused invalidation API.
 - Preserve stable telemetry card DOM and update values/states incrementally for each
   poll instead of rebuilding all eight Rapid-MLX cards. Preserve focus, accessible live
   regions, reduced-motion behavior, stale-card history, and backend switching.
@@ -1070,6 +1071,70 @@ Detached-host evidence:
   security review, no native dialogs, and tests proving UI-only inventory controls do
   not refetch `/api/models` or `/api/llama-binary/platform-info`.
 - Checkpoint: `feat(ui): add experimental GGUF import lab`.
+
+#### R4 checkpoint evidence (2026-07-16)
+
+Status: **complete; independent Verifier approved after hardening.** Every recovered or
+re-quantized cache remains `Experimental` and `launchable: false`; this checkpoint does
+not authorize a production profile promotion.
+
+Application and safety contract:
+
+- The Models manager now provides an app-native Import Lab for converter-free GGUF
+  compatibility inspection, explicit resource estimation, bounded recovery jobs,
+  progress, cancellation, diagnostics, cleanup, and llama.cpp fallback. Browser-native
+  dialogs are not used.
+- Local recovery is available only on Apple Silicon macOS. Inventory, model-management,
+  compatibility inspection, and remote workflows remain cross-platform.
+- Resource estimation uses two fail-fast blocking workers with a 15-second route
+  timeout. Unsafe path syntax is rejected before pool admission, saturation returns
+  `429`, and timed-out work retains its permit until the blocking task exits. Unknown
+  disk headroom is displayed as `Unknown` and disables recovery.
+- Public job failures map to stable path-free diagnostics. Enqueue rejects traversal,
+  absolute/root-relative paths, symlink components, and non-GGUF targets before
+  accepting a job. The original GGUF is never modified.
+- Recovered and re-quantized inventory entries require a non-symlink cache root,
+  zero-byte `.complete`, bounded non-symlink typed manifest, exact profile, worker, and
+  environment identities, validation-report hash, and complete recursive published-file
+  hash closure. Inventory exposes sanitized lineage only. Tests prove missing completion,
+  invalid status, symlinked manifests, and unmanifested published files are omitted.
+
+Frontend and workflow evidence:
+
+- Recovered FP16 and re-quantized MLX models receive first-class format, source,
+  compatibility, quantization, and lineage badges on every platform, with explicit copy
+  that launch remains disabled pending profile promotion.
+- The open Model Library retains one typed inventory. Search, filter, sort, and view
+  changes render client-side without refetching; a completed Import Lab job invalidates
+  that state and returning to Library performs one fresh fetch.
+- Models, presets, setup, and wizard share one cached platform-information promise. R4
+  has no runtime-install or platform-changing mutation; an explicit refresh option is
+  retained for the later installation workflow.
+- Rapid-MLX telemetry cards keep stable keyed DOM nodes across polls and backend changes.
+  The focused browser suite proves stable-node updates, missing-card aging, degraded
+  status, accessible progress, and llama.cpp restoration.
+
+Validation and visual evidence:
+
+- Focused Rust filters passed for Import Lab, experimental-cache validation, recovered
+  and re-quantized inventory, and Phase 5 authentication routing. JavaScript syntax
+  validation and ESLint passed, as did `git diff --check`.
+- The final mandatory gate passed Clippy with warnings denied, all 984 Rust tests with
+  20 intentional ignores, all 39 standalone authentication-routing tests, the Windows
+  GNU cross-target check, the release build, formatting, JavaScript validation, ESLint,
+  and whitespace checks.
+- The isolated release-binary Playwright run passed all 17 focused Import Lab,
+  inventory, performance, and Rapid-MLX telemetry tests. The final complete suite passed
+  216 tests with its two intentional skips; the stable module-count ceiling remained 58.
+- The screenshot harness captured and was visually reviewed for Import Lab dark, light,
+  narrow, non-Apple, and reduced-motion states plus Rapid-MLX dashboard dark, light, and
+  partial-telemetry states. Hierarchy, contrast, wrapping, badges, disabled states, and
+  responsive layout remained coherent; no artifact screenshots were committed.
+- Independent verification rechecked authentication, path handling, diagnostic
+  disclosure, bounded work, cache trust boundaries, backend/frontend contracts, CSS
+  specificity, light theme, reduced motion, stable DOM behavior, stale code, and test
+  adequacy. It approved R4 after all eight hardening findings were resolved and the
+  direct file-closure tampering regression was added.
 
 ### R5 — Architecture promotion
 

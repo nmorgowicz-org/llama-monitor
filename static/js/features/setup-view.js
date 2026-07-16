@@ -2,6 +2,7 @@
 // View transitions, animations, quick stats, and view state initialization.
 
 import { setupViewState, chat, sessionState } from '../core/app-state.js';
+import { getPlatformInfo } from '../core/platform-info.js';
 import { doAttachFromSetup, doRestoreSession } from './attach-detach.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showConfirmDialog, showPromptDialog } from './toast.js';
@@ -271,10 +272,10 @@ export async function fetchAndRenderMemoryBar() {
 
     try {
         const headers = window.authHeaders ? window.authHeaders() : {};
-        const [sysResp, gpuResp, platResp, limResp] = await Promise.all([
+        const [sysResp, gpuResp, platformInfo, limResp] = await Promise.all([
             fetch('/metrics/system', { headers }),
             fetch('/metrics/gpu', { headers }),
-            fetch('/api/llama-binary/platform-info', { headers }),
+            getPlatformInfo().catch(() => null),
             fetch('/api/system/metal-gpu-limit', { headers }),
         ]);
 
@@ -313,9 +314,8 @@ export async function fetchAndRenderMemoryBar() {
 
         // Fallback: if GPU metrics haven't populated yet (mactop race on startup),
         // detect unified memory from platform-info (independent of mactop).
-        if (!isUnified && platResp.ok) {
-            const plat = await platResp.json();
-            if (plat.auto_backend === 'metal') {
+        if (!isUnified && platformInfo) {
+            if (platformInfo.auto_backend === 'metal') {
                 isUnified = true;
                 if (!metalGpuLimitMb && limResp.ok) {
                     const lim = await limResp.json();

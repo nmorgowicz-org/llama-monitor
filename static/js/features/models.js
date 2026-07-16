@@ -3,6 +3,7 @@
 
 import { sessionState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
+import { getPlatformInfo } from '../core/platform-info.js';
 import { showToast, showToastWithActions } from './toast.js';
 import Router from './router.js';
 import { _showConfirm } from './presets.js';
@@ -38,6 +39,8 @@ const INVENTORY_BADGES = {
         local: ['Local', 'Source: Local library'],
         hugging_face: ['Hugging Face', 'Source: Hugging Face'],
         official_conversion: ['Official conversion', 'Source: Official MLX conversion'],
+        recovered_gguf: ['Recovered from GGUF', 'Source: Experimental GGUF recovery'],
+        requantized_mlx: ['Re-quantized MLX', 'Source: Experimental MLX re-quantization'],
         legacy: ['Legacy location', 'Source: Legacy model-library location'],
         unknown: ['Unknown source', 'Source: Unknown'],
     },
@@ -50,6 +53,7 @@ const INVENTORY_BADGES = {
     },
     compatibility: {
         verified: ['Verified', 'Compatibility: Verified'],
+        experimental: ['Experimental', 'Compatibility: Experimental and not launchable'],
         provisional: ['Provisional', 'Compatibility: Provisional'],
         unsupported: ['Unsupported', 'Compatibility: Unsupported'],
         unknown: ['Unknown compatibility', 'Compatibility: Unknown'],
@@ -66,6 +70,7 @@ let rapidMlxLocalAvailable = false;
 let rapidMlxLocalRequirement = 'Rapid-MLX local execution requires macOS on Apple Silicon';
 
 let initialized = false;
+let inventoryCache = null;
 
 // State for the HF download tab
 let hfState = {
@@ -133,7 +138,7 @@ function savePrefs() {
 
 export function openModelsModal() {
     document.getElementById('models-modal')?.classList.add('open');
-    loadModels();
+    loadModels({ refresh: true });
 }
 
 function closeModelsModal() {
@@ -142,47 +147,51 @@ function closeModelsModal() {
 
 export { closeModelsModal };
 
-async function loadModels() {
+export function invalidateModelInventory() {
+    inventoryCache = null;
+}
+
+async function loadModels({ refresh = false } = {}) {
     const grid = document.getElementById('models-list');
     const summary = document.getElementById('models-summary');
     const tabCount = document.getElementById('models-tab-count');
     const dirLabel = document.getElementById('models-dir-label');
     if (!grid) return;
 
-    if (summary) summary.textContent = 'Loading...';
-    grid.innerHTML = '<div class="mm-loading">Scanning...</div>';
+    const needsFetch = refresh || !inventoryCache;
+    if (needsFetch) {
+        if (summary) summary.textContent = 'Loading...';
+        grid.innerHTML = '<div class="mm-loading">Scanning...</div>';
+    }
 
     try {
-        const dirResp = await fetch('/api/hf/download-dir', {
-            headers: window.authHeaders ? window.authHeaders() : {},
-        });
-        if (dirResp.ok && dirLabel) {
-            const dirInfo = await dirResp.json();
-            if (dirInfo.dir) {
-                if (dirInfo.configured) {
-                    dirLabel.textContent = dirInfo.dir;
+        if (needsFetch) {
+            const dirResp = await fetch('/api/hf/download-dir', {
+                headers: window.authHeaders ? window.authHeaders() : {},
+            });
+            if (dirResp.ok && dirLabel) {
+                const dirInfo = await dirResp.json();
+                if (dirInfo.dir) {
+                    if (dirInfo.configured) {
+                        dirLabel.textContent = dirInfo.dir;
+                    } else {
+                        dirLabel.textContent = 'Using default: ' + dirInfo.dir;
+                    }
                 } else {
-                    dirLabel.textContent = 'Using default: ' + dirInfo.dir;
+                    dirLabel.textContent = 'No models directory configured';
                 }
-            } else {
-                dirLabel.textContent = 'No models directory configured';
             }
-        }
-
-        const platformResp = await fetch('/api/llama-binary/platform-info', {
-            headers: window.authHeaders ? window.authHeaders() : {},
-        });
-        if (platformResp.ok) {
-            const platform = await platformResp.json();
+            const platform = await getPlatformInfo();
             rapidMlxLocalAvailable = platform.rapid_mlx_local_available === true;
             rapidMlxLocalRequirement = platform.rapid_mlx_local_requirement
                 || rapidMlxLocalRequirement;
+            const resp = await fetch('/api/models', {
+                headers: window.authHeaders ? window.authHeaders() : {},
+            });
+            if (!resp.ok) throw new Error(`Model inventory failed (${resp.status})`);
+            inventoryCache = await resp.json();
         }
-
-        const resp = await fetch('/api/models', {
-            headers: window.authHeaders ? window.authHeaders() : {},
-        });
-        const models = await resp.json();
+        const models = inventoryCache || [];
 
         const count = models.length;
         if (tabCount) tabCount.textContent = count ? String(count) : '';
@@ -738,6 +747,8 @@ function inventoryActionNote(inventory) {
     if (inventory.lifecycle === 'invalid') return 'Invalid model. Review its files or provenance before launch.';
     if (inventory.rapidMlxPlatformBlocked) return `${rapidMlxLocalRequirement}. You can still manage or copy this model.`;
     if (inventory.compatibility === 'unsupported') return 'No installed backend supports this model.';
+    if (inventory.source === 'recovered_gguf') return 'Experimental GGUF recovery; launch is disabled pending profile promotion.';
+    if (inventory.source === 'requantized_mlx') return 'Experimental MLX re-quantization; launch is disabled pending profile promotion.';
     return 'Backend compatibility has not been verified.';
 }
 
@@ -960,7 +971,8 @@ async function deleteModel(path, filename) {
             return;
         }
         showToast('Model deleted', 'success');
-        await loadModels();
+        invalidateModelInventory();
+        await loadModels({ refresh: true });
     } catch (err) {
         showToast('Delete failed: ' + err.message, 'error');
     }
@@ -983,7 +995,8 @@ async function refreshModels() {
     } finally {
         if (btn) btn.classList.remove('spinning');
     }
-    await loadModels();
+    invalidateModelInventory();
+    await loadModels({ refresh: true });
 }
 
 // ── Model tags ────────────────────────────────────────────────────────────────
@@ -1015,7 +1028,8 @@ async function removeModelTag(modelPath, tag) {
     const data = await resp.json();
     const currentTags = (data.tags[modelPath] || []).filter(t => t !== tag);
     await updateModelTags(modelPath, currentTags);
-    await loadModels();
+    invalidateModelInventory();
+    await loadModels({ refresh: true });
 }
 
 function openTagPicker(modelPath, currentTags) {
@@ -1045,7 +1059,10 @@ function openTagPicker(modelPath, currentTags) {
                 ? currentTags.filter(t => t !== tag)
                 : [...currentTags, tag];
             updateModelTags(modelPath, newTags).then(ok => {
-                if (ok) loadModels();
+                if (ok) {
+                    invalidateModelInventory();
+                    loadModels({ refresh: true });
+                }
             });
         });
         pillsWrap.appendChild(pill);
@@ -1443,6 +1460,286 @@ function createChip(label, active) {
     return chip;
 }
 
+// ── Experimental Import Lab ─────────────────────────────────────────────────
+
+let importLabInitialized = false;
+let importLabAvailability = null;
+let importLabPollTimer = null;
+let importLabCompletedJobs = new Set();
+
+function apiHeaders(json = false) {
+    const headers = window.authHeaders ? { ...window.authHeaders() } : {};
+    if (json) headers['Content-Type'] = 'application/json';
+    return headers;
+}
+
+async function importLabJson(url, options = {}) {
+    const response = await fetch(url, options);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+    return data;
+}
+
+function formatImportBytes(bytes) {
+    const value = Number(bytes || 0);
+    if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GiB`;
+    if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(0)} MiB`;
+    return `${Math.round(value / 1024)} KiB`;
+}
+
+function exactImportProfile(path) {
+    const name = String(path || '').split('/').pop();
+    return [
+        'SmolLM2-135M-Instruct-F16.gguf',
+        'SmolLM2-135M-Instruct-Q8_0.gguf',
+        'SmolLM2-135M-Instruct-Q6_K.gguf',
+        'SmolLM2-135M-Instruct-Q4_K_M.gguf',
+    ].includes(name);
+}
+
+async function initImportLab() {
+    if (!importLabInitialized) {
+        importLabInitialized = true;
+        document.getElementById('mm-import-analyze')?.addEventListener('click', analyzeImportSource);
+        document.getElementById('mm-import-source')?.addEventListener('keydown', event => {
+            if (event.key === 'Enter') analyzeImportSource();
+        });
+        document.getElementById('mm-import-jobs-refresh')?.addEventListener('click', loadImportJobs);
+    }
+    try {
+        importLabAvailability = await importLabJson('/api/models/import-lab/availability', {
+            headers: apiHeaders(),
+        });
+        const status = document.getElementById('mm-import-platform');
+        if (status) {
+            status.classList.toggle('unavailable', !importLabAvailability.local_execution_available);
+            status.textContent = importLabAvailability.local_execution_available
+                ? 'Apple Silicon ready · Local recovery available'
+                : 'Local recovery unavailable · Manage models or use llama.cpp';
+        }
+    } catch (error) {
+        showToast(`Import Lab availability failed: ${error.message}`, 'error');
+    }
+    await loadImportJobs();
+}
+
+async function analyzeImportSource() {
+    const input = document.getElementById('mm-import-source');
+    const reportEl = document.getElementById('mm-import-report');
+    const engineNote = document.getElementById('mm-import-engine-note');
+    const path = input?.value.trim();
+    if (!path || !reportEl) return;
+    reportEl.replaceChildren(Object.assign(document.createElement('div'), {
+        className: 'mm-import-empty-state', textContent: 'Reading bounded GGUF metadata…',
+    }));
+    try {
+        const body = JSON.stringify({ path });
+        const [report, resource] = await Promise.all([
+            importLabJson('/api/models/gguf/import/compatibility/preview', {
+                method: 'POST', headers: apiHeaders(true), body,
+            }),
+            importLabJson('/api/models/import-lab/resource-estimate', {
+                method: 'POST', headers: apiHeaders(true), body,
+            }),
+        ]);
+        renderImportReport(reportEl, report, resource, path);
+        if (engineNote) {
+            const recoverable = report.compatibility === 'experimental' && exactImportProfile(path);
+            engineNote.textContent = recoverable
+                ? 'Exact experimental profile found. llama.cpp remains available; recovery creates a separate non-launchable MLX copy.'
+                : 'Recommended engine: llama.cpp. No safe MLX recovery profile is available for this model.';
+        }
+    } catch (error) {
+        reportEl.replaceChildren(Object.assign(document.createElement('div'), {
+            className: 'mm-import-empty-state', textContent: error.message,
+        }));
+    }
+}
+
+function appendImportFact(container, label, value) {
+    const fact = document.createElement('div');
+    fact.className = 'mm-import-fact';
+    const labelEl = document.createElement('span');
+    labelEl.textContent = label;
+    const valueEl = document.createElement('strong');
+    valueEl.textContent = value;
+    fact.append(labelEl, valueEl);
+    container.appendChild(fact);
+}
+
+function renderImportReport(container, report, resource, path) {
+    container.replaceChildren();
+    const verdict = document.createElement('div');
+    verdict.className = 'mm-import-verdict';
+    const title = document.createElement('strong');
+    title.textContent = report.architecture
+        ? `${report.architecture} · ${report.tensor_count || 0} tensors`
+        : 'GGUF compatibility report';
+    const badge = document.createElement('span');
+    const compatibility = report.compatibility || 'unsupported';
+    badge.className = `mm-import-verdict-badge ${compatibility}`;
+    badge.textContent = compatibility;
+    verdict.append(title, badge);
+    container.appendChild(verdict);
+
+    const facts = document.createElement('div');
+    facts.className = 'mm-import-facts';
+    appendImportFact(facts, 'Source', formatImportBytes(resource.source_bytes));
+    appendImportFact(facts, 'Recovered FP16', formatImportBytes(resource.estimated_fp16_bytes));
+    appendImportFact(facts, 'Disk required', formatImportBytes(resource.required_disk_bytes));
+    appendImportFact(facts, 'Disk headroom', resource.disk_sufficient === true
+        ? 'Available'
+        : (resource.disk_sufficient === false ? 'Insufficient' : 'Unknown'));
+    appendImportFact(facts, 'Memory', resource.ram_guidance?.replaceAll('_', ' ') || 'Unknown');
+    appendImportFact(facts, 'Engine fallback', 'llama.cpp');
+    container.appendChild(facts);
+
+    const reasons = [
+        ...(report.unsupported_reasons || []),
+        ...(report.missing_profile_fields || []).map(value => `Missing profile: ${value}`),
+        ...(report.missing_assets || []).map(value => `Missing asset: ${value}`),
+        ...(report.warnings || []),
+    ].slice(0, 8);
+    if (reasons.length) {
+        const list = document.createElement('ul');
+        list.className = 'mm-import-reasons';
+        reasons.forEach(reason => {
+            const item = document.createElement('li');
+            item.textContent = reason;
+            list.appendChild(item);
+        });
+        container.appendChild(list);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'mm-import-actions';
+    const start = document.createElement('button');
+    start.type = 'button';
+    start.className = 'mm-action-btn mm-action-btn--switch';
+    start.textContent = 'Recover experimental FP16';
+    const allowed = report.compatibility === 'experimental'
+        && exactImportProfile(path)
+        && importLabAvailability?.local_execution_available
+        && resource.disk_sufficient === true;
+    start.disabled = !allowed;
+    start.title = allowed
+        ? 'Create a separate non-launchable MLX recovery cache'
+        : 'Recovery requires Apple Silicon, disk headroom, and an exact supported profile';
+    start.addEventListener('click', () => startImportJob(path));
+    actions.appendChild(start);
+    container.appendChild(actions);
+}
+
+async function startImportJob(path) {
+    try {
+        await importLabJson('/api/models/import-lab/jobs', {
+            method: 'POST', headers: apiHeaders(true), body: JSON.stringify({ source_path: path }),
+        });
+        showToast('Experimental recovery queued', 'success');
+        await loadImportJobs();
+    } catch (error) {
+        showToast(`Recovery could not start: ${error.message}`, 'error');
+    }
+}
+
+async function cancelImportJob(id) {
+    try {
+        await importLabJson(`/api/models/import-lab/jobs/${encodeURIComponent(id)}/cancel`, {
+            method: 'POST', headers: apiHeaders(),
+        });
+        await loadImportJobs();
+    } catch (error) {
+        showToast(`Cancellation failed: ${error.message}`, 'error');
+    }
+}
+
+async function forgetImportJob(id) {
+    try {
+        await importLabJson(`/api/models/import-lab/jobs/${encodeURIComponent(id)}`, {
+            method: 'DELETE', headers: apiHeaders(),
+        });
+        await loadImportJobs();
+    } catch (error) {
+        showToast(`Cleanup failed: ${error.message}`, 'error');
+    }
+}
+
+async function loadImportJobs() {
+    const container = document.getElementById('mm-import-jobs-list');
+    if (!container) return;
+    try {
+        const jobs = await importLabJson('/api/models/import-lab/jobs', { headers: apiHeaders() });
+        renderImportJobs(container, jobs);
+        const active = jobs.some(job => job.can_cancel);
+        clearTimeout(importLabPollTimer);
+        if (active) importLabPollTimer = setTimeout(loadImportJobs, 800);
+        const newlyComplete = jobs.filter(job => job.state === 'complete' && !importLabCompletedJobs.has(job.id));
+        if (newlyComplete.length) {
+            newlyComplete.forEach(job => importLabCompletedJobs.add(job.id));
+            invalidateModelInventory();
+        }
+    } catch (error) {
+        container.replaceChildren(Object.assign(document.createElement('div'), {
+            className: 'mm-import-empty-state', textContent: error.message,
+        }));
+    }
+}
+
+function renderImportJobs(container, jobs) {
+    container.replaceChildren();
+    if (!jobs.length) {
+        container.appendChild(Object.assign(document.createElement('div'), {
+            className: 'mm-import-empty-state', textContent: 'No recovery jobs yet.',
+        }));
+        return;
+    }
+    jobs.slice().reverse().forEach(job => {
+        const card = document.createElement('article');
+        card.className = 'mm-import-job';
+        const top = document.createElement('div');
+        top.className = 'mm-import-job-top';
+        const message = document.createElement('strong');
+        message.textContent = job.message;
+        const state = document.createElement('span');
+        state.className = 'mm-import-job-state';
+        state.textContent = job.state;
+        top.append(message, state);
+        const progress = document.createElement('div');
+        progress.className = 'mm-import-progress';
+        const progressPercent = Math.max(0, Math.min(100, job.progress_percent || 0));
+        progress.setAttribute('role', 'progressbar');
+        progress.setAttribute('aria-label', `Recovery progress: ${job.phase || job.state}`);
+        progress.setAttribute('aria-valuemin', '0');
+        progress.setAttribute('aria-valuemax', '100');
+        progress.setAttribute('aria-valuenow', String(progressPercent));
+        const fill = document.createElement('span');
+        fill.style.width = `${progressPercent}%`;
+        progress.appendChild(fill);
+        card.append(top, progress);
+        if (Array.isArray(job.diagnostics) && job.diagnostics.length) {
+            const diagnostics = document.createElement('div');
+            diagnostics.className = 'mm-import-diagnostics';
+            diagnostics.textContent = job.diagnostics.join('\n');
+            card.appendChild(diagnostics);
+        }
+        const actions = document.createElement('div');
+        actions.className = 'mm-import-actions';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'mm-action-btn';
+        if (job.can_cancel) {
+            button.textContent = 'Cancel and clean staging';
+            button.addEventListener('click', () => cancelImportJob(job.id));
+        } else {
+            button.textContent = 'Clear job';
+            button.addEventListener('click', () => forgetImportJob(job.id));
+        }
+        actions.appendChild(button);
+        card.appendChild(actions);
+        container.appendChild(card);
+    });
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initModels() {
@@ -1466,6 +1763,8 @@ export function initModels() {
     document.querySelectorAll('#models-modal .mm-tab').forEach(tab => {
         tab.addEventListener('click', () => {
             const target = tab.dataset.tab;
+            const summary = document.getElementById('models-summary');
+            if (summary) summary.style.visibility = target === 'library' ? '' : 'hidden';
             document.querySelectorAll('#models-modal .mm-tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('#models-modal .mm-tab-panel').forEach(p => p.classList.remove('active'));
             tab.classList.add('active');
@@ -1473,6 +1772,10 @@ export function initModels() {
             if (panel) panel.classList.add('active');
             if (target === 'download') {
                 initHfDownloadTab();
+            } else if (target === 'import-lab') {
+                initImportLab();
+            } else if (target === 'library' && !inventoryCache) {
+                loadModels();
             }
         });
     });
@@ -1732,7 +2035,8 @@ async function onHfFileSelected(file, repoId, downloadPanel) {
                 onComplete: (downloadId, localPath) => {
                     hfState.currentDownloadIds.add(downloadId);
                     // Refresh library tab
-                    loadModels();
+                    invalidateModelInventory();
+                    loadModels({ refresh: true });
                 },
                 onValidationError: (msg) => {
                     // hfStartDownload now shows its own toast for most cases.

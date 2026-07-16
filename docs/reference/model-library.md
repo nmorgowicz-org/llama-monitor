@@ -10,6 +10,9 @@ models/
 │   ├── native/                 # local native MLX models
 │   └── converted/              # validated official mlx-lm conversions
 ├── transformers/              # complete safetensors conversion sources
+├── rapid-mlx/
+│   ├── imports/               # experimental recovered FP16 caches
+│   └── requantized/           # experimental MLX quantization caches
 ├── cache/huggingface/
 │   ├── hub/                    # app-scoped Hugging Face cache
 │   └── xet/                    # app-scoped Xet cache
@@ -33,9 +36,11 @@ Every model card receives typed metadata from the backend rather than guessing s
 from its filename:
 
 - `format`: `gguf`, `mlx`, `transformers`, or `unknown`
-- `source`: `local`, `hugging_face`, `official_conversion`, `legacy`, or `unknown`
+- `source`: `local`, `hugging_face`, `official_conversion`, `recovered_gguf`,
+  `requantized_mlx`, `legacy`, or `unknown`
 - `lifecycle`: `ready`, `incomplete`, `converting`, `invalid`, or `unknown`
-- `compatibility`: `verified`, `provisional`, `unsupported`, or `unknown`
+- `compatibility`: `verified`, `experimental`, `provisional`, `unsupported`, or
+  `unknown`
 - `supported_backends`: `llama_cpp`, `rapid_mlx`, or an empty list
 - `companion_kind`: `mmproj` or `draft` when applicable
 
@@ -43,9 +48,14 @@ Unknown and incomplete entries remain visible with explicit badges but cannot la
 Ready Rapid-MLX entries create a typed Rapid-MLX preset; GGUF entries continue through
 the llama.cpp wizard. GGUF is not presented as a native Rapid-MLX input.
 
-## Experimental GGUF import inspection
+Recovered and re-quantized caches appear as first-class MLX cards with their source,
+recipe, and `Experimental` badges. They deliberately have no supported backend and no
+launch action. Visibility is not a promotion: only a future architecture gate can make
+one launchable.
 
-The compatibility inspector evaluates a GGUF for a future experimental MLX import
+## Experimental GGUF Import Lab
+
+The compatibility inspector evaluates a GGUF for an experimental MLX recovery
 without converting weights, launching a runtime, or using the network. It reads at most
 64 MiB of GGUF metadata and tensor-directory data in a bounded blocking worker and
 returns a versioned report containing:
@@ -65,6 +75,18 @@ unknown tensor formats, and Q3/Q2/IQ3-or-lower tiers fail closed until dedicated
 profiles and runtime/parity evidence exist. Q4/Q5 inputs show a compounded-loss warning,
 and IQ4 inputs require a separate importance-aware profile.
 
+The Models manager's Import Lab tab combines that report with current disk/RAM
+headroom, the llama.cpp fallback, and an exact-profile recovery action. Recovery is
+available only for the pinned SmolLM2 135M R2 profile and creates a separate FP16 cache;
+it never edits or replaces the GGUF. One bounded worker runs at a time, with at most 32
+retained in-memory job records. Progress, cancellation, bounded diagnostics, terminal
+cleanup, and failures are app-native. Browser dialogs are not used.
+
+Resource estimates use a fail-fast pool of two blocking workers. Unsafe path syntax is
+rejected before pool admission, saturation returns `429`, and unknown disk headroom is
+shown as unknown rather than treated as available. Public job failures are stable,
+path-free diagnostics; raw worker errors and local filesystem paths are not exposed.
+
 Only library-relative paths resolving to regular `.gguf` files inside the configured
 `models_dir` are accepted. Traversal, absolute or root-relative input, symlinked path
 components, incomplete headers, and oversized metadata are rejected. Inspection never
@@ -75,7 +97,8 @@ Other platforms still inventory, identify, and allow copying or migration of MLX
 Transformers models, but show an explicit Apple Silicon requirement instead of a local
 Rapid-MLX configure action. The Rust launch boundary enforces the same restriction
 before runtime discovery, downloads, or conversion can begin. Remote attachment remains
-separate from local execution.
+separate from local execution. On unsupported platforms the report and model-management
+surfaces remain available, while the local recovery action stays disabled.
 
 ## Rapid-MLX sources
 
@@ -90,6 +113,19 @@ check, writes a source/tool/recipe/hash manifest, and atomically promotes the re
 `mlx/converted/`. A `.complete` marker alone is insufficient: every cached file is
 verified against the manifest before reuse.
 
+Recovered and re-quantized experimental caches receive first-class inventory badges
+only after strict validation of their non-symlink cache root, zero-byte `.complete`
+marker, bounded typed manifest, exact profile/worker/environment identities,
+validation-report hash, and complete recursive published-file hash closure. Invalid or
+incomplete caches are omitted. The inventory emits sanitized lineage fields and never
+trusts arbitrary manifest provenance; every such model remains non-launchable pending
+an explicit profile-promotion phase.
+
 App-launched Hugging Face operations receive `HF_HUB_CACHE` and `HF_XET_CACHE` inside
 the model library. `HF_TOKEN` is passed only through the child environment and is not
 stored in source metadata, conversion manifests, command arguments, or diagnostics.
+
+Platform information is fetched once through shared frontend state. This phase has no
+runtime-install or platform-changing action, so there is no mutation that needs to
+invalidate it yet; the explicit refresh mechanism is reserved for the installation
+workflow.

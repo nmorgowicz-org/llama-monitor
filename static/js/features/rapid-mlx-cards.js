@@ -109,6 +109,101 @@ function card(title, rows, state = '') {
     return element;
 }
 
+function syncAttributes(target, source) {
+    for (const attribute of [...target.attributes]) {
+        if (!source.hasAttribute(attribute.name)) target.removeAttribute(attribute.name);
+    }
+    for (const attribute of [...source.attributes]) {
+        if (target.getAttribute(attribute.name) !== attribute.value) {
+            target.setAttribute(attribute.name, attribute.value);
+        }
+    }
+}
+
+function syncText(target, source) {
+    if (target.textContent !== source.textContent) target.textContent = source.textContent;
+}
+
+function syncProgressRow(target, source) {
+    const targetLabel = target.querySelector('.rapid-progress-label');
+    const sourceLabel = source.querySelector('.rapid-progress-label');
+    if (targetLabel && sourceLabel) {
+        const targetValue = targetLabel.querySelector('strong');
+        const sourceValue = sourceLabel.querySelector('strong');
+        if (targetValue && sourceValue) syncText(targetValue, sourceValue);
+    }
+    const targetTrack = target.querySelector('.rapid-progress-track');
+    const sourceTrack = source.querySelector('.rapid-progress-track');
+    if (targetTrack && sourceTrack) {
+        syncAttributes(targetTrack, sourceTrack);
+        const targetFill = targetTrack.querySelector('.rapid-progress-fill');
+        const sourceFill = sourceTrack.querySelector('.rapid-progress-fill');
+        if (targetFill && sourceFill && targetFill.style.width !== sourceFill.style.width) {
+            targetFill.style.width = sourceFill.style.width;
+        }
+    }
+}
+
+function rowKey(row, index) {
+    if (row.classList.contains('rapid-progress')) return 'progress';
+    const label = row.querySelector(':scope > span')?.textContent;
+    return label ? 'metric:' + label : 'row:' + index;
+}
+
+function syncCardBody(target, source) {
+    const existing = new Map([...target.children].map((row, index) => [rowKey(row, index), row]));
+    [...source.children].forEach((sourceRow, index) => {
+        const key = rowKey(sourceRow, index);
+        let targetRow = existing.get(key);
+        if (!targetRow || targetRow.tagName !== sourceRow.tagName) {
+            targetRow = sourceRow;
+        } else if (sourceRow.classList.contains('rapid-progress')) {
+            syncProgressRow(targetRow, sourceRow);
+        } else {
+            const targetLabel = targetRow.querySelector(':scope > span');
+            const sourceLabel = sourceRow.querySelector(':scope > span');
+            const targetValue = targetRow.querySelector(':scope > strong');
+            const sourceValue = sourceRow.querySelector(':scope > strong');
+            if (targetLabel && sourceLabel) syncText(targetLabel, sourceLabel);
+            if (targetValue && sourceValue) syncText(targetValue, sourceValue);
+        }
+        const currentAtIndex = target.children[index];
+        if (currentAtIndex !== targetRow) target.insertBefore(targetRow, currentAtIndex || null);
+        existing.delete(key);
+    });
+    existing.forEach(row => row.remove());
+}
+
+function syncCard(target, source) {
+    syncAttributes(target, source);
+    const targetTopline = target.querySelector('.metric-card-topline');
+    const sourceTopline = source.querySelector('.metric-card-topline');
+    if (targetTopline && sourceTopline) {
+        const targetHeading = targetTopline.querySelector('.widget-metric-label');
+        const sourceHeading = sourceTopline.querySelector('.widget-metric-label');
+        if (targetHeading && sourceHeading) {
+            syncAttributes(targetHeading, sourceHeading);
+            syncText(targetHeading, sourceHeading);
+        }
+        const sourceChip = sourceTopline.querySelector('.metric-live-chip');
+        let targetChip = targetTopline.querySelector('.metric-live-chip');
+        if (sourceChip) {
+            if (!targetChip) {
+                targetChip = sourceChip;
+                targetTopline.append(targetChip);
+            } else {
+                syncAttributes(targetChip, sourceChip);
+                syncText(targetChip, sourceChip);
+            }
+        } else {
+            targetChip?.remove();
+        }
+    }
+    const targetBody = target.querySelector('.rapid-metric-list');
+    const sourceBody = source.querySelector('.rapid-metric-list');
+    if (targetBody && sourceBody) syncCardBody(targetBody, sourceBody);
+}
+
 const CARD_REGISTRY = [
     {
         id: 'runtime', order: 10,
@@ -232,17 +327,22 @@ export function renderRapidMlxCards(
         section.append(grid);
     }
     if (!sessionChanged && sample && pollSequence === lastPollSequence && grid.childElementCount > 0) return;
-    grid.replaceChildren();
     if (!sample) {
-        const loading = document.createElement('div');
-        loading.className = 'rapid-telemetry-loading';
-        loading.dataset.telemetryState = 'loading';
-        loading.setAttribute('role', 'status');
-        loading.setAttribute('aria-live', 'polite');
-        loading.textContent = 'Connecting to Rapid-MLX telemetry…';
-        grid.append(loading);
+        grid.querySelectorAll('[data-card-id]').forEach(element => element.remove());
+        let loading = grid.querySelector('[data-telemetry-state="loading"]');
+        if (!loading) {
+            loading = document.createElement('div');
+            loading.className = 'rapid-telemetry-loading';
+            loading.dataset.telemetryState = 'loading';
+            loading.setAttribute('role', 'status');
+            loading.setAttribute('aria-live', 'polite');
+            loading.textContent = 'Connecting to Rapid-MLX telemetry…';
+            grid.append(loading);
+        }
         return;
     }
+
+    grid.querySelector('[data-telemetry-state="loading"]')?.remove();
 
     const isNewPoll = pollSequence !== lastPollSequence;
     lastPollSequence = pollSequence;
@@ -252,6 +352,7 @@ export function renderRapidMlxCards(
         uptime_seconds: sample.uptime_seconds,
         ready: sample.ready,
     } : sample;
+    const renderedCardIds = new Set();
     CARD_REGISTRY.slice().sort((a, b) => a.order - b.order).forEach(definition => {
         let renderedSample = sample;
         let stale = false;
@@ -296,7 +397,20 @@ export function renderRapidMlxCards(
             const staleText = staleLabel(sampledAtUnixMs, missing);
             chip.textContent = definition.id === 'runtime' ? 'degraded · ' + staleText : staleText;
         }
-        grid.append(element);
+        renderedCardIds.add(definition.id);
+        const existing = grid.querySelector(`[data-card-id="${definition.id}"]`);
+        if (existing) {
+            syncCard(existing, element);
+        } else {
+            grid.append(element);
+        }
+    });
+    grid.querySelectorAll('[data-card-id]').forEach(element => {
+        if (!renderedCardIds.has(element.dataset.cardId)) element.remove();
+    });
+    CARD_REGISTRY.slice().sort((a, b) => a.order - b.order).forEach(definition => {
+        const element = grid.querySelector(`[data-card-id="${definition.id}"]`);
+        if (element) grid.append(element);
     });
 }
 

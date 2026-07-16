@@ -356,8 +356,20 @@ pub struct RequantizeResult {
     pub cache_dir: PathBuf,
     pub model_dir: PathBuf,
     pub report: RequantizeReport,
-    /// Always false in R3. R3 results never enter production model inventory.
+    /// Always false. Inventory may display the cache as Experimental but never launch it.
     pub launchable: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExperimentalInventoryCacheKind {
+    RecoveredGguf,
+    RequantizedMlx,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExperimentalInventorySummary {
+    pub provenance: serde_json::Value,
+    pub quant_type: String,
 }
 
 #[derive(Serialize)]
@@ -1597,6 +1609,190 @@ fn validate_requantize_cache(
         report,
         launchable: false,
     })
+}
+
+/// Validate the immutable, non-launchable cache envelope before exposing it in the
+/// model inventory. This verifies the completion sentinel, typed provenance, embedded
+/// worker identities, validation-report identity, and every published file hash. It
+/// returns a sanitized summary rather than the user-controlled manifest JSON.
+pub fn validate_experimental_inventory_cache(
+    path: &Path,
+    kind: ExperimentalInventoryCacheKind,
+) -> Result<ExperimentalInventorySummary> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        bail!("Experimental cache root must be a non-symlink directory");
+    }
+    let cache_key_name = path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .ok_or_else(|| anyhow!("Experimental cache has no UTF-8 cache key"))?;
+    let complete = path.join(".complete");
+    require_regular_file_bounded(&complete, 0, "experimental cache completion marker")?;
+
+    match kind {
+        ExperimentalInventoryCacheKind::RecoveredGguf => {
+            let manifest_path = path.join("manifest.json");
+            require_regular_file_bounded(
+                &manifest_path,
+                MAX_MANIFEST_BYTES,
+                "recovery cache manifest",
+            )?;
+            let manifest: RecoveryManifest =
+                serde_json::from_reader(fs::File::open(manifest_path)?)?;
+            let profile: RecoveryProfile = serde_json::from_str(PROFILE)?;
+            let tier = profile
+                .gguf_source
+                .tiers
+                .get(manifest.source_tier.profile_name())
+                .ok_or_else(|| anyhow!("Recovery cache tier is absent from its profile"))?;
+            let expected_key = cache_key(manifest.source_tier.clone(), &tier.sha256);
+            if manifest.schema_version != 1
+                || manifest.status != "experimental_structurally_validated"
+                || manifest.launchable
+                || manifest.profile_id != PROFILE_ID
+                || manifest.cache_key != cache_key_name
+                || manifest.cache_key != expected_key
+                || manifest.worker_sha256 != sha256(WORKER.as_bytes())
+                || manifest.profile_sha256 != sha256(PROFILE.as_bytes())
+                || manifest.requirements_lock_sha256 != sha256(REQUIREMENTS_LOCK.as_bytes())
+                || manifest.environment_lock_sha256 != sha256(ENVIRONMENT_LOCK.as_bytes())
+                || manifest.third_party_notice_sha256 != sha256(NOTICE.as_bytes())
+            {
+                bail!("Experimental recovery cache provenance is invalid");
+            }
+            validate_inventory_file_closure(path, &manifest.files, &manifest.worker_report_sha256)?;
+            Ok(ExperimentalInventorySummary {
+                provenance: serde_json::json!({
+                    "schema_version": 1,
+                    "status": manifest.status,
+                    "launchable": false,
+                    "profile_id": PROFILE_ID,
+                    "cache_key": manifest.cache_key,
+                    "source_tier": manifest.source_tier,
+                    "lineage_kind": "gguf_recovered_fp16",
+                }),
+                quant_type: "F16 recovered".into(),
+            })
+        }
+        ExperimentalInventoryCacheKind::RequantizedMlx => {
+            let manifest_path = path.join("manifest.json");
+            require_regular_file_bounded(
+                &manifest_path,
+                MAX_MANIFEST_BYTES,
+                "re-quantized cache manifest",
+            )?;
+            let manifest: RequantizeManifest =
+                serde_json::from_reader(fs::File::open(manifest_path)?)?;
+            let expected_key = requantize_cache_key(&manifest.recipe);
+            if manifest.schema_version != 1
+                || manifest.status != "experimental_requantized_structurally_validated"
+                || manifest.launchable
+                || manifest.profile_id != REQUANT_PROFILE_ID
+                || manifest.cache_key != cache_key_name
+                || manifest.cache_key != expected_key
+                || manifest.source_recovery_cache_key != R2_F16_CACHE_KEY
+                || manifest.worker_sha256 != sha256(REQUANT_WORKER.as_bytes())
+                || manifest.profile_sha256 != sha256(REQUANT_PROFILE.as_bytes())
+                || manifest.environment_lock_sha256 != sha256(REQUANT_ENVIRONMENT_LOCK.as_bytes())
+                || manifest.third_party_notice_sha256 != sha256(REQUANT_NOTICE.as_bytes())
+            {
+                bail!("Experimental re-quantized cache provenance is invalid");
+            }
+            validate_inventory_file_closure(path, &manifest.files, &manifest.worker_report_sha256)?;
+            let recipe = manifest.recipe.profile_name();
+            Ok(ExperimentalInventorySummary {
+                provenance: serde_json::json!({
+                    "schema_version": 1,
+                    "status": manifest.status,
+                    "launchable": false,
+                    "profile_id": REQUANT_PROFILE_ID,
+                    "cache_key": manifest.cache_key,
+                    "source_recovery_cache_key": manifest.source_recovery_cache_key,
+                    "recipe": {
+                        "id": recipe,
+                        "bits": manifest.recipe.bits(),
+                        "group_size": 64,
+                    },
+                    "lineage_kind": "mlx_requantized",
+                }),
+                quant_type: recipe.into(),
+            })
+        }
+    }
+}
+
+fn validate_inventory_file_closure(
+    cache: &Path,
+    expected_files: &BTreeMap<String, String>,
+    expected_report_sha256: &str,
+) -> Result<()> {
+    let actual_files = manifest_files(cache)?;
+    if &actual_files != expected_files
+        || actual_files.get("validation.json").map(String::as_str) != Some(expected_report_sha256)
+    {
+        bail!("Experimental cache differs from its complete published file closure");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn inventory_test_manifest(
+    kind: ExperimentalInventoryCacheKind,
+    files: BTreeMap<String, String>,
+) -> Result<(String, serde_json::Value)> {
+    let report_sha = files
+        .get("validation.json")
+        .cloned()
+        .ok_or_else(|| anyhow!("Test file closure requires validation.json"))?;
+    match kind {
+        ExperimentalInventoryCacheKind::RecoveredGguf => {
+            let profile: RecoveryProfile = serde_json::from_str(PROFILE)?;
+            let tier = RecoveryTier::F16;
+            let source = profile
+                .gguf_source
+                .tiers
+                .get(tier.profile_name())
+                .ok_or_else(|| anyhow!("Test profile has no F16 tier"))?;
+            let key = cache_key(tier.clone(), &source.sha256);
+            let manifest = RecoveryManifest {
+                schema_version: 1,
+                status: "experimental_structurally_validated".into(),
+                launchable: false,
+                profile_id: PROFILE_ID.into(),
+                cache_key: key.clone(),
+                source_tier: tier,
+                worker_sha256: sha256(WORKER.as_bytes()),
+                profile_sha256: sha256(PROFILE.as_bytes()),
+                requirements_lock_sha256: sha256(REQUIREMENTS_LOCK.as_bytes()),
+                environment_lock_sha256: sha256(ENVIRONMENT_LOCK.as_bytes()),
+                third_party_notice_sha256: sha256(NOTICE.as_bytes()),
+                worker_report_sha256: report_sha,
+                files,
+            };
+            Ok((key, serde_json::to_value(manifest)?))
+        }
+        ExperimentalInventoryCacheKind::RequantizedMlx => {
+            let recipe = MlxQuantRecipe::Affine8bitG64;
+            let key = requantize_cache_key(&recipe);
+            let manifest = RequantizeManifest {
+                schema_version: 1,
+                status: "experimental_requantized_structurally_validated".into(),
+                launchable: false,
+                profile_id: REQUANT_PROFILE_ID.into(),
+                cache_key: key.clone(),
+                source_recovery_cache_key: R2_F16_CACHE_KEY.into(),
+                recipe,
+                worker_sha256: sha256(REQUANT_WORKER.as_bytes()),
+                profile_sha256: sha256(REQUANT_PROFILE.as_bytes()),
+                environment_lock_sha256: sha256(REQUANT_ENVIRONMENT_LOCK.as_bytes()),
+                third_party_notice_sha256: sha256(REQUANT_NOTICE.as_bytes()),
+                worker_report_sha256: report_sha,
+                files,
+            };
+            Ok((key, serde_json::to_value(manifest)?))
+        }
+    }
 }
 
 fn validate_cache(

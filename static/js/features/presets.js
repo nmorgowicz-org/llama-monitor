@@ -3,6 +3,7 @@
 // Preset CRUD: load, save, copy, delete, reset. Modal management.
 
 import { sessionState, lastSystemMetrics } from '../core/app-state.js';
+import { getPlatformInfo } from '../core/platform-info.js';
 import { escapeHtml } from '../core/format.js';
 import { buildArchitectureLabel, isMoEEligible } from './setup-view.js';
 import { openModelFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
@@ -506,7 +507,7 @@ async function _ensureUnifiedFlag() {
     try {
         const headers = window.authHeaders ? window.authHeaders() : {};
         const [platform, sys, gpu] = await Promise.all([
-            fetch('/api/llama-binary/platform-info', { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
+            getPlatformInfo().catch(() => null),
             fetch('/metrics/system', { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
             fetch('/metrics/gpu', { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
         ]);

@@ -60,6 +60,28 @@ test.describe('Rapid-MLX dashboard card registry', () => {
     await expect(page.locator('[data-card-id="throughput"]')).toHaveCount(0);
   });
 
+  test('patches stable card nodes in place as telemetry changes', async ({ page }) => {
+    const stable = await page.evaluate(async sample => {
+      const cards = await import('/js/features/rapid-mlx-cards.js');
+      cards.renderRapidMlxCards(sample, 1, false, 'stable-rapid', Date.now());
+      const card = document.querySelector('[data-card-id="throughput"]');
+      const metric = [...card.querySelectorAll('.rapid-metric')]
+        .find(row => row.querySelector('span')?.textContent === 'Generation');
+      cards.renderRapidMlxCards({
+        ...sample,
+        prompt_tokens_per_second: 12.5,
+        generation_tokens_per_second: 34.5,
+      }, 2, false, 'stable-rapid', Date.now());
+      return {
+        card: card === document.querySelector('[data-card-id="throughput"]'),
+        metric: metric === [...document.querySelectorAll('[data-card-id="throughput"] .rapid-metric')]
+          .find(row => row.querySelector('span')?.textContent === 'Generation'),
+      };
+    }, fullSample);
+    expect(stable).toEqual({ card: true, metric: true });
+    await expect(page.locator('[data-card-id="throughput"]')).toContainText('34.5 t/s');
+  });
+
   test('marks failed runtime telemetry degraded and renders accessible progress', async ({ page }) => {
     const withProgress = { ...fullSample, backend_details: { progress: { current: 25, total: 100 } } };
     await render(page, withProgress, 1);

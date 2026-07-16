@@ -714,8 +714,8 @@ the llama.cpp recommendation.
 ### `POST /api/models/gguf/import/compatibility/preview`
 Auth: api-token.
 
-Performs a converter-free, network-free metadata inspection for a future experimental
-GGUF-to-MLX import. `path` must be library-relative, and its canonical target must be a
+Performs a converter-free, network-free metadata inspection for experimental
+GGUF-to-MLX recovery. `path` must be library-relative, and its canonical target must be a
 non-symlinked `.gguf` file inside the configured `models_dir`. Absolute and root-relative
 paths are rejected rather than accepted from user input.
 
@@ -733,6 +733,55 @@ explicitly not a hash of all model weights. R1 produces no weights or launchable
 
 Malformed JSON, traversal, symlinks, non-GGUF files, paths outside the model library,
 incomplete headers, or metadata/tensor directories over 64 MiB return `400`.
+
+### `GET /api/models/import-lab/availability`
+Auth: api-token.
+
+Returns the local Apple-Silicon execution gate, exact experimental profile, llama.cpp
+fallback, and the invariant that recovered output is not launchable.
+
+### `POST /api/models/import-lab/resource-estimate`
+Auth: api-token.
+
+Accepts the same `{ "path": "gguf/model.gguf" }` library-relative request as the
+compatibility preview. It returns source and estimated recovered-FP16 bytes, required
+disk space, current disk/RAM headroom, and guidance. Metadata parsing runs in a bounded
+two-worker blocking pool with a 15-second route timeout. Invalid JSON and unsafe paths
+return `400`; saturation fails fast with `429`; a timeout returns `408`. A timed-out
+blocking task retains its worker permit until it exits, preventing hidden overcommit.
+
+### `GET /api/models/import-lab/jobs`
+Auth: api-token.
+
+Lists up to 32 retained in-memory recovery jobs. Jobs expose a typed state, phase,
+progress percentage, bounded diagnostics, cancellation availability, and an optional
+terminal result. Jobs do not resume after an app restart; completed cache manifests
+remain durable model-library provenance. Public failure diagnostics use stable,
+path-free messages rather than raw worker errors.
+
+### `POST /api/models/import-lab/jobs`
+Auth: api-token.
+
+Queues the exact supported experimental profile and returns `202`:
+
+```json
+{ "source_path": "gguf/SmolLM2-135M-Instruct-Q8_0.gguf" }
+```
+
+The path is canonicalized and rejected for traversal, symlink components, non-GGUF
+targets, or targets outside `models_dir` before a worker slot is consumed. One recovery
+worker runs at a time. The original GGUF is never modified and published results remain
+`experimental` and `launchable: false`.
+
+### `GET /api/models/import-lab/jobs/{id}`
+Auth: api-token. Returns one job or `404`.
+
+### `POST /api/models/import-lab/jobs/{id}/cancel`
+Auth: api-token. Requests cooperative process-group cancellation and staging cleanup.
+
+### `DELETE /api/models/import-lab/jobs/{id}`
+Auth: api-token. Removes a terminal in-memory job record. Active jobs cannot be removed,
+and this endpoint never deletes the source GGUF or a published cache.
 
 ### `POST /api/models/library/migration/preview`
 Auth: api-token.
