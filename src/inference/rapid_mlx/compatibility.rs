@@ -88,12 +88,43 @@ impl CompatibilityProfile {
 }
 
 pub async fn probe(binary: &Path, source: RuntimeSource) -> Result<CompatibilityProfile> {
-    probe_with_limits(binary, source, PROBE_TIMEOUT, MAX_PROBE_OUTPUT_BYTES).await
+    probe_with_policy(binary, source, false, PROBE_TIMEOUT, MAX_PROBE_OUTPUT_BYTES).await
 }
 
+/// Probe a managed runtime selected from immutable, published release metadata.
+///
+/// Normal discovery remains stable-only. The runtime manager may opt a published
+/// prerelease into the same minimum-version and capability gates, but local-version
+/// builds remain ineligible for managed activation.
+#[allow(dead_code)]
+pub async fn probe_published_managed_release(
+    binary: &Path,
+    allow_prerelease: bool,
+) -> Result<CompatibilityProfile> {
+    probe_with_policy(
+        binary,
+        RuntimeSource::Managed,
+        allow_prerelease,
+        PROBE_TIMEOUT,
+        MAX_PROBE_OUTPUT_BYTES,
+    )
+    .await
+}
+
+#[cfg(test)]
 async fn probe_with_limits(
     binary: &Path,
     source: RuntimeSource,
+    timeout: Duration,
+    max_output_bytes: usize,
+) -> Result<CompatibilityProfile> {
+    probe_with_policy(binary, source, false, timeout, max_output_bytes).await
+}
+
+async fn probe_with_policy(
+    binary: &Path,
+    source: RuntimeSource,
+    allow_published_prerelease: bool,
     timeout: Duration,
     max_output_bytes: usize,
 ) -> Result<CompatibilityProfile> {
@@ -121,7 +152,10 @@ async fn probe_with_limits(
             format_version(version)
         );
     }
-    if source == RuntimeSource::Managed && !parsed_version.stable {
+    if source == RuntimeSource::Managed
+        && !parsed_version.stable
+        && !(allow_published_prerelease && parsed_version.prerelease)
+    {
         anyhow::bail!(
             "Managed Rapid-MLX runtime is {}; the managed channel requires a stable release at version {} or newer (latest directly qualified: {}). Configure this build explicitly as a user-owned custom runtime to probe it provisionally",
             version_text.trim(),
@@ -174,7 +208,7 @@ async fn probe_with_limits(
         } else {
             CompatibilityState::Provisional
         },
-        version: format_version(version),
+        version: parsed_version.exact,
         capabilities,
     })
 }
@@ -262,10 +296,12 @@ fn output_text(stdout: &[u8], stderr: &[u8]) -> String {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ParsedVersion {
     numbers: (u64, u64, u64),
     stable: bool,
+    prerelease: bool,
+    exact: String,
 }
 
 fn parse_version(text: &str) -> Option<ParsedVersion> {
@@ -292,15 +328,42 @@ fn parse_version(text: &str) -> Option<ParsedVersion> {
         let Some(patch) = parse_number(bytes, &mut cursor) else {
             continue;
         };
-        let stable = !bytes.get(cursor).is_some_and(|next| {
+        let suffix_end = bytes[cursor..]
+            .iter()
+            .position(|byte| byte.is_ascii_whitespace())
+            .map_or(bytes.len(), |offset| cursor + offset);
+        let suffix = &bytes[cursor..suffix_end];
+        let stable = !suffix.first().is_some_and(|next| {
             next.is_ascii_alphanumeric() || matches!(next, b'.' | b'+' | b'-' | b'_')
         });
+        let prerelease = !stable && is_prerelease_suffix(suffix);
         return Some(ParsedVersion {
             numbers: (major, minor, patch),
             stable,
+            prerelease,
+            exact: String::from_utf8_lossy(&bytes[start..suffix_end]).into_owned(),
         });
     }
     None
+}
+
+fn is_prerelease_suffix(suffix: &[u8]) -> bool {
+    let suffix = suffix.strip_prefix(b"-").unwrap_or(suffix);
+    let Some(first) = suffix.first() else {
+        return false;
+    };
+    if !first.is_ascii_alphabetic()
+        || suffix.contains(&b'+')
+        || !suffix
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+    {
+        return false;
+    }
+    let lowercase = String::from_utf8_lossy(suffix).to_ascii_lowercase();
+    ["a", "alpha", "b", "beta", "rc", "dev"]
+        .iter()
+        .any(|prefix| lowercase.starts_with(prefix))
 }
 
 fn parse_number(bytes: &[u8], cursor: &mut usize) -> Option<u64> {
@@ -332,6 +395,8 @@ mod tests {
             Some(ParsedVersion {
                 numbers,
                 stable: true,
+                prerelease: false,
+                exact: format!("{}.{}.{}", numbers.0, numbers.1, numbers.2),
             })
         };
         assert_eq!(parse_version("rapid-mlx 0.10.9"), stable((0, 10, 9)));
@@ -349,6 +414,9 @@ mod tests {
         ] {
             assert_eq!(parse_version(version).unwrap().stable, false, "{version}");
         }
+        assert!(parse_version("0.10.11rc1").unwrap().prerelease);
+        assert!(parse_version("0.10.11-beta.2").unwrap().prerelease);
+        assert!(!parse_version("0.10.11+local").unwrap().prerelease);
     }
 
     #[test]
@@ -448,6 +516,32 @@ mod tests {
             let error = probe(&binary, RuntimeSource::Managed).await.unwrap_err();
             assert!(format!("{error:#}").contains("--served-model-name"));
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn published_managed_prerelease_uses_the_full_managed_gate() {
+        let required = "--host --port --log-level --served-model-name --timeout --max-cache-blocks";
+        let (_dir, binary) = fixture_runtime("0.10.11rc1", required);
+        assert!(probe(&binary, RuntimeSource::Managed).await.is_err());
+        let profile = probe_published_managed_release(&binary, true)
+            .await
+            .unwrap();
+        assert_eq!(profile.state, CompatibilityState::Verified);
+        assert_eq!(profile.version, "0.10.11rc1");
+
+        let (_dir, binary) = fixture_runtime("0.10.11+local", required);
+        assert!(
+            probe_published_managed_release(&binary, true)
+                .await
+                .is_err()
+        );
+
+        let (_dir, binary) = fixture_runtime("0.10.11rc1", "--host --port");
+        let error = probe_published_managed_release(&binary, true)
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("--log-level"));
     }
 
     #[test]

@@ -856,6 +856,83 @@ Integrate backend selection into the Spawn Wizard and implement full Rapid-MLX r
 - Runtime management via `uv tool install`.
 - Deterministic engine recommendation.
 
+### Phase 6 delivery gates
+
+#### 6A — Managed runtime lifecycle
+
+- Discover published Rapid-MLX releases dynamically. Do not maintain a per-release
+  allowlist: any exact version at or above the compatibility floor may proceed when its
+  staged CLI/capability/readiness contract passes. Release provenance and capability
+  evidence, rather than a hard-coded version string, determine activation.
+- Install `rapid-mlx==<exact-version>` into a new immutable app-owned `uv tool`
+  environment. Never update an active environment in place. A typed completion manifest
+  and atomic active pointer retain one previous known-good environment for rollback.
+- Stable is the default channel; published preview releases may be explicitly selected
+  and receive the same staged gates. Drafts, mutable branches, unversioned local builds,
+  and arbitrary package names are never treated as managed releases. User-owned custom,
+  Brew, Pip, and Pipx runtimes remain discoverable/provisional and are never mutated.
+- Mutations are Apple-Silicon-only, concurrency-bounded, time-limited, and authenticated
+  with `db-admin-token` plus an explicit app-native confirmation. Status/release reads
+  require `api-token`. Diagnostics are bounded and path/secret-safe.
+- Gate: fixture-driven install, failed-preflight/no-pointer-change, repair isolation,
+  upgrade, rollback, concurrent-mutation rejection, symlink/path rejection, and
+  unsupported-platform tests plus Windows compilation.
+- Checkpoint: `feat(binary): manage Rapid-MLX runtimes`.
+
+#### 6B — Engine-aware launch UX
+
+- Add premium engine cards before model selection. The recommendation is deterministic:
+  GGUF selects llama.cpp; validated MLX directories, authoritative safetensors, and
+  Rapid-MLX HF/alias sources select Rapid-MLX when local support and a compatible runtime
+  exist. Unsupported or ambiguous inputs explain the decision and preserve a manual
+  choice rather than silently switching.
+- Switching engines preserves shared access and sampling values (port, host, API key,
+  temperature, top-p/top-k, penalties, max tokens, and seed). Backend-owned fields stay
+  isolated and llama.cpp-only memory/speculation controls are hidden or disabled for
+  Rapid-MLX, never serialized into its configuration.
+- Add Settings runtime management and an active `Engine · Model ●` indicator. Runtime
+  operations use app-native confirmation/progress/result surfaces; no browser dialogs.
+  Installing or upgrading does not restart or reroute an active inference session.
+- Gate: preset round-trip, backend payload exclusivity, recommendation cases, unsupported
+  platform states, install/upgrade/repair/rollback UI, active-session indicator, dark and
+  light desktop, narrow layout, reduced motion, and isolated Playwright.
+- Checkpoint: `feat(wizard): add engine-aware Rapid-MLX management`.
+
+#### 6C — Phase verification
+
+- Independent review covers updater provenance, atomicity/rollback, auth, secrets,
+  platform gates, backend/frontend contracts, accessibility, and stale llama-only UI.
+- Run the complete mandatory Rust/JavaScript/Windows/UI gates and record the checkpoint
+  evidence before Phase 7 begins.
+
+### Phase 6A checkpoint (2026-07-16)
+
+Status: **complete and independently approved.** The managed runtime lifecycle is ready
+for the Phase 6B product surfaces.
+
+- Published stable and explicitly selected prerelease metadata produce an opaque runtime
+  selection; arbitrary request JSON and production callers cannot assert provenance.
+- Install, upgrade, and repair stage exact releases in isolated app-owned uv directories.
+  The typed manifest, completion marker, executable SHA-256, and compatibility profile
+  must validate before `current.json` is atomically committed. Rollback revalidates the
+  previous environment. Post-commit retention maintenance cannot misreport a successful
+  activation as failed.
+- The authenticated API provides path-safe status, release discovery, deterministic
+  recommendation, install/upgrade/repair/rollback jobs, exact confirmations, bounded
+  release responses, atomic job admission, and exact-tag fallback for older published
+  versions. Managed mutations reject non-Apple-Silicon hosts before invoking uv.
+- Real uv qualification passed in a disposable app-owned root: install `0.10.9`, upgrade
+  to `0.10.10`, rollback to `0.10.9`, and reactivate `0.10.10`. No external PATH runtime
+  was present or modified.
+- Gates passed: independent verifier approval; 1,060 Rust tests with 22 intentional
+  ignores; 39 authentication-routing tests; Clippy with warnings denied; Windows GNU
+  compilation; JavaScript validation/lint; release build; formatting and diff checks.
+- Checkpoint: `feat(binary): manage Rapid-MLX runtimes`.
+
+Phase 6B begins with the engine-aware Spawn Wizard, Settings runtime controls, app-native
+confirmation/progress surfaces, and the active `Engine · Model ●` indicator. Do not add
+browser-native dialogs or couple runtime updates to active-session restart/rerouting.
+
 ### Implementation Steps
 1. **Implement the Runtime Manager**:
     - In `updater.rs`, implement versioned `install`, `upgrade`, `repair`, and rollback.

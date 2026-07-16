@@ -4,6 +4,8 @@ pub mod discovery;
 pub mod model_resolver;
 pub mod poller;
 pub mod runtime;
+#[allow(dead_code)]
+pub mod updater;
 
 use self::command::RapidMlxCommandBuilder;
 use self::compatibility::CompatibilityProfile;

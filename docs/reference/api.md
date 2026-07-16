@@ -2098,7 +2098,92 @@ Restart a locally running llama-server with the current binary (useful after ins
   - 200 with `ok: false` if:
     - No local server is running.
     - No saved server config found.
-    - Stop or restart fails.
+  - Stop or restart fails.
+
+## Rapid-MLX Runtime Management
+
+Route handlers: `src/web/api/rapid_mlx_runtime.rs`.
+
+Managed Rapid-MLX environments are immutable and app-owned. Mutations are available
+only on Apple Silicon macOS and never modify Homebrew, Pip, Pipx, or explicitly
+configured custom runtimes. A successful activation retains the previous known-good
+environment for rollback. Runtime status and job payloads intentionally omit local
+executable paths.
+
+### `GET /api/rapid-mlx/runtime/status`
+
+Auth: `api-token`.
+
+Returns platform support, `uv` installer availability, mutation state, rollback
+availability, the active managed runtime, retained inventory, and recent runtime jobs.
+Inventory entries contain the environment ID, exact version, release channel,
+active/rollback flags, and completion state.
+
+### `GET /api/rapid-mlx/runtime/releases`
+
+Auth: `api-token`.
+
+Returns recent non-draft published Rapid-MLX releases discovered from the upstream
+GitHub release feed. Stable releases are the default; a published prerelease must be
+selected explicitly and passes the same staged verification gates. Exact versions older
+than the recent list are verified through immutable tag metadata when selected.
+
+### `POST /api/rapid-mlx/recommend`
+
+Auth: `api-token`.
+
+Returns a deterministic, explainable backend recommendation for a typed artifact.
+Accepted `artifact_kind` values are `gguf`, `mlx_directory`,
+`authoritative_safetensors`, `rapid_mlx_hf_repository`, `rapid_mlx_alias`, and
+`unknown`. GGUF always recommends llama.cpp. Rapid-MLX-native sources recommend
+Rapid-MLX only when the local platform and a compatible runtime are available.
+
+### `POST /api/rapid-mlx/runtime/install`
+
+Auth: `db-admin-token`.
+
+```json
+{
+  "version": "0.10.10",
+  "channel": "stable",
+  "confirm": "INSTALL_RAPID_MLX_RUNTIME"
+}
+```
+
+The exact version and channel must match non-draft published release metadata. Returns
+`202` with a job ID after reserving the single runtime-mutation slot.
+
+### `POST /api/rapid-mlx/runtime/upgrade`
+
+Auth: `db-admin-token`.
+
+Uses the install payload with confirmation `UPGRADE_RAPID_MLX_RUNTIME`. The active
+environment is never modified in place and an active inference session is not restarted
+or rerouted.
+
+### `POST /api/rapid-mlx/runtime/repair`
+
+Auth: `db-admin-token`.
+
+Request: `{ "confirm": "REPAIR_RAPID_MLX_RUNTIME" }`. Rebuilds the active exact release
+in a new isolated environment and activates it only after re-verifying the exact version
+and channel against published release metadata and completing runtime validation.
+
+### `POST /api/rapid-mlx/runtime/rollback`
+
+Auth: `db-admin-token`.
+
+Request: `{ "confirm": "ROLLBACK_RAPID_MLX_RUNTIME" }`. Revalidates and atomically
+activates the retained previous known-good environment.
+
+### `GET /api/rapid-mlx/runtime/jobs/{id}`
+
+Auth: `api-token`.
+
+Returns `queued`, `running`, `complete`, or `failed` state plus a path-safe message and,
+on success, the active public runtime metadata. Only 16 recent jobs are retained. A
+concurrent mutation request returns `429`; malformed or unknown JSON fields return
+`400`.
 
 ## Remote Agent
 

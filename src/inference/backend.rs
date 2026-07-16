@@ -2,11 +2,90 @@ use anyhow::Result;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::inference::InferenceBackend;
 use crate::inference::capabilities::CapabilitySet;
 use crate::inference::llama_cpp::LlamaCppAdapter;
 use crate::inference::metrics::InferenceMetricsSnapshot;
 use crate::inference::rapid_mlx::RapidMlxAdapter;
 use crate::inference::supervisor::SupervisedLaunch;
+
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RecommendationArtifactKind {
+    Gguf,
+    MlxDirectory,
+    AuthoritativeSafetensors,
+    RapidMlxHfRepository,
+    RapidMlxAlias,
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct BackendRecommendationInput {
+    #[serde(default)]
+    pub artifact_kind: RecommendationArtifactKind,
+    #[serde(default)]
+    pub rapid_mlx_local_available: bool,
+    #[serde(default)]
+    pub rapid_mlx_runtime_compatible: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct BackendRecommendation {
+    pub recommended_backend: Option<InferenceBackend>,
+    pub state: &'static str,
+    pub reason: &'static str,
+}
+
+/// Return an explainable engine recommendation without inspecting filenames or
+/// silently substituting one backend for another.
+pub fn recommend_backend(input: &BackendRecommendationInput) -> BackendRecommendation {
+    match input.artifact_kind {
+        RecommendationArtifactKind::Gguf => BackendRecommendation {
+            recommended_backend: Some(InferenceBackend::LlamaCpp),
+            state: "ready",
+            reason: "GGUF runs natively with llama.cpp.",
+        },
+        RecommendationArtifactKind::MlxDirectory
+        | RecommendationArtifactKind::AuthoritativeSafetensors
+        | RecommendationArtifactKind::RapidMlxHfRepository
+        | RecommendationArtifactKind::RapidMlxAlias
+            if !input.rapid_mlx_local_available =>
+        {
+            BackendRecommendation {
+                recommended_backend: None,
+                state: "platform_unavailable",
+                reason: "Local Rapid-MLX requires Apple Silicon macOS; remote attachment remains available.",
+            }
+        }
+        RecommendationArtifactKind::MlxDirectory
+        | RecommendationArtifactKind::AuthoritativeSafetensors
+        | RecommendationArtifactKind::RapidMlxHfRepository
+        | RecommendationArtifactKind::RapidMlxAlias
+            if !input.rapid_mlx_runtime_compatible =>
+        {
+            BackendRecommendation {
+                recommended_backend: None,
+                state: "runtime_required",
+                reason: "This model is Rapid-MLX compatible, but a compatible local runtime is required.",
+            }
+        }
+        RecommendationArtifactKind::MlxDirectory
+        | RecommendationArtifactKind::AuthoritativeSafetensors
+        | RecommendationArtifactKind::RapidMlxHfRepository
+        | RecommendationArtifactKind::RapidMlxAlias => BackendRecommendation {
+            recommended_backend: Some(InferenceBackend::RapidMlx),
+            state: "ready",
+            reason: "This source is native to the verified Rapid-MLX resolution path.",
+        },
+        RecommendationArtifactKind::Unknown => BackendRecommendation {
+            recommended_backend: None,
+            state: "manual_selection",
+            reason: "Choose an engine after selecting a typed model source.",
+        },
+    }
+}
 
 /// The BackendAdapter is an enum to ensure exhaustive and zero-overhead dispatch
 /// to the specific implementation for each inference engine.
@@ -69,5 +148,47 @@ impl BackendAdapter {
             Self::LlamaCpp(adapter) => adapter.capabilities(),
             Self::RapidMlx(adapter) => adapter.capabilities(),
         }
+    }
+}
+
+#[cfg(test)]
+mod recommendation_tests {
+    use super::*;
+
+    #[test]
+    fn gguf_always_recommends_llama_cpp() {
+        let result = recommend_backend(&BackendRecommendationInput {
+            artifact_kind: RecommendationArtifactKind::Gguf,
+            rapid_mlx_local_available: true,
+            rapid_mlx_runtime_compatible: true,
+        });
+        assert_eq!(result.recommended_backend, Some(InferenceBackend::LlamaCpp));
+        assert_eq!(result.state, "ready");
+    }
+
+    #[test]
+    fn native_mlx_requires_platform_and_compatible_runtime() {
+        let mut input = BackendRecommendationInput {
+            artifact_kind: RecommendationArtifactKind::MlxDirectory,
+            rapid_mlx_local_available: false,
+            rapid_mlx_runtime_compatible: false,
+        };
+        assert_eq!(recommend_backend(&input).state, "platform_unavailable");
+
+        input.rapid_mlx_local_available = true;
+        assert_eq!(recommend_backend(&input).state, "runtime_required");
+
+        input.rapid_mlx_runtime_compatible = true;
+        assert_eq!(
+            recommend_backend(&input).recommended_backend,
+            Some(InferenceBackend::RapidMlx)
+        );
+    }
+
+    #[test]
+    fn unknown_sources_require_manual_selection() {
+        let result = recommend_backend(&BackendRecommendationInput::default());
+        assert_eq!(result.recommended_backend, None);
+        assert_eq!(result.state, "manual_selection");
     }
 }
