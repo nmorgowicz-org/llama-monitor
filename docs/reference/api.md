@@ -660,20 +660,32 @@ Route handlers: `src/web/api/models.rs`.
 
 ### `GET /api/models`
 Auth: api-token.
-Returns the current scan result for the configured `models_dir`.
-
-The response now includes per-model `tags` and `classification` fields (derived from filename heuristics):
+Returns the unified typed inventory for the configured `models_dir` as an array. Legacy
+GGUF fields remain available, while every entry also reports its format, source,
+lifecycle, compatibility, supported backends, companion kind, and typed Rapid-MLX
+source when applicable. GGUF entries retain `tags` and filename-derived
+`classification` fields.
 
 ```json
 [
   {
-    "path": "/models/Qwen3.5-27B-Q4_0.gguf",
+    "path": "/models/gguf/Qwen3.5-27B-Q4_0.gguf",
     "filename": "Qwen3.5-27B-Q4_0.gguf",
     "size_bytes": 4680000000,
     "size_display": "4.4 GB",
     "quant_type": "Q4_0",
     "model_name": "Qwen3.5-27B",
     "is_split": false,
+    "format": "gguf",
+    "source": "local",
+    "lifecycle": "ready",
+    "compatibility": "verified",
+    "supported_backends": ["llama_cpp"],
+    "companion_kind": null,
+    "model_source": {
+      "kind": "gguf_file",
+      "path": "/models/gguf/Qwen3.5-27B-Q4_0.gguf"
+    },
     "tags": [],
     "classification": { "is_mtp": false, "is_moe": false, "is_vision": false }
   }
@@ -683,6 +695,48 @@ The response now includes per-model `tags` and `classification` fields (derived 
 Improved quant detection (branch-specific):
 - Now recognizes `-IQ` and `_IQ` patterns (e.g., IQ2_XXS, IQ3_M).
 - MTP models: files ending in `-mtp.gguf` (Unsloth naming) are marked as MTP and shown with a badge in the UI.
+
+### `GET /api/models/inventory`
+Auth: api-token.
+
+Returns `{ models_dir, entries, truncated }`. `entries` uses the same typed inventory
+objects as `GET /api/models`; this wrapper also reports the canonical library root and
+whether the 10,000-entry safety bound was reached.
+
+### `POST /api/models/rapid-mlx/resolve/preview`
+Auth: api-token.
+
+Validates a tagged Rapid-MLX model source without downloading, converting, or launching
+it. The response state is `ready`, `conversion_required`, `unsupported_source`, or
+`invalid`, with warnings and remediation. GGUF returns `unsupported_source` and retains
+the llama.cpp recommendation.
+
+### `POST /api/models/library/migration/preview`
+Auth: api-token.
+
+Builds a non-mutating, bounded migration plan. The optional body selects only explicit
+legacy Hugging Face repositories:
+
+```json
+{ "hf_repos": ["mlx-community/Qwen3-0.6B-4bit"] }
+```
+
+### `POST /api/models/library/migration/execute`
+Auth: db-admin-token.
+
+Executes the exact previewed plan. Concurrent executions are rejected.
+
+```json
+{
+  "plan_id": "<64-character preview id>",
+  "confirmation": "MIGRATE_MODEL_LIBRARY",
+  "hf_repos": ["mlx-community/Qwen3-0.6B-4bit"]
+}
+```
+
+The repository selection must match the preview. The operation is journaled and
+restartable; a stale preview, collision, path escape, or changed persistence file is
+rejected before a new plan starts.
 
 ### `POST /api/models/refresh`
 Auth: api-token.
@@ -1928,6 +1982,9 @@ Endpoints to manage llama-server binary.
 Return current platform and backend information.
 
 - Auth: `api-token`.
+- `rapid_mlx_local_available` is true only for `macOS` on `aarch64`.
+- `rapid_mlx_local_requirement` provides the user-facing platform requirement used to
+  gate local configure actions. This does not prohibit attaching to a remote endpoint.
 
 ### `GET /api/llama-binary/latest`
 Return the latest available llama.cpp release.

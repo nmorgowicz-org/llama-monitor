@@ -1,11 +1,13 @@
 pub mod command;
 pub mod compatibility;
 pub mod discovery;
+pub mod model_resolver;
 pub mod poller;
 pub mod runtime;
 
 use self::command::RapidMlxCommandBuilder;
 use self::compatibility::CompatibilityProfile;
+use self::model_resolver::{RapidMlxModelSource, ResolvedRapidMlxLaunchModel};
 use self::runtime::RuntimeMetadata;
 use crate::inference::capabilities::CapabilitySet;
 use crate::inference::metrics::InferenceMetricsSnapshot;
@@ -19,6 +21,9 @@ use std::time::{Duration, Instant};
 pub struct RapidMlxConfig {
     #[serde(default)]
     pub model_path: String,
+    /// Typed source for new configurations. `model_path` remains the migration fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_source: Option<RapidMlxModelSource>,
     #[serde(default)]
     pub served_model_name: Option<String>,
     #[serde(default)]
@@ -53,10 +58,27 @@ fn default_log_level() -> String {
     "INFO".into()
 }
 
+pub fn ensure_local_platform_supported() -> Result<()> {
+    if std::env::consts::OS != "macos" {
+        return Err(anyhow!(
+            "Rapid-MLX local execution requires macOS on Apple Silicon. Detected OS: {}",
+            std::env::consts::OS
+        ));
+    }
+    if std::env::consts::ARCH != "aarch64" {
+        return Err(anyhow!(
+            "Rapid-MLX local execution requires Apple Silicon (aarch64). Detected architecture: {}",
+            std::env::consts::ARCH
+        ));
+    }
+    Ok(())
+}
+
 impl Default for RapidMlxConfig {
     fn default() -> Self {
         Self {
             model_path: String::new(),
+            model_source: None,
             served_model_name: None,
             executable_path: None,
             managed_runtime_path: None,
@@ -71,6 +93,12 @@ impl Default for RapidMlxConfig {
 }
 
 impl RapidMlxConfig {
+    pub fn effective_model_source(&self) -> Result<RapidMlxModelSource> {
+        self.model_source.clone().map(Ok).unwrap_or_else(|| {
+            self::model_resolver::source_from_legacy_model_path(&self.model_path)
+        })
+    }
+
     pub fn validate_access(&self, fallback_api_key: Option<&str>) -> Result<()> {
         let loopback = matches!(
             self.host.as_str(),
@@ -92,7 +120,7 @@ impl RapidMlxConfig {
 
 pub struct RapidMlxAdapter {
     pub runtime: RuntimeMetadata,
-    pub model_path: PathBuf,
+    pub resolved_model: ResolvedRapidMlxLaunchModel,
     pub served_model_name: Option<String>,
     pub host: String,
     pub port: u16,
@@ -106,11 +134,13 @@ pub struct RapidMlxAdapter {
 }
 
 impl RapidMlxAdapter {
-    #[allow(dead_code)]
-    pub fn new(runtime: RuntimeMetadata, model_path: PathBuf) -> Self {
+    pub fn from_resolved(
+        runtime: RuntimeMetadata,
+        resolved_model: ResolvedRapidMlxLaunchModel,
+    ) -> Self {
         Self {
             runtime,
-            model_path,
+            resolved_model,
             served_model_name: None,
             host: "127.0.0.1".to_string(),
             port: 8000,
@@ -145,19 +175,7 @@ impl RapidMlxAdapter {
     }
 
     pub async fn validate(&self) -> Result<()> {
-        if std::env::consts::OS != "macos" {
-            return Err(anyhow!(
-                "Rapid-MLX is only supported on macOS. Detected: {}",
-                std::env::consts::OS
-            ));
-        }
-
-        if std::env::consts::ARCH != "aarch64" {
-            return Err(anyhow!(
-                "Rapid-MLX requires Apple Silicon (aarch64). Detected: {}",
-                std::env::consts::ARCH
-            ));
-        }
+        ensure_local_platform_supported()?;
 
         if !self.runtime.executable_path.is_file() {
             return Err(anyhow!(
@@ -165,7 +183,7 @@ impl RapidMlxAdapter {
                 self.runtime.executable_path.display()
             ));
         }
-        if self.model_path.as_os_str().is_empty() {
+        if self.resolved_model.launch_argument.trim().is_empty() {
             return Err(anyhow!("Rapid-MLX requires a model path"));
         }
         RapidMlxConfig {
@@ -179,7 +197,7 @@ impl RapidMlxAdapter {
     }
 
     pub async fn build_launch(&self) -> Result<SupervisedLaunch> {
-        let mut builder = RapidMlxCommandBuilder::new(self.model_path.clone())
+        let mut builder = RapidMlxCommandBuilder::new(self.resolved_model.clone())
             .host(self.host.clone())
             .port(self.port);
 
@@ -412,13 +430,13 @@ mod chat_tests {
     use super::*;
 
     fn adapter() -> RapidMlxAdapter {
-        RapidMlxAdapter::new(
+        RapidMlxAdapter::from_resolved(
             RuntimeMetadata {
                 executable_path: "rapid-mlx".into(),
                 source: runtime::RuntimeSource::Managed,
                 version: "0.10.9".into(),
             },
-            "model".into(),
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         )
     }
 

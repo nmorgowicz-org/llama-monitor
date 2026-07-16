@@ -6,13 +6,21 @@
 | Status | Research plan; intentionally outside the Rapid-MLX release gate |
 | Product goal | Let users recover valuable GGUF-only finetunes for MLX without presenting reverse conversion as lossless or universally safe |
 | Initial host | Apple Silicon macOS |
-| Native runtime | Rapid-MLX `v0.10.9` / mlx-lm |
+| Verified native runtime baseline | Rapid-MLX `v0.10.9` / mlx-lm |
+| First upgrade qualification | Rapid-MLX `v0.10.10` at `5ca536275e89ddf0de3b49bd6f55fad80e42656e` |
 | Candidate reverse converter | `barrontang/gguf2mlx` at audited SHA `6a0da6529f233df79362cbf62dd96221c895351f` |
 
 ## Executive Decision
 
 GGUF-only conversion remains a desired llama-monitor capability, but it is a separate
 Experimental Import Lab rather than a prerequisite for the first Rapid-MLX release.
+
+Phase 5.5 also owns one bounded runtime-upgrade qualification. Rapid-MLX `v0.10.10`
+was published on 2026-07-15 with release-artifact acceptance and publication-integrity
+hardening plus the version bump. It does not advertise an inference feature or API
+change, but release notes alone are not compatibility evidence. The lab must exercise
+an isolated managed `v0.10.9` -> `v0.10.10` upgrade before using `v0.10.10` in GGUF
+conversion parity gates. Phase 6 still owns the production updater and its app UI.
 
 The supported model paths remain:
 
@@ -393,6 +401,23 @@ multimodal models.
 
 ## Milestones and Gates
 
+### R0.5 — Rapid-MLX v0.10.10 upgrade qualification
+
+- Verify the tag, source SHA, package version, wheel identity, and installed
+  `rapid-mlx --version`; never accept version text alone as provenance.
+- Install `v0.10.10` into a new app-scoped staging environment without changing the
+  active `v0.10.9` environment or any user-owned Brew/Pip installation.
+- Run capability discovery, command/profile validation, readiness, one deterministic
+  chat stream, telemetry/status parsing, stop, and the Phase 5 native-MLX fixture.
+- Atomically activate the staged version only after every probe passes, retain
+  `v0.10.9` as last-known-good, then prove rollback restores it.
+- If app-owned upgrade plumbing is not implemented yet, capture the same evidence with
+  an isolated manual harness and carry its contract into the Phase 6 runtime manager.
+- Gate: a failed install, provenance check, capability probe, launch, or chat leaves
+  `v0.10.9` active and produces bounded, redacted diagnostics.
+- Checkpoint: recorded `v0.10.10` compatibility and rollback evidence; no production
+  updater UI is implied by this research milestone.
+
 ### R0 — Tool survey and evidence matrix
 
 - Continue surveying maintained reverse-conversion tools.
@@ -466,6 +491,10 @@ multimodal models.
 
 - Rapid-MLX `v0.10.9`:
   <https://github.com/raullenchai/Rapid-MLX/tree/3edb3ac69c1d1c5e81836a5d146e5f81048658d9>
+- Rapid-MLX `v0.10.10` release:
+  <https://github.com/raullenchai/Rapid-MLX/releases/tag/v0.10.10>
+- Rapid-MLX `v0.10.10` release-artifact hardening:
+  <https://github.com/raullenchai/Rapid-MLX/pull/1115>
 - Rapid-MLX GGUF direction note:
   <https://github.com/raullenchai/Rapid-MLX/blob/3edb3ac69c1d1c5e81836a5d146e5f81048658d9/vllm_mlx/_download_gate.py#L58-L73>
 - Official mlx-lm `v0.31.3` conversion:

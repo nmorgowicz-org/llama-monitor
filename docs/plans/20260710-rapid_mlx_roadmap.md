@@ -537,17 +537,58 @@ the separate experimental Phase 5.5 gate.
 **Files to Create**:
 - `src/inference/rapid_mlx/model_resolver.rs`: The full `RapidMlxModelSource` resolution pipeline.
 
+**Structured model library**:
+
+The configured `models_dir` is the single user-visible model-library root. New installs
+use this backend-neutral layout:
+
+```text
+models/
+├── gguf/                       # llama.cpp models and mmproj companions
+├── mlx/
+│   ├── native/                 # imported/user-managed native MLX directories
+│   └── converted/              # immutable, manifest-backed official conversions
+├── transformers/              # complete local HF/safetensors source models
+├── cache/
+│   └── huggingface/
+│       ├── hub/                # server-delegated HF snapshots/blobs
+│       └── xet/                # Xet-backed content when used
+└── .staging/                   # incomplete downloads/conversions; never launchable
+```
+
+- Existing root-level model files remain discoverable for backward compatibility.
+- Migration is explicit, same-filesystem, restartable, and journaled. It rewrites
+  persisted preset, session, tag, draft-model, and mmproj paths atomically only after
+  each move succeeds. It never silently drops an unknown reference or moves a file
+  outside the configured model-library/config roots.
+- Root-level complete `.gguf`/mmproj files move to `gguf/`; incomplete `.part` files
+  move to `.staging/downloads/`. Existing large libraries are not copied.
+- App-launched Rapid-MLX and official HF download tools receive `HF_HUB_CACHE` and
+  `HF_XET_CACHE` pointing inside this library. `HF_TOKEN` remains transient and the
+  Hugging Face cache remains content-addressed rather than duplicated into `mlx/`.
+- Migration may explicitly import selected app-referenced repositories from the user's
+  previous default Hugging Face cache. It must not relocate the entire shared cache or
+  unrelated repositories owned by other applications.
+- The model library and selectors give every discovered item first-class badges for
+  runtime format, source, lifecycle state, and compatibility. GGUF, mmproj, native
+  MLX, converted MLX, Transformers/safetensors sources, HF-cached snapshots, and
+  incomplete/staged items must not fall back to filename-only or second-class rows.
+
 **Logic to Implement**:
 - Resolver pipeline: `Input` $\rightarrow$ `Validate` $\rightarrow$ `ResolvedLaunchModel`.
 - Official `mlx_lm.convert` orchestration for authoritative original/merged HF
   safetensors, with optional one-time MLX quantization.
 - Provenance and cache management keyed by source revision/hash, mlx-lm version, and
   quantization recipe.
+- The first verified converter profile is official `mlx-lm==0.31.3`. Conversion fails
+  closed when the selected runtime environment does not prove that exact package and
+  the required `python -m mlx_lm convert` flag contract.
 
 ### Implementation Steps
 1. **Define Model Sources**: Implement the `RapidMlxModelSource` enum
    (`MlxDirectory`, `HuggingFaceRepo`, `Alias`, `AuthoritativeSafetensors`,
-   `UnsupportedGguf`).
+   `GgufFile`). `GgufFile` preserves the input; `unsupported_source` is the resolver
+   outcome and never a launchable model kind.
 2. **Implement the Resolution Pipeline**:
     - Validate local MLX directories and HF repo IDs.
     - Resolve aliases via the runtime catalog.
@@ -564,6 +605,19 @@ the separate experimental Phase 5.5 gate.
 5. **Implement the Resolved Output**:
     - Create `ResolvedRapidMlxLaunchModel` which contains the final path to pass to `rapid-mlx serve`.
 6. **Wire to Adapter**: Ensure `RapidMlxAdapter::build_launch` consumes only the `ResolvedRapidMlxLaunchModel`.
+7. **Unify Storage Discovery**:
+    - Discover legacy root models and every structured directory through one typed
+      inventory contract.
+    - Keep physical cache ownership distinct from user-visible model identity and
+      deduplicate HF blob/snapshot aliases without copying weights.
+8. **Migrate Safely**:
+    - Plan and preview every filesystem move and persisted-path rewrite.
+    - Journal completed moves, use atomic JSON rewrites, resume after interruption,
+      and provide rollback metadata without attempting cross-filesystem renames.
+9. **Render First-Class Badges**:
+    - Use the shared inventory metadata in model cards, selectors, and details.
+    - Badge text, color, iconography, and tooltips must work in dark/light themes,
+      reduced motion, keyboard navigation, and narrow layouts.
 
 ### Hard Gates (Verification)
 - **Clippy Compliance**: Run `cargo clippy -- -D warnings`. Zero warnings are allowed.
@@ -579,6 +633,19 @@ the separate experimental Phase 5.5 gate.
   yield a launchable cache entry.
 - **End-to-End Resolution**: Resolve and launch at least one local MLX directory and
   one supported HF identifier.
+- **Storage Migration**: Fixture and live-library evidence proves GGUF/mmproj moves,
+  `.part` staging, persisted-path rewrites, interruption resume, collision refusal,
+  and legacy discovery without copying or losing data.
+- **App-Scoped HF Cache**: Spawned native HF, alias, and conversion-download commands
+  use the configured library's HF hub/Xet cache paths while tokens remain absent from
+  argv, manifests, persisted data, logs, and diagnostics.
+- **Selective HF Import**: The live migration moves the known Rapid-MLX smoke model into
+  the app-scoped cache without moving unrelated Hugging Face repositories or breaking
+  the snapshot's blob links.
+- **Badge Parity**: Screenshot and Playwright evidence covers every inventory kind in
+  dark/light and narrow layouts. Each item exposes format, source, status, and
+  compatibility labels with accessible names; no backend is represented only by a
+  filename or generic fallback badge.
 - **Checkpoint**: Verifier sign-off followed by `feat(models): resolve Rapid-MLX model sources`.
 
 ### Known Pitfalls & Constraints
@@ -586,6 +653,64 @@ the separate experimental Phase 5.5 gate.
   complete config, tokenizer, model class, and revision/hash identity.
 - **Staged output**: Official conversion output becomes launchable only after load
   validation and atomic promotion.
+- **Apple Silicon local gate**: Local Rapid-MLX configuration and launch are available
+  only on macOS/aarch64. Rust rejects unsupported hosts before discovery, download, or
+  conversion side effects; other platforms retain read/manage/copy inventory access and
+  may still attach to a remote compatible endpoint.
+- **No destructive implicit migration**: Startup may discover and recommend migration,
+  but moving an existing library requires an explicit migration operation and a durable
+  journal. A collision, symlink escape, or failed metadata rewrite stops the operation.
+
+### Phase 5 checkpoint and handoff (2026-07-15)
+
+Phase 5 is complete. Stop here; Phase 5.5 and Phase 6 require separate explicit starts.
+
+Delivered:
+
+- Typed native MLX, revision-pinned HF, alias, authoritative safetensors, and explicit
+  unsupported GGUF sources resolve through `ResolvedRapidMlxLaunchModel`.
+- Official conversion is pinned to `mlx-lm==0.31.3`, verifies the real CLI flag
+  contract, uses bounded/redacted subprocesses, validates a real MLX load, records
+  immutable source/tool/recipe/content hashes, and atomically promotes only complete
+  outputs. Cache reuse independently revalidates schemas, pinned tool identity,
+  immutable HF provenance, derived cache/directory identity, and every manifest hash.
+- The backend-neutral model library, authenticated inventory/resolver/migration APIs,
+  explicit Unknown/No-backend treatment, typed preset seeding, and first-class badge
+  rails are implemented. Dark, light, narrow, reduced-motion, and non-Apple platform
+  presentation are covered by the screenshot harness and Playwright.
+- Local Rapid-MLX is gated to Apple Silicon before any discovery/download/conversion
+  side effect. Other platforms retain model inventory/management and remote attach.
+- Live migration plan `874b49dc8f5c3c6174a016f503d25f2293cf89253e41e8d3f9cf889919bb49b3`
+  completed: 57 GGUFs (730,246,897,792 bytes), two partial downloads, and only the
+  selected `mlx-community/Qwen3-0.6B-4bit` repo/locks moved; two preset and six tag
+  references rewrote; 19 unrelated shared HF repositories and the root `.jinja` stayed
+  untouched. One pre-existing tag for an already absent GGUF was intentionally retained.
+- Real smoke evidence passed for a local MLX directory, a typed HF source, an official
+  Qwen/Qwen3-0.6B FP16 conversion at immutable revision
+  `c1899de289a04d12100db370d81485cdf75e47ca`, conversion cache reuse, Rapid-MLX chat and
+  status telemetry, and the migrated llama.cpp preset readiness/chat flow.
+
+Validation at the checkpoint:
+
+- Independent Phase 5 verifier sign-off, including the Apple Silicon follow-up gate.
+- Rust: full suite 870 passed / 6 ignored; focused resolver, library, Rapid-MLX, and
+  auth-routing suites passed; clippy with warnings denied passed.
+- UI: focused inventory 5/5. An earlier isolated full Playwright run passed 209 / 2
+  skipped. The final rerun passed 206 / 2 skipped with one transient module-count case
+  and three live Hugging Face search timeouts; the module-count spec then passed 2/2
+  standalone. On 2026-07-16 the user confirmed a Hugging Face service incident and
+  directed that those three external-service cases be skipped for this checkpoint.
+- JavaScript validation/lint, release build, formatting, diff check, and Windows GNU
+  cross-check passed.
+
+Next-session entry point:
+
+1. Confirm this checkpoint commit is present and the worktree is clean.
+2. Archive/fold the completed Rapid-MLX planning docs into reference/developer notes as
+   part of the later documentation-consolidation task.
+3. Begin Phase 5.5 only when explicitly requested, using
+   `docs/plans/20260715-gguf_to_mlx_conversion_research.md`; otherwise proceed to Phase 6
+   only when explicitly requested.
 
 ---
 
@@ -593,6 +718,13 @@ the separate experimental Phase 5.5 gate.
 
 Detailed research, local probe evidence, and the architecture-promotion program live in
 `docs/plans/20260715-gguf_to_mlx_conversion_research.md`.
+
+This phase also qualifies Rapid-MLX `v0.10.10` as the first concrete daily-update
+exercise. The release is pinned to
+`5ca536275e89ddf0de3b49bd6f55fad80e42656e`; its notes describe release-artifact
+acceptance hardening and a version bump, not an inference contract change. Even so,
+compatibility must be proven through a staged `v0.10.9` -> `v0.10.10` install, runtime
+smoke, atomic activation, and rollback rather than inferred from release notes.
 
 ### Phase Objective
 
@@ -610,6 +742,10 @@ quantization family at a time based on real parity evidence.
   asset set, source quantization, and validated converter profile.
 - Preserve source GGUF, metadata, tensor inventory, quant types, converter/runtime
   versions, config/tokenizer hashes, and output recipe in a manifest.
+- Run the `v0.10.10` qualification in a new app-scoped environment. Do not mutate the
+  active `v0.10.9` runtime or any external Brew/Pip installation. A manual isolated
+  harness is acceptable in Phase 5.5 if the production updater is not yet implemented;
+  Phase 6 remains responsible for the user-facing runtime manager.
 
 ### Hard Gates (Verification)
 
@@ -635,6 +771,10 @@ quantization family at a time based on real parity evidence.
 - **Release Independence**: Phase 5.5 may ship as an Experimental/Lab capability after
   its own sign-off, but a missing architecture profile does not block native Rapid-MLX
   release readiness.
+- **Upgrade Qualification**: Verify tag/package provenance, live version, capability
+  profile, readiness, deterministic chat, telemetry, stop, atomic activation, retained
+  last-known-good `v0.10.9`, and rollback for Rapid-MLX `v0.10.10`. Any failure leaves
+  the prior runtime active with bounded, redacted diagnostics.
 - **Checkpoint**: Verifier sign-off followed by
   `feat(models): add verified experimental GGUF import`.
 

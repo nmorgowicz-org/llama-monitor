@@ -1,3 +1,4 @@
+use llama_monitor::inference::rapid_mlx::model_resolver::ResolvedRapidMlxLaunchModel;
 use llama_monitor::inference::rapid_mlx::poller::RapidMlxPoller;
 use llama_monitor::inference::rapid_mlx::runtime::{RuntimeMetadata, RuntimeSource};
 use llama_monitor::inference::rapid_mlx::{RapidMlxAdapter, discovery::Discovery};
@@ -25,7 +26,10 @@ async fn test_rapid_mlx_platform_validation() {
         version: "0.1.0".to_string(),
         source: RuntimeSource::Custom,
     };
-    let adapter = RapidMlxAdapter::new(runtime, PathBuf::from("/tmp"));
+    let adapter = RapidMlxAdapter::from_resolved(
+        runtime,
+        ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+    );
 
     let result = adapter.validate().await;
 
@@ -110,7 +114,10 @@ async fn test_rapid_mlx_await_ready_success() {
         version: "0.1.0".to_string(),
         source: RuntimeSource::Custom,
     };
-    let mut adapter = RapidMlxAdapter::new(runtime, PathBuf::from("/tmp"));
+    let mut adapter = RapidMlxAdapter::from_resolved(
+        runtime,
+        ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+    );
     adapter.host = "127.0.0.1".to_string();
 
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -138,7 +145,10 @@ async fn test_rapid_mlx_await_ready_failure() {
         version: "0.1.0".to_string(),
         source: RuntimeSource::Custom,
     };
-    let mut adapter = RapidMlxAdapter::new(runtime, PathBuf::from("/tmp"));
+    let mut adapter = RapidMlxAdapter::from_resolved(
+        runtime,
+        ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+    );
     adapter.host = "127.0.0.1".to_string();
 
     let deadline = Instant::now() + Duration::from_millis(500);
@@ -231,7 +241,10 @@ async fn rapid_native_cancellation_degrades_without_a_public_request_id_contract
         version: "0.10.9".into(),
         source: RuntimeSource::Managed,
     };
-    let mut supported = RapidMlxAdapter::new(runtime, "model".into());
+    let mut supported = RapidMlxAdapter::from_resolved(
+        runtime,
+        ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+    );
     supported.host = "127.0.0.1".into();
     supported.configure_runtime(
         compatibility::CompatibilityProfile::verified_baseline(),
@@ -340,13 +353,13 @@ async fn fixture_lifecycle_discovers_loads_becomes_ready_and_stops() {
     tokio::spawn(warp::serve(route).run(([127, 0, 0, 1], port)));
     tokio::time::sleep(Duration::from_millis(25)).await;
 
-    let mut adapter = RapidMlxAdapter::new(
+    let mut adapter = RapidMlxAdapter::from_resolved(
         RuntimeMetadata {
             executable_path: resolved,
             version: profile.version.clone(),
             source,
         },
-        PathBuf::from("fixture-model"),
+        ResolvedRapidMlxLaunchModel::validated_alias("fixture-model").unwrap(),
     );
     adapter.host = "127.0.0.1".into();
     adapter.port = port;
@@ -390,13 +403,13 @@ async fn fixture_early_exit_propagates_actionable_tail() {
         .await
         .unwrap();
     let profile = compatibility::probe(&resolved, source).await.unwrap();
-    let mut adapter = RapidMlxAdapter::new(
+    let mut adapter = RapidMlxAdapter::from_resolved(
         RuntimeMetadata {
             executable_path: resolved,
             version: profile.version.clone(),
             source,
         },
-        PathBuf::from("fixture-model"),
+        ResolvedRapidMlxLaunchModel::validated_alias("fixture-model").unwrap(),
     );
     adapter.configure_runtime(profile, None);
     let observer = Arc::new(FixtureObserver {

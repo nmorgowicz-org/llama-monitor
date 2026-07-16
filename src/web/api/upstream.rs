@@ -433,13 +433,13 @@ mod tests {
         state.set_active_session("attached-rapid");
         *state.server_running.lock().unwrap() = true;
         *state.backend.lock().unwrap() = Some(BackendAdapter::RapidMlx(std::sync::Arc::new(
-            RapidMlxAdapter::new(
+            RapidMlxAdapter::from_resolved(
                 RuntimeMetadata {
                     executable_path: "rapid-mlx".into(),
                     source: RuntimeSource::Managed,
                     version: "0.10.9".into(),
                 },
-                "stale-model".into(),
+                crate::inference::rapid_mlx::model_resolver::ResolvedRapidMlxLaunchModel::validated_alias("stale-model").unwrap(),
             ),
         )));
 

@@ -9,6 +9,7 @@ Documentation index for Llama Monitor — a local LLM inference and GPU monitori
 | [chat.md](reference/chat.md) | Chat features, guided generation, explicit mode, persona system |
 | [dashboard.md](reference/dashboard.md) | Dashboard layout, settings, server tab, GPU metrics |
 | [api.md](reference/api.md) | REST API endpoints, WebSocket schema |
+| [model-library.md](reference/model-library.md) | Structured GGUF, MLX, safetensors, cache, and migration behavior |
 | [remote-agent.md](reference/remote-agent.md) | Remote agent connection, multi-server setup |
 | [inference-tuning.md](reference/inference-tuning.md) | Model/quant/KV/flag tuning for Apple Silicon & discrete GPUs (dense vs MoE, `--n-cpu-moe`) |
 | [capabilities.md](reference/capabilities.md) | System capabilities, hardware support |

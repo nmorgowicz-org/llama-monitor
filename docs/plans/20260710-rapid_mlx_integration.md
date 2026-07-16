@@ -969,6 +969,9 @@ RapidMlxModelSource
 - `MlxDirectory`: local MLX-format directory.
 - `HuggingFaceRepo`: repository ID and optional revision.
 - `Alias`: runtime-provided or user-entered alias.
+- `AuthoritativeSafetensors`: a complete local Transformers model directory or an
+  immutable-revision Hugging Face repository plus an explicit FP16/BF16 or MLX 4/6/8
+  conversion recipe. The first verified official converter is `mlx-lm==0.31.3`.
 - `GgufFile`: local GGUF file retained as user input so the resolver can recommend
   llama.cpp or an independently available Phase 5.5 import workflow; never launchable
   as native MLX.
@@ -1259,6 +1262,36 @@ This integration does not claim native or automatic GGUF support. Users can keep
 running existing GGUFs with llama.cpp or select a native MLX/Hugging Face source for
 Rapid-MLX.
 
+### Structured model library and first-class inventory
+
+The effective configured `models_dir` is the common library root for every backend:
+
+```text
+gguf/                  complete GGUF models and mmproj companions
+mlx/native/            native/user-managed MLX model directories
+mlx/converted/         validated official conversions with provenance manifests
+transformers/          complete local HF/Transformers source directories
+cache/huggingface/hub/ Hugging Face snapshots and content-addressed blobs
+cache/huggingface/xet/ Xet-backed Hugging Face content
+.staging/              incomplete downloads and conversion work
+```
+
+Discovery returns one typed inventory regardless of physical storage. Every entry
+provides format (`GGUF`, `MLX`, `Transformers`), source (`Local`, `Hugging Face`,
+`Official conversion`), lifecycle state (`Ready`, `Incomplete`, `Converting`,
+`Invalid`), supported backend(s), compatibility, provenance, and companion relations.
+All model cards, selectors, and detail surfaces render those values as first-class,
+accessible badges. An unknown model may receive an explicit `Unknown` badge but never
+silently fall back to an unlabeled filename-only row.
+
+Legacy files directly under `models_dir` remain discoverable. The explicit migration
+operation uses same-filesystem renames, refuses collisions/symlink escapes, journals
+each successful move, and atomically rewrites persisted paths in presets, sessions,
+model tags, draft-model fields, and mmproj references. Complete `.gguf` files move to
+`gguf/`; `.part` files move to `.staging/downloads/`. Interrupted migration is
+restartable and never deletes a source before its destination and metadata rewrite are
+durable.
+
 ### MLX local directory
 
 Validate:
@@ -1413,7 +1446,10 @@ and llama-server handles the download itself. The app only sees download activit
 through log lines.
 
 For Rapid-MLX, use **server-delegated download**: `rapid-mlx serve <hf-repo-id>`
-initiates its own download via the MLX hub cache (`~/.cache/huggingface`). The app:
+initiates its own download via the MLX hub cache. The app sets `HF_HUB_CACHE` and
+`HF_XET_CACHE` to `models_dir/cache/huggingface/{hub,xet}` so app-launched downloads
+remain inside the selected model library without duplicating the content-addressed
+cache. The app:
 
 - passes the HF token to the subprocess via `cmd.env("HF_TOKEN", token)` (parallel
   to `hf_load_token()` which is already called in `src/web/api.rs:1941`);
@@ -1422,10 +1458,16 @@ initiates its own download via the MLX hub cache (`~/.cache/huggingface`). The a
 - displays a "Downloading model..." status in the readiness phase until
   `/health/ready` returns 200.
 
+An explicit migration can import a selected repository that llama-monitor previously
+downloaded into the default shared Hugging Face cache. Import the complete repository
+cache directory and its lock metadata with same-filesystem renames; never sweep or move
+unrelated repositories used by other applications.
+
 Do **not** use `model_download.rs` for Rapid-MLX HF model downloads. That path is
 for individual GGUF file acquisition and is not designed for repo-level MLX downloads.
-In the runtime/model storage settings area, display the
-`~/.cache/huggingface/hub/` directory size as informational only; do not manage it.
+In the runtime/model storage settings area, display the app-scoped Hugging Face cache
+size and provide inventory-aware cleanup later through the runtime-management phase.
+Phase 5 owns placement and discovery, not destructive cache deletion.
 
 ### Historical Gap 4 — Disk space pre-check before GGUF conversion (deferred)
 

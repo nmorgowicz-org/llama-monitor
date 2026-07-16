@@ -18,7 +18,7 @@ use std::sync::Arc;
 #[serde(tag = "backend", content = "config", rename_all = "snake_case")]
 pub enum LocalLaunchRequest {
     LlamaCpp(Box<ServerConfig>),
-    RapidMlx(RapidMlxConfig),
+    RapidMlx(Box<RapidMlxConfig>),
 }
 
 impl LocalLaunchRequest {
@@ -54,10 +54,13 @@ impl LocalLaunchRequest {
         match self {
             Self::LlamaCpp(config) if !config.model_path.is_empty() => config.model_path.clone(),
             Self::LlamaCpp(config) => config.hf_repo.clone().unwrap_or_default(),
-            Self::RapidMlx(config) => config
-                .served_model_name
-                .clone()
-                .unwrap_or_else(|| config.model_path.clone()),
+            Self::RapidMlx(config) => config.served_model_name.clone().unwrap_or_else(|| {
+                config
+                    .model_source
+                    .as_ref()
+                    .map(|source| source.display_name())
+                    .unwrap_or_else(|| config.model_path.clone())
+            }),
         }
     }
 
@@ -102,7 +105,7 @@ pub fn request_from_api_payload(payload: &serde_json::Value) -> Result<LocalLaun
                 anyhow::bail!("Rapid-MLX launch requires a non-zero port");
             }
             config.validate_access(None)?;
-            Ok(LocalLaunchRequest::RapidMlx(config))
+            Ok(LocalLaunchRequest::RapidMlx(Box::new(config)))
         }
     }
 }
@@ -126,9 +129,12 @@ pub fn validate_preset_backend_config(preset: &ModelPreset) -> Result<()> {
                     preset.name
                 );
             }
-            if rapid.model_path.trim().is_empty() {
-                anyhow::bail!("Rapid-MLX preset '{}' requires a model_path", preset.name);
-            }
+            rapid.effective_model_source().with_context(|| {
+                format!(
+                    "Rapid-MLX preset '{}' requires a valid model source",
+                    preset.name
+                )
+            })?;
             if rapid.port == 0 {
                 anyhow::bail!(
                     "Rapid-MLX preset '{}' requires a non-zero port",
@@ -162,7 +168,7 @@ pub fn request_from_preset(
             if config.port == 0 {
                 anyhow::bail!("Rapid-MLX launch requires a non-zero port");
             }
-            Ok(LocalLaunchRequest::RapidMlx(config))
+            Ok(LocalLaunchRequest::RapidMlx(Box::new(config)))
         }
         InferenceBackend::LlamaCpp => Ok(LocalLaunchRequest::LlamaCpp(Box::new(ServerConfig {
             model_path: preset.model_path.clone(),
@@ -334,9 +340,8 @@ pub async fn construct_adapter(
             ))))
         }
         LocalLaunchRequest::RapidMlx(config) => {
-            if config.model_path.trim().is_empty() {
-                anyhow::bail!("Rapid-MLX requires a model_path");
-            }
+            crate::inference::rapid_mlx::ensure_local_platform_supported()?;
+            let model_source = config.effective_model_source()?;
             config.validate_access(None)?;
 
             let (executable_path, source) = Discovery::resolve_binary(
@@ -356,15 +361,57 @@ pub async fn construct_adapter(
                     )
                 })?;
             let version = profile.version.clone();
-            let mut adapter = RapidMlxAdapter::new(
-                RuntimeMetadata {
-                    executable_path,
-                    source,
-                    version,
+            let runtime = RuntimeMetadata {
+                executable_path,
+                source,
+                version,
+            };
+            let models_dir = state
+                .models_dir
+                .clone()
+                .or_else(|| {
+                    let configured = state.ui_settings.lock().unwrap().models_dir.clone();
+                    (!configured.trim().is_empty()).then(|| PathBuf::from(configured))
+                })
+                .or_else(|| app_config.models_dir.clone())
+                .unwrap_or_else(|| app_config.default_models_dir.clone());
+            std::fs::create_dir_all(&models_dir)?;
+            let python_executable = runtime
+                .executable_path
+                .parent()
+                .map(|parent| {
+                    parent.join(if cfg!(windows) {
+                        "python.exe"
+                    } else {
+                        "python3"
+                    })
+                })
+                .filter(|path| path.is_file())
+                .unwrap_or_else(|| {
+                    PathBuf::from(if cfg!(windows) {
+                        "python.exe"
+                    } else {
+                        "python3"
+                    })
+                });
+            let resolved_model = crate::inference::rapid_mlx::model_resolver::resolve(
+                model_source,
+                &crate::inference::rapid_mlx::model_resolver::RapidMlxResolveContext {
+                    models_dir,
+                    python_executable,
+                    runtime_version: runtime.version.clone(),
+                    hf_token: crate::hf::hf_load_token(),
+                    verified_aliases: Vec::new(),
+                    execute_conversion: true,
                 },
-                PathBuf::from(&config.model_path),
-            );
-            adapter.served_model_name = config.served_model_name.clone();
+            )
+            .await?;
+            let resolved_display_name = resolved_model.display_name.clone();
+            let mut adapter = RapidMlxAdapter::from_resolved(runtime, resolved_model);
+            adapter.served_model_name = config
+                .served_model_name
+                .clone()
+                .or(Some(resolved_display_name));
             adapter.host = config.host.clone();
             adapter.port = config.port;
             adapter.log_level = config.log_level.clone();
@@ -480,16 +527,24 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let model = dir.path().join("mlx-model");
+        std::fs::create_dir(&model).unwrap();
+        std::fs::write(model.join("config.json"), r#"{"model_type":"qwen3"}"#).unwrap();
+        std::fs::write(model.join("tokenizer.json"), "{}").unwrap();
+        std::fs::write(model.join("model.safetensors"), "weights").unwrap();
         let config = test_app_config(dir.path());
         let state = AppState::default();
-        let request = LocalLaunchRequest::RapidMlx(RapidMlxConfig {
-            model_path: "/models/rapid".into(),
+        let request = LocalLaunchRequest::RapidMlx(Box::new(RapidMlxConfig {
+            model_path: model.to_string_lossy().into_owned(),
             executable_path: Some(runtime),
             ..Default::default()
-        });
+        }));
 
         let adapter = construct_adapter(&request, &state, &config).await.unwrap();
-        assert!(matches!(adapter, BackendAdapter::RapidMlx(_)));
+        let BackendAdapter::RapidMlx(adapter) = adapter else {
+            panic!("expected Rapid-MLX adapter");
+        };
+        assert_eq!(adapter.served_model_name.as_deref(), Some("mlx-model"));
     }
 
     #[test]
@@ -625,11 +680,11 @@ mod tests {
             api_key: Some("do-not-persist".into()),
             ..Default::default()
         }));
-        let rapid = LocalLaunchRequest::RapidMlx(RapidMlxConfig {
+        let rapid = LocalLaunchRequest::RapidMlx(Box::new(RapidMlxConfig {
             model_path: "/models/private-mlx".into(),
             api_key: Some("also-do-not-persist".into()),
             ..Default::default()
-        });
+        }));
         for request in [llama, rapid] {
             let persisted = request.for_persistence();
             let json = serde_json::to_string(&persisted).unwrap();
@@ -675,12 +730,12 @@ mod tests {
 
     #[test]
     fn restored_direct_rapid_session_routes_from_launch_envelope() {
-        let request = LocalLaunchRequest::RapidMlx(RapidMlxConfig {
+        let request = LocalLaunchRequest::RapidMlx(Box::new(RapidMlxConfig {
             model_path: "/models/rapid".into(),
             port: 8123,
             api_key: Some("rapid-original-secret".into()),
             ..Default::default()
-        });
+        }));
         let mut session = Session::new_spawn_with_backend(
             "s1".into(),
             "Rapid".into(),

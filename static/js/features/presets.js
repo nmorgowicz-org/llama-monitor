@@ -15,6 +15,8 @@ import {
     detectCommunityTemplateFamily,
 } from './chat-template-registry.js';
 
+let newPresetSeed = null;
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function setVal(id, v) { document.getElementById(id).value = v ?? ''; }
@@ -1003,13 +1005,14 @@ async function autoTunePreset() {
     }
 }
 
-export function openPresetModal(mode, section) {
+export function openPresetModal(mode, section, seedPreset = null) {
     const modal = document.getElementById('preset-modal');
     const title = document.getElementById('modal-title');
     const subtitle = document.getElementById('preset-editor-subtitle');
     const form = document.getElementById('preset-form');
     form.reset();
     clearFieldErrors();
+    newPresetSeed = mode === 'new' && seedPreset ? structuredClone(seedPreset) : null;
 
     if (mode === 'edit') {
         const id = document.getElementById('preset-select').value;
@@ -1172,18 +1175,25 @@ export function openPresetModal(mode, section) {
         _configureBackendPresetEditor(p);
     } else {
         title.textContent = 'New Preset';
-        if (subtitle) subtitle.textContent = 'New model profile';
+        if (subtitle) subtitle.textContent = newPresetSeed?.backend === 'rapid_mlx'
+            ? 'Rapid-MLX model profile'
+            : 'New model profile';
         setVal('modal-preset-id', '');
+        setVal('modal-name', newPresetSeed?.name || '');
+        setVal('modal-model-path', presetModelSource(newPresetSeed));
         setVal('modal-context-size', 128000);
         setVal('modal-ctk', 'q8_0');
         setVal('modal-ctv', 'f16');
         setVal('modal-batch-size', 2048);
         setVal('modal-ubatch-size', 2048);
         setVal('modal-parallel-slots', 1);
+        numOrEmpty('modal-port', newPresetSeed?.backend === 'rapid_mlx'
+            ? newPresetSeed.rapid_mlx?.port
+            : newPresetSeed?.port);
         _toggleFitTarget(false);
         _toggleSpecFields('');
         setStructuredOutputMode('');
-        _configureBackendPresetEditor(null);
+        _configureBackendPresetEditor(newPresetSeed);
     }
 
     const presetModel = document.getElementById('modal-model-path')?.value.trim();
@@ -1236,6 +1246,7 @@ export function openPresetModal(mode, section) {
 
 export function closePresetModal() {
     document.getElementById('preset-modal').classList.remove('open');
+    newPresetSeed = null;
 }
 
 // ── Presets Panel ──────────────────────────────────────────────────────────────
@@ -1711,7 +1722,9 @@ export async function savePreset(event) {
 
     const id = document.getElementById('modal-preset-id').value;
     const saveBtn = document.getElementById('btn-modal-save');
-    const existing = id ? (sessionState.presets.find(p => p.id === id) || {}) : {};
+    const existing = id
+        ? (sessionState.presets.find(p => p.id === id) || {})
+        : (newPresetSeed || {});
     const preset = _buildFormPreset(existing);
 
     // Inline validation

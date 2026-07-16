@@ -507,6 +507,8 @@ fn api_llama_binary_platform_info(
                         "label":        label,
                         "backends":     backends,
                         "multi_backend": os == "windows" || os == "linux",
+                        "rapid_mlx_local_available": os == "macos" && arch == "aarch64",
+                        "rapid_mlx_local_requirement": "Rapid-MLX local execution requires macOS on Apple Silicon",
                     }),
                 )))
             }
@@ -1182,10 +1184,10 @@ mod tests {
         *state.server_config.lock().unwrap() = Some(ServerConfig::default());
         *state.local_launch_request.lock().unwrap() =
             Some(crate::inference::launch::LocalLaunchRequest::RapidMlx(
-                crate::inference::rapid_mlx::RapidMlxConfig {
+                Box::new(crate::inference::rapid_mlx::RapidMlxConfig {
                     model_path: "/models/rapid".into(),
                     ..Default::default()
-                },
+                }),
             ));
 
         assert!(llama_update_restart_config(&state).is_none());

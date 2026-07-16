@@ -368,7 +368,7 @@ fn api_put_settings(
 
             if new_dir != old_dir
                 && !new_dir.is_empty()
-                && let Ok(discovered) = crate::models::scan_models_dir(&PathBuf::from(&new_dir))
+                && let Ok(discovered) = crate::models::scan_gguf_library(&PathBuf::from(&new_dir))
             {
                 *state.discovered_models.lock().unwrap() = discovered;
             }

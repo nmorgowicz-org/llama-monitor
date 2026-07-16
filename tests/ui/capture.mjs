@@ -1692,6 +1692,57 @@ async function scenarioModels(ctx, options) {
 async function scenarioModelsV2(ctx, options) {
     const { page, baseUrl } = ctx;
     await gotoApp(page, baseUrl);
+    await page.evaluate(() => {
+        localStorage.setItem('llama-monitor-models-prefs', JSON.stringify({
+            viewMode: 'cards',
+            showMmproj: true,
+            showMain: true,
+            showSplit: true,
+            showDraftModels: true,
+        }));
+    });
+    await page.reload({ waitUntil: 'networkidle0' });
+    await page.waitForSelector('html.modules-ready', { timeout: 15000 });
+    await page.evaluate(() => {
+        const typedInventory = [
+            { model_name: 'Qwen 3.6 35B', filename: 'qwen-35b-Q6_K.gguf', path: '/models/gguf/qwen-35b-Q6_K.gguf', format: 'gguf', source: 'local', lifecycle: 'ready', compatibility: 'verified', supported_backends: ['llama_cpp'], size_display: '25.4 GiB', quant_type: 'Q6_K' },
+            { model_name: 'Qwen 3 MLX 4-bit', filename: 'mlx-community/Qwen3-8B-4bit', path: '/models/cache/huggingface/qwen3-mlx', format: 'mlx', source: 'hugging_face', lifecycle: 'ready', compatibility: 'provisional', supported_backends: ['rapid_mlx'], size_display: '4.8 GiB' },
+            { model_name: 'Gemma conversion', filename: 'gemma-official-conversion', path: '/models/mlx/converted/gemma', format: 'mlx', source: 'official_conversion', lifecycle: 'converting', compatibility: 'verified', supported_backends: ['rapid_mlx'], size_display: '12.1 GiB' },
+            { model_name: 'Staged download', filename: 'model.safetensors.part', path: '/models/.staging/downloads/model.safetensors.part', format: 'unknown', source: 'legacy', lifecycle: 'incomplete', compatibility: 'unknown', supported_backends: [] },
+            { model_name: 'Invalid tokenizer bundle', filename: 'broken-transformers-model', path: '/models/transformers/broken', format: 'transformers', source: 'local', lifecycle: 'invalid', compatibility: 'unsupported', supported_backends: [] },
+            { model_name: 'Gemma vision projector', filename: 'gemma-mmproj.gguf', path: '/models/gguf/gemma-mmproj.gguf', format: 'gguf', source: 'local', lifecycle: 'ready', compatibility: 'verified', supported_backends: ['llama_cpp'], companion_kind: 'mmproj' },
+            { model_name: 'Qwen draft companion', filename: 'qwen-draft.gguf', path: '/models/gguf/qwen-draft.gguf', format: 'gguf', source: 'local', lifecycle: 'ready', compatibility: 'verified', supported_backends: ['llama_cpp'], companion_kind: 'draft', is_draft_assistant: true },
+        ];
+        window.__captureRapidMlxAvailable = true;
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (input, init) => {
+            const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+            if (url.pathname === '/api/models') {
+                return Promise.resolve(new Response(JSON.stringify(typedInventory), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                }));
+            }
+            if (url.pathname === '/api/hf/download-dir') {
+                return Promise.resolve(new Response(JSON.stringify({ dir: '/models', configured: true }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                }));
+            }
+            if (url.pathname === '/api/llama-binary/platform-info') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    os: window.__captureRapidMlxAvailable ? 'macos' : 'linux',
+                    arch: window.__captureRapidMlxAvailable ? 'aarch64' : 'x86_64',
+                    rapid_mlx_local_available: window.__captureRapidMlxAvailable,
+                    rapid_mlx_local_requirement: 'Rapid-MLX local execution requires macOS on Apple Silicon',
+                }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                }));
+            }
+            return originalFetch(input, init);
+        };
+    });
     if (!options.noAttach) {
         try { await attachToServer(page); } catch {}
     }
@@ -1701,6 +1752,23 @@ async function scenarioModelsV2(ctx, options) {
     await page.waitForSelector('#models-modal.open', { timeout: 8000 });
     await sleep(1500);
     await captureShot(page, 'models-discovery-overview.png', { fullPage: true });
+    await captureShot(page, 'models-inventory-dark.png', { fullPage: true });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(250);
+    await captureShot(page, 'models-inventory-light.png', { fullPage: true });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+    await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
+    await sleep(250);
+    await captureShot(page, 'models-inventory-narrow.png', { fullPage: true });
+    await page.setViewport(DEFAULT_VIEWPORT);
+    await sleep(250);
+    await page.evaluate(() => {
+        document.getElementById('models-modal')?.classList.remove('open');
+        window.__captureRapidMlxAvailable = false;
+        window.openModelsModal?.();
+    });
+    await sleep(500);
+    await captureShot(page, 'models-inventory-non-apple.png', { fullPage: true });
 
     // 2. Switch to Download tab and simulate a download in progress.
     await page.evaluate(() => {

@@ -907,7 +907,7 @@ impl AppState {
         let model_tags_path = paths.model_tags_path;
         let discovered = models_dir
             .as_ref()
-            .and_then(|dir| crate::models::scan_models_dir(dir).ok())
+            .and_then(|dir| crate::models::scan_gguf_library(dir).ok())
             .unwrap_or_default();
         let model_tags = ModelTags::load(&model_tags_path);
         let preset_collections = {

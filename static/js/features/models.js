@@ -27,6 +27,44 @@ const ICON_CARDS_VIEW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24
 
 const KNOWN_TAGS = ['coding', 'roleplay', 'general', 'art', 'fast', 'default'];
 
+const INVENTORY_BADGES = {
+    format: {
+        gguf: ['GGUF', 'Format: GGUF'],
+        mlx: ['MLX', 'Format: MLX'],
+        transformers: ['Transformers', 'Format: Transformers / safetensors'],
+        unknown: ['Unknown format', 'Format: Unknown'],
+    },
+    source: {
+        local: ['Local', 'Source: Local library'],
+        hugging_face: ['Hugging Face', 'Source: Hugging Face'],
+        official_conversion: ['Official conversion', 'Source: Official MLX conversion'],
+        legacy: ['Legacy location', 'Source: Legacy model-library location'],
+        unknown: ['Unknown source', 'Source: Unknown'],
+    },
+    lifecycle: {
+        ready: ['Ready', 'Lifecycle: Ready'],
+        incomplete: ['Incomplete', 'Lifecycle: Incomplete'],
+        converting: ['Converting', 'Lifecycle: Converting'],
+        invalid: ['Invalid', 'Lifecycle: Invalid'],
+        unknown: ['Status unknown', 'Lifecycle: Unknown'],
+    },
+    compatibility: {
+        verified: ['Verified', 'Compatibility: Verified'],
+        provisional: ['Provisional', 'Compatibility: Provisional'],
+        unsupported: ['Unsupported', 'Compatibility: Unsupported'],
+        unknown: ['Unknown compatibility', 'Compatibility: Unknown'],
+    },
+};
+
+const BACKEND_LABELS = {
+    llama_cpp: 'llama.cpp',
+    rapid_mlx: 'Rapid-MLX',
+};
+
+let modelCardSequence = 0;
+let rapidMlxLocalAvailable = false;
+let rapidMlxLocalRequirement = 'Rapid-MLX local execution requires macOS on Apple Silicon';
+
 let initialized = false;
 
 // State for the HF download tab
@@ -131,6 +169,16 @@ async function loadModels() {
             }
         }
 
+        const platformResp = await fetch('/api/llama-binary/platform-info', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        if (platformResp.ok) {
+            const platform = await platformResp.json();
+            rapidMlxLocalAvailable = platform.rapid_mlx_local_available === true;
+            rapidMlxLocalRequirement = platform.rapid_mlx_local_requirement
+                || rapidMlxLocalRequirement;
+        }
+
         const resp = await fetch('/api/models', {
             headers: window.authHeaders ? window.authHeaders() : {},
         });
@@ -188,11 +236,13 @@ async function loadModels() {
 }
 
 function isMmproj(m) {
+    if (m.companion_kind != null) return m.companion_kind === 'mmproj';
     const f = (m.filename || '').toLowerCase();
     return f.includes('mmproj') || f.includes('.mmproj.') || f.includes('-mmproj-');
 }
 
 function isDraftModel(m) {
+    if (m.companion_kind != null) return m.companion_kind === 'draft';
     // Trust the backend's is_draft_assistant (size-guarded).
     // Fallback: quick client-side check using same logic as backend.
     if (m.is_draft_assistant !== undefined) return m.is_draft_assistant;
@@ -310,7 +360,7 @@ function applySearch(models) {
 }
 
 function buildModelCard(m) {
-    const name = m.model_name || m.filename;
+    const name = m.model_name || m.filename || 'Unnamed model';
     const quant = m.quant_type || 'unknown';
     const size = m.size_display || '';
     const vramEst = m.vram_est_gb != null
@@ -320,13 +370,20 @@ function buildModelCard(m) {
         : '';
     const vramPct = m.vram_percent != null ? Math.min(100, m.vram_percent) : null;
     const isSplit = m.is_split;
-    const mmproj = isMmproj(m);
+    const inventory = normalizeInventory(m);
+    const mmproj = inventory.companionKind === 'mmproj';
+    const companion = inventory.companionKind !== null;
     const tags = Array.isArray(m.tags) ? m.tags : [];
     const relatedPresets = mmproj ? [] : findPresetsForModel(m);
 
-    const card = document.createElement('div');
+    const card = document.createElement('article');
     card.className = 'mm-model-card';
+    card.dataset.format = inventory.format;
+    card.dataset.source = inventory.source;
+    card.dataset.lifecycle = inventory.lifecycle;
+    card.dataset.compatibility = inventory.compatibility;
     if (mmproj) card.classList.add('mm-model-card--mmproj');
+    if (companion) card.classList.add('mm-model-card--companion');
 
     // Top row: name + quant badge
     const top = document.createElement('div');
@@ -334,12 +391,15 @@ function buildModelCard(m) {
 
     const nameEl = document.createElement('div');
     nameEl.className = 'mm-card-name';
+    modelCardSequence += 1;
+    nameEl.id = `mm-model-name-${modelCardSequence}`;
+    card.setAttribute('aria-labelledby', nameEl.id);
     nameEl.title = m.path || '';
     nameEl.textContent = name;
     top.appendChild(nameEl);
 
     // Only show quant badge when it's meaningful — skip for mmproj files with no known quant
-    if (!(mmproj && quant === 'unknown')) {
+    if (quant !== 'unknown') {
         const badge = document.createElement('span');
         badge.className = 'mm-quant-badge';
         badge.textContent = quant;
@@ -353,13 +413,6 @@ function buildModelCard(m) {
         top.appendChild(splitBadge);
     }
 
-    if (mmproj) {
-        const mmBadge = document.createElement('span');
-        mmBadge.className = 'mm-quant-badge mm-mmproj-badge';
-        mmBadge.textContent = 'mmproj';
-        top.appendChild(mmBadge);
-    }
-
     // MTP / draft model badge
     const isDraft = m.is_draft_assistant || (m.classification && m.classification.has_mtp);
     if (isDraft && !mmproj) {
@@ -371,6 +424,8 @@ function buildModelCard(m) {
     }
 
     card.appendChild(top);
+
+    card.appendChild(buildInventoryBadgeRail(inventory));
 
     // Meta row: filename (ellipsis + full tooltip)
     const meta = document.createElement('div');
@@ -439,7 +494,7 @@ function buildModelCard(m) {
     const actions = document.createElement('div');
     actions.className = 'mm-card-actions';
 
-    if (!mmproj) {
+    if (!companion && inventory.launchable) {
         const serverRunning = isLocalServerRunning();
 
         if (serverRunning) {
@@ -482,7 +537,7 @@ function buildModelCard(m) {
                 switchWrap.appendChild(switchBtn);
                 actions.appendChild(switchWrap);
 
-            } else {
+            } else if (inventory.supportedBackends.includes('llama_cpp')) {
                 // No preset → Quick Load (inherits current server settings)
                 const loadBtn = document.createElement('button');
                 loadBtn.type = 'button';
@@ -491,6 +546,8 @@ function buildModelCard(m) {
                 loadBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg> Quick Load';
                 loadBtn.addEventListener('click', () => doQuickLoad(m));
                 actions.appendChild(loadBtn);
+            } else {
+                appendRapidMlxConfigureButton(actions, m);
             }
 
             // Edit preset(s) — secondary action when running
@@ -509,20 +566,24 @@ function buildModelCard(m) {
         } else {
             // ── Server is not running: wizard / new-preset ───────────────────
 
-            const useBtn = document.createElement('button');
-            useBtn.type = 'button';
-            useBtn.className = 'mm-action-btn';
-            useBtn.title = relatedPresets.length ? 'Build a new preset from this model' : 'Open this model in the spawn wizard';
-            useBtn.textContent = relatedPresets.length ? 'New Preset' : 'Use in Wizard';
-            useBtn.addEventListener('click', () => {
-                closeModelsModal();
-                window.__spawnWizardOpts = {
-                    localPath: m.path || '',
-                    localModel: m,
-                };
-                Router.navigate('/spawn');
-            });
-            actions.appendChild(useBtn);
+            if (inventory.supportedBackends.includes('llama_cpp')) {
+                const useBtn = document.createElement('button');
+                useBtn.type = 'button';
+                useBtn.className = 'mm-action-btn';
+                useBtn.title = relatedPresets.length ? 'Build a new preset from this model' : 'Open this model in the spawn wizard';
+                useBtn.textContent = relatedPresets.length ? 'New Preset' : 'Use in Wizard';
+                useBtn.addEventListener('click', () => {
+                    closeModelsModal();
+                    window.__spawnWizardOpts = {
+                        localPath: m.path || '',
+                        localModel: m,
+                    };
+                    Router.navigate('/spawn');
+                });
+                actions.appendChild(useBtn);
+            } else if (!relatedPresets.length) {
+                appendRapidMlxConfigureButton(actions, m);
+            }
 
             if (relatedPresets.length) {
                 const editBtn = document.createElement('button');
@@ -536,6 +597,12 @@ function buildModelCard(m) {
                 actions.appendChild(editBtn);
             }
         }
+    } else {
+        const unavailable = document.createElement('div');
+        unavailable.className = 'mm-card-action-note';
+        unavailable.setAttribute('role', 'status');
+        unavailable.textContent = inventoryActionNote(inventory);
+        actions.appendChild(unavailable);
     }
 
     const copyBtn = document.createElement('button');
@@ -543,7 +610,9 @@ function buildModelCard(m) {
     copyBtn.className = 'mm-action-btn mm-action-copy';
     copyBtn.title = 'Copy path';
     copyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy Path';
-    const pathToCopy = m.path || '';
+    // Typed HF sources retain a stable repo id while `path` points at a resolved
+    // cache snapshot. Copy the source users can reuse in configuration.
+    const pathToCopy = inventoryModelSourceValue(m) || m.path || '';
     copyBtn.addEventListener('click', () => {
         navigator.clipboard.writeText(pathToCopy).then(() => {
             showToast('Path copied', 'success');
@@ -551,16 +620,20 @@ function buildModelCard(m) {
             showToast('Copy failed', 'error');
         });
     });
-    actions.appendChild(copyBtn);
+    if (pathToCopy) actions.appendChild(copyBtn);
 
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'mm-action-btn mm-action-delete';
-    deleteBtn.title = 'Delete this model from library';
-    deleteBtn.setAttribute('aria-label', 'Delete this model from library');
-    deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
-    deleteBtn.addEventListener('click', () => deleteModel(m.path, m.filename || name));
-    actions.appendChild(deleteBtn);
+    // The current delete endpoint is deliberately file-only and validates a
+    // .gguf suffix. Do not advertise directory deletion for MLX/Transformers.
+    if (inventory.format === 'gguf' && (m.path || '').toLowerCase().endsWith('.gguf')) {
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'mm-action-btn mm-action-delete';
+        deleteBtn.title = 'Delete this model from library';
+        deleteBtn.setAttribute('aria-label', 'Delete this model from library');
+        deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+        deleteBtn.addEventListener('click', () => deleteModel(m.path, m.filename || name));
+        actions.appendChild(deleteBtn);
+    }
 
     const tagBtn = document.createElement('button');
     tagBtn.type = 'button';
@@ -577,14 +650,151 @@ function buildModelCard(m) {
     return card;
 }
 
+function normalizeInventory(model) {
+    const format = Object.hasOwn(INVENTORY_BADGES.format, model.format) ? model.format : 'unknown';
+    const source = Object.hasOwn(INVENTORY_BADGES.source, model.source) ? model.source : 'unknown';
+    const lifecycle = Object.hasOwn(INVENTORY_BADGES.lifecycle, model.lifecycle) ? model.lifecycle : 'unknown';
+    let compatibility = Object.hasOwn(INVENTORY_BADGES.compatibility, model.compatibility)
+        ? model.compatibility
+        : 'unknown';
+    const advertisedBackends = Array.isArray(model.supported_backends)
+        ? [...new Set(model.supported_backends.filter(backend => Object.hasOwn(BACKEND_LABELS, backend)))]
+        : [];
+    const rapidMlxPlatformBlocked = advertisedBackends.includes('rapid_mlx')
+        && !rapidMlxLocalAvailable;
+    const supportedBackends = rapidMlxPlatformBlocked
+        ? advertisedBackends.filter(backend => backend !== 'rapid_mlx')
+        : advertisedBackends;
+    if (rapidMlxPlatformBlocked && supportedBackends.length === 0) compatibility = 'unsupported';
+    const companionKind = ['mmproj', 'draft'].includes(model.companion_kind)
+        ? model.companion_kind
+        : null;
+    return {
+        format,
+        source,
+        lifecycle,
+        compatibility,
+        supportedBackends,
+        rapidMlxPlatformBlocked,
+        companionKind,
+        launchable: lifecycle === 'ready' && compatibility !== 'unsupported' && supportedBackends.length > 0,
+    };
+}
+
+function createInventoryBadge(category, value, descriptor) {
+    const badge = document.createElement('span');
+    badge.className = `mm-inventory-badge mm-inventory-badge--${category} mm-inventory-badge--${value}`;
+    badge.textContent = descriptor[0];
+    badge.title = descriptor[1];
+    badge.setAttribute('aria-label', descriptor[1]);
+    return badge;
+}
+
+function buildInventoryBadgeRail(inventory) {
+    const rail = document.createElement('div');
+    rail.className = 'mm-inventory-badges';
+    rail.setAttribute('aria-label', 'Model inventory metadata');
+    rail.appendChild(createInventoryBadge('format', inventory.format, INVENTORY_BADGES.format[inventory.format]));
+    rail.appendChild(createInventoryBadge('source', inventory.source, INVENTORY_BADGES.source[inventory.source]));
+    rail.appendChild(createInventoryBadge('lifecycle', inventory.lifecycle, INVENTORY_BADGES.lifecycle[inventory.lifecycle]));
+    rail.appendChild(createInventoryBadge(
+        'compatibility',
+        inventory.compatibility,
+        INVENTORY_BADGES.compatibility[inventory.compatibility],
+    ));
+
+    if (inventory.supportedBackends.length) {
+        inventory.supportedBackends.forEach(backend => {
+            rail.appendChild(createInventoryBadge(
+                'backend',
+                backend,
+                [BACKEND_LABELS[backend], `Supported backend: ${BACKEND_LABELS[backend]}`],
+            ));
+        });
+    } else if (inventory.rapidMlxPlatformBlocked) {
+        rail.appendChild(createInventoryBadge(
+            'backend',
+            'platform-unavailable',
+            ['Apple Silicon required', rapidMlxLocalRequirement],
+        ));
+    } else {
+        rail.appendChild(createInventoryBadge('backend', 'none', ['No backend', 'Supported backend: None']));
+    }
+
+    if (inventory.companionKind) {
+        const descriptor = inventory.companionKind === 'mmproj'
+            ? ['Vision companion', 'Companion type: Multimodal projector']
+            : ['Draft companion', 'Companion type: Draft / MTP model'];
+        rail.appendChild(createInventoryBadge('companion', inventory.companionKind, descriptor));
+    }
+    return rail;
+}
+
+function inventoryActionNote(inventory) {
+    if (inventory.companionKind === 'mmproj') return 'Vision companion — select it with a compatible primary model.';
+    if (inventory.companionKind === 'draft') return 'Draft companion — select it from speculative decoding settings.';
+    if (inventory.lifecycle === 'converting') return 'Conversion in progress. Launch will be available after validation.';
+    if (inventory.lifecycle === 'incomplete') return 'Incomplete model. Finish the download or conversion before launch.';
+    if (inventory.lifecycle === 'invalid') return 'Invalid model. Review its files or provenance before launch.';
+    if (inventory.rapidMlxPlatformBlocked) return `${rapidMlxLocalRequirement}. You can still manage or copy this model.`;
+    if (inventory.compatibility === 'unsupported') return 'No installed backend supports this model.';
+    return 'Backend compatibility has not been verified.';
+}
+
+function appendRapidMlxConfigureButton(actions, model) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'mm-action-btn mm-action-btn--switch';
+    button.title = 'Create a Rapid-MLX preset for this model';
+    button.textContent = 'Configure Rapid-MLX';
+    button.addEventListener('click', async () => {
+        const modelPath = inventoryModelSourceValue(model) || model.path || '';
+        const modelSource = model.model_source || {
+            kind: 'mlx_directory',
+            path: model.path || modelPath,
+        };
+        const seed = {
+            backend: 'rapid_mlx',
+            name: `${model.model_name || model.filename || 'MLX model'} · Rapid-MLX`,
+            model_path: '',
+            port: 8000,
+            rapid_mlx: {
+                model_path: modelPath,
+                model_source: modelSource,
+                host: '127.0.0.1',
+                port: 8000,
+                log_level: 'INFO',
+            },
+        };
+        closeModelsModal();
+        const { openPresetModal } = await import('./presets.js');
+        openPresetModal('new', 'model', seed);
+    });
+    actions.appendChild(button);
+}
+
+function inventoryModelSourceValue(model) {
+    const source = model.model_source;
+    if (!source || typeof source !== 'object') return '';
+    if (source.kind === 'mlx_directory' || source.kind === 'gguf_file') return source.path || '';
+    if (source.kind === 'hugging_face_repo') return source.repo_id || '';
+    if (source.kind === 'alias') return source.value || '';
+    if (source.kind === 'authoritative_safetensors') {
+        return source.source?.path || source.source?.repo_id || '';
+    }
+    return '';
+}
+
 function isLocalServerRunning() {
     return !document.getElementById('btn-stop')?.disabled;
 }
 
 function findPresetsForModel(model) {
-    const path = model.path || '';
-    if (!path) return [];
-    return (sessionState.presets || []).filter(preset => preset.model_path === path);
+    const paths = new Set([model.path, inventoryModelSourceValue(model)].filter(Boolean));
+    if (!paths.size) return [];
+    return (sessionState.presets || []).filter(preset =>
+        paths.has(preset.model_path) || paths.has(preset.rapid_mlx?.model_path)
+    );
 }
 
 async function doSwitchToPreset(presetId) {
@@ -2120,4 +2330,3 @@ function guessQuantFromName(name) {
     if (lower.includes('f16') || lower.includes('bf16')) return 'f16';
     return 'q4_k_m';
 }
-

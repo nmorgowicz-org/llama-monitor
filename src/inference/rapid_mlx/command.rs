@@ -1,11 +1,12 @@
 use crate::inference::rapid_mlx::compatibility::ServeCapabilities;
+use crate::inference::rapid_mlx::model_resolver::ResolvedRapidMlxLaunchModel;
 use crate::inference::supervisor::SupervisedLaunch;
 use anyhow::Result;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
 pub struct RapidMlxCommandBuilder {
-    model_path: PathBuf,
+    model: ResolvedRapidMlxLaunchModel,
     served_model_name: Option<String>,
     host: String,
     port: u16,
@@ -16,9 +17,9 @@ pub struct RapidMlxCommandBuilder {
 }
 
 impl RapidMlxCommandBuilder {
-    pub fn new(model_path: PathBuf) -> Self {
+    pub fn new(model: ResolvedRapidMlxLaunchModel) -> Self {
         Self {
-            model_path,
+            model,
             served_model_name: None,
             host: "127.0.0.1".to_string(),
             port: 8000,
@@ -70,7 +71,7 @@ impl RapidMlxCommandBuilder {
         capabilities: &ServeCapabilities,
     ) -> Result<SupervisedLaunch> {
         let mut args = vec!["serve".to_string()];
-        args.push(self.model_path.to_string_lossy().into_owned());
+        args.push(self.model.launch_argument.clone());
 
         if let Some(name) = self.served_model_name {
             capabilities.require("--served-model-name")?;
@@ -112,6 +113,11 @@ impl RapidMlxCommandBuilder {
         if let Some(key) = self.api_key {
             env.push((OsString::from("RAPID_MLX_API_KEY"), OsString::from(key)));
         }
+        env.extend(
+            self.model
+                .environment()
+                .map(|(name, value)| (name.clone(), value.clone())),
+        );
 
         Ok(SupervisedLaunch {
             program: binary_path,
@@ -121,8 +127,7 @@ impl RapidMlxCommandBuilder {
             port: self.port,
             redacted_summary: format!(
                 "Rapid-MLX serve: {} on port {}",
-                self.model_path.display(),
-                self.port
+                self.model.display_name, self.port
             ),
         })
     }
@@ -142,9 +147,11 @@ mod tests {
 
     #[test]
     fn secure_defaults_omit_upstream_default_tuning_flags() {
-        let launch = RapidMlxCommandBuilder::new("model".into())
-            .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
-            .unwrap();
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .unwrap();
         assert_eq!(
             args(&launch),
             ["serve", "model", "--host", "127.0.0.1", "--port", "8000"]
@@ -159,12 +166,14 @@ mod tests {
 
     #[test]
     fn current_flag_names_and_secret_environment_are_used() {
-        let launch = RapidMlxCommandBuilder::new("model".into())
-            .timeout(90)
-            .max_cache_blocks(200)
-            .api_key("do-not-log".into())
-            .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
-            .unwrap();
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .timeout(90)
+        .max_cache_blocks(200)
+        .api_key("do-not-log".into())
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .unwrap();
         let args = args(&launch);
         assert!(args.windows(2).any(|pair| pair == ["--timeout", "90"]));
         assert!(
@@ -185,10 +194,12 @@ mod tests {
     #[test]
     fn explicitly_configured_unsupported_option_fails_closed() {
         let capabilities = ServeCapabilities::from_help("--host --port");
-        let error = RapidMlxCommandBuilder::new("model".into())
-            .timeout(90)
-            .build("rapid-mlx".into(), &capabilities)
-            .unwrap_err();
+        let error = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .timeout(90)
+        .build("rapid-mlx".into(), &capabilities)
+        .unwrap_err();
         assert!(error.to_string().contains("--timeout"));
     }
 }
