@@ -2325,6 +2325,7 @@ async function updateVramDisplay(file) {
             ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
             : { 'Content-Type': 'application/json' };
         const body = {
+            backend: 'llama_cpp',
             hf_repo_id: hfState.selectedRepoId || '',
             hf_file_path: file?.path || file?.name || '',
             model_size_bytes: modelBytes,

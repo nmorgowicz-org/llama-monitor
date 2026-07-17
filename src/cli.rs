@@ -5,14 +5,14 @@ use std::path::PathBuf;
 #[command(
     name = "llama-monitor",
     version,
-    about = "Web dashboard for llama.cpp server management and GPU monitoring"
+    about = "Web dashboard for local inference server management and GPU monitoring"
 )]
 pub struct AppArgs {
-    /// Path to the llama-server binary
+    /// Path to the llama-server binary (llama.cpp backend)
     #[arg(short = 's', long)]
     pub llama_server_path: Option<PathBuf>,
 
-    /// Working directory for llama-server
+    /// Working directory for llama-server (llama.cpp backend)
     #[arg(long)]
     pub llama_server_cwd: Option<PathBuf>,
 

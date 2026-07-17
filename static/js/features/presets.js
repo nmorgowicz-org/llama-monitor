@@ -2161,7 +2161,7 @@ async function _restartServerWithPreset(presetId) {
         const token = tokenData.token;
         if (!token) throw new Error('Authentication required');
 
-        await fetch('/api/kill-llama', {
+        await fetch('/api/kill-server', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

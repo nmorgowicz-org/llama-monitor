@@ -4565,6 +4565,7 @@ async function clampAutoSizeResultToSizingMath(result, arch, modelBytes, availVr
 
   const tryEstimate = (ctx) => {
     const body = {
+      backend: wizardState.engine.selected || 'llama_cpp',
       model_path: wizardState.model.path || '',
       n_ctx: ctx,
       parallel_slots: hw.parallelSlots || 1,
@@ -5418,6 +5419,7 @@ async function renderScenarioCards(modelBytes, arch, availVram) {
       try {
         const headers = (window.authHeaders ? window.authHeaders() : {});
         const body = {
+          backend: wizardState.engine.selected || 'llama_cpp',
           model_path: wizardState.model.path || '',
           n_ctx: currentCtx,
           parallel_slots: hw.parallelSlots || 1,

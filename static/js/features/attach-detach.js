@@ -256,7 +256,7 @@ export async function doStop() {
 // ── Kill ───────────────────────────────────────────────────────────────────────
 
 export async function doKillLlama() {
-    if (!await _showConfirm('Stop server', 'Kill all running llama-server processes?')) return;
+    if (!await _showConfirm('Stop server', 'Kill all running inference server processes?')) return;
 
     const btnKill = document.getElementById('btn-kill');
     if (btnKill) btnKill.disabled = true;
@@ -272,7 +272,7 @@ export async function doKillLlama() {
             return;
         }
 
-        const resp = await fetch('/api/kill-llama', {
+        const resp = await fetch('/api/kill-server', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -296,7 +296,7 @@ export async function doKillLlama() {
                 showToast('Kill failed: ' + (data.error || 'unknown'), 'error');
             }
         } else {
-            showToast('llama-server killed', 'success');
+            showToast('Inference server killed', 'success');
             hideTunePanel();
         }
     } catch (e) {
@@ -315,7 +315,7 @@ export async function doKillLlamaInternal() {
         const token = tokenData.token;
         if (!token) return;
 
-        await fetch('/api/kill-llama', {
+        await fetch('/api/kill-server', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

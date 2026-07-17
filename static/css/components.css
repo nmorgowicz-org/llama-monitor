@@ -2967,6 +2967,10 @@ button:disabled {
   50% { opacity: 0.55; }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .engine-indicator-dot.live { animation: none; }
+}
+
 /* ── llama.cpp Version Picker Modal ──────────────────────────────────────── */
 
 #llama-version-modal {

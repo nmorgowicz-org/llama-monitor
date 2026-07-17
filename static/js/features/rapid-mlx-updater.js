@@ -230,6 +230,8 @@ function updateSettingsSummary() {
 
 // ── Modal ────────────────────────────────────────────────────────────────────
 
+let _previousFocus = null;
+
 async function openRapidMlxModal() {
   if (_mutationInflight) return;
 
@@ -237,7 +239,15 @@ async function openRapidMlxModal() {
 
   const modal = document.getElementById('rapid-mlx-modal');
   if (!modal) return;
+  _previousFocus = document.activeElement;
   modal.classList.add('open');
+
+  // Move focus to close button for accessibility.
+  const closeBtn = document.getElementById('rapid-mlx-modal-close');
+  if (closeBtn) closeBtn.focus();
+
+  // Attach Escape key and tab-scope handlers.
+  document.addEventListener('keydown', handleRapidMlxModalKeydown, true);
 
   const supported = _runtimeStatus?.supported ?? false;
   const active = _runtimeStatus?.active ?? null;
@@ -291,6 +301,46 @@ async function openRapidMlxModal() {
 function closeRapidMlxModal() {
   const modal = document.getElementById('rapid-mlx-modal');
   if (modal) modal.classList.remove('open');
+  document.removeEventListener('keydown', handleRapidMlxModalKeydown, true);
+  // Restore focus to element that had focus before modal opened.
+  if (_previousFocus && typeof _previousFocus.focus === 'function') {
+    _previousFocus.focus();
+    _previousFocus = null;
+  }
+}
+
+function handleRapidMlxModalKeydown(e) {
+  const modal = document.getElementById('rapid-mlx-modal');
+  if (!modal || !modal.classList.contains('open')) return;
+
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    closeRapidMlxModal();
+    return;
+  }
+
+  if (e.key === 'Tab') {
+    const focusable = [...modal.querySelectorAll(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    )].filter(el => {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 || rect.height > 0 || style.display !== 'none';
+    });
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
 }
 
 function buildReleaseRow(release, isCurrent, isLatest) {

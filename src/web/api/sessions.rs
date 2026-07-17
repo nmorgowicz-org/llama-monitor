@@ -47,7 +47,7 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .or(api_detach(state.clone(), config.clone()).map(box_reply))
         .unify()
-        .or(api_kill_llama(state, config).map(box_reply))
+        .or(api_kill_server(state, config).map(box_reply))
         .unify()
         .boxed()
 }
@@ -1259,13 +1259,13 @@ fn api_detach(
         })
 }
 
-fn api_kill_llama(
+fn api_kill_server(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let app_config = app_config.clone();
 
-    warp::path!("api" / "kill-llama")
+    warp::path!("api" / "kill-server")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<serde_json::Value>())
@@ -1298,7 +1298,7 @@ fn api_kill_llama(
                     ));
                 }
 
-                state.push_log("[monitor] kill-llama: kill-llama requested (best-effort)".into());
+                state.push_log("[monitor] kill-server: kill-server requested (best-effort)".into());
                 let had_managed_process = state.server_child.lock().await.is_some()
                     || state.supervisor.lock().await.is_some();
                 match stop_server(&state).await {
@@ -1309,7 +1309,7 @@ fn api_kill_llama(
                     }
                     Ok(()) => {
                         state.push_log(
-                            "[monitor] kill-llama: no supervised process; trying legacy process cleanup"
+                            "[monitor] kill-server: no supervised process; trying legacy process cleanup"
                                 .into(),
                         );
                     }

@@ -1,4 +1,4 @@
-//! Architecture-aware VRAM estimator for llama-server configurations.
+//! Architecture-aware VRAM estimator for inference server configurations (llama.cpp and Rapid-MLX).
 //!
 //! Handles:
 //! - Standard full-attention (Llama, Mistral, Qwen, …)

@@ -190,9 +190,9 @@ function refreshMonitoringChip(mode, isManual, hasActiveEndpoint) {
     } else if (isLogsOnly) {
         chip.setAttribute('title', 'Logs-only mode — only live logs active. Click to change mode.');
     } else if (isSleeping && isManual) {
-        chip.setAttribute('title', 'Monitoring paused (manual) — llama-server keeps running. Click to change mode.');
+        chip.setAttribute('title', 'Monitoring paused (manual) — inference server keeps running. Click to change mode.');
     } else if (isSleeping) {
-        chip.setAttribute('title', 'Monitoring paused (idle timeout) — llama-server keeps running. Click to resume.');
+        chip.setAttribute('title', 'Monitoring paused (idle timeout) — inference server keeps running. Click to resume.');
     } else {
         chip.setAttribute('title', 'Dashboard monitoring active — click to cycle modes.');
     }
@@ -659,7 +659,7 @@ export function initNav() {
                 const messages = {
                     'off': 'Monitoring resumed.',
                     'logs-only': 'Logs-only mode — only live logs active.',
-                    'sleep': 'Monitoring paused — llama-server keeps running.',
+                    'sleep': 'Monitoring paused — inference server keeps running.',
                 };
                 showToast(messages[nextMode] || ('Mode: ' + nextMode), 'success');
             } catch (_err) {
