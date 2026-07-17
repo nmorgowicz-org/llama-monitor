@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Phase 5.5 R2/R3 profile-scoped GGUF recovery and MLX re-quantization adapters.
 //!
 //! Recovered output remains experimental and outside production model inventory. The
