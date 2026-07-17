@@ -9,6 +9,8 @@ managed runtime isolated from the user's Python tooling. Local Rapid-MLX launch 
 managed runtime changes are supported only on Apple Silicon macOS. Remote attachment
 remains backend-aware on other platforms.
 
+![Rapid-MLX Runtime Manager](../screenshots/rapid-mlx-runtime-manager-dark.png)
+
 The managed runtime is designed with these goals:
 
 - Fully app-owned and isolated.
@@ -353,6 +355,8 @@ This guarantees that logs, UI, and HTTP responses do not reveal:
 - Executable file paths.
 
 ## API and permissions summary
+
+![Rapid-MLX settings card](../screenshots/settings-rapid-mlx-runtime-card.png)
 
 (For full HTTP contracts, see [api.md](api.md#rapid-mlx-runtime-management).)
 

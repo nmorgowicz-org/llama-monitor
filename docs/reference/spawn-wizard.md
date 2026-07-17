@@ -27,7 +27,11 @@ The wizard supports two inference backends:
 - llama.cpp — native for GGUF models
 - Rapid-MLX — optimized for MLX-ecosystem models on Apple Silicon
 
-Engine selection appears on Step 2 (Choose model) as two cards. The wizard:
+Engine selection appears on Step 2 (Choose model) as two cards.
+
+![Engine selection](../screenshots/spawn-wizard-engines-dark.png)
+
+The wizard:
 
 - Prefers llama.cpp by default.
 - Automatically recommends Rapid-MLX when the chosen model source is native to it.
@@ -104,6 +108,8 @@ When Rapid-MLX is selected, the wizard adapts the Step 2 and Step 3 UI:
     threads, speculative decoding, MTP, mmproj) are hidden.
   - A Rapid-MLX-specific panel (rapid-hardware-panel) is shown for backend-specific
     configuration, keeping its settings isolated from llama.cpp flags.
+
+![Rapid-MLX hardware panel](../screenshots/spawn-wizard-rapid-mlx-hardware.png)
 - Launch guard:
   - Step 2 validation:
     - Blocks if Rapid-MLX is selected but not Apple Silicon.

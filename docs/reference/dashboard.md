@@ -726,6 +726,8 @@ drives which card set is rendered.
 When the active session's backend is Rapid-MLX, the dashboard renders the following
 cards (in order) based on what metrics are available:
 
+![Rapid-MLX dashboard telemetry](../screenshots/dashboard-rapid-mlx-dark.png)
+
 - **Rapid-MLX runtime** — model identity, runtime state (e.g. Ready, Degraded),
   uptime. Marked live or degraded depending on health.
 - **Inference throughput** — prompt and generation tokens/sec, when available.
@@ -747,6 +749,8 @@ becomes unavailable, it is removed from the grid so the layout reflows cleanly.
 ### Partial telemetry (stale metrics)
 
 Rapid-MLX telemetry is intentionally graceful when metrics are missing:
+
+![Rapid-MLX partial telemetry](../screenshots/dashboard-rapid-mlx-partial.png)
 
 - **Before first sample** — the inference area shows a compact "Connecting to
   Rapid-MLX telemetry…" status instead of llama.cpp cards.
