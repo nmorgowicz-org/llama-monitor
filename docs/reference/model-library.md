@@ -30,7 +30,12 @@ path-keyed tag references. Files with other extensions, including chat-template
 Migration is never automatic. Preview the exact plan with an API token, then execute
 that same `plan_id` with the database-admin token and the explicit confirmation value.
 
-## Inventory metadata
+## Inventory metadata and backend awareness
+
+The inventory is backend-neutral: it scans `models_dir` once and classifies each entry by
+format (`gguf`, `mlx`, `transformers`, `unknown`) and by which backends it supports
+(`llama_cpp`, `rapid_mlx`). A model can be launchable under llama.cpp, Rapid-MLX, or
+neither. The inventory does not run either backend.
 
 Every model card receives typed metadata from the backend rather than guessing solely
 from its filename:
@@ -100,12 +105,20 @@ before runtime discovery, downloads, or conversion can begin. Remote attachment 
 separate from local execution. On unsupported platforms the report and model-management
 surfaces remain available, while the local recovery action stays disabled.
 
-## Rapid-MLX sources
+## Rapid-MLX model sources
 
-Rapid-MLX presets store a tagged `rapid_mlx.model_source`. Supported inputs are a
-validated local MLX directory, a revision-pinned Hugging Face repository, a runtime
-alias, or complete authoritative safetensors. Legacy `rapid_mlx.model_path` values are
-migrated at resolution time.
+Rapid-MLX presets store a tagged `rapid_mlx.model_source`. Supported inputs are:
+
+- A validated local MLX directory
+- A revision-pinned Hugging Face repository
+- A runtime alias (a known name mapped by the launcher to a specific repository)
+- Complete authoritative safetensors
+
+The VRAM estimator's Rapid-MLX path also accepts an HF-repo-style alias as `model_path`
+(e.g. `"mlx-community/Qwen3-30B-A3B-4bit"`): it detects the `"org/repo"` shape and
+treats it as an `hf_repo_id`, fetching the `config.json` directly from Hugging Face.
+
+Legacy `rapid_mlx.model_path` values are migrated at resolution time.
 
 Authoritative safetensors conversion uses the managed runtime's exact
 `mlx-lm==0.31.3`, stages output below `.staging/conversions/`, performs a real MLX load

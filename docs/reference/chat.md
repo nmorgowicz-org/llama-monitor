@@ -1,6 +1,6 @@
 # Chat
 
-The chat tab provides multi-conversation streaming chat against the connected llama.cpp server, with per-conversation prompts, parameters, guided-generation tools, and live telemetry.
+The chat tab provides multi-conversation streaming chat against the connected inference backend (llama.cpp or Rapid-MLX), with per-conversation prompts, parameters, guided-generation tools, and live telemetry.
 
 ## Tab Management
 
@@ -90,11 +90,11 @@ Several appearance and chat behaviors are configurable via Settings and are appl
 
 ## Messaging
 
-- **Streaming** — Real-time SSE streaming via `POST /api/chat`, which routes to the active llama.cpp or Rapid-MLX session at `/v1/chat/completions`
-- **Backend-safe controls** — llama.cpp requests retain their existing wire shape; Rapid-MLX requests are filtered and renamed against the active compatibility profile, with usage streaming enabled when supported
+- **Streaming** — Real-time SSE streaming via `POST /api/chat`, which proxies to the active backend session (llama.cpp or Rapid-MLX) at `/v1/chat/completions`
+- **Backend-safe controls** — llama.cpp requests are forwarded as-is; Rapid-MLX requests are filtered and normalized by a compatibility profile (e.g., `repeat_penalty` → `repetition_penalty`, llama.cpp–specific flags dropped) and usage streaming is enabled automatically when the runtime supports it
 - **Markdown rendering** — Assistant output is rendered with Markdown, syntax-highlighted code blocks, and per-block copy controls
 - **Thinking blocks** — If the upstream model sends `reasoning_content`, the UI renders it in an expandable thinking block during the active browser session
-- **Stop behavior** — Stop immediately closes local forwarding. Rapid-MLX aborts the scheduler request through its disconnect guard; native cancel routes are used only by profiles with a verified public request-ID contract
+- **Stop behavior** — Stop immediately closes local SSE forwarding and aborts the in-flight request. For Rapid-MLX backends, native cancel endpoints are used only when the active profile exposes a verified public request-ID; otherwise the abort is handled locally via disconnect.
 - **Token estimates** — The composer shows a rough `~N tok` estimate with warning colors at higher counts
 - **Smart scroll** — Auto-scroll stays on only while you are near the bottom; scrolling upward during generation disables follow mode until you jump back down
 - **Unread badge** — New assistant replies increment a scroll-to-bottom unread badge when you are reading older content
@@ -189,6 +189,12 @@ Per-tab controls for generation behavior. A dot indicator appears when the activ
 | `max_tokens` | `4096` | Reply length cap |
 | `stream_timeout` | `120s` | Abort if no content arrives within this interval |
 
+These parameters are applied for both llama.cpp and Rapid-MLX sessions. Rapid-MLX uses a compatibility profile:
+
+- `repeat_penalty` is renamed to `repetition_penalty` before being sent.
+- llama.cpp-specific flags not recognized by Rapid-MLX are dropped (e.g., MTP sweep settings, GGUF tuning knobs).
+- The `max_tokens` cap is enforced per-backend via the shared UI but is ultimately constrained by the active model's context window.
+
 ![Response Settings](../screenshots/panels-model-settings.png)
 
 ## Context Pressure Bar
@@ -242,7 +248,7 @@ The debug inspector shows the exact outbound request shape used for the next rep
 
 ## Chat Telemetry
 
-Real-time metrics for the active chat tab, accessible from the telemetry toggle in the chat header.
+Real-time metrics for the active chat tab, accessible from the telemetry toggle in the chat header. Metrics are sourced from the connected inference backend: llama.cpp exposes detailed slot/slot-usage info; Rapid-MLX exposes status/memory telemetry when available; both backends provide per-message token counts.
 
 ### Summary Rail
 
@@ -275,7 +281,7 @@ Each assistant message footer shows:
 - `N%` — estimated context-usage percentage at that point
 - Model name (if known)
 
-These values are derived from the live llama.cpp metrics and the token counts reported per message.
+These values are derived from backend-provided metrics (llama.cpp health/telemetry or Rapid-MLX status) and the token counts reported per streamed message.
 
 ## Chat Style
 
@@ -574,7 +580,7 @@ Purely device-specific presentation choices such as chat style and font scale re
 
 ## Sessions and Attachment
 
-llama-monitor manages one or more llama.cpp or Rapid-MLX sessions and routes chat
+llama-monitor manages one or more sessions (llama.cpp or Rapid-MLX) and routes chat
 traffic through the active session's persisted backend and model identity.
 
 Key session endpoints:
@@ -584,13 +590,13 @@ Key session endpoints:
 - `POST /api/sessions` — register a new session definition
 - `DELETE /api/sessions/:id` — remove a session (requires db-admin-token)
 - `POST /api/sessions/active` — switch active session by ID
-- `POST /api/sessions/spawn` — spawn a new llama-server from a preset or inline config (requires db-admin-token)
+- `POST /api/sessions/spawn` — spawn a new local inference backend (llama.cpp or Rapid-MLX) from a preset or inline config (requires db-admin-token)
 - `POST /api/attach` — explicitly attach to an existing llama.cpp or Rapid-MLX endpoint
 - `POST /api/detach` — detach from the current attach-style active session
 - `GET /api/sessions/recent` — last 10 sessions, sorted by recent use
 - `GET /api/sessions/restore-hint` — lightweight hint for restore/attach suggestions
-- `GET /api/sessions/check-endpoint` — probe whether a llama-server URL is reachable
-- `GET /api/capabilities` — current capabilities and availability derived from active session(s)
+- `GET /api/sessions/check-endpoint` — probe whether an inference server URL is reachable
+- `GET /api/capabilities` — current capabilities and availability derived from active session(s), including backend-specific features (e.g., cancellation, tool support, reasoning controls)
 
 ChatStorage mediates all database access; browser endpoints never talk directly to SQLite. Conversations and messages are persisted via `ChatStorage` behind the tab and search endpoints.
 
@@ -598,13 +604,18 @@ ChatStorage mediates all database access; browser endpoints never talk directly 
 
 Chat-related routes are implemented in `src/web/api/chat/`:
 
-- `stream.rs` — `api_chat`, `api_chat_abort` (SSE relay to `/v1/chat/completions`)
+- `stream.rs` — `api_chat`, `api_chat_abort` (backend-aware SSE relay to `/v1/chat/completions`)
 - `guided.rs` — guided-generation handler and thinking-content stripping
 - `suggestions.rs` — suggestion generation, director cards, keyword extraction
 - `notes.rs` — context-notes analysis and persistence
 - `tabs.rs` — tab CRUD, search, archive/hide/restore helpers
 
-Session and attachment routes are implemented in `src/web/api/sessions.rs`.
+Session, attachment, and backend selection routes are implemented in `src/web/api/sessions.rs`.
+
+Backend-specific behavior:
+
+- `src/web/api/upstream.rs` — `prepare_inference_request` resolves active session, backend type, and model identity; `map_chat_body` applies backend-specific transformations.
+- `src/inference/` — per-backend adapters (`llama_cpp.rs`, `rapid_mlx/`) handle launch, readiness, metrics polling, capability detection, and request mapping.
 
 Note: Many supporting endpoints now exist (guided chat, tab management, search, suggestions, context notes, sessions, capabilities). The list below is not exhaustive and is subject to change as the API grows.
 
@@ -633,15 +644,17 @@ Note: Many supporting endpoints now exist (guided chat, tab management, search, 
 
 ### Server Control
 
-- `POST /api/kill-llama` — best-effort kill of the managed llama-server process (requires db-admin-token and `"confirm": "kill"` in the body).
+- `POST /api/kill-server` — best-effort kill of whichever inference backend llama-monitor is currently running locally (llama.cpp or Rapid-MLX). Requires db-admin-token and `"confirm": "kill"` in the body. Primary kill path is backend-agnostic (supervisor by PID); a legacy platform-specific fallback may only match llama-server.
 
 ## Data Flow
 
 ```text
 User message -> llama-monitor POST /api/chat
-             -> active backend request mapping + transient runtime auth
-             -> upstream /v1/chat/completions SSE
-             -> browser renders content, reasoning, and usage live
+              -> active-session resolved (llama.cpp or Rapid-MLX)
+              -> backend-specific request mapping (e.g., field filtering for Rapid-MLX) + runtime auth
+              -> upstream /v1/chat/completions SSE
+              -> backend-specific SSE normalization (e.g., reasoning fields)
+              -> browser renders content, reasoning, and usage live
 ```
 
 ## Persistence

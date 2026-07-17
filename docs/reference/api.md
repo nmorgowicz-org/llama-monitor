@@ -21,6 +21,7 @@ Internally, the API is implemented as a modular warp router in `src/web/api/mod.
 - `metrics` — system/metrics endpoints
 - `models` — model scan, downloads, GGUF metadata
 - `presets` — preset CRUD
+- `rapid_mlx_runtime` — Rapid-MLX runtime install, upgrade, repair, rollback, status, releases
 - `remote_agent` — remote agent install/manage via SSH
 - `self_update` — in-place update of llama-monitor
 - `sensor_bridge` — Windows sensor-bridge service
@@ -2104,43 +2105,224 @@ Restart a locally running llama-server with the current binary (useful after ins
 
 Route handlers: `src/web/api/rapid_mlx_runtime.rs`.
 
-Managed Rapid-MLX environments are immutable and app-owned. Mutations are available
-only on Apple Silicon macOS and never modify Homebrew, Pip, Pipx, or explicitly
-configured custom runtimes. A successful activation retains the previous known-good
-environment for rollback. Runtime status and job payloads intentionally omit local
-executable paths.
+Rapid-MLX is a supported inference backend for macOS Apple Silicon. Its runtime can be
+managed in-place: installed, upgraded, repaired, and rolled back using isolated, immutable
+environments. These endpoints:
+
+- Do not touch Homebrew, system Python, or external package managers.
+- Use a single-mutation model: only one runtime operation may run at a time.
+- Never modify a running environment in place; new versions are built separately and
+  activated after validation.
+- Always retain the previous known-good environment to allow rollback.
+- Never expose local filesystem paths in public JSON payloads.
+
+Mutations require `db-admin-token` and an explicit confirmation token.
+Read endpoints (status, releases, jobs) require `api-token`.
 
 ### `GET /api/rapid-mlx/runtime/status`
 
 Auth: `api-token`.
 
-Returns platform support, `uv` installer availability, mutation state, rollback
-availability, the active managed runtime, retained inventory, and recent runtime jobs.
-Inventory entries contain the environment ID, exact version, release channel,
-active/rollback flags, and completion state.
+Returns the current managed runtime status, inventory, and recent jobs.
+
+Response:
+
+```json
+{
+  "runtime": {
+    "supported": true,
+    "installer_available": true,
+    "mutation_in_progress": false,
+    "rollback_available": true,
+    "active": {
+      "environment_id": "rapid-mlx-0.10.10",
+      "version": "0.10.10",
+      "release_channel": "stable",
+      "active": true,
+      "rollback_candidate": false,
+      "complete": true
+    },
+    "inventory": [
+      {
+        "environment_id": "rapid-mlx-0.10.10",
+        "version": "0.10.10",
+        "release_channel": "stable",
+        "active": true,
+        "rollback_candidate": false,
+        "complete": true
+      },
+      {
+        "environment_id": "rapid-mlx-0.10.9",
+        "version": "0.10.9",
+        "release_channel": "stable",
+        "active": false,
+        "rollback_candidate": true,
+        "complete": true
+      }
+    ]
+  },
+  "jobs": [
+    {
+      "id": "a1b2c3d4e5f6...",
+      "operation": "install",
+      "state": "complete",
+      "message": "Runtime validated and activated",
+      "version": "0.10.10",
+      "result": {
+        "active": {
+          "environment_id": "rapid-mlx-0.10.10",
+          "version": "0.10.10",
+          "release_channel": "stable",
+          "active": true,
+          "rollback_candidate": false,
+          "complete": true
+        },
+        "previous_environment_id": "rapid-mlx-0.10.9"
+      }
+    }
+  ]
+}
+```
+
+Fields:
+
+- `supported`: true if the platform is Apple Silicon macOS (Rapid-MLX requirement).
+- `installer_available`: true if `uv` or equivalent installer is available.
+- `mutation_in_progress`: true while an install/upgrade/repair/rollback job is active.
+- `rollback_available`: true if a previous known-good environment is retained.
+- `active`: current managed runtime or null.
+- `inventory`: retained environments (up to internal limit), each with active/rollback
+  candidate flags.
+- `jobs`: up to 16 most recent runtime operations.
+
+If the manager cannot initialize, the endpoint returns 500 with:
+
+```json
+{ "ok": false, "error": "Managed Rapid-MLX storage is unavailable" }
+```
 
 ### `GET /api/rapid-mlx/runtime/releases`
 
 Auth: `api-token`.
 
-Returns recent non-draft published Rapid-MLX releases discovered from the upstream
-GitHub release feed. Stable releases are the default; a published prerelease must be
-selected explicitly and passes the same staged verification gates. Exact versions older
-than the recent list are verified through immutable tag metadata when selected.
+Lists recent non-draft Rapid-MLX releases discovered from the upstream GitHub release
+feed. Used for selecting a version in install/upgrade. Responses are cached for 5 minutes.
+
+Response:
+
+```json
+{
+  "releases": [
+    {
+      "version": "0.10.10",
+      "tag": "v0.10.10",
+      "channel": "stable",
+      "published_at": "2026-07-16T00:00:00Z"
+    },
+    {
+      "version": "0.10.11rc1",
+      "tag": "v0.10.11rc1",
+      "channel": "prerelease",
+      "published_at": "2026-07-17T00:00:00Z"
+    }
+  ]
+}
+```
+
+Notes:
+
+- Draft releases are excluded.
+- Versions below the configured floor are filtered out.
+- Prerelease channels must be selected explicitly and must match between request and
+  release metadata.
+
+If GitHub is unreachable or exceeds response bounds, returns 502:
+
+```json
+{ "ok": false, "error": "Rapid-MLX release discovery is temporarily unavailable" }
+```
 
 ### `POST /api/rapid-mlx/recommend`
 
 Auth: `api-token`.
 
-Returns a deterministic, explainable backend recommendation for a typed artifact.
-Accepted `artifact_kind` values are `gguf`, `mlx_directory`,
-`authoritative_safetensors`, `rapid_mlx_hf_repository`, `rapid_mlx_alias`, and
-`unknown`. GGUF always recommends llama.cpp. Rapid-MLX-native sources recommend
-Rapid-MLX only when the local platform and a compatible runtime are available.
+Returns a deterministic backend recommendation based on artifact type, platform, and
+runtime compatibility.
+
+Request:
+
+```json
+{
+  "artifact_kind": "mlx_directory"
+}
+```
+
+Accepted `artifact_kind` values:
+
+- `gguf`: always recommends `llama_cpp`.
+- `mlx_directory`, `authoritative_safetensors`, `rapid_mlx_hf_repository`, `rapid_mlx_alias`:
+  recommends `rapid_mlx` if platform is Apple Silicon and a compatible runtime is present;
+  otherwise indicates runtime is required or platform is unavailable.
+- `unknown`: returns `manual_selection` with no recommendation.
+
+Response (ready):
+
+```json
+{
+  "recommended_backend": "rapid_mlx",
+  "state": "ready",
+  "reason": "This source is native to the verified Rapid-MLX resolution path."
+}
+```
+
+Response (GGUF):
+
+```json
+{
+  "recommended_backend": "llama_cpp",
+  "state": "ready",
+  "reason": "GGUF runs natively with llama.cpp."
+}
+```
+
+Response (platform missing):
+
+```json
+{
+  "recommended_backend": null,
+  "state": "platform_unavailable",
+  "reason": "Local Rapid-MLX requires Apple Silicon macOS; remote attachment remains available."
+}
+```
+
+Response (runtime required):
+
+```json
+{
+  "recommended_backend": null,
+  "state": "runtime_required",
+  "reason": "This model is Rapid-MLX compatible, but a compatible local runtime is required."
+}
+```
+
+Response (unknown):
+
+```json
+{
+  "recommended_backend": null,
+  "state": "manual_selection",
+  "reason": "Choose an engine after selecting a typed model source."
+}
+```
 
 ### `POST /api/rapid-mlx/runtime/install`
 
 Auth: `db-admin-token`.
+
+Installs the specified Rapid-MLX version as a managed runtime. Requires Apple Silicon macOS;
+returns 400 if not available.
+
+Request:
 
 ```json
 {
@@ -2150,40 +2332,143 @@ Auth: `db-admin-token`.
 }
 ```
 
-The exact version and channel must match non-draft published release metadata. Returns
-`202` with a job ID after reserving the single runtime-mutation slot.
+Rules:
+
+- `version` must match a published non-draft release exactly.
+- `channel` must match (`stable` or `prerelease`).
+- `confirm` must be exactly `INSTALL_RAPID_MLX_RUNTIME`.
+- Rejects unknown or extra fields with 400.
+
+If another runtime operation is in progress: 429
+
+```json
+{ "ok": false, "error": "Another managed Rapid-MLX runtime operation is already in progress" }
+```
+
+If platform not supported: 400
+
+```json
+{ "ok": false, "error": "Managed Rapid-MLX runtime changes require Apple Silicon macOS" }
+```
+
+Success: 202
+
+```json
+{ "job_id": "a1b2c3d4e5f6...", "state": "queued" }
+```
+
+Track progress via `GET /api/rapid-mlx/runtime/jobs/{job_id}`.
 
 ### `POST /api/rapid-mlx/runtime/upgrade`
 
 Auth: `db-admin-token`.
 
-Uses the install payload with confirmation `UPGRADE_RAPID_MLX_RUNTIME`. The active
-environment is never modified in place and an active inference session is not restarted
-or rerouted.
+Upgrades to a newer Rapid-MLX version by installing a second environment, validating it,
+then activating it. The previous environment is kept as rollback candidate; it is never
+modified in place.
+
+Request uses the same shape as install, but with its own confirmation token:
+
+```json
+{
+  "version": "0.10.11",
+  "channel": "stable",
+  "confirm": "UPGRADE_RAPID_MLX_RUNTIME"
+}
+```
+
+Notes:
+
+- An active inference session is not restarted or rerouted automatically.
+- Same concurrency, versioning, and platform rules as install.
+- Returns 202 with `job_id` on success.
 
 ### `POST /api/rapid-mlx/runtime/repair`
 
 Auth: `db-admin-token`.
 
-Request: `{ "confirm": "REPAIR_RAPID_MLX_RUNTIME" }`. Rebuilds the active exact release
-in a new isolated environment and activates it only after re-verifying the exact version
-and channel against published release metadata and completing runtime validation.
+Rebuilds the currently active release in a new isolated environment and activates it,
+used when the managed runtime becomes corrupted or incomplete.
+
+Request:
+
+```json
+{
+  "confirm": "REPAIR_RAPID_MLX_RUNTIME"
+}
+```
+
+Rules:
+
+- The active runtime must be verifiable against published release metadata.
+- If not verifiable, returns 400:
+  `{ "ok": false, "error": "The active managed Rapid-MLX runtime could not be verified against published release metadata" }`
+- Same concurrency rules; returns 202 with `job_id` on success.
 
 ### `POST /api/rapid-mlx/runtime/rollback`
 
 Auth: `db-admin-token`.
 
-Request: `{ "confirm": "ROLLBACK_RAPID_MLX_RUNTIME" }`. Revalidates and atomically
-activates the retained previous known-good environment.
+Restores the previous known-good managed runtime when available.
+
+Request:
+
+```json
+{
+  "confirm": "ROLLBACK_RAPID_MLX_RUNTIME"
+}
+```
+
+Rules:
+
+- No-op if no previous known-good environment exists:
+  `{ "ok": false, "error": "No previous known-good Rapid-MLX runtime is available" }`
+- Revalidates that environment before activation.
+- Returns 202 with `job_id` on success.
 
 ### `GET /api/rapid-mlx/runtime/jobs/{id}`
 
 Auth: `api-token`.
 
-Returns `queued`, `running`, `complete`, or `failed` state plus a path-safe message and,
-on success, the active public runtime metadata. Only 16 recent jobs are retained. A
-concurrent mutation request returns `429`; malformed or unknown JSON fields return
-`400`.
+Returns the state of a specific runtime operation job.
+
+Response:
+
+```json
+{
+  "id": "a1b2c3d4e5f6...",
+  "operation": "install",
+  "state": "complete",
+  "message": "Runtime validated and activated",
+  "version": "0.10.10",
+  "result": {
+    "active": {
+      "environment_id": "rapid-mlx-0.10.10",
+      "version": "0.10.10",
+      "release_channel": "stable",
+      "active": true,
+      "rollback_candidate": false,
+      "complete": true
+    },
+    "previous_environment_id": "rapid-mlx-0.10.9"
+  }
+}
+```
+
+Fields:
+
+- `operation`: one of `install`, `upgrade`, `repair`, `rollback`.
+- `state`: one of `queued`, `running`, `complete`, `failed`.
+- `message`: path-safe human-readable status; never exposes internal filesystem paths.
+- `version`: version associated with the operation (if applicable).
+- `result`: present on success; contains `active` runtime metadata and optional
+  `previous_environment_id`.
+
+If the job is not found, returns 404:
+
+```json
+{ "ok": false, "error": "Runtime operation was not found" }
+```
 
 ## Remote Agent
 

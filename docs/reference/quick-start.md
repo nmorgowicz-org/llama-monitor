@@ -16,13 +16,21 @@ used internally by the UI.
 You’ll land on the dashboard / setup view, where you can browse available models, see your
 hardware memory, and get started.
 
-## 2. Use the Setup wizard (optional)
+## 2. Use the Setup wizard (recommended)
 
-The setup wizard is recommended but optional. You can:
+The setup wizard is the easiest way to get started. It will:
 
-- Use the wizard to choose a model and tune settings, or
-- Attach directly to an existing llama.cpp or Rapid-MLX server by choosing its engine
-  and entering its URL.
+- Detect your platform and recommend a backend:
+  - llama.cpp on most platforms.
+  - Rapid-MLX on Apple Silicon macOS (uses a managed runtime maintained by
+    Llama Monitor).
+- Guide you through model and quant selection.
+- Use the VRAM estimator to keep your system stable.
+
+Or, if you already have a server running, you can:
+
+- Attach directly to an existing llama.cpp or Rapid-MLX server by selecting its
+  engine and entering its URL.
 
 Click **Open setup wizard** on the dashboard to begin.
 
@@ -51,7 +59,9 @@ At the end of the wizard:
 
 Llama Monitor will:
 
-- Launch llama-server with your chosen preset.
+- Start the selected backend with your chosen preset:
+  - llama.cpp: launches llama-server.
+  - Rapid-MLX: ensures its managed runtime is installed and launches Rapid-MLX.
 - Switch you to the Performance & metrics dashboard.
 
 ## 5. Open a new conversation
@@ -89,7 +99,7 @@ The monitoring chip in the top nav lets you cycle through three modes:
 
 - **Monitoring** – full telemetry, GPU reads, system metrics, and live logs.
 - **Logs only** – only the live log stream is active; GPU, system, and sparkline updates are paused to save resources.
-- **Paused** – all telemetry and logs are paused; llama-server keeps running.
+- **Paused** – all telemetry and logs are paused; the backend keeps running.
 
 Click the chip to cycle modes, or use it when you want the server running but need lower overhead on your system.
 
@@ -98,14 +108,18 @@ Click the chip to cycle modes, or use it when you want the server running but ne
 - Default URL: http://127.0.0.1:7778 (loopback only; not reachable from other devices).
 - LAN exposure: use `--host 0.0.0.0` (or 0.0.0.0) to allow access from other devices on your
   network. If you do this:
-  - Set a strong API key in llama-server (Server API key in the wizard or preset editor).
+  - Set a strong server API key in the wizard or preset editor for your backend.
   - Be aware that exposing llama-monitor over the internet without TLS or an API gateway
     is not recommended.
 - GPU / backend setup:
-  - macOS: Metal is automatic.
-  - Linux with NVIDIA GPU: install the matching CUDA runtime and select the CUDA backend when installing llama.cpp.
+  - macOS on Apple Silicon:
+    - Rapid-MLX: automatic (Metal); managed runtime handled by Llama Monitor.
+    - llama.cpp: Metal is automatic.
+  - Linux with NVIDIA GPU: install the matching CUDA runtime and select the
+    CUDA backend when installing llama.cpp.
   - Linux with AMD GPU: install ROCm and select the ROCm backend.
-  - Windows: choose the backend that matches your GPU (CUDA, Vulkan, SYCL) in the llama.cpp
-    version modal or setup wizard.
+  - Windows: choose the backend that matches your GPU (CUDA, Vulkan, SYCL) in
+    the llama.cpp version modal or setup wizard.
 - Config directory: most settings and files live under `~/.config/llama-monitor`:
-  - API token, HF token, models directory, and llama.cpp binary are stored there (configurable in Settings).
+  - API token, HF token, models directory, llama.cpp binary, and Rapid-MLX
+    managed runtime are stored there (configurable in Settings).

@@ -710,20 +710,86 @@ Open the shortcuts modal with `Ctrl+/`.
 | `Escape` | Close the active modal |
 
 ![Keyboard Shortcuts](../screenshots/panels-keyboard-shortcuts.png)
-# Backend-aware inference telemetry
+## Backend-aware inference telemetry
 
 The performance dashboard selects its inference cards from the active runtime's
-normalized telemetry contract. llama.cpp retains its native throughput, generation,
-context, slot, speculative-decoding, and sampler views. Rapid-MLX instead exposes only
-metrics its server reports natively: runtime/model state, prompt and generation
-throughput, request queue, Metal runtime memory, recognized cache statistics,
-cumulative totals, recognized request activity, and optional progress.
+normalized telemetry contract. The backend field is emitted via WebSocket and
+drives which card set is rendered.
 
-Missing metrics do not become zero or permanent `N/A` placeholders. A reported
-`0.0` throughput is displayed as zero. Optional cards retain their last valid sample
-with a visible last-seen age for two subsequent missing polls and are removed on the
-third. Runtime state remains visible as degraded when telemetry disconnects, while
-recognized live progress uses an accessible progress bar. Unsupported cards are
-removed from the document so the grid reflows and stale controls are not exposed to
-keyboard or accessibility navigation. Before Rapid-MLX's first successful status
-sample, the region shows one compact loading status.
+- **llama.cpp sessions** use the standard llama.cpp cards: throughput, generation,
+  context, slots, speculative decoding, and sampler config.
+- **Rapid-MLX sessions** replace llama.cpp cards with Rapid-MLX-specific telemetry
+  cards.
+
+### Rapid-MLX telemetry cards
+
+When the active session's backend is Rapid-MLX, the dashboard renders the following
+cards (in order) based on what metrics are available:
+
+- **Rapid-MLX runtime** — model identity, runtime state (e.g. Ready, Degraded),
+  uptime. Marked live or degraded depending on health.
+- **Inference throughput** — prompt and generation tokens/sec, when available.
+- **Request queue** — running and waiting request counts; labeled "active" when
+  requests are running.
+- **Metal runtime memory** — active memory, peak memory, and cache memory usage in
+  human-readable units.
+- **Prefix & cache state** — global cache hit rate, cache entries, memory in use,
+  and whether multimodal cache is available.
+- **Cumulative totals** — completed requests, prompt tokens, completion tokens, and
+  compute steps.
+- **Request activity** — count of recognized active requests.
+- **Live progress** — an accessible progress bar driven from the backend's
+  progress value (0–100%) when present.
+
+Each card is shown only when its underlying metric is available; if it later
+becomes unavailable, it is removed from the grid so the layout reflows cleanly.
+
+### Partial telemetry (stale metrics)
+
+Rapid-MLX telemetry is intentionally graceful when metrics are missing:
+
+- **Before first sample** — the inference area shows a compact "Connecting to
+  Rapid-MLX telemetry…" status instead of llama.cpp cards.
+- **Missing metrics (graceful degradation)** — when a previously available metric
+  stops appearing:
+  - For 1–2 polls: the card keeps its last known values and displays a stale
+    indicator with an age and a "X/3" counter.
+  - On the 3rd consecutive missing poll: the card is removed.
+- **Runtime card degradation** — if polling fails while the runtime card is
+  available, it is kept visible but marked as degraded with
+  "Telemetry unavailable" and a stale label instead of being removed.
+- **Zero vs. missing** — a real `0.0` throughput is displayed as zero (not as
+  "N/A") to differentiate from genuinely missing fields.
+
+This prevents the UI from freezing around stale values or cluttering the dashboard
+with irrelevant cards.
+
+### Engine · Model indicator
+
+The top navigation bar includes an Engine · Model indicator that shows which
+inference backend is currently active and what model is loaded:
+
+- Format: `Rapid-MLX · <model>` or `llama.cpp · <model>`.
+- Visible when a running session has an identified backend and model.
+- Includes a live state dot:
+  - Green "live" dot while generating.
+  - Subtle "idle-active" dot when the server is running but idle.
+- Hovering the indicator shows the full model identity and whether it is
+  generating or idle.
+
+This lets the user confirm at a glance whether they are running on llama.cpp or
+Rapid-MLX without opening the Server tab.
+
+### Backend-aware session management
+
+Session creation, restore, and display are backend-aware:
+
+- **Recent endpoints** — each recent session card labels its backend (e.g.
+  "Rapid-MLX" or "llama.cpp") in the meta line.
+- **Spawn-saved sessions** — when restoring a saved model, the detail line shows
+  which engine the preset was saved for.
+- **Attach flow** — when reconnecting to a saved endpoint, the backend is
+  pre-selected based on how the session was originally created.
+- **WebSocket payload** — the backend field reflects the active session's backend
+  and is used by all dashboard components (cards, cockpit, indicators) to decide
+  which telemetry path to render.

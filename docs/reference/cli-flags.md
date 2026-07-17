@@ -94,13 +94,17 @@ Disable the tray icon even on systems where one would normally be shown.
 llama-monitor --no-tray
 ```
 
-## Local llama.cpp launch defaults
+## Inference backend launch defaults
 
-These flags seed the dashboard's local launch/runtime defaults.
+These flags affect how Llama Monitor discovers and launches local inference
+backends (llama.cpp, Rapid-MLX, etc.).
 
 ### `--llama-server-path`, `-s`
 
-Path to the `llama-server` binary.
+Path to the `llama-server` binary for the llama.cpp backend.
+
+If you are only using the Rapid-MLX backend on Apple Silicon, this flag is
+optional and can be omitted.
 
 ```bash
 llama-monitor --llama-server-path /usr/local/bin/llama-server
@@ -109,7 +113,7 @@ llama-monitor -s /opt/llama.cpp/llama-server
 
 ### `--llama-server-cwd`
 
-Optional working directory for `llama-server`.
+Optional working directory for `llama-server` (llama.cpp backend).
 
 Use this only when the launched process depends on relative paths.
 
@@ -119,7 +123,7 @@ llama-monitor --llama-server-cwd /srv/llama
 
 ### `--models-dir`, `-m`
 
-Directory used for model auto-discovery.
+Directory used for model auto-discovery across all backends.
 
 ```bash
 llama-monitor --models-dir /srv/models
@@ -192,7 +196,8 @@ llama-monitor --gpu-devices 0,1
 
 ### `--llama-poll-interval` (default: `1`)
 
-Polling interval in seconds for llama.cpp metrics collection.
+Polling interval in seconds for backend metrics collection (llama.cpp,
+Rapid-MLX, and others).
 
 ```bash
 llama-monitor --llama-poll-interval 5
@@ -280,10 +285,18 @@ llama-monitor --remote-agent-ssh-command "systemctl --user start llama-monitor-a
 
 ## Supported examples
 
-### Dashboard on the local machine
+### Dashboard on the local machine (llama.cpp)
 
 ```bash
 llama-monitor --llama-server-path /usr/local/bin/llama-server --models-dir ~/models
+```
+
+### Dashboard on Apple Silicon with Rapid-MLX
+
+For Rapid-MLX, no backend-specific server path is required; use:
+
+```bash
+llama-monitor --models-dir ~/models
 ```
 
 ### Headless dashboard on a LAN host

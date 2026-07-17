@@ -163,8 +163,8 @@ The project uses two tokens:
 - `db-admin-token` — elevated token for destructive/high-impact operations:
   - DB restore, repair, and backup deletion.
   - Session deletion.
-  - Session spawn (starting llama-server).
-  - Kill-llama.
+  - Session spawn (starting any managed inference backend).
+  - Kill-server (best-effort backend-agnostic stop).
   - Self-update.
   - Metal GPU limit tuning (on macOS).
   - DB queries via `POST /api/db/query` with no column restrictions on `SELECT`.
@@ -175,7 +175,7 @@ Operations protected by `db-admin-token`:
 - `POST /api/db/repair`
 - `DELETE /api/sessions/:id`
 - `POST /api/sessions/spawn`
-- `POST /api/kill-llama`
+- `POST /api/kill-server`
 - `POST /api/self-update`
 - `POST /api/system/set-metal-gpu-limit`
 
@@ -261,13 +261,86 @@ For `/api/*` routes, there is an Origin validation filter:
 
 This is a best-effort defense against cross-origin CSRF from third-party pages; it is not a full CSRF token system.
 
+## Rapid-MLX Runtime Mutation Auth
+
+Rapid-MLX runtime changes (install, upgrade, repair, rollback) are protected with
+`db-admin-token` plus an explicit confirmation string. Each mutation runs in a managed,
+isolated environment under `config_dir/runtimes/rapid-mlx/` and never touches the host
+system outside that tree.
+
+Endpoints:
+
+- `POST /api/rapid-mlx/runtime/install`
+  - Requires: `db-admin-token` (Bearer).
+  - Body: `{ "version": "<version>", "channel": "stable"|"prerelease", "confirm": "INSTALL_RAPID_MLX_RUNTIME" }`.
+  - Platform gate: 400 on non-Apple-Silicon; no mutation occurs.
+
+- `POST /api/rapid-mlx/runtime/upgrade`
+  - Requires: `db-admin-token` (Bearer).
+  - Body: `{ "version": "<version>", "channel": "stable"|"prerelease", "confirm": "UPGRADE_RAPID_MLX_RUNTIME" }`.
+
+- `POST /api/rapid-mlx/runtime/repair`
+  - Requires: `db-admin-token` (Bearer).
+  - Body: `{ "confirm": "REPAIR_RAPID_MLX_RUNTIME" }`.
+  - Reinstalls the active managed runtime and verifies it against published metadata.
+
+- `POST /api/rapid-mlx/runtime/rollback`
+  - Requires: `db-admin-token` (Bearer).
+  - Body: `{ "confirm": "ROLLBACK_RAPID_MLX_RUNTIME" }`.
+
+Notes:
+
+- All four use `check_db_admin_token()` with a strict confirmation string, not `api-token`.
+- Only one mutation may run at a time; concurrent requests receive 429.
+- The active runtime is only updated after full validation; if validation fails, the
+  previous environment is preserved and no public pointer is changed.
+- The public status endpoints (`GET /api/rapid-mlx/runtime/status`, `/releases`,
+  `/jobs/:id`) require `api-token` (not `db-admin-token`) and never expose internal
+  filesystem paths, environment IDs with sensitive details, or raw error traces.
+
+### Runtime Sandboxing
+
+When installing a Rapid-MLX runtime, the process is heavily constrained:
+
+- `uv` runs with `env_clear()` plus a small allowlist:
+  - `PATH`, `SSL_CERT_FILE`, `SSL_CERT_DIR` forwarded for connectivity.
+  - All other env vars (including `HF_TOKEN`, `LLAMA_MONITOR_*`, `PATH` extras) are dropped.
+- The managed root is created under `config_dir/runtimes/rapid-mlx/`:
+  - `environments/<id>/` — isolated per-version Python and tool env.
+  - `uv-cache/`, `uv-python/` — private caches.
+- Path traversal defenses:
+  - No symlink components allowed anywhere in the managed root.
+  - All child paths are canonicalized and validated to stay inside the root.
+- HF_TOKEN:
+  - Not set in the uv install environment.
+  - For runtime HF operations (model fetches, config introspection), the token is passed
+    only through the child process environment and never stored in manifests, source
+    metadata, or command arguments.
+
+### Rapid-MLX Diagnostics and Token Redaction
+
+Rapid-MLX runtime error responses are sanitized:
+
+- `public_runtime_error()` normalizes internal error messages into a small set of stable
+  strings, discarding filesystem paths, Python tracebacks, and uv output.
+- Public inventory responses (`PublicRuntimeInventoryEntry`) include:
+  - `environment_id`, `version`, `release_channel`, `active`, `rollback_candidate`, `complete`.
+  - The absolute `executable_path` is excluded and never exposed.
+- Job detail responses (`GET /api/rapid-mlx/runtime/jobs/:id`) never include raw stderr
+  from uv or the runtime probe.
+
 ## Per-Endpoint Cooldowns
 
 Some endpoints enforce short cooldowns to reduce accidental or abusive use.
 
-- `POST /api/kill-llama`
+- `POST /api/kill-server`
   - Requires `db-admin-token` and `{ "confirm": "kill" }`.
   - 30-second cooldown between calls.
+  - Backend-agnostic: stops any actively managed inference process (llama.cpp or Rapid-MLX)
+    via the shared `stop_server()` path (generation-based invalidation, supervisor cleanup).
+  - Fallback: if no supervised process is found, it attempts a best-effort OS-level kill
+    of `llama-server`; this does not affect Rapid-MLX, which is only ever killed through
+    the managed stop_server() path.
 - `POST /api/self-update`
   - Requires db-admin-token and `{ "confirm": "update" }`. 5-minute cooldown between calls.
   - Update safety: self-update downloads the release asset for the running platform in-place. No cryptographic signature or integrity check is currently enforced beyond token-based auth.
