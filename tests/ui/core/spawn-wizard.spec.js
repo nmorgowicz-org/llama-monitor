@@ -64,6 +64,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         });
 
         await page.goto('/');
+        await page.waitForLoadState('networkidle');
         await page.evaluate(async () => {
             const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
             openSpawnWizard({
@@ -237,6 +238,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         }));
 
         await page.goto('/');
+        await page.waitForLoadState('networkidle');
         await page.evaluate(async () => {
             const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
             openSpawnWizard({
@@ -309,6 +311,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         });
 
         await page.goto('/');
+        await page.waitForLoadState('networkidle');
         await page.evaluate(async () => {
             const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
             openSpawnWizard({ localPath: '/models/model.gguf' });
@@ -403,6 +406,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         }));
 
         await page.goto('/');
+        await page.waitForLoadState('networkidle');
         await page.evaluate(async () => {
             const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
             openSpawnWizard({
