@@ -22,6 +22,16 @@ Quick start:
 
 ## Features
 
+### Rapid-MLX Backend (Apple Silicon)
+
+Rapid-MLX is now a first-class inference backend for Apple Silicon. Llama Monitor manages its runtime in an isolated environment—no manual Python setup required.
+
+- Engine selection: choose llama.cpp or Rapid-MLX in the Setup wizard; the wizard recommends Rapid-MLX when using MLX-native models.
+- Managed runtime: Llama Monitor installs, updates, repairs, and rolls back the Rapid-MLX runtime automatically.
+- Live telemetry: the dashboard surfaces Rapid-MLX-specific metrics (throughput, context, model info) alongside llama.cpp, with the same UX.
+
+![Rapid-MLX dashboard](docs/screenshots/dashboard-rapid-mlx-dark.png)
+
 ### Live Monitoring Cockpit
 
 Top nav and Server tab show Speed (throughput), context pressure, connection details, active sessions, and model/runtime details in real time. Local sessions read host telemetry directly; remote sessions gain the same depth via the remote agent.
@@ -81,7 +91,7 @@ See [TLS Architecture](docs/reference/tls-architecture.md) for full details.
 
 ### Start a Server
 
-An integrated setup wizard for discovering, downloading, configuring, and launching a llama-server instance. No CLI flags required.
+An integrated setup wizard for discovering, downloading, configuring, and launching a local inference server with llama.cpp or Rapid-MLX. No CLI flags required.
 
 - **Hardware profiles**: Quick / Balanced / Workstation / Advanced
 - **Model sources**:
@@ -90,6 +100,8 @@ An integrated setup wizard for discovering, downloading, configuring, and launch
   - Local GGUF files with VRAM estimates
 - **VRAM-aware tuning**: live breakdown bar with auto-size and quant-compare
 - **llama.cpp binary management**: auto-download, install, and update the llama.cpp runtime
+
+![Engine selection in Setup wizard](docs/screenshots/spawn-wizard-engines-dark.png)
 
 ![Setup wizard flow](docs/screenshots/spawn-wizard-flow.gif)
 
@@ -111,6 +123,7 @@ An integrated setup wizard for discovering, downloading, configuring, and launch
 | AMD | `rocm-smi` | Auto-detected |
 | NVIDIA | `nvidia-smi` | Auto-detected |
 | Apple Silicon | `mactop` | Auto-detected |
+| Apple Silicon (MLX) | Rapid-MLX runtime | Managed by Llama Monitor |
 | Windows (CPU temp) | `sensor_bridge.exe` | Bundled |
 
 ## Installation
@@ -142,6 +155,7 @@ Llama Monitor includes in-app updates via the dashboard (Settings or header upda
 - [Real-Time Communication](docs/reference/realtime-communication.md) — WebSocket schema, polling, network detection
 - [API Reference](docs/reference/api.md) — REST endpoints
 - [CLI Reference](docs/reference/cli-flags.md) — Supported flags
+- [Rapid-MLX Runtime](docs/reference/rapid-mlx-runtime.md) — Managed Rapid-MLX backend, install, update, and diagnostics
 - [Cross-Compilation](docs/reference/cross-compilation.md) — Build targets and toolchains
 - [Capability Flags](docs/reference/capabilities.md) — Metric capability system
 
