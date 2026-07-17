@@ -446,7 +446,7 @@ async function installVersion(btn, release) {
         body: JSON.stringify({
           version: release.version,
           channel: release.channel || 'stable',
-          confirm: 'INSTALL_RAPID_MLX_RUNTIME',
+          confirm: `${actionName.toUpperCase()}_RAPID_MLX_RUNTIME`,
         }),
       }
     );
