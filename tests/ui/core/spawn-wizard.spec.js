@@ -69,6 +69,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
                 localModel: { source_kind: 'mlx_directory', path: '/models/Qwen-MLX' },
             });
         });
+        await page.locator('.wizard-engine-card').first().waitFor({ state: 'visible', timeout: 5000 });
         await page.locator('.wizard-engine-card[data-engine="llama_cpp"]').click();
 
         await expect(page.locator('.wizard-engine-card[data-engine="llama_cpp"]')).toHaveClass(/selected/);
@@ -247,6 +248,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
                 },
             });
         });
+        await page.locator('#spawn-model-path').waitFor({ state: 'visible', timeout: 5000 });
         await expect(page.locator('#spawn-model-path')).toHaveValue('team/production-model');
         await expect(page.locator('#wizard-next-btn')).toBeEnabled();
         await page.locator('#wizard-next-btn').click();
@@ -275,6 +277,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
                 },
             });
         });
+        await page.locator('#spawn-hf-repo').waitFor({ state: 'visible', timeout: 5000 });
         await expect(page.locator('#spawn-hf-repo')).toHaveValue('owner/source-model');
         await expect(page.locator('#wizard-next-btn')).toBeEnabled();
         await page.locator('#wizard-next-btn').click();
@@ -308,6 +311,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
             const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
             openSpawnWizard({ localPath: '/models/model.gguf' });
         });
+        await page.locator('.wizard-engine-card').first().waitFor({ state: 'visible', timeout: 5000 });
         await expect(page.locator('.wizard-engine-card[data-engine="llama_cpp"]')).toHaveClass(/selected/);
         await page.locator('.wizard-engine-card[data-engine="rapid_mlx"]').click();
         await expect(page.locator('#wizard-next-btn')).toBeDisabled();
@@ -327,6 +331,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
                 },
             });
         });
+        await page.locator('.wizard-engine-card').first().waitFor({ state: 'visible', timeout: 5000 });
         await expect(page.locator('.wizard-engine-card[data-engine="rapid_mlx"]')).toHaveClass(/selected/);
         await expect(page.locator('#wizard-engine-reason')).toContainText('native to Rapid-MLX');
         await expect(page.locator('#wizard-binary-prereq')).toBeHidden();
@@ -403,6 +408,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
                 localModel: { source_kind: 'mlx_directory', path: '/models/model-mlx' },
             });
         });
+        await page.locator('.wizard-engine-card').first().waitFor({ state: 'visible', timeout: 5000 });
         await page.locator('.wizard-engine-card[data-engine="rapid_mlx"]').click();
 
         await expect(page.locator('.wizard-engine-card[data-engine="rapid_mlx"]')).toHaveClass(/is-unavailable/);

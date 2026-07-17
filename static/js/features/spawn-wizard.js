@@ -7777,6 +7777,7 @@ async function triggerAutoSize() {
       expert_fraction:       arch.expertFraction || undefined,
       mtp_depth:             arch.mtpDepth   || undefined,
       mmproj_bytes:          arch.mmprojBytes || undefined,
+      backend:               wizardState.engine.selected || 'llama_cpp',
     };
 
     const resp = await fetch('/api/vram/auto-size', { method: 'POST', headers, body: JSON.stringify(body) });

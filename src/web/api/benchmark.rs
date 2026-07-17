@@ -467,6 +467,7 @@ fn api_tune_ncpumoe(
                         available_vram_bytes,
                         ubatch_size,
                         is_unified_memory,
+                        crate::llama::vram_estimator::Backend::LlamaCpp,
                     );
 
                 if !verify {

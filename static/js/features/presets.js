@@ -793,6 +793,7 @@ async function autoSizePreset() {
             available_vram_bytes: _presetAvailBytes(),
             available_ram_bytes: _presetAvailableRamBytes(),
             is_unified_memory: !!_presetIsUnified,
+            backend: _currentModalPreset()?.backend === 'rapid_mlx' ? 'rapid_mlx' : 'llama_cpp',
         };
 
         const resp = await fetch('/api/vram/auto-size', { method: 'POST', headers, body: JSON.stringify(body) });

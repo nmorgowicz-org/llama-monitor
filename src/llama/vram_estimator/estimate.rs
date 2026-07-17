@@ -598,6 +598,7 @@ pub fn max_context(
     headroom_fraction: f64,
     n_ctx_train: Option<u64>,
     is_unified_memory: bool,
+    backend: Backend,
 ) -> u64 {
     if available_vram_bytes == 0 {
         return 0;
@@ -607,20 +608,24 @@ pub fn max_context(
     let mtp = mtp_overhead_bytes(model_size_bytes, arch.mtp_depth);
     let linear_state = arch.linear_attn_state_bytes; // constant; doesn't scale with context
     // Context-INDEPENDENT overhead goes into the fixed budget. The context-SCALING part is
-    // charged against the KV budget: discrete GPUs add a per-token slope; Metal's scales as a
+    // charged against the KV budget: discrete GPUs add a per-token slope; Metal/MLX scale as a
     // fraction of the KV cache, so we reserve it by shrinking the KV budget by that factor.
-    let (base_overhead, overhead_slope, kv_overhead_mult) = if is_unified_memory {
-        (
+    let (base_overhead, overhead_slope, kv_overhead_mult) = match backend {
+        Backend::RapidMlx => (
+            mlx_overhead_base_bytes(arch, ubatch_size),
+            0.0,
+            1.0 + MLX_KV_OVERHEAD_FRACTION,
+        ),
+        Backend::LlamaCpp if is_unified_memory => (
             metal_overhead_base_bytes(arch, ubatch_size),
             0.0,
             1.0 + METAL_KV_OVERHEAD_FRACTION,
-        )
-    } else {
-        (
+        ),
+        Backend::LlamaCpp => (
             discrete_overhead_base_bytes(arch, ubatch_size),
             discrete_overhead_ctx_bytes_per_token(arch, ubatch_size),
             1.0,
-        )
+        ),
     };
     let fixed = weight_vram + mmproj + mtp + linear_state + base_overhead;
 
@@ -795,6 +800,7 @@ pub fn auto_size(
     preferred_fit_granularity: u64,
     is_unified_memory: bool,
     n_ctx_train: Option<u64>,
+    backend: Backend,
 ) -> AutoSizeResult {
     let fit_gran = preferred_fit_granularity.max(512);
     let parallel_slots = requested_parallel_slots.max(1);
@@ -815,6 +821,7 @@ pub fn auto_size(
             available_vram_bytes,
             ubatch,
             is_unified_memory,
+            backend,
         )
     } else {
         0
@@ -840,6 +847,7 @@ pub fn auto_size(
         headroom,
         n_ctx_train,
         is_unified_memory,
+        backend,
     );
 
     let breakdown = full_estimate(
@@ -855,7 +863,15 @@ pub fn auto_size(
         available_vram_bytes,
         0,
         is_unified_memory,
-        EstimatorOptions::default(),
+        EstimatorOptions {
+            backend,
+            evidence: if backend == Backend::RapidMlx {
+                EstimateEvidence::Approximate
+            } else {
+                EstimateEvidence::Measured
+            },
+            ..Default::default()
+        },
     );
 
     // ── Step 4: Warnings ──────────────────────────────────────────────────────
@@ -914,6 +930,7 @@ pub fn auto_size(
         &kv_k,
         is_unified_memory,
         n_ctx_train,
+        backend,
     );
 
     AutoSizeResult {
@@ -948,11 +965,12 @@ pub fn find_min_cpu_moe_to_fit_weights(
     available_vram_bytes: u64,
     ubatch_size: u32,
     is_unified_memory: bool,
+    backend: Backend,
 ) -> i32 {
-    let overhead = if is_unified_memory {
-        metal_overhead_base_bytes(arch, ubatch_size)
-    } else {
-        discrete_overhead_base_bytes(arch, ubatch_size)
+    let overhead = match backend {
+        Backend::RapidMlx => mlx_overhead_base_bytes(arch, ubatch_size),
+        Backend::LlamaCpp if is_unified_memory => metal_overhead_base_bytes(arch, ubatch_size),
+        Backend::LlamaCpp => discrete_overhead_base_bytes(arch, ubatch_size),
     };
     let target = (available_vram_bytes * 80 / 100).saturating_sub(
         overhead + arch.mmproj_bytes + mtp_overhead_bytes(model_size_bytes, arch.mtp_depth),
@@ -997,6 +1015,7 @@ fn build_scenarios(
     recommended_kv: &str,
     is_unified_memory: bool,
     n_ctx_train: Option<u64>,
+    backend: Backend,
 ) -> Vec<ContextScenario> {
     let mut scenarios = Vec::new();
     let headroom = compute_headroom(available_vram_bytes, is_unified_memory);
@@ -1021,6 +1040,7 @@ fn build_scenarios(
             headroom,
             n_ctx_train,
             is_unified_memory,
+            backend,
         );
         let bd = full_estimate(
             model_size_bytes,
@@ -1035,7 +1055,15 @@ fn build_scenarios(
             available_vram_bytes,
             0,
             is_unified_memory,
-            EstimatorOptions::default(),
+            EstimatorOptions {
+                backend,
+                evidence: if backend == Backend::RapidMlx {
+                    EstimateEvidence::Approximate
+                } else {
+                    EstimateEvidence::Measured
+                },
+                ..Default::default()
+            },
         );
         let warn = if _use_case == UseCase::Agentic && kv_elem_bytes(kk) < 1.0 {
             Some("⚠ Below q8_0 — not recommended for agents".into())
@@ -1072,6 +1100,7 @@ fn build_scenarios(
             headroom,
             n_ctx_train,
             is_unified_memory,
+            backend,
         );
         let bd = full_estimate(
             model_size_bytes,
@@ -1086,7 +1115,15 @@ fn build_scenarios(
             available_vram_bytes,
             0,
             is_unified_memory,
-            EstimatorOptions::default(),
+            EstimatorOptions {
+                backend,
+                evidence: if backend == Backend::RapidMlx {
+                    EstimateEvidence::Approximate
+                } else {
+                    EstimateEvidence::Measured
+                },
+                ..Default::default()
+            },
         );
         scenarios.push(ContextScenario {
             label: format!("Extended ({}× CPU offload)", aggressive_cpu),
@@ -1143,6 +1180,7 @@ pub struct QuantOption {
 /// `available_vram_bytes`: effective available memory (caller must subtract OS overhead on unified)
 /// `use_case`: affects the recommended-quant choice
 /// `is_unified_memory`: true for Apple Silicon — tightens headroom and fits check
+#[allow(clippy::too_many_arguments)]
 pub fn quant_comparison_table(
     param_b: f64,
     arch: &ModelArch,
@@ -1151,6 +1189,7 @@ pub fn quant_comparison_table(
     _use_case: UseCase,
     parallel_slots: u32,
     is_unified_memory: bool,
+    backend: Backend,
 ) -> Vec<QuantOption> {
     // Quants we show in the advisor (sorted from highest to lowest quality)
     let show_quants = [
@@ -1188,10 +1227,10 @@ pub fn quant_comparison_table(
         // Without this check, a model that fills all available memory shows as fitting even though
         // there's no budget left for inference context.
         let min_kv = kv_cache_bytes(arch, 8192, parallel_slots, "q8_0", "q8_0");
-        let oh = if is_unified_memory {
-            metal_overhead_base_bytes(arch, 512)
-        } else {
-            discrete_overhead_base_bytes(arch, 512)
+        let oh = match backend {
+            Backend::RapidMlx => mlx_overhead_base_bytes(arch, 512),
+            Backend::LlamaCpp if is_unified_memory => metal_overhead_base_bytes(arch, 512),
+            Backend::LlamaCpp => discrete_overhead_base_bytes(arch, 512),
         };
         let fits = model_bytes + oh + min_kv < available_vram_bytes;
 
@@ -1208,6 +1247,7 @@ pub fn quant_comparison_table(
             headroom,
             None, // pre-download advisor: VRAM-limited maxes only
             is_unified_memory,
+            backend,
         );
         let max_q4 = max_context(
             model_bytes,
@@ -1222,6 +1262,7 @@ pub fn quant_comparison_table(
             headroom,
             None, // pre-download advisor: VRAM-limited maxes only
             is_unified_memory,
+            backend,
         );
 
         let mut notes = Vec::new();

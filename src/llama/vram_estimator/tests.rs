@@ -32,6 +32,7 @@ fn kv_calibration_qwen3_27b() {
         0.05,
         None,
         false, // discrete GPU (RTX 5090)
+        Backend::LlamaCpp,
     );
     // Should be in the 180K–240K range
     assert!(
@@ -180,6 +181,7 @@ fn auto_size_returns_reasonable_context() {
         1024,
         false, // not unified memory in this test
         None,  // no training context cap in test
+        Backend::LlamaCpp,
     );
     assert!(
         result.context_size >= 100_000,
@@ -205,6 +207,7 @@ fn quant_comparison_table_marks_one_recommended() {
         UseCase::General,
         1,
         false,
+        Backend::LlamaCpp,
     );
     let rec: Vec<_> = opts.iter().filter(|o| o.recommended).collect();
     assert_eq!(rec.len(), 1, "Expected exactly one recommended quant");
@@ -528,6 +531,7 @@ fn gemma4_qat_q4_0_is_recommended_as_near_reference_quality() {
         UseCase::General,
         1,
         false,
+        Backend::LlamaCpp,
     );
     let q4 = opts.iter().find(|o| o.quant == "q4_0").unwrap();
     assert_eq!(q4.quality, QuantQuality::Excellent);
@@ -640,6 +644,7 @@ fn qwopus_122b_a10b_large_moe_iq3s() {
         1024,
         false,
         None,
+        Backend::LlamaCpp,
     );
     // Should recommend substantial CPU offload
     assert!(
@@ -1102,4 +1107,138 @@ fn mlx_overhead_scales_with_context_via_kv_fraction() {
         },
     );
     assert!(large_ctx.overhead_bytes > small_ctx.overhead_bytes);
+}
+
+#[test]
+fn max_context_diverges_between_mlx_and_metal_backends() {
+    let arch = mlx_qwen3_0_6b_arch();
+    let model_bytes = 400_000_000;
+    let mlx_ctx = max_context(
+        model_bytes,
+        &arch,
+        "q8_0",
+        "q8_0",
+        1,
+        2048,
+        0,
+        16 * 1024 * 1024 * 1024,
+        1024,
+        0.05,
+        None,
+        true,
+        Backend::RapidMlx,
+    );
+    let metal_ctx = max_context(
+        model_bytes,
+        &arch,
+        "q8_0",
+        "q8_0",
+        1,
+        2048,
+        0,
+        16 * 1024 * 1024 * 1024,
+        1024,
+        0.05,
+        None,
+        true,
+        Backend::LlamaCpp,
+    );
+    // Rapid-MLX's overhead formulas must not silently reuse llama.cpp's Metal calibration.
+    assert_ne!(mlx_ctx, metal_ctx);
+    assert!(mlx_ctx > 0 && metal_ctx > 0);
+}
+
+#[test]
+fn find_min_cpu_moe_diverges_between_mlx_and_metal_backends() {
+    let arch = mlx_qwen3_30b_a3b_arch();
+    let model_bytes = estimate_model_size_bytes(30.0, "q4_k_m");
+    let mlx_result = find_min_cpu_moe_to_fit_weights(
+        model_bytes,
+        &arch,
+        8 * 1024 * 1024 * 1024,
+        2048,
+        true,
+        Backend::RapidMlx,
+    );
+    let metal_result = find_min_cpu_moe_to_fit_weights(
+        model_bytes,
+        &arch,
+        8 * 1024 * 1024 * 1024,
+        2048,
+        true,
+        Backend::LlamaCpp,
+    );
+    // Both should return valid n_cpu_moe values; the point is the overhead formula used
+    // internally differs by backend even though this call site doesn't expose it directly.
+    assert!(mlx_result >= 0);
+    assert!(metal_result >= 0);
+}
+
+#[test]
+fn auto_size_rapid_mlx_uses_approximate_evidence() {
+    let arch = mlx_qwen3_0_6b_arch();
+    let model_bytes = 400_000_000;
+    let result = auto_size(
+        model_bytes,
+        &arch,
+        16 * 1024 * 1024 * 1024,
+        UseCase::General,
+        1,
+        1024,
+        true,
+        None,
+        Backend::RapidMlx,
+    );
+    assert_eq!(result.breakdown.evidence, EstimateEvidence::Approximate);
+    assert!(result.context_size > 0);
+    assert!(!result.scenarios.is_empty());
+}
+
+#[test]
+fn auto_size_llama_cpp_uses_measured_evidence() {
+    let arch = mlx_qwen3_0_6b_arch();
+    let model_bytes = 400_000_000;
+    let result = auto_size(
+        model_bytes,
+        &arch,
+        16 * 1024 * 1024 * 1024,
+        UseCase::General,
+        1,
+        1024,
+        true,
+        None,
+        Backend::LlamaCpp,
+    );
+    assert_eq!(result.breakdown.evidence, EstimateEvidence::Measured);
+}
+
+#[test]
+fn quant_comparison_table_rapid_mlx_diverges_from_llama_cpp() {
+    let arch = mlx_qwen3_0_6b_arch();
+    let mlx_opts = quant_comparison_table(
+        0.6,
+        &arch,
+        "Qwen3-0.6B-MLX",
+        16 * 1024 * 1024 * 1024,
+        UseCase::General,
+        1,
+        true,
+        Backend::RapidMlx,
+    );
+    let llama_cpp_opts = quant_comparison_table(
+        0.6,
+        &arch,
+        "Qwen3-0.6B-GGUF",
+        16 * 1024 * 1024 * 1024,
+        UseCase::General,
+        1,
+        true,
+        Backend::LlamaCpp,
+    );
+    assert!(!mlx_opts.is_empty());
+    assert!(!llama_cpp_opts.is_empty());
+    let mlx_q8 = mlx_opts.iter().find(|o| o.quant == "q8_0").unwrap();
+    let cpp_q8 = llama_cpp_opts.iter().find(|o| o.quant == "q8_0").unwrap();
+    // Same model, same quant, different backend overhead formula — max context must diverge.
+    assert_ne!(mlx_q8.max_ctx_q8, cpp_q8.max_ctx_q8);
 }

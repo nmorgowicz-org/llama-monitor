@@ -416,7 +416,18 @@ fn api_vram_quant_compare(
                 let model_name = body["model_name"].as_str().unwrap_or("").to_string();
                 let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
                 let parallel_slots = body["parallel_slots"].as_u64().unwrap_or(1) as u32;
-                let is_unified_memory = body["is_unified_memory"].as_bool().unwrap_or(false);
+                let backend_field = body["backend"]
+                    .as_str()
+                    .or_else(|| body["engine"].as_str())
+                    .unwrap_or("llama_cpp");
+                let is_rapid_mlx = matches!(backend_field, "rapid_mlx" | "mlx" | "rapid-mlx");
+                let backend = if is_rapid_mlx {
+                    crate::llama::vram_estimator::Backend::RapidMlx
+                } else {
+                    crate::llama::vram_estimator::Backend::LlamaCpp
+                };
+                let is_unified_memory =
+                    is_rapid_mlx || body["is_unified_memory"].as_bool().unwrap_or(false);
 
                 let use_case = match body["use_case"].as_str().unwrap_or("general") {
                     "agentic" => crate::llama::vram_estimator::UseCase::Agentic,
@@ -436,6 +447,7 @@ fn api_vram_quant_compare(
                     use_case,
                     parallel_slots,
                     is_unified_memory,
+                    backend,
                 );
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
@@ -466,7 +478,18 @@ fn api_vram_auto_size(
                 let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
                 let parallel_slots = body["parallel_slots"].as_u64().unwrap_or(1).max(1) as u32;
                 let fit_granularity = body["fit_granularity"].as_u64().unwrap_or(1024).max(512);
-                let is_unified_memory = body["is_unified_memory"].as_bool().unwrap_or(false);
+                let backend_field = body["backend"]
+                    .as_str()
+                    .or_else(|| body["engine"].as_str())
+                    .unwrap_or("llama_cpp");
+                let is_rapid_mlx = matches!(backend_field, "rapid_mlx" | "mlx" | "rapid-mlx");
+                let backend = if is_rapid_mlx {
+                    crate::llama::vram_estimator::Backend::RapidMlx
+                } else {
+                    crate::llama::vram_estimator::Backend::LlamaCpp
+                };
+                let is_unified_memory =
+                    is_rapid_mlx || body["is_unified_memory"].as_bool().unwrap_or(false);
 
                 let use_case = match body["use_case"].as_str().unwrap_or("general") {
                     "agentic" => crate::llama::vram_estimator::UseCase::Agentic,
@@ -572,6 +595,7 @@ fn api_vram_auto_size(
                     fit_granularity,
                     is_unified_memory,
                     context_cap, // n_ctx_train cap from GGUF metadata
+                    backend,
                 );
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
