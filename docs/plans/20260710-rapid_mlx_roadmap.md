@@ -1007,6 +1007,29 @@ browser-native dialogs or couple runtime updates to active-session restart/rerou
 - **User Overrides**: An explicit user choice of engine must never be overridden by the recommendation logic.
 - **Managed Environments**: Ensure that `uv` managed environments are stored in the dedicated `~/.config/llama-monitor/runtimes/rapid-mlx/` directory.
 
+### Phase 6B/6C checkpoint (2026-07-17)
+
+Status: **complete and independently verified.** The 6B1-6B4 product surfaces and the
+6C phase-verification gates are both satisfied; Phase 7 may begin.
+
+- 6B1 (engine-aware Spawn Wizard launch UX), 6B2 (authoritative MLX memory estimator),
+  and 6B3 (runtime management and active engine identity) landed in `847ab56`, `a624e32`,
+  and `8cdf965` respectively, each carrying its own gate evidence in the commit body.
+- 6B4 product verification landed in `290ac82`, closing the cross-surface gaps found
+  during review: renamed `/api/kill-llama` to the backend-neutral `/api/kill-server`,
+  backend-neutral CLI/UI copy, backend field wiring for the three VRAM-estimate consumers
+  that were still missing it (spawn-wizard auto-size, scenario cards, HF preview panel),
+  and accessibility fixes for the Rapid-MLX runtime manager modal (Escape-to-close,
+  initial focus, Tab-scope trap, `prefers-reduced-motion` guard on the engine-dot pulse).
+- 6C independent review re-ran the full mandatory gate suite against `290ac82` on a
+  clean tree: `cargo clippy -- -D warnings` (0 warnings), `cargo test --release` (515
+  lib tests + all integration suites, 0 failures, 11 intentionally ignored), `npm run
+  validate-js` and `npm run lint` (clean), `git diff --check` (clean), and
+  `cargo build --release` (clean). No stale llama-only assumptions or browser-native
+  dialogs were found remaining in the reviewed surfaces.
+- Checkpoint: `fix: engine-neutrality, accessibility, and stale llama-only assumptions`
+  (`290ac82`) serves as the 6B4/6C checkpoint commit.
+
 ---
 
 ## Phase 7: Cross-Backend Release Gate
