@@ -72,6 +72,7 @@ fn api_chat(
                     let _permit = permit;
                     let mut stream = resp.bytes_stream();
                     let mut buf = String::new();
+                    let mut pending_utf8: Vec<u8> = Vec::new();
 
                     if !is_sse {
                         const MAX_NON_STREAM_BYTES: usize = 2 * 1024 * 1024;
@@ -120,8 +121,8 @@ fn api_chat(
                                     return;
                                 }
 
-                                buf.push_str(&String::from_utf8_lossy(&bytes));
-                                if buf.len() > MAX_SSE_BUFFER_BYTES {
+                                push_utf8_chunk(&mut buf, &mut pending_utf8, &bytes);
+                                if buf.len() + pending_utf8.len() > MAX_SSE_BUFFER_BYTES {
                                     send_event(
                                         &tx,
                                         r#"{"error":"Upstream SSE event exceeded 2 MiB"}"#.into(),
@@ -147,6 +148,9 @@ fn api_chat(
                             }
                         }
                     }
+                    if !pending_utf8.is_empty() {
+                        buf.push_str(&String::from_utf8_lossy(&pending_utf8));
+                    }
                     if !buf.is_empty()
                         && let Some(data) = normalize_sse_line(backend, &buf)
                     {
@@ -159,6 +163,32 @@ fn api_chat(
                 )))
             }
         })
+}
+
+/// Appends `bytes` to `pending`, decodes as much valid UTF-8 as is available onto `dest`,
+/// and leaves any trailing incomplete multi-byte sequence in `pending` for the next chunk.
+fn push_utf8_chunk(dest: &mut String, pending: &mut Vec<u8>, bytes: &[u8]) {
+    pending.extend_from_slice(bytes);
+    match std::str::from_utf8(pending) {
+        Ok(valid) => {
+            dest.push_str(valid);
+            pending.clear();
+        }
+        Err(error) => {
+            let valid_up_to = error.valid_up_to();
+            if valid_up_to > 0 {
+                // Safety of unwrap: valid_up_to is guaranteed to be a valid UTF-8 boundary.
+                dest.push_str(std::str::from_utf8(&pending[..valid_up_to]).unwrap());
+                pending.drain(..valid_up_to);
+            }
+            // A genuinely invalid (not just incomplete) sequence can never resolve by
+            // appending more bytes; flush it lossily so the buffer doesn't grow forever.
+            if error.error_len().is_some() {
+                dest.push_str(&String::from_utf8_lossy(pending));
+                pending.clear();
+            }
+        }
+    }
 }
 
 fn normalize_sse_line(backend: crate::inference::InferenceBackend, line: &str) -> Option<String> {
@@ -357,6 +387,40 @@ fn parse_abort_request(body: &[u8]) -> Result<Option<String>, super::super::ApiE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn push_utf8_chunk_reassembles_multibyte_char_split_across_chunks() {
+        // "🦀" is 4 bytes (U+1F980); split it 1/3 across two chunks.
+        let full = "hello 🦀 world".as_bytes();
+        let split_at = 7; // splits inside the crab emoji's byte sequence
+        let (first, second) = full.split_at(split_at);
+
+        let mut buf = String::new();
+        let mut pending = Vec::new();
+        push_utf8_chunk(&mut buf, &mut pending, first);
+        // The incomplete emoji bytes must not have been decoded into buf as U+FFFD.
+        assert!(!buf.contains('\u{FFFD}'));
+        assert!(!pending.is_empty());
+
+        push_utf8_chunk(&mut buf, &mut pending, second);
+        assert!(pending.is_empty());
+        assert_eq!(buf, "hello 🦀 world");
+        assert!(!buf.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn push_utf8_chunk_handles_cjk_char_split_byte_by_byte() {
+        // "日" (U+65E5) is 3 bytes; feed it one byte at a time.
+        let full = "日本語".as_bytes();
+        let mut buf = String::new();
+        let mut pending = Vec::new();
+        for byte in full {
+            push_utf8_chunk(&mut buf, &mut pending, std::slice::from_ref(byte));
+        }
+        assert!(pending.is_empty());
+        assert_eq!(buf, "日本語");
+        assert!(!buf.contains('\u{FFFD}'));
+    }
 
     #[test]
     fn rapid_sse_normalizes_reasoning_and_preserves_usage_tools_and_finish() {
