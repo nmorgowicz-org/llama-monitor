@@ -355,8 +355,12 @@ impl LlamaCppAdapter {
             Some(n) => n.to_string(),
         };
         cmd.arg("-ngl").arg(&ngl_str);
-        cmd.arg("-ctk").arg(&self.config.ctk);
-        cmd.arg("-ctv").arg(&self.config.ctv);
+        if !self.config.ctk.is_empty() {
+            cmd.arg("-ctk").arg(&self.config.ctk);
+        }
+        if !self.config.ctv.is_empty() {
+            cmd.arg("-ctv").arg(&self.config.ctv);
+        }
         cmd.arg("--host")
             .arg(self.config.bind_host.as_deref().unwrap_or("127.0.0.1"));
         cmd.arg("--port").arg(self.config.port.to_string());
@@ -1040,6 +1044,19 @@ mod tests {
                 "--metrics",
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn empty_ctk_and_ctv_are_omitted_rather_than_passed_as_empty_strings() {
+        let args = launch_args(ServerConfig {
+            model_path: "/models/test.gguf".into(),
+            port: 8080,
+            ..Default::default()
+        })
+        .await;
+
+        assert!(!args.iter().any(|a| a == "-ctk"));
+        assert!(!args.iter().any(|a| a == "-ctv"));
     }
 
     #[tokio::test]
