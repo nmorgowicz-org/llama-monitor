@@ -507,7 +507,7 @@ fn api_llama_binary_platform_info(
                         "label":        label,
                         "backends":     backends,
                         "multi_backend": os == "windows" || os == "linux",
-                        "rapid_mlx_local_available": os == "macos" && arch == "aarch64",
+                        "rapid_mlx_local_available": crate::inference::rapid_mlx::ensure_local_platform_supported().is_ok(),
                         "rapid_mlx_local_requirement": "Rapid-MLX local execution requires macOS on Apple Silicon",
                     }),
                 )))

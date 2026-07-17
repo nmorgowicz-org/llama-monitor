@@ -63,6 +63,9 @@ fn default_log_level() -> String {
 }
 
 pub fn ensure_local_platform_supported() -> Result<()> {
+    if std::env::var_os("LLAMA_MONITOR_FAKE_RAPID_MLX_LOCAL_AVAILABLE").is_some_and(|v| v == "1") {
+        return Ok(());
+    }
     if std::env::consts::OS != "macos" {
         return Err(anyhow!(
             "Rapid-MLX local execution requires macOS on Apple Silicon. Detected OS: {}",
