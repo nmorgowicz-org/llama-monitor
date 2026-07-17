@@ -136,7 +136,7 @@ fn sanitize_guided_content(input: &str) -> String {
                     let text = if eff.is_empty() || eff == t {
                         t.to_string()
                     } else if eff.len() > 120 {
-                        format!("{}: {}", t, &eff[..117].trim())
+                        format!("{}: {}", t, eff[..117].trim())
                     } else {
                         format!("{}: {}", t, eff)
                     };

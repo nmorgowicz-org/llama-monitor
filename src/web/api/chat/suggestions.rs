@@ -583,7 +583,7 @@ fn parse_suggestions(input: &str) -> Vec<String> {
                     entry
                         .as_str()
                         .map(clean_fragment)
-                        .and_then(|value| if value.is_empty() { None } else { Some(value) })
+                        .filter(|value| !value.is_empty())
                 })
                 .collect();
 
