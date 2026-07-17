@@ -1,3 +1,5 @@
+# [ARCHIVED] Rapid-MLX Backend Integrationn
+> Integrated into main via PR (Phase 7). Superseded by docs/reference/rapid-mlx-runtime.md.n
 # Rapid-MLX Backend Integration
 
 | Field | Value |

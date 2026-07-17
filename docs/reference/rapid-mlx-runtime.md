@@ -1,5 +1,9 @@
 # Rapid-MLX Runtime Management
 
+> **Status: Shipped.** Phase 7 completed. Rapid-MLX is now a first-class inference
+> backend with a managed runtime, backend-neutral spawn wizard, live telemetry cards,
+> VRAM estimator, and per-backend presets.
+
 Llama Monitor treats Rapid-MLX as a first-class inference engine while keeping its
 managed runtime isolated from the user's Python tooling. Local Rapid-MLX launch and
 managed runtime changes are supported only on Apple Silicon macOS. Remote attachment

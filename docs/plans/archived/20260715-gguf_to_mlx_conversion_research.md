@@ -1,3 +1,5 @@
+# [ARCHIVED] GGUF→MLX Conversion Researchn
+> Phase 5.5 research completed; findings incorporated.n
 # GGUF to MLX Conversion Research & Experimental Import Plan
 
 | Field | Value |

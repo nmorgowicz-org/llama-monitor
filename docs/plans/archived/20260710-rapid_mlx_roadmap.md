@@ -1,3 +1,5 @@
+# [ARCHIVED] Rapid-MLX Implementation Manualn
+> All phases completed. Superseded by docs/reference/rapid-mlx-runtime.md.n
 # Rapid-MLX Implementation Manual
 
 This document transforms the high-level roadmap into a comprehensive technical implementation manual. It serves as the primary guide for sub-agents implementing the Rapid-MLX backend.
