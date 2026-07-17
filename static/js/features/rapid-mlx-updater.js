@@ -39,7 +39,7 @@ export function initRapidMlxUpdater() {
         const resp = await fetch('/api/rapid-mlx/runtime/upgrade', {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ version: latest.version, confirm: 'INSTALL_RAPID_MLX_RUNTIME' }),
+          body: JSON.stringify({ version: latest.version, confirm: 'UPGRADE_RAPID_MLX_RUNTIME' }),
         });
         if (!resp.ok) {
           const body = await resp.json().catch(() => ({}));
