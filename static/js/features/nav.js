@@ -322,6 +322,41 @@ export function refreshTopCockpit() {
     const genDisplayRate = genRate > 0 ? genRate : (l?.last_generation_tokens_per_sec || 0);
     const generationActive = !!l?.slot_generation_active || (l?.slots_processing || 0) > 0 || genRate > 0;
 
+    // ── Engine · Model indicator ────────────────────────────────────────
+    {
+      const indicator = document.getElementById('engine-indicator');
+      const labelEl = indicator?.querySelector('.engine-indicator-label');
+      const dotEl = indicator?.querySelector('.engine-indicator-dot');
+      if (indicator && labelEl && dotEl) {
+        const backend = wsData?.backend || null;
+        const modelIdentity = wsData?.active_session_model_identity || null;
+        const sessionStatus = wsData?.active_session_status || null;
+        const isRunning = sessionStatus === 'running' || sessionStatus === 'disconnected';
+
+        if (backend && isRunning && (modelIdentity || sessionStatus)) {
+          const engineName = backend === 'rapid_mlx' ? 'Rapid-MLX' : 'llama.cpp';
+          const modelName = modelIdentity
+            ? modelIdentity.length > 24
+              ? modelIdentity.slice(0, 22) + '…'
+              : modelIdentity
+            : 'Active';
+          labelEl.textContent = `${engineName} · ${modelName}`;
+
+          if (generationActive) {
+            dotEl.className = 'engine-indicator-dot live';
+            indicator.setAttribute('title', `${engineName} · ${modelIdentity || modelName} (generating)`);
+          } else {
+            dotEl.className = 'engine-indicator-dot idle-active';
+            indicator.setAttribute('title', `${engineName} · ${modelIdentity || modelName} (idle)`);
+          }
+
+          indicator.style.display = 'inline-flex';
+        } else {
+          indicator.style.display = 'none';
+        }
+      }
+    }
+
     const wsMode = wsData?.mode ?? (wsData?.sleep_mode ? 'sleep' : 'off');
     const isSleeping = wsMode === 'sleep';
     const isManualSleep = isSleeping && wsData?.sleep_mode_manual === true;

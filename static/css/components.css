@@ -2919,6 +2919,54 @@ button:disabled {
   pointer-events: none;
 }
 
+/* ── Engine indicator (active backend · model) ─────────────────────────────── */
+
+.engine-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px 2px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
+  color: var(--color-fg-soft);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.engine-indicator-label {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.engine-indicator-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: var(--color-fg-subtle);
+}
+
+.engine-indicator-dot.live {
+  background: var(--color-ok);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color-ok) 70%, transparent);
+  animation: engine-dot-pulse 1.8s ease-in-out infinite;
+}
+
+.engine-indicator-dot.idle-active {
+  background: var(--color-info);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--color-info) 60%, transparent);
+}
+
+@keyframes engine-dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
 /* ── llama.cpp Version Picker Modal ──────────────────────────────────────── */
 
 #llama-version-modal {
@@ -3845,3 +3893,236 @@ button:disabled {
 @media (max-width: 850px) { .mm-import-workbench { grid-template-columns: 1fr; } .mm-import-hero { flex-direction: column; } }
 @media (max-width: 600px) { .mm-import-lab { padding: 12px; } .mm-import-hero, .mm-import-source-card, .mm-import-report, .mm-import-jobs { padding: 14px; } .mm-import-source-row { flex-direction: column; } .mm-import-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .mm-import-verdict { align-items: flex-start; flex-direction: column; } }
 @media (prefers-reduced-motion: reduce) { .mm-import-progress > span { transition: none; } }
+
+/* ── Rapid-MLX Runtime Modal ──────────────────────────────────────────── */
+
+#rapid-mlx-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0.52) 0%, rgba(0,0,0,0.76) 100%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+#rapid-mlx-modal.open {
+  display: flex;
+}
+
+.rapid-mlx-modal-shell {
+  width: min(820px, 94vw);
+  max-height: min(72vh, 560px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-modal);
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 12%, transparent);
+  box-shadow: 0 24px 64px rgba(0,0,0,0.45), 0 0 0 1px rgba(0,0,0,0.35);
+  overflow: hidden;
+}
+
+.rapid-mlx-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-fg-subtle) 14%, transparent);
+}
+
+.rapid-mlx-modal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--color-fg-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rapid-mlx-modal-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-fg);
+}
+
+.rapid-mlx-modal-close {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-fg-subtle) 24%, transparent);
+  background: color-mix(in srgb, var(--color-fg-subtle) 6%, transparent);
+  color: var(--color-fg-soft);
+  cursor: pointer;
+}
+
+.rapid-mlx-modal-status {
+  padding: 4px 14px 0;
+  font-size: 11px;
+  color: var(--color-fg-soft);
+}
+
+.rapid-mlx-modal-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 14px 0;
+}
+
+.rapid-mlx-action-btn {
+  font-size: 10px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 9%, transparent);
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.rapid-mlx-action-btn-soft {
+  border-color: color-mix(in srgb, var(--color-fg-subtle) 22%, transparent);
+  background: color-mix(in srgb, var(--color-fg-subtle) 6%, transparent);
+  color: var(--color-fg-soft);
+}
+
+.rapid-mlx-modal-body {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 14px 12px;
+  overflow-y: auto;
+}
+
+.rapid-mlx-panes {
+  display: grid;
+  grid-template-columns: minmax(0, 260px) 1fr;
+  gap: 10px;
+}
+
+.rapid-mlx-list-header {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+}
+
+.rapid-mlx-loading {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.rapid-mlx-releases-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.rapid-mlx-release-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 10px;
+}
+
+.rapid-mlx-release-row:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 3%, transparent);
+}
+
+.rapid-mlx-release-row-info {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.rapid-mlx-release-row-ver {
+  font-weight: 600;
+  color: var(--color-fg);
+}
+
+.rapid-mlx-release-row-badges {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.rapid-mlx-badge {
+  font-size: 8px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+.rapid-mlx-badge--latest {
+  background: color-mix(in srgb, var(--color-ok) 15%, transparent);
+  color: var(--color-ok);
+}
+
+.rapid-mlx-badge--installed {
+  background: color-mix(in srgb, var(--color-info) 14%, transparent);
+  color: var(--color-info);
+}
+
+.rapid-mlx-release-row-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  color: var(--color-fg-subtle);
+}
+
+.rapid-mlx-release-row-meta {
+  color: var(--color-fg-subtle);
+}
+
+.rapid-mlx-install-btn {
+  font-size: 9px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 28%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.rapid-mlx-pane-notes {
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-fg-subtle) 14%, transparent);
+  background: color-mix(in srgb, var(--color-fg-subtle) 3%, transparent);
+  font-size: 10px;
+  color: var(--color-fg-soft);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rapid-mlx-notes-empty {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.rapid-mlx-notes-content {
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+/* Responsive: stack panes on narrow */
+@media (max-width: 700px) {
+  .rapid-mlx-panes {
+    grid-template-columns: 1fr;
+  }
+}

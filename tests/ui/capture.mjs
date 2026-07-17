@@ -358,25 +358,27 @@ async function switchTab(page, tabName) {
 async function attachToServer(page, remoteServer = REMOTE_SERVER) {
     console.log(`[CAPTURE] Attaching to remote server at ${remoteServer}...`);
 
-    // Intercept the /api/attach response to log the real error
+    // Set up listener for /api/attach response.
     const attachPromise = new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
-            reject(new Error('Attach API request timed out (no /api/attach response within 30s)'));
-        }, 30000);
-        page.once('response', async (response) => {
+            reject(new Error('Attach API request timed out (no /api/attach response within 45s)'));
+        }, 45000);
+        const handler = async (response) => {
             if (!response.url().includes('/api/attach')) return;
             clearTimeout(timeout);
+            page.off('response', handler);
             try {
                 const body = await response.text();
                 console.log(`[CAPTURE] /api/attach response ${response.status()}: ${body.trim()}`);
-                resolve();
             } catch (e) {
-                console.log(`[CAPTURE] /api/attach response ${response.status()} (read error: ${e.message})`);
-                resolve();
+                console.log(`[CAPTURE] /api/attach response ${response.status()} (read: ${e.message})`);
             }
-        });
+            resolve();
+        };
+        page.on('response', handler);
     });
 
+    // Fill the endpoint URL.
     await page.waitForSelector('#setup-endpoint-url', { visible: true });
     await page.$eval('#setup-endpoint-url', (input, url) => {
         input.value = url;
@@ -385,20 +387,31 @@ async function attachToServer(page, remoteServer = REMOTE_SERVER) {
     }, remoteServer);
     await sleep(200);
 
-    const attachBtn = await page.$('#setup-attach-btn');
-    if (!attachBtn) {
-        throw new Error('Attach button #setup-attach-btn not found');
-    }
-    console.log('[CAPTURE] Clicking attach button...');
-    await attachBtn.click();
+    // Instead of relying on a DOM click, call the SPA's doAttachFromSetup() directly
+    // so the attach flow is deterministic in headless environments.
+    console.log('[CAPTURE] Invoking doAttachFromSetup()...');
+    const attachResult = await page.evaluate(async () => {
+        try {
+            const { doAttachFromSetup } = await import('/js/features/attach-detach.js');
+            if (typeof doAttachFromSetup === 'function') {
+                await doAttachFromSetup();
+                return 'called_doAttachFromSetup';
+            }
+        } catch (err) {
+            console.error('[CAPTURE] doAttachFromSetup error:', err);
+            return 'doAttachFromSetup_error: ' + (err.message || err);
+        }
+        return 'doAttachFromSetup_not_found';
+    });
+    console.log('[CAPTURE] doAttachFromSetup result:', attachResult);
 
-    // Wait for both the API response and the monitor view
+    // Wait for both the API response and the monitor view.
     await Promise.all([
         attachPromise,
         waitForMonitor(page),
     ]);
 
-    // Optional: confirm endpoint displayed (use #endpoint-url, not #endpoint-url-display)
+    // Optional: confirm endpoint displayed.
     await page.waitForFunction(
         endpoint => document.getElementById('endpoint-url')?.textContent?.includes(endpoint),
         { timeout: 5000 }
@@ -3489,7 +3502,7 @@ async function scenarioSpawnWizard(ctx, options) {
 
 async function scenarioSpawnWizardEngines(ctx) {
     const { page, baseUrl } = ctx;
-    await gotoApp(page, baseUrl);
+    await loadAppDocument(page, baseUrl);
 
     await page.evaluate(() => {
         const originalFetch = window.fetch.bind(window);
@@ -4045,8 +4058,170 @@ async function scenarioAppearancePalette(ctx, options) {
         }));
         document.documentElement.dataset.theme = 'dark';
     });
-
     console.log('[CAPTURE] Scenario "appearance-palette" complete.');
+}
+
+// ── Rapid-MLX Runtime Manager, Engine Indicator, and Settings Card ──
+// Captures the Rapid-MLX runtime management UI in Settings and the nav bar engine indicator.
+
+async function scenarioRapidMlxRuntime(ctx, options) {
+    const { page, baseUrl } = ctx;
+
+    // Load app without attach (uses auth bypass).
+    await loadAppDocument(page, baseUrl);
+
+    // Mock Rapid-MLX runtime endpoints.
+    await page.evaluate(() => {
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (input, init) => {
+            const url = new URL(typeof input === 'string' ? input : input.url, window.location.origin);
+            const path = url.pathname;
+
+            // Status: active managed runtime
+            if (path === '/api/rapid-mlx/runtime/status') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    runtime: {
+                        supported: true,
+                        active: {
+                            version: '0.10.10',
+                            source: 'managed',
+                            path: '~/.config/llama-monitor/runtimes/rapid-mlx/0.10.10/venv/bin/rapid-mlx',
+                        },
+                        last_known_good: { version: '0.10.9' },
+                        update_available: '0.10.11',
+                    },
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+
+            // Releases list
+            if (path === '/api/rapid-mlx/runtime/releases') {
+                return Promise.resolve(new Response(JSON.stringify([
+                    { version: '0.10.11', tag: 'v0.10.11', prerelease: false, published_at: '2026-07-14T12:00:00Z', body: 'Bug fixes and performance improvements for prefix caching.' },
+                    { version: '0.10.10', tag: 'v0.10.10', prerelease: false, published_at: '2026-07-10T08:00:00Z', body: 'Stable release with updated capability profile.' },
+                    { version: '0.10.9', tag: 'v0.10.9', prerelease: false, published_at: '2026-06-28T10:00:00Z', body: 'Initial verified release baseline.' },
+                ]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+
+            return originalFetch(input, init);
+        };
+    });
+
+    // Simulate active session WebSocket data for engine indicator.
+    await page.evaluate(() => {
+        const wsData = {
+            backend: 'rapid_mlx',
+            active_session_status: 'running',
+            active_session_model_identity: 'mlx-community/Qwen3.5-9B-MLX-4bit',
+        };
+        if (window.__llamaMonitorUpdateCockpit) {
+            window.__llamaMonitorUpdateCockpit(wsData);
+        }
+        // Also inject via a more general hook in case refreshTopCockpit reads a shared object.
+        if (!window.__wsData) window.__wsData = {};
+        Object.assign(window.__wsData, wsData);
+    });
+    await sleep(400);
+
+    // ── 1. Settings: Rapid-MLX Runtime card (Advanced pane) ──
+    try {
+        await page.evaluate(() => { window.openSettingsModal?.(); });
+        await page.waitForSelector('#settings-modal.open', { timeout: 5000 });
+        await sleep(600);
+
+        // Switch to Advanced tab where the Rapid-MLX Runtime card lives.
+        const advTab = await page.$('#settings-modal .settings-tab[data-tab="advanced"]');
+        if (advTab) {
+            await advTab.click();
+            await sleep(500);
+        }
+
+        // Look for the Rapid-MLX Runtime card.
+        const runtimeCard = await page.$('#rapid-mlx-runtime-summary');
+        if (runtimeCard) {
+            await captureShot(page, 'settings-rapid-mlx-runtime-card.png', { fullPage: true });
+            await captureCloseUp(page, '#settings-modal', 'settings-rapid-mlx-runtime-card.png', options);
+        }
+    } catch (e) {
+        console.log('[CAPTURE] Settings Rapid-MLX card failed, continuing...');
+    }
+
+    // ── 2. Rapid-MLX Runtime Manager modal ──
+    try {
+        const manageBtn = await page.$('#rapid-mlx-manage-btn');
+        if (manageBtn) {
+            await manageBtn.click();
+            await sleep(600);
+            await page.waitForSelector('#rapid-mlx-modal.open', { timeout: 5000 });
+            await sleep(400);
+
+            // Dark desktop
+            await captureShot(page, 'rapid-mlx-runtime-manager-dark.png', { fullPage: true });
+
+            // Light desktop
+            await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+            await sleep(250);
+            await captureShot(page, 'rapid-mlx-runtime-manager-light.png', { fullPage: true });
+
+            // Narrow layout
+            await page.setViewport({ width: 480, height: 900, deviceScaleFactor: 1 });
+            await sleep(250);
+            await captureShot(page, 'rapid-mlx-runtime-manager-narrow.png', { fullPage: true });
+
+            // Reduced motion
+            await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+            await sleep(200);
+            await captureShot(page, 'rapid-mlx-runtime-manager-reduced.png', { fullPage: true });
+
+            // Reset viewport
+            await page.setViewport(DEFAULT_VIEWPORT);
+            await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+            await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+        }
+    } catch (e) {
+        console.log('[CAPTURE] Runtime manager modal failed, continuing...');
+    }
+
+    // Close settings modal.
+    try {
+        await page.keyboard.press('Escape');
+        await sleep(200);
+    } catch {}
+
+    // ── 3. Engine indicator in nav bar (with simulated generation active) ──
+    try {
+        // Force refreshTopCockpit to render the engine indicator with our mocked data.
+        await page.evaluate(async () => {
+            // Ensure backend/model identity are present.
+            const wsData = {
+                backend: 'rapid_mlx',
+                active_session_status: 'running',
+                active_session_model_identity: 'mlx-community/Qwen3.5-9B-MLX-4bit',
+                local_status: { slot_generation_active: true },
+            };
+            if (window.__llamaMonitorUpdateCockpit) {
+                window.__llamaMonitorUpdateCockpit(wsData);
+            }
+        });
+        await sleep(300);
+
+        // Check engine indicator is visible.
+        const indicatorVisible = await page.evaluate(() => {
+            const el = document.getElementById('engine-indicator');
+            return el && getComputedStyle(el).display !== 'none';
+        });
+
+        if (indicatorVisible) {
+            // Full nav bar with indicator
+            const navBar = await page.$('#top-bar');
+            if (navBar) {
+                await captureCloseUp(page, '#top-bar', 'nav-engine-indicator.png', options);
+            }
+        }
+    } catch (e) {
+        console.log('[CAPTURE] Engine indicator capture failed, continuing...');
+    }
+
+    console.log('[CAPTURE] Scenario "rapid-mlx-runtime" complete.');
 }
 
 const SCENARIOS = {
@@ -4080,6 +4255,8 @@ const SCENARIOS = {
     'benchmark-results': scenarioBenchmarkResults,
     'llama-updater': scenarioLlamaUpdater,
     'chat-history-qa': scenarioChatHistoryQA,
+    // Rapid-MLX runtime and engine indicator
+    'rapid-mlx-runtime': scenarioRapidMlxRuntime,
     // Validation
     sparkline: scenarioSparkline,
     gifs: scenarioGifs,

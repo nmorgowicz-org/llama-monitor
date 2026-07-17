@@ -173,6 +173,10 @@
             <button id="llama-pill" class="top-nav-pill llama-pill-idle" style="display:none;" type="button" title="llama-server binary version">
               <span id="llama-pill-version">b—</span>
             </button>
+            <div id="engine-indicator" class="engine-indicator" style="display:none;" title="Active engine and model">
+              <span class="engine-indicator-label"></span>
+              <span class="engine-indicator-dot"></span>
+            </div>
             <button id="update-pill" class="top-nav-pill" style="display:none;">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/>
@@ -5111,6 +5115,15 @@
                             <span>Check for updates automatically</span>
                         </label>
                     </div>
+                    <div class="settings-card" style="margin-top:14px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:4px;">Rapid-MLX Runtime</div>
+                        <div id="rapid-mlx-runtime-summary" style="font-size:12px;color:var(--color-text-muted);margin-bottom:6px;">
+                            Checking status…
+                        </div>
+                        <button type="button" class="btn btn-secondary" id="rapid-mlx-manage-btn" style="margin-top:6px;font-size:11px;">
+                            Manage Versions
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Security & Certificates -->
@@ -6386,6 +6399,46 @@
                         <div class="llama-version-notes-tag" id="llama-version-notes-tag"></div>
                         <div class="llama-version-notes-body markdown-body" id="llama-version-notes-body"></div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- ── Rapid-MLX Runtime Manager Modal ─────────────────────────────────── -->
+<div class="modal-overlay" id="rapid-mlx-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="rapid-mlx-modal-title">
+    <div class="rapid-mlx-modal-shell">
+        <div class="rapid-mlx-modal-header">
+            <div class="rapid-mlx-modal-title-row">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                <h2 class="rapid-mlx-modal-title" id="rapid-mlx-modal-title">Rapid-MLX Runtime</h2>
+            </div>
+            <button class="rapid-mlx-modal-close" id="rapid-mlx-modal-close" type="button" aria-label="Close">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="rapid-mlx-modal-status" id="rapid-mlx-status-text">Checking runtime…</div>
+        <div class="rapid-mlx-modal-actions">
+            <button id="rapid-mlx-upgrade-btn" class="rapid-mlx-action-btn" type="button" style="display:none;">Upgrade</button>
+            <button id="rapid-mlx-repair-btn" class="rapid-mlx-action-btn" type="button" style="display:none;">Repair</button>
+            <button id="rapid-mlx-rollback-btn" class="rapid-mlx-action-btn rapid-mlx-action-btn-soft" type="button" style="display:none;">Rollback</button>
+        </div>
+        <div class="rapid-mlx-modal-body">
+            <div class="rapid-mlx-panes">
+                <div class="rapid-mlx-pane-list">
+                    <div class="rapid-mlx-list-header">
+                        <span>Published Versions</span>
+                    </div>
+                    <div class="rapid-mlx-releases-list" id="rapid-mlx-releases-list">
+                        <div class="rapid-mlx-loading">Loading versions…</div>
+                    </div>
+                </div>
+                <div class="rapid-mlx-pane-notes">
+                    <div class="rapid-mlx-notes-empty" id="rapid-mlx-notes-empty">
+                        <span>Select a version to see details</span>
+                    </div>
+                    <div class="rapid-mlx-notes-content" id="rapid-mlx-release-notes" style="display:none;"></div>
                 </div>
             </div>
         </div>

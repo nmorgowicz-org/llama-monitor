@@ -338,6 +338,14 @@ pub fn ws_route(
                                             })
                                     };
 
+                                    let active_session_model_identity = {
+                                        let sessions = s.sessions.lock().unwrap();
+                                        sessions
+                                            .iter()
+                                            .find(|ss| ss.id == active_session_id)
+                                            .and_then(|ss| ss.model_identity.clone())
+                                    };
+
                                      let is_manual = s.sleep_mode_manual.load(Ordering::Relaxed);
                                      serde_json::json!({
                                          "mode": "off",
@@ -358,9 +366,10 @@ pub fn ws_route(
                                         "session_mode": session_mode,
                                         "active_session_status": active_session_status,
                                         "active_session_error": active_session_error,
-                                        "active_session_id": active_session_id,
-                                        "active_session_endpoint": active_session_endpoint,
-                                        "active_session_preset_id": active_session_preset_id,
+                                         "active_session_id": active_session_id,
+                                         "active_session_endpoint": active_session_endpoint,
+                                         "active_session_preset_id": active_session_preset_id,
+                                         "active_session_model_identity": active_session_model_identity,
                                         "local_metrics_available": local_metrics_available,
                                         "host_metrics_available": host_metrics_available,
                                         "remote_agent_connected": remote_agent_connected,

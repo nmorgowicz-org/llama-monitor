@@ -1000,13 +1000,17 @@ async fn mlx_hf_estimate_from_repo(
     hf_file_path: &str,
     size: u64,
 ) -> Result<
-    (u64, crate::llama::vram_estimator::ModelArch, crate::llama::vram_estimator::EstimateEvidence),
+    (
+        u64,
+        crate::llama::vram_estimator::ModelArch,
+        crate::llama::vram_estimator::EstimateEvidence,
+    ),
     String,
 > {
     if size == 0 {
-        return Err(
-            String::from("model_size_bytes is required when introspecting a HuggingFace MLX model")
-        );
+        return Err(String::from(
+            "model_size_bytes is required when introspecting a HuggingFace MLX model",
+        ));
     }
     let config_file = if hf_file_path.is_empty() {
         "config.json".to_string()
@@ -1032,7 +1036,11 @@ async fn mlx_hf_estimate_from_repo(
                 repo_id,
                 crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
             );
-            Ok((size, arch, crate::llama::vram_estimator::EstimateEvidence::Degraded))
+            Ok((
+                size,
+                arch,
+                crate::llama::vram_estimator::EstimateEvidence::Degraded,
+            ))
         }
     }
 }

@@ -1262,11 +1262,7 @@ pub async fn resolve_mlx_repo_size_bytes(repo_id: &str) -> Result<Option<u64>> {
         }
     }
 
-    if total > 0 {
-        Ok(Some(total))
-    } else {
-        Ok(None)
-    }
+    if total > 0 { Ok(Some(total)) } else { Ok(None) }
 }
 
 /// Sort rank for quant labels (lower = higher quality / bigger file = shown first).
