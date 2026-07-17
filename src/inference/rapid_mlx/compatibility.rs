@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(profile.state, CompatibilityState::Provisional);
     }
 
-    #[cfg(unix)]
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[tokio::test]
     async fn managed_and_required_capability_probes_fail_closed() {
         let required = "--host --port --log-level --served-model-name --timeout --max-cache-blocks";

@@ -514,7 +514,7 @@ mod tests {
         assert!(matches!(adapter, BackendAdapter::LlamaCpp(_)));
     }
 
-    #[cfg(unix)]
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[tokio::test]
     async fn factory_selects_rapid_mlx_adapter() {
         use std::os::unix::fs::PermissionsExt;
