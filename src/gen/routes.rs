@@ -399,114 +399,119 @@ pub fn static_routes()
         .map(|| js_reply(static_assets::FEATURES_TUNING_CARDS_JS));
     let route_76 = warp::path("js")
         .and(warp::path("features"))
+        .and(warp::path("updater-shared.js"))
+        .and(warp::get())
+        .map(|| js_reply(static_assets::FEATURES_UPDATER_SHARED_JS));
+    let route_77 = warp::path("js")
+        .and(warp::path("features"))
         .and(warp::path("updates.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_UPDATES_JS));
-    let route_77 = warp::path("js")
+    let route_78 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("user-menu.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_USER_MENU_JS));
-    let route_78 = warp::path("js")
+    let route_79 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("vram-estimate.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_VRAM_ESTIMATE_JS));
-    let route_79 = warp::path("js")
+    let route_80 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("workspace-command-palette.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_WORKSPACE_COMMAND_PALETTE_JS));
-    let route_80 = warp::path("manifest.json")
+    let route_81 = warp::path("manifest.json")
         .and(warp::get())
         .map(|| other_reply(static_assets::MANIFEST_JSON, "application/json"));
-    let route_81 = warp::path("prompts")
+    let route_82 = warp::path("prompts")
         .and(warp::path("action.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::ACTION_MD, "application/octet-stream"));
-    let route_82 = warp::path("prompts")
+    let route_83 = warp::path("prompts")
         .and(warp::path("character.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::CHARACTER_MD, "application/octet-stream"));
-    let route_83 = warp::path("prompts")
+    let route_84 = warp::path("prompts")
         .and(warp::path("comedy.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::COMEDY_MD, "application/octet-stream"));
-    let route_84 = warp::path("prompts")
+    let route_85 = warp::path("prompts")
         .and(warp::path("context.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::CONTEXT_MD, "application/octet-stream"));
-    let route_85 = warp::path("prompts")
+    let route_86 = warp::path("prompts")
         .and(warp::path("director.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::DIRECTOR_MD, "application/octet-stream"));
-    let route_86 = warp::path("prompts")
+    let route_87 = warp::path("prompts")
         .and(warp::path("explicit.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::EXPLICIT_MD, "application/octet-stream"));
-    let route_87 = warp::path("prompts")
+    let route_88 = warp::path("prompts")
         .and(warp::path("fantasy.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::FANTASY_MD, "application/octet-stream"));
-    let route_88 = warp::path("prompts")
+    let route_89 = warp::path("prompts")
         .and(warp::path("general.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::GENERAL_MD, "application/octet-stream"));
-    let route_89 = warp::path("prompts")
+    let route_90 = warp::path("prompts")
         .and(warp::path("horror.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::HORROR_MD, "application/octet-stream"));
-    let route_90 = warp::path("prompts")
+    let route_91 = warp::path("prompts")
         .and(warp::path("mystery.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::MYSTERY_MD, "application/octet-stream"));
-    let route_91 = warp::path("prompts")
+    let route_92 = warp::path("prompts")
         .and(warp::path("new-character.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::NEW_CHARACTER_MD, "application/octet-stream"));
-    let route_92 = warp::path("prompts")
+    let route_93 = warp::path("prompts")
         .and(warp::path("noir.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::NOIR_MD, "application/octet-stream"));
-    let route_93 = warp::path("prompts")
+    let route_94 = warp::path("prompts")
         .and(warp::path("plot-twist.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::PLOT_TWIST_MD, "application/octet-stream"));
-    let route_94 = warp::path("prompts")
+    let route_95 = warp::path("prompts")
         .and(warp::path("romance.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::ROMANCE_MD, "application/octet-stream"));
-    let route_95 = warp::path("prompts")
+    let route_96 = warp::path("prompts")
         .and(warp::path("sci-fi.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::SCI_FI_MD, "application/octet-stream"));
-    let route_96 = warp::path("prompts")
+    let route_97 = warp::path("prompts")
         .and(warp::path("template.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::TEMPLATE_MD, "application/octet-stream"));
-    let route_97 = warp::path("prompts")
+    let route_98 = warp::path("prompts")
         .and(warp::path("thriller.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::THRILLER_MD, "application/octet-stream"));
-    let route_98 = warp::path("sw.js")
+    let route_99 = warp::path("sw.js")
         .and(warp::get())
         .map(|| js_reply(static_assets::SW_JS));
-    let route_99 = warp::path("vendor")
+    let route_100 = warp::path("vendor")
         .and(warp::path("css"))
         .and(warp::path("atom-one-dark.min.css"))
         .and(warp::get())
         .map(|| css_reply(static_assets::ATOM_ONE_DARK_MIN_CSS));
-    let route_100 = warp::path("vendor")
+    let route_101 = warp::path("vendor")
         .and(warp::path("js"))
         .and(warp::path("highlight.min.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::HIGHLIGHT_MIN_JS));
-    let route_101 = warp::path("vendor")
+    let route_102 = warp::path("vendor")
         .and(warp::path("js"))
         .and(warp::path("marked.min.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::MARKED_MIN_JS));
-    let route_102 = warp::path("vendor")
+    let route_103 = warp::path("vendor")
         .and(warp::path("js"))
         .and(warp::path("purify.min.js"))
         .and(warp::get())
@@ -514,37 +519,38 @@ pub fn static_routes()
 
     // Chain all routes using balanced tree structure
     ((((((route_0).or((route_1).or(route_2))).or((route_3).or((route_4).or(route_5))))
-        .or(((route_6).or((route_7).or(route_8))).or((route_9).or((route_10).or(route_11)))))
+        .or(((route_6).or((route_7).or(route_8)))
+            .or(((route_9).or(route_10)).or((route_11).or(route_12)))))
     .or(
-        (((route_12).or((route_13).or(route_14))).or((route_15).or((route_16).or(route_17))))
-            .or(((route_18).or((route_19).or(route_20)))
-                .or(((route_21).or(route_22)).or((route_23).or(route_24)))),
+        (((route_13).or((route_14).or(route_15))).or((route_16).or((route_17).or(route_18))))
+            .or(((route_19).or((route_20).or(route_21)))
+                .or(((route_22).or(route_23)).or((route_24).or(route_25)))),
     ))
-    .or(((((route_25).or((route_26).or(route_27)))
-        .or((route_28).or((route_29).or(route_30))))
-    .or(((route_31).or((route_32).or(route_33)))
-        .or(((route_34).or(route_35)).or((route_36).or(route_37)))))
+    .or(((((route_26).or((route_27).or(route_28)))
+        .or((route_29).or((route_30).or(route_31))))
+    .or(((route_32).or((route_33).or(route_34)))
+        .or(((route_35).or(route_36)).or((route_37).or(route_38)))))
     .or(
-        (((route_38).or((route_39).or(route_40))).or((route_41).or((route_42).or(route_43))))
-            .or(((route_44).or((route_45).or(route_46)))
-                .or(((route_47).or(route_48)).or((route_49).or(route_50)))),
+        (((route_39).or((route_40).or(route_41))).or((route_42).or((route_43).or(route_44))))
+            .or(((route_45).or((route_46).or(route_47)))
+                .or(((route_48).or(route_49)).or((route_50).or(route_51)))),
     )))
-    .or((((((route_51).or((route_52).or(route_53)))
-        .or((route_54).or((route_55).or(route_56))))
-    .or(((route_57).or((route_58).or(route_59)))
-        .or(((route_60).or(route_61)).or((route_62).or(route_63)))))
+    .or((((((route_52).or((route_53).or(route_54)))
+        .or((route_55).or((route_56).or(route_57))))
+    .or(((route_58).or((route_59).or(route_60)))
+        .or(((route_61).or(route_62)).or((route_63).or(route_64)))))
     .or(
-        (((route_64).or((route_65).or(route_66))).or((route_67).or((route_68).or(route_69))))
-            .or(((route_70).or((route_71).or(route_72)))
-                .or(((route_73).or(route_74)).or((route_75).or(route_76)))),
+        (((route_65).or((route_66).or(route_67))).or((route_68).or((route_69).or(route_70))))
+            .or(((route_71).or((route_72).or(route_73)))
+                .or(((route_74).or(route_75)).or((route_76).or(route_77)))),
     ))
-    .or(((((route_77).or((route_78).or(route_79)))
-        .or((route_80).or((route_81).or(route_82))))
-    .or(((route_83).or((route_84).or(route_85)))
-        .or(((route_86).or(route_87)).or((route_88).or(route_89)))))
+    .or(((((route_78).or((route_79).or(route_80)))
+        .or((route_81).or((route_82).or(route_83))))
+    .or(((route_84).or((route_85).or(route_86)))
+        .or(((route_87).or(route_88)).or((route_89).or(route_90)))))
     .or(
-        (((route_90).or((route_91).or(route_92))).or((route_93).or((route_94).or(route_95))))
-            .or(((route_96).or((route_97).or(route_98)))
-                .or(((route_99).or(route_100)).or((route_101).or(route_102)))),
+        (((route_91).or((route_92).or(route_93))).or((route_94).or((route_95).or(route_96))))
+            .or(((route_97).or((route_98).or(route_99)))
+                .or(((route_100).or(route_101)).or((route_102).or(route_103)))),
     )))
 }

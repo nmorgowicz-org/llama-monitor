@@ -6,6 +6,7 @@
 // any build (including older ones) can be installed from there.
 
 import { showToast } from './toast.js';
+import { attachModalFocusTrap, detachModalFocusTrap } from './updater-shared.js';
 
 const LLAMA_CPP_REPO = 'https://github.com/ggml-org/llama.cpp';
 const PR_LINK_RE = /#(\d+)/g;
@@ -129,6 +130,13 @@ async function openVersionModal() {
   modal.classList.add('open');
   document.body.style.overflow = 'hidden';
 
+  // Move focus to close button for accessibility.
+  const closeBtn = document.getElementById('llama-version-modal-close');
+  if (closeBtn) closeBtn.focus();
+
+  // Attach Escape key and tab-scope handlers.
+  attachModalFocusTrap(modal, closeVersionModal);
+
   await loadReleaseList();
 }
 
@@ -138,6 +146,7 @@ function closeVersionModal() {
   modal.style.display = 'none';
   modal.classList.remove('open');
   document.body.style.overflow = '';
+  detachModalFocusTrap(modal);
   // Reset notes pane for next open
   const empty = document.getElementById('llama-version-notes-empty');
   const content = document.getElementById('llama-version-notes-content');

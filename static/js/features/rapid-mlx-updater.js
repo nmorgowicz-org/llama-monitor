@@ -5,6 +5,7 @@
 // Uses existing API endpoints under /api/rapid-mlx/runtime/.
 
 import { showToast } from './toast.js';
+import { attachModalFocusTrap, detachModalFocusTrap } from './updater-shared.js';
 
 let _runtimeStatus = null;
 let _releases = [];
@@ -230,8 +231,6 @@ function updateSettingsSummary() {
 
 // ── Modal ────────────────────────────────────────────────────────────────────
 
-let _previousFocus = null;
-
 async function openRapidMlxModal() {
   if (_mutationInflight) return;
 
@@ -239,7 +238,6 @@ async function openRapidMlxModal() {
 
   const modal = document.getElementById('rapid-mlx-modal');
   if (!modal) return;
-  _previousFocus = document.activeElement;
   modal.classList.add('open');
 
   // Move focus to close button for accessibility.
@@ -247,7 +245,7 @@ async function openRapidMlxModal() {
   if (closeBtn) closeBtn.focus();
 
   // Attach Escape key and tab-scope handlers.
-  document.addEventListener('keydown', handleRapidMlxModalKeydown, true);
+  attachModalFocusTrap(modal, closeRapidMlxModal);
 
   const supported = _runtimeStatus?.supported ?? false;
   const active = _runtimeStatus?.active ?? null;
@@ -301,46 +299,7 @@ async function openRapidMlxModal() {
 function closeRapidMlxModal() {
   const modal = document.getElementById('rapid-mlx-modal');
   if (modal) modal.classList.remove('open');
-  document.removeEventListener('keydown', handleRapidMlxModalKeydown, true);
-  // Restore focus to element that had focus before modal opened.
-  if (_previousFocus && typeof _previousFocus.focus === 'function') {
-    _previousFocus.focus();
-    _previousFocus = null;
-  }
-}
-
-function handleRapidMlxModalKeydown(e) {
-  const modal = document.getElementById('rapid-mlx-modal');
-  if (!modal || !modal.classList.contains('open')) return;
-
-  if (e.key === 'Escape') {
-    e.preventDefault();
-    e.stopPropagation();
-    closeRapidMlxModal();
-    return;
-  }
-
-  if (e.key === 'Tab') {
-    const focusable = [...modal.querySelectorAll(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    )].filter(el => {
-      const rect = el.getBoundingClientRect();
-      const style = getComputedStyle(el);
-      return rect.width > 0 || rect.height > 0 || style.display !== 'none';
-    });
-    if (!focusable.length) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    const active = document.activeElement;
-
-    if (e.shiftKey && active === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && active === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  }
+  detachModalFocusTrap(modal);
 }
 
 function buildReleaseRow(release, isCurrent, isLatest) {
@@ -468,16 +427,46 @@ async function installVersion(btn, release) {
   }
 }
 
+const POLL_JOB_INTERVAL_MS = 2000;
+const POLL_JOB_MAX_CONSECUTIVE_ERRORS = 5;
+const POLL_JOB_MAX_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+
 async function pollJob(jobId) {
   if (!jobId) return;
+  const startedAt = Date.now();
+  let consecutiveErrors = 0;
+
+  const giveUp = (interval, message) => {
+    clearInterval(interval);
+    _mutationInflight = false;
+    showToast('Rapid-MLX operation status unknown', 'error', message);
+    fetchRuntimeStatus();
+  };
+
   const interval = setInterval(async () => {
+    if (Date.now() - startedAt > POLL_JOB_MAX_DURATION_MS) {
+      giveUp(interval, 'Timed out waiting for the operation to finish. Check server logs.');
+      return;
+    }
+
     try {
       const headers = window.authHeaders ? window.authHeaders() : {};
       const resp = await fetch(`/api/rapid-mlx/runtime/jobs/${jobId}`, { headers });
-      if (!resp.ok) return;
+      if (!resp.ok) {
+        consecutiveErrors += 1;
+        if (consecutiveErrors >= POLL_JOB_MAX_CONSECUTIVE_ERRORS) {
+          giveUp(interval, `Repeated failures checking job status (HTTP ${resp.status}).`);
+        }
+        return;
+      }
+      consecutiveErrors = 0;
       const data = await resp.json();
       const job = data.job || null;
-      if (!job) { clearInterval(interval); return; }
+      if (!job) {
+        clearInterval(interval);
+        _mutationInflight = false;
+        return;
+      }
 
       if (job.state === 'completed') {
         clearInterval(interval);
@@ -490,10 +479,13 @@ async function pollJob(jobId) {
         showToast(`Rapid-MLX operation ${job.state}: ${job.message || 'See logs'}`, 'error');
         fetchRuntimeStatus();
       }
-    } catch {
-      // keep polling
+    } catch (err) {
+      consecutiveErrors += 1;
+      if (consecutiveErrors >= POLL_JOB_MAX_CONSECUTIVE_ERRORS) {
+        giveUp(interval, `Repeated failures checking job status (${err.message || err}).`);
+      }
     }
-  }, 2000);
+  }, POLL_JOB_INTERVAL_MS);
 }
 
 function showReleaseNotes(release) {
