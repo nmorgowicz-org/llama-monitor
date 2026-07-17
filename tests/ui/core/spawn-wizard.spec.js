@@ -37,6 +37,8 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         });
     });
 
+    test.use({ animationBehavior: 'disabled' });
+
     test('external Rapid-MLX runtime can be recommended and an explicit llama.cpp choice is preserved', async ({ page }) => {
         await page.route('**/api/llama-binary/platform-info', route => route.fulfill({
             status: 200,
