@@ -1239,8 +1239,8 @@ fn quant_comparison_table_rapid_mlx_diverges_from_llama_cpp() {
     assert!(!llama_cpp_opts.is_empty());
     let mlx_q8 = mlx_opts.iter().find(|o| o.quant == "q8_0").unwrap();
     let cpp_q8 = llama_cpp_opts.iter().find(|o| o.quant == "q8_0").unwrap();
-    // Same model, same quant, different backend overhead formula — max context must diverge.
     assert_ne!(mlx_q8.max_ctx_q8, cpp_q8.max_ctx_q8);
+}
 
 // Hardware calibration: mlx-community/Qwen3-0.6B-4bit served via `rapid-mlx serve` 0.10.12 on
 // an Apple M5 Max. The server's own scheduler logs self-reported Metal `active` memory
