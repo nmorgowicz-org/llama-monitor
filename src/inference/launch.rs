@@ -417,6 +417,8 @@ pub async fn construct_adapter(
             adapter.log_level = config.log_level.clone();
             adapter.timeout = config.timeout;
             adapter.max_cache_blocks = config.max_cache_blocks;
+            adapter.enable_thinking = config.enable_thinking;
+            adapter.reasoning_effort = config.reasoning_effort.clone();
             adapter.configure_runtime(profile, config.api_key.clone());
             Ok(BackendAdapter::RapidMlx(Arc::new(adapter)))
         }

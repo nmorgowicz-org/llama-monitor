@@ -3144,6 +3144,25 @@
                                     <input type="text" class="pe-input" id="modal-api-key" placeholder="(none)">
                                 </div>
                             </div>
+                            <div class="pe-row" id="pe-row-rapid-reasoning">
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-enable-thinking" title="Default sent as enable_thinking on every chat request that doesn't override it.">Thinking Mode</label>
+                                    <select class="pe-select" id="modal-rapid-enable-thinking">
+                                        <option value="">(unset — client decides)</option>
+                                        <option value="true">on</option>
+                                        <option value="false">off</option>
+                                    </select>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-reasoning-effort" title="Default sent as reasoning_effort on every chat request that doesn't override it.">Reasoning Effort</label>
+                                    <select class="pe-select" id="modal-rapid-reasoning-effort">
+                                        <option value="">(unset)</option>
+                                        <option value="low">low</option>
+                                        <option value="medium">medium</option>
+                                        <option value="high">high</option>
+                                    </select>
+                                </div>
+                            </div>
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-max-tokens" title="Maximum tokens to generate per request. Empty = unlimited (model's context limit).">Max Tokens</label>

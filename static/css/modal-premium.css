@@ -2275,6 +2275,14 @@
   display: block;
 }
 
+/* Rapid-MLX-only reasoning defaults; irrelevant to llama.cpp presets. */
+#pe-row-rapid-reasoning {
+  display: none;
+}
+#preset-modal.preset-editor--rapid-mlx #pe-row-rapid-reasoning {
+  display: grid;
+}
+
 /* Rapid-MLX currently exposes only the launch fields the adapter can persist.
    Keep llama.cpp-only controls out of sight so edits can never be silently lost. */
 #preset-modal.preset-editor--rapid-mlx .preset-nav-item:not([data-section="model"]):not([data-section="advanced"]),
@@ -2282,8 +2290,8 @@
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-row,
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-toggles,
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .preset-memory-warning,
-#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] > .pe-section-body > :not(.pe-row:has(#modal-port)),
-#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] .pe-field:not(:has(#modal-port)),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] > .pe-section-body > :not(.pe-row:has(#modal-port)):not(#pe-row-rapid-reasoning),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] .pe-field:not(:has(#modal-port)):not(:has(#modal-rapid-enable-thinking)):not(:has(#modal-rapid-reasoning-effort)),
 #preset-modal.preset-editor--rapid-mlx #preset-browse-model-btn,
 #preset-modal.preset-editor--rapid-mlx #preset-vram-strip {
   display: none !important;

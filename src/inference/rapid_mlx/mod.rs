@@ -48,6 +48,13 @@ pub struct RapidMlxConfig {
     /// sessions, or diagnostics.
     #[serde(default, skip_serializing)]
     pub api_key: Option<String>,
+    /// Default applied to chat requests that omit `enable_thinking`, mirroring
+    /// llama.cpp's standing `--reasoning` server-level default.
+    #[serde(default)]
+    pub enable_thinking: Option<bool>,
+    /// Default applied to chat requests that omit `reasoning_effort`.
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
 }
 
 fn default_host() -> String {
@@ -95,6 +102,8 @@ impl Default for RapidMlxConfig {
             timeout: None,
             max_cache_blocks: None,
             api_key: None,
+            enable_thinking: None,
+            reasoning_effort: None,
         }
     }
 }
@@ -134,6 +143,8 @@ pub struct RapidMlxAdapter {
     pub log_level: String,
     pub timeout: Option<u32>,
     pub max_cache_blocks: Option<u32>,
+    pub enable_thinking: Option<bool>,
+    pub reasoning_effort: Option<String>,
     api_key: Option<String>,
     compatibility: CompatibilityProfile,
     capabilities: CapabilitySet,
@@ -172,6 +183,8 @@ impl RapidMlxAdapter {
             log_level: "INFO".to_string(),
             timeout: None,
             max_cache_blocks: None,
+            enable_thinking: None,
+            reasoning_effort: None,
             api_key: None,
             compatibility: CompatibilityProfile::verified_baseline(),
             capabilities: verified_capabilities(),
@@ -344,7 +357,35 @@ impl RapidMlxAdapter {
     }
 
     pub fn map_chat_request(&self, body: &[u8]) -> Result<Vec<u8>> {
-        map_chat_request_with_fields(body, &self.chat_fields)
+        let mapped = map_chat_request_with_fields(body, &self.chat_fields)?;
+        self.apply_reasoning_defaults(mapped)
+    }
+
+    /// Fills in `enable_thinking`/`reasoning_effort` from the launch config when the
+    /// caller's request omits them, mirroring llama.cpp's standing `--reasoning`
+    /// server-level default (Rapid-MLX has no launch-time reasoning flag; these are
+    /// per-request chat fields instead).
+    fn apply_reasoning_defaults(&self, mapped: Vec<u8>) -> Result<Vec<u8>> {
+        if self.enable_thinking.is_none() && self.reasoning_effort.is_none() {
+            return Ok(mapped);
+        }
+        let mut value: serde_json::Value = serde_json::from_slice(&mapped)?;
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| anyhow!("Chat request must be a JSON object"))?;
+        if self.chat_fields.contains("enable_thinking")
+            && let Some(default) = self.enable_thinking
+            && !object.contains_key("enable_thinking")
+        {
+            object.insert("enable_thinking".to_string(), serde_json::json!(default));
+        }
+        if self.chat_fields.contains("reasoning_effort")
+            && let Some(default) = &self.reasoning_effort
+            && !object.contains_key("reasoning_effort")
+        {
+            object.insert("reasoning_effort".to_string(), serde_json::json!(default));
+        }
+        Ok(serde_json::to_vec(&value)?)
     }
 }
 
@@ -548,6 +589,39 @@ mod chat_tests {
             .unwrap();
         let value: serde_json::Value = serde_json::from_slice(&mapped).unwrap();
         assert_eq!(value["stream_options"]["include_usage"], false);
+    }
+
+    #[test]
+    fn reasoning_defaults_fill_omitted_fields_without_overriding_caller_choice() {
+        let mut with_defaults = adapter();
+        with_defaults.enable_thinking = Some(true);
+        with_defaults.reasoning_effort = Some("high".into());
+
+        let mapped = with_defaults
+            .map_chat_request(br#"{"messages":[],"stream":false}"#)
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&mapped).unwrap();
+        assert_eq!(value["enable_thinking"], true);
+        assert_eq!(value["reasoning_effort"], "high");
+
+        let mapped = with_defaults
+            .map_chat_request(
+                br#"{"messages":[],"stream":false,"enable_thinking":false,"reasoning_effort":"low"}"#,
+            )
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&mapped).unwrap();
+        assert_eq!(value["enable_thinking"], false);
+        assert_eq!(value["reasoning_effort"], "low");
+    }
+
+    #[test]
+    fn no_reasoning_defaults_configured_leaves_request_untouched() {
+        let mapped = adapter()
+            .map_chat_request(br#"{"messages":[],"stream":false}"#)
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&mapped).unwrap();
+        assert!(value.get("enable_thinking").is_none());
+        assert!(value.get("reasoning_effort").is_none());
     }
 
     #[test]

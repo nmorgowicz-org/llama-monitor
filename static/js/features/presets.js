@@ -1169,6 +1169,8 @@ export function openPresetModal(mode, section, seedPreset = null) {
         // Advanced
         setOpt('modal-bind-host', p.bind_host || '');
         numOrEmpty('modal-port', p.backend === 'rapid_mlx' ? p.rapid_mlx?.port : p.port);
+        setOpt('modal-rapid-enable-thinking', p.rapid_mlx?.enable_thinking == null ? '' : String(!!p.rapid_mlx.enable_thinking));
+        setOpt('modal-rapid-reasoning-effort', p.rapid_mlx?.reasoning_effort || '');
         setVal('modal-api-key', p.api_key || '');
         numOrEmpty('modal-max-tokens', p.max_tokens);
         numOrEmpty('modal-seed', p.seed);
@@ -1590,6 +1592,8 @@ function _buildFormPreset(existing) {
                 ...existing.rapid_mlx,
                 model_path: strVal('modal-model-path'),
                 port: rapidPort,
+                enable_thinking: nullableBoolOpt('modal-rapid-enable-thinking'),
+                reasoning_effort: strVal('modal-rapid-reasoning-effort') || null,
             } : null,
         };
     }

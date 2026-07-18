@@ -9245,6 +9245,7 @@ export function buildSpawnPayload() {
         host: wizardState.access.bindHost || '127.0.0.1',
         port: wizardState.access.port || 8001,
         api_key: wizardState.access.apiKey || null,
+        enable_thinking: h.enableThinking,
       },
     };
   }
