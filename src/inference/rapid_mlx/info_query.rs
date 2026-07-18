@@ -698,7 +698,11 @@ mod tests {
             let profile = parse_model_profile(output, true, model_id)
                 .unwrap()
                 .unwrap();
-            assert!(profile.extras.vision, "vision should be true for {}", model_id);
+            assert!(
+                profile.extras.vision,
+                "vision should be true for {}",
+                model_id
+            );
             assert!(
                 profile.extras.has_vision_tower,
                 "has_vision_tower should be true for {}",
@@ -741,7 +745,11 @@ mod tests {
             let profile = parse_model_profile(output, true, model_id)
                 .unwrap()
                 .unwrap();
-            assert!(!profile.extras.vision, "vision should be false for {}", model_id);
+            assert!(
+                !profile.extras.vision,
+                "vision should be false for {}",
+                model_id
+            );
         }
     }
 }

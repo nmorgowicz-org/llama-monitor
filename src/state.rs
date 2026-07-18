@@ -1622,6 +1622,55 @@ fn local_interface_ips() -> Vec<IpAddr> {
     ips
 }
 
+// ── Inference diagnostics ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FixAction {
+    AddToolCallParser,
+    EnableAutoToolChoice,
+    AddNoThinking,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DoctorFinding {
+    #[serde(rename = "type")]
+    pub finding_type: DoctorFindingType,
+    pub severity: DoctorSeverity,
+    pub message: String,
+    #[serde(default)]
+    pub section: String,
+    #[serde(default)]
+    pub fix: Option<FixAction>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DoctorFindingType {
+    Environment,
+    Preset,
+    LlamaCpp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DoctorSeverity {
+    Ok,
+    Warning,
+    Issue,
+}
+
+impl DoctorSeverity {
+    pub fn from_glyph(glyph: char) -> Self {
+        match glyph {
+            '✓' => Self::Ok,
+            '⚠' | '!' => Self::Warning,
+            '✗' | '×' => Self::Issue,
+            _ => Self::Warning,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

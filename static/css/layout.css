@@ -2762,3 +2762,101 @@ body.chat-focus-mode #focus-mode-exit-beacon {
 [data-theme="light"] .server-error-details-body code {
   background: rgba(15, 23, 42, 0.04);
 }
+
+/* ── Doctor findings ─────────────────────────────────────────── */
+
+.server-error-details-body .doctor-findings,
+.local-server-error-details-body .doctor-findings {
+  margin-top: 4px;
+}
+
+.server-error-details-body .doctor-section,
+.local-server-error-details-body .doctor-section {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="light"] .server-error-details-body .doctor-section,
+[data-theme="light"] .local-server-error-details-body .doctor-section {
+  border-top-color: rgba(15, 23, 42, 0.08);
+}
+
+.server-error-details-body .doctor-section-title,
+.local-server-error-details-body .doctor-section-title {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+}
+
+.server-error-details-body .doctor-finding,
+.local-server-error-details-body .doctor-finding {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 10px;
+  padding: 2px 0;
+  line-height: 1.4;
+}
+
+.server-error-details-body .doctor-finding .doctor-finding-icon,
+.local-server-error-details-body .doctor-finding .doctor-finding-icon {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8px;
+  margin-top: 1px;
+}
+
+.server-error-details-body .doctor-finding[data-severity="ok"] .doctor-finding-icon,
+.local-server-error-details-body .doctor-finding[data-severity="ok"] .doctor-finding-icon {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+}
+
+.server-error-details-body .doctor-finding[data-severity="warning"] .doctor-finding-icon,
+.local-server-error-details-body .doctor-finding[data-severity="warning"] .doctor-finding-icon {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+.server-error-details-body .doctor-finding[data-severity="issue"] .doctor-finding-icon,
+.local-server-error-details-body .doctor-finding[data-severity="issue"] .doctor-finding-icon {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.server-error-details-body .doctor-finding .doctor-finding-message,
+.local-server-error-details-body .doctor-finding .doctor-finding-message {
+  flex: 1;
+  color: var(--color-text-secondary);
+}
+
+.server-error-details-body .doctor-finding .doctor-fix-btn,
+.local-server-error-details-body .doctor-finding .doctor-fix-btn {
+  flex-shrink: 0;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  background: rgba(99, 102, 241, 0.1);
+  color: #818cf8;
+  cursor: pointer;
+  line-height: 1.5;
+}
+
+.server-error-details-body .doctor-finding .doctor-fix-btn:hover,
+.local-server-error-details-body .doctor-finding .doctor-fix-btn:hover {
+  background: rgba(99, 102, 241, 0.2);
+}
+
+.server-error-details-body .doctor-finding .doctor-fix-btn:active,
+.local-server-error-details-body .doctor-finding .doctor-fix-btn:active {
+  background: rgba(99, 102, 241, 0.3);
+}

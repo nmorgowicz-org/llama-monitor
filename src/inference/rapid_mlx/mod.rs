@@ -56,6 +56,14 @@ pub struct RapidMlxConfig {
     /// Default applied to chat requests that omit `reasoning_effort`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Diagnostic fix flags: set by the diagnostics panel to patch launch behavior.
+    /// These are diagnostic helpers only, not general-purpose escape hatches.
+    #[serde(default)]
+    pub tool_call_parser: bool,
+    #[serde(default)]
+    pub auto_tool_choice: bool,
+    #[serde(default)]
+    pub no_thinking: bool,
 }
 
 fn default_host() -> String {
@@ -105,6 +113,9 @@ impl Default for RapidMlxConfig {
             api_key: None,
             enable_thinking: None,
             reasoning_effort: None,
+            tool_call_parser: false,
+            auto_tool_choice: false,
+            no_thinking: false,
         }
     }
 }
@@ -146,6 +157,9 @@ pub struct RapidMlxAdapter {
     pub max_cache_blocks: Option<u32>,
     pub enable_thinking: Option<bool>,
     pub reasoning_effort: Option<String>,
+    pub tool_call_parser: bool,
+    pub auto_tool_choice: bool,
+    pub no_thinking: bool,
     api_key: Option<String>,
     compatibility: CompatibilityProfile,
     capabilities: CapabilitySet,
@@ -186,6 +200,9 @@ impl RapidMlxAdapter {
             max_cache_blocks: None,
             enable_thinking: None,
             reasoning_effort: None,
+            tool_call_parser: false,
+            auto_tool_choice: false,
+            no_thinking: false,
             api_key: None,
             compatibility: CompatibilityProfile::verified_baseline(),
             capabilities: verified_capabilities(),
@@ -264,6 +281,11 @@ impl RapidMlxAdapter {
         } else {
             builder
         };
+
+        let builder = builder
+            .tool_call_parser(self.tool_call_parser)
+            .auto_tool_choice(self.auto_tool_choice)
+            .no_thinking(self.no_thinking);
 
         let mut launch = builder.build(
             self.runtime.executable_path.clone(),

@@ -21,6 +21,7 @@ use crate::inference::rapid_mlx::updater::{
     ManagedReleaseChannel, ManagedReleaseSelection, ManagedRuntimeStatus, RapidMlxRuntimeManager,
     RuntimeInventoryEntry, RuntimeMutationResult,
 };
+use crate::state::{DoctorFinding, DoctorFindingType, DoctorSeverity};
 
 const RELEASES_URL: &str =
     "https://api.github.com/repos/raullenchai/Rapid-MLX/releases?per_page=30";
@@ -229,6 +230,8 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .or(releases_route(ctx.clone(), state.clone()))
         .unify()
         .or(recommendation_route(ctx.clone(), state.clone()))
+        .unify()
+        .or(doctor_route(ctx.clone(), state.clone()))
         .unify()
         .or(mutation_route(
             ctx.clone(),
@@ -909,6 +912,141 @@ fn profile_route(ctx: ApiCtx, state: RuntimeApiState) -> ApiRoute {
             }
         })
         .boxed()
+}
+
+fn doctor_route(ctx: ApiCtx, _state: RuntimeApiState) -> ApiRoute {
+    let config = ctx.config;
+    warp::path!("api" / "rapid-mlx" / "doctor")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let config = config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                if crate::inference::rapid_mlx::ensure_local_platform_supported().is_err() {
+                    return Ok(json_error(
+                        StatusCode::BAD_REQUEST,
+                        "rapid-mlx doctor requires Apple Silicon macOS",
+                    ));
+                }
+                let Ok((binary, _)) = Discovery::resolve_binary(None, None).await else {
+                    return Ok(json_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "rapid-mlx binary not found on PATH",
+                    ));
+                };
+
+                let version = run_rapid_mlx_version(&binary).await;
+                if version.is_err() {
+                    return Ok(json_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "rapid-mlx version check failed",
+                    ));
+                }
+                let version_str = version.unwrap_or_default();
+
+                let doctor_output = run_rapid_mlx_doctor(&binary).await;
+                match doctor_output {
+                    Ok(output) => {
+                        let findings = parse_doctor_output(&output);
+                        Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(
+                            &serde_json::json!({
+                                "ok": true,
+                                "version": version_str,
+                                "findings": findings,
+                                "raw_output": output
+                            }),
+                        )))
+                    }
+                    Err(_) => Ok(json_error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "rapid-mlx doctor command failed",
+                    )),
+                }
+            }
+        })
+        .boxed()
+}
+
+async fn run_rapid_mlx_version(binary: &std::path::Path) -> Result<String, std::io::Error> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::process::Command::new(binary)
+            .arg("--version")
+            .output(),
+    )
+    .await
+    .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "version timed out"))??;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("v") && trimmed.split('.').count() >= 3 {
+            return Ok(trimmed.to_string());
+        }
+    }
+    Ok(text.lines().next().unwrap_or("").trim().to_string())
+}
+
+async fn run_rapid_mlx_doctor(binary: &std::path::Path) -> Result<String, std::io::Error> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        tokio::process::Command::new(binary).arg("doctor").output(),
+    )
+    .await
+    .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "doctor timed out"))??;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let combined = if stderr.trim().is_empty() {
+        stdout
+    } else {
+        format!("{stdout}\n{stderr}")
+    };
+    Ok(combined)
+}
+
+fn parse_doctor_output(output: &str) -> Vec<DoctorFinding> {
+    let mut findings = Vec::new();
+    let mut current_section = String::from("general");
+
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed.starts_with('◆') {
+            current_section = trimmed
+                .trim_start_matches('◆')
+                .trim()
+                .chars()
+                .take_while(|c| !c.is_whitespace())
+                .collect();
+            continue;
+        }
+
+        let first_char = trimmed.chars().next();
+        let glyph = match first_char {
+            Some(g @ ('✓' | '⚠' | '✗' | '×' | '!')) => g,
+            _ => continue,
+        };
+
+        let severity = DoctorSeverity::from_glyph(glyph);
+        let message = trimmed.trim_start_matches(glyph).trim().to_string();
+
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::Environment,
+            severity,
+            message,
+            section: current_section.clone(),
+            fix: None,
+        });
+    }
+
+    findings
 }
 
 #[cfg(test)]

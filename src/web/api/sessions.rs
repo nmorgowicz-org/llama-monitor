@@ -1,6 +1,8 @@
+use std::net::TcpStream;
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use warp::Filter;
 
@@ -9,7 +11,10 @@ use crate::inference::launch::{
     launch_local, request_from_api_payload, request_from_preset, request_from_session,
 };
 use crate::llama::server::stop_server;
-use crate::state::{self as app_state, AppState, SessionMode, SessionStatus};
+use crate::state::{
+    self as app_state, AppState, DoctorFinding, DoctorFindingType, DoctorSeverity, FixAction,
+    SessionMode, SessionStatus,
+};
 
 use super::common::{ApiCtx, ApiError, ApiRoute, box_reply};
 use super::common::{
@@ -28,6 +33,10 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .or(api_get_recent_sessions(state.clone(), config.clone()).map(box_reply))
         .unify()
         .or(api_check_endpoint_health(config.clone()).map(box_reply))
+        .unify()
+        .or(api_llama_cpp_diagnostics(config.clone()).map(box_reply))
+        .unify()
+        .or(api_apply_fix(state.clone(), config.clone()).map(box_reply))
         .unify()
         .or(api_create_session(state.clone(), config.clone()).map(box_reply))
         .unify()
@@ -211,6 +220,315 @@ fn api_check_endpoint_health(
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({ "reachable": reachable }),
                 )))
+            },
+        )
+}
+
+fn api_llama_cpp_diagnostics(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "sessions" / "llama-cpp-diagnostics")
+        .and(warp::path::end())
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(
+            move |auth: Option<String>, cfg: Arc<AppConfig>| async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let mut findings = Vec::new();
+                findings.extend(check_llama_server_binary(&cfg.llama_server_path));
+                // Port check uses the active session's port if available, otherwise skips.
+                // (Default model path is preset-specific, not in AppConfig.)
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "findings": findings
+                    }),
+                )))
+            },
+        )
+}
+
+#[allow(dead_code)]
+fn check_llama_server_binary(bin_path: &std::path::Path) -> Vec<DoctorFinding> {
+    let mut findings = Vec::new();
+
+    if bin_path.as_os_str().is_empty() {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Issue,
+            message: "llama.cpp server binary path is not configured".to_string(),
+            section: "binary".to_string(),
+            fix: None,
+        });
+        return findings;
+    }
+
+    if !bin_path.exists() {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Issue,
+            message: format!(
+                "llama.cpp server binary not found at {}",
+                bin_path.display()
+            ),
+            section: "binary".to_string(),
+            fix: None,
+        });
+        return findings;
+    }
+
+    let version_output = Command::new(bin_path).arg("--help").output();
+
+    match version_output {
+        Ok(output) if output.status.success() => {
+            let text = String::from_utf8_lossy(&output.stdout);
+            if text.contains("llama-server") {
+                findings.push(DoctorFinding {
+                    finding_type: DoctorFindingType::LlamaCpp,
+                    severity: DoctorSeverity::Ok,
+                    message: "llama.cpp server binary is present and executable".to_string(),
+                    section: "binary".to_string(),
+                    fix: None,
+                });
+            } else {
+                findings.push(DoctorFinding {
+                    finding_type: DoctorFindingType::LlamaCpp,
+                    severity: DoctorSeverity::Warning,
+                    message: "llama.cpp server binary exists but help output looks unusual"
+                        .to_string(),
+                    section: "binary".to_string(),
+                    fix: None,
+                });
+            }
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            findings.push(DoctorFinding {
+                finding_type: DoctorFindingType::LlamaCpp,
+                severity: DoctorSeverity::Warning,
+                message: format!(
+                    "llama.cpp server binary exists but returned error: {}",
+                    stderr.trim().lines().next().unwrap_or("unknown")
+                ),
+                section: "binary".to_string(),
+                fix: None,
+            });
+        }
+        Err(e) => {
+            findings.push(DoctorFinding {
+                finding_type: DoctorFindingType::LlamaCpp,
+                severity: DoctorSeverity::Issue,
+                message: format!("Failed to execute llama.cpp server binary: {e}"),
+                section: "binary".to_string(),
+                fix: None,
+            });
+        }
+    }
+
+    findings
+}
+
+#[allow(dead_code)]
+fn check_gguf_path(gguf_path: &std::path::Path) -> Vec<DoctorFinding> {
+    let mut findings = Vec::new();
+
+    if gguf_path.as_os_str().is_empty() {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Issue,
+            message: "Default model (GGUF) path is not configured".to_string(),
+            section: "model".to_string(),
+            fix: None,
+        });
+        return findings;
+    }
+
+    if !gguf_path.exists() {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Issue,
+            message: format!("Default model file not found at {}", gguf_path.display()),
+            section: "model".to_string(),
+            fix: None,
+        });
+        return findings;
+    }
+
+    if !matches!(gguf_path.extension(), Some(ext) if ext == "gguf") {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Warning,
+            message: "Default model file does not have .gguf extension".to_string(),
+            section: "model".to_string(),
+            fix: None,
+        });
+    } else {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Ok,
+            message: format!(
+                "Default model file found at {}",
+                gguf_path.file_name().unwrap_or_default().to_string_lossy()
+            ),
+            section: "model".to_string(),
+            fix: None,
+        });
+    }
+
+    findings
+}
+
+#[allow(dead_code)]
+fn check_port_available(port: u16) -> Vec<DoctorFinding> {
+    let mut findings: Vec<DoctorFinding> = Vec::new();
+
+    let is_in_use = TcpStream::connect(("127.0.0.1", port))
+        .map(|stream| {
+            stream
+                .set_read_timeout(Some(Duration::from_millis(100)))
+                .is_ok()
+        })
+        .unwrap_or(false);
+
+    if is_in_use {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Warning,
+            message: format!(
+                "Port {} is already in use; a new server may fail to bind",
+                port
+            ),
+            section: "network".to_string(),
+            fix: None,
+        });
+    } else {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Ok,
+            message: format!("Port {} is available for binding", port),
+            section: "network".to_string(),
+            fix: None,
+        });
+    }
+
+    findings
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ApplyFixRequest {
+    fix: FixAction,
+}
+
+fn api_apply_fix(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "diagnostics" / "apply-fix")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<ApplyFixRequest>())
+        .and(with_app_config(app_config))
+        .and_then(
+            move |auth: Option<String>, req: ApplyFixRequest, cfg: Arc<AppConfig>| {
+                let state = state.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let fix_action = req.fix;
+
+                    let active_session_id = state.active_session_id.lock().unwrap().clone();
+                    if active_session_id.is_empty() {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "No active session"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ),
+                        ));
+                    }
+
+                    let preset_id = {
+                        let sessions = state.sessions.lock().unwrap();
+                        sessions
+                            .iter()
+                            .find(|s| s.id == active_session_id)
+                            .and_then(|s| {
+                                if s.preset_id.is_empty() {
+                                    None
+                                } else {
+                                    Some(s.preset_id.clone())
+                                }
+                            })
+                    };
+
+                    let Some(preset_id) = preset_id else {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Active session has no preset ID"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ),
+                        ));
+                    };
+
+                    // Apply fix to preset's RapidMlxConfig
+                    let mut presets = state.presets.lock().unwrap();
+                    let preset = presets.iter_mut().find(|p| p.id == preset_id);
+                    let Some(preset) = preset else {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Preset not found"
+                                })),
+                                warp::http::StatusCode::NOT_FOUND,
+                            ),
+                        ));
+                    };
+
+                    let config = preset.rapid_mlx.as_mut();
+                    let Some(config) = config else {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Preset does not use Rapid-MLX backend"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ),
+                        ));
+                    };
+
+                    match fix_action {
+                        FixAction::AddToolCallParser => config.tool_call_parser = true,
+                        FixAction::EnableAutoToolChoice => config.auto_tool_choice = true,
+                        FixAction::AddNoThinking => config.no_thinking = true,
+                    }
+
+                    let presets_path = state.presets_path.clone();
+                    drop(presets);
+                    if let Err(e) =
+                        crate::presets::save_presets(&presets_path, &state.presets.lock().unwrap())
+                    {
+                        eprintln!("[warn] Failed to save presets after applying fix: {e}");
+                    }
+
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({
+                            "ok": true,
+                            "applied": req.fix
+                        }),
+                    )))
+                }
             },
         )
 }

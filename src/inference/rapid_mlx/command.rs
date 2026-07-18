@@ -14,6 +14,9 @@ pub struct RapidMlxCommandBuilder {
     timeout: Option<u32>,
     max_cache_blocks: Option<u32>,
     api_key: Option<String>,
+    tool_call_parser: bool,
+    auto_tool_choice: bool,
+    no_thinking: bool,
 }
 
 impl RapidMlxCommandBuilder {
@@ -27,6 +30,9 @@ impl RapidMlxCommandBuilder {
             timeout: None,
             max_cache_blocks: None,
             api_key: None,
+            tool_call_parser: false,
+            auto_tool_choice: false,
+            no_thinking: false,
         }
     }
 
@@ -62,6 +68,21 @@ impl RapidMlxCommandBuilder {
 
     pub fn api_key(mut self, api_key: String) -> Self {
         self.api_key = Some(api_key);
+        self
+    }
+
+    pub fn tool_call_parser(mut self, enable: bool) -> Self {
+        self.tool_call_parser = enable;
+        self
+    }
+
+    pub fn auto_tool_choice(mut self, enable: bool) -> Self {
+        self.auto_tool_choice = enable;
+        self
+    }
+
+    pub fn no_thinking(mut self, enable: bool) -> Self {
+        self.no_thinking = enable;
         self
     }
 
@@ -103,6 +124,18 @@ impl RapidMlxCommandBuilder {
             capabilities.require("--max-cache-blocks")?;
             args.push("--max-cache-blocks".to_string());
             args.push(blocks.to_string());
+        }
+
+        // Diagnostic fix flags — not guarded by capability checks since they are
+        // only activated by the diagnostics panel, never by default.
+        if self.tool_call_parser {
+            args.push("--tool-call-parser".to_string());
+        }
+        if self.auto_tool_choice {
+            args.push("--auto-tool-choice".to_string());
+        }
+        if self.no_thinking {
+            args.push("--no-thinking".to_string());
         }
 
         let os_args: Vec<OsString> = args.into_iter().map(OsString::from).collect();

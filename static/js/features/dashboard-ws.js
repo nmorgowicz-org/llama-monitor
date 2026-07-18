@@ -1566,12 +1566,10 @@ function populateServerErrorDetails(data) {
     const cmd = data.last_spawn_cmd || '';
     const logs = data.logs || [];
 
-    // Short summary (first ~200 chars)
     const summary = err.length > 200
         ? err.substring(0, 200).trim() + '...'
         : err;
 
-    // Filter non-[monitor] lines and take last 20
     const serverLogs = logs
         .filter(l => !l.startsWith('[monitor]'))
         .slice(-20);
@@ -1596,6 +1594,11 @@ No additional context captured. Check the full Logs tab for more details.
 </div>`;
     }
 
+    // Doctor findings placeholder (filled async)
+    html += `<div class="doctor-findings" id="server-doctor-findings">
+        <div style="font-size:9px;color:var(--color-text-muted);">Loading diagnostics…</div>
+    </div>`;
+
     html += `<div style="margin-top:4px;">
     <a href="#" id="error-open-logs-link" style="color:var(--color-primary);font-size:10px;text-decoration:underline;">
         Open Logs tab
@@ -1616,6 +1619,9 @@ No additional context captured. Check the full Logs tab for more details.
 
     wrapper.style.display = 'flex';
     panel.style.display = '';
+
+    // Load doctor findings async
+    loadDoctorFindings('server-doctor-findings');
 }
 
 // Bind buttons once (after DOM ready).
@@ -1722,6 +1728,10 @@ No additional context captured. Open the Logs tab or run llama-monitor from a te
 </div>`;
     }
 
+    html += `<div class="doctor-findings" id="local-doctor-findings">
+        <div style="font-size:9px;color:var(--color-text-muted);">Loading diagnostics…</div>
+    </div>`;
+
     html += `<div style="margin-top:4px;">
     <a href="#" id="local-error-open-logs-link" style="color:var(--color-primary);font-size:10px;text-decoration:underline;">
         Open Logs tab
@@ -1741,4 +1751,113 @@ No additional context captured. Open the Logs tab or run llama-monitor from a te
     }
 
     details.style.display = 'block';
+
+    loadDoctorFindings('local-doctor-findings');
+}
+
+// ── Doctor findings loader ──────────────────────────────────────
+
+async function loadDoctorFindings(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const allFindings = [];
+
+    // Fetch Rapid-MLX doctor findings (platform-guarded)
+    try {
+        const rmResp = await fetch('/api/rapid-mlx/doctor', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        if (rmResp.ok) {
+            const rmData = await rmResp.json();
+            if (rmData.ok && Array.isArray(rmData.findings)) {
+                allFindings.push(...rmData.findings);
+            }
+        }
+    } catch (_err) {
+        // Rapid-MLX doctor not available (non-Apple Silicon or not installed)
+    }
+
+    // Fetch llama.cpp diagnostics
+    try {
+        const lcResp = await fetch('/api/sessions/llama-cpp-diagnostics', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        if (lcResp.ok) {
+            const lcData = await lcResp.json();
+            if (lcData.ok && Array.isArray(lcData.findings)) {
+                allFindings.push(...lcData.findings);
+            }
+        }
+    } catch (_err) {
+        // llama.cpp diagnostics unavailable
+    }
+
+    if (allFindings.length === 0) {
+        container.innerHTML = `<div style="font-size:9px;color:var(--color-text-muted);">
+Diagnostics endpoints unavailable on this system.
+</div>`;
+        return;
+    }
+
+    // Group findings by section
+    const bySection = {};
+    for (const f of allFindings) {
+        const section = f.section || 'general';
+        if (!bySection[section]) bySection[section] = [];
+        bySection[section].push(f);
+    }
+
+    let html = '';
+    for (const [section, findings] of Object.entries(bySection)) {
+        html += `<div class="doctor-section">`;
+        html += `<div class="doctor-section-title">${escapeHtml(section)}</div>`;
+        for (const finding of findings) {
+            const iconChar = finding.severity === 'ok' ? '✓' : finding.severity === 'warning' ? '⚠' : '✗';
+            html += `<div class="doctor-finding" data-severity="${escapeHtml(finding.severity)}">`;
+            html += `<span class="doctor-finding-icon">${iconChar}</span>`;
+            html += `<span class="doctor-finding-message">${escapeHtml(finding.message)}</span>`;
+            if (finding.fix) {
+                html += `<button class="doctor-fix-btn" data-fix="${escapeHtml(finding.fix)}">Apply fix</button>`;
+            }
+            html += `</div>`;
+        }
+        html += `</div>`;
+    }
+
+    // eslint-disable-next-line no-unsanitized/property -- values sanitized via escapeHtml
+    container.innerHTML = html;
+
+    // Wire up fix buttons
+    container.querySelectorAll('.doctor-fix-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const fixAction = btn.getAttribute('data-fix');
+            if (!fixAction) return;
+            btn.textContent = 'Applying…';
+            btn.disabled = true;
+            try {
+                const resp = await fetch('/api/diagnostics/apply-fix', {
+                    method: 'POST',
+                    headers: window.authHeaders
+                        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                        : { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fix: fixAction }),
+                });
+                const result = await resp.json();
+                if (result.ok) {
+                    btn.textContent = 'Applied';
+                    btn.style.color = '#4ade80';
+                    btn.style.borderColor = 'rgba(74, 222, 128, 0.4)';
+                } else {
+                    btn.textContent = result.error || 'Failed';
+                    btn.style.color = '#ef4444';
+                    btn.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+                }
+            } catch (err) {
+                btn.textContent = 'Error';
+                btn.style.color = '#ef4444';
+                console.error('Apply fix failed:', err);
+            }
+        });
+    });
 }
