@@ -2369,6 +2369,14 @@ mod tests {
     }
 
     #[test]
+    fn hf_model_format_as_api_filter_threads_mlx_vs_gguf() {
+        assert_eq!(HfModelFormat::Gguf.as_api_filter(), "gguf");
+        assert_eq!(HfModelFormat::Mlx.as_api_filter(), "mlx");
+        // Default (backward-compat) must remain Gguf.
+        assert_eq!(HfModelFormat::default().as_api_filter(), "gguf");
+    }
+
+    #[test]
     fn test_infer_quant_label() {
         assert_eq!(infer_quant_label("model-Q4_K_M.gguf"), "Q4_K_M");
         assert_eq!(infer_quant_label("model-Q8_0.gguf"), "Q8_0");

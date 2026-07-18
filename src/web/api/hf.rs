@@ -18,6 +18,17 @@ fn validate_hf_repo_id(repo_id: &str) -> bool {
     HF_REPO_RE.is_match(repo_id)
 }
 
+/// Map the `format` field of an `/api/hf/search` request body to the
+/// `HfModelFormat` threaded into the outgoing HF API `filter=` query param.
+/// Anything other than `"mlx"` (including absent/empty/unrecognized values)
+/// falls back to `Gguf` for backward compatibility.
+pub(crate) fn parse_hf_format_param(raw: &str) -> crate::hf::HfModelFormat {
+    match raw.to_lowercase().as_str() {
+        "mlx" => crate::hf::HfModelFormat::Mlx,
+        _ => crate::hf::HfModelFormat::Gguf,
+    }
+}
+
 pub(crate) fn resolve_hf_target_dir(
     models_dir: &Path,
     target_path: Option<&str>,
@@ -138,11 +149,7 @@ fn api_hf_search(
                 }
 
                 let cursor = body["cursor"].as_str().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-                let format_str = body["format"].as_str().unwrap_or("gguf").to_lowercase();
-                let format = match format_str.as_str() {
-                    "mlx" => crate::hf::HfModelFormat::Mlx,
-                    _ => crate::hf::HfModelFormat::Gguf,
-                };
+                let format = parse_hf_format_param(body["format"].as_str().unwrap_or("gguf"));
                 let params = crate::hf::HfSearchParams { query, author, sort, limit: limit as usize, cursor, format };
 
                 match crate::hf::hf_search_models(&params).await {
@@ -820,4 +827,39 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .boxed();
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Covers the `format` threading from an `/api/hf/search` request body
+    /// through to the `HfModelFormat` passed into `HfSearchParams` (and, via
+    /// `HfModelFormat::as_api_filter`, to the outgoing `filter=` HF API query
+    /// param) without a live HF call.
+    #[test]
+    fn parse_hf_format_param_threads_mlx_and_gguf() {
+        assert!(matches!(
+            parse_hf_format_param("mlx"),
+            crate::hf::HfModelFormat::Mlx
+        ));
+        // Case-insensitive.
+        assert!(matches!(
+            parse_hf_format_param("MLX"),
+            crate::hf::HfModelFormat::Mlx
+        ));
+        assert!(matches!(
+            parse_hf_format_param("gguf"),
+            crate::hf::HfModelFormat::Gguf
+        ));
+        // Unrecognized / absent format falls back to Gguf (backward compat).
+        assert!(matches!(
+            parse_hf_format_param(""),
+            crate::hf::HfModelFormat::Gguf
+        ));
+        assert!(matches!(
+            parse_hf_format_param("bogus"),
+            crate::hf::HfModelFormat::Gguf
+        ));
+    }
 }
