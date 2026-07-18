@@ -2464,9 +2464,10 @@ async function ensureEscapeHatchRendered() {
     const row = document.createElement('div');
     row.className = 'esc-hatch-row';
     row.dataset.flagName = d.flag;
+    const tooltipText = d.default ? `${d.tooltip || ''} (default: ${d.default})` : (d.tooltip || '');
     const label = document.createElement('div');
     label.className = 'esc-hatch-label';
-    label.title = d.tooltip || '';
+    label.title = tooltipText;
     const nameSpan = document.createElement('span');
     nameSpan.className = 'esc-hatch-name';
     nameSpan.textContent = d.description || '';
@@ -2475,13 +2476,19 @@ async function ensureEscapeHatchRendered() {
     typeSpan.textContent = d.value_type || '';
     label.appendChild(nameSpan);
     label.appendChild(typeSpan);
+    if (d.default) {
+      const defaultSpan = document.createElement('span');
+      defaultSpan.className = 'esc-hatch-default';
+      defaultSpan.textContent = `default: ${d.default}`;
+      label.appendChild(defaultSpan);
+    }
     const controls = document.createElement('div');
     controls.className = 'esc-hatch-controls';
     const existing = wizardState.hardware.escapeHatchFlags?.[d.flag];
     if (d.value_type === 'bool') {
       const toggle = document.createElement('label');
       toggle.className = 'esc-hatch-toggle';
-      toggle.title = d.tooltip || '';
+      toggle.title = tooltipText;
       const chk = document.createElement('input');
       chk.type = 'checkbox';
       chk.checked = !!existing;
@@ -2494,7 +2501,7 @@ async function ensureEscapeHatchRendered() {
     } else if (d.value_type === 'enum') {
       const sel = document.createElement('select');
       sel.className = 'esc-hatch-select';
-      sel.title = d.tooltip || '';
+      sel.title = tooltipText;
       (d.enum_options || []).forEach(opt => {
         const o = document.createElement('option');
         o.value = opt;
@@ -2510,8 +2517,12 @@ async function ensureEscapeHatchRendered() {
       const inp = document.createElement('input');
       inp.type = d.value_type === 'float' ? 'number' : 'number';
       inp.className = 'esc-hatch-input';
-      inp.title = d.tooltip || '';
+      inp.title = tooltipText;
       inp.step = d.value_type === 'float' ? '0.01' : '1';
+      if (d.default) {
+        const numericDefault = parseFloat(d.default);
+        if (Number.isFinite(numericDefault)) inp.placeholder = String(numericDefault);
+      }
       if (existing !== undefined && existing !== null) inp.value = existing;
       inp.addEventListener('input', () => {
         const val = d.value_type === 'float' ? parseFloat(inp.value) : parseInt(inp.value, 10);

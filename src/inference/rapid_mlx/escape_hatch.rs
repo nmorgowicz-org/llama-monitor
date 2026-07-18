@@ -6,6 +6,11 @@ pub struct EscapeFlagDescriptor {
     pub tooltip: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enum_options: Option<&'static [&'static str]>,
+    /// The real `rapid-mlx serve --help` default for this flag, as display
+    /// text (e.g. "32768", "0.20"). `None` when the CLI has no fixed default
+    /// to show (e.g. a conditional default, or a bare on/off toggle flag).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<&'static str>,
 }
 
 pub const ALLOWED_ESCAPE_FLAGS: &[EscapeFlagDescriptor] = &[
@@ -16,6 +21,7 @@ pub const ALLOWED_ESCAPE_FLAGS: &[EscapeFlagDescriptor] = &[
         description: "Prefilter cache mode",
         tooltip: "Controls how Rapid-MLX reuses KV cache across requests. 'auto' lets the runtime decide; 'always' maximizes reuse but uses more memory; 'off' disables it.",
         enum_options: Some(&["off", "auto", "always"]),
+        default: Some("off (\"always\" for verified aliases)"),
     },
     EscapeFlagDescriptor {
         flag: "pflash-threshold",
@@ -23,6 +29,7 @@ pub const ALLOWED_ESCAPE_FLAGS: &[EscapeFlagDescriptor] = &[
         description: "PFlash activation threshold",
         tooltip: "Minimum prompt length (tokens) at which PFlash reuse becomes active. Below this, a direct forward pass is used.",
         enum_options: None,
+        default: Some("32768"),
     },
     EscapeFlagDescriptor {
         flag: "pflash-keep-ratio",
@@ -30,6 +37,7 @@ pub const ALLOWED_ESCAPE_FLAGS: &[EscapeFlagDescriptor] = &[
         description: "PFlash keep ratio",
         tooltip: "Fraction of the prefix cache to preserve between requests. 0.0–1.0; higher keeps more history but consumes more memory.",
         enum_options: None,
+        default: Some("0.20"),
     },
     EscapeFlagDescriptor {
         flag: "pflash-min-keep-tokens",
@@ -37,41 +45,47 @@ pub const ALLOWED_ESCAPE_FLAGS: &[EscapeFlagDescriptor] = &[
         description: "PFlash minimum keep tokens",
         tooltip: "Absolute minimum number of tokens to retain in the prefix cache, regardless of keep-ratio.",
         enum_options: None,
+        default: Some("2048"),
     },
     EscapeFlagDescriptor {
         flag: "pflash-sink-tokens",
         value_type: "int",
         description: "PFlash sink tokens",
-        tooltip: "Number of tokens at the end of a prompt to always treat as non-reusable (sink). Higher values reduce false positives in cache matches.",
+        tooltip: "Leading prompt tokens always kept by PFlash. Higher values reduce false positives in cache matches.",
         enum_options: None,
+        default: Some("256"),
     },
     EscapeFlagDescriptor {
         flag: "pflash-tail-tokens",
         value_type: "int",
         description: "PFlash tail tokens",
-        tooltip: "Tokens reserved at the tail of the cache for new content growth. Adjusts how aggressively the cache can extend.",
+        tooltip: "Trailing prompt tokens always kept by PFlash. Adjusts how aggressively the cache can extend.",
         enum_options: None,
+        default: Some("2048"),
     },
     EscapeFlagDescriptor {
         flag: "pflash-block-size",
         value_type: "int",
         description: "PFlash block size",
-        tooltip: "Size of individual PFlash cache blocks in tokens. Must be a power of two (e.g. 64, 128, 256).",
+        tooltip: "Middle-token scoring block size, in tokens.",
         enum_options: None,
+        default: Some("128"),
     },
     EscapeFlagDescriptor {
         flag: "pflash-query-window",
         value_type: "int",
         description: "PFlash query window",
-        tooltip: "Number of leading tokens used as the query key for cache lookups. Larger windows give more precise matches but slower lookups.",
+        tooltip: "Trailing query window used to score middle blocks. Larger windows give more precise matches but slower lookups.",
         enum_options: None,
+        default: Some("512"),
     },
     EscapeFlagDescriptor {
         flag: "pflash-stride-blocks",
         value_type: "int",
         description: "PFlash stride blocks",
-        tooltip: "Stride between PFlash block comparisons during cache scanning. Higher values skip blocks for speed but may miss matches.",
+        tooltip: "Keep every Nth middle block as an anchor during scoring (0 disables anchors).",
         enum_options: None,
+        default: Some("8"),
     },
     EscapeFlagDescriptor {
         flag: "pflash-include-tools",
@@ -79,6 +93,7 @@ pub const ALLOWED_ESCAPE_FLAGS: &[EscapeFlagDescriptor] = &[
         description: "PFlash include tools",
         tooltip: "When true, tool definitions and tool-call history are included in PFlash cache keys. Disabling can improve reuse in agentic workloads with rotating tool sets.",
         enum_options: None,
+        default: None,
     },
     // ── Spec-decode force toggles ───────────────────────────────────────────────
     EscapeFlagDescriptor {
@@ -87,6 +102,7 @@ pub const ALLOWED_ESCAPE_FLAGS: &[EscapeFlagDescriptor] = &[
         description: "Force speculative decoding",
         tooltip: "Override runtime heuristics and always enable speculative decoding, even if the model or hardware would normally disable it.",
         enum_options: None,
+        default: None,
     },
     EscapeFlagDescriptor {
         flag: "no-spec-decode",
@@ -94,6 +110,7 @@ pub const ALLOWED_ESCAPE_FLAGS: &[EscapeFlagDescriptor] = &[
         description: "Disable speculative decoding",
         tooltip: "Force speculative decoding off regardless of model capabilities or runtime auto-detection.",
         enum_options: None,
+        default: None,
     },
     // ── Hybrid force toggles ────────────────────────────────────────────────────
     EscapeFlagDescriptor {
@@ -102,6 +119,7 @@ pub const ALLOWED_ESCAPE_FLAGS: &[EscapeFlagDescriptor] = &[
         description: "Force hybrid attention",
         tooltip: "Override the runtime's attention mode and force hybrid attention path. Useful for models where auto-detection is uncertain.",
         enum_options: None,
+        default: None,
     },
     EscapeFlagDescriptor {
         flag: "no-hybrid",
@@ -109,6 +127,7 @@ pub const ALLOWED_ESCAPE_FLAGS: &[EscapeFlagDescriptor] = &[
         description: "Disable hybrid attention",
         tooltip: "Force pure attention path; disable hybrid attention mode even if the model supports it.",
         enum_options: None,
+        default: None,
     },
 ];
 
@@ -190,5 +209,71 @@ mod tests {
             })
             .collect();
         assert!(validate_escape_flags(&flags).is_ok());
+    }
+
+    /// Every non-boolean (int/float/enum) flag should surface a real
+    /// `rapid-mlx serve --help` default so the wizard can show a
+    /// placeholder instead of an empty input. Pure on/off toggle flags
+    /// (bool) have no meaningful "default value" to display and are
+    /// exempt.
+    #[test]
+    fn numeric_and_enum_flags_have_a_surfaced_default() {
+        for d in ALLOWED_ESCAPE_FLAGS {
+            if d.value_type == "bool" {
+                continue;
+            }
+            assert!(
+                d.default.is_some(),
+                "flag '{}' (type {}) has no `default` surfaced for the wizard",
+                d.flag,
+                d.value_type
+            );
+        }
+    }
+
+    #[test]
+    fn pflash_threshold_and_keep_ratio_defaults_match_real_cli_help() {
+        let by_flag = |flag: &str| {
+            ALLOWED_ESCAPE_FLAGS
+                .iter()
+                .find(|d| d.flag == flag)
+                .unwrap_or_else(|| panic!("missing descriptor for {flag}"))
+        };
+        assert_eq!(by_flag("pflash-threshold").default, Some("32768"));
+        assert_eq!(by_flag("pflash-keep-ratio").default, Some("0.20"));
+        assert_eq!(by_flag("pflash-block-size").default, Some("128"));
+    }
+
+    #[test]
+    fn pflash_block_size_tooltip_has_no_fabricated_power_of_two_claim() {
+        let d = ALLOWED_ESCAPE_FLAGS
+            .iter()
+            .find(|d| d.flag == "pflash-block-size")
+            .unwrap();
+        assert!(
+            !d.tooltip.to_lowercase().contains("power of two"),
+            "pflash-block-size tooltip must not invent a power-of-two constraint absent from `serve --help`"
+        );
+    }
+
+    #[test]
+    fn pflash_sink_and_query_window_tooltips_match_real_cli_help_direction() {
+        let sink = ALLOWED_ESCAPE_FLAGS
+            .iter()
+            .find(|d| d.flag == "pflash-sink-tokens")
+            .unwrap();
+        assert!(
+            sink.tooltip.to_lowercase().contains("leading"),
+            "pflash-sink-tokens are leading tokens per `serve --help`, tooltip must say so"
+        );
+
+        let query_window = ALLOWED_ESCAPE_FLAGS
+            .iter()
+            .find(|d| d.flag == "pflash-query-window")
+            .unwrap();
+        assert!(
+            query_window.tooltip.to_lowercase().contains("trailing"),
+            "pflash-query-window is a trailing window per `serve --help`, tooltip must say so"
+        );
     }
 }
