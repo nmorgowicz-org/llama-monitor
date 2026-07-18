@@ -1271,6 +1271,21 @@ fn hex_digest(bytes: &[u8]) -> String {
     output
 }
 
+#[allow(dead_code)]
+pub async fn live_model_profile(
+    binary: &Path,
+    model_id: &str,
+) -> Result<Option<crate::inference::rapid_mlx::info_query::ModelProfile>> {
+    crate::inference::rapid_mlx::info_query::fetch_model_profile(binary, model_id).await
+}
+
+#[allow(dead_code)]
+pub async fn live_model_list(
+    binary: &Path,
+) -> Result<Vec<crate::inference::rapid_mlx::info_query::ModelListEntry>> {
+    crate::inference::rapid_mlx::info_query::fetch_model_list(binary).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

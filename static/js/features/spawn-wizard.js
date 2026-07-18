@@ -174,6 +174,10 @@ export const wizardState = {
     hfFile: '',
     hfTokenSet: false,
     rapidMlxSource: null,
+    rapidMlxProfile: null,          // live profile from rapid-mlx info <model>
+    rapidMlxSpeculativeConfig: null, // --speculative-config JSON string
+    rapidMlxMllm: true,              // --mllm toggle (vision enabled by default when available)
+    rapidMlxEmbeddingModel: null,    // --embedding-model repo ID/alias
     delivery: 'local_file', // 'local_file' | 'imported_local' | 'stream_hf' | 'downloaded_hf'
     originRepo: '',
     originFile: '',
@@ -514,6 +518,10 @@ function resetWizardState() {
   wizardState.model.quantFiles = [];
   wizardState.model.hfTokenSet = false;
   wizardState.model.rapidMlxSource = null;
+  wizardState.model.rapidMlxProfile = null;
+  wizardState.model.rapidMlxSpeculativeConfig = null;
+  wizardState.model.rapidMlxMllm = true;
+  wizardState.model.rapidMlxEmbeddingModel = null;
   wizardState.model._quantSwapRepo = '';
 
   // Clear module-level quant-swap search state so next open starts fresh
@@ -967,6 +975,7 @@ function bindEvents() {
     wizardState.model.rapidMlxSource = null;
     refreshEngineRecommendation();
     refreshStepGuardrails();
+    _scheduleRapidMlxProfileFetch(wizardState.model.hfRepo);
   });
   dom.hfRepoInput?.addEventListener('blur', () => triggerHfFileFetch());
   dom.hfRepoInput?.addEventListener('keydown', e => {
@@ -2021,6 +2030,7 @@ function hfSearchForWizard({ query, author, sort, limit }) {
       if (m.param_b > 0) triggerQuantAdvisor();
       clearValidationError();
       refreshStepGuardrails();
+      _scheduleRapidMlxProfileFetch(m.id);
     },
   });
 }
@@ -2335,6 +2345,9 @@ function selectWizardEngine(engine, explicit) {
   if (!['llama_cpp', 'rapid_mlx'].includes(engine)) return;
   wizardState.engine.selected = engine;
   if (explicit) wizardState.engine.explicit = true;
+  if (engine !== 'rapid_mlx') {
+    wizardState.model.rapidMlxProfile = null;
+  }
   if (engine === 'rapid_mlx' && wizardState.model.source === 'import') {
     wizardState.model.source = 'local';
     wizardState.model.path = '';
@@ -2351,6 +2364,11 @@ function selectWizardEngine(engine, explicit) {
   refreshStepGuardrails();
   _checkBinaryPrereq();
   refreshEngineRecommendation();
+  // Fetch live profile when switching to Rapid-MLX with a model selected
+  if (engine === 'rapid_mlx') {
+    const modelId = wizardState.model.hfRepo || wizardState.model.path || '';
+    _scheduleRapidMlxProfileFetch(modelId);
+  }
 }
 
 function renderEngineSelection() {
@@ -4202,6 +4220,197 @@ async function fetchHfFiles(repo) {
       refreshStepGuardrails();
     },
   });
+}
+
+// ── Rapid-MLX live model profile (from rapid-mlx info <model>) ────────────────
+
+let _rapidMlxProfileTimer = null;
+
+// Fetch the live model profile from rapid-mlx info and store it in wizardState.
+// Only runs when Rapid-MLX engine is selected and a model identity is known.
+// Non-blocking: failures degrade gracefully without stopping wizard flow.
+async function _fetchRapidMlxModelProfile(modelId) {
+  if (!modelId || modelId.trim().length < 2) {
+    wizardState.model.rapidMlxProfile = null;
+    return;
+  }
+  if (wizardState.engine.selected !== 'rapid_mlx') {
+    wizardState.model.rapidMlxProfile = null;
+    return;
+  }
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const url = `/api/rapid-mlx/models/${encodeURIComponent(modelId)}/profile`;
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      wizardState.model.rapidMlxProfile = null;
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    wizardState.model.rapidMlxProfile = data.profile || null;
+    _renderRapidMlxProfileHints();
+  } catch {
+    wizardState.model.rapidMlxProfile = null;
+  }
+}
+
+// Debounced wrapper: schedule a profile fetch after model selection stabilizes.
+function _scheduleRapidMlxProfileFetch(modelId) {
+  clearTimeout(_rapidMlxProfileTimer);
+  _rapidMlxProfileTimer = setTimeout(() => {
+    _fetchRapidMlxModelProfile(modelId);
+  }, 350);
+}
+
+// Render contextual hints from the live Rapid-MLX profile.
+// Only renders when on the Rapid-MLX hardware panel and a profile is available.
+function _renderRapidMlxProfileHints() {
+  const hintsEl = document.getElementById('rapid-mlx-profile-hints');
+  if (!hintsEl) return;
+  const profile = wizardState.model.rapidMlxProfile;
+  if (!profile) {
+    hintsEl.style.display = 'none';
+    return;
+  }
+  hintsEl.style.display = '';
+  hintsEl.innerHTML = '';
+
+  const hasVision = profile.extras && (profile.extras.vision || profile.extras.has_vision_tower);
+  const hasEmbeddings = profile.extras && profile.extras.embeddings;
+
+  // Tool format + reasoning parser row
+  if (profile.tool_format || profile.reasoning_parser) {
+    const row = document.createElement('div');
+    row.className = 'rapid-mlx-hint-row';
+    const parts = [];
+    if (profile.tool_format) parts.push(`Tool: ${profile.tool_format}`);
+    if (profile.reasoning_parser) parts.push(`Reasoning: ${profile.reasoning_parser}`);
+    row.textContent = parts.join(' · ');
+    hintsEl.appendChild(row);
+  }
+
+  // Spec-decode eligibility readout + --speculative-config JSON builder
+  if (profile.spec_decode) {
+    const row = document.createElement('div');
+    row.className = 'rapid-mlx-hint-row rapid-mlx-hint-row--spec';
+    const spec = profile.spec_decode;
+    if (spec === 'supported') {
+      row.textContent = 'Speculative decoding: eligible';
+    } else if (spec === 'unsupported') {
+      row.textContent = 'Speculative decoding: not eligible';
+    } else {
+      row.textContent = 'Speculative decoding: unknown';
+    }
+    hintsEl.appendChild(row);
+
+    // JSON builder for --speculative-config
+    const configRow = document.createElement('div');
+    configRow.className = 'rapid-mlx-config-row';
+    const configLabel = document.createElement('span');
+    configLabel.className = 'rapid-mlx-config-label';
+    configLabel.textContent = '--speculative-config';
+    configRow.appendChild(configLabel);
+    const configInput = document.createElement('input');
+    configInput.className = 'rapid-mlx-config-input';
+    configInput.type = 'text';
+    configInput.placeholder = 'e.g. {"draft_model": "alias", "max_tokens": 4}';
+    configInput.disabled = spec !== 'supported';
+    if (spec !== 'supported') {
+      configInput.title = 'Speculative decoding not supported for this model';
+    }
+    configInput.addEventListener('input', () => {
+      wizardState.model.rapidMlxSpeculativeConfig = configInput.value || null;
+    });
+    configRow.appendChild(configInput);
+    hintsEl.appendChild(configRow);
+  }
+
+  // DFlash / DDTree eligibility
+  const renderEligibility = (label, elig) => {
+    if (!elig) return;
+    const row = document.createElement('div');
+    row.className = 'rapid-mlx-hint-row rapid-mlx-hint-row--eligibility';
+    const status = elig.supported === true ? 'eligible' : elig.supported === false ? 'not eligible' : 'unknown';
+    row.textContent = `${label}: ${status}`;
+    if (elig.reasons && Object.keys(elig.reasons).length > 0) {
+      const details = Object.entries(elig.reasons)
+        .map(([k, v]) => `${k}: ${v || '—'}`)
+        .join(' · ');
+      row.title = details;
+      const dot = document.createElement('span');
+      dot.className = 'rapid-mlx-hint-dot';
+      dot.textContent = ' ⓘ';
+      row.appendChild(dot);
+    }
+    hintsEl.appendChild(row);
+  };
+  if (profile.dflash_eligibility) renderEligibility('DFlash', profile.dflash_eligibility);
+  if (profile.ddtree_eligibility) renderEligibility('DDTree', profile.ddtree_eligibility);
+
+  // MTP path
+  if (profile.mtp_path && profile.mtp_path !== 'unknown') {
+    const row = document.createElement('div');
+    row.className = 'rapid-mlx-hint-row';
+    row.textContent = `MTP path: ${profile.mtp_path}`;
+    hintsEl.appendChild(row);
+  }
+
+  // Vision toggle (--mllm / --no-mllm) — shown only when vision extra present
+  if (hasVision) {
+    const configRow = document.createElement('div');
+    configRow.className = 'rapid-mlx-config-row';
+    const configLabel = document.createElement('span');
+    configLabel.className = 'rapid-mlx-config-label';
+    configLabel.textContent = '--mllm';
+    configRow.appendChild(configLabel);
+    const toggleLabel = document.createElement('label');
+    toggleLabel.className = 'rapid-mlx-config-toggle';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = true;
+    checkbox.addEventListener('change', () => {
+      wizardState.model.rapidMlxMllm = checkbox.checked;
+    });
+    toggleLabel.appendChild(checkbox);
+    const toggleText = document.createElement('span');
+    toggleText.textContent = 'Enable vision (multimodal)';
+    toggleLabel.appendChild(toggleText);
+    configRow.appendChild(toggleLabel);
+    hintsEl.appendChild(configRow);
+  }
+
+  // Embeddings value input (--embedding-model <repo>) — shown only when embeddings extra present
+  if (hasEmbeddings) {
+    const configRow = document.createElement('div');
+    configRow.className = 'rapid-mlx-config-row';
+    const configLabel = document.createElement('span');
+    configLabel.className = 'rapid-mlx-config-label';
+    configLabel.textContent = '--embedding-model';
+    configRow.appendChild(configLabel);
+    const input = document.createElement('input');
+    input.className = 'rapid-mlx-config-input';
+    input.type = 'text';
+    input.placeholder = 'Repo ID or alias for embedding model';
+    input.addEventListener('input', () => {
+      wizardState.model.rapidMlxEmbeddingModel = input.value || null;
+    });
+    configRow.appendChild(input);
+    hintsEl.appendChild(configRow);
+  }
+
+  // Extras tag row (always show extras summary)
+  if (profile.extras) {
+    const row = document.createElement('div');
+    row.className = 'rapid-mlx-hint-row rapid-mlx-hint-row--extras';
+    const tags = [];
+    if (hasVision) tags.push('vision');
+    if (hasEmbeddings) tags.push('embeddings');
+    if (profile.extras.mtp_dflash) tags.push('mtp-dflash');
+    if (tags.length > 0) {
+      row.textContent = `Extras: ${tags.join(', ')}`;
+      hintsEl.appendChild(row);
+    }
+  }
 }
 
 // ── Third-party model import ──────────────────────────────────────────────────

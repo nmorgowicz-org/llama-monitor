@@ -247,14 +247,13 @@ finding producers, rendered into the same panel:
 - A second producer (no new endpoint needed — reuse the Item 1 profile fetch): the
   **preset flag advisor** compares the selected model's `rapid-mlx info` profile against
   the active preset's launch args and emits the `FixAction`-bearing findings.
-- llama.cpp-side parity checks: locate the existing health-check logic backing
-  `inference_diagnostics_available()` (`src/web/api/sessions.rs:857`) and the
-  `/health`-poll path used to populate `local-server-error-details`/
-  `server-error-details` today (trace it from `dashboard-ws.js:1544-1623` back through
-  whatever endpoint currently populates those panels — do not assume a file path without
-  tracing the actual call chain first) and add the small set of llama.cpp parity checks
-  (server binary reachable, GGUF path valid, port free) to the same response shape as the
-  new Rapid-MLX doctor findings.
+- llama.cpp-side parity checks: the existing diagnostics data (`active_session_error`,
+   `last_spawn_cmd`, `logs`) is emitted by the WebSocket telemetry builder in
+   `src/web/ws.rs:294-390`. Add the llama.cpp parity checks (server binary reachable, GGUF
+   path valid, port free) to the same `DoctorFinding` response shape as the new Rapid-MLX
+   doctor findings, reusing whatever health-check logic already feeds `ws.rs`. Note:
+   `inference_diagnostics_available()` in `src/web/api/sessions.rs:857` is only a boolean
+   liveness probe, not a findings source.
 - `static/js/features/dashboard-ws.js`: render doctor findings in both panels; for
   findings tagged with a known fixable flag (`tool-call-parser`, `auto-tool-choice`,
   `no-thinking`), show an inline "Apply fix" action that patches the current preset's

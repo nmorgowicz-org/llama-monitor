@@ -16,6 +16,7 @@ use crate::inference::backend::{
 };
 use crate::inference::rapid_mlx::compatibility;
 use crate::inference::rapid_mlx::discovery::Discovery;
+use crate::inference::rapid_mlx::info_query;
 use crate::inference::rapid_mlx::updater::{
     ManagedReleaseChannel, ManagedReleaseSelection, ManagedRuntimeStatus, RapidMlxRuntimeManager,
     RuntimeInventoryEntry, RuntimeMutationResult,
@@ -253,7 +254,9 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
             RuntimeOperation::Rollback,
         ))
         .unify()
-        .or(job_route(ctx, state))
+        .or(job_route(ctx.clone(), state.clone()))
+        .unify()
+        .or(profile_route(ctx, state))
         .unify()
         .boxed()
 }
@@ -812,6 +815,100 @@ fn json_error(status: StatusCode, message: impl Into<String>) -> ApiReply {
         warp::reply::json(&serde_json::json!({ "ok": false, "error": message.into() })),
         status,
     ))
+}
+
+fn profile_route(ctx: ApiCtx, state: RuntimeApiState) -> ApiRoute {
+    let config = ctx.config;
+    warp::path!("api" / "rapid-mlx" / "models" / String / "profile")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |model_id: String, auth: Option<String>| {
+            let config = config.clone();
+            let state = state.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                if crate::inference::rapid_mlx::ensure_local_platform_supported().is_err() {
+                    return Ok(json_error(
+                        StatusCode::BAD_REQUEST,
+                        "Model profile queries require Apple Silicon macOS",
+                    ));
+                }
+                let manager_result = manager(&state);
+                let mut active_info: Option<(std::path::PathBuf, ManagedReleaseChannel)> = None;
+                if let Ok(manager) = &manager_result {
+                    let manager = manager.clone();
+                    if let Ok(Ok(status)) =
+                        tokio::task::spawn_blocking(move || manager.status()).await
+                        && let Some(active) = status.active
+                    {
+                        active_info = Some((active.executable_path, active.release_channel));
+                    }
+                }
+                let binary_path = active_info.as_ref().map(|(p, _)| p.as_path());
+                let Ok((binary, source)) = Discovery::resolve_binary(None, binary_path).await
+                else {
+                    return Ok(json_error(
+                        StatusCode::NOT_FOUND,
+                        "Rapid-MLX binary not found. Run rapid-mlx doctor or install via Settings.",
+                    ));
+                };
+                let allow_prerelease = active_info
+                    .as_ref()
+                    .is_some_and(|(p, c)| p == &binary && *c == ManagedReleaseChannel::Prerelease);
+                if source == crate::inference::rapid_mlx::runtime::RuntimeSource::Managed {
+                    if allow_prerelease {
+                        if compatibility::probe_published_managed_release(&binary, allow_prerelease)
+                            .await
+                            .is_err()
+                        {
+                            return Ok(json_error(
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                "Rapid-MLX runtime probe failed",
+                            ));
+                        }
+                    } else if compatibility::probe(&binary, source).await.is_err() {
+                        return Ok(json_error(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "Rapid-MLX runtime probe failed",
+                        ));
+                    }
+                } else if compatibility::probe(&binary, source).await.is_err() {
+                    return Ok(json_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "Rapid-MLX runtime probe failed",
+                    ));
+                }
+                match info_query::fetch_model_profile(&binary, &model_id).await {
+                    Ok(Some(profile)) => Ok::<ApiReply, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": true, "profile": profile })),
+                    )),
+                    Ok(None) => Ok(json_error(
+                        StatusCode::NOT_FOUND,
+                        format!(
+                            "Model '{}' not recognized by this Rapid-MLX installation",
+                            model_id
+                        ),
+                    )),
+                    Err(error) => {
+                        let msg = error.to_string();
+                        if msg.contains("timed out") {
+                            Ok(json_error(
+                                StatusCode::REQUEST_TIMEOUT,
+                                "Rapid-MLX info query timed out",
+                            ))
+                        } else {
+                            Ok(json_error(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Rapid-MLX info query failed",
+                            ))
+                        }
+                    }
+                }
+            }
+        })
+        .boxed()
 }
 
 #[cfg(test)]

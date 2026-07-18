@@ -1024,6 +1024,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
     form.reset();
     clearFieldErrors();
     newPresetSeed = mode === 'new' && seedPreset ? structuredClone(seedPreset) : null;
+    _presetRapidMlxProfile = null;
 
     if (mode === 'edit') {
         const id = document.getElementById('preset-select').value;
@@ -1041,6 +1042,8 @@ export function openPresetModal(mode, section, seedPreset = null) {
         setVal('modal-model-path', modelValue);
         _renderPresetArchInfo(p);
         setVal('modal-alias', p.alias || '');
+        // Fetch live Rapid-MLX profile when editing a Rapid-MLX preset
+        _schedulePresetRapidMlxProfile();
         numOrEmpty('modal-gpu-layers', p.gpu_layers);
         setChk('modal-no-mmap', p.no_mmap);
         setChk('modal-mlock', p.mlock);
@@ -2297,7 +2300,47 @@ document.getElementById('modal-model-path')?.addEventListener('input', () => {
     ['modal-gpu-layers', 'modal-n-cpu-moe'].forEach(id => {
         document.getElementById(id)?.removeAttribute('max');
     });
+    // Fetch live Rapid-MLX profile for this model when backend is rapid_mlx
+    _schedulePresetRapidMlxProfile();
 });
+
+// ── Rapid-MLX live model profile for preset editor ────────────────────────────
+
+let _presetRapidMlxProfileTimer = null;
+let _presetRapidMlxProfile = null;
+
+function _schedulePresetRapidMlxProfile() {
+    clearTimeout(_presetRapidMlxProfileTimer);
+    _presetRapidMlxProfileTimer = setTimeout(async () => {
+        const preset = _currentModalPreset();
+        if (!preset || preset.backend !== 'rapid_mlx') {
+            _presetRapidMlxProfile = null;
+            return;
+        }
+        const modelId = preset.rapid_mlx?.model_path || '';
+        if (!modelId || modelId.trim().length < 2) {
+            _presetRapidMlxProfile = null;
+            return;
+        }
+        try {
+            const headers = window.authHeaders ? window.authHeaders() : {};
+            const url = `/api/rapid-mlx/models/${encodeURIComponent(modelId)}/profile`;
+            const res = await fetch(url, { headers });
+            if (!res.ok) {
+                _presetRapidMlxProfile = null;
+                return;
+            }
+            const data = await res.json().catch(() => ({}));
+            _presetRapidMlxProfile = data.profile || null;
+        } catch {
+            _presetRapidMlxProfile = null;
+        }
+    }, 350);
+}
+
+export function getPresetRapidMlxProfile() {
+    return _presetRapidMlxProfile;
+}
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 

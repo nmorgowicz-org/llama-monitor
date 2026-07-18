@@ -5755,6 +5755,21 @@
 .rapid-hardware-orb { flex:0 0 52px; height:52px; display:grid; place-items:center; border-radius:16px; color:#f4efff; font-size:21px; font-weight:900; background:linear-gradient(145deg,#805ad5,#3c286f); box-shadow:0 12px 30px rgba(100,65,175,.28); }
 .rapid-hardware-content { flex:1; min-width:0; }
 .rapid-hardware-note { margin-top:12px; padding:10px 12px; border-radius:10px; color:#cfc1f4; background:rgba(109,70,180,.14); font-size:11px; }
+
+/* Rapid-MLX model profile hints */
+.rapid-mlx-hint-row { font-size:11px; line-height:1.5; color:var(--color-text-secondary); padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.04); }
+.rapid-mlx-hint-row:last-child { border-bottom:none; }
+.rapid-mlx-hint-row--spec { color:#a7f3d0; }
+.rapid-mlx-hint-row--eligibility { color:#bfdbfe; }
+.rapid-mlx-hint-row--extras { color:#e9d5ff; }
+.rapid-mlx-hint-dot { color:var(--color-text-muted); font-size:10px; margin-left:2px; }
+.rapid-mlx-config-row { margin-top:6px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; font-size:10px; }
+.rapid-mlx-config-label { color:var(--color-text-muted); font-weight:600; min-width:90px; }
+.rapid-mlx-config-input { padding:3px 6px; border-radius:6px; border:1px solid rgba(255,255,255,0.12); background:rgba(0,0,0,0.25); color:var(--color-text); font-size:10px; min-width:180px; max-width:100%; }
+.rapid-mlx-config-toggle { display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--color-text-secondary); font-size:10px; }
+.rapid-mlx-config-toggle input[type="checkbox"] { accent-color:#8b5cf6; width:14px; height:14px; }
+.rapid-mlx-config-toggle.disabled { opacity:0.45; cursor:not-allowed; }
+
 .engine-rapid-mlx #wizard-step-1.active { grid-template-columns:minmax(0,1fr); }
 .engine-rapid-mlx #wizard-step-1 > .wizard-sidebar { display:none; }
 .engine-rapid-mlx #wizard-step-2.active { grid-template-columns:minmax(0,1fr); }
@@ -5764,6 +5779,8 @@
 [data-theme="light"] .wizard-engine-section { background:linear-gradient(145deg,#f5f8ff,#fff); }
 [data-theme="light"] .wizard-engine-card { background:rgba(255,255,255,.9); }
 [data-theme="light"] .rapid-hardware-note { color:#563d8c; }
+[data-theme="light"] .rapid-mlx-hint-row { border-bottom-color:rgba(0,0,0,0.06); }
+[data-theme="light"] .rapid-mlx-config-input { background:#f8fafc; border-color:rgba(0,0,0,0.12); color:#1e293b; }
 
 @media (max-width:700px) {
   .spawn-wizard-modal { width:calc(100vw - 16px); max-height:calc(100vh - 16px); }

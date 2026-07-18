@@ -1,6 +1,7 @@
 pub mod command;
 pub mod compatibility;
 pub mod discovery;
+pub mod info_query;
 pub mod mlx_meta;
 pub mod model_resolver;
 pub mod poller;
