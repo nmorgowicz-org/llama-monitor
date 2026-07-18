@@ -185,12 +185,8 @@ export async function doStartWithConfig(config, options = {}, buttonArg = null) 
         const resolvedPreset = config.preset_id
             ? sessionState.presets.find(item => item.id === config.preset_id)
             : null;
-        if (data.backend === 'rapid_mlx') {
-            hideTunePanel();
-        } else {
-            setTuneConfig(resolvedPreset || config);
-            showTunePanel();
-        }
+        setTuneConfig(resolvedPreset || config);
+        showTunePanel();
         setHeaderMode('Spawn:' + launchPort);
         Router.navigate('/server');
         hideConnectingState();

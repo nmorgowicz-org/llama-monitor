@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -5,6 +6,8 @@ use warp::Filter;
 use warp::http::StatusCode;
 
 use crate::config::AppConfig;
+use crate::inference::InferenceBackend;
+use crate::inference::rapid_mlx::discovery::Discovery;
 use crate::state::AppState;
 
 use super::common::{ApiCtx, ApiRoute, check_api_token, unauthorized_api_token};
@@ -13,6 +16,110 @@ use super::common::{ApiCtx, ApiRoute, check_api_token, unauthorized_api_token};
 
 static BENCHMARK_LAST_TS: std::sync::LazyLock<std::sync::Mutex<u64>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(0u64));
+
+/// Run `rapid-mlx bench --base-url` against a running server and parse its
+/// text output into normalized benchmark metrics.
+async fn run_rapid_mlx_bench(
+    base_url: &str,
+    binary_path: Option<PathBuf>,
+    managed_path: Option<PathBuf>,
+) -> Result<Option<(f64, f64, f64)>, String> {
+    let (binary, _) = Discovery::resolve_binary(binary_path.as_deref(), managed_path.as_deref())
+        .await
+        .map_err(|e| format!("rapid-mlx binary not found: {e}"))?;
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(90),
+        tokio::process::Command::new(&binary)
+            .arg("bench")
+            .arg("--base-url")
+            .arg(base_url)
+            .arg("--tier")
+            .arg("speed")
+            .output(),
+    )
+    .await
+    .map_err(|_| "rapid-mlx bench timed out after 90 s".to_string())?
+    .map_err(|e| format!("failed to run rapid-mlx bench: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let text = format!("{stdout}\n{stderr}");
+
+    let prompt_tps = parse_rapid_mlx_throughput(&text, "prompt")
+        .or_else(|| parse_rapid_mlx_throughput(&text, "prefill"));
+    let gen_tps = parse_rapid_mlx_throughput(&text, "generation")
+        .or_else(|| parse_rapid_mlx_throughput(&text, "gen"));
+    let ttft_ms = parse_rapid_mlx_ttft(&text);
+
+    match (prompt_tps, gen_tps, ttft_ms) {
+        (Some(pps), Some(gps), Some(ttft)) => Ok(Some((pps, gps, ttft))),
+        _ => Ok(None),
+    }
+}
+
+/// Extract a throughput number (tokens/s) from rapid-mlx bench text output.
+/// Matches patterns like "prompt: 42.3 t/s" or "Prefill throughput: 85 tokens/s".
+fn parse_rapid_mlx_throughput(text: &str, label: &str) -> Option<f64> {
+    let label_lower = label.to_lowercase();
+    for line in text.lines() {
+        let lower = line.to_lowercase();
+        if lower.contains(&label_lower)
+            && (lower.contains("t/s") || lower.contains("tokens/s") || lower.contains("tok/s"))
+            && let Some(val) = extract_first_float(line)
+        {
+            return Some(val);
+        }
+    }
+    None
+}
+
+/// Extract TTFT in milliseconds from rapid-mlx bench text output.
+/// Matches patterns like "TTFT: 123 ms" or "time to first token: 0.42 s".
+fn parse_rapid_mlx_ttft(text: &str) -> Option<f64> {
+    for line in text.lines() {
+        let lower = line.to_lowercase();
+        if (lower.contains("ttft")
+            || lower.contains("time to first token")
+            || lower.contains("first token"))
+            && let Some(val) = extract_first_float(line)
+        {
+            if lower.contains("ms") {
+                return Some(val);
+            } else if lower.contains("s") {
+                return Some(val * 1000.0);
+            }
+            return Some(val);
+        }
+    }
+    None
+}
+
+/// Extract the first floating-point number from a line.
+fn extract_first_float(line: &str) -> Option<f64> {
+    let trimmed = line.trim();
+    let bytes = trimmed.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && !bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return None;
+    }
+    let mut j = i;
+    let mut has_dot = false;
+    while j < bytes.len() && (bytes[j].is_ascii_digit() || (!has_dot && bytes[j] == b'.')) {
+        if bytes[j] == b'.' {
+            has_dot = true;
+        }
+        j += 1;
+    }
+    if j <= i {
+        return None;
+    }
+    let slice = &trimmed[i..j];
+    slice.parse().ok()
+}
 
 fn api_benchmark(
     state: AppState,
@@ -85,6 +192,76 @@ fn api_benchmark(
                         Ok(prepared) => prepared,
                         Err(error) => return Err(error),
                     };
+
+                    // Backend-specific benchmark path
+                    if prepared.backend == InferenceBackend::RapidMlx {
+                        let base_url = prepared.url.clone();
+                        let binary_path = state
+                            .local_launch_request
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .and_then(|req| match req {
+                                crate::inference::launch::LocalLaunchRequest::RapidMlx(cfg) => {
+                                    cfg.executable_path.clone()
+                                }
+                                _ => None,
+                            });
+                        let managed_path = state
+                            .local_launch_request
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .and_then(|req| match req {
+                                crate::inference::launch::LocalLaunchRequest::RapidMlx(cfg) => {
+                                    cfg.managed_runtime_path.clone()
+                                }
+                                _ => None,
+                            });
+
+                        let bench_result =
+                            run_rapid_mlx_bench(&base_url, binary_path, managed_path).await;
+                        match bench_result {
+                            Ok(Some((prompt_tps, gen_tps, ttft_ms))) => {
+                                let benchmark =
+                                    crate::llama::spawn_wizard::classify_benchmark_result(
+                                        prompt_tps,
+                                        gen_tps,
+                                        ttft_ms,
+                                        None,
+                                        None,
+                                        0,
+                                    );
+                                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                    Box::new(warp::reply::json(&serde_json::json!({
+                                        "prompt_tokens_per_second": (benchmark.prompt_tokens_per_second * 100.0).round() / 100.0,
+                                        "gen_tokens_per_second": (benchmark.gen_tokens_per_second * 100.0).round() / 100.0,
+                                        "time_to_first_token_ms": (benchmark.time_to_first_token_ms * 100.0).round() / 100.0,
+                                        "verdict": benchmark.verdict,
+                                        "hints": benchmark.hints,
+                                        "suggestions": benchmark.suggestions,
+                                    }))),
+                                );
+                            }
+                            Ok(None) => {
+                                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                    Box::new(warp::reply::json(&serde_json::json!({
+                                        "error": "rapid-mlx bench completed but output could not be parsed. The tool's output format may have changed."
+                                    }))),
+                                );
+                            }
+                            Err(e) => {
+                                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                    Box::new(warp::reply::json(&serde_json::json!({
+                                        "error": format!("rapid-mlx bench failed: {e}")
+                                    }))),
+                                );
+                            }
+                        }
+                    }
+
+                    // ── llama.cpp path (HTTP-driven against running server) ──────
+
                     let url = prepared.url.clone();
 
                     let prompt =
@@ -557,6 +734,23 @@ fn api_bench_sweep(
                     return Ok(unauthorized_api_token());
                 }
 
+                // Depth sweep requires llama-bench; not available for Rapid-MLX.
+                let is_rapid_mlx = matches!(
+                    state.local_launch_request.lock().unwrap().as_ref(),
+                    Some(crate::inference::launch::LocalLaunchRequest::RapidMlx(_))
+                );
+                if is_rapid_mlx {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Depth sweep is not supported for Rapid-MLX — llama-bench (required for depth sweep) is a llama.cpp-only tool. Rapid-MLX does not expose KV-cache depth as a tunable parameter.",
+                            })),
+                            StatusCode::BAD_REQUEST,
+                        ),
+                    ));
+                }
+
                 // llama-bench needs the GPU to itself.
                 let running = state.server_running.lock().map(|g| *g).unwrap_or(false);
                 if running {
@@ -629,6 +823,25 @@ fn api_bench_batch_sweep(
             async move {
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
+                }
+
+                // Batch sweep is llama.cpp-only — Rapid-MLX does not expose batch/ubatch
+                // as standalone CLI knobs like llama-bench; they are baked into the
+                // server's internal scheduler and not safely tunable via rapid-mlx bench.
+                let is_rapid_mlx = matches!(
+                    state.local_launch_request.lock().unwrap().as_ref(),
+                    Some(crate::inference::launch::LocalLaunchRequest::RapidMlx(_))
+                );
+                if is_rapid_mlx {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Batch sweep is not supported for Rapid-MLX — it is a llama.cpp-only feature using llama-bench. Rapid-MLX does not expose batch/ubatch as standalone tunable knobs.",
+                            })),
+                            StatusCode::BAD_REQUEST,
+                        ),
+                    ));
                 }
 
                 let running = state.server_running.lock().map(|g| *g).unwrap_or(false);

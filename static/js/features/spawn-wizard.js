@@ -5249,12 +5249,14 @@ function updateAdvisor() {
     const hw = wizardState.hardware;
     const m = wizardState.model;
 
-    // Batch/ubatch sweep and depth sweep are available once a local .gguf is selected.
+    // Batch/ubatch sweep and depth sweep are llama.cpp-only (require llama-bench + .gguf).
     const localGguf = !!(m.path && m.path.toLowerCase().endsWith('.gguf'));
+    const isLlamaCpp = wizardState.engine.selected === 'llama_cpp';
+    const sweepAvailable = localGguf && isLlamaCpp;
     const batchSweepBox = document.getElementById('wizard-batch-sweep');
-    if (batchSweepBox) batchSweepBox.style.display = localGguf ? '' : 'none';
+    if (batchSweepBox) batchSweepBox.style.display = sweepAvailable ? '' : 'none';
     const sweepBox = document.getElementById('wizard-depth-sweep');
-    if (sweepBox) sweepBox.style.display = localGguf ? '' : 'none';
+    if (sweepBox) sweepBox.style.display = sweepAvailable ? '' : 'none';
 
     // Confident MoE only: explicit isMoe flag, or expert counts from introspection.
     const moeConfident =
@@ -9487,7 +9489,7 @@ export function launchPortForPayload(payload) {
 }
 
 export function supportsTunePanelForPayload(payload) {
-  return payload?.backend === 'llama_cpp';
+  return payload?.backend === 'llama_cpp' || payload?.backend === 'rapid_mlx';
 }
 
 async function waitForSpawnReadiness(port, timeoutMs = 30000) {
