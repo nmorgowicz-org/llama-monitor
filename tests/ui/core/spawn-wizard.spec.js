@@ -129,7 +129,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         expect(payloads.spawn).not.toHaveProperty('context_size');
         expect(payloads.spawn).not.toHaveProperty('ctk');
         expect(payloads.launchPort).toBe(9123);
-        expect(payloads.supportsTune).toBe(false);
+        expect(payloads.supportsTune).toBe(true);
         expect(payloads.preset).toMatchObject({
             backend: 'rapid_mlx',
             temperature: 0.42,

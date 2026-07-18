@@ -434,6 +434,7 @@ export function openSpawnWizard(opts = {}) {
         wizardState.model.hfRepo = source.repo_id || source.source?.repo_id || '';
         wizardState.model.hfFile = '';
       } else {
+        wizardState.model.source = 'local';
         wizardState.model.path = source?.path || source?.source?.path || source?.value || rapid.model_path || '';
         wizardState.model.localMeta = source ? { source_kind: source.kind, model_source: source } : null;
       }
