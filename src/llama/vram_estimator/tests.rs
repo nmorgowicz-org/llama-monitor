@@ -1241,4 +1241,94 @@ fn quant_comparison_table_rapid_mlx_diverges_from_llama_cpp() {
     let cpp_q8 = llama_cpp_opts.iter().find(|o| o.quant == "q8_0").unwrap();
     // Same model, same quant, different backend overhead formula — max context must diverge.
     assert_ne!(mlx_q8.max_ctx_q8, cpp_q8.max_ctx_q8);
+
+// Hardware calibration: mlx-community/Qwen3-0.6B-4bit served via `rapid-mlx serve` 0.10.12 on
+// an Apple M5 Max. The server's own scheduler logs self-reported Metal `active` memory
+// (a direct MLX allocator measurement, not RSS). At ctx=2048 (a ~1.9K-token generation), the
+// server reported active=0.6GB steady-state. The estimator predicts total=596MB for the same
+// config — within ~1% of the real measurement, validating the existing dense (non-local-attn)
+// per-layer overhead coefficient without changes.
+#[test]
+fn empirical_calibration_qwen3_0_6b_mlx_matches_measured_active_memory() {
+    let arch = mlx_qwen3_0_6b_arch();
+    let model_bytes = 351_386_061u64; // on-disk mlx-community/Qwen3-0.6B-4bit weights
+    let bd = full_estimate(
+        model_bytes,
+        &arch,
+        2048,
+        "q4_0",
+        "q4_0",
+        1,
+        512,
+        0,
+        -1,
+        64 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: 0,
+        },
+    );
+    let observed_active_bytes = 600_000_000u64;
+    let diff = (bd.total_bytes as i64 - observed_active_bytes as i64).unsigned_abs();
+    assert!(
+        diff < observed_active_bytes / 10,
+        "predicted {}MB should be within 10% of observed 600MB active",
+        bd.total_bytes / 1_000_000
+    );
+}
+
+// Hardware calibration: mlx-community/gemma-3-1b-it-4bit (local/sliding-window attention,
+// window=512) served the same way. Metal `active` memory stayed flat at 0.8GB across the whole
+// generation regardless of context growth, confirming the has_local_attn() KV-scaling logic.
+// Before this measurement, mlx_overhead_base_bytes() copied llama.cpp's Metal local-attn
+// per-layer coefficient (8.8) unvalidated, predicting a 1061MB total — a 33% over-prediction
+// against the observed 800MB. Recalibrated to 5.5, predicting ~938MB (still conservative, ~17%
+// over). Single-model sample: revisit once a larger Gemma4 local-attn model is measured.
+#[test]
+fn empirical_calibration_gemma3_1b_mlx_matches_measured_active_memory() {
+    let arch = ModelArch {
+        n_layers: 26,
+        n_embd: 1152,
+        n_kv_heads: 1,
+        head_dim: 256,
+        n_global_attn_layers: 5,
+        local_attn_window: 512,
+        local_kv_heads: 1,
+        ..Default::default()
+    };
+    let model_bytes = 732_577_304u64; // on-disk mlx-community/gemma-3-1b-it-4bit weights
+    let bd = full_estimate(
+        model_bytes,
+        &arch,
+        2048,
+        "q4_0",
+        "q4_0",
+        1,
+        512,
+        0,
+        -1,
+        64 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: 0,
+        },
+    );
+    let observed_active_bytes = 800_000_000u64;
+    assert!(
+        bd.total_bytes >= observed_active_bytes,
+        "prediction should stay conservative (>=) relative to observed 800MB, got {}MB",
+        bd.total_bytes / 1_000_000
+    );
+    let over_prediction = bd.total_bytes - observed_active_bytes;
+    assert!(
+        over_prediction < observed_active_bytes / 4,
+        "over-prediction should be under 25% of observed, got {}MB over 800MB",
+        over_prediction / 1_000_000
+    );
 }

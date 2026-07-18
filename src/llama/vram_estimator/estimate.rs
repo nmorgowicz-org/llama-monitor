@@ -337,17 +337,29 @@ pub struct EstimatorOptions {
 /// graph-compile/buffer-pooling behavior differs from llama.cpp's Metal backend (different
 /// kernel fusion, KV cache layout, and MLX's lazy-evaluation graph cache), so llama.cpp's
 /// Metal constants (`metal_overhead_base_bytes`) are deliberately NOT reused here. This is a
-/// documented, formula-based approximation — same per-layer order of magnitude as the Metal
-/// calibration, inflated by a fixed 25% safety margin to compensate for the lack of a real
-/// measurement — pending direct Rapid-MLX hardware calibration. Any estimate using this
-/// function MUST be reported with `EstimateEvidence::Approximate`, never `Measured`.
+/// documented, formula-based approximation, partially calibrated against real Rapid-MLX
+/// 0.10.12 hardware measurements on an Apple M5 Max (see per-branch notes below). Any estimate
+/// using this function MUST be reported with `EstimateEvidence::Approximate`, never `Measured`,
+/// since only two architectures have been directly measured so far.
 pub fn mlx_overhead_base_bytes(arch: &ModelArch, ubatch_size: u32) -> u64 {
     if arch.n_layers == 0 {
         return 256 * 1024 * 1024; // unknown arch: flat reserve
     }
     let mib = 1024.0 * 1024.0;
     const SAFETY_MARGIN: f64 = 1.25;
-    let per_layer = (if arch.has_local_attn() { 8.8 } else { 4.3 }) * SAFETY_MARGIN;
+    // Dense (non-local-attn): validated against mlx-community/Qwen3-0.6B-4bit (28 layers) —
+    // predicted total (596MB) matched the server's self-reported steady-state Metal `active`
+    // memory (0.6GB) to within ~1% at ctx=2048. The original Metal-derived 4.3 value holds.
+    //
+    // Local-attn (Gemma3/Gemma4-style sliding window): the previous 8.8 value was an unvalidated
+    // copy of llama.cpp's Metal local-attn coefficient. Measured against
+    // mlx-community/gemma-3-1b-it-4bit (26 layers, sliding_window=512): the server's
+    // self-reported Metal `active` memory stayed flat at 0.8GB across the whole generation
+    // (steps 256-1792), while the old coefficient predicted a 1061MB total against a 732MB
+    // weight file — a ~260MB (33%) overhead over-prediction. Lowered to 5.5, which predicts a
+    // ~938MB total (still conservative, ~17% over the observed 800MB) for the same run.
+    // Single-model sample — recalibrate once a larger Gemma4 local-attn model has been measured.
+    let per_layer = (if arch.has_local_attn() { 5.5 } else { 4.3 }) * SAFETY_MARGIN;
     let base = per_layer * arch.n_layers as f64 + 0.035 * ubatch_size as f64 * SAFETY_MARGIN;
     (base.max(160.0) * mib) as u64
 }
