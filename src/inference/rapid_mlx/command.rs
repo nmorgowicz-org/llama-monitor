@@ -17,6 +17,7 @@ pub struct RapidMlxCommandBuilder {
     tool_call_parser: bool,
     auto_tool_choice: bool,
     no_thinking: bool,
+    escape_hatch_flags: Vec<(String, serde_json::Value)>,
 }
 
 impl RapidMlxCommandBuilder {
@@ -33,6 +34,7 @@ impl RapidMlxCommandBuilder {
             tool_call_parser: false,
             auto_tool_choice: false,
             no_thinking: false,
+            escape_hatch_flags: Vec::new(),
         }
     }
 
@@ -83,6 +85,11 @@ impl RapidMlxCommandBuilder {
 
     pub fn no_thinking(mut self, enable: bool) -> Self {
         self.no_thinking = enable;
+        self
+    }
+
+    pub fn escape_hatch_flags(mut self, flags: Vec<(String, serde_json::Value)>) -> Self {
+        self.escape_hatch_flags = flags;
         self
     }
 
@@ -138,6 +145,23 @@ impl RapidMlxCommandBuilder {
             args.push("--no-thinking".to_string());
         }
 
+        // Apply validated escape-hatch flags (already allowlisted at load time).
+        // Bool flags are boolean switches: true = presence of flag, false = omitted.
+        for (name, value) in &self.escape_hatch_flags {
+            match value {
+                serde_json::Value::Bool(true) => {
+                    args.push(format!("--{}", name));
+                }
+                serde_json::Value::Bool(false) => {
+                    // Omitted: false means "use default" for switch flags.
+                }
+                _ => {
+                    args.push(format!("--{}", name));
+                    args.push(serde_value_to_flag_arg(value));
+                }
+            }
+        }
+
         let os_args: Vec<OsString> = args.into_iter().map(OsString::from).collect();
 
         // Prevent Rapid-MLX's first-run telemetry question from blocking an
@@ -163,6 +187,29 @@ impl RapidMlxCommandBuilder {
                 self.model.display_name, self.port
             ),
         })
+    }
+}
+
+fn serde_value_to_flag_arg(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Bool(true) => String::new(),
+        serde_json::Value::Bool(false) => String::new(),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                i.to_string()
+            } else if let Some(f) = n.as_f64() {
+                format!("{f}")
+            } else {
+                String::new()
+            }
+        }
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .map(serde_value_to_flag_arg)
+            .collect::<Vec<_>>()
+            .join(","),
+        _ => String::new(),
     }
 }
 
@@ -234,5 +281,34 @@ mod tests {
         .build("rapid-mlx".into(), &capabilities)
         .unwrap_err();
         assert!(error.to_string().contains("--timeout"));
+    }
+
+    #[test]
+    fn escape_hatch_flags_are_applied_correctly() {
+        let flags = vec![
+            ("force-spec-decode".into(), serde_json::Value::Bool(true)),
+            ("no-hybrid".into(), serde_json::Value::Bool(false)),
+            ("pflash".into(), serde_json::Value::String("always".into())),
+            (
+                "pflash-threshold".into(),
+                serde_json::Value::Number(serde_json::Number::from(128)),
+            ),
+            (
+                "pflash-keep-ratio".into(),
+                serde_json::Value::Number(serde_json::Number::from_f64(0.7).unwrap()),
+            ),
+        ];
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .escape_hatch_flags(flags)
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .unwrap();
+        let args = args(&launch);
+        assert!(args.contains(&"--force-spec-decode".to_string()));
+        assert!(!args.contains(&"--no-hybrid".to_string()));
+        assert!(args.windows(2).any(|p| p == ["--pflash", "always"]));
+        assert!(args.windows(2).any(|p| p == ["--pflash-threshold", "128"]));
+        assert!(args.windows(2).any(|p| p == ["--pflash-keep-ratio", "0.7"]));
     }
 }

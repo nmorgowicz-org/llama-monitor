@@ -261,6 +261,19 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .or(profile_route(ctx, state))
         .unify()
+        .or(escape_hatch_route())
+        .unify()
+        .boxed()
+}
+
+fn escape_hatch_route() -> ApiRoute {
+    warp::path!("api" / "rapid-mlx" / "escape-hatch-flags")
+        .and(warp::get())
+        .map(|| {
+            Box::new(warp::reply::json(
+                &crate::inference::rapid_mlx::escape_hatch::ALLOWED_ESCAPE_FLAGS,
+            )) as ApiReply
+        })
         .boxed()
 }
 

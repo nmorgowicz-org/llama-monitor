@@ -242,6 +242,8 @@ export const wizardState = {
     jsonSchema: '',
     alias: '',
     extraArgs: '',
+    // Rapid-MLX escape-hatch flags (keyed by flag name)
+    escapeHatchFlags: {},
   },
   access: {
     port: 8001,
@@ -258,6 +260,7 @@ export const wizardState = {
 let dom = {};
 let pendingHardwareScrollReset = false;
 let pendingHardwareScrollRestore = null;
+let _escapeHatchDescriptors = null; // cached from /api/rapid-mlx/escape-hatch-flags
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -421,6 +424,9 @@ export function openSpawnWizard(opts = {}) {
       wizardState.access.port = rapid.port || t.port || 8001;
       wizardState.access.bindHost = rapid.host || t.bind_host || '127.0.0.1';
       wizardState.hardware.alias = rapid.served_model_name || '';
+      if (Array.isArray(rapid.escape_hatch_flags)) {
+        wizardState.hardware.escapeHatchFlags = Object.fromEntries(rapid.escape_hatch_flags);
+      }
       const authoritativeHf = source?.kind === 'authoritative_safetensors'
         && source.source?.kind === 'hugging_face_repo';
       if (source?.kind === 'hugging_face_repo' || authoritativeHf) {
@@ -428,10 +434,10 @@ export function openSpawnWizard(opts = {}) {
         wizardState.model.hfRepo = source.repo_id || source.source?.repo_id || '';
         wizardState.model.hfFile = '';
       } else {
-        wizardState.model.source = 'local';
         wizardState.model.path = source?.path || source?.source?.path || source?.value || rapid.model_path || '';
         wizardState.model.localMeta = source ? { source_kind: source.kind, model_source: source } : null;
       }
+    }
     }
   }
 
@@ -571,6 +577,7 @@ function resetWizardState() {
   wizardState.hardware.jsonSchema = '';
   wizardState.hardware.alias = '';
   wizardState.hardware.extraArgs = '';
+  wizardState.hardware.escapeHatchFlags = {};
 
   // Reset architecture
   wizardState.arch.nLayers = 0;
@@ -799,9 +806,11 @@ function cacheDom() {
   dom.cardPanelClose      = document.getElementById('wizard-card-panel-close');
   dom.cardLoading         = document.getElementById('wizard-card-loading');
   dom.cardError           = document.getElementById('wizard-card-error');
-  dom.cardFrontmatter     = document.getElementById('wizard-card-frontmatter');
-  dom.cardFrontmatterPre  = document.getElementById('wizard-card-frontmatter-content');
-  dom.cardContent         = document.getElementById('wizard-card-content');
+   dom.cardFrontmatter     = document.getElementById('wizard-card-frontmatter');
+   dom.cardFrontmatterPre  = document.getElementById('wizard-card-frontmatter-content');
+   dom.cardContent         = document.getElementById('wizard-card-content');
+   dom.rapidMlxAdvancedSection = document.getElementById('rapid-mlx-advanced-section');
+   dom.rapidMlxAdvancedFlags = document.getElementById('rapid-mlx-advanced-flags');
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────
@@ -2386,6 +2395,10 @@ function renderEngineSelection() {
   });
   dom.overlay?.classList.toggle('engine-rapid-mlx', selected === 'rapid_mlx');
   if (dom.rapidHardwarePanel) dom.rapidHardwarePanel.hidden = selected !== 'rapid_mlx';
+  if (dom.rapidMlxAdvancedSection) {
+    dom.rapidMlxAdvancedSection.style.display = selected === 'rapid_mlx' ? '' : 'none';
+    if (selected === 'rapid_mlx') ensureEscapeHatchRendered();
+  }
   const rapidBadge = dom.overlay?.querySelector('[data-engine-badge="rapid_mlx"]');
   if (rapidBadge) {
     rapidBadge.textContent = !wizardState.engine.rapidMlxLocalAvailable
@@ -2429,6 +2442,81 @@ function renderEngineSelection() {
       : 'Model path (e.g. /models/my-model.gguf)';
   }
   _updateSpawnBtnForPrereq();
+}
+
+async function ensureEscapeHatchRendered() {
+  if (!dom.rapidMlxAdvancedFlags) return;
+  // Cache descriptors on first fetch
+  if (!_escapeHatchDescriptors) {
+    try {
+      const headers = window.authHeaders ? window.authHeaders() : {};
+      const resp = await fetch('/api/rapid-mlx/escape-hatch-flags', { headers });
+      if (resp.ok) {
+        _escapeHatchDescriptors = await resp.json();
+      }
+    } catch {
+      return;
+    }
+  }
+  if (!_escapeHatchDescriptors || dom.rapidMlxAdvancedFlags.dataset.rendered === '1') return;
+  dom.rapidMlxAdvancedFlags.dataset.rendered = '1';
+  dom.rapidMlxAdvancedFlags.innerHTML = '';
+  for (const d of _escapeHatchDescriptors) {
+    const row = document.createElement('div');
+    row.className = 'esc-hatch-row';
+    row.dataset.flagName = d.flag;
+    const label = document.createElement('div');
+    label.className = 'esc-hatch-label';
+    label.title = d.tooltip || '';
+    label.innerHTML = `<span class="esc-hatch-name">${d.description}</span><span class="esc-hatch-type">${d.value_type}</span>`;
+    const controls = document.createElement('div');
+    controls.className = 'esc-hatch-controls';
+    const existing = wizardState.hardware.escapeHatchFlags?.[d.flag];
+    if (d.value_type === 'bool') {
+      const toggle = document.createElement('label');
+      toggle.className = 'esc-hatch-toggle';
+      toggle.title = d.tooltip || '';
+      const chk = document.createElement('input');
+      chk.type = 'checkbox';
+      chk.checked = !!existing;
+      chk.addEventListener('change', () => {
+        wizardState.hardware.escapeHatchFlags[d.flag] = chk.checked;
+      });
+      toggle.appendChild(chk);
+      toggle.appendChild(document.createTextNode(d.description));
+      controls.appendChild(toggle);
+    } else if (d.value_type === 'enum') {
+      const sel = document.createElement('select');
+      sel.className = 'esc-hatch-select';
+      sel.title = d.tooltip || '';
+      (d.enum_options || []).forEach(opt => {
+        const o = document.createElement('option');
+        o.value = opt;
+        o.textContent = opt;
+        if (existing === opt) o.selected = true;
+        sel.appendChild(o);
+      });
+      sel.addEventListener('change', () => {
+        wizardState.hardware.escapeHatchFlags[d.flag] = sel.value;
+      });
+      controls.appendChild(sel);
+    } else {
+      const inp = document.createElement('input');
+      inp.type = d.value_type === 'float' ? 'number' : 'number';
+      inp.className = 'esc-hatch-input';
+      inp.title = d.tooltip || '';
+      inp.step = d.value_type === 'float' ? '0.01' : '1';
+      if (existing !== undefined && existing !== null) inp.value = existing;
+      inp.addEventListener('input', () => {
+        const val = d.value_type === 'float' ? parseFloat(inp.value) : parseInt(inp.value, 10);
+        wizardState.hardware.escapeHatchFlags[d.flag] = Number.isFinite(val) ? val : null;
+      });
+      controls.appendChild(inp);
+    }
+    row.appendChild(label);
+    row.appendChild(controls);
+    dom.rapidMlxAdvancedFlags.appendChild(row);
+  }
 }
 
 function updateSelectedModelDisplay() {
@@ -9446,6 +9534,9 @@ export function buildSpawnPayload() {
     const modelSource = preservedSource || (m.source === 'hf'
       ? { kind: 'hugging_face_repo', repo_id: m.hfRepo || '', revision: 'main' }
       : { kind: 'mlx_directory', path: m.path || '' });
+    const escapeHatchFlags = Object.entries(h.escapeHatchFlags || {})
+      .filter(([_, v]) => v !== null && v !== undefined && v !== '' && !(typeof v === 'boolean' && !v))
+      .map(([k, v]) => [k, v]);
     return {
       backend: 'rapid_mlx',
       rapid_mlx: {
@@ -9455,6 +9546,7 @@ export function buildSpawnPayload() {
         port: wizardState.access.port || 8001,
         api_key: wizardState.access.apiKey || null,
         ...(h.enableThinking != null && { enable_thinking: h.enableThinking }),
+        ...(escapeHatchFlags.length > 0 && { escape_hatch_flags: escapeHatchFlags }),
       },
     };
   }

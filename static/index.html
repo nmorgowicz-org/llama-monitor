@@ -2275,9 +2275,25 @@
                          <input type="text" id="set-remote-agent-ssh-command" placeholder='optional override, e.g. start "" /B llama-monitor.exe --agent --agent-host 0.0.0.0 --agent-port 7779'>
                      </label>
                  </details>
-             </details>
+                         </details>
 
-        </div>
+                         <!-- Rapid-MLX escape-hatch flags (advanced tuning only) -->
+                         <details class="wizard-advanced-collapse" id="rapid-mlx-advanced-section" style="margin-top:14px;display:none;">
+                             <summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:#8b5cf6;padding:4px 0;">
+                                 Rapid-MLX advanced tuning <span style="font-weight:400;color:var(--color-text-muted);font-size:0.78rem;margin-left:6px;">(optional)</span>
+                             </summary>
+                             <div style="padding-top:6px;">
+                                 <div class="field-hint" style="margin-bottom:8px;">
+                                     Curated CLI flags for PFlash caching, speculative decoding, and hybrid attention.
+                                     Only safe, allowlisted options are exposed — no free-text injection.
+                                 </div>
+                                 <div id="rapid-mlx-advanced-flags" style="display:grid;grid-template-columns:1fr;gap:8px;">
+                                     <!-- Dynamically populated by spawn-wizard.js from escape_hatch descriptors -->
+                                 </div>
+                             </div>
+                         </details>
+
+                     </div>
         <div class="modal-buttons">
             <button type="button" class="btn btn-modal-cancel" id="config-modal-cancel">Cancel</button>
             <button type="button" class="btn btn-modal-save" id="config-modal-save">Save</button>

@@ -1,6 +1,7 @@
 pub mod command;
 pub mod compatibility;
 pub mod discovery;
+pub mod escape_hatch;
 pub mod info_query;
 pub mod mlx_meta;
 pub mod model_resolver;
@@ -64,6 +65,10 @@ pub struct RapidMlxConfig {
     pub auto_tool_choice: bool,
     #[serde(default)]
     pub no_thinking: bool,
+    /// Curated escape-hatch flags for advanced tuning (PFlash, spec-decode, hybrid).
+    /// Validated against an allowlist at load time; no free-text CLI injection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub escape_hatch_flags: Vec<(String, serde_json::Value)>,
 }
 
 fn default_host() -> String {
@@ -116,6 +121,7 @@ impl Default for RapidMlxConfig {
             tool_call_parser: false,
             auto_tool_choice: false,
             no_thinking: false,
+            escape_hatch_flags: Vec::new(),
         }
     }
 }
@@ -160,6 +166,7 @@ pub struct RapidMlxAdapter {
     pub tool_call_parser: bool,
     pub auto_tool_choice: bool,
     pub no_thinking: bool,
+    pub escape_hatch_flags: Vec<(String, serde_json::Value)>,
     api_key: Option<String>,
     compatibility: CompatibilityProfile,
     capabilities: CapabilitySet,
@@ -203,6 +210,7 @@ impl RapidMlxAdapter {
             tool_call_parser: false,
             auto_tool_choice: false,
             no_thinking: false,
+            escape_hatch_flags: Vec::new(),
             api_key: None,
             compatibility: CompatibilityProfile::verified_baseline(),
             capabilities: verified_capabilities(),
@@ -285,7 +293,8 @@ impl RapidMlxAdapter {
         let builder = builder
             .tool_call_parser(self.tool_call_parser)
             .auto_tool_choice(self.auto_tool_choice)
-            .no_thinking(self.no_thinking);
+            .no_thinking(self.no_thinking)
+            .escape_hatch_flags(self.escape_hatch_flags.clone());
 
         let mut launch = builder.build(
             self.runtime.executable_path.clone(),

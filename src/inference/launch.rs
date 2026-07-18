@@ -142,6 +142,15 @@ pub fn validate_preset_backend_config(preset: &ModelPreset) -> Result<()> {
                 );
             }
             rapid.validate_access(preset.api_key.as_deref())?;
+            if let Err(invalid) = crate::inference::rapid_mlx::escape_hatch::validate_escape_flags(
+                &rapid.escape_hatch_flags,
+            ) {
+                anyhow::bail!(
+                    "Rapid-MLX preset '{}' contains non-allowlisted escape-hatch flags: {}",
+                    preset.name,
+                    invalid.join(", ")
+                );
+            }
             Ok(())
         }
         InferenceBackend::LlamaCpp => Ok(()),
@@ -422,6 +431,15 @@ pub async fn construct_adapter(
             adapter.tool_call_parser = config.tool_call_parser;
             adapter.auto_tool_choice = config.auto_tool_choice;
             adapter.no_thinking = config.no_thinking;
+            if let Err(invalid) = crate::inference::rapid_mlx::escape_hatch::validate_escape_flags(
+                &config.escape_hatch_flags,
+            ) {
+                anyhow::bail!(
+                    "Rapid-MLX preset contains non-allowlisted escape-hatch flags: {}",
+                    invalid.join(", ")
+                );
+            }
+            adapter.escape_hatch_flags = config.escape_hatch_flags.clone();
             adapter.configure_runtime(profile, config.api_key.clone());
             Ok(BackendAdapter::RapidMlx(Arc::new(adapter)))
         }
@@ -766,5 +784,45 @@ mod tests {
                 .unwrap()
                 .contains("rapid-transient-key")
         );
+    }
+
+    #[test]
+    fn preset_with_non_allowlisted_escape_hatch_flag_fails_validation() {
+        let preset = ModelPreset {
+            name: "BadFlags".into(),
+            backend: InferenceBackend::RapidMlx,
+            rapid_mlx: Some(RapidMlxConfig {
+                model_path: "/models/rapid".into(),
+                escape_hatch_flags: vec![
+                    ("pflash".into(), serde_json::Value::String("auto".into())),
+                    ("bad-unknown-flag".into(), serde_json::Value::Bool(true)),
+                ],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let err = validate_preset_backend_config(&preset).unwrap_err();
+        assert!(err.to_string().contains("bad-unknown-flag"));
+    }
+
+    #[test]
+    fn preset_with_valid_escape_hatch_flags_passes_validation() {
+        let preset = ModelPreset {
+            name: "GoodFlags".into(),
+            backend: InferenceBackend::RapidMlx,
+            rapid_mlx: Some(RapidMlxConfig {
+                model_path: "/models/rapid".into(),
+                escape_hatch_flags: vec![
+                    ("force-spec-decode".into(), serde_json::Value::Bool(true)),
+                    (
+                        "pflash-threshold".into(),
+                        serde_json::Value::Number(serde_json::Number::from(64)),
+                    ),
+                ],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert!(validate_preset_backend_config(&preset).is_ok());
     }
 }
