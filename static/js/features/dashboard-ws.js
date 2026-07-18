@@ -1793,6 +1793,21 @@ async function loadDoctorFindings(containerId) {
         // llama.cpp diagnostics unavailable
     }
 
+    // Fetch Rapid-MLX preset-flag advisor findings (fixable — carries `fix`)
+    try {
+        const faResp = await fetch('/api/rapid-mlx/flag-advisor', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        if (faResp.ok) {
+            const faData = await faResp.json();
+            if (faData.ok && Array.isArray(faData.findings)) {
+                allFindings.push(...faData.findings);
+            }
+        }
+    } catch (_err) {
+        // Flag advisor unavailable (no active Rapid-MLX session/preset, etc.)
+    }
+
     if (allFindings.length === 0) {
         container.innerHTML = `<div style="font-size:9px;color:var(--color-text-muted);">
 Diagnostics endpoints unavailable on this system.

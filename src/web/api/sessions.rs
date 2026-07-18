@@ -34,7 +34,7 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .or(api_check_endpoint_health(config.clone()).map(box_reply))
         .unify()
-        .or(api_llama_cpp_diagnostics(config.clone()).map(box_reply))
+        .or(api_llama_cpp_diagnostics(state.clone(), config.clone()).map(box_reply))
         .unify()
         .or(api_apply_fix(state.clone(), config.clone()).map(box_reply))
         .unify()
@@ -225,6 +225,7 @@ fn api_check_endpoint_health(
 }
 
 fn api_llama_cpp_diagnostics(
+    state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "sessions" / "llama-cpp-diagnostics")
@@ -233,26 +234,52 @@ fn api_llama_cpp_diagnostics(
         .and(warp::header::optional::<String>("authorization"))
         .and(with_app_config(app_config))
         .and_then(
-            move |auth: Option<String>, cfg: Arc<AppConfig>| async move {
-                if !check_api_token(&auth, &cfg) {
-                    return Ok(unauthorized_api_token());
-                }
-                let mut findings = Vec::new();
-                findings.extend(check_llama_server_binary(&cfg.llama_server_path));
-                // Port check uses the active session's port if available, otherwise skips.
-                // (Default model path is preset-specific, not in AppConfig.)
+            move |auth: Option<String>, cfg: Arc<AppConfig>| {
+                let state = state.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let mut findings = Vec::new();
+                    findings.extend(check_llama_server_binary(&cfg.llama_server_path));
 
-                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                    &serde_json::json!({
-                        "ok": true,
-                        "findings": findings
-                    }),
-                )))
+                    // Model/port parity checks use the active session's llama.cpp launch
+                    // config when available; otherwise these are skipped (nothing to
+                    // check against — the default model path is preset-specific, not
+                    // in AppConfig).
+                    let active_session_id = state.active_session_id.lock().unwrap().clone();
+                    if !active_session_id.is_empty() {
+                        let launch = state
+                            .sessions
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .find(|s| s.id == active_session_id)
+                            .and_then(|s| s.launch.clone());
+                        if let Some(crate::inference::launch::LocalLaunchRequest::LlamaCpp(
+                            config,
+                        )) = launch
+                        {
+                            if !config.model_path.is_empty() {
+                                findings.extend(check_gguf_path(std::path::Path::new(
+                                    &config.model_path,
+                                )));
+                            }
+                            findings.extend(check_port_available(config.port));
+                        }
+                    }
+
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({
+                            "ok": true,
+                            "findings": findings
+                        }),
+                    )))
+                }
             },
         )
 }
 
-#[allow(dead_code)]
 fn check_llama_server_binary(bin_path: &std::path::Path) -> Vec<DoctorFinding> {
     let mut findings = Vec::new();
 
@@ -332,7 +359,6 @@ fn check_llama_server_binary(bin_path: &std::path::Path) -> Vec<DoctorFinding> {
     findings
 }
 
-#[allow(dead_code)]
 fn check_gguf_path(gguf_path: &std::path::Path) -> Vec<DoctorFinding> {
     let mut findings = Vec::new();
 
@@ -382,7 +408,6 @@ fn check_gguf_path(gguf_path: &std::path::Path) -> Vec<DoctorFinding> {
     findings
 }
 
-#[allow(dead_code)]
 fn check_port_available(port: u16) -> Vec<DoctorFinding> {
     let mut findings: Vec<DoctorFinding> = Vec::new();
 
@@ -1874,5 +1899,70 @@ mod tests {
         ] {
             assert!(!is_private_or_loopback_ip(ip.parse().unwrap()), "{ip}");
         }
+    }
+
+    #[test]
+    fn doctor_check_gguf_path_nonexistent_is_an_issue() {
+        let path = std::path::Path::new("/tmp/llama-monitor-test-doctor/does-not-exist.gguf");
+        let findings = check_gguf_path(path);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, DoctorSeverity::Issue);
+        assert_eq!(findings[0].finding_type, DoctorFindingType::LlamaCpp);
+        assert!(findings[0].fix.is_none());
+    }
+
+    #[test]
+    fn doctor_check_gguf_path_empty_path_is_an_issue() {
+        let findings = check_gguf_path(std::path::Path::new(""));
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, DoctorSeverity::Issue);
+    }
+
+    #[test]
+    fn doctor_check_gguf_path_existing_gguf_file_is_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model.gguf");
+        std::fs::write(&path, b"fake gguf bytes").unwrap();
+
+        let findings = check_gguf_path(&path);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, DoctorSeverity::Ok);
+    }
+
+    #[test]
+    fn doctor_check_gguf_path_wrong_extension_is_a_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model.bin");
+        std::fs::write(&path, b"fake bytes").unwrap();
+
+        let findings = check_gguf_path(&path);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, DoctorSeverity::Warning);
+    }
+
+    #[test]
+    fn doctor_check_port_available_reports_bound_port_as_in_use() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let findings = check_port_available(port);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, DoctorSeverity::Warning);
+        assert!(findings[0].message.contains(&port.to_string()));
+
+        drop(listener);
+    }
+
+    #[test]
+    fn doctor_check_port_available_reports_free_port_as_ok() {
+        // Bind then immediately drop to obtain a port that is very likely free,
+        // then verify the check reports it as available.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let findings = check_port_available(port);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, DoctorSeverity::Ok);
     }
 }

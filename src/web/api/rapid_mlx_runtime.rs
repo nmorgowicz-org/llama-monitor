@@ -18,11 +18,13 @@ use crate::inference::rapid_mlx::changelog;
 use crate::inference::rapid_mlx::compatibility;
 use crate::inference::rapid_mlx::discovery::Discovery;
 use crate::inference::rapid_mlx::info_query;
+use crate::inference::rapid_mlx::model_resolver::{AuthoritativeSafetensorsSource, RapidMlxModelSource};
 use crate::inference::rapid_mlx::updater::{
     ManagedReleaseChannel, ManagedReleaseSelection, ManagedRuntimeStatus, RapidMlxRuntimeManager,
     RuntimeInventoryEntry, RuntimeMutationResult,
 };
-use crate::state::{DoctorFinding, DoctorFindingType, DoctorSeverity};
+use crate::inference::rapid_mlx::RapidMlxConfig;
+use crate::state::{DoctorFinding, DoctorFindingType, DoctorSeverity, FixAction};
 
 const RELEASES_URL: &str =
     "https://api.github.com/repos/raullenchai/Rapid-MLX/releases?per_page=30";
@@ -237,6 +239,8 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .or(recommendation_route(ctx.clone(), state.clone()))
         .unify()
         .or(doctor_route(ctx.clone(), state.clone()))
+        .unify()
+        .or(flag_advisor_route(ctx.clone()))
         .unify()
         .or(mutation_route(
             ctx.clone(),
@@ -1020,14 +1024,29 @@ fn doctor_route(ctx: ApiCtx, _state: RuntimeApiState) -> ApiRoute {
                 }
                 let version_str = version.unwrap_or_default();
 
+                // No `--json` output exists on any `rapid-mlx` subcommand, so
+                // `parse_doctor_output` scrapes human box-drawing/glyph text whose
+                // layout is only guaranteed on trusted versions. Below the trusted
+                // minor, degrade to raw-output-only with no structured findings
+                // rather than risk misparsing an unknown layout.
+                let version_trusted = match info_query::cached_version(&binary).await {
+                    Ok(Some((_, minor))) => minor >= info_query::MIN_TRUSTED_MINOR,
+                    _ => false,
+                };
+
                 let doctor_output = run_rapid_mlx_doctor(&binary).await;
                 match doctor_output {
                     Ok(output) => {
-                        let findings = parse_doctor_output(&output);
+                        let findings = if version_trusted {
+                            parse_doctor_output(&output)
+                        } else {
+                            Vec::new()
+                        };
                         Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(
                             &serde_json::json!({
                                 "ok": true,
                                 "version": version_str,
+                                "version_trusted": version_trusted,
                                 "findings": findings,
                                 "raw_output": output
                             }),
@@ -1041,6 +1060,177 @@ fn doctor_route(ctx: ApiCtx, _state: RuntimeApiState) -> ApiRoute {
             }
         })
         .boxed()
+}
+
+/// Preset-flag advisor: diffs the active session's model `rapid-mlx info` profile
+/// against the active preset's Rapid-MLX launch flags and emits `DoctorFinding`s
+/// with `fix: Some(FixAction::…)` where the preset is missing a flag the model's
+/// declared capabilities imply it needs. Findings from this route flow into the
+/// same diagnostics panel as `doctor_route`'s findings (which always keep
+/// `fix: None`) via the frontend's `loadDoctorFindings`.
+fn flag_advisor_route(ctx: ApiCtx) -> ApiRoute {
+    let config = ctx.config;
+    let state = ctx.state;
+    warp::path!("api" / "rapid-mlx" / "flag-advisor")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let config = config.clone();
+            let state = state.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                fn empty_findings() -> ApiReply {
+                    Box::new(warp::reply::json(&serde_json::json!({
+                        "ok": true,
+                        "findings": Vec::<DoctorFinding>::new()
+                    })))
+                }
+
+                let active_session_id = state.active_session_id.lock().unwrap().clone();
+                if active_session_id.is_empty() {
+                    return Ok::<ApiReply, warp::Rejection>(empty_findings());
+                }
+
+                let preset_id = {
+                    let sessions = state.sessions.lock().unwrap();
+                    sessions
+                        .iter()
+                        .find(|s| s.id == active_session_id)
+                        .and_then(|s| {
+                            if s.preset_id.is_empty() {
+                                None
+                            } else {
+                                Some(s.preset_id.clone())
+                            }
+                        })
+                };
+                let Some(preset_id) = preset_id else {
+                    return Ok(empty_findings());
+                };
+
+                let rapid_config = {
+                    let presets = state.presets.lock().unwrap();
+                    presets
+                        .iter()
+                        .find(|p| p.id == preset_id)
+                        .and_then(|p| p.rapid_mlx.clone())
+                };
+                let Some(rapid_config) = rapid_config else {
+                    return Ok(empty_findings());
+                };
+
+                if crate::inference::rapid_mlx::ensure_local_platform_supported().is_err() {
+                    return Ok(empty_findings());
+                }
+                let Ok((binary, _)) = Discovery::resolve_binary(None, None).await else {
+                    return Ok(empty_findings());
+                };
+                let Some(model_id) = model_id_for_info(&rapid_config) else {
+                    return Ok(empty_findings());
+                };
+
+                let profile = match info_query::fetch_model_profile(&binary, &model_id).await {
+                    Ok(Some(profile)) => profile,
+                    _ => return Ok(empty_findings()),
+                };
+
+                let findings = build_flag_advisor_findings(&profile, &rapid_config);
+                Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(&serde_json::json!({
+                    "ok": true,
+                    "findings": findings
+                }))))
+            }
+        })
+        .boxed()
+}
+
+/// Extract the identifier to pass to `rapid-mlx info <id>` from a preset's
+/// Rapid-MLX model source. Only sources `rapid-mlx info` can resolve (aliases,
+/// HuggingFace repos) are supported; local directory/GGUF-file sources have no
+/// equivalent `info` lookup and are skipped (advisor degrades to no findings).
+fn model_id_for_info(config: &RapidMlxConfig) -> Option<String> {
+    match &config.model_source {
+        Some(RapidMlxModelSource::Alias { value }) => Some(value.clone()),
+        Some(RapidMlxModelSource::HuggingFaceRepo { repo_id, .. }) => Some(repo_id.clone()),
+        Some(RapidMlxModelSource::AuthoritativeSafetensors { source, .. }) => match source {
+            AuthoritativeSafetensorsSource::HuggingFaceRepo { repo_id, .. } => {
+                Some(repo_id.clone())
+            }
+            AuthoritativeSafetensorsSource::LocalDirectory { .. } => None,
+        },
+        Some(RapidMlxModelSource::MlxDirectory { .. } | RapidMlxModelSource::GgufFile { .. }) => {
+            None
+        }
+        None if !config.model_path.is_empty() => Some(config.model_path.clone()),
+        None => None,
+    }
+}
+
+/// Pure diff between a model's `rapid-mlx info` profile and the active preset's
+/// Rapid-MLX diagnostic flags. Kept free of I/O so it is directly unit-testable.
+fn build_flag_advisor_findings(
+    profile: &info_query::ModelProfile,
+    config: &RapidMlxConfig,
+) -> Vec<DoctorFinding> {
+    let mut findings = Vec::new();
+
+    let tool_format = profile
+        .tool_format
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    if let Some(tool_format) = tool_format {
+        if !config.tool_call_parser {
+            findings.push(DoctorFinding {
+                finding_type: DoctorFindingType::Preset,
+                severity: DoctorSeverity::Warning,
+                message: format!(
+                    "Model declares tool format '{tool_format}' but the active preset does not pass --tool-call-parser"
+                ),
+                section: "Preset Flags".to_string(),
+                fix: Some(FixAction::AddToolCallParser),
+            });
+        }
+        if !config.auto_tool_choice {
+            findings.push(DoctorFinding {
+                finding_type: DoctorFindingType::Preset,
+                severity: DoctorSeverity::Warning,
+                message: format!(
+                    "Model declares tool format '{tool_format}' but the active preset does not pass --auto-tool-choice"
+                ),
+                section: "Preset Flags".to_string(),
+                fix: Some(FixAction::EnableAutoToolChoice),
+            });
+        }
+    }
+
+    let has_reasoning_parser = profile
+        .reasoning_parser
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty());
+
+    // The preset has explicitly opted out of thinking by default
+    // (`enable_thinking: Some(false)`) but the launch args don't pass
+    // `--no-thinking`, so a reasoning-capable model may still emit thinking
+    // tokens despite the preset's stated intent.
+    if has_reasoning_parser && config.enable_thinking == Some(false) && !config.no_thinking {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::Preset,
+            severity: DoctorSeverity::Warning,
+            message:
+                "Preset disables thinking by default but does not pass --no-thinking; the model may still emit reasoning tokens"
+                    .to_string(),
+            section: "Preset Flags".to_string(),
+            fix: Some(FixAction::AddNoThinking),
+        });
+    }
+
+    findings
 }
 
 async fn run_rapid_mlx_version(binary: &std::path::Path) -> Result<String, std::io::Error> {
@@ -1092,12 +1282,11 @@ fn parse_doctor_output(output: &str) -> Vec<DoctorFinding> {
         }
 
         if trimmed.starts_with('◆') {
-            current_section = trimmed
-                .trim_start_matches('◆')
-                .trim()
-                .chars()
-                .take_while(|c| !c.is_whitespace())
-                .collect();
+            // Capture the full multi-word header (e.g. "Optional Packages",
+            // "Optional Tools", "Required Packages") — do not truncate to the
+            // first word, which collides sections like "Optional Packages"
+            // and "Optional Tools" into a single "Optional" bucket.
+            current_section = trimmed.trim_start_matches('◆').trim().to_string();
             continue;
         }
 
@@ -1255,5 +1444,239 @@ mod tests {
             )),
             &binary,
         ));
+    }
+
+    /// Real `rapid-mlx doctor` output captured on Apple Silicon (M5 Max,
+    /// rapid-mlx 0.10.12) via `rapid-mlx doctor`. Not hand-mirrored — used
+    /// verbatim (box-drawing header + `◆` section markers + glyphs) so the
+    /// contract test exercises the real layout, per the project's fixture rule.
+    const REAL_DOCTOR_OUTPUT: &str = "\
+┌─────────────────────────────────────────────────────────┐
+│                    🩺 Rapid-MLX Doctor                   │
+└─────────────────────────────────────────────────────────┘
+
+◆ System
+  ✓ Apple Silicon (Apple M5 Max, 64 GB)
+  ✓ macOS 26.5.1 (Darwin 25.5.0)
+  ✓ Free disk: 514 GB
+  ⚠ HF cache size: 123 GB (consider `rapid-mlx rm` for unused models)
+
+◆ Python
+  ✓ Python 3.11.15
+  ✓ Install location: virtualenv (/Users/nick/.local/share/uv/python/cpython-3.11.15-macos-aarch64-none/bin/python3.11)
+
+◆ Required Packages
+  ✓ mlx 0.32.0
+  ✓ mlx-lm 0.31.3
+  ✓ transformers 5.12.1
+  ✓ fastapi 0.139.2
+  ✓ uvicorn 0.51.0
+  ✓ rapid-mlx 0.10.12
+
+◆ Optional Packages
+  ⚠ mlx-vlm (vision extras) not installed (`pip install 'rapid-mlx[vision]'`)
+  ⚠ mlx-audio (audio extras) not installed (`pip install 'rapid-mlx[audio]'`)
+  ⚠ mlx-embeddings (embeddings extras) not installed (`pip install 'rapid-mlx[embeddings]'`)
+  ⚠ mlx-vlm 0.5.0+ (dflash extras) not installed or too old (current: not installed, need: 0.5.0+)
+
+◆ HuggingFace Cache
+  ✓ /Users/nick/.cache/huggingface/hub exists, writable
+  ✓ Free space: 514 GB
+
+◆ Network
+  ✓ huggingface.co reachable
+
+◆ Shell Integration
+  ✓ rapid-mlx in $PATH (/Users/nick/.local/bin/rapid-mlx)
+  ⚠ argcomplete not activated — add `eval \"$(register-python-argcomplete rapid-mlx)\"` to your shell rc
+
+◆ Optional Tools
+  ✓ codex CLI (/opt/homebrew/bin/codex)
+
+────────────────────────────────────────
+Summary: 16 ok, 6 warnings, 0 issues
+Run with `--verbose` for details on each check.
+";
+
+    #[test]
+    fn parse_doctor_output_captures_full_multi_word_section_names() {
+        let findings = parse_doctor_output(REAL_DOCTOR_OUTPUT);
+
+        let sections: std::collections::BTreeSet<&str> =
+            findings.iter().map(|f| f.section.as_str()).collect();
+
+        // Real multi-word headers must survive intact — the historical bug
+        // truncated everything after the first word, colliding "Optional
+        // Packages" and "Optional Tools" into a single "Optional" bucket.
+        assert!(sections.contains("System"));
+        assert!(sections.contains("Python"));
+        assert!(sections.contains("Required Packages"));
+        assert!(sections.contains("Optional Packages"));
+        assert!(sections.contains("HuggingFace Cache"));
+        assert!(sections.contains("Network"));
+        assert!(sections.contains("Shell Integration"));
+        assert!(sections.contains("Optional Tools"));
+
+        // No truncated collision bucket should exist.
+        assert!(!sections.contains("Optional"));
+        assert!(!sections.contains("Required"));
+        assert!(!sections.contains("Shell"));
+
+        // "Optional Packages" and "Optional Tools" findings must stay in their
+        // own distinct sections rather than merging.
+        let optional_packages_count = findings
+            .iter()
+            .filter(|f| f.section == "Optional Packages")
+            .count();
+        let optional_tools_count = findings
+            .iter()
+            .filter(|f| f.section == "Optional Tools")
+            .count();
+        assert_eq!(optional_packages_count, 4);
+        assert_eq!(optional_tools_count, 1);
+    }
+
+    #[test]
+    fn parse_doctor_output_maps_glyphs_to_severity_and_rollup_matches_summary_line() {
+        let findings = parse_doctor_output(REAL_DOCTOR_OUTPUT);
+
+        let ok_count = findings
+            .iter()
+            .filter(|f| f.severity == DoctorSeverity::Ok)
+            .count();
+        let warning_count = findings
+            .iter()
+            .filter(|f| f.severity == DoctorSeverity::Warning)
+            .count();
+        let issue_count = findings
+            .iter()
+            .filter(|f| f.severity == DoctorSeverity::Issue)
+            .count();
+
+        // Cross-check against the fixture's own "Summary: N ok, M warnings, K issues"
+        // rollup line rather than a hand-picked number.
+        let summary_line = REAL_DOCTOR_OUTPUT
+            .lines()
+            .find(|l| l.trim_start().starts_with("Summary:"))
+            .expect("fixture must contain a Summary line");
+        assert_eq!(summary_line.trim(), "Summary: 16 ok, 6 warnings, 0 issues");
+
+        assert_eq!(ok_count, 16);
+        assert_eq!(warning_count, 6);
+        assert_eq!(issue_count, 0);
+
+        // All doctor findings are informational only — never fixable.
+        assert!(findings.iter().all(|f| f.fix.is_none()));
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.finding_type == DoctorFindingType::Environment)
+        );
+    }
+
+    fn sample_profile_with_tool_format(tool_format: &str) -> info_query::ModelProfile {
+        info_query::ModelProfile {
+            tool_format: Some(tool_format.to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn flag_advisor_emits_fix_when_preset_missing_tool_call_flags() {
+        let profile = sample_profile_with_tool_format("hermes");
+        let config = RapidMlxConfig {
+            model_path: String::new(),
+            model_source: None,
+            served_model_name: None,
+            executable_path: None,
+            managed_runtime_path: None,
+            host: "127.0.0.1".into(),
+            port: 8000,
+            log_level: "INFO".into(),
+            timeout: None,
+            max_cache_blocks: None,
+            api_key: None,
+            enable_thinking: None,
+            reasoning_effort: None,
+            tool_call_parser: false,
+            auto_tool_choice: false,
+            no_thinking: false,
+            escape_hatch_flags: Vec::new(),
+        };
+
+        let findings = build_flag_advisor_findings(&profile, &config);
+
+        assert_eq!(findings.len(), 2);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.fix == Some(FixAction::AddToolCallParser))
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.fix == Some(FixAction::EnableAutoToolChoice))
+        );
+        assert!(findings.iter().all(|f| f.finding_type == DoctorFindingType::Preset));
+    }
+
+    #[test]
+    fn flag_advisor_is_silent_when_preset_already_matches_model_profile() {
+        let profile = sample_profile_with_tool_format("hermes");
+        let config = RapidMlxConfig {
+            model_path: String::new(),
+            model_source: None,
+            served_model_name: None,
+            executable_path: None,
+            managed_runtime_path: None,
+            host: "127.0.0.1".into(),
+            port: 8000,
+            log_level: "INFO".into(),
+            timeout: None,
+            max_cache_blocks: None,
+            api_key: None,
+            enable_thinking: None,
+            reasoning_effort: None,
+            tool_call_parser: true,
+            auto_tool_choice: true,
+            no_thinking: false,
+            escape_hatch_flags: Vec::new(),
+        };
+
+        let findings = build_flag_advisor_findings(&profile, &config);
+
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn flag_advisor_recommends_no_thinking_when_preset_wants_thinking_disabled() {
+        let profile = info_query::ModelProfile {
+            reasoning_parser: Some("qwen3".to_string()),
+            ..Default::default()
+        };
+        let config = RapidMlxConfig {
+            model_path: String::new(),
+            model_source: None,
+            served_model_name: None,
+            executable_path: None,
+            managed_runtime_path: None,
+            host: "127.0.0.1".into(),
+            port: 8000,
+            log_level: "INFO".into(),
+            timeout: None,
+            max_cache_blocks: None,
+            api_key: None,
+            enable_thinking: Some(false),
+            reasoning_effort: None,
+            tool_call_parser: false,
+            auto_tool_choice: false,
+            no_thinking: false,
+            escape_hatch_flags: Vec::new(),
+        };
+
+        let findings = build_flag_advisor_findings(&profile, &config);
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].fix, Some(FixAction::AddNoThinking));
     }
 }
