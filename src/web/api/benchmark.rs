@@ -92,7 +92,8 @@ async fn run_rapid_mlx_bench(
 }
 
 /// Extract a throughput number (tokens/s) from rapid-mlx bench text output.
-/// Matches patterns like "prompt: 42.3 t/s" or "Prefill throughput: 85 tokens/s".
+/// Matches legacy label-based patterns like "prompt: 42.3 t/s" or "Prefill throughput: 85 tokens/s",
+/// plus the real CLI's key=value format: "tps=198.3" on the PASS line (generation throughput).
 fn parse_rapid_mlx_throughput(text: &str, label: &str) -> Option<f64> {
     let label_lower = label.to_lowercase();
     for line in text.lines() {
@@ -104,12 +105,39 @@ fn parse_rapid_mlx_throughput(text: &str, label: &str) -> Option<f64> {
             return Some(val);
         }
     }
+    // Real rapid-mlx 0.10.x CLI emits a single `tps=` value on the PASS line
+    // (generation throughput). Match it for labels "generation"/"gen"/"throughput".
+    if label_lower == "generation" || label_lower == "gen" || label_lower == "throughput" {
+        for line in text.lines() {
+            if let Some(idx) = line.find("tps=")
+                && let Some(val) = extract_first_float(&line[idx + 4..])
+            {
+                return Some(val);
+            }
+        }
+    }
     None
 }
 
 /// Extract TTFT in milliseconds from rapid-mlx bench text output.
-/// Matches patterns like "TTFT: 123 ms" or "time to first token: 0.42 s".
+/// Matches legacy label-based patterns like "TTFT: 123 ms" or "time to first token: 0.42 s",
+/// plus the real CLI's key=value format: "ttft=140ms" on the PASS line (smoke tier).
 fn parse_rapid_mlx_ttft(text: &str) -> Option<f64> {
+    // Real rapid-mlx 0.10.x CLI emits `ttft=140ms` on the PASS line (smoke tier).
+    for line in text.lines() {
+        if let Some(idx) = line.find("ttft=") {
+            let rest = &line[idx + 5..];
+            if let Some(val) = extract_first_float(rest) {
+                if rest.contains("ms") {
+                    return Some(val);
+                } else if rest.contains("s") && !rest.contains("ms") {
+                    return Some(val * 1000.0);
+                }
+                return Some(val);
+            }
+        }
+    }
+    // Legacy label-based patterns
     for line in text.lines() {
         let lower = line.to_lowercase();
         if (lower.contains("ttft")
@@ -1362,15 +1390,22 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
 mod rapid_mlx_bench_tests {
     use super::*;
 
+    /// Real `rapid-mlx bench qwen3-0.6b-4bit --tier speed` output
+    /// (rapid-mlx 0.10.12, captured 2026-07-18). Note: the speed tier reports
+    /// a single `tps=` metric (generation throughput) — no separate prompt/prefill
+    /// throughput or TTFT line is emitted for this tier.
     const WELL_FORMED_BENCH_OUTPUT: &str = "\
-Rapid-MLX bench (tier=speed)
-Booting server...
-Server ready in 4.2s
+Alias: qwen3-0.6b-4bit → mlx-community/Qwen3-0.6B-4bit
+Rapid-MLX bench — tier=speed model=mlx-community/Qwen3-0.6B-4bit
+============================================================
+  [server] booted mlx-community/Qwen3-0.6B-4bit on port 8500
 
-Prefill throughput: 812.4 tokens/s
-Generation throughput: 63.7 t/s
-TTFT: 142.5 ms
-Tokens generated: 512
+  [PASS] tier=speed duration=0.6s
+        PASS model=mlx-community/Qwen3-0.6B-4bit sampling=greedy tokens=117 chars=580 tps=198.3
+
+============================================================
+  OK: 1/1 tiers passed (speed=pass)
+  total: 2.6s
 ";
 
     #[test]
@@ -1398,20 +1433,23 @@ Tokens generated: 512
     }
 
     #[test]
-    fn parses_prompt_and_generation_throughput_from_well_formed_output() {
+    fn parses_generation_throughput_via_tps_from_real_speed_tier_output() {
+        // Real rapid-mlx speed tier emits a single `tps=` value (generation throughput)
+        // on the PASS line; no separate prompt/prefill throughput or TTFT.
         let prompt_tps = parse_rapid_mlx_throughput(WELL_FORMED_BENCH_OUTPUT, "prompt")
             .or_else(|| parse_rapid_mlx_throughput(WELL_FORMED_BENCH_OUTPUT, "prefill"));
         let gen_tps = parse_rapid_mlx_throughput(WELL_FORMED_BENCH_OUTPUT, "generation")
             .or_else(|| parse_rapid_mlx_throughput(WELL_FORMED_BENCH_OUTPUT, "gen"));
 
-        assert_eq!(prompt_tps, Some(812.4));
-        assert_eq!(gen_tps, Some(63.7));
+        assert_eq!(prompt_tps, None);
+        assert_eq!(gen_tps, Some(198.3));
     }
 
     #[test]
-    fn parses_ttft_in_milliseconds_from_well_formed_output() {
+    fn speed_tier_output_has_no_ttft() {
+        // Real rapid-mlx speed tier does not emit a TTFT line.
         let ttft = parse_rapid_mlx_ttft(WELL_FORMED_BENCH_OUTPUT);
-        assert_eq!(ttft, Some(142.5));
+        assert_eq!(ttft, None);
     }
 
     #[test]
@@ -1446,6 +1484,42 @@ Tokens generated: 512
         assert_eq!(extract_first_float("prefill: 42.3 t/s"), Some(42.3));
         assert_eq!(extract_first_float("no digits here"), None);
         assert_eq!(extract_first_float("trailing dot 5."), Some(5.0));
+    }
+
+    #[test]
+    fn parses_ttft_from_real_smoke_tier_ttft_key() {
+        // Real rapid-mlx smoke tier: `ttft=140ms` on the PASS line.
+        let text = "\
+Alias: qwen3-0.6b-4bit → mlx-community/Qwen3-0.6B-4bit
+Rapid-MLX bench — tier=smoke model=mlx-community/Qwen3-0.6B-4bit
+============================================================
+  [server] booted mlx-community/Qwen3-0.6B-4bit on port 8500
+
+  [PASS] tier=smoke duration=0.2s
+        PASS model=mlx-community/Qwen3-0.6B-4bit ttft=140ms response='Hello! 2 + 2 equals 4.'
+
+============================================================
+  OK: 1/1 tiers passed (smoke=pass)
+  total: 3.2s
+";
+        assert_eq!(parse_rapid_mlx_ttft(text), Some(140.0));
+    }
+
+    #[test]
+    fn well_formed_fixture_has_no_llama_bench_labels() {
+        // Verify the rapid-mlx fixture contains no llama-bench labels.
+        assert!(
+            !WELL_FORMED_BENCH_OUTPUT.contains("llama-bench"),
+            "rapid-mlx fixture must not contain 'llama-bench'"
+        );
+        assert!(
+            !WELL_FORMED_BENCH_OUTPUT.contains("llama_bench"),
+            "rapid-mlx fixture must not contain 'llama_bench'"
+        );
+        assert!(
+            !WELL_FORMED_BENCH_OUTPUT.contains("llama.cpp"),
+            "rapid-mlx fixture must not contain 'llama.cpp'"
+        );
     }
 
     #[tokio::test]
