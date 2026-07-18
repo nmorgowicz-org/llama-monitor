@@ -298,6 +298,7 @@ fn parse_model_profile(
             || trimmed.contains("## DFlash Eligibility")
             || trimmed.contains("DFlash eligibility")
         {
+            flush_eligibility_into(&mut profile, current_section, eligibility.take());
             eligibility = Some(Eligibility::default());
             current_section = "dflash";
             if trimmed.contains("✓")
@@ -316,6 +317,7 @@ fn parse_model_profile(
             || trimmed.contains("## DDTree Eligibility")
             || trimmed.contains("DDTree eligibility")
         {
+            flush_eligibility_into(&mut profile, current_section, eligibility.take());
             eligibility = Some(Eligibility::default());
             current_section = "ddtree";
             if trimmed.contains("✓")
@@ -374,13 +376,13 @@ fn parse_model_profile(
                     _ => {}
                 }
 
+                // Every key:value line printed inside a DFlash/DDTree eligibility
+                // box is a per-criterion reason (e.g. "Declared support",
+                // "Not MoE", "Precision ≥8-bit", "Drafter declared",
+                // "mlx-vlm 0.5.0+", "Spec tokens", "Tree budget",
+                // "dtree-mlx runtime") — capture all of them rather than
+                // matching a brittle, incomplete keyword allowlist.
                 if !current_section.is_empty()
-                    && (trimmed.contains("Declared")
-                        || trimmed.contains("MoE")
-                        || trimmed.contains("Precision")
-                        || trimmed.contains("Drafter")
-                        || trimmed.contains("Runtime")
-                        || trimmed.contains("Supported"))
                     && let Some(ref mut elig) = eligibility
                 {
                     let reason_key = key.to_string();
@@ -439,12 +441,13 @@ fn parse_model_profile(
 
         if trimmed.starts_with("##") && !(trimmed.contains("DFlash") || trimmed.contains("DDTree"))
         {
+            flush_eligibility_into(&mut profile, current_section, eligibility.take());
             current_section = "";
-            eligibility = None;
         }
 
-        if (trimmed.starts_with("Model:") || trimmed.starts_with("Name:"))
-            && let Some(id_part) = trimmed.split_once(':').map(|(_, rest)| rest.trim())
+        let unboxed = trimmed.trim_start_matches('│').trim_end_matches('│').trim();
+        if (unboxed.starts_with("Model:") || unboxed.starts_with("Name:"))
+            && let Some(id_part) = unboxed.split_once(':').map(|(_, rest)| rest.trim())
             && id_part.contains('/')
             && id_part.split('/').count() == 2
         {
@@ -452,14 +455,7 @@ fn parse_model_profile(
         }
     }
 
-    if eligibility.is_some() {
-        if current_section == "dflash" {
-            profile.dflash_eligibility = eligibility.take().unwrap_or_default();
-        }
-        if current_section == "ddtree" {
-            profile.ddtree_eligibility = eligibility.take().unwrap_or_default();
-        }
-    }
+    flush_eligibility_into(&mut profile, current_section, eligibility.take());
 
     if let Some(ref repo) = detected_hf_repo {
         profile.is_finetune = repo == model_id;
@@ -478,6 +474,28 @@ fn parse_model_profile(
     }
 
     Ok(Some(profile))
+}
+
+/// Merge an in-progress `Eligibility` accumulator into the profile field for
+/// `section` ("dflash"/"ddtree"). Must be called whenever the parser is
+/// about to leave a section (a new eligibility header, an unrelated `##`
+/// header, or end of input) — real `rapid-mlx info` output always prints
+/// both the DFlash and DDTree boxes together, so without this flush the
+/// first section's accumulated per-criterion `reasons` are silently
+/// discarded when the second section's header resets the accumulator.
+/// Only overwrites `supported` when the accumulator captured a definite
+/// value, preserving whatever the section's header line already implied.
+fn flush_eligibility_into(profile: &mut ModelProfile, section: &str, elig: Option<Eligibility>) {
+    let Some(elig) = elig else { return };
+    let target = match section {
+        "dflash" => &mut profile.dflash_eligibility,
+        "ddtree" => &mut profile.ddtree_eligibility,
+        _ => return,
+    };
+    if elig.supported.is_some() {
+        target.supported = elig.supported;
+    }
+    target.reasons.extend(elig.reasons);
 }
 
 fn extract_pair(line: &str) -> Option<(String, String)> {
@@ -646,20 +664,115 @@ mod tests {
         assert!(!profile.is_finetune);
     }
 
+    /// Real `rapid-mlx info mlx-community/Qwen3-0.6B-4bit` output (rapid-mlx
+    /// 0.10.x, captured 2026-07-18), box-drawn `│`-bordered header as
+    /// actually printed by the CLI. The finetune-detection regex must strip
+    /// the `│` border before matching `"Model:"` — a border-less fixture
+    /// (as this test previously used) doesn't exercise that bug.
+    const REAL_INFO_HEADER: &str = "┌──────────────────────────────────────────────────────────────┐\n\
+│ Model: mlx-community/Qwen3-0.6B-4bit                          │\n\
+│ ──────────────────────────────────────────────────────────── │\n\
+│ Tool format      : hermes                                     │\n\
+│ Reasoning parser : qwen3                                      │\n\
+│ Architecture     : pure attention                             │\n\
+│ Spec decode      : ✓ supported                                │\n\
+│ MTP path         : disabled                                   │\n\
+│ KV-share         : no                                         │\n\
+│ Throttle         : ✗ not needed                                │\n\
+└──────────────────────────────────────────────────────────────┘";
+
     #[test]
     fn finetune_detection_marks_unknown_hf_repos() {
-        let output =
-            "Model: user/my-finetuned-model\nTool format: hermes\nSpec decode: ✓ supported";
-
-        let profile = parse_model_profile(output, true, "user/my-finetuned-model")
-            .unwrap()
-            .unwrap();
+        // Querying by the exact HF repo id (as one would for an unrecognized
+        // finetune) means the printed `│ Model: <repo> │` line equals the
+        // query id, so it's flagged as a finetune/unregistered repo.
+        let profile = parse_model_profile(
+            REAL_INFO_HEADER,
+            true,
+            "mlx-community/Qwen3-0.6B-4bit",
+        )
+        .unwrap()
+        .unwrap();
         assert!(profile.is_finetune);
 
-        let profile2 = parse_model_profile(output, true, "known-alias")
+        // Querying by a known alias means the query id differs from the
+        // resolved `Model:` line, so it's not treated as a finetune.
+        let profile2 = parse_model_profile(REAL_INFO_HEADER, true, "qwen3-0.6b-4bit")
             .unwrap()
             .unwrap();
         assert!(!profile2.is_finetune);
+    }
+
+    /// Real `rapid-mlx info qwen3-0.6b-4bit` DFlash/DDTree eligibility
+    /// blocks (rapid-mlx 0.10.x, captured 2026-07-18). These include
+    /// criterion labels the old keyword allowlist ("Declared" | "MoE" |
+    /// "Precision" | "Drafter" | "Runtime" | "Supported") dropped:
+    /// `mlx-vlm 0.5.0+`, `Spec tokens`, `Tree budget`, and the
+    /// lowercase-`runtime` `dtree-mlx runtime`.
+    const REAL_ELIGIBILITY_BLOCKS: &str = "┌──────────────────────────────────────────────────────────────┐\n\
+│ DFlash eligibility: ✗ ineligible                              │\n\
+│ ──────────────────────────────────────────────────────────── │\n\
+│ Declared support  : ✗ no                                      │\n\
+│ Not MoE           : ✓ yes (dense)                              │\n\
+│ Precision ≥8-bit  : ✗ no (4-bit/mxfp4/nvfp4)                   │\n\
+│ Drafter declared  : ✗ no (dflash_draft_model unset)            │\n\
+│ mlx-vlm 0.5.0+    : ✗ missing (need rapid-mlx[dflash])         │\n\
+└──────────────────────────────────────────────────────────────┘\n\
+\n\
+┌──────────────────────────────────────────────────────────────┐\n\
+│ DDTree eligibility: ✗ ineligible                              │\n\
+│ ──────────────────────────────────────────────────────────── │\n\
+│ Declared support  : ✗ no                                      │\n\
+│ Not MoE           : ✓ yes (dense)                              │\n\
+│ Precision ≥8-bit  : ✗ no (4-bit/mxfp4/nvfp4)                   │\n\
+│ Drafter declared  : ✗ no (ddtree_draft_model unset)            │\n\
+│ Spec tokens       : ✗ missing                                 │\n\
+│ Tree budget       : ✗ missing                                 │\n\
+│ dtree-mlx runtime : ✗ missing/import-broken                   │\n\
+└──────────────────────────────────────────────────────────────┘";
+
+    #[test]
+    fn eligibility_reasons_capture_all_real_criterion_lines_not_just_keyword_subset() {
+        let profile = parse_model_profile(REAL_ELIGIBILITY_BLOCKS, true, "qwen3-0.6b-4bit")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(profile.dflash_eligibility.supported, Some(false));
+        for key in ["Declared support", "Not MoE", "Precision ≥8-bit", "Drafter declared"] {
+            assert!(
+                profile.dflash_eligibility.reasons.contains_key(key),
+                "expected DFlash reasons to contain {key:?}, got {:?}",
+                profile.dflash_eligibility.reasons
+            );
+        }
+        // Previously dropped by the keyword allowlist:
+        assert!(
+            profile.dflash_eligibility.reasons.contains_key("mlx-vlm 0.5.0+"),
+            "expected DFlash reasons to contain 'mlx-vlm 0.5.0+', got {:?}",
+            profile.dflash_eligibility.reasons
+        );
+
+        assert_eq!(profile.ddtree_eligibility.supported, Some(false));
+        for key in [
+            "Declared support",
+            "Not MoE",
+            "Precision ≥8-bit",
+            "Drafter declared",
+        ] {
+            assert!(
+                profile.ddtree_eligibility.reasons.contains_key(key),
+                "expected DDTree reasons to contain {key:?}, got {:?}",
+                profile.ddtree_eligibility.reasons
+            );
+        }
+        // Previously dropped by the keyword allowlist:
+        for key in ["Spec tokens", "Tree budget", "dtree-mlx runtime"] {
+            assert!(
+                profile.ddtree_eligibility.reasons.contains_key(key),
+                "expected DDTree reasons to contain {key:?}, got {:?}",
+                profile.ddtree_eligibility.reasons
+            );
+        }
     }
 
     #[test]
