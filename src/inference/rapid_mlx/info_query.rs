@@ -686,13 +686,9 @@ mod tests {
         // Querying by the exact HF repo id (as one would for an unrecognized
         // finetune) means the printed `│ Model: <repo> │` line equals the
         // query id, so it's flagged as a finetune/unregistered repo.
-        let profile = parse_model_profile(
-            REAL_INFO_HEADER,
-            true,
-            "mlx-community/Qwen3-0.6B-4bit",
-        )
-        .unwrap()
-        .unwrap();
+        let profile = parse_model_profile(REAL_INFO_HEADER, true, "mlx-community/Qwen3-0.6B-4bit")
+            .unwrap()
+            .unwrap();
         assert!(profile.is_finetune);
 
         // Querying by a known alias means the query id differs from the
@@ -738,7 +734,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(profile.dflash_eligibility.supported, Some(false));
-        for key in ["Declared support", "Not MoE", "Precision ≥8-bit", "Drafter declared"] {
+        for key in [
+            "Declared support",
+            "Not MoE",
+            "Precision ≥8-bit",
+            "Drafter declared",
+        ] {
             assert!(
                 profile.dflash_eligibility.reasons.contains_key(key),
                 "expected DFlash reasons to contain {key:?}, got {:?}",
@@ -747,7 +748,10 @@ mod tests {
         }
         // Previously dropped by the keyword allowlist:
         assert!(
-            profile.dflash_eligibility.reasons.contains_key("mlx-vlm 0.5.0+"),
+            profile
+                .dflash_eligibility
+                .reasons
+                .contains_key("mlx-vlm 0.5.0+"),
             "expected DFlash reasons to contain 'mlx-vlm 0.5.0+', got {:?}",
             profile.dflash_eligibility.reasons
         );

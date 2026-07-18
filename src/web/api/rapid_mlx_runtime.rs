@@ -14,16 +14,18 @@ use super::{ApiCtx, ApiReply, ApiRoute, unauthorized_api_token, unauthorized_db_
 use crate::inference::backend::{
     BackendRecommendationInput, RecommendationArtifactKind, recommend_backend,
 };
+use crate::inference::rapid_mlx::RapidMlxConfig;
 use crate::inference::rapid_mlx::changelog;
 use crate::inference::rapid_mlx::compatibility;
 use crate::inference::rapid_mlx::discovery::Discovery;
 use crate::inference::rapid_mlx::info_query;
-use crate::inference::rapid_mlx::model_resolver::{AuthoritativeSafetensorsSource, RapidMlxModelSource};
+use crate::inference::rapid_mlx::model_resolver::{
+    AuthoritativeSafetensorsSource, RapidMlxModelSource,
+};
 use crate::inference::rapid_mlx::updater::{
     ManagedReleaseChannel, ManagedReleaseSelection, ManagedRuntimeStatus, RapidMlxRuntimeManager,
     RuntimeInventoryEntry, RuntimeMutationResult,
 };
-use crate::inference::rapid_mlx::RapidMlxConfig;
 use crate::state::{DoctorFinding, DoctorFindingType, DoctorSeverity, FixAction};
 
 const RELEASES_URL: &str =
@@ -1617,7 +1619,11 @@ Run with `--verbose` for details on each check.
                 .iter()
                 .any(|f| f.fix == Some(FixAction::EnableAutoToolChoice))
         );
-        assert!(findings.iter().all(|f| f.finding_type == DoctorFindingType::Preset));
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.finding_type == DoctorFindingType::Preset)
+        );
     }
 
     #[test]

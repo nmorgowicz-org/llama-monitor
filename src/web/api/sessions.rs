@@ -233,51 +233,47 @@ fn api_llama_cpp_diagnostics(
         .and(warp::get())
         .and(warp::header::optional::<String>("authorization"))
         .and(with_app_config(app_config))
-        .and_then(
-            move |auth: Option<String>, cfg: Arc<AppConfig>| {
-                let state = state.clone();
-                async move {
-                    if !check_api_token(&auth, &cfg) {
-                        return Ok(unauthorized_api_token());
-                    }
-                    let mut findings = Vec::new();
-                    findings.extend(check_llama_server_binary(&cfg.llama_server_path));
-
-                    // Model/port parity checks use the active session's llama.cpp launch
-                    // config when available; otherwise these are skipped (nothing to
-                    // check against — the default model path is preset-specific, not
-                    // in AppConfig).
-                    let active_session_id = state.active_session_id.lock().unwrap().clone();
-                    if !active_session_id.is_empty() {
-                        let launch = state
-                            .sessions
-                            .lock()
-                            .unwrap()
-                            .iter()
-                            .find(|s| s.id == active_session_id)
-                            .and_then(|s| s.launch.clone());
-                        if let Some(crate::inference::launch::LocalLaunchRequest::LlamaCpp(
-                            config,
-                        )) = launch
-                        {
-                            if !config.model_path.is_empty() {
-                                findings.extend(check_gguf_path(std::path::Path::new(
-                                    &config.model_path,
-                                )));
-                            }
-                            findings.extend(check_port_available(config.port));
-                        }
-                    }
-
-                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                        &serde_json::json!({
-                            "ok": true,
-                            "findings": findings
-                        }),
-                    )))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            let state = state.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
                 }
-            },
-        )
+                let mut findings = Vec::new();
+                findings.extend(check_llama_server_binary(&cfg.llama_server_path));
+
+                // Model/port parity checks use the active session's llama.cpp launch
+                // config when available; otherwise these are skipped (nothing to
+                // check against — the default model path is preset-specific, not
+                // in AppConfig).
+                let active_session_id = state.active_session_id.lock().unwrap().clone();
+                if !active_session_id.is_empty() {
+                    let launch = state
+                        .sessions
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .find(|s| s.id == active_session_id)
+                        .and_then(|s| s.launch.clone());
+                    if let Some(crate::inference::launch::LocalLaunchRequest::LlamaCpp(config)) =
+                        launch
+                    {
+                        if !config.model_path.is_empty() {
+                            findings
+                                .extend(check_gguf_path(std::path::Path::new(&config.model_path)));
+                        }
+                        findings.extend(check_port_available(config.port));
+                    }
+                }
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "findings": findings
+                    }),
+                )))
+            }
+        })
 }
 
 fn check_llama_server_binary(bin_path: &std::path::Path) -> Vec<DoctorFinding> {
