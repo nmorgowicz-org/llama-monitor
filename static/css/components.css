@@ -4038,9 +4038,21 @@ button:disabled {
   font-size: 10px;
 }
 
-.rapid-mlx-release-row:hover {
+ .rapid-mlx-release-row:hover {
   border-color: color-mix(in srgb, var(--color-primary) 22%, transparent);
   background: color-mix(in srgb, var(--color-primary) 3%, transparent);
+}
+
+.rapid-mlx-release-row--selected {
+  border-color: color-mix(in srgb, var(--color-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+}
+
+.rapid-mlx-changelog-summary {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  padding: 2px 0 4px;
+  font-weight: 500;
 }
 
 .rapid-mlx-release-row-info {
@@ -4118,10 +4130,108 @@ button:disabled {
   font-size: 10px;
 }
 
-.rapid-mlx-notes-content {
+ .rapid-mlx-notes-content {
   font-size: 10px;
   line-height: 1.5;
   white-space: pre-wrap;
+}
+
+.rapid-mlx-notes-changelog {
+  margin-top: 6px;
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: 4px;
+}
+
+.rapid-mlx-changelog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+}
+
+.rapid-mlx-changelog-title {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.rapid-mlx-changelog-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 1px 4px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.rapid-mlx-changelog-toggle:hover {
+  color: var(--color-text);
+}
+
+.rapid-mlx-changelog-chevron {
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.rapid-mlx-changelog-toggle[aria-expanded="true"] .rapid-mlx-changelog-chevron {
+  transform: rotate(180deg);
+}
+
+.rapid-mlx-changelog-body {
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.rapid-mlx-changelog-loading,
+.rapid-mlx-changelog-error {
+  color: var(--color-text-muted);
+  font-size: 9px;
+  padding: 4px 0;
+}
+
+.rapid-mlx-changelog-error {
+  color: var(--color-error-soft);
+}
+
+.rapid-mlx-changelog-commit {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.rapid-mlx-changelog-commit:last-child {
+  border-bottom: none;
+}
+
+.rapid-mlx-changelog-commit-message {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.rapid-mlx-changelog-commit-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1px;
+  color: var(--color-text-muted);
+}
+
+.rapid-mlx-changelog-commit-sha {
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+
+.rapid-mlx-changelog-commit-author {
+  font-size: 8px;
+}
+
+.rapid-mlx-changelog-link {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.rapid-mlx-changelog-link:hover {
+  text-decoration: underline;
 }
 
 /* Responsive: stack panes on narrow */

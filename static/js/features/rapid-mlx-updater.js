@@ -10,6 +10,7 @@ import { attachModalFocusTrap, detachModalFocusTrap } from './updater-shared.js'
 let _runtimeStatus = null;
 let _releases = [];
 let _mutationInflight = false;
+let _changelogCache = Object.create(null);
 
 export function initRapidMlxUpdater() {
   // Settings: Manage button
@@ -126,14 +127,20 @@ export function initRapidMlxUpdater() {
   const closeBtn = document.getElementById('rapid-mlx-modal-close');
   if (closeBtn) closeBtn.addEventListener('click', closeRapidMlxModal);
 
-  const overlay = document.getElementById('rapid-mlx-modal');
-  if (overlay) {
-    overlay.addEventListener('click', e => {
-      if (e.target === overlay) closeRapidMlxModal();
-    });
-  }
+   const overlay = document.getElementById('rapid-mlx-modal');
+   if (overlay) {
+     overlay.addEventListener('click', e => {
+       if (e.target === overlay) closeRapidMlxModal();
+     });
+   }
 
-  // Initial status load
+   // Changelog expand/collapse toggle
+   const changelogToggle = document.getElementById('rapid-mlx-changelog-toggle');
+   if (changelogToggle) {
+     changelogToggle.addEventListener('click', toggleChangelog);
+   }
+
+   // Initial status load
   setTimeout(() => {
     if (!document.hidden) {
       fetchRuntimeStatus();
@@ -300,15 +307,35 @@ function closeRapidMlxModal() {
   const modal = document.getElementById('rapid-mlx-modal');
   if (modal) modal.classList.remove('open');
   detachModalFocusTrap(modal);
+  resetChangelogSection();
+}
+
+function resetChangelogSection() {
+  const changelogEl = document.getElementById('rapid-mlx-changelog');
+  const bodyEl = document.getElementById('rapid-mlx-changelog-body');
+  const toggleBtn = document.getElementById('rapid-mlx-changelog-toggle');
+  if (changelogEl) changelogEl.style.display = 'none';
+  if (bodyEl) {
+    bodyEl.style.display = 'none';
+    bodyEl.innerHTML = '';
+  }
+  if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
+}
+
+function selectReleaseRow(row) {
+  document.querySelectorAll('.rapid-mlx-release-row--selected').forEach(el => el.classList.remove('rapid-mlx-release-row--selected'));
+  row.classList.add('rapid-mlx-release-row--selected');
 }
 
 function buildReleaseRow(release, isCurrent, isLatest) {
   const row = document.createElement('div');
   row.className = 'rapid-mlx-release-row';
+  row.dataset.version = release.version;
   row.title = 'Click to view release details';
   row.style.cursor = 'pointer';
   row.addEventListener('click', e => {
     if (e.target.closest('.rapid-mlx-install-btn')) return;
+    selectReleaseRow(row);
     showReleaseNotes(release);
   });
 
@@ -500,6 +527,178 @@ function showReleaseNotes(release) {
     detailsEl.textContent = 'No release notes available.';
     detailsEl.style.display = '';
   }
+
+  showChangelogSection(release);
+}
+
+function showChangelogSection(release) {
+  const changelogEl = document.getElementById('rapid-mlx-changelog');
+  if (!changelogEl) return;
+
+  const active = _runtimeStatus?.active;
+  const fromVersion = active?.version;
+
+  if (!fromVersion || fromVersion === release.version) {
+    changelogEl.style.display = 'none';
+    return;
+  }
+
+  changelogEl.style.display = '';
+  resetChangelogBody(fromVersion, release.version);
+}
+
+function resetChangelogBody(fromVersion, toVersion) {
+  const bodyEl = document.getElementById('rapid-mlx-changelog-body');
+  const toggleBtn = document.getElementById('rapid-mlx-changelog-toggle');
+  if (!bodyEl || !toggleBtn) return;
+
+   const cacheKey = `${fromVersion}...${toVersion}`;
+  const cached = _changelogCache[cacheKey];
+
+  toggleBtn.setAttribute('aria-expanded', 'false');
+  bodyEl.style.display = 'none';
+
+  if (cached) {
+    /* eslint-disable-next-line no-unsanitized/property */
+    bodyEl.innerHTML = cached;
+  } else {
+    bodyEl.textContent = 'Loading changelog…';
+    bodyEl.className = 'rapid-mlx-changelog-loading';
+  }
+}
+
+function toggleChangelog() {
+  const bodyEl = document.getElementById('rapid-mlx-changelog-body');
+  const toggleBtn = document.getElementById('rapid-mlx-changelog-toggle');
+  if (!bodyEl || !toggleBtn) return;
+
+  const isExpanded = toggleBtn.getAttribute('aria-expanded') === 'true';
+
+  if (isExpanded) {
+    toggleBtn.setAttribute('aria-expanded', 'false');
+    bodyEl.style.display = 'none';
+    return;
+  }
+
+  toggleBtn.setAttribute('aria-expanded', 'true');
+  bodyEl.style.display = '';
+
+  const cachedContent = bodyEl.innerHTML.trim();
+  if (!cachedContent.includes('Loading changelog') && !cachedContent.includes('changelog-unavailable')) {
+    return;
+  }
+
+  fetchChangelog();
+}
+
+async function fetchChangelog() {
+  const bodyEl = document.getElementById('rapid-mlx-changelog-body');
+  if (!bodyEl) return;
+
+  const active = _runtimeStatus?.active;
+  const fromVersion = active?.version;
+  const selectedRelease = findSelectedRelease();
+  if (!fromVersion || !selectedRelease) {
+    bodyEl.innerHTML = '<div class="rapid-mlx-changelog-error">Changelog unavailable.</div>';
+    return;
+  }
+
+  const toVersion = selectedRelease.version;
+  const cacheKey = `${fromVersion}...${toVersion}`;
+
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const resp = await fetch(
+      `/api/rapid-mlx/runtime/changelog?from=${encodeURIComponent(fromVersion)}&to=${encodeURIComponent(toVersion)}`,
+      { headers }
+    );
+
+    if (!resp.ok) {
+      handleChangelogError(resp, bodyEl);
+      return;
+    }
+
+    const data = await resp.json();
+    if (!data.ok) {
+      handleChangelogError({ status: 500, json: () => Promise.resolve(data) }, bodyEl);
+      return;
+    }
+
+    const html = renderChangelog(data.changelog);
+    _changelogCache[cacheKey] = html;
+    /* eslint-disable-next-line no-unsanitized/property */
+    bodyEl.innerHTML = html;
+  } catch {
+    bodyEl.innerHTML = '<div class="rapid-mlx-changelog-error">Changelog unavailable (network error).</div>';
+  }
+}
+
+function handleChangelogError(resp, bodyEl) {
+  if (resp.status === 429 || resp.status === 503) {
+    bodyEl.innerHTML = '<div class="rapid-mlx-changelog-error">Changelog unavailable (rate-limited).</div>';
+    return;
+  }
+  resp.json().then(data => {
+    if (data.kind === 'rate_limited') {
+      bodyEl.innerHTML = '<div class="rapid-mlx-changelog-error">Changelog unavailable (rate-limited).</div>';
+    } else if (data.kind === 'invalid_tag') {
+      bodyEl.innerHTML = '<div class="rapid-mlx-changelog-error">Changelog unavailable (invalid version).</div>';
+    } else {
+      bodyEl.innerHTML = '<div class="rapid-mlx-changelog-error">Changelog unavailable.</div>';
+    }
+  }).catch(() => {
+    bodyEl.innerHTML = '<div class="rapid-mlx-changelog-error">Changelog unavailable.</div>';
+  });
+}
+
+function findSelectedRelease() {
+  const selectedRow = document.querySelector('.rapid-mlx-release-row--selected');
+  if (!selectedRow) return null;
+
+  const versionText = selectedRow.querySelector('.rapid-mlx-release-row-ver')?.textContent;
+  if (!versionText) return null;
+
+  const version = versionText.replace(/^v/, '');
+  return _releases.find(r => r.version === version) || null;
+}
+
+function renderChangelog(changelog) {
+  if (!changelog || !changelog.commits || changelog.commits.length === 0) {
+    return '<div class="rapid-mlx-changelog-error">No commit details available.</div>';
+  }
+
+  let html = '';
+  const commits = changelog.commits.slice(0, 50);
+
+  html += `<div class="rapid-mlx-changelog-summary">
+    ${commits.length} commit${commits.length === 1 ? '' : 's'} in this release
+  </div>`;
+
+  commits.forEach(commit => {
+    const message = escapeHtml(commit.message);
+    const author = escapeHtml(commit.author || 'unknown');
+    html += `<div class="rapid-mlx-changelog-commit">
+      <div class="rapid-mlx-changelog-commit-message">${message}</div>
+      <div class="rapid-mlx-changelog-commit-meta">
+        <span class="rapid-mlx-changelog-commit-sha">${commit.sha}</span>
+        <span class="rapid-mlx-changelog-commit-author">${author}</span>
+      </div>
+    </div>`;
+  });
+
+  if (changelog.html_url) {
+    html += `<div style="margin-top:6px;">
+      <a class="rapid-mlx-changelog-link" href="${escapeHtml(changelog.html_url)}" target="_blank" rel="noopener noreferrer">View full diff on GitHub ↗</a>
+    </div>`;
+  }
+
+  return html;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 function timeAgo(iso) {

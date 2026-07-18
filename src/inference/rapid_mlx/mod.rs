@@ -1,3 +1,4 @@
+pub mod changelog;
 pub mod command;
 pub mod compatibility;
 pub mod discovery;

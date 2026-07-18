@@ -14,6 +14,7 @@ use super::{ApiCtx, ApiReply, ApiRoute, unauthorized_api_token, unauthorized_db_
 use crate::inference::backend::{
     BackendRecommendationInput, RecommendationArtifactKind, recommend_backend,
 };
+use crate::inference::rapid_mlx::changelog;
 use crate::inference::rapid_mlx::compatibility;
 use crate::inference::rapid_mlx::discovery::Discovery;
 use crate::inference::rapid_mlx::info_query;
@@ -37,6 +38,7 @@ struct RuntimeApiState {
     manager: Result<Arc<RapidMlxRuntimeManager>, String>,
     releases: Arc<tokio::sync::Mutex<ReleaseCache>>,
     jobs: Arc<Mutex<RuntimeJobs>>,
+    changelog_cache: Arc<changelog::ChangelogCacheManager>,
     client: reqwest::Client,
 }
 
@@ -223,11 +225,14 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         manager,
         releases: Arc::new(tokio::sync::Mutex::new(None)),
         jobs: Arc::new(Mutex::new(RuntimeJobs::default())),
+        changelog_cache: Arc::new(changelog::ChangelogCacheManager::new()),
         client,
     };
 
     status_route(ctx.clone(), state.clone())
         .or(releases_route(ctx.clone(), state.clone()))
+        .unify()
+        .or(changelog_route(ctx.clone(), state.clone()))
         .unify()
         .or(recommendation_route(ctx.clone(), state.clone()))
         .unify()
@@ -406,6 +411,61 @@ fn releases_route(ctx: ApiCtx, state: RuntimeApiState) -> ApiRoute {
             }
         })
         .boxed()
+}
+
+fn changelog_route(ctx: ApiCtx, state: RuntimeApiState) -> ApiRoute {
+    let config = ctx.config;
+    warp::path!("api" / "rapid-mlx" / "runtime" / "changelog")
+        .and(warp::get())
+        .and(warp::query::<ChangelogQuery>())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |query: ChangelogQuery, auth: Option<String>| {
+            let config = config.clone();
+            let state = state.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                let result = changelog::fetch_compare(
+                    &state.client,
+                    &state.changelog_cache,
+                    &query.from,
+                    &query.to,
+                )
+                .await;
+
+                match result {
+                    Ok(summary) => Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({ "ok": true, "changelog": summary }),
+                    ))),
+                    Err(err) => {
+                        let status = match err.kind {
+                            changelog::ChangelogErrorKind::RateLimited => {
+                                StatusCode::TOO_MANY_REQUESTS
+                            }
+                            changelog::ChangelogErrorKind::InvalidTag => StatusCode::NOT_FOUND,
+                            _ => StatusCode::BAD_GATEWAY,
+                        };
+                        Ok(Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": err.message,
+                                "kind": &err.kind,
+                            })),
+                            status,
+                        )))
+                    }
+                }
+            }
+        })
+        .boxed()
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+struct ChangelogQuery {
+    from: String,
+    to: String,
 }
 
 fn mutation_route(ctx: ApiCtx, state: RuntimeApiState, operation: RuntimeOperation) -> ApiRoute {
@@ -1071,6 +1131,7 @@ mod tests {
             manager: Err("unused".into()),
             releases: Arc::new(tokio::sync::Mutex::new(None)),
             jobs: Arc::new(Mutex::new(RuntimeJobs::default())),
+            changelog_cache: Arc::new(changelog::ChangelogCacheManager::new()),
             client: reqwest::Client::new(),
         }
     }
