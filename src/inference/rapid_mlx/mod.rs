@@ -50,10 +50,10 @@ pub struct RapidMlxConfig {
     pub api_key: Option<String>,
     /// Default applied to chat requests that omit `enable_thinking`, mirroring
     /// llama.cpp's standing `--reasoning` server-level default.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_thinking: Option<bool>,
     /// Default applied to chat requests that omit `reasoning_effort`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
 }
 

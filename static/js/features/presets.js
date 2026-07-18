@@ -1592,8 +1592,14 @@ function _buildFormPreset(existing) {
                 ...existing.rapid_mlx,
                 model_path: strVal('modal-model-path'),
                 port: rapidPort,
-                enable_thinking: nullableBoolOpt('modal-rapid-enable-thinking'),
-                reasoning_effort: strVal('modal-rapid-reasoning-effort') || null,
+                ...(function() {
+                    const et = nullableBoolOpt('modal-rapid-enable-thinking');
+                    const re = strVal('modal-rapid-reasoning-effort');
+                    const out = {};
+                    if (et != null) out.enable_thinking = et;
+                    if (re) out.reasoning_effort = re;
+                    return out;
+                })(),
             } : null,
         };
     }
