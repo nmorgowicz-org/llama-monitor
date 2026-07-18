@@ -671,6 +671,24 @@ pub async fn hf_download_file_stream(
 
 // ── Search and browse ─────────────────────────────────────────────────────────
 
+/// Model format filter for HF search (GGUF vs MLX).
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HfModelFormat {
+    #[default]
+    Gguf,
+    Mlx,
+}
+
+impl HfModelFormat {
+    fn as_api_filter(self) -> &'static str {
+        match self {
+            HfModelFormat::Gguf => "gguf",
+            HfModelFormat::Mlx => "mlx",
+        }
+    }
+}
+
 /// Full search request parameters.
 #[derive(Debug, Clone, Default)]
 pub struct HfSearchParams {
@@ -682,6 +700,8 @@ pub struct HfSearchParams {
     pub limit: usize,
     /// Opaque cursor from the HF API `Link` response header for pagination.
     pub cursor: Option<String>,
+    /// Model format filter (GGUF default for backward compatibility).
+    pub format: HfModelFormat,
 }
 
 /// Parse the `cursor=` value out of a HF API `Link: <url>; rel="next"` header.
@@ -729,8 +749,7 @@ pub async fn hf_search_models(
         if let Some(ref cursor) = params.cursor {
             p.append_pair("cursor", cursor);
         }
-        // Always filter for GGUF
-        p.append_pair("filter", "gguf");
+        p.append_pair("filter", params.format.as_api_filter());
     }
 
     let mut req = HF_HTTP_CLIENT.get(url);
@@ -1616,6 +1635,7 @@ pub async fn hf_resolve_origin(filename: &str, size_bytes: u64) -> Result<HfReso
             sort: HfSort::Downloads,
             limit: 15,
             cursor: None,
+            format: HfModelFormat::Gguf,
         };
         let result = hf_search_models(&params).await;
         match result {

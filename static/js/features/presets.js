@@ -15,8 +15,14 @@ import {
     buildCommunityTemplateInstallRequest,
     detectCommunityTemplateFamily,
 } from './chat-template-registry.js';
+import { hfSearch, hfCreateFormatToggle } from './hf-browse.js';
 
 let newPresetSeed = null;
+
+// ── HF search state for preset editor ─────────────────────────────────────────
+let _presetHfSearchTimer = null;
+let _presetHfSearchInitialized = false;
+let _presetHfSearchFormat = 'gguf';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -479,7 +485,103 @@ document.addEventListener('DOMContentLoaded', () => {
             sel.click();
         }
     });
+
+    // HF model search for preset editor
+    _initPresetHfSearch();
 });
+
+function _initPresetHfSearch() {
+    if (_presetHfSearchInitialized) return;
+    _presetHfSearchInitialized = true;
+
+    const input = document.getElementById('modal-model-path');
+    const resultsContainer = document.getElementById('preset-hf-search-results');
+    const toggleWrap = document.getElementById('preset-hf-format-toggle-wrap');
+    if (!input || !resultsContainer || !toggleWrap) return;
+
+    // Create format toggle (GGUF/MLX)
+    hfCreateFormatToggle({
+        container: toggleWrap,
+        defaultFormat: 'gguf',
+        onChange: (fmt) => {
+            _presetHfSearchFormat = fmt;
+            _triggerPresetHfSearch();
+        },
+    });
+
+    // Search when user types something that looks like an HF repo id (contains "/")
+    input.addEventListener('input', () => {
+        clearTimeout(_presetHfSearchTimer);
+        _presetHfSearchTimer = setTimeout(_triggerPresetHfSearch, 350);
+    });
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && resultsContainer.style.display !== 'none') {
+            e.preventDefault();
+            clearTimeout(_presetHfSearchTimer);
+            const first = resultsContainer.querySelector('.hf-search-result');
+            if (first) first.click();
+        }
+    });
+
+    // Close results when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!input.contains(e.target) && !resultsContainer.contains(e.target) && !toggleWrap.contains(e.target)) {
+            resultsContainer.style.display = 'none';
+        }
+    });
+}
+
+function _looksLikeHfRepoId(value) {
+    if (!value || value.length < 4) return false;
+    const v = value.trim();
+    // Must contain "/" but not look like a local path
+    if (!v.includes('/')) return false;
+    if (v.startsWith('/') || v.startsWith('./') || v.startsWith('../')) return false;
+    if (v.includes('\\') || /^[A-Za-z]:/.test(v)) return false;
+    if (v.toLowerCase().endsWith('.gguf')) return false;
+    // Must be owner/repo format (two path segments)
+    const parts = v.split('/');
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return false;
+    return /^[a-zA-Z0-9._-]+$/.test(parts[0]) && /^[a-zA-Z0-9._/-]+$/.test(parts[1]);
+}
+
+function _triggerPresetHfSearch() {
+    const input = document.getElementById('modal-model-path');
+    const resultsContainer = document.getElementById('preset-hf-search-results');
+    if (!input || !resultsContainer) return;
+
+    const value = input.value.trim();
+    if (!_looksLikeHfRepoId(value)) {
+        resultsContainer.style.display = 'none';
+        return;
+    }
+
+    const parts = value.split('/');
+    const author = parts[0];
+    const query = parts.slice(1).join('/');
+
+    hfSearch({
+        query: query || undefined,
+        author,
+        sort: 'downloads',
+        limit: 8,
+        format: _presetHfSearchFormat,
+        container: resultsContainer,
+        filelistContainer: null,
+        quickpicksContainer: null,
+        discoverPillsContainerId: null,
+        onOpenCardPanel: (repoId) => {
+            window.open(`https://huggingface.co/${repoId}`, '_blank', 'noopener');
+        },
+        onSelectModel: (m) => {
+            input.value = m.id;
+            resultsContainer.style.display = 'none';
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            showToast(`Selected: ${m.id}`, 'info');
+        },
+    });
+}
 
 // ── Modal ──────────────────────────────────────────────────────────────────────
 

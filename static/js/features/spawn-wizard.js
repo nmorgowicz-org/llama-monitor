@@ -438,7 +438,6 @@ export function openSpawnWizard(opts = {}) {
         wizardState.model.localMeta = source ? { source_kind: source.kind, model_source: source } : null;
       }
     }
-    }
   }
 
   if (opts.localPath) {
@@ -2468,7 +2467,14 @@ async function ensureEscapeHatchRendered() {
     const label = document.createElement('div');
     label.className = 'esc-hatch-label';
     label.title = d.tooltip || '';
-    label.innerHTML = `<span class="esc-hatch-name">${d.description}</span><span class="esc-hatch-type">${d.value_type}</span>`;
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'esc-hatch-name';
+    nameSpan.textContent = d.description || '';
+    const typeSpan = document.createElement('span');
+    typeSpan.className = 'esc-hatch-type';
+    typeSpan.textContent = d.value_type || '';
+    label.appendChild(nameSpan);
+    label.appendChild(typeSpan);
     const controls = document.createElement('div');
     controls.className = 'esc-hatch-controls';
     const existing = wizardState.hardware.escapeHatchFlags?.[d.flag];

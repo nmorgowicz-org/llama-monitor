@@ -138,7 +138,12 @@ fn api_hf_search(
                 }
 
                 let cursor = body["cursor"].as_str().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-                let params = crate::hf::HfSearchParams { query, author, sort, limit: limit as usize, cursor };
+                let format_str = body["format"].as_str().unwrap_or("gguf").to_lowercase();
+                let format = match format_str.as_str() {
+                    "mlx" => crate::hf::HfModelFormat::Mlx,
+                    _ => crate::hf::HfModelFormat::Gguf,
+                };
+                let params = crate::hf::HfSearchParams { query, author, sort, limit: limit as usize, cursor, format };
 
                 match crate::hf::hf_search_models(&params).await {
                     Ok((models, next_cursor)) => {

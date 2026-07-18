@@ -2587,10 +2587,12 @@
                             </div>
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-model-path" title="Absolute path to the .gguf model file on disk">Model Path <span class="pe-required">*</span></label>
-                                <div class="pe-input-row">
+                                <div class="pe-input-row" style="align-items:center;">
                                     <input type="text" class="pe-input" id="modal-model-path" required>
                                     <button type="button" class="btn-sm btn-preset" id="preset-browse-model-btn" title="Browse filesystem for .gguf files">Browse</button>
+                                    <div id="preset-hf-format-toggle-wrap"></div>
                                 </div>
+                                <div class="hf-search-results" id="preset-hf-search-results" style="display:none;"></div>
                                 <div class="pe-arch-info" id="pe-arch-info"></div>
                                 <span class="field-error-msg" role="alert">Model path is required</span>
                             </div>
