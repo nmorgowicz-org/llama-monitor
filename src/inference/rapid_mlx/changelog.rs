@@ -39,7 +39,7 @@ struct CommitItem {
     sha: String,
     commit: CommitData,
     html_url: String,
-    author: GithubUser,
+    author: Option<GithubUser>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -241,8 +241,13 @@ fn summarize_commits(raw: Vec<CommitItem>) -> Vec<CommitEntry> {
         .take(MAX_COMMITS)
         .map(|item| {
             let subject = extract_subject(&item.commit.message);
-            let author = if !item.author.login.is_empty() {
-                item.author.login
+            let login = item
+                .author
+                .as_ref()
+                .map(|a| a.login.clone())
+                .unwrap_or_default();
+            let author = if !login.is_empty() {
+                login
             } else if !item.commit.author.name.is_empty() {
                 item.commit.author.name
             } else {
@@ -385,9 +390,9 @@ mod tests {
                 },
             },
             html_url: "https://github.com/raullenchai/Rapid-MLX/commit/abd3f09c927803e6d37c63e65b6324a15fd48bff".into(),
-            author: GithubUser {
+            author: Some(GithubUser {
                 login: "raullenchai".into(),
-            },
+            }),
         }];
 
         let entries = summarize_commits(raw);
@@ -412,9 +417,9 @@ mod tests {
                     },
                 },
                 html_url: format!("https://example.com/{i}"),
-                author: GithubUser {
+                author: Some(GithubUser {
                     login: "tester".into(),
-                },
+                }),
             })
             .collect();
 
@@ -433,7 +438,7 @@ mod tests {
                 },
             },
             html_url: "https://example.com".into(),
-            author: GithubUser { login: "".into() },
+            author: Some(GithubUser { login: "".into() }),
         }];
 
         let entries = summarize_commits(raw);
@@ -522,5 +527,56 @@ mod tests {
         );
         assert_eq!(entries[0].author, "raullenchai");
         assert_eq!(entries[1].author, "pierre427");
+    }
+
+    #[test]
+    fn real_github_compare_api_fixture_with_null_author_still_deserializes() {
+        // GitHub's compare API returns "author": null for commits whose commit
+        // email isn't linked to a GitHub account (bot/orphaned commits). This
+        // fixture mirrors the real shape and must not fail the whole response.
+        let fixture = br#"
+        {
+          "html_url": "https://github.com/raullenchai/Rapid-MLX/compare/v0.10.10...v0.10.12",
+          "ahead_by": 2,
+          "behind_by": 0,
+          "commits": [
+            {
+              "sha": "abd3f09c927803e6d37c63e65b6324a15fd48bff",
+              "commit": {
+                "author": { "name": "Raullen Chai", "email": "raullenchai@gmail.com", "date": "2026-07-16T03:58:12Z" },
+                "committer": { "name": "GitHub", "email": "noreply@github.com", "date": "2026-07-16T03:58:12Z" },
+                "message": "fix: exclude broken mlx-vlm 0.6.4 from all extras (#1119)"
+              },
+              "url": "https://api.github.com/repos/raullenchai/Rapid-MLX/commits/abd3f09c927803e6d37c63e65b6324a15fd48bff",
+              "html_url": "https://github.com/raullenchai/Rapid-MLX/commit/abd3f09c927803e6d37c63e65b6324a15fd48bff",
+              "author": { "login": "raullenchai" },
+              "committer": { "login": "web-flow" }
+            },
+            {
+              "sha": "9f1e2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b",
+              "commit": {
+                "author": { "name": "orphaned-bot", "email": "bot@nowhere.example", "date": "2026-07-16T12:32:22Z" },
+                "committer": { "name": "GitHub", "email": "noreply@github.com", "date": "2026-07-16T12:32:22Z" },
+                "message": "chore: bump lockfile"
+              },
+              "url": "https://api.github.com/repos/raullenchai/Rapid-MLX/commits/9f1e2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b",
+              "html_url": "https://github.com/raullenchai/Rapid-MLX/commit/9f1e2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b",
+              "author": null,
+              "committer": null
+            }
+          ]
+        }
+        "#;
+
+        let response: CompareResponse = serde_json::from_slice(fixture)
+            .expect("compare response with a null commit author must still deserialize");
+        assert_eq!(response.commits.len(), 2);
+
+        let entries = summarize_commits(response.commits);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].author, "raullenchai");
+        // No top-level GitHub account (author: null) -> falls back to the
+        // nested commit-author name, which GitHub always populates.
+        assert_eq!(entries[1].author, "orphaned-bot");
     }
 }

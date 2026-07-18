@@ -5,7 +5,7 @@
 // Uses existing API endpoints under /api/rapid-mlx/runtime/.
 
 import { showToast } from './toast.js';
-import { attachModalFocusTrap, detachModalFocusTrap } from './updater-shared.js';
+import { attachModalFocusTrap, detachModalFocusTrap, fetchReleaseList, buildReleaseBadges } from './updater-shared.js';
 
 let _runtimeStatus = null;
 let _releases = [];
@@ -194,10 +194,7 @@ export async function fetchRuntimeStatus() {
 
 export async function fetchReleases() {
   try {
-    const headers = window.authHeaders ? window.authHeaders() : {};
-    const resp = await fetch('/api/rapid-mlx/runtime/releases', { headers });
-    if (!resp.ok) return;
-    const data = await resp.json();
+    const data = await fetchReleaseList('/api/rapid-mlx/runtime/releases');
     _releases = data.releases || [];
   } catch {
     // silent
@@ -346,20 +343,12 @@ function buildReleaseRow(release, isCurrent, isLatest) {
   ver.className = 'rapid-mlx-release-row-ver';
   ver.textContent = `v${release.version}`;
 
-  const badges = document.createElement('span');
-  badges.className = 'rapid-mlx-release-row-badges';
-  if (isLatest) {
-    const b = document.createElement('span');
-    b.className = 'rapid-mlx-badge rapid-mlx-badge--latest';
-    b.textContent = 'latest';
-    badges.appendChild(b);
-  }
-  if (isCurrent) {
-    const b = document.createElement('span');
-    b.className = 'rapid-mlx-badge rapid-mlx-badge--installed';
-    b.textContent = 'installed';
-    badges.appendChild(b);
-  }
+  const badges = buildReleaseBadges({
+    wrapperClass: 'rapid-mlx-release-row-badges',
+    badgeClass: 'rapid-mlx-badge',
+    isLatest,
+    isCurrent,
+  });
 
   const meta = document.createElement('span');
   meta.className = 'rapid-mlx-release-row-meta';
