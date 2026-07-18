@@ -22,8 +22,6 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures_util::StreamExt;
-use hf_hub::api::sync::ApiBuilder;
-use hf_hub::{Repo, RepoType};
 use serde::Serialize;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
@@ -318,18 +316,8 @@ async fn run_download(
         }
     };
 
-    // Resolve the HF download URL via hf-hub.
-    let api = match ApiBuilder::new().with_token(hf_token.clone()).build() {
-        Ok(a) => a,
-        Err(e) => {
-            set_failed(&task, format!("Failed to build HF API client: {e}"));
-            return;
-        }
-    };
-
-    let url = api
-        .repo(Repo::new(repo_id.clone(), RepoType::Model))
-        .url(&file_path);
+    // Resolve the HF download URL.
+    let url = crate::hf::hf_resolve_download_url(&repo_id, &file_path);
     if url.is_empty() {
         set_failed(
             &task,

@@ -10,12 +10,28 @@
 //! - HF token management
 
 use anyhow::{Context, Result};
-use hf_hub::api::sync::ApiBuilder;
-use hf_hub::{Repo, RepoType};
+use hf_hub::{HFClient, HFClientSync};
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use std::path::Path;
 use std::sync::LazyLock;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+
+fn hf_build_client(token: Option<String>) -> anyhow::Result<HFClientSync> {
+    let async_client = if let Some(tok) = token {
+        HFClient::builder().token(tok).build()
+    } else {
+        HFClient::new()
+    }
+    .map_err(|e| anyhow::anyhow!("Failed to build HF async client: {e}"))?;
+    HFClientSync::from_inner(async_client)
+        .map_err(|e| anyhow::anyhow!("Failed to build HF sync client: {e}"))
+}
+
+pub fn hf_resolve_download_url(repo_id: &str, file_path: &str) -> String {
+    let encoded_path = utf8_percent_encode(file_path, NON_ALPHANUMERIC).to_string();
+    format!("https://huggingface.co/{repo_id}/resolve/main/{encoded_path}")
+}
 
 static HF_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
@@ -428,17 +444,20 @@ pub async fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
 /// List repo files; filters for GGUF if gguf_only=true.
 #[allow(dead_code)]
 pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileInfo>> {
-    let api = ApiBuilder::new()
-        .with_token(hf_load_token())
-        .build()
-        .context("Failed to build HF API client")?;
-    let info = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+    let (owner, name) = repo_id
+        .split_once('/')
+        .context("repo_id must be in owner/name format")?;
+    let client = hf_build_client(hf_load_token())?;
+    let info = client
+        .model(owner, name)
         .info()
+        .send()
         .context("Failed to list repo files")?;
 
-    Ok(info
+    let siblings = info
         .siblings
+        .context("HF API did not return file listing (siblings)")?;
+    Ok(siblings
         .iter()
         .filter(|s| !gguf_only || s.rfilename.to_ascii_lowercase().ends_with(".gguf"))
         .map(|s| HfFileInfo {
@@ -452,16 +471,20 @@ pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileIn
 /// Get info for a single file in a repo.
 #[allow(dead_code)]
 pub fn hf_get_file_info(repo_id: &str, path: &str) -> Result<HfFileInfo> {
-    let api = ApiBuilder::new()
-        .with_token(hf_load_token())
-        .build()
-        .context("Failed to build HF API client")?;
-    let info = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+    let (owner, name) = repo_id
+        .split_once('/')
+        .context("repo_id must be in owner/name format")?;
+    let client = hf_build_client(hf_load_token())?;
+    let info = client
+        .model(owner, name)
         .info()
+        .send()
         .context("Failed to list repo files")?;
 
-    info.siblings
+    let siblings = info
+        .siblings
+        .context("HF API did not return file listing (siblings)")?;
+    siblings
         .iter()
         .find(|s| s.rfilename == path)
         .map(|s| HfFileInfo {
@@ -483,13 +506,7 @@ pub async fn fetch_gguf_header_metadata(
     repo_id: &str,
     file_path: &str,
 ) -> Result<crate::llama::gguf_meta::GgufMetadata, String> {
-    let api = ApiBuilder::new()
-        .with_token(hf_load_token())
-        .build()
-        .map_err(|e| format!("Failed to build HF API client: {e}"))?;
-    let url = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
-        .url(file_path);
+    let url = hf_resolve_download_url(repo_id, file_path);
     if url.is_empty() {
         return Err(format!(
             "Could not resolve HF URL for {repo_id}/{file_path}"
@@ -542,13 +559,7 @@ pub async fn fetch_mlx_config(
     repo_id: &str,
     file_path: &str,
 ) -> Result<crate::inference::rapid_mlx::mlx_meta::MlxConfig, String> {
-    let api = ApiBuilder::new()
-        .with_token(hf_load_token())
-        .build()
-        .map_err(|e| format!("Failed to build HF API client: {e}"))?;
-    let url = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
-        .url(file_path);
+    let url = hf_resolve_download_url(repo_id, file_path);
     if url.is_empty() {
         return Err(format!(
             "Could not resolve HF URL for {repo_id}/{file_path}"
@@ -591,13 +602,7 @@ pub async fn hf_download_file_stream(
     local_path: &Path,
     resume_from: u64,
 ) -> Result<u64> {
-    let api = ApiBuilder::new()
-        .with_token(token.map(String::from))
-        .build()
-        .context("Failed to build HF API client")?;
-    let url = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
-        .url(path);
+    let url = hf_resolve_download_url(repo_id, path);
     if url.is_empty() {
         anyhow::bail!("Failed to resolve HF URL for {path}");
     }
@@ -867,14 +872,19 @@ async fn list_repo_gguf_files(
         .await
         .unwrap_or_default();
 
-    let api = ApiBuilder::new()
-        .with_token(token)
-        .build()
-        .map_err(|e| format!("Failed to build HF API client: {e}"))?;
-    let info = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+    let (owner, name) = repo_id
+        .split_once('/')
+        .ok_or_else(|| format!("Invalid repo_id format: {repo_id}"))?;
+    let client = hf_build_client(token).map_err(|e| format!("Failed to build HF client: {e}"))?;
+    let info = client
+        .model(owner, name)
         .info()
+        .send()
         .map_err(|e| format!("Failed to list repo files: {e}"))?;
+
+    let siblings = info
+        .siblings
+        .ok_or_else(|| format!("HF API did not return file listing (siblings) for {repo_id}"))?;
 
     // Infer provider from repo owner
     let repo_owner = repo_id.split('/').next().unwrap_or("");
@@ -883,7 +893,7 @@ async fn list_repo_gguf_files(
     let family = {
         let from_repo = infer_family_from_name(repo_id);
         if from_repo.is_empty() {
-            info.siblings
+            siblings
                 .iter()
                 .map(|s| infer_family_from_name(&s.rfilename))
                 .find(|candidate| !candidate.is_empty())
@@ -893,8 +903,7 @@ async fn list_repo_gguf_files(
         }
     };
     let mmproj_preference = mmproj_preference_for_family(&family);
-    let mut result: Vec<HfGgufFile> = info
-        .siblings
+    let mut result: Vec<HfGgufFile> = siblings
         .iter()
         .map(|s| s.rfilename.as_str())
         .filter(|name| name.to_ascii_lowercase().ends_with(".gguf"))
