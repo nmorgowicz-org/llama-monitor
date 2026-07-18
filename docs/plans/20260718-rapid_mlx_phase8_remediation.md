@@ -218,3 +218,29 @@ These are the hard gates deliberately excluded from per-item fixes (they need a 
 - If a worker's window/quota expires mid-item, the **fixup commits** are the restore points — the next worker picks up from the last clean `cargo clippy`/`cargo test` green state (check `git status` + `git log --oneline`).
 - Nothing here is on `main`; everything is `fixup!` commits on `feat/rapid-mlx-integration`, foldable with `git rebase -i --autosquash origin/feat/rapid-mlx-integration`.
 - Do not weaken any existing hard gate to make an item pass (per the Builder/Verifier/Coordinator protocol in the parity plan doc).
+
+---
+
+## Completion Status (2026-07-18)
+
+**ALL ITEMS COMPLETE.** The following gates have passed:
+
+- **Per-item Rust validation (6 sub-agents):** All defects across Items 1-6 verified against code. Every fix confirmed at file:line with tests passing.
+- **Full Rust test suite:** `cargo test --lib` — 588 passed, 0 failed, 13 ignored.
+- **Clippy:** `cargo clippy --all-targets -- -D warnings` — clean.
+- **Playwright E2E:** `CI=1 LLAMA_MONITOR_USE_RELEASE=1 LLAMA_MONITOR_TEST_PORT=17778 npm test` — 224 passed, 0 failed, 2 skipped (SSH integration requires real target).
+- **Baseline update:** JS module count updated 59→60 (`updater-shared.js` from Item 6 dedup).
+
+**Fixup commits on branch (HEAD = `81e27fe`):**
+| Fixup | Original | Item |
+|-------|----------|------|
+| `3b2b6e5` | `05e8a15` | I5 (bench) |
+| `ba10140` | `bf70afd` | I2 (doctor) |
+| `30c380f` | `1f27646` | I1 (info) |
+| `5112d53` | `29c2f49` | I6 (changelog) |
+| `f13b26c` | `4c2c3f6` | I3 (escape-hatch) |
+| `765f40f` | `480ce80` | I4 (HF search) |
+| `46bd21f` | `05e8a15` | I5 (bench fixture) |
+| `b1865ec` | `05e8a15` | I5 (spawn-wizard template visibility) |
+
+**Squash-ready:** Run `git rebase -i --autosquash origin/feat/rapid-mlx-integration` to fold all fixups.
