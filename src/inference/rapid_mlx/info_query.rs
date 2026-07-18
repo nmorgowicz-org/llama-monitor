@@ -15,7 +15,7 @@ const MAX_OUTPUT_BYTES: usize = 256 * 1024;
 /// Minimum minor version at which the `rapid-mlx info <model>` output layout is trusted.
 /// Below this, parsing may produce incorrect fields, so we return a minimal profile
 /// with no recommendation hints (fields fall back to defaults/unknowns).
-const MIN_TRUSTED_MINOR: u64 = 10;
+pub(crate) const MIN_TRUSTED_MINOR: u64 = 10;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -110,7 +110,10 @@ struct QueryOutput {
 #[allow(clippy::type_complexity)]
 static VERSION_CACHE: OnceLock<Arc<std::sync::RwLock<Option<(String, u64)>>>> = OnceLock::new();
 
-async fn cached_version(binary: &Path) -> Result<Option<(String, u64)>> {
+/// Query (and cache) the `rapid-mlx --version` output as `(exact_string, minor)`.
+/// Shared by callers that need to version-guard text-scraping of other
+/// subcommands (e.g. `info`, `bench`) before trusting their output layout.
+pub(crate) async fn cached_version(binary: &Path) -> Result<Option<(String, u64)>> {
     let cache = VERSION_CACHE
         .get_or_init(|| Arc::new(std::sync::RwLock::new(None)))
         .clone();
@@ -560,7 +563,7 @@ mod tests {
         let json = r#"{}"#;
         let profile: ModelProfile = serde_json::from_str(json).unwrap();
         assert!(profile.tool_format.is_none());
-        assert!(profile.extras.vision == false);
+        assert!(!profile.extras.vision);
     }
 
     #[test]

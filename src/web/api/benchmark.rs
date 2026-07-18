@@ -17,26 +17,59 @@ use super::common::{ApiCtx, ApiRoute, check_api_token, unauthorized_api_token};
 static BENCHMARK_LAST_TS: std::sync::LazyLock<std::sync::Mutex<u64>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(0u64));
 
-/// Run `rapid-mlx bench --base-url` against a running server and parse its
-/// text output into normalized benchmark metrics.
+/// Build the argv (excluding the binary itself) for a `rapid-mlx bench` invocation.
+/// `rapid-mlx bench` requires a positional `model` argument immediately after the
+/// `bench` subcommand — without it the CLI exits with code 2 ("the following
+/// arguments are required: model"). Kept as a pure function so the exact argument
+/// order/shape can be unit-tested without spawning a process.
+fn build_rapid_mlx_bench_args(model: &str, base_url: &str, tier: &str) -> Vec<String> {
+    vec![
+        "bench".to_string(),
+        model.to_string(),
+        "--base-url".to_string(),
+        base_url.to_string(),
+        "--tier".to_string(),
+        tier.to_string(),
+    ]
+}
+
+/// Run `rapid-mlx bench <model> --base-url ... --tier speed` against a running
+/// server and parse its text output into normalized benchmark metrics.
 async fn run_rapid_mlx_bench(
     base_url: &str,
+    model: &str,
     binary_path: Option<PathBuf>,
     managed_path: Option<PathBuf>,
 ) -> Result<Option<(f64, f64, f64)>, String> {
+    if model.is_empty() {
+        return Err(
+            "No model identity is known for the active Rapid-MLX session; rapid-mlx bench requires a model argument.".to_string(),
+        );
+    }
+
     let (binary, _) = Discovery::resolve_binary(binary_path.as_deref(), managed_path.as_deref())
         .await
         .map_err(|e| format!("rapid-mlx binary not found: {e}"))?;
 
+    // Version-guard the text scrape: below MIN_TRUSTED_MINOR the bench output
+    // layout is not verified, so degrade to a clear no-result instead of risking
+    // a garbage parse. Mirrors the same guard used for `rapid-mlx info` in
+    // info_query.rs.
+    let version_trusted = matches!(
+        crate::inference::rapid_mlx::info_query::cached_version(&binary).await,
+        Ok(Some((_, minor))) if minor >= crate::inference::rapid_mlx::info_query::MIN_TRUSTED_MINOR
+    );
+    if !version_trusted {
+        return Err(
+            "Unsupported rapid-mlx version: bench output parsing is only verified from 0.10.x onward. Update rapid-mlx or use the llama.cpp backend.".to_string(),
+        );
+    }
+
+    let args = build_rapid_mlx_bench_args(model, base_url, "speed");
+
     let output = tokio::time::timeout(
         Duration::from_secs(90),
-        tokio::process::Command::new(&binary)
-            .arg("bench")
-            .arg("--base-url")
-            .arg(base_url)
-            .arg("--tier")
-            .arg("speed")
-            .output(),
+        tokio::process::Command::new(&binary).args(&args).output(),
     )
     .await
     .map_err(|_| "rapid-mlx bench timed out after 90 s".to_string())?
@@ -219,8 +252,10 @@ fn api_benchmark(
                                 _ => None,
                             });
 
+                        let model = prepared.model_identity().to_string();
                         let bench_result =
-                            run_rapid_mlx_bench(&base_url, binary_path, managed_path).await;
+                            run_rapid_mlx_bench(&base_url, &model, binary_path, managed_path)
+                                .await;
                         match bench_result {
                             Ok(Some((prompt_tps, gen_tps, ttft_ms))) => {
                                 let benchmark =
@@ -1321,4 +1356,129 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .boxed();
     r
+}
+
+#[cfg(test)]
+mod rapid_mlx_bench_tests {
+    use super::*;
+
+    const WELL_FORMED_BENCH_OUTPUT: &str = "\
+Rapid-MLX bench (tier=speed)
+Booting server...
+Server ready in 4.2s
+
+Prefill throughput: 812.4 tokens/s
+Generation throughput: 63.7 t/s
+TTFT: 142.5 ms
+Tokens generated: 512
+";
+
+    #[test]
+    fn build_args_places_model_positional_immediately_after_bench() {
+        let args = build_rapid_mlx_bench_args("qwen3-0.6b-4bit", "http://127.0.0.1:8000", "speed");
+        assert_eq!(
+            args,
+            vec![
+                "bench",
+                "qwen3-0.6b-4bit",
+                "--base-url",
+                "http://127.0.0.1:8000",
+                "--tier",
+                "speed",
+            ]
+        );
+        assert_eq!(args[0], "bench");
+        assert_eq!(args[1], "qwen3-0.6b-4bit");
+    }
+
+    #[test]
+    fn build_args_handles_empty_model_without_panicking() {
+        let args = build_rapid_mlx_bench_args("", "http://127.0.0.1:8000", "speed");
+        assert_eq!(args[1], "");
+    }
+
+    #[test]
+    fn parses_prompt_and_generation_throughput_from_well_formed_output() {
+        let prompt_tps = parse_rapid_mlx_throughput(WELL_FORMED_BENCH_OUTPUT, "prompt")
+            .or_else(|| parse_rapid_mlx_throughput(WELL_FORMED_BENCH_OUTPUT, "prefill"));
+        let gen_tps = parse_rapid_mlx_throughput(WELL_FORMED_BENCH_OUTPUT, "generation")
+            .or_else(|| parse_rapid_mlx_throughput(WELL_FORMED_BENCH_OUTPUT, "gen"));
+
+        assert_eq!(prompt_tps, Some(812.4));
+        assert_eq!(gen_tps, Some(63.7));
+    }
+
+    #[test]
+    fn parses_ttft_in_milliseconds_from_well_formed_output() {
+        let ttft = parse_rapid_mlx_ttft(WELL_FORMED_BENCH_OUTPUT);
+        assert_eq!(ttft, Some(142.5));
+    }
+
+    #[test]
+    fn parses_ttft_and_converts_seconds_to_milliseconds() {
+        let text = "time to first token: 0.42 s\n";
+        assert_eq!(parse_rapid_mlx_ttft(text), Some(420.0));
+    }
+
+    #[test]
+    fn throughput_parser_returns_none_on_malformed_output_without_panicking() {
+        let malformed = "unexpected format\nno numbers here at all\n";
+        assert_eq!(parse_rapid_mlx_throughput(malformed, "prompt"), None);
+        assert_eq!(parse_rapid_mlx_throughput(malformed, "generation"), None);
+    }
+
+    #[test]
+    fn throughput_parser_returns_none_on_empty_output_without_panicking() {
+        assert_eq!(parse_rapid_mlx_throughput("", "prompt"), None);
+        assert_eq!(parse_rapid_mlx_ttft(""), None);
+        assert_eq!(extract_first_float(""), None);
+    }
+
+    #[test]
+    fn ttft_parser_returns_none_when_no_ttft_line_present() {
+        let text = "Prefill throughput: 100.0 tokens/s\nGeneration throughput: 50.0 t/s\n";
+        assert_eq!(parse_rapid_mlx_ttft(text), None);
+    }
+
+    #[test]
+    fn extract_first_float_handles_leading_labels_and_units() {
+        assert_eq!(extract_first_float("TTFT: 123 ms"), Some(123.0));
+        assert_eq!(extract_first_float("prefill: 42.3 t/s"), Some(42.3));
+        assert_eq!(extract_first_float("no digits here"), None);
+        assert_eq!(extract_first_float("trailing dot 5."), Some(5.0));
+    }
+
+    #[tokio::test]
+    async fn run_rapid_mlx_bench_rejects_empty_model_before_spawning() {
+        let result = run_rapid_mlx_bench(
+            "http://127.0.0.1:8000",
+            "",
+            Some(PathBuf::from("/nonexistent/rapid-mlx")),
+            None,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("model"));
+    }
+
+    /// Contract test against the real CLI, mirroring
+    /// `info_query::parses_real_rapid_mlx_info_output_contract`. Not run in CI —
+    /// requires a real rapid-mlx install and (for a non-empty parse) a live
+    /// server at --base-url. A follow-up live pass exercises the full,
+    /// server-backed contract; this stub only pins the argv shape against the
+    /// installed CLI's own `--help`.
+    #[tokio::test]
+    #[ignore = "requires rapid-mlx CLI installed; run manually to verify against real output"]
+    async fn rapid_mlx_bench_help_still_documents_a_positional_model_arg() {
+        let output = std::process::Command::new("rapid-mlx")
+            .args(["bench", "--help"])
+            .output()
+            .expect("rapid-mlx CLI must be installed for this contract test");
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            text.contains("model"),
+            "rapid-mlx bench --help no longer documents a `model` argument; \
+             update build_rapid_mlx_bench_args if the CLI contract changed"
+        );
+    }
 }

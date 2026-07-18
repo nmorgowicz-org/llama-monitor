@@ -71,6 +71,13 @@ pub(crate) fn local_connect_host(bind_host: Option<&str>) -> &str {
 }
 
 impl PreparedInferenceRequest {
+    /// The served model identity for this request, or `""` when none is known
+    /// (e.g. an attach session that never reported one). Used to plumb the
+    /// positional `model` argument into `rapid-mlx bench`.
+    pub fn model_identity(&self) -> &str {
+        self.model_identity.as_deref().unwrap_or_default()
+    }
+
     pub fn authenticate(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         match &self.api_key {
             Some(key) if !key.is_empty() => request.bearer_auth(key),
