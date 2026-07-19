@@ -208,12 +208,15 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 
 ### Phase 3 — Runtime and dependency qualification
 
-- **State:** Not started
-- **Budget:** 140k
+- **State:** Not started (splits into Parts A/B/C per §4.1)
+- **Budget:** 140k total (~60k A + ~60k B + ~50k C)
 - **Depends on:** Phases 1–2
 - **Read:** gaps 3.4/3.8–3.10; D13/D24/D25/D27; contract 7.5; A2/A14/A15/A17–A19/A26/A29/A48/A51–A52; Phase 3; runtime/client matrices; evidence ledger.
 - **Primary output:** automatically generated exact-executable capability snapshots for Rapid and llama; upstream dependency-contract and resolved-receipt handling; a first-class **on-device, user-driven update-validation probe** `[escalate→device]` (modeled on the existing thin llama.cpp beta-update validation) — the only qualification the Phase 3 gate depends on; dependency/extras states; endpoint matrix; alias/finetune confidence; MTP concurrency qualification; per-field Rapid sampling-default CLI/cascade coverage. Any Nick-owned upstream-monitoring CI/manifest is **additive/optional** and must not gate Phase 3 (E6).
 - **Completion proof:** no manual per-release certification treadmill; drift is handled by the on-device probe (near-daily rapid-mlx/dependency updates validated on the user's device, independent of llama-monitor releases), and the absence of any upstream CI never blocks this or a dependent phase; an unseen environment satisfying upstream constraints and passing the on-device baseline receives no global disclaimer; only concrete failures or indeterminate selected Advanced capabilities produce actionable per-feature notices; probes are bounded; managed installs retain a resolved receipt and rollback; Rapid MTP fallback and llama MTP build/model distinctions are represented.
+- **Part A (~60k):** capability snapshots + dependency handling — builder items 1-7 (~line 1718-1730), gap 3.8 (~351-362), gap 3.10 (~376-390), D13 (~627-638), D24 (~723-730); files: capabilities.rs, rapid_mlx/{compatibility.rs, discovery.rs, info_query.rs}, rapid_mlx_runtime.rs
+- **Part B (~60k):** on-device probe — builder item 6 (~line 1725-1727), hard gates (~1734-1738), gap 3.10 (~376-390); files: rapid_mlx/{runtime.rs, updater.rs}
+- **Part C (~50k):** endpoint matrix + MTP + sampling — builder items 8-12 (~line 1727-1738), hard gates (~1734-1738), D25 (~731-742), D26 (~743-759), D27 (~760-769); files: capabilities.rs (llama), rapid_mlx/{compatibility.rs, discovery.rs}, rapid_mlx_runtime.rs
 
 ### Phase 4 — Normalized MLX architecture metadata
 
