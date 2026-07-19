@@ -59,7 +59,9 @@ Do not begin at Phase 1 merely because it changes code. Phase 0 freezes evidence
 
 ## 3. Navigation Map
 
-Current line hints in the comprehensive plan:
+> **Refinement note (2026-07-19):** the comprehensive plan was refined in a single deliberate pass (the E1–E11 edits are applied inline and cited by their E-numbers throughout the plan). That pass added ~180 lines, so the line hints below are stale — **use the headings, not the numbers**, and refresh with the `rg` command after this note. New anchors added by the refinement: §3.9 (rewritten — chat-template tool-call reliability), §8.3 (M5 Max `[escalate→device]` measurement envelope), §9.6 (four-bucket gate taxonomy), and D32 (preset schema migration/versioning).
+
+Current line hints in the comprehensive plan (pre-refinement — treat as approximate):
 
 | Section | Current line | Why it exists |
 |---|---:|---|
@@ -143,6 +145,19 @@ capability/evidence
 
 Hide or render read-only any concept that cannot complete the trace.
 
+### 4.6 Gate taxonomy (four buckets)
+
+Implementation is executed 90%+ by a finetuned local model (Qwen3.6-27B, stable 200k context), with ~10% escalation to a frontier model. The Builder→Verifier loop is a **local** dev-iteration loop, not Claude sub-agent fan-out. So "escalate" (comprehensive §9.5) splits four ways — every hard gate carries exactly one tag (comprehensive §9.6):
+
+| Tag | Who decides | Spends frontier quota? |
+|---|---|---|
+| `[local-verifiable]` | the local model self-runs an exact CHECK with a machine-decidable `PASS iff` | no |
+| `[decide-once]` | Nick settles it once in refinement (copy strings, thresholds, A-items); then it *becomes* `[local-verifiable]` | no |
+| `[escalate→device]` | Nick + the local model on the M5 Max: measurements, wire captures, calibration, KV floor (the §8.3 envelope) | no |
+| `[escalate→frontier]` | genuine reasoning judgment the local model cannot do | **yes — the only bucket that does** |
+
+Coordinator behavior: prefer `[local-verifiable]`; route measurement/wire-capture/calibration gates to `[escalate→device]` (real hardware, not quota); reserve `[escalate→frontier]` for the small pre-counted set of reasoning judgments. A `[decide-once]` gate, once decided, is treated as `[local-verifiable]` with its resolved value inlined — do not reopen it.
+
 ## 5. Phase Router
 
 Each card identifies the minimum comprehensive-plan reading set. The exact phase section remains mandatory in full.
@@ -171,9 +186,9 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 - **State:** Not started
 - **Budget:** 160k
 - **Depends on:** Phase 1
-- **Read:** gaps 3.2/3.4; D5/D16/D21/D22/D27; contracts 7.1/7.3; A2/A20/A32/A38/A40/A45/A51–A52; Phase 2; source/client matrices and pinned Unsloth evidence.
-- **Primary output:** one Rust-owned Rapid source codec; legacy migration; one cross-backend sampling mode catalog; metadata/lineage finetune resolution; complete mode visibility and provenance; omission-only request defaults; explicit-zero provenance; Coding agent default; Roleplay path semantics.
-- **Completion proof:** every source variant survives display/edit/clone/save/estimate/library/launch; every model has universal sampling choices; every recognized family/finetune shows all curated modes on both backends; Unsloth values match pinned sources; explicit client values win; typed fixture no longer opens legacy data.
+- **Read:** gaps 3.2/3.4; D5/D16/D21/D22/D27/**D32**; contracts 7.1/7.3; A2/A20/A32/A38/A40/A45/A51–A52; Phase 2; source/client matrices and pinned Unsloth evidence.
+- **Primary output:** one Rust-owned Rapid source codec; legacy migration; one cross-backend sampling mode catalog; metadata/lineage finetune resolution; complete mode visibility and provenance; omission-only request defaults; explicit-zero provenance; Coding agent default; Roleplay path semantics. Establish the **preset schema version/migration contract (D32, E10)**: a schema-version field, forward-migration on read, save→load→save round-trip tests, and safe downgrade — every preset-shape change (here and in D27/D20/D30/D23) plugs into it instead of ad-hoc `serde(default)`.
+- **Completion proof:** every source variant survives display/edit/clone/save/estimate/library/launch; every model has universal sampling choices; every recognized family/finetune shows all curated modes on both backends; Unsloth values match pinned sources; explicit client values win; typed fixture no longer opens legacy data; presets from today's shipped llama-monitor migrate without loss and round-trip.
 
 ### Phase 3 — Runtime and dependency qualification
 
@@ -181,8 +196,8 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 - **Budget:** 140k
 - **Depends on:** Phases 1–2
 - **Read:** gaps 3.4/3.8–3.10; D13/D24/D25/D27; contract 7.5; A2/A14/A15/A17–A19/A26/A29/A48/A51–A52; Phase 3; runtime/client matrices; evidence ledger.
-- **Primary output:** automatically generated exact-executable capability snapshots for Rapid and llama; upstream dependency-contract and resolved-receipt handling; automated CI release monitoring/manifests; dependency/extras states; endpoint matrix; alias/finetune confidence; MTP concurrency qualification; per-field Rapid sampling-default CLI/cascade coverage.
-- **Completion proof:** no manual per-release certification treadmill; an unseen environment satisfying upstream constraints and passing automated baseline checks receives no global disclaimer; only concrete failures or indeterminate selected Advanced capabilities produce actionable per-feature notices; probes are bounded; managed installs retain a resolved receipt and rollback; Rapid MTP fallback and llama MTP build/model distinctions are represented.
+- **Primary output:** automatically generated exact-executable capability snapshots for Rapid and llama; upstream dependency-contract and resolved-receipt handling; a first-class **on-device, user-driven update-validation probe** `[escalate→device]` (modeled on the existing thin llama.cpp beta-update validation) — the only qualification the Phase 3 gate depends on; dependency/extras states; endpoint matrix; alias/finetune confidence; MTP concurrency qualification; per-field Rapid sampling-default CLI/cascade coverage. Any Nick-owned upstream-monitoring CI/manifest is **additive/optional** and must not gate Phase 3 (E6).
+- **Completion proof:** no manual per-release certification treadmill; drift is handled by the on-device probe (near-daily rapid-mlx/dependency updates validated on the user's device, independent of llama-monitor releases), and the absence of any upstream CI never blocks this or a dependent phase; an unseen environment satisfying upstream constraints and passing the on-device baseline receives no global disclaimer; only concrete failures or indeterminate selected Advanced capabilities produce actionable per-feature notices; probes are bounded; managed installs retain a resolved receipt and rollback; Rapid MTP fallback and llama MTP build/model distinctions are represented.
 
 ### Phase 4 — Normalized MLX architecture metadata
 
@@ -201,7 +216,7 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 - **Read:** gaps 3.5–3.7/3.11; accepted D1–D4, D18–D25, D28, and D30–D31; contracts 7.2–7.4; A1/A3–A5/A21–A22/A42–A43/A46–A48/A53–A54/A58; existing RTX 5090/M5 Max calibration evidence; Phase 5; memory/llama/client matrices.
 - **Primary output:** Rapid-native policy and estimator; corrected llama unified/partitioned context contract; active versus retained memory; typed Auto/Standard/K8V4/V-only retained-prefix policy with exact alias eligibility; one backend-owned live unified-memory snapshot with safe-now/reclaim/app-close/configured-cap scenarios; workload-fit quant guidance; explicit llama MTP single-stream mode; explicit Rapid MTP companion ownership plus memory-first one-active Auto and fully re-estimated Advanced overlap.
 - **Completion proof:** all surfaces consume the same timestamped snapshot and agree; Rapid cannot inherit stale llama/HF memory caches; no total RAM or wired cap is mislabeled available; TurboQuant savings apply only to qualified retained conventional-KV portions, Standard is not mislabeled FP16, unknown finetunes do not inherit alias eligibility, and transient decompression peaks remain visible; recovery actions distinguish allocator cache, reusable state, runtime/app memory, and OS disk cache; recovery is conservative and measured before/after; process diagnostics redact commands and use honest footprint/RSS/backend labels; sysctl mutation is bounded/reversible/exactly verified/restart-aware; the user's verified reboot-persistent M5 Max path is preserved and its mechanism/version evidence recorded without untested cross-version generalization; Qualified/Calculated/Provisional and uncertainty boundaries are honest; existing 5090/M5 calibration does not regress; raw Rapid measurements reproduce; every embedded/external MTP companion and cache reservation is additive; Rapid single-active Auto protects near-capacity quant/context fit while overlap refits worst-admitted memory and context guarantees; llama command and estimator describe the same KV pool; no Rapid `ctk/ctv`; recommended quant satisfies workload policy.
-- **Mandatory Builder packets:** 5A (execution-policy schemas, canonical memory snapshot, launch parity) <=120k; then 5B (backend-native estimator, calibration, cross-surface consumption) <=120k. Each packet returns its own handoff/checkpoint; one fresh Verifier evaluates the complete Phase 5 diff and both packets.
+- **Formal sub-phases (E5, comprehensive §Phase 5):** Phase 5 is two formal sub-phases, each with its **own hard gate and its own fresh Verifier pass** — not one Verifier over two packets. **5a** = execution policy + `MemoryBreakdown` + estimator core + cross-surface estimate equality (comprehensive Builder items 1–14), <=120k; it must reach `Verified complete` before 5b starts. **5b** = `MemoryAvailabilitySnapshot` + reclaim + wired-limit + acquisition-gap repairs (items 15–18), <=120k. Rationale: coherence-per-packet for the local model (not token fit), compounding with the §4.6 gate taxonomy. Track 5a and 5b as distinct checkpoint rows.
 
 ### Phase 6 — Cross-backend cache guidance
 
@@ -209,8 +224,8 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 - **Budget:** 170k
 - **Depends on:** Phase 5
 - **Read:** comprehensive Section 6 in full; D14/D15/D17–D20; A6–A9/A21/A23/A31–A37/A41; Phase 6; cache/client matrices; cache evidence ledger rows.
-- **Primary output:** shared Reusable prompt state Auto/Off/Advanced Custom with backend-native effective behavior; Rapid hybrid and expert-only response-cache policies; bounded llama prompt-cache policy; educational workload profiles; recommendation/refusal logic; privacy-safe observation contract.
-- **Completion proof:** response cache Off for normal agents/roleplay; Rapid Auto uses the smallest memory-safe working set for the dominant single-user loop, does not permanently provision for brief cron overlap, and resolves Off when ineligible/unbounded; llama unified-memory Auto defaults extra host states to `0` while ordinary common-prefix reuse remains active, and only confirmed evidence-backed surplus permits a bounded positive cap; no generic concurrency value becomes cache size; shadow fingerprints use a random per-runtime HMAC key, remain memory-only/TTL- and size-bounded, emit aggregates only, and cannot reach persistence/log/export/backup/network surfaces; telemetry never mutates or restarts automatically.
+- **Primary output:** shared Reusable prompt state Auto/Off/Advanced Custom with backend-native effective behavior; Rapid hybrid and expert-only response-cache policies; bounded llama prompt-cache policy; educational workload profiles; recommendation/refusal logic. Cache-repeat observation ships as an **explicit opt-in trial by default** (E9); the ephemeral per-runtime HMAC-fingerprint shadow observer is **DEFERRED/optional**, since the cache is Off by default and a privacy-sensitive fingerprinting subsystem is not justified before demand is proven.
+- **Completion proof:** response cache Off for normal agents/roleplay; Rapid Auto uses the smallest memory-safe working set for the dominant single-user loop, does not permanently provision for brief cron overlap, and resolves Off when ineligible/unbounded; llama unified-memory Auto defaults extra host states to `0` while ordinary common-prefix reuse remains active, and only confirmed evidence-backed surplus permits a bounded positive cap; no generic concurrency value becomes cache size; the default path is the explicit trial with no fingerprinting subsystem built; IF the shadow observer is later built, its fingerprints use a random per-runtime HMAC key, remain memory-only/TTL- and size-bounded, emit aggregates only, and cannot reach persistence/log/export/backup/network surfaces; telemetry never mutates or restarts automatically.
 
 ### Phase 7 — Critical settings and shared UI
 
@@ -232,14 +247,14 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 - **Completion proof:** search is not qualification; every mature GGUF discovery/quant/mmproj behavior has a regression gate; original author and converter stay distinct; community finetunes reach Rapid through qualified native MLX or conversion; repo/revision/variant survives end to end; context/KV changes recompute but never silently switch model quant; Recommended means workload fit; public search remains tokenless.
 - **Mandatory Builder packets:** 8A (qualification/identity/lineage/fit APIs and fixtures) <=120k; then 8B (HF/Library discovery, cards, quant-switch UX and captures) <=120k. Each packet returns its own handoff/checkpoint; one fresh Verifier evaluates the complete Phase 8 diff and both packets.
 
-### Phase 9 — Formatting, endpoints, and templates
+### Phase 9 — Formatting, endpoints, and revision-pinned template substitution
 
 - **State:** Not started
 - **Budget:** 120k
-- **Depends on:** Phases 2–3
-- **Read:** gap 3.9; D11/D21/D22; A10/A27/A38–A40; Phase 9; template and external-client matrices; Rapid/MLX-LM/SillyTavern evidence.
-- **Primary output:** truthful Rapid template state; a locally qualified native-upstream contract/design or already released capability; no app-side renderer/shim; an improved llama.cpp native template-file library that preserves Froggeric SHA/update handling while adding immutable releases, multiple alternatives, official Google Gemma 4 sources, separately labeled HF-discussion/fork candidates, workload qualification, side-by-side install/comparison, stale/update state, bounded history, and rollback; client-protocol qualification; SillyTavern raw Text and structured Chat paths; actual tool-loop template evidence. If native Rapid support is unavailable, stop with the full-featured overlay fallback proposal—pinned model template, revisioned family alternatives, symptom-led explicit trials, provenance, workload qualification, and rollback—without implementing it.
-- **Completion proof:** llama.cpp gains richer versioned template selection without unnecessary model overlays; Froggeric behavior does not regress; mutable upstream updates install alongside rather than overwrite the active release; official Google templates and community forks are provenance-distinct; rollback reaches the model-provided or any retained pinned release; no double template; SillyTavern owns raw instruct prompts; Rapid `/v1/completions` and llama `/completion` separately pass; recommended tool templates have real protocol proof; no overlay or silent template replacement occurs without the A27 approval gate.
+- **Depends on:** Phases 2–3; Phase 0 template-arg grep (item 9)
+- **Read:** gap 3.9 (rewritten by E1); D11/D21/D22; A10/A27 (both resolved by E1)/A38–A40; Phase 9; template and external-client matrices; Rapid/MLX-LM/SillyTavern evidence.
+- **Primary output (E1 — architecture is resolved, this is NOT a "native override investigation"):** ONE revision-pinned template-selection layer with two thin appliers — llama.cpp via `--chat-template`/`--chat-template-file`, Rapid via **file placement** into an llama-monitor-owned copy/overlay (never the canonical/HF-cache dir), or a template-path flag if Phase 0's grep found Rapid accepts one. The driving reason is the §3.9 **tool-call-reliability** defect (stock Qwen3.6/Gemma4 templates loop/fail on tool calls; Froggeric and the official Google Gemma template are the candidates to qualify). A tool-call smoke-test matrix gates activation; one retained `[escalate→device]` M5 Max check confirms the first real substitution loads and kills the observed loop. Preserve Froggeric SHA/update handling while adding immutable `TemplateRelease` records, alternatives, provenance-distinct official-Google/community candidates, comparison, stale/update state, bounded history, and rollback. Plus client-protocol qualification and SillyTavern raw Text / structured Chat paths.
+- **Completion proof:** the Rapid applier never mutates the canonical/HF-cache dir (only an owned copy/overlay, reversible/re-download-safe); the applier is labeled honestly per backend (no false parity); no Jinja renderer, shim/proxy, fork, or unreleased pin; a candidate becomes active only after passing the tool-call smoke test, and a failed test leaves the active selection unchanged; the M5 Max device check passes; Froggeric behavior does not regress; mutable upstream updates install alongside rather than overwrite the active release; official Google templates and community forks are provenance-distinct; rollback reaches the model-provided or any retained pinned release; no double template; SillyTavern owns raw instruct prompts; Rapid `/v1/completions` and llama `/completion` separately pass. There is no A27 "stop for approval" fork — the plan never depended on Rapid gaining native override. A heavier full tokenizer/config-replacement overlay still needs separate approval.
 
 ### Phase 10 — Screenshot-driven IA
 
@@ -256,8 +271,8 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 - **Budget:** 170k
 - **Depends on:** Phases 3 and 5–7
 - **Read:** cache telemetry Sections 6.1/6.2/6.5; A9/A12/A23–A24/A31/A37/A41/A48; Phase 11; diagnostics/security/client matrices.
-- **Primary output:** effective-policy and capability diagnostics; cache/queue/TTFT/context/MTP metrics; bounded privacy; disk-state visibility and approved cleanup only.
-- **Completion proof:** no content telemetry; no raw/stable fingerprint leaves ephemeral process memory; local aggregate-only shadow telemetry is absent from exports/backups/network paths; zero differs from absent; MTP activation/fallback visible; schema drift degrades safely; storage operations remain bounded/authenticated.
+- **Primary output:** effective-policy and capability diagnostics; cache/queue/TTFT/context/MTP metrics; bounded privacy; disk-state visibility and approved cleanup only; and the **cross-backend Doctor** (E11) — grow the existing rapid-mlx-focused Doctor to cover llama.cpp too (drawing on the Phase 3 llama capability snapshot), as a release-gating teaching + troubleshooting pillar. Each check traces to a real failure mode (same defect→test rigor), gives condition + explanation + remediation + a "why this happens" teaching note, at dual reading levels (novice + power-user) from one detection engine reusing the `[decide-once]` educational copy. Ship the already-surfaced checks: KV < q8_0 for tool-enabled llama, tool-call-loop template mismatch, invalid `--tool-call-parser` argv, stale/incompatible rapid-mlx update.
+- **Completion proof:** no content telemetry; no raw/stable fingerprint leaves ephemeral process memory; local aggregate-only shadow telemetry (if built) is absent from exports/backups/network paths; zero differs from absent; MTP activation/fallback visible; schema drift degrades safely; storage operations remain bounded/authenticated; every Doctor check is anchored to a real failure mode (no speculative checks), covers both backends where the failure applies, and renders both reading levels from one detection engine with concrete remediation text.
 
 ### Phase 12 — Security, dependencies, and watchlist
 
@@ -274,8 +289,8 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 - **Budget:** 130k
 - **Depends on:** Phases 5–12
 - **Read:** all resolved decisions; Phase 13; completion ledger; surface/client matrices; reference-doc requirements.
-- **Primary output:** one vocabulary across all surfaces; migrations; complete user/reference/client/cache/troubleshooting documentation.
-- **Completion proof:** no evidence grade is hidden; docs match code; OpenCode/Hermes/OpenClaw/SillyTavern setup is explicit; promoted screenshots are referenced.
+- **Primary output:** one vocabulary across all surfaces; completed preset migrations against the D32 version/migration contract (not ad-hoc per-field defaults); complete user/reference/client/cache/troubleshooting documentation.
+- **Completion proof:** no evidence grade is hidden; docs match code; all preset-shape migrations reference the single D32 contract and round-trip; OpenCode/Hermes/OpenClaw/SillyTavern setup is explicit; promoted screenshots are referenced.
 
 ### Phase 14 — Full release validation
 
@@ -283,8 +298,8 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 - **Budget:** 120k
 - **Depends on:** Phases 1–13
 - **Read:** Phase 14; all validation matrices; revalidation and completion ledgers; repository mandatory checks.
-- **Primary output:** final independent validation evidence, closed traceability, clean intended worktree.
-- **Completion proof:** mandatory checks in exact order; isolated full Playwright; sequential screenshots; security/platform review; representative E2E matrix; no P0 remains.
+- **Primary output:** final independent validation evidence, closed traceability, clean intended worktree. This is the **one and only** release checkpoint (single cutover, no intermediate release, B3 resolved): dead/unwired code between phase gates was expected; the "releasable" check applies only here.
+- **Completion proof:** mandatory checks in exact order; isolated full Playwright; sequential screenshots; security/platform review; representative E2E matrix; no P0 remains; the "releasable" check holds (no half-wired user-visible control, no partial read-path migration); the **dual-audience UX release bar** is met — novice safe-default/progressive-disclosure/educational-copy path AND power-user full-tweakability path both verified — and the cross-backend Doctor teaching pillar is present (release-gating, not cosmetic).
 
 ## 6. Decision Gate Router
 
@@ -300,7 +315,7 @@ The full decision text is comprehensive Section 8. This table tells the Coordina
 | 6 | Hybrid byte budget; response-cache placement/trial; cache telemetry privacy; automatic recommendation authority; mixed-client policy |
 | 7 | Advanced control placement; workload-profile UX; endpoint presentation; MTP/slot behavior |
 | 8 | HF qualification/cache/credential behavior; unknown finetunes; library hierarchy |
-| 9 | Rapid upstream template route; overlay fallback; SillyTavern Text/Chat behavior |
+| 9 | (Template architecture is resolved by E1 — no route/overlay decision to stop on; Rapid applies templates by file-placement, llama by flag.) SillyTavern Text/Chat behavior |
 | 10 | Final preset categories and wizard order; whether shared IA reorganizes llama.cpp |
 | 11 | Telemetry retention/hashing; disk ownership/cleanup; automatic tuning prohibition |
 | 12 | Final remote-code/dependency/export/import/watchlist policies |
@@ -316,8 +331,9 @@ These are the only known consequential choices still open. They are deliberately
 | Gate | Current safe baseline | Stop only when | Owning phase |
 |---|---|---|---:|
 | Foreground/background runtime architecture (Section 8.2 item 6) | One runtime, one active generation where policy requires it, queue rare overlap | Evidence justifies app-owned priority scheduling or a separate background runtime/port/credential lifecycle | 5/7/13 |
-| Rapid template escalation (A10/A27/D11) | Research and qualify the native released path; no shim, fork, unreleased pin, or overlay | Native support is absent/declined and a concrete upstream or overlay proposal is ready | 9/12 |
 | llama-server built-in tools (A44/D26) | Web UI controls allowed; MCP proxy Off; built-in tools absent | A concrete allowlist/threat model/network design proposes enabling tools | 7/12/13 |
+
+The former "Rapid template escalation (A10/A27/D11)" authority gate is **resolved by E1** and is no longer open: do not build native Rapid override or pause for approval. Rapid applies revision-pinned templates by file-placement into an llama-monitor-owned copy/overlay; llama uses its flags; the work is driven by the §3.9 tool-call-reliability defect and gated by a tool-call smoke test plus one M5 Max device check. Only a heavier full tokenizer/config-replacement overlay (beyond the sanctioned template-file copy) would need its own approval/threat model.
 
 Implementation-time calibration, exact client protocols, prefix stability, package/model qualification, and source inspection are evidence gates—not invitations for a Builder to reopen product decisions. Unknown evidence resolves to the already documented conservative behavior.
 
@@ -327,9 +343,9 @@ Mechanical A-ID status ledger:
 
 | Status | Decision IDs | Coordinator behavior |
 |---|---|---|
-| Accepted/frozen and ready | A1–A3, A7–A9, A11, A14, A16–A21, A23, A25, A28, A30–A34, A36, A38–A40, A45, A47, A49–A51, A53, A55–A57 | Do not reopen unless new evidence contradicts the accepted policy |
-| Accepted/frozen; implementation evidence or numeric calibration pending | A4–A6, A15, A22, A24, A26, A29, A35, A37, A41–A43, A46, A48, A52, A54, A58 | Use the documented conservative/default behavior until the owning phase proves a stronger recommendation |
-| Conditional user-authority gate | A10, A27, A44 | Only the specific expansion described in the authority-gate table is open; the recorded baseline remains frozen |
+| Accepted/frozen and ready | A1–A3, A7–A9 (A9 default inverted by E9: explicit trial ships; HMAC shadow observer deferred), A10 (resolved by E1), A11, A14, A16–A21, A23, A25, A27 (resolved by E1), A28, A30–A34, A36, A38–A40, A45, A47, A49–A51, A53, A55–A57 | Do not reopen unless new evidence contradicts the accepted policy |
+| Accepted/frozen; implementation evidence or numeric calibration pending | A4–A6, A15, A22, A24, A26, A29, A35, A37, A41–A43, A46, A48, A52, A54, A58 (measurement-blocked A4/A5/A6/A22/A35/A41/A42/A48/A54/A58 form the §8.3 `[escalate→device]` M5 Max envelope) | Use the documented conservative/default behavior until the owning phase proves a stronger recommendation |
+| Conditional user-authority gate | A44 | Only the specific expansion described in the authority-gate table is open; the recorded baseline remains frozen |
 | Explicitly deferred/out of parity scope | A12–A13 | Preserve as a watchlist/deferred item; do not implement implicitly |
 
 Section 8.2 item 6 is the additional non-A-ID foreground/background authority gate. Other Section 8.2 items are measurements under accepted policies.
@@ -431,8 +447,9 @@ Only the Coordinator updates this table after independent verification.
 | 2 | Not started | — | — | — | Phase 1 |
 | 3 | Not started | — | — | — | Phases 1–2 |
 | 4 | Not started | — | — | — | Phase 0 fixtures, Phase 2 identity |
-| 5 | Not started | — | — | — | Phases 3–4 |
-| 6 | Not started | — | — | — | Phase 5 |
+| 5a | Not started | — | — | — | Phases 3–4 (execution policy + estimator core, own gate + fresh Verifier) |
+| 5b | Not started | — | — | — | Phase 5a Verified (memory-availability + reclaim + wired-limit + acquisition repairs) |
+| 6 | Not started | — | — | — | Phase 5 (5a + 5b) |
 | 7 | Not started | — | — | — | Phases 2–3, 5–6 |
 | 8 | Not started | — | — | — | Phases 2–5 |
 | 9 | Not started | — | — | — | Phases 2–3 |

@@ -284,7 +284,9 @@ Every model on both backends must show a complete mode selector. At minimum it i
 
 Finetune resolution must prefer real lineage and metadata—GGUF base-model metadata, architecture, tokenizer/template evidence, HF base-model relationship and pinned revision, MLX `config.json`/`generation_config.json`, and qualified Rapid alias profile—over filenames. Provide a persisted manual base-family override with provenance when authoritative lineage cannot be recovered. A renamed finetune must not lose its family's options merely because its filename lacks `qwen`, `gemma`, or another family token.
 
-Rapid-MLX already resolves request sampling in the correct order: explicit request > CLI default > alias `recommended_sampling` > model `generation_config.json` > hard fallback. At the pinned commit, the config/resolver represents temperature, top-p, top-k, min-p, repetition, presence, and frequency penalties, but the public server parser exposes only `--default-temperature`, `--default-top-p`, and `--default-top-k`. Phase 0/3 must revalidate this gap. Prefer upstreaming/probing the missing `--default-*` flags so direct third-party clients receive the same selected omission-only defaults without requiring a new Llama Monitor proxy endpoint. Until qualified, the UI must show per-field backend coverage and never claim a selected Rapid default is active when it cannot reach the runtime.
+Rapid-MLX already resolves request sampling in the correct order: explicit request > CLI default > alias `recommended_sampling` > model `generation_config.json` > hard fallback. At the pinned commit, the config/resolver represents temperature, top-p, top-k, min-p, repetition, presence, and frequency penalties, but the public server parser exposes only `--default-temperature`, `--default-top-p`, and `--default-top-k`. Phase 0/3 must revalidate this exposure as a **fact to pin**, not a gap this plan promises to close: the scope is the sampling controls Rapid already exposes (temp / top-p / top-k), and this plan does **not** commit to upstreaming additional `--default-*` flags. Where a control is not exposed, the UI shows per-field backend coverage and never claims a selected Rapid default is active when it cannot reach the runtime.
+
+The plan also does not ship opinionated default sampling *values*. Unsloth's published values are use-case-specific guidelines (agentic-thinking vs non-thinking, general, etc.) that harnesses routinely override; they remain optional, user-selectable, provenance-bearing presets and are never silently applied. What the plan pins is the **resolver precedence** — explicit client/harness value > user preset > backend default (= D22 / D27 / A2 / A40) — with the §12.13 precedence matrix as the validation surface, and the §13.2 `request_from_preset()` omission test guarding the persisted-not-applied defect.
 
 ### 3.5 P0: MLX memory metadata is not architecture-complete
 
@@ -317,6 +319,11 @@ The estimator accepts `ctk`/`ctv` values such as `q8_0`, `q4_0`, and `f16`. Rapi
 - TurboQuant `v4`, `k8v4`, or `none` with asymmetric K/V behavior and alias-driven defaults.
 
 The app launches none of these fields, while estimates read shared llama values. Rapid-MLX also has no server `--ctx-size`; current context is a planning target rather than a launch-enforced allocation. Present estimates therefore look precise while being disconnected from the actual runtime policy.
+
+Two distinct facts must not be conflated when this is repaired (see §13.1 for the pin split):
+
+- **llama.cpp KV floor for tool calling is a known heuristic.** For agentic / tool-calling workloads on these smaller models, KV below `q8_0` (e.g. `q4_0`) becomes unreliable and prone to loops. This is lived and community-corroborated; encode it as a warning when a tool-enabled llama runtime is configured below `q8_0` KV.
+- **The Rapid-MLX / MLX KV floor for tool calling is unknown and must not be guessed.** TurboQuant and RotorQuant redistribute precision rather than naively truncating, so "4-bit MLX" is not equivalent to `q4_0` quality and the llama floor does **not** port. Surface each backend's native KV option honestly (D20 — no cross-backend KV-vocabulary normalization). The *factual* flags/choices/defaults are grep-able from the vllm_mlx parser and may be pinned; the *recommended* tool-calling value is measured on the M5 Max, not asserted.
 
 ### 3.7 P1: estimator data-source and arithmetic defects
 
@@ -353,13 +360,18 @@ The HF/Model Library audit also found that existing first-class GGUF concepts ar
 
 Every profile field must carry source and confidence. Unknown must remain unknown. Never upgrade a finetune to verified-alias confidence because the text parser returned a partial table.
 
-### 3.9 P1: custom chat-template parity does not exist
+### 3.9 P0/P1: stock chat templates are tool-call-unreliable, and no revision-pinned template substitution exists
 
-Rapid-MLX 0.10.12 has no `--chat-template`, `--chat-template-file`, or server template overlay. It uses the model/tokenizer repository template. Its request `chat_template_kwargs` support does not replace the template and currently forwards only a narrow supported subset such as thinking behavior.
+**Driving correctness defect (P0/P1 for a tool endpoint).** The stock chat templates shipped with Qwen3.5/Qwen3.6 and Gemma4 models — including the exact families this feature must guide, and the finetuned Qwen3.6-27B this project itself relies on — are unreliable for tool calls: they loop or fail to emit well-formed tool-call output. This is corroborated by widespread community reports and is not specific to one loader. The community-standard remedy for this use case is a substituted template (the **Froggeric** template for Qwen3.5/3.6; for Gemma4 the official Google template is the current candidate to qualify, since the community `jscott` template has underperformed in practice). Because tool calling is a primary workload (§1.1), shipping the stock template unchanged means the endpoint can loop or drop tool calls under exactly the traffic it is designed for. The mitigation is a **revision-pinned template-substitution layer** with a **tool-call smoke-test matrix** that must pass before a candidate template becomes active. This is the driving defect behind the comparison / rollback / smoke-test machinery in §12.7 — that machinery exists to make this class of failure detectable and reversible, on **both** backends.
 
-Underlying MLX-LM supports a template override, but Rapid-MLX does not invoke the MLX-LM server CLI, so the feature is not inherited.
+**Architecture: one selection layer, two appliers.** Do **not** build native template-override support into Rapid-MLX. Build ONE revision-pinned template-selection layer (identity, rollback, provenance — mostly existing llama.cpp plumbing that needs improvement anyway) with two thin appliers:
 
-The existing llama.cpp Froggeric/custom-template library therefore does not apply to Rapid-MLX. This is a real gap and must be represented honestly in the UI.
+- **llama.cpp:** apply via the existing `--chat-template` / `--chat-template-file` flags.
+- **Rapid-MLX:** apply by **file placement** — the template is just a file in the model directory. See the narrower truthfulness note below for why this cannot be a flag today, and Phase 0 for the pins that decide whether it can become symmetric.
+
+Safety rule for the Rapid applier: it must **never** mutate the canonical / HF-cache model directory. Use a copy or overlay that llama-monitor owns, so swaps are reversible and a re-download cannot be clobbered.
+
+**Narrower truthfulness sub-point (was the whole of §3.9).** Rapid-MLX 0.10.12 has no `--chat-template`, `--chat-template-file`, or server template overlay; it uses the model/tokenizer repository template, and its request `chat_template_kwargs` support forwards only a narrow supported subset such as thinking behavior — it does not replace the template. Underlying MLX-LM supports a template override, but Rapid-MLX does not invoke the MLX-LM server CLI, so the feature is not inherited. The UI must therefore never claim an override that Rapid cannot honor: on the Rapid backend, template substitution is file-placement provenance, not a runtime flag. This is honesty about the applier, not the reason to skip the work — the work is required by the tool-call defect above.
 
 ### 3.10 P1: security and dependency gaps
 
@@ -849,6 +861,24 @@ External evidence to revalidate during implementation:
 - Rapid CLI/default resolution: <https://github.com/raullenchai/Rapid-MLX/blob/75b1fe3b3a8ab12967f64150524296f179dd9979/vllm_mlx/cli.py#L6955-L7010>
 - TurboQuant implementation and packing: <https://github.com/raullenchai/Rapid-MLX/blob/75b1fe3b3a8ab12967f64150524296f179dd9979/vllm_mlx/turboquant.py#L1-L190>
 - Retained-prefix compression/decompression path: <https://github.com/raullenchai/Rapid-MLX/blob/75b1fe3b3a8ab12967f64150524296f179dd9979/vllm_mlx/memory_cache.py#L1302-L1375>
+
+### D32. Preset schema migration and versioning (cross-cutting)
+
+**Approach A — accepted:** own preset schema evolution with ONE explicit contract instead of ad-hoc `serde(default)` scattered across phases. This plan changes preset shape in many places — typed model source (D5 / A20), sampling mode catalog (D27), cache vocabulary (D20), memory policy (D30), and context/slot contract (D23) — and every one of those is a place where a user's already-saved preset can silently lose meaning.
+
+The contract:
+
+- a preset carries an explicit **schema version** field;
+- reads perform **forward migration** from any prior version to current, with the migration path recorded and inspectable;
+- **round-trip tests** (save → load → save) prove a preset's meaning survives, and prove that an older-version preset migrates without data loss;
+- **downgrade behavior** is defined: a newer preset opened by an older build must fail safe and legible, never silently corrupt;
+- every phase that changes preset shape plugs into this contract rather than adding another one-off default; the phase that "completes migrations" (P13) references it as the single source of truth.
+
+This survives the single-cutover release model independently of any staging question: even one final release must migrate the presets users **already have** from today's shipped llama-monitor. The round-trip tests additionally guard against the local executor corrupting preset shape during mid-iteration builds, when many preset-touching phases are in flight at once.
+
+**Approach B:** keep per-field `serde(default)` and let each phase absorb its own shape change.
+
+Approach B is what exists today and is exactly why a typed source can be dropped to a legacy string on read, or a new sampling field can vanish on the next save by an older code path. It provides no version identity, no migration audit, and no downgrade safety. Reject as the owning strategy; `serde(default)` may remain only as a within-version leniency, never as the migration mechanism.
 
 ## 6. Required Educational Cache Design
 
@@ -1363,8 +1393,8 @@ The coordinator must present these to the user before the phase that depends on 
 | A6 | Hybrid cache policy budget | Accepted: shared Reusable prompt state uses Auto/Off/Advanced Custom; Rapid Auto selects the smallest memory-safe hybrid/SWA working set inside a dedicated prefix-cache policy slice/byte budget, and N remains a secondary ceiling | Phase 6 |
 | A7 | Response cache in primary wizard? | Accepted: no; Off by default and excluded from normal-user recommendations/primary Wizard. Expert Advanced control only for explicitly selected Deterministic batch/eval API workloads | Phase 6/7 |
 | A8 | Response-cache trial default | Accepted: none. Expert Advanced control offers Off and Custom only; do not suggest 8 or any other count until telemetry plus a bounded memory policy justify a new product decision | Phase 6 |
-| A9 | Disabled-mode repeat telemetry | Accepted Approach B: local-only shadow repeat/reuse-distance observation using ephemeral per-runtime-key HMAC fingerprints; memory-only, short-TTL and hard-bounded; aggregate output only; never plain hashes, content, persistence, logs/exports/backups, or network telemetry. Fall back to an explicit trial if this contract cannot be proved | Phase 6/11 |
-| A10 | Custom template path | Accepted investigation path: native Rapid template file/config support first; Llama Monitor is library/selector only; no renderer/proxy shim; return for approval before upstream submission, unreleased pin/fork, managed dependency change, or overlay fallback. A later approved overlay should support pinned model-provided and family-qualified alternatives, reversible trials, workload-specific semantic qualification, and troubleshooting rather than a one-off replacement | Phase 9 |
+| A9 | Disabled-mode repeat telemetry | Accepted (default inverted per E9): ship the **explicit opt-in cache trial** as the default path; the ephemeral per-runtime-key HMAC fingerprint + reuse-distance shadow observer is **DEFERRED/optional**, not the initial mechanism. Rationale: the cache is Off by default (D14/D17), so a privacy-sensitive fingerprinting subsystem the local executor must build exactly-right is not justified before an explicit trial proves demand. If the shadow observer is later built, it keeps the original contract: memory-only, short-TTL, hard-bounded, aggregate output only; never plain hashes, content, persistence, logs/exports/backups, or network telemetry | Phase 6/11 |
+| A10 | Custom template path | Resolved (E1 supersedes the prior "investigate native Rapid support first / pause for approval" gate): do NOT build native template-override into Rapid. Ship ONE revision-pinned template-selection layer (identity/rollback/provenance — mostly existing llama.cpp plumbing) with two thin appliers — llama.cpp via `--chat-template`/`--chat-template-file`, Rapid-MLX via **file placement** into an llama-monitor-owned copy/overlay (never the canonical/HF-cache dir). The driving reason is the §3.9 tool-call-reliability defect, not truthfulness alone; keep the §12.7 comparison/rollback/smoke-test machinery, now driven by that defect. One retained [escalate→device] checkpoint: verify on M5 Max that the first real template swap loads and kills the tool-call loop | Phase 9 |
 | A11 | Remote-code trust | Accepted: inspected data-only pinned MLX repositories launch normally; custom-code declarations require evidence-bearing per-revision consent; incomplete inspection is provisional; browse/search/estimate never execute code; seek native force-off as defense in depth | Phase 1/12 |
 | A12 | Cache export/import | Defer until a concrete warm-start/migration workflow is approved | Phase 11/12 |
 | A13 | Reranker/adapters | Watchlist/separate scope, not part of parity closure | Phase 12 |
@@ -1377,16 +1407,16 @@ The coordinator must present these to the user before the phase that depends on 
 | ID | Decision | Recommended position | Blocking phase |
 |---|---|---|---|
 | A17 | Unknown/provisional model launch policy | Allow with a prominent warning when the selected runtime can attempt it; block only known-incompatible or security-disallowed cases | Phase 1/3 |
-| A18 | Managed optional dependencies | Accepted automation constraint: install the explicitly product-supported upstream extras, detect other extras automatically, and provide actionable enablement only when a selected feature needs one. External environments that satisfy upstream constraints and pass automated baseline checks are normal, not arbitrarily disclaimed; warn only on a concrete missing/broken/indeterminate selected capability | Phase 3/12 |
+| A18 | Managed optional dependencies | Accepted automation constraint: install the explicitly product-supported upstream extras, detect other extras automatically, and provide actionable enablement only when a selected feature needs one. External environments that satisfy upstream constraints and pass automated baseline checks are normal, not arbitrarily disclaimed; warn only on a concrete missing/broken/indeterminate selected capability. Reframe (E6): the "automated baseline check" is an **on-device probe** the user runs, not a Nick-owned CI gate. Rapid-MLX + dependencies update near-daily; drift is validated on the user's device, user-driven, independent of llama-monitor's release cycle (modeled on and upgrading the existing thin llama.cpp beta-update validation). Any upstream-monitoring CI is additive/optional and must NOT gate Phase 3 | Phase 3/12 |
 | A19 | Rapid on Linux/Windows | Preserve preset browsing/editing and evidence, but show Rapid as unavailable with an actionable macOS/Apple-silicon explanation; never hide or corrupt data | Phase 1/13 |
 | A20 | Legacy `model_path` lifetime | Accepted: read and migrate indefinitely; stop writing it as soon as Phase 2 lands; typed source wins conflicts and disagreement is diagnosed; preserve free-form input through Alias; keep `served_model_name` separate; document downgrade incompatibility rather than maintaining two identities | Phase 2 |
 | A21 | Recommendation authority | Recommendations are advisory until the user accepts them; safety-enforced effective downgrades are automatic and explicitly explained | Phase 5/6 |
 | A22 | Estimator calibration bar | Accepted: preserve/version the existing RTX 5090 CUDA-WDDM and M5 Max Metal llama.cpp calibrations; target ±10% within each explicitly qualified Rapid/llama hardware-runtime-model-configuration envelope; label unmeasured complete math Calculated and missing/inferred paths Provisional | Phase 5 |
-| A23 | Cache telemetry retention | Accepted with A9: retain only bounded aggregate counters/histograms. Raw keyed fingerprints and their random per-runtime key remain memory-only for a short bounded observation window and are destroyed on exit; no prompt/response content, raw fingerprint, stable identifier, database/log/export/backup retention, or outbound telemetry | Phase 6/11 |
+| A23 | Cache telemetry retention | Accepted with A9 (now deferred per E9): applies only if/when the shadow observer is built. Until then there is no keyed-fingerprint retention to govern. When built: retain only bounded aggregate counters/histograms; raw keyed fingerprints and their random per-runtime key remain memory-only for a short bounded observation window and are destroyed on exit; no prompt/response content, raw fingerprint, stable identifier, database/log/export/backup retention, or outbound telemetry | Phase 6/11 |
 | A24 | Disk KV ownership/default | Keep upstream behavior visible but do not add app-managed cleanup or recommend enablement until ownership, path, and recovery semantics are proved | Phase 11/12 |
 | A25 | Companion-model ownership | Each drafter, vision tower, and embedding model is an explicit source component with separate download, provenance, lifecycle, and additive memory | Phase 4/8 |
 | A26 | `[guided]` absent | Show structured generation as unavailable/provisional and give installation guidance; never silently weaken strict schema requests | Phase 3/7 |
-| A27 | Template fallback if upstream declines | Accepted gate: pause and return for approval; do not silently choose a managed overlay, shim/proxy, fork, or unreleased dependency pin. Preserve the full-featured overlay proposal—pinned source template plus revisioned family alternatives, symptom-led user trials, provenance/comparison/rollback, and workload-specific semantic qualification—as the preferred fallback design to discuss | Phase 9 |
+| A27 | Template fallback if upstream declines | Resolved (E1): the question is moot — the plan no longer depends on Rapid gaining native override, so there is no "upstream declines" fork to pause on. Rapid applies templates by file placement into an llama-monitor-owned copy/overlay today; llama.cpp uses its existing flags. Still forbidden: a Llama Monitor Jinja renderer, request-rewriting proxy/shim, mutation of the canonical/HF-cache model dir, or an unreleased dependency pin. The Phase-0 grep of the vllm_mlx parser only decides whether the Rapid applier can become flag-symmetric; it is not a gate on doing the work | Phase 9 |
 | A28 | Shared IA effect on llama.cpp | Accepted target: the same stable seven-category order for llama.cpp and Rapid-MLX, with backend-adaptive contents; hide empty subsections rather than reorder navigation; reorganize only after parity repair and screenshot-backed explicit user approval | Phase 10 |
 | A29 | HF qualification cache | Key by repo plus immutable revision and runtime/dependency snapshot; short-lived lookup aliases may refresh, but pinned evidence does not mutate | Phase 3/8 |
 | A30 | No-op controls during remediation | Hide controls that have never worked; show read-only eligibility only when it teaches something useful and is clearly labeled not configurable yet | Phase 1 |
@@ -1435,6 +1465,14 @@ The workload mix is decided; these operational details are not. Phase 0 should c
 10. Acceptable bounded host-cache budget/calibration envelope on the user's unified-memory machines. Unlimited is not an Auto candidate regardless of answer.
 
 Until measured, UI returns scenario-based choices and ranges—not one universal slot, cache, context, speculation, or sampler value.
+
+### 8.3 Consolidated M5 Max measurement envelope `[escalate→device]`
+
+Most A-register items are already Accepted with a concrete approach (decisions were front-loaded here, not left for the local executor to settle mid-phase). The genuine residual is a small set of items whose *recommended numeric value* cannot be derived and must be **measured on the M5 Max** (see the gate taxonomy in §9.6 — this is bucket 3, `[escalate→device]`; it does not spend frontier quota). Naming the envelope lets the local executor return "range now, number after measurement" instead of stalling on a value it cannot compute.
+
+Measurement-blocked items: A4 (stage-2 calibrated Auto memory limit), A5 (TurboQuant realized-memory), A6 (hybrid cache budget), A22 (calibration ±10% envelope), A35 (agent-session hybrid tiers), A41 (roleplay cache prefix stability), A42 (guaranteed/burst context numbers), A48 (MTP admission ceiling), A54 (calibration confidence tiers), A58 (live memory-availability numbers). These are fed by the ten §8.2 operational facts and overlap the KV floor (§13.1, E3) and the wire-capture oracles (§12.11, E8).
+
+Discipline: the plan already degrades each of these to honest scenario ranges rather than a fabricated value. This section only consolidates them so their device-measurement dependency is explicit and routed to Nick + the local model on the M5 Max, not to a frontier model.
 
 ## 9. Mandatory Pipelined Implementation Protocol
 
@@ -1528,6 +1566,29 @@ Required remediation scope:
 - Present the best two approaches, recommend one, explain why, and identify the affected later phases.
 - Screenshot scenarios run sequentially because the harness shares a port. For any UI phase, run `cargo build --release` first and use captures as the source of truth.
 
+### 9.6 Gate taxonomy: four buckets, one tag per hard gate
+
+This project's implementation is executed 90%+ by a finetuned local model (a Qwen3.6-27B with a stable, months-proven 200k context), with roughly 10% escalation to a frontier model (Opus/Sol). The Builder→Verifier loop above is a **local** dev-iteration loop, not Claude sub-agent fan-out. Because of that, "escalate to the Coordinator/user" (§9.5) is not one thing — it splits by *who or what can actually decide the gate*. Every hard gate in this plan — the §9.4 Verifier verdict contract and every per-phase hard-gate paragraph — carries exactly one of these four tags:
+
+1. **`[local-verifiable]`** — the local model self-runs it. MUST carry an exact CHECK command and a machine-decidable `PASS iff` condition. If no CHECK can be written, it is not this bucket. This is the default and the largest bucket.
+2. **`[decide-once]`** — Nick settles it once during refinement (a copy string, a threshold, an A-item position); after that it *becomes* `[local-verifiable]`. It is not a per-run stop. Educational copy (E7) and fit thresholds live here.
+3. **`[escalate→device]`** — Nick + the local model on the M5 Max: measurements, wire captures (§12.11), Phase 5 calibration, the KV floor (§13.1). Real hardware, but it does **not** spend frontier quota. The §8.3 envelope is this bucket.
+4. **`[escalate→frontier]`** — genuine reasoning judgment the local model cannot do. This is the ONLY bucket that spends the ~10% Opus/Sol budget, so it is deliberately kept small and pre-counted.
+
+Gate line format:
+
+```text
+GATE [tag]: <assertion>
+  CHECK | JUDGMENT: <exact command, or the specific judgment to be made>
+  PASS iff | HAND UP: <machine-decidable condition, or who it hands up to and what they decide>
+```
+
+Rules:
+
+- Buckets 2 and 3 absorb most of what naive "escalation" would have sent to a frontier model; the bucket-4 list is the minimized, pre-counted frontier budget.
+- A `[decide-once]` gate that has been decided is rewritten in place as `[local-verifiable]` with its resolved value inlined, so a later run does not re-open it.
+- The execution companion (`20260718-final_rapidmlx_followups_execution.md`) carries the concrete per-phase bucket assignments in its checkpoint tables; this section defines the taxonomy those tables apply.
+
 ## 10. Phase Index and Dependency Map
 
 | Phase | Deliverable | Depends on | Blocking decisions | Suggested context ceiling | State |
@@ -1537,11 +1598,11 @@ Required remediation scope:
 | 2 | Typed source, sampling catalog, and request-default contracts | 1 | A2, A20, A32, A38, A40, A45, A51–A52 | 160k | Not started |
 | 3 | Runtime/dependency capability qualification | 1–2 | A2, A14, A15, A17–A19, A26, A29, A51–A52 | 140k | Not started |
 | 4 | Normalized MLX architecture metadata | 0, 2 | A25, A53 | 170k | Not started |
-| 5 | Backend execution policies and first-class estimator | 3–4 | A1, A3–A5, A21–A22, A42–A43, A46–A48, A53–A54, A58 | two Builder packets, each <=120k | Not started |
+| 5 | Backend execution policies and first-class estimator (formal sub-phases 5a → 5b, §E5) | 3–4 (5b also needs 5a Verified) | A1, A3–A5, A21–A22, A42–A43, A46–A48, A53–A54, A58 | two sub-phases, each <=120k, each own gate + fresh Verifier | Not started |
 | 6 | Cross-backend cache policies, recommendations, and teaching | 5 | A6–A9, A21, A23, A31–A37, A41 | 170k | Not started |
 | 7 | Critical settings and shared wizard/editor component | 2–3, 5–6 | A2, A5, A7–A8, A26, A30, A33, A38–A40, A43, A45, A47–A49, A51 | two Builder packets, each <=120k | Not started |
 | 8 | HF discovery and Model Library convergence | 2–5 | A15, A17, A25, A29, A45–A46, A51–A57 | two Builder packets, each <=120k | Not started |
-| 9 | Conversation formatting, client routes, and chat-template truthfulness | 2–3 | A10, A27, A38–A40 | 120k | Not started |
+| 9 | Conversation formatting, client routes, and revision-pinned chat-template substitution (tool-call reliability) | 2–3 | A10, A27 (both resolved by E1), A38–A40 | 120k | Not started |
 | 10 | Screenshot-driven wizard/preset/library/HF IA | 7–9 | A16, A28, A32–A33, A50–A51 | 170k | Not started |
 | 11 | Diagnostics, metrics, cache/storage observability | 3, 5–7 | A9, A12, A23–A24, A31 | 170k | Not started |
 | 12 | Security, dependency, and watchlist closure | 3, 8–11 | A11–A14, A18, A24, A27 | 120k | Not started |
@@ -1568,10 +1629,12 @@ The dependency table above is authoritative. Do not infer prerequisites from a s
 6. Return unresolved decisions needed by Phases 1–3 to the Coordinator as two-approach decision packets with a recommendation. Only the Coordinator presents them to the user and records answers in Section 8.
 7. Define macOS functional support and Linux/Windows graceful-unavailability expectations.
 8. Pin current llama.cpp server/cache/OpenAI/tool/template evidence and official OpenCode, Hermes/OpenClaw, and SillyTavern integration documentation. Record what is documented versus inferred/observed from real requests.
+9. `[local-verifiable]` Template applier fact-pin (E1): grep the `vllm_mlx` argument parser to determine whether Rapid accepts **any** template-path/template-file argument. Record the exact answer. If yes, the Rapid template applier can become flag-based and symmetric with llama.cpp; if no (expected at the pinned commit), the Rapid applier is file-placement only. Also record the safety rule for later phases: the Rapid applier must never mutate the canonical / HF-cache model directory — it operates on an llama-monitor-owned copy or overlay so swaps are reversible and a re-download cannot clobber them. CHECK: grep result recorded with file:line evidence. This is a fact to pin, not a gate to stop on.
+10. `[local-verifiable]` KV-dtype fact-pin (E3): grep the `vllm_mlx` parser for the factual KV-cache flags, their allowed choices, and their defaults (e.g. `--kv-cache-dtype {bf16,int8,int4}`, `--reasoning`, TurboQuant tiers). Pin exactly what exists. Do **not** pin a recommended tool-calling KV value — that value is unknown on MLX and belongs to the §8.3 `[escalate→device]` measurement envelope (TurboQuant vs RotorQuant vs plain 4-bit), not to Phase 0. Separately record the llama.cpp heuristic to encode later: tool-enabled runtimes below `q8_0` KV are unreliable (§3.6).
 
-**Verifier brief:** Independently reproduce hashes/revisions, check that fixtures assert facts rather than mirror structs, confirm sources are immutable, and verify every Phase 1–3 decision is recorded.
+**Verifier brief:** Independently reproduce hashes/revisions, check that fixtures assert facts rather than mirror structs, confirm sources are immutable, verify every Phase 1–3 decision is recorded, and confirm the template-arg and KV-dtype greps pin only what the parser actually contains (no recommended MLX KV value asserted).
 
-**Hard gates:** no mutable evidence is treated as pinned; exact CLI/dependency/extras state is captured; fixtures cover the four named modern families plus flat Qwen3 and standard Qwen3 MoE; traceability has no orphan P0/P1 finding; no application behavior changes.
+**Hard gates:** no mutable evidence is treated as pinned; exact CLI/dependency/extras state is captured; fixtures cover the four named modern families plus flat Qwen3 and standard Qwen3 MoE; the `vllm_mlx` template-arg and KV-dtype greps are recorded with file:line evidence and no guessed MLX KV recommendation is pinned; traceability has no orphan P0/P1 finding; no application behavior changes.
 
 **Stop/escalate:** upstream HEAD invalidates a major recommendation; an HF revision cannot be resolved; current and audited Rapid behavior conflict; a blocking user choice remains unanswered.
 
@@ -1655,7 +1718,7 @@ The dependency table above is authoritative. Do not infer prerequisites from a s
 3. Represent MLX, MLX-LM, MLX-VLM, embeddings, and guided/outlines separately.
 4. Keep arbitrary finetunes distinct from verified aliases; source each parser, architecture, PFlash/TurboQuant, DFlash/DDTree, vision, embedding, and guided claim independently.
 5. Treat environments satisfying Rapid's published constraints and automated baseline import/self/protocol checks as normally upstream-supported. Do not require manual maintainer certification and do not apply a global Provisional banner solely because an exact compatible tuple is new. Reserve per-feature indeterminate state for consequential optional capabilities automation cannot safely establish.
-6. Add automated upstream monitoring/CI: detect new selected Rapid releases/commits, create a clean environment from upstream package metadata, run representative text/tool/guided/template/cache/model smoke cases, and publish a machine-readable capability/regression manifest. A failed concrete gate can create a known-incompatible override and maintainer alert; a passing run requires no manual approval.
+6. `[escalate→device]` Make the **on-device** update-validation probe first-class (E6): the real cadence is near-daily rapid-mlx + dependency updates, validated on the **user's device**, user-driven, independent of llama-monitor's release cycle — modeled on and upgrading the existing thin llama.cpp beta-update validation. The Phase 3 hard gate depends only on these on-device probes. Any Nick-owned automated upstream-monitoring CI (clean environment from upstream metadata, representative text/tool/guided/template/cache/model smoke cases, machine-readable capability/regression manifest) is **additive/optional** and must NOT gate Phase 3, because Phase 3 blocks Phases 5/7/8/11/12. If the optional CI runs, a failed concrete gate may create a known-incompatible override and maintainer alert and a passing run needs no manual approval — but its absence never blocks a phase.
 7. Implement the selected missing-extra installation/diagnostic policy and A26 strict-generation behavior. The managed easy button uses Rapid's upstream dependency contract plus explicitly product-supported extras, records the resolved receipt, and retains a last-known-good rollback; it does not maintain an independent hand-curated lock by default.
 8. Treat waybarrios only as a comparison/watchlist source.
 9. Add a parallel bounded llama.cpp capability snapshot for the shared workload contract: cache prompt/RAM/idle/reuse, context checkpoints, unified/partitioned KV, auto/explicit slots, continuous batching, Chat Completions, Responses, raw/text completion routes, streaming usage/progress, template caps, tools/parallel tools, and speculative modes.
@@ -1665,7 +1728,7 @@ The dependency table above is authoritative. Do not infer prerequisites from a s
 
 **Verifier brief:** Test old/current/future help fixtures, hash invalidation, missing/broken extras, arbitrary finetunes, stale snapshots, bounded probes, upstream-constrained but previously unseen dependency tuples, CI manifest ingestion, known-bad overrides, rollback receipts, and no version-only optional-feature inference. Prove a healthy unseen tuple receives no global warning while a concrete failure produces an actionable per-feature diagnosis.
 
-**Hard gates:** no manual per-release certification requirement; no arbitrary global Provisional/disclaimer state for an upstream-compatible environment passing automated baseline checks; warnings identify concrete evidence and remediation; flag presence alone cannot justify consequential semantics; help matching is exact; snapshots invalidate correctly; upstream constraints and resolved receipts are preserved; CI and on-device probes are automatic, timed, and bounded; no search/estimate executes repository code.
+**Hard gates:** no manual per-release certification requirement; no arbitrary global Provisional/disclaimer state for an upstream-compatible environment passing automated baseline checks; warnings identify concrete evidence and remediation; flag presence alone cannot justify consequential semantics; help matching is exact; snapshots invalidate correctly; upstream constraints and resolved receipts are preserved; the on-device update-validation probe is automatic, timed, and bounded and is the only qualification the Phase 3 gate depends on; any upstream-monitoring CI is additive/optional and its absence never blocks this or a dependent phase; no search/estimate executes repository code.
 
 **Stop/escalate:** qualification would require downloading/executing untrusted repo code; package versions cannot be safely enumerated; installer authority differs from A18.
 
@@ -1704,9 +1767,14 @@ The dependency table above is authoritative. Do not infer prerequisites from a s
 
 **Objective and outcome:** Produce one honest estimate for all surfaces using backend-native runtime semantics, separate active from retained memory, and revalidate llama.cpp slots/unified-KV/host-cache math for external-agent concurrency.
 
-**Budget:** 190k. **Prerequisites:** Phases 3–4; A1/A3–A5/A21–A22/A58. **Files:** new execution-policy/calculator and memory-availability modules, `src/inference/rapid_mlx/{mod.rs,command.rs}`, `src/inference/launch.rs`, `src/system.rs`, `src/gpu/apple.rs`, `src/web/api/{vram.rs,system_tools.rs}`, `src/llama/vram_estimator/`, `static/js/features/{vram-estimate.js,spawn-wizard.js,presets.js,setup-view.js,models.js,dashboard-render.js}`. **Read D31 in full.**
+**Formal sub-phase split (E5).** Phase 5 is executed as two formal sub-phases, each with its own hard gate and its own **fresh Verifier pass** — not merely "two Builder packets." The reason is coherence-per-packet for the local executor (this is not a token-fit problem; the 200k context holds the whole phase), and it compounds with the §9.6 gate taxonomy (fewer interdependent gates per Verifier pass) and the front-loaded A-decisions (each sub-phase enters with its decisions already resolved):
 
-**Builder brief:**
+- **Phase 5a — execution policy + estimator core (Builder brief items 1–14):** backend execution policies, `MemoryBreakdown`, effective-KV/TurboQuant modeling, planning-context contract, active-vs-retained separation, calibration, llama slot/unified-KV/host-cache revalidation, workload scenarios, quant-comparison rebasing, and MTP modeling — ending in cross-surface estimate equality. 5a must pass its own gate before 5b starts.
+- **Phase 5b — memory-availability, reclaim, and acquisition repairs (Builder brief items 15–18):** the backend-owned `MemoryAvailabilitySnapshot`, outcome-aware reclaim guidance, hardened wired-limit handling, and the concrete acquisition/propagation-gap repairs.
+
+**Budget:** 190k total (each sub-phase Builder packet ≤120k). **Prerequisites:** Phases 3–4; A1/A3–A5/A21–A22/A58; 5b additionally requires 5a `Verified complete`. **Files:** new execution-policy/calculator and memory-availability modules, `src/inference/rapid_mlx/{mod.rs,command.rs}`, `src/inference/launch.rs`, `src/system.rs`, `src/gpu/apple.rs`, `src/web/api/{vram.rs,system_tools.rs}`, `src/llama/vram_estimator/`, `static/js/features/{vram-estimate.js,spawn-wizard.js,presets.js,setup-view.js,models.js,dashboard-render.js}`. **Read D31 in full.**
+
+**Builder brief (items 1–14 = Phase 5a; items 15–18 = Phase 5b):**
 
 1. Implement `RapidMlxExecutionPolicy` and `MemoryBreakdown` without translating Rapid modes to llama `ctk`/`ctv` strings.
 2. Model requested/effective bf16/int8/int4, reasoning's int8 override, model-safe bf16 downgrade, and machine-readable reasons.
@@ -1722,6 +1790,8 @@ The dependency table above is authoritative. Do not infer prerequisites from a s
 12. Make llama.cpp MTP an explicit `--parallel 1` single-stream policy before save/launch, with queueing and sequential-sub-agent guidance. Benchmark it against a multi-slot/MTP-Off overlap policy; permit current-upstream multi-slot MTP only as a build/model/hardware-qualified experiment. Include all MTP recurrent/draft memory.
 13. For Rapid, inventory per-family embedded versus external MTP weights from actual loader behavior, not config labels/comments; include sidecar download/disk/provenance plus resident weights and MTP cache/state additively even while inactive. Implement the selected D25 admission policy. For Advanced overlap, model every allowed active request's KV/recurrent/working/speculative state, reduced context guarantee, and audited single-live greedy/no-logits MTP gate; do not claim lossless mid-stream fallback until exact-runtime stress tests pass. Return eligibility/fallback/handoff reasons, count MTP-active steps, and record peak memory.
 14. Distinguish external-client compaction ownership from Llama Monitor chat compaction and show observed prompt/context pressure without promising app-side protection.
+_— Phase 5a gate falls here; 5b begins. A fresh Verifier must pass Phase 5a (items 1–14, ending in cross-surface estimate equality) before the following items start. —_
+
 15. Implement the accepted D30/A58 backend-owned `MemoryAvailabilitySnapshot`. Feed the identical timestamped snapshot and effective backend ceiling to every fit surface. Return safe-now, conditional-after-reclaim, after-closing-apps diagnostic, configured-ceiling, and unsafe states without calling total RAM or a wired cap available memory. Carry explicit additional-versus-replace launch intent; add back only a measured app-owned runtime that the launch action will actually stop. Show stable capacity and current readiness separately in Model Browser/HF.
 16. Make reclaim guidance outcome-aware and action-specific: distinguish backend allocator-cache clear, reusable-state eviction, app-owned runtime stop/high-memory-app guidance, and OS disk-cache purge. Use a conservative bounded recovery estimate, offer an action only when it can cross the selected fit boundary, remeasure afterward, and report actual change. Group/redact high-memory-process evidence, do not return full command arguments by default, use macOS `phys_footprint` with labeled RSS/backend metrics where available, and do not add arbitrary process termination.
 17. Harden wired-limit handling with RAM-relative safe bounds, explicit consequence/confirmation, exact readback, restore/default, failure provenance, and process restart. Preserve the user's verified reboot-persistent 57,344 MiB M5 Max path; record mechanism/macOS evidence and test supported versions rather than replacing it preemptively. If a different boot mechanism is ever required, it needs opt-in ownership and rollback. Keep raw wired limit, Metal recommended working set, backend effective utilization, and current safe availability as separate values.
@@ -1729,7 +1799,9 @@ The dependency table above is authoritative. Do not infer prerequisites from a s
 
 **Verifier brief:** Recalculate representative cases independently; cross product KV/reasoning/TurboQuant/concurrency/context; compare every UI surface; prove unknown finetunes do not inherit alias eligibility; test PFlash/paged/hybrid-zero/recurrent bypasses and transient peaks; inspect false precision and model ceilings; run llama regression tests.
 
-**Hard gates:** no Rapid estimate accepts/displays llama KV vocabulary; requested/effective policies are distinct; active and retained totals are distinct; TurboQuant affects only qualified retained-prefix components and its transient decompression peak remains visible; Standard is not mislabeled FP16; unknown finetunes do not inherit exact-alias eligibility; all surfaces consume the same memory snapshot and agree; Rapid never inherits stale/zero llama memory caches; no total unified memory or theoretical wired cap is called available; current pressure can downgrade a previously successful configuration with actionable recovery scenarios; reclaim is conservative and remeasured; OS disk purge is not presented as clearing live model/Metal memory; process command secrets are absent and process metrics are labeled honestly; sysctl mutation is bounded, exactly verified, reversible, restart-aware, and persistence-qualified; Qwen3.6/Gemma4 errors meet or truthfully display the calibrated envelope; external MTP/vision/embedding companions and Rapid cache reservations are additive and never hidden/double-counted; eligibility/dispatch/weight ownership disagreements stop MTP qualification; concurrency fit covers the worst admitted active-request state rather than the non-reserving ceiling alone; Rapid context is not presented as server allocation; llama slot/context math matches the pinned current runtime; unbounded host cache is never included as a finite fit promise.
+**Hard gates — Phase 5a (items 1–14):** no Rapid estimate accepts/displays llama KV vocabulary; requested/effective policies are distinct; active and retained totals are distinct; TurboQuant affects only qualified retained-prefix components and its transient decompression peak remains visible; Standard is not mislabeled FP16; unknown finetunes do not inherit exact-alias eligibility; the same estimator API result feeds wizard/preset/welcome/Model Library/HF preview and they agree (cross-surface equality is the 5a exit gate); Qwen3.6/Gemma4 errors meet or truthfully display the calibrated envelope; external MTP/vision/embedding companions and Rapid cache reservations are additive and never hidden/double-counted; eligibility/dispatch/weight ownership disagreements stop MTP qualification; concurrency fit covers the worst admitted active-request state rather than the non-reserving ceiling alone; Rapid context is not presented as server allocation; llama slot/context math matches the pinned current runtime; unbounded host cache is never included as a finite fit promise.
+
+**Hard gates — Phase 5b (items 15–18):** all surfaces consume the same `MemoryAvailabilitySnapshot` and agree; Rapid never inherits stale/zero llama memory caches; no total unified memory or theoretical wired cap is called available; current pressure can downgrade a previously successful configuration with actionable recovery scenarios; reclaim is conservative and remeasured; OS disk purge is not presented as clearing live model/Metal memory; process command secrets are absent and process metrics are labeled honestly; sysctl mutation is bounded, exactly verified, reversible, restart-aware, and persistence-qualified; the acquisition/propagation-gap repairs (Rapid fresh snapshot, Model Browser availability, partial-info overwrite, Preset Editor refresh, `max_cache_blocks` reaching prelaunch estimates) all land.
 
 **Stop/escalate:** calibration exceeds A22; runtime safety overrides cannot be determined; shared API changes would break existing clients without a migration; evidence cannot bound a component.
 
@@ -1832,29 +1904,29 @@ The dependency table above is authoritative. Do not infer prerequisites from a s
 
 **Handoff emphasis:** identity/creator/converter flow diagram, old-to-new feature parity matrix, network bounds, qualification evidence states, quant/context feedback matrix, library association/grouping matrix, captures.
 
-### Phase 9 — Conversation formatting and chat-template handling
+### Phase 9 — Conversation formatting and chat-template substitution
 
-**Objective and outcome:** Tell the truth about Rapid's model-provided template today and establish a safe path to real custom-template support.
+**Objective and outcome:** Fix the §3.9 tool-call-reliability defect by substituting revision-pinned chat templates on **both** backends, and tell the truth about how each backend applies them. This is not "investigate whether Rapid can get native override first" — E1 resolved the architecture: ONE revision-pinned selection layer (identity/rollback/provenance) with two thin appliers. The driving reason is functional tool-call correctness (stock Qwen3.6/Gemma4 templates loop/fail on tool calls), not truthfulness alone.
 
-**Budget:** 120k. **Prerequisites:** Phases 2–3; A10/A27. **Files:** Rapid compatibility/command/info/model resolver, `src/web/api/templates.rs`, chat-template registry/updater/UI, wizard/preset/chat transport, related tests.
+**Budget:** 120k. **Prerequisites:** Phases 2–3; A10/A27 (both resolved by E1); Phase 0 template-arg grep (item 9). **Files:** Rapid compatibility/command/info/model resolver, `src/web/api/templates.rs`, chat-template registry/updater/UI, wizard/preset/chat transport, related tests.
 
 **Builder brief:**
 
-1. Until a real Rapid override exists, show “model-provided template,” provenance/evidence, and limitations; do not offer llama custom templates as launchable.
-2. Keep `chat_template_kwargs` separate from template replacement and expose only probed supported kwargs.
-3. Prevent hidden llama template state from leaking into Rapid; preserve it for switching back.
-4. Revalidate current Rapid source and design/locally qualify the smallest native template file/config contract through Rapid's existing tokenizer/MLX-LM rendering path. If already released, capability-probe exact syntax, validate/canonicalize the file, and reuse the library through backend-specific launch mapping. If not released, produce an upstream-ready design/patch and evidence, then stop for approval before any external submission, unreleased pin/fork, or managed dependency change.
-5. Preserve the existing Froggeric HF/SHA/update foundation, but migrate mutable `main` plus overwrite-in-place installs into immutable `TemplateRelease` records. Fetch/resolve exact revisions, install new releases alongside the active one, retain version history, show content/capability diffs, require explicit activation, and support rollback to the model-provided template or any retained pinned release under a bounded cleanup policy.
-6. If native support is unavailable, stop for A27; do not implement overlays, a Jinja renderer, request-rewriting shim/proxy, fork, or unreleased pin. Carry forward a concrete overlay proposal that defaults to the pinned repository template and can offer opt-in, revision-pinned, model-family-qualified alternatives when the user reports looping, tool-call, role, or reasoning problems. Include Google/native and community/Froggeric revision examples where applicable, but treat every release as separate evidence rather than a “latest is best” upgrade.
+1. Apply a substituted template on Rapid by **file placement** into an llama-monitor-owned copy/overlay of the model directory — never the canonical/HF-cache dir (Phase 0 item 9 safety rule). If Phase 0's grep found that Rapid accepts a template-path argument, the Rapid applier may instead pass that flag (symmetric with llama); otherwise file-placement is the mechanism. Surface the applier honestly: on Rapid, substitution is file-placement provenance, not a runtime flag, and `chat_template_kwargs` (kept separate, only probed supported kwargs) does not replace the template.
+2. Apply a substituted template on llama.cpp via its existing `--chat-template` / `--chat-template-file` flags. Both appliers consume the same revision-pinned selection layer.
+3. Prevent one backend's template state from leaking into the other; preserve each for switching back.
+4. **Tool-call smoke-test matrix gates activation (E1):** a candidate template becomes active only after it passes a tool-call smoke test for its model family/workload — single/parallel tool calls, null/empty arguments, tool errors/retries, reasoning preservation, role integrity, streaming shape. A failed smoke test leaves the active selection unchanged. This is the machinery §12.7 describes, now driven by the §3.9 defect. On Rapid specifically, one retained `[escalate→device]` checkpoint: verify on the M5 Max that the first real substitution loads and kills the observed tool-call loop.
+5. Preserve the existing Froggeric HF/SHA/update foundation, but migrate mutable `main` plus overwrite-in-place installs into immutable `TemplateRelease` records. Fetch/resolve exact revisions, install new releases alongside the active one, retain version history, show content/capability diffs, require explicit activation, and support rollback to the model-provided template or any retained pinned release under a bounded cleanup policy. The community-standard candidates already exist: Froggeric for Qwen3.5/3.6, and the official Google template for Gemma4 (the community jscott template underperformed) — qualification, not a search for a second alternative, is the work.
+6. Forbidden regardless of backend: a Llama Monitor Jinja renderer, request-rewriting shim/proxy, a fork or unreleased dependency pin, and any mutation of the canonical/HF-cache model directory. File placement operates only on the llama-monitor-owned copy/overlay so it is reversible and re-download-safe. There is no "native support unavailable → stop for A27" fork: the plan never depended on Rapid gaining native override.
 7. Upgrade the llama.cpp template-library experience without inventing an overlay where its native template-file path suffices: support multiple revisioned alternatives per family, immutable provenance/hashes, compatibility and workload evidence, reversible trials/comparison, stale/update state, user notes, and rollback to model-provided behavior. For Gemma 4, discover and version the applicable Google official model-repository template as a first-class model-author source; separately ingest relevant official-repo discussion links and community forks as untrusted candidates requiring exact-revision inspection and independent workload qualification. Reuse this library/selection contract for Rapid only when a qualified native Rapid hook exists; shared UX does not imply shared runtime mechanics.
 8. Add SillyTavern integration qualification for structured OpenAI chat and client-formatted text completion. For text completion, assert that SillyTavern owns the entire prompt and no backend chat-template field participates; qualify llama.cpp `/completion` and Rapid `/v1/completions` payload filtering, streaming, samplers, stops, context, response shape, errors, and cache behavior separately. For structured chat, qualify the backend template and role/tool behavior separately.
 9. Qualify recommended coding/tool templates against the actual OpenCode and Hermes/OpenClaw protocols observed in Phase 0: Chat Completions, Responses, or Anthropic Messages as applicable; single/parallel tool calls; null/empty arguments; tool errors/retries; long observations; reasoning preservation; and streaming message shapes. `/props` template capabilities are necessary evidence, not sufficient proof.
 
 **Verifier brief:** Test current-runtime truthfulness, backend switching, unsupported selection, provenance/update state, and—only if supported—actual argv and real-runtime semantic smoke tests. For a separately approved overlay prototype, verify immutable source/template/config hashes, complete tokenizer closure, no downloaded-snapshot mutation or unnecessary weight duplication, explicit selection, reversible trial/rollback, stale revisions, and independent Chat/Coding/Tool/research/Roleplay qualification.
 
-**Hard gates:** no false parity; no raw-prompt rendering or template intervention by llama-monitor on the SillyTavern text path; kwargs are not labeled templates; wrong-engine or wrong-family template cannot launch; client-formatted roleplay prompts receive no server chat template; custom chat support is labeled verified only after actual tool/reasoning/system tests; Froggeric SHA/update behavior does not regress; mutable `main` is not a release identity; update checks never overwrite the active file before explicit activation; previous/model-provided versions remain rollback-safe; official Google sources and discussion-linked community forks have distinct provenance/trust labels; no silent template substitution or universal “newer is better” claim; overlay work has separate approval/threat model.
+**Hard gates:** the Rapid applier never mutates the canonical/HF-cache model dir — only an llama-monitor-owned copy/overlay, reversible and re-download-safe; the applier is described honestly per backend (llama flag vs Rapid file-placement) with no false parity claim; no raw-prompt rendering, Jinja renderer, or request-rewriting shim/proxy on any path; no fork or unreleased dependency pin; no template intervention by llama-monitor on the SillyTavern text path; kwargs are not labeled templates; a candidate template becomes active only after passing the tool-call smoke-test matrix, and a failed smoke test leaves the active selection unchanged; wrong-engine or wrong-family template cannot launch; client-formatted roleplay prompts receive no server chat template; Froggeric SHA/update behavior does not regress; mutable `main` is not a release identity; update checks never overwrite the active file before explicit activation; previous/model-provided versions remain rollback-safe; official Google sources and discussion-linked community forks have distinct provenance/trust labels; no silent template substitution or universal “newer is better” claim. A heavier full tokenizer/config-replacement overlay (beyond the sanctioned template-file copy) still requires its own approval/threat model.
 
-**Stop/escalate:** upstream rejects/delays the flag; selected fallback is overlay; tokenizer closure/remote code prevents safe override; template changes break tool/reasoning semantics.
+**Stop/escalate:** tokenizer closure/remote code prevents a safe file-placement copy; template changes break tool/reasoning semantics on the M5 Max device check; a candidate cannot pass the tool-call smoke test for a required family.
 
 **Non-goals:** managed overlay by default, modifying remote repos, universal template correctness inference.
 
@@ -1886,9 +1958,9 @@ The dependency table above is authoritative. Do not infer prerequisites from a s
 
 **Handoff emphasis:** baseline and accepted-design capture sets, final visual approval, accessibility checklist, CSS audit, final scenario list.
 
-### Phase 11 — Diagnostics, metrics, cache and storage observability
+### Phase 11 — Diagnostics, metrics, cache/storage observability, and the cross-backend Doctor
 
-**Objective and outcome:** Expose enough bounded, privacy-safe evidence to troubleshoot effective policies, validate recommendations, and understand storage/memory pressure.
+**Objective and outcome:** Expose enough bounded, privacy-safe evidence to troubleshoot effective policies, validate recommendations, and understand storage/memory pressure — and grow the existing Doctor into a **cross-backend teaching + troubleshooting pillar** (E11). Teaching users "wherever and whenever we can" is release-gating, not decoration (see Phase 14 release bar); the Doctor is the mechanism for the troubleshooting half and raises novice skill by explaining *why*, not just fixing symptoms.
 
 **Budget:** 170k. **Prerequisites:** Phases 3 and 5–7; A9/A12/A23–A24/A31. **Files:** Rapid poller, inference/web metrics and capabilities, runtime API, dashboard cards/updater, model diagnostics, fixtures, auth/UI tests.
 
@@ -1901,10 +1973,11 @@ The dependency table above is authoritative. Do not infer prerequisites from a s
 5. Surface disk checkpoint interval, cap, current use, path ownership, errors, and recovery. Add cleanup only if A24 defines safe app ownership and authorization.
 6. Add schema-drift fixtures, restart/reset behavior, malformed optional/required status cases, auth and bounded-retention tests.
 7. Add endpoint/workload diagnostics that distinguish streaming, tools, format path, simultaneous requests, hot-session reuse, cached-prefix tokens, context trimming/shift, and stop reason without recording prompts. Include roleplay lore-insertion/cache-miss and agent tool-schema-churn cases.
+8. **Expand the Doctor into a cross-backend troubleshooting system (E11).** Grow the existing rapid-mlx-focused Doctor to cover **llama.cpp too**, drawing the llama side on the Phase 3 llama capability snapshot. Discipline (keeps it bounded for the local executor and the single-cutover release): each Doctor check traces to a **real** failure mode with the same defect→test rigor as the rest of the plan — no speculative "cover everything." Each check = detected condition + plain explanation + concrete remediation + a short "why this happens" teaching note. Provide **dual reading levels** per check from one detection engine: novice (symptom + fix + why, safe language) and power-user (flag/value/source-evidence/threshold) — reuse the `[decide-once]` educational copy from Phase 6/§13.2, do not duplicate it. Ship the checks already surfaced by this plan: KV below `q8_0` for tool-enabled llama runtimes (§3.6/§13.1), tool-call-loop template mismatch (§3.9/Phase 9), invalid `--tool-call-parser` argv (§3.1), and a stale/incompatible rapid-mlx update (the on-device update-validation probe from Phase 3/A18 is itself a Doctor surface).
 
-**Verifier brief:** Fuzz absent/unknown/malformed metrics, check units/epochs, inspect privacy/logs, test stale capability and disk errors, validate auth/path constraints and dashboard dark/light/narrow states.
+**Verifier brief:** Fuzz absent/unknown/malformed metrics, check units/epochs, inspect privacy/logs, test stale capability and disk errors, validate auth/path constraints and dashboard dark/light/narrow states. For the Doctor: confirm every check maps to a real failure mode with a reproducing condition, both reading levels render the same underlying detection, and remediation text names a concrete action (no vague "check your configuration").
 
-**Hard gates:** no prompt/response content; metrics schema drift degrades safely; required corruption remains detectable; recommendations can cite observed evidence without self-mutating; disk cleanup cannot escape owned paths or delete active data; all new routes are authenticated and bounded.
+**Hard gates:** no prompt/response content; metrics schema drift degrades safely; required corruption remains detectable; recommendations can cite observed evidence without self-mutating; disk cleanup cannot escape owned paths or delete active data; all new routes are authenticated and bounded; every Doctor check is anchored to a real failure mode (no speculative checks), covers both backends where the failure applies, and provides condition + explanation + remediation + teaching note at both novice and power-user reading levels from one detection engine.
 
 **Stop/escalate:** desired metric requires content capture; upstream exposes no stable signal; storage cleanup ownership is ambiguous; destructive operation lacks authority/confirmation design.
 
@@ -1967,6 +2040,13 @@ The dependency table above is authoritative. Do not infer prerequisites from a s
 
 **Objective and outcome:** Independently prove all findings are closed, regressions are absent, and the branch is ready for human PR/release decisions.
 
+**Single-cutover release model (B3 resolved).** This is the **one and only** release checkpoint. Execution is continuous local-model iteration (12+hrs/day); dead or unwired code *between* phase gates is expected and correct, so there is no per-phase "releasable main" invariant — the per-phase guard is only "no VISIBLE no-op / no false UX claim." The "releasable" check (no half-wired user-visible control, no partial read-path migration) applies **only here**. There is no intermediate release.
+
+**Release bar — both required (Nick):**
+
+1. **Full parity:** backend + frontend function as intended with rapid-mlx, verified.
+2. **Dual-audience UX (release-gating, not cosmetic):** a properly designed UI/UX flow that serves both a minimally-experienced local-LLM user (safe defaults, progressive disclosure, educational copy) and a powerful technical user (full tweakability, no hidden ceilings). This elevates §12.8 (UI + a11y), the `[decide-once]` educational copy/thresholds, the template-selection UX (Phase 9), the cross-backend Doctor teaching pillar (Phase 11, E11), and progressive-disclosure IA (Phase 10) from "nice to have" to gate criteria.
+
 **Budget:** 120k. **Prerequisites:** Phases 1–13 and all decisions. **Files:** whole diff, tests, docs, generated assets, plan completion ledger. No feature expansion.
 
 **Builder brief:** The Builder in this phase is a release-preparation agent. It may fix only mechanical validation failures or return focused defects for separate remediation. It updates traceability and prepares evidence; it does not waive gates.
@@ -1995,7 +2075,7 @@ If platform-sensitive Rust/tray/config paths changed, also run the documented Wi
 
 **Verifier brief:** A fresh Verifier repeats risk-focused tests and a representative end-to-end matrix, audits auth/security/platform behavior, inspects final screenshots, maps every P0/P1/decision/hard gate to evidence, and confirms clean intended status.
 
-**Hard gates:** all mandatory commands pass; full isolated Playwright passes; no P0 defect reproduces; representative Qwen3.6/Gemma4/simple/MoE cases pass; both backends pass shared-regression cases; every source and control trace is complete; security review has no unresolved high/critical finding; all decisions and external citations are current; the Builder provides a complete handoff, a fresh Verifier returns PASS, and the Coordinator accepts the evidence and closes traceability.
+**Hard gates:** all mandatory commands pass; full isolated Playwright passes; no P0 defect reproduces; representative Qwen3.6/Gemma4/simple/MoE cases pass; both backends pass shared-regression cases; every source and control trace is complete; security review has no unresolved high/critical finding; all decisions and external citations are current; the "releasable" check holds (no half-wired user-visible control, no partial read-path migration); the dual-audience UX release bar is met (novice safe-defaults/progressive-disclosure/educational-copy path AND power-user full-tweakability path both verified) and the cross-backend Doctor teaching pillar is present; the Builder provides a complete handoff, a fresh Verifier returns PASS, and the Coordinator accepts the evidence and closes traceability.
 
 **Stop/escalate:** any failure needs non-mechanical product code; external baseline drifted; uncommitted unrelated changes overlap; required hardware/real runtime evidence is unavailable. Return a precise blocker and remediation phase rather than marking complete.
 
@@ -2076,10 +2156,10 @@ Cover public tokenless, private, gated, missing token, paginated siblings, neste
 
 | Backend/runtime | Built-in model template | Custom library template | Missing/invalid | Tools/reasoning/multimodal |
 |---|---|---|---|---|
-| llama.cpp supported | regression baseline | selectable/uploadable/pinned | actionable validation | existing behavior retained |
-| Rapid 0.10.12 | model-provided/provenance | unavailable and not offered | truthful limitation | kwargs only where probed |
-| Future Rapid with override | capability-probed | backend-specific argv | safe failure | real-runtime qualification required |
-| Managed overlay proposal | design-only unless A27 approves; starts with pinned repository template | revision-pinned, family-qualified alternatives with provenance and explicit trial/rollback | threat-model and tokenizer-closure gate | independently qualify chat, coding, tools/reasoning, roleplay, streaming, and multimodal behavior |
+| llama.cpp supported | regression baseline | selectable/uploadable/pinned, applied via `--chat-template`/`--chat-template-file` | actionable validation | existing behavior retained |
+| Rapid 0.10.12 | model-provided/provenance | **substituted by file-placement** into an llama-monitor-owned copy/overlay (never the canonical/HF-cache dir); activation gated by the tool-call smoke test | truthful applier label (file-placement, not a runtime flag) | kwargs only where probed; template substitution fixes tool-call looping (§3.9) |
+| Rapid with a template-path arg (if Phase 0 grep finds one) | capability-probed | flag-based/symmetric with llama argv | safe failure | real-runtime qualification required |
+| Heavier full tokenizer/config-replacement overlay | design-only, separate approval; beyond the sanctioned template-file copy | revision-pinned, family-qualified alternatives with provenance and explicit trial/rollback | threat-model and tokenizer-closure gate | independently qualify chat, coding, tools/reasoning, roleplay, streaming, and multimodal behavior |
 | SillyTavern instruct/text on llama.cpp | not applicable: client renders raw prompt | SillyTavern instruct/context template only | client-side actionable guidance | server chat-template/tool capability not part of this route |
 | SillyTavern instruct/text on Rapid | not applicable: client renders raw prompt for `/v1/completions` | SillyTavern instruct/context template only | qualify Generic/VLLM-style payload/stream contract | Rapid chat-template/tool capability not part of this route |
 | SillyTavern custom chat | backend model/custom template applies | only where backend supports it | prevent instruct + chat double formatting | qualify structured role/tool behavior separately |
@@ -2129,6 +2209,8 @@ Required sequential scenarios include `spawn-wizard`, `spawn-wizard-engines`, `s
 | Deterministic batch/eval | qualified non-streaming route | greedy, exact repeats, preferably no tools | response-cache eligibility, byte/working set, isolation from interactive clients |
 
 For every external client, capture the real request/event shape at a local test endpoint for a pinned client version. Test explicit `0`/`false`, unknown-field preservation, timeouts, cancellation, SSE pings, terminal usage chunks, tool-call streaming, retry behavior, authentication, and model alias. Documentation evidence is not a substitute for a wire capture.
+
+These wire captures are `[escalate→device]` (§9.6 bucket 3): they are **produced during implementation** on real hardware, not pre-existing fixtures the local executor can self-validate against, so they are part of the §8.3 M5 Max device envelope — Nick + the local model capture them on the M5 Max. This does not spend frontier quota; it is a device/measurement dependency, not a reasoning judgment.
 
 ### 12.12 llama.cpp execution/cache matrix
 
@@ -2262,7 +2344,9 @@ The audit verified these against upstream source, but a future implementation ag
 - exact response-cache eligibility/hash/lookup/store lines beyond the LRU class;
 - exact scheduler/cache implementation behind hybrid entry counting, global byte limits, PFlash bypass, and SWA exact-repeat behavior;
 - HF API semantics used for pagination, revisions, gated/private access, and sibling/file sizing;
-- community/Froggeric template repository, revision, license, provenance, and update policy before any Rapid-related reuse claim.
+- community/Froggeric template repository, revision, license, provenance, and update policy before any Rapid-related reuse claim; and the official Google Gemma4 template revision (the community jscott template underperformed) as the candidate to qualify.
+
+KV-dtype pin discipline (E3): the pins above are **factual** — the flags, allowed choices, and defaults that exist in the `vllm_mlx` parser. Do NOT record a *recommended* tool-calling KV value on the MLX side here: because TurboQuant/RotorQuant redistribute precision, "4-bit MLX" is not `q4_0`, the llama.cpp `q8_0`-for-tools floor does not port, and the right MLX value is unknown and belongs to the §8.3 `[escalate→device]` M5 Max measurement envelope (TurboQuant vs RotorQuant vs plain 4-bit). Encode the llama.cpp heuristic (warn below `q8_0` KV for tool-enabled runtimes) as a fact; leave the MLX floor "measured, not asserted" (D20 — no cross-backend KV-vocabulary normalization).
 
 ### 13.2 Local defect evidence to preserve in tests
 
@@ -2278,14 +2362,14 @@ External citations do not replace local regression tests. Before fixing each def
 | bytes-to-bits error | MLX size fallback | numeric unit test with known size/bit width |
 | llama vocabulary leaks into Rapid | VRAM API/UI and auto-size | request/result/visual regression tests |
 | `info` confidence overreach | `info_query.rs`/profile callers | unknown-finetune fixture remains provisional |
-| no Rapid template override | command/capability/template UI | unsupported runtime truthfulness test |
+| stock template tool-call unreliability; no revision-pinned substitution (§3.9) | command/capability/template UI, chat-template registry | reproduce a stock-template tool-call loop; prove the substituted (Froggeric/Google-official) template via file-placement kills it and passes the tool-call smoke test; honest per-backend applier label |
 | Metal auto-selects unlimited llama host cache | wizard auto-size/platform initialization | no new Auto preset emits `-cram -1`; explicit legacy value preserved/warned |
 | llama context/slot estimator-launch mismatch | llama command, VRAM estimator/API, all estimate surfaces | unified/partitioned/Auto matrix with guaranteed/burst context |
 | unconditional llama Web UI MCP proxy | `src/inference/llama_cpp.rs` | ordinary external-agent argv omits flag; explicit secure Web UI case only |
-| cache-idle copy conflates mechanisms | preset/wizard HTML/JS/docs | lifecycle test plus reviewed educational copy |
+| cache-idle copy conflates mechanisms | preset/wizard HTML/JS/docs | lifecycle test plus reviewed educational copy `[decide-once]` (Nick approves the copy string once in refinement; the gate then becomes `[local-verifiable]`) |
 | llama MTP slot policy is hidden | wizard payload and launch policy | explicit MTP single-stream lock/queue guidance; multi-slot mode disables MTP; no silent rewrite |
 | Rapid MTP benefit is conditional | scheduler/profile/diagnostics | single-greedy-request activation and batched/non-greedy fallback tests/metrics |
-| generic quant recommendation ignores workload | estimator/Model Browser/HF/wizard | workload-fit recommendation equality and badge gate |
+| generic quant recommendation ignores workload | estimator/Model Browser/HF/wizard | workload-fit recommendation equality and badge gate `[decide-once]` (Nick sets the fit threshold once; the gate then becomes `[local-verifiable]`) |
 | explicit sampler zeros are lost | wizard/preset/default/request path | zero/false/omission round-trip and client-precedence tests |
 
 ## 14. Upstream Revalidation Procedure
@@ -2318,7 +2402,10 @@ The Coordinator maintains this table after each independently verified phase. A 
 | Response-cache guidance | 6, 11 | eligibility/bypass/copy/bytes evidence | Open |
 | Runtime/extras qualification | 3, 12 | capability/dependency/smoke matrix | Open |
 | HF and Model Library parity | 8, 10 | identity/network/library/UI matrix | Open |
-| Chat-template truthfulness/support | 9 | capability/semantic/backend-switch tests | Open |
+| Stock chat-template tool-call unreliability + revision-pinned substitution (§3.9, E1) | 9, 11 | reproduce stock-template tool-call loop; substituted (Froggeric/Google-official) template via llama flag / Rapid file-placement kills it; tool-call smoke-test-gated activation; M5 Max device check; honest per-backend applier label; backend-switch/no-leak tests | Open |
+| Preset schema migration/versioning (D32, E10) | 2, 13 | schema-version field; forward-migration on read; save→load→save round-trip; migration of presets from today's shipped llama-monitor; safe downgrade | Open |
+| Cross-backend Doctor teaching/troubleshooting pillar (E11) | 11 | every check anchored to a real failure mode; both backends where applicable; condition + explanation + remediation + teaching note at novice and power-user reading levels from one detection engine | Open |
+| Dual-audience UX + single-cutover release bar (B3, release bar) | 14 | novice safe-default/progressive-disclosure/educational-copy path AND power-user full-tweakability path both verified; "releasable" check applies only at this one checkpoint | Open |
 | Remote-code posture | 1, 12 | decision, consent/block tests, upstream status | Open |
 | llama unlimited Metal cache recommendation | 1, 5, 6 | no auto `-1`; bounded retained-memory policy/calibration | Open |
 | llama context/parallel contract | 0, 5, 7 | unified/partitioned/Auto launch-estimator-surface matrix | Open |
