@@ -22,7 +22,8 @@ export function getConfig() {
 
 function hasModelSource(config) {
     if (config.backend === 'rapid_mlx') {
-        return !!config.rapid_mlx?.model_path;
+        const rapidMlx = config.rapid_mlx;
+        return !!(rapidMlx?.model_source_view || rapidMlx?.model_path);
     }
     return !!(config.model_path || config.hf_repo);
 }
@@ -80,8 +81,9 @@ export async function doStart(cooldownBtn, options = {}) {
     const buttonArg = cooldownBtn instanceof Event ? null : cooldownBtn;
     const config = getConfig();
     const preset = sessionState.presets.find(item => item.id === config.preset_id);
+    const rapidMlx = preset?.rapid_mlx;
     const hasSource = preset?.backend === 'rapid_mlx'
-        ? !!preset.rapid_mlx?.model_path
+        ? !!(rapidMlx?.model_source_view || rapidMlx?.model_path)
         : !!(preset?.model_path || preset?.hf_repo);
     if (!hasSource) {
         showToast('No model source set. Edit the preset to select a local model or HuggingFace repo.', 'error');

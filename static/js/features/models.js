@@ -803,9 +803,15 @@ function isLocalServerRunning() {
 function findPresetsForModel(model) {
     const paths = new Set([model.path, inventoryModelSourceValue(model)].filter(Boolean));
     if (!paths.size) return [];
-    return (sessionState.presets || []).filter(preset =>
-        paths.has(preset.model_path) || paths.has(preset.rapid_mlx?.model_path)
-    );
+    return (sessionState.presets || []).filter(preset => {
+        if (paths.has(preset.model_path)) return true;
+        const rapidMlx = preset.rapid_mlx;
+        if (!rapidMlx) return false;
+        const candidate = rapidMlx.model_source_view?.canonical_identity
+            || rapidMlx.model_source_view?.display_name
+            || rapidMlx.model_path;
+        return candidate ? paths.has(candidate) : false;
+    });
 }
 
 async function doSwitchToPreset(presetId) {

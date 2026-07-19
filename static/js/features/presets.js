@@ -68,7 +68,12 @@ function isRunningStatus(status) {
 }
 
 export function presetModelSource(preset) {
-    if (preset?.backend === 'rapid_mlx') return preset.rapid_mlx?.model_path || '';
+    const rapidMlx = preset?.rapid_mlx;
+    if (preset?.backend === 'rapid_mlx') {
+        return rapidMlx?.model_source_view?.canonical_identity
+            || rapidMlx?.model_source_view?.display_name
+            || rapidMlx?.model_path || '';
+    }
     return preset?.model_path || preset?.hf_repo || '';
 }
 
@@ -1422,9 +1427,15 @@ function _renderPresetsPanel() {
         info.appendChild(name);
 
         const metaParts = [];
-        if (preset.backend === 'rapid_mlx' && preset.rapid_mlx?.model_path) {
-            metaParts.push(preset.rapid_mlx.model_path.split(/[/\\]/).pop() || preset.rapid_mlx.model_path);
-            metaParts.push('Rapid-MLX');
+        const rapidMlx = preset.rapid_mlx;
+        if (preset.backend === 'rapid_mlx') {
+            const modelIdentity = rapidMlx?.model_source_view?.canonical_identity
+                || rapidMlx?.model_source_view?.display_name
+                || rapidMlx?.model_path;
+            if (modelIdentity) {
+                metaParts.push(modelIdentity.split(/[/\\]/).pop() || modelIdentity);
+                metaParts.push('Rapid-MLX');
+            }
         } else if (preset.model_path) metaParts.push(preset.model_path.split(/[/\\]/).pop() || preset.model_path);
         else if (preset.hf_repo) metaParts.push(preset.hf_repo);
         if (preset.bind_host === '0.0.0.0') metaParts.push('LAN');
@@ -1859,8 +1870,9 @@ export async function savePreset(event) {
         markFieldError('modal-name', 'Preset name is required.');
         valid = false;
     }
+    const rapidMlx = preset.rapid_mlx;
     const hasModelSource = preset.backend === 'rapid_mlx'
-        ? !!preset.rapid_mlx?.model_path
+        ? !!(rapidMlx?.model_source_view || rapidMlx?.model_path)
         : !!(preset.model_path || preset.hf_repo);
     if (!hasModelSource) {
         markFieldError('modal-model-path', 'Model path or HuggingFace repo is required.');
@@ -2419,7 +2431,10 @@ function _schedulePresetRapidMlxProfile() {
             _presetRapidMlxProfile = null;
             return;
         }
-        const modelId = preset.rapid_mlx?.model_path || '';
+        const rapidMlx = preset.rapid_mlx;
+        const modelId = rapidMlx?.model_source_view?.canonical_identity
+            || rapidMlx?.model_source_view?.display_name
+            || rapidMlx?.model_path || '';
         if (!modelId || modelId.trim().length < 2) {
             _presetRapidMlxProfile = null;
             return;

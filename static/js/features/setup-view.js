@@ -878,8 +878,11 @@ function _buildLaunchCard(preset, activePresetId) {
     const isRunning = !isExample && sessionState.serverRunning && preset.id === activePresetId && activePresetId;
     if (isRunning) card.classList.add('launch-card--running');
 
+    const rapidMlx = preset.rapid_mlx;
     const modelSource = preset.backend === 'rapid_mlx'
-        ? (preset.rapid_mlx?.model_path || '')
+        ? (rapidMlx?.model_source_view?.canonical_identity
+            || rapidMlx?.model_source_view?.display_name
+            || rapidMlx?.model_path || '')
         : (preset.model_path || preset.hf_repo || '');
     const modelFile = (preset.model_path || '').split(/[/\\]/).pop() ||
                       (preset.backend === 'rapid_mlx' ? modelSource.split(/[/\\]/).pop() : '') ||
