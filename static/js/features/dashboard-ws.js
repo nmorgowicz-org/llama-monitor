@@ -22,6 +22,8 @@ import {
     setWsData,
     setLastServerState,
     setLastLlamaMetrics,
+    setLastRapidMlxMetrics,
+    getLastRapidMlxMetrics,
     setContextCapacityTokens,
     setLastSystemMetrics,
     setLastGpuMetrics,
@@ -70,6 +72,7 @@ import { hideConnectingState, switchView } from './setup-view.js';
 import Router from './router.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { loadPresets, syncSelectedPresetSelection } from './presets.js';
+import { renderRapidMlxCards, restoreLlamaCards } from './rapid-mlx-cards.js';
 
 // ── Cached DOM elements (populated at init time to avoid repeated queries) ──
 let cachedElements = null;
@@ -87,6 +90,7 @@ const LOG_TAIL_LINES_MIN = 1;
 const LOG_TAIL_LINES_MAX = 6;
 
 // ── Badge change detection — skip DOM writes when badge content is unchanged ──
+var cardStaleness = { throughput: 0, generation: 0, context: 0 };
 let prevBadgeState = { server: null, chat: null, logs: null };
 
 // ── Power optimization: Page Visibility API throttling ─────────────────────────
@@ -763,7 +767,7 @@ function updateServerState(d) {
 
     setLastServerState(d.server_running);
     setLastLlamaMetrics(d.llama);
-
+    setLastRapidMlxMetrics(d.backend === 'rapid_mlx' ? (d.inference ?? null) : null);
     // Normalize context capacity to the actual loaded limit.
     // KV-only reports can be stale; prefer reported capacity, then KV max, then a
     // safe default so context-pressure math is consistent across telemetry and chat.
@@ -810,8 +814,25 @@ function updateServerState(d) {
 
 function updateInferenceMetrics(d) {
     const l = lastLlamaMetrics;
+    const rm = getLastRapidMlxMetrics();
     const hasActiveEndpoint = !!d.active_session_id;
     const ce = cachedElements;
+    const backend = d.backend || (rm ? 'rapid_mlx' : (l ? 'llama_cpp' : 'unknown'));
+
+    if (backend === 'rapid_mlx') {
+        renderRapidMlxCards(
+            rm,
+            d.inference_poll_sequence,
+            d.inference_poll_failed === true,
+            d.active_session_id,
+            d.inference_sampled_at_unix_ms
+        );
+        const hostMetricsVisible = d.host_metrics_available === true;
+        setMetricSectionVisibility('gpu-card', hostMetricsVisible && !!d.capabilities?.gpu, 'gpu-section');
+        setMetricSectionVisibility('system-card', hostMetricsVisible && !!d.capabilities?.system, 'system-section');
+        return;
+    }
+    restoreLlamaCards();
 
     const promptEl = ce.mPrompt;
     const genEl = ce.mGen;
@@ -829,14 +850,18 @@ function updateInferenceMetrics(d) {
 
     const promptRate = l?.prompt_tokens_per_sec || 0;
     const genRate = l?.generation_tokens_per_sec || 0;
-    const promptDisplayRate = promptRate > 0 ? promptRate : (l?.last_prompt_tokens_per_sec || 0);
-    const genDisplayRate = genRate > 0 ? genRate : (l?.last_generation_tokens_per_sec || 0);
+    const promptDisplayRate = promptRate > 0 ? promptRate : l?.last_prompt_tokens_per_sec || 0;
+    const genDisplayRate = genRate > 0 ? genRate : l?.last_generation_tokens_per_sec || 0;
     const promptAgeMs = l?.last_prompt_throughput_unix_ms || 0;
     const genAgeMs = l?.last_generation_throughput_unix_ms || 0;
-    const latestThroughputMs = Math.max(promptAgeMs, genAgeMs);
+    const latestThroughputMs = Math.max(l?.last_prompt_throughput_unix_ms || 0, l?.last_generation_throughput_unix_ms || 0);
     const throughputActive = promptRate > 0 || genRate > 0;
 
-    setCardState(throughputCard, !hasActiveEndpoint ? 'dormant' : throughputActive ? 'live' : 'idle');
+    if (!throughputActive) cardStaleness.throughput++;
+    else cardStaleness.throughput = 0;
+
+    const throughputVisible = hasActiveEndpoint && (throughputActive || cardStaleness.throughput < 3);
+    setCardState(throughputCard, !hasActiveEndpoint ? 'dormant' : throughputVisible ? (throughputActive ? 'live' : 'idle') : 'dormant');
     setEmptyState(ce.mThroughputEmpty, !hasActiveEndpoint);
     setChipState(throughputState, throughputActive ? 'live' : 'idle', throughputActive ? 'live' : 'idle');
 
@@ -926,14 +951,25 @@ function updateInferenceMetrics(d) {
     updateRequestActivity(taskId, generationActive, generated, nowMs);
     renderActivityRail(generationActive);
     renderRecentTask();
-    renderSlotGrid(l, hasActiveEndpoint);
-    renderSlotUtilization(l);
-    renderBatchEfficiency(l);
+    if (backend === 'llama_cpp') {
+        renderSlotGrid(l, hasActiveEndpoint);
+        renderSlotUtilization(l);
+        renderBatchEfficiency(l);
+    } else {
+        if (ce.mSlotsState) ce.mSlotsState.textContent = '';
+        if (ce.mActivityState) ce.mActivityState.textContent = '';
+        renderSlotGrid(null, false);
+        renderSlotUtilization(null);
+        renderBatchEfficiency(null);
+    }
     renderRequestStats();
     renderDecodingConfig(l, hasActiveEndpoint, generationActive);
     renderLiveSparkline('m-live-output-spark', metricSeries.liveOutput);
 
-    setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : generationActive ? 'live' : generationAvailable ? 'idle' : 'unavailable');
+    if (!generationActive) cardStaleness.generation++;
+    else cardStaleness.generation = 0;
+    const genVisible = hasActiveEndpoint && (generationActive || cardStaleness.generation < 3);
+    setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : genVisible ? (generationActive ? 'live' : 'idle') : 'dormant');
     setEmptyState(ce.mGenEmpty, !hasActiveEndpoint);
     setChipState(generationState, generationActive ? 'generating' : 'idle', generationActive ? 'live' : 'idle');
     setChipState(ce.mSlotsState, generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
@@ -1530,12 +1566,10 @@ function populateServerErrorDetails(data) {
     const cmd = data.last_spawn_cmd || '';
     const logs = data.logs || [];
 
-    // Short summary (first ~200 chars)
     const summary = err.length > 200
         ? err.substring(0, 200).trim() + '...'
         : err;
 
-    // Filter non-[monitor] lines and take last 20
     const serverLogs = logs
         .filter(l => !l.startsWith('[monitor]'))
         .slice(-20);
@@ -1560,6 +1594,11 @@ No additional context captured. Check the full Logs tab for more details.
 </div>`;
     }
 
+    // Doctor findings placeholder (filled async)
+    html += `<div class="doctor-findings" id="server-doctor-findings">
+        <div style="font-size:9px;color:var(--color-text-muted);">Loading diagnostics…</div>
+    </div>`;
+
     html += `<div style="margin-top:4px;">
     <a href="#" id="error-open-logs-link" style="color:var(--color-primary);font-size:10px;text-decoration:underline;">
         Open Logs tab
@@ -1580,6 +1619,9 @@ No additional context captured. Check the full Logs tab for more details.
 
     wrapper.style.display = 'flex';
     panel.style.display = '';
+
+    // Load doctor findings async
+    loadDoctorFindings('server-doctor-findings');
 }
 
 // Bind buttons once (after DOM ready).
@@ -1686,6 +1728,10 @@ No additional context captured. Open the Logs tab or run llama-monitor from a te
 </div>`;
     }
 
+    html += `<div class="doctor-findings" id="local-doctor-findings">
+        <div style="font-size:9px;color:var(--color-text-muted);">Loading diagnostics…</div>
+    </div>`;
+
     html += `<div style="margin-top:4px;">
     <a href="#" id="local-error-open-logs-link" style="color:var(--color-primary);font-size:10px;text-decoration:underline;">
         Open Logs tab
@@ -1705,4 +1751,128 @@ No additional context captured. Open the Logs tab or run llama-monitor from a te
     }
 
     details.style.display = 'block';
+
+    loadDoctorFindings('local-doctor-findings');
+}
+
+// ── Doctor findings loader ──────────────────────────────────────
+
+async function loadDoctorFindings(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const allFindings = [];
+
+    // Fetch Rapid-MLX doctor findings (platform-guarded)
+    try {
+        const rmResp = await fetch('/api/rapid-mlx/doctor', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        if (rmResp.ok) {
+            const rmData = await rmResp.json();
+            if (rmData.ok && Array.isArray(rmData.findings)) {
+                allFindings.push(...rmData.findings);
+            }
+        }
+    } catch (_err) {
+        // Rapid-MLX doctor not available (non-Apple Silicon or not installed)
+    }
+
+    // Fetch llama.cpp diagnostics
+    try {
+        const lcResp = await fetch('/api/sessions/llama-cpp-diagnostics', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        if (lcResp.ok) {
+            const lcData = await lcResp.json();
+            if (lcData.ok && Array.isArray(lcData.findings)) {
+                allFindings.push(...lcData.findings);
+            }
+        }
+    } catch (_err) {
+        // llama.cpp diagnostics unavailable
+    }
+
+    // Fetch Rapid-MLX preset-flag advisor findings (fixable — carries `fix`)
+    try {
+        const faResp = await fetch('/api/rapid-mlx/flag-advisor', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        if (faResp.ok) {
+            const faData = await faResp.json();
+            if (faData.ok && Array.isArray(faData.findings)) {
+                allFindings.push(...faData.findings);
+            }
+        }
+    } catch (_err) {
+        // Flag advisor unavailable (no active Rapid-MLX session/preset, etc.)
+    }
+
+    if (allFindings.length === 0) {
+        container.innerHTML = `<div style="font-size:9px;color:var(--color-text-muted);">
+Diagnostics endpoints unavailable on this system.
+</div>`;
+        return;
+    }
+
+    // Group findings by section
+    const bySection = {};
+    for (const f of allFindings) {
+        const section = f.section || 'general';
+        if (!bySection[section]) bySection[section] = [];
+        bySection[section].push(f);
+    }
+
+    let html = '';
+    for (const [section, findings] of Object.entries(bySection)) {
+        html += `<div class="doctor-section">`;
+        html += `<div class="doctor-section-title">${escapeHtml(section)}</div>`;
+        for (const finding of findings) {
+            const iconChar = finding.severity === 'ok' ? '✓' : finding.severity === 'warning' ? '⚠' : '✗';
+            html += `<div class="doctor-finding" data-severity="${escapeHtml(finding.severity)}">`;
+            html += `<span class="doctor-finding-icon">${iconChar}</span>`;
+            html += `<span class="doctor-finding-message">${escapeHtml(finding.message)}</span>`;
+            if (finding.fix) {
+                html += `<button class="doctor-fix-btn" data-fix="${escapeHtml(finding.fix)}">Apply fix</button>`;
+            }
+            html += `</div>`;
+        }
+        html += `</div>`;
+    }
+
+    // eslint-disable-next-line no-unsanitized/property -- values sanitized via escapeHtml
+    container.innerHTML = html;
+
+    // Wire up fix buttons
+    container.querySelectorAll('.doctor-fix-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const fixAction = btn.getAttribute('data-fix');
+            if (!fixAction) return;
+            btn.textContent = 'Applying…';
+            btn.disabled = true;
+            try {
+                const resp = await fetch('/api/diagnostics/apply-fix', {
+                    method: 'POST',
+                    headers: window.authHeaders
+                        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                        : { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fix: fixAction }),
+                });
+                const result = await resp.json();
+                if (result.ok) {
+                    btn.textContent = 'Applied';
+                    btn.style.color = '#4ade80';
+                    btn.style.borderColor = 'rgba(74, 222, 128, 0.4)';
+                } else {
+                    btn.textContent = result.error || 'Failed';
+                    btn.style.color = '#ef4444';
+                    btn.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+                }
+            } catch (err) {
+                btn.textContent = 'Error';
+                btn.style.color = '#ef4444';
+                console.error('Apply fix failed:', err);
+            }
+        });
+    });
 }

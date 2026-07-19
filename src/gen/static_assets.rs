@@ -31,6 +31,7 @@ pub const COMPAT_GLOBALS_JS: &str = include_str!("../../static/js/compat/globals
 pub const CONFIG_DOMPURIFY_INIT_JS: &str = include_str!("../../static/js/config/dompurify-init.js");
 pub const CORE_APP_STATE_JS: &str = include_str!("../../static/js/core/app-state.js");
 pub const CORE_FORMAT_JS: &str = include_str!("../../static/js/core/format.js");
+pub const CORE_PLATFORM_INFO_JS: &str = include_str!("../../static/js/core/platform-info.js");
 pub const CORE_TOOLTIP_JS: &str = include_str!("../../static/js/core/tooltip.js");
 pub const FEATURES_ANIMATE_JS: &str = include_str!("../../static/js/features/animate.js");
 pub const FEATURES_ATTACH_DETACH_JS: &str =
@@ -79,6 +80,10 @@ pub const FEATURES_NAV_JS: &str = include_str!("../../static/js/features/nav.js"
 pub const FEATURES_NETWORK_DETECTION_JS: &str =
     include_str!("../../static/js/features/network-detection.js");
 pub const FEATURES_PRESETS_JS: &str = include_str!("../../static/js/features/presets.js");
+pub const FEATURES_RAPID_MLX_CARDS_JS: &str =
+    include_str!("../../static/js/features/rapid-mlx-cards.js");
+pub const FEATURES_RAPID_MLX_UPDATER_JS: &str =
+    include_str!("../../static/js/features/rapid-mlx-updater.js");
 pub const FEATURES_REMOTE_AGENT_JS: &str = include_str!("../../static/js/features/remote-agent.js");
 pub const FEATURES_ROUTER_JS: &str = include_str!("../../static/js/features/router.js");
 pub const FEATURES_SENSOR_BRIDGE_JS: &str =
@@ -97,6 +102,8 @@ pub const FEATURES_TEMPLATE_AUTOUPDATER_JS: &str =
 pub const FEATURES_TOAST_JS: &str = include_str!("../../static/js/features/toast.js");
 pub const FEATURES_TUNE_PANEL_JS: &str = include_str!("../../static/js/features/tune-panel.js");
 pub const FEATURES_TUNING_CARDS_JS: &str = include_str!("../../static/js/features/tuning-cards.js");
+pub const FEATURES_UPDATER_SHARED_JS: &str =
+    include_str!("../../static/js/features/updater-shared.js");
 pub const FEATURES_UPDATES_JS: &str = include_str!("../../static/js/features/updates.js");
 pub const FEATURES_USER_MENU_JS: &str = include_str!("../../static/js/features/user-menu.js");
 pub const FEATURES_VRAM_ESTIMATE_JS: &str =

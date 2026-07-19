@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "profile_id": "smollm2-135m-r3-affine-v1",
+  "source": {
+    "original_format": "gguf",
+    "original_quant_tier": "f16",
+    "recovery_format": "mlx_fp16_safetensors",
+    "recovery_profile_id": "smollm2-135m-instruct-llama-v1",
+    "recovery_cache_key": "a21cca76ec236c3c71ea2bf5eb6f78716602b90fb16d78c3aef4da51e1ff4177",
+    "recovery_manifest_sha256": "9861d40f1e7c5582dac23b667a223fd29adeb4732021bb3333846280a92bcb6e",
+    "recovery_report_sha256": "d125dc3dc078a3b7e3e376ab3fe3213edecbaf0870bb374e549df13b9e402aaf",
+    "recovered_weight_sha256": "b9f93ce41c270feb4eb9a8870f0b48b3fd2d761bd6af47f4d74fe35d991f9bf5",
+    "recovered_tensor_count": 272
+  },
+  "runtime": {
+    "python": "3.12",
+    "mlx_lm_version": "0.31.3",
+    "mlx_version": "0.32.0",
+    "mlx_lm_metadata_sha256": "d464222b4761a38f817e5c470e7d4f546cea4df29482335b68c8e22c0142fac4",
+    "mlx_lm_license_sha256": "ccfab7ccb2ea306f71531c8ca77bb55507606cd90768b1e32b8b52ab5b48cf01",
+    "mlx_lm_artifact": {
+      "filename": "mlx_lm-0.31.3-py3-none-any.whl",
+      "size": 408890,
+      "sha256": "758cfddf1180053b7613db76fad3d246a331a2a905808e1164a275621fc983b8"
+    },
+    "mlx_artifact": {
+      "filename": "mlx-0.32.0-cp312-cp312-macosx_15_0_arm64.whl",
+      "size": 558890,
+      "sha256": "e5f778001562ccce26cf6e5be1050d2afc78e2902bad206201ab9f5a6d0f886a"
+    }
+  },
+  "recipes": {
+    "affine_4bit_g64": {"mode": "affine", "bits": 4, "group_size": 64},
+    "affine_6bit_g64": {"mode": "affine", "bits": 6, "group_size": 64},
+    "affine_8bit_g64": {"mode": "affine", "bits": 8, "group_size": 64}
+  },
+  "output_status": "experimental_requantized_structurally_validated",
+  "launchable": false
+}

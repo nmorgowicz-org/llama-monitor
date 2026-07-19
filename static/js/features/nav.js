@@ -190,9 +190,9 @@ function refreshMonitoringChip(mode, isManual, hasActiveEndpoint) {
     } else if (isLogsOnly) {
         chip.setAttribute('title', 'Logs-only mode — only live logs active. Click to change mode.');
     } else if (isSleeping && isManual) {
-        chip.setAttribute('title', 'Monitoring paused (manual) — llama-server keeps running. Click to change mode.');
+        chip.setAttribute('title', 'Monitoring paused (manual) — inference server keeps running. Click to change mode.');
     } else if (isSleeping) {
-        chip.setAttribute('title', 'Monitoring paused (idle timeout) — llama-server keeps running. Click to resume.');
+        chip.setAttribute('title', 'Monitoring paused (idle timeout) — inference server keeps running. Click to resume.');
     } else {
         chip.setAttribute('title', 'Dashboard monitoring active — click to cycle modes.');
     }
@@ -321,6 +321,41 @@ export function refreshTopCockpit() {
     const promptDisplayRate = promptRate > 0 ? promptRate : (l?.last_prompt_tokens_per_sec || 0);
     const genDisplayRate = genRate > 0 ? genRate : (l?.last_generation_tokens_per_sec || 0);
     const generationActive = !!l?.slot_generation_active || (l?.slots_processing || 0) > 0 || genRate > 0;
+
+    // ── Engine · Model indicator ────────────────────────────────────────
+    {
+      const indicator = document.getElementById('engine-indicator');
+      const labelEl = indicator?.querySelector('.engine-indicator-label');
+      const dotEl = indicator?.querySelector('.engine-indicator-dot');
+      if (indicator && labelEl && dotEl) {
+        const backend = wsData?.backend || null;
+        const modelIdentity = wsData?.active_session_model_identity || null;
+        const sessionStatus = wsData?.active_session_status || null;
+        const isRunning = sessionStatus === 'running' || sessionStatus === 'disconnected';
+
+        if (backend && isRunning && (modelIdentity || sessionStatus)) {
+          const engineName = backend === 'rapid_mlx' ? 'Rapid-MLX' : 'llama.cpp';
+          const modelName = modelIdentity
+            ? modelIdentity.length > 24
+              ? modelIdentity.slice(0, 22) + '…'
+              : modelIdentity
+            : 'Active';
+          labelEl.textContent = `${engineName} · ${modelName}`;
+
+          if (generationActive) {
+            dotEl.className = 'engine-indicator-dot live';
+            indicator.setAttribute('title', `${engineName} · ${modelIdentity || modelName} (generating)`);
+          } else {
+            dotEl.className = 'engine-indicator-dot idle-active';
+            indicator.setAttribute('title', `${engineName} · ${modelIdentity || modelName} (idle)`);
+          }
+
+          indicator.style.display = 'inline-flex';
+        } else {
+          indicator.style.display = 'none';
+        }
+      }
+    }
 
     const wsMode = wsData?.mode ?? (wsData?.sleep_mode ? 'sleep' : 'off');
     const isSleeping = wsMode === 'sleep';
@@ -624,7 +659,7 @@ export function initNav() {
                 const messages = {
                     'off': 'Monitoring resumed.',
                     'logs-only': 'Logs-only mode — only live logs active.',
-                    'sleep': 'Monitoring paused — llama-server keeps running.',
+                    'sleep': 'Monitoring paused — inference server keeps running.',
                 };
                 showToast(messages[nextMode] || ('Mode: ' + nextMode), 'success');
             } catch (_err) {

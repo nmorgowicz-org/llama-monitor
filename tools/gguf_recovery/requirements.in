@@ -1,0 +1,5 @@
+# Phase 5.5 R2 converter runtime. All direct dependencies are exact; the generated
+# requirements.lock pins every transitive artifact by hash.
+gguf==0.19.0
+numpy==2.5.1
+safetensors==0.8.0

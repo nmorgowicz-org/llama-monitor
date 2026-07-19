@@ -3,6 +3,7 @@
 
 import { sessionState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
+import { getPlatformInfo } from '../core/platform-info.js';
 import { showToast, showToastWithActions } from './toast.js';
 import Router from './router.js';
 import { _showConfirm } from './presets.js';
@@ -27,7 +28,49 @@ const ICON_CARDS_VIEW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24
 
 const KNOWN_TAGS = ['coding', 'roleplay', 'general', 'art', 'fast', 'default'];
 
+const INVENTORY_BADGES = {
+    format: {
+        gguf: ['GGUF', 'Format: GGUF'],
+        mlx: ['MLX', 'Format: MLX'],
+        transformers: ['Transformers', 'Format: Transformers / safetensors'],
+        unknown: ['Unknown format', 'Format: Unknown'],
+    },
+    source: {
+        local: ['Local', 'Source: Local library'],
+        hugging_face: ['Hugging Face', 'Source: Hugging Face'],
+        official_conversion: ['Official conversion', 'Source: Official MLX conversion'],
+        recovered_gguf: ['Recovered from GGUF', 'Source: Experimental GGUF recovery'],
+        requantized_mlx: ['Re-quantized MLX', 'Source: Experimental MLX re-quantization'],
+        legacy: ['Legacy location', 'Source: Legacy model-library location'],
+        unknown: ['Unknown source', 'Source: Unknown'],
+    },
+    lifecycle: {
+        ready: ['Ready', 'Lifecycle: Ready'],
+        incomplete: ['Incomplete', 'Lifecycle: Incomplete'],
+        converting: ['Converting', 'Lifecycle: Converting'],
+        invalid: ['Invalid', 'Lifecycle: Invalid'],
+        unknown: ['Status unknown', 'Lifecycle: Unknown'],
+    },
+    compatibility: {
+        verified: ['Verified', 'Compatibility: Verified'],
+        experimental: ['Experimental', 'Compatibility: Experimental and not launchable'],
+        provisional: ['Provisional', 'Compatibility: Provisional'],
+        unsupported: ['Unsupported', 'Compatibility: Unsupported'],
+        unknown: ['Unknown compatibility', 'Compatibility: Unknown'],
+    },
+};
+
+const BACKEND_LABELS = {
+    llama_cpp: 'llama.cpp',
+    rapid_mlx: 'Rapid-MLX',
+};
+
+let modelCardSequence = 0;
+let rapidMlxLocalAvailable = false;
+let rapidMlxLocalRequirement = 'Rapid-MLX local execution requires macOS on Apple Silicon';
+
 let initialized = false;
+let inventoryCache = null;
 
 // State for the HF download tab
 let hfState = {
@@ -95,7 +138,7 @@ function savePrefs() {
 
 export function openModelsModal() {
     document.getElementById('models-modal')?.classList.add('open');
-    loadModels();
+    loadModels({ refresh: true });
 }
 
 function closeModelsModal() {
@@ -104,37 +147,51 @@ function closeModelsModal() {
 
 export { closeModelsModal };
 
-async function loadModels() {
+export function invalidateModelInventory() {
+    inventoryCache = null;
+}
+
+async function loadModels({ refresh = false } = {}) {
     const grid = document.getElementById('models-list');
     const summary = document.getElementById('models-summary');
     const tabCount = document.getElementById('models-tab-count');
     const dirLabel = document.getElementById('models-dir-label');
     if (!grid) return;
 
-    if (summary) summary.textContent = 'Loading...';
-    grid.innerHTML = '<div class="mm-loading">Scanning...</div>';
+    const needsFetch = refresh || !inventoryCache;
+    if (needsFetch) {
+        if (summary) summary.textContent = 'Loading...';
+        grid.innerHTML = '<div class="mm-loading">Scanning...</div>';
+    }
 
     try {
-        const dirResp = await fetch('/api/hf/download-dir', {
-            headers: window.authHeaders ? window.authHeaders() : {},
-        });
-        if (dirResp.ok && dirLabel) {
-            const dirInfo = await dirResp.json();
-            if (dirInfo.dir) {
-                if (dirInfo.configured) {
-                    dirLabel.textContent = dirInfo.dir;
+        if (needsFetch) {
+            const dirResp = await fetch('/api/hf/download-dir', {
+                headers: window.authHeaders ? window.authHeaders() : {},
+            });
+            if (dirResp.ok && dirLabel) {
+                const dirInfo = await dirResp.json();
+                if (dirInfo.dir) {
+                    if (dirInfo.configured) {
+                        dirLabel.textContent = dirInfo.dir;
+                    } else {
+                        dirLabel.textContent = 'Using default: ' + dirInfo.dir;
+                    }
                 } else {
-                    dirLabel.textContent = 'Using default: ' + dirInfo.dir;
+                    dirLabel.textContent = 'No models directory configured';
                 }
-            } else {
-                dirLabel.textContent = 'No models directory configured';
             }
+            const platform = await getPlatformInfo();
+            rapidMlxLocalAvailable = platform.rapid_mlx_local_available === true;
+            rapidMlxLocalRequirement = platform.rapid_mlx_local_requirement
+                || rapidMlxLocalRequirement;
+            const resp = await fetch('/api/models', {
+                headers: window.authHeaders ? window.authHeaders() : {},
+            });
+            if (!resp.ok) throw new Error(`Model inventory failed (${resp.status})`);
+            inventoryCache = await resp.json();
         }
-
-        const resp = await fetch('/api/models', {
-            headers: window.authHeaders ? window.authHeaders() : {},
-        });
-        const models = await resp.json();
+        const models = inventoryCache || [];
 
         const count = models.length;
         if (tabCount) tabCount.textContent = count ? String(count) : '';
@@ -188,11 +245,13 @@ async function loadModels() {
 }
 
 function isMmproj(m) {
+    if (m.companion_kind != null) return m.companion_kind === 'mmproj';
     const f = (m.filename || '').toLowerCase();
     return f.includes('mmproj') || f.includes('.mmproj.') || f.includes('-mmproj-');
 }
 
 function isDraftModel(m) {
+    if (m.companion_kind != null) return m.companion_kind === 'draft';
     // Trust the backend's is_draft_assistant (size-guarded).
     // Fallback: quick client-side check using same logic as backend.
     if (m.is_draft_assistant !== undefined) return m.is_draft_assistant;
@@ -310,7 +369,7 @@ function applySearch(models) {
 }
 
 function buildModelCard(m) {
-    const name = m.model_name || m.filename;
+    const name = m.model_name || m.filename || 'Unnamed model';
     const quant = m.quant_type || 'unknown';
     const size = m.size_display || '';
     const vramEst = m.vram_est_gb != null
@@ -320,13 +379,20 @@ function buildModelCard(m) {
         : '';
     const vramPct = m.vram_percent != null ? Math.min(100, m.vram_percent) : null;
     const isSplit = m.is_split;
-    const mmproj = isMmproj(m);
+    const inventory = normalizeInventory(m);
+    const mmproj = inventory.companionKind === 'mmproj';
+    const companion = inventory.companionKind !== null;
     const tags = Array.isArray(m.tags) ? m.tags : [];
     const relatedPresets = mmproj ? [] : findPresetsForModel(m);
 
-    const card = document.createElement('div');
+    const card = document.createElement('article');
     card.className = 'mm-model-card';
+    card.dataset.format = inventory.format;
+    card.dataset.source = inventory.source;
+    card.dataset.lifecycle = inventory.lifecycle;
+    card.dataset.compatibility = inventory.compatibility;
     if (mmproj) card.classList.add('mm-model-card--mmproj');
+    if (companion) card.classList.add('mm-model-card--companion');
 
     // Top row: name + quant badge
     const top = document.createElement('div');
@@ -334,12 +400,15 @@ function buildModelCard(m) {
 
     const nameEl = document.createElement('div');
     nameEl.className = 'mm-card-name';
+    modelCardSequence += 1;
+    nameEl.id = `mm-model-name-${modelCardSequence}`;
+    card.setAttribute('aria-labelledby', nameEl.id);
     nameEl.title = m.path || '';
     nameEl.textContent = name;
     top.appendChild(nameEl);
 
     // Only show quant badge when it's meaningful — skip for mmproj files with no known quant
-    if (!(mmproj && quant === 'unknown')) {
+    if (quant !== 'unknown') {
         const badge = document.createElement('span');
         badge.className = 'mm-quant-badge';
         badge.textContent = quant;
@@ -353,13 +422,6 @@ function buildModelCard(m) {
         top.appendChild(splitBadge);
     }
 
-    if (mmproj) {
-        const mmBadge = document.createElement('span');
-        mmBadge.className = 'mm-quant-badge mm-mmproj-badge';
-        mmBadge.textContent = 'mmproj';
-        top.appendChild(mmBadge);
-    }
-
     // MTP / draft model badge
     const isDraft = m.is_draft_assistant || (m.classification && m.classification.has_mtp);
     if (isDraft && !mmproj) {
@@ -371,6 +433,8 @@ function buildModelCard(m) {
     }
 
     card.appendChild(top);
+
+    card.appendChild(buildInventoryBadgeRail(inventory));
 
     // Meta row: filename (ellipsis + full tooltip)
     const meta = document.createElement('div');
@@ -439,7 +503,7 @@ function buildModelCard(m) {
     const actions = document.createElement('div');
     actions.className = 'mm-card-actions';
 
-    if (!mmproj) {
+    if (!companion && inventory.launchable) {
         const serverRunning = isLocalServerRunning();
 
         if (serverRunning) {
@@ -482,7 +546,7 @@ function buildModelCard(m) {
                 switchWrap.appendChild(switchBtn);
                 actions.appendChild(switchWrap);
 
-            } else {
+            } else if (inventory.supportedBackends.includes('llama_cpp')) {
                 // No preset → Quick Load (inherits current server settings)
                 const loadBtn = document.createElement('button');
                 loadBtn.type = 'button';
@@ -491,6 +555,8 @@ function buildModelCard(m) {
                 loadBtn.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg> Quick Load';
                 loadBtn.addEventListener('click', () => doQuickLoad(m));
                 actions.appendChild(loadBtn);
+            } else {
+                appendRapidMlxConfigureButton(actions, m);
             }
 
             // Edit preset(s) — secondary action when running
@@ -509,20 +575,24 @@ function buildModelCard(m) {
         } else {
             // ── Server is not running: wizard / new-preset ───────────────────
 
-            const useBtn = document.createElement('button');
-            useBtn.type = 'button';
-            useBtn.className = 'mm-action-btn';
-            useBtn.title = relatedPresets.length ? 'Build a new preset from this model' : 'Open this model in the spawn wizard';
-            useBtn.textContent = relatedPresets.length ? 'New Preset' : 'Use in Wizard';
-            useBtn.addEventListener('click', () => {
-                closeModelsModal();
-                window.__spawnWizardOpts = {
-                    localPath: m.path || '',
-                    localModel: m,
-                };
-                Router.navigate('/spawn');
-            });
-            actions.appendChild(useBtn);
+            if (inventory.supportedBackends.includes('llama_cpp')) {
+                const useBtn = document.createElement('button');
+                useBtn.type = 'button';
+                useBtn.className = 'mm-action-btn';
+                useBtn.title = relatedPresets.length ? 'Build a new preset from this model' : 'Open this model in the spawn wizard';
+                useBtn.textContent = relatedPresets.length ? 'New Preset' : 'Use in Wizard';
+                useBtn.addEventListener('click', () => {
+                    closeModelsModal();
+                    window.__spawnWizardOpts = {
+                        localPath: m.path || '',
+                        localModel: m,
+                    };
+                    Router.navigate('/spawn');
+                });
+                actions.appendChild(useBtn);
+            } else if (!relatedPresets.length) {
+                appendRapidMlxConfigureButton(actions, m);
+            }
 
             if (relatedPresets.length) {
                 const editBtn = document.createElement('button');
@@ -536,6 +606,12 @@ function buildModelCard(m) {
                 actions.appendChild(editBtn);
             }
         }
+    } else {
+        const unavailable = document.createElement('div');
+        unavailable.className = 'mm-card-action-note';
+        unavailable.setAttribute('role', 'status');
+        unavailable.textContent = inventoryActionNote(inventory);
+        actions.appendChild(unavailable);
     }
 
     const copyBtn = document.createElement('button');
@@ -543,7 +619,9 @@ function buildModelCard(m) {
     copyBtn.className = 'mm-action-btn mm-action-copy';
     copyBtn.title = 'Copy path';
     copyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy Path';
-    const pathToCopy = m.path || '';
+    // Typed HF sources retain a stable repo id while `path` points at a resolved
+    // cache snapshot. Copy the source users can reuse in configuration.
+    const pathToCopy = inventoryModelSourceValue(m) || m.path || '';
     copyBtn.addEventListener('click', () => {
         navigator.clipboard.writeText(pathToCopy).then(() => {
             showToast('Path copied', 'success');
@@ -551,16 +629,20 @@ function buildModelCard(m) {
             showToast('Copy failed', 'error');
         });
     });
-    actions.appendChild(copyBtn);
+    if (pathToCopy) actions.appendChild(copyBtn);
 
-    const deleteBtn = document.createElement('button');
-    deleteBtn.type = 'button';
-    deleteBtn.className = 'mm-action-btn mm-action-delete';
-    deleteBtn.title = 'Delete this model from library';
-    deleteBtn.setAttribute('aria-label', 'Delete this model from library');
-    deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
-    deleteBtn.addEventListener('click', () => deleteModel(m.path, m.filename || name));
-    actions.appendChild(deleteBtn);
+    // The current delete endpoint is deliberately file-only and validates a
+    // .gguf suffix. Do not advertise directory deletion for MLX/Transformers.
+    if (inventory.format === 'gguf' && (m.path || '').toLowerCase().endsWith('.gguf')) {
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'mm-action-btn mm-action-delete';
+        deleteBtn.title = 'Delete this model from library';
+        deleteBtn.setAttribute('aria-label', 'Delete this model from library');
+        deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+        deleteBtn.addEventListener('click', () => deleteModel(m.path, m.filename || name));
+        actions.appendChild(deleteBtn);
+    }
 
     const tagBtn = document.createElement('button');
     tagBtn.type = 'button';
@@ -577,14 +659,153 @@ function buildModelCard(m) {
     return card;
 }
 
+function normalizeInventory(model) {
+    const format = Object.hasOwn(INVENTORY_BADGES.format, model.format) ? model.format : 'unknown';
+    const source = Object.hasOwn(INVENTORY_BADGES.source, model.source) ? model.source : 'unknown';
+    const lifecycle = Object.hasOwn(INVENTORY_BADGES.lifecycle, model.lifecycle) ? model.lifecycle : 'unknown';
+    let compatibility = Object.hasOwn(INVENTORY_BADGES.compatibility, model.compatibility)
+        ? model.compatibility
+        : 'unknown';
+    const advertisedBackends = Array.isArray(model.supported_backends)
+        ? [...new Set(model.supported_backends.filter(backend => Object.hasOwn(BACKEND_LABELS, backend)))]
+        : [];
+    const rapidMlxPlatformBlocked = advertisedBackends.includes('rapid_mlx')
+        && !rapidMlxLocalAvailable;
+    const supportedBackends = rapidMlxPlatformBlocked
+        ? advertisedBackends.filter(backend => backend !== 'rapid_mlx')
+        : advertisedBackends;
+    if (rapidMlxPlatformBlocked && supportedBackends.length === 0) compatibility = 'unsupported';
+    const companionKind = ['mmproj', 'draft'].includes(model.companion_kind)
+        ? model.companion_kind
+        : null;
+    return {
+        format,
+        source,
+        lifecycle,
+        compatibility,
+        supportedBackends,
+        rapidMlxPlatformBlocked,
+        companionKind,
+        launchable: lifecycle === 'ready' && compatibility !== 'unsupported' && supportedBackends.length > 0,
+    };
+}
+
+function createInventoryBadge(category, value, descriptor) {
+    const badge = document.createElement('span');
+    badge.className = `mm-inventory-badge mm-inventory-badge--${category} mm-inventory-badge--${value}`;
+    badge.textContent = descriptor[0];
+    badge.title = descriptor[1];
+    badge.setAttribute('aria-label', descriptor[1]);
+    return badge;
+}
+
+function buildInventoryBadgeRail(inventory) {
+    const rail = document.createElement('div');
+    rail.className = 'mm-inventory-badges';
+    rail.setAttribute('aria-label', 'Model inventory metadata');
+    rail.appendChild(createInventoryBadge('format', inventory.format, INVENTORY_BADGES.format[inventory.format]));
+    rail.appendChild(createInventoryBadge('source', inventory.source, INVENTORY_BADGES.source[inventory.source]));
+    rail.appendChild(createInventoryBadge('lifecycle', inventory.lifecycle, INVENTORY_BADGES.lifecycle[inventory.lifecycle]));
+    rail.appendChild(createInventoryBadge(
+        'compatibility',
+        inventory.compatibility,
+        INVENTORY_BADGES.compatibility[inventory.compatibility],
+    ));
+
+    if (inventory.supportedBackends.length) {
+        inventory.supportedBackends.forEach(backend => {
+            rail.appendChild(createInventoryBadge(
+                'backend',
+                backend,
+                [BACKEND_LABELS[backend], `Supported backend: ${BACKEND_LABELS[backend]}`],
+            ));
+        });
+    } else if (inventory.rapidMlxPlatformBlocked) {
+        rail.appendChild(createInventoryBadge(
+            'backend',
+            'platform-unavailable',
+            ['Apple Silicon required', rapidMlxLocalRequirement],
+        ));
+    } else {
+        rail.appendChild(createInventoryBadge('backend', 'none', ['No backend', 'Supported backend: None']));
+    }
+
+    if (inventory.companionKind) {
+        const descriptor = inventory.companionKind === 'mmproj'
+            ? ['Vision companion', 'Companion type: Multimodal projector']
+            : ['Draft companion', 'Companion type: Draft / MTP model'];
+        rail.appendChild(createInventoryBadge('companion', inventory.companionKind, descriptor));
+    }
+    return rail;
+}
+
+function inventoryActionNote(inventory) {
+    if (inventory.companionKind === 'mmproj') return 'Vision companion — select it with a compatible primary model.';
+    if (inventory.companionKind === 'draft') return 'Draft companion — select it from speculative decoding settings.';
+    if (inventory.lifecycle === 'converting') return 'Conversion in progress. Launch will be available after validation.';
+    if (inventory.lifecycle === 'incomplete') return 'Incomplete model. Finish the download or conversion before launch.';
+    if (inventory.lifecycle === 'invalid') return 'Invalid model. Review its files or provenance before launch.';
+    if (inventory.rapidMlxPlatformBlocked) return `${rapidMlxLocalRequirement}. You can still manage or copy this model.`;
+    if (inventory.compatibility === 'unsupported') return 'No installed backend supports this model.';
+    if (inventory.source === 'recovered_gguf') return 'Experimental GGUF recovery; launch is disabled pending profile promotion.';
+    if (inventory.source === 'requantized_mlx') return 'Experimental MLX re-quantization; launch is disabled pending profile promotion.';
+    return 'Backend compatibility has not been verified.';
+}
+
+function appendRapidMlxConfigureButton(actions, model) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'mm-action-btn mm-action-btn--switch';
+    button.title = 'Create a Rapid-MLX preset for this model';
+    button.textContent = 'Configure Rapid-MLX';
+    button.addEventListener('click', async () => {
+        const modelPath = inventoryModelSourceValue(model) || model.path || '';
+        const modelSource = model.model_source || {
+            kind: 'mlx_directory',
+            path: model.path || modelPath,
+        };
+        const seed = {
+            backend: 'rapid_mlx',
+            name: `${model.model_name || model.filename || 'MLX model'} · Rapid-MLX`,
+            model_path: '',
+            port: 8000,
+            rapid_mlx: {
+                model_path: modelPath,
+                model_source: modelSource,
+                host: '127.0.0.1',
+                port: 8000,
+                log_level: 'INFO',
+            },
+        };
+        closeModelsModal();
+        const { openPresetModal } = await import('./presets.js');
+        openPresetModal('new', 'model', seed);
+    });
+    actions.appendChild(button);
+}
+
+function inventoryModelSourceValue(model) {
+    const source = model.model_source;
+    if (!source || typeof source !== 'object') return '';
+    if (source.kind === 'mlx_directory' || source.kind === 'gguf_file') return source.path || '';
+    if (source.kind === 'hugging_face_repo') return source.repo_id || '';
+    if (source.kind === 'alias') return source.value || '';
+    if (source.kind === 'authoritative_safetensors') {
+        return source.source?.path || source.source?.repo_id || '';
+    }
+    return '';
+}
+
 function isLocalServerRunning() {
     return !document.getElementById('btn-stop')?.disabled;
 }
 
 function findPresetsForModel(model) {
-    const path = model.path || '';
-    if (!path) return [];
-    return (sessionState.presets || []).filter(preset => preset.model_path === path);
+    const paths = new Set([model.path, inventoryModelSourceValue(model)].filter(Boolean));
+    if (!paths.size) return [];
+    return (sessionState.presets || []).filter(preset =>
+        paths.has(preset.model_path) || paths.has(preset.rapid_mlx?.model_path)
+    );
 }
 
 async function doSwitchToPreset(presetId) {
@@ -750,7 +971,8 @@ async function deleteModel(path, filename) {
             return;
         }
         showToast('Model deleted', 'success');
-        await loadModels();
+        invalidateModelInventory();
+        await loadModels({ refresh: true });
     } catch (err) {
         showToast('Delete failed: ' + err.message, 'error');
     }
@@ -773,7 +995,8 @@ async function refreshModels() {
     } finally {
         if (btn) btn.classList.remove('spinning');
     }
-    await loadModels();
+    invalidateModelInventory();
+    await loadModels({ refresh: true });
 }
 
 // ── Model tags ────────────────────────────────────────────────────────────────
@@ -805,7 +1028,8 @@ async function removeModelTag(modelPath, tag) {
     const data = await resp.json();
     const currentTags = (data.tags[modelPath] || []).filter(t => t !== tag);
     await updateModelTags(modelPath, currentTags);
-    await loadModels();
+    invalidateModelInventory();
+    await loadModels({ refresh: true });
 }
 
 function openTagPicker(modelPath, currentTags) {
@@ -835,7 +1059,10 @@ function openTagPicker(modelPath, currentTags) {
                 ? currentTags.filter(t => t !== tag)
                 : [...currentTags, tag];
             updateModelTags(modelPath, newTags).then(ok => {
-                if (ok) loadModels();
+                if (ok) {
+                    invalidateModelInventory();
+                    loadModels({ refresh: true });
+                }
             });
         });
         pillsWrap.appendChild(pill);
@@ -1233,6 +1460,286 @@ function createChip(label, active) {
     return chip;
 }
 
+// ── Experimental Import Lab ─────────────────────────────────────────────────
+
+let importLabInitialized = false;
+let importLabAvailability = null;
+let importLabPollTimer = null;
+let importLabCompletedJobs = new Set();
+
+function apiHeaders(json = false) {
+    const headers = window.authHeaders ? { ...window.authHeaders() } : {};
+    if (json) headers['Content-Type'] = 'application/json';
+    return headers;
+}
+
+async function importLabJson(url, options = {}) {
+    const response = await fetch(url, options);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+    return data;
+}
+
+function formatImportBytes(bytes) {
+    const value = Number(bytes || 0);
+    if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GiB`;
+    if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(0)} MiB`;
+    return `${Math.round(value / 1024)} KiB`;
+}
+
+function exactImportProfile(path) {
+    const name = String(path || '').split('/').pop();
+    return [
+        'SmolLM2-135M-Instruct-F16.gguf',
+        'SmolLM2-135M-Instruct-Q8_0.gguf',
+        'SmolLM2-135M-Instruct-Q6_K.gguf',
+        'SmolLM2-135M-Instruct-Q4_K_M.gguf',
+    ].includes(name);
+}
+
+async function initImportLab() {
+    if (!importLabInitialized) {
+        importLabInitialized = true;
+        document.getElementById('mm-import-analyze')?.addEventListener('click', analyzeImportSource);
+        document.getElementById('mm-import-source')?.addEventListener('keydown', event => {
+            if (event.key === 'Enter') analyzeImportSource();
+        });
+        document.getElementById('mm-import-jobs-refresh')?.addEventListener('click', loadImportJobs);
+    }
+    try {
+        importLabAvailability = await importLabJson('/api/models/import-lab/availability', {
+            headers: apiHeaders(),
+        });
+        const status = document.getElementById('mm-import-platform');
+        if (status) {
+            status.classList.toggle('unavailable', !importLabAvailability.local_execution_available);
+            status.textContent = importLabAvailability.local_execution_available
+                ? 'Apple Silicon ready · Local recovery available'
+                : 'Local recovery unavailable · Manage models or use llama.cpp';
+        }
+    } catch (error) {
+        showToast(`Import Lab availability failed: ${error.message}`, 'error');
+    }
+    await loadImportJobs();
+}
+
+async function analyzeImportSource() {
+    const input = document.getElementById('mm-import-source');
+    const reportEl = document.getElementById('mm-import-report');
+    const engineNote = document.getElementById('mm-import-engine-note');
+    const path = input?.value.trim();
+    if (!path || !reportEl) return;
+    reportEl.replaceChildren(Object.assign(document.createElement('div'), {
+        className: 'mm-import-empty-state', textContent: 'Reading bounded GGUF metadata…',
+    }));
+    try {
+        const body = JSON.stringify({ path });
+        const [report, resource] = await Promise.all([
+            importLabJson('/api/models/gguf/import/compatibility/preview', {
+                method: 'POST', headers: apiHeaders(true), body,
+            }),
+            importLabJson('/api/models/import-lab/resource-estimate', {
+                method: 'POST', headers: apiHeaders(true), body,
+            }),
+        ]);
+        renderImportReport(reportEl, report, resource, path);
+        if (engineNote) {
+            const recoverable = report.compatibility === 'experimental' && exactImportProfile(path);
+            engineNote.textContent = recoverable
+                ? 'Exact experimental profile found. llama.cpp remains available; recovery creates a separate non-launchable MLX copy.'
+                : 'Recommended engine: llama.cpp. No safe MLX recovery profile is available for this model.';
+        }
+    } catch (error) {
+        reportEl.replaceChildren(Object.assign(document.createElement('div'), {
+            className: 'mm-import-empty-state', textContent: error.message,
+        }));
+    }
+}
+
+function appendImportFact(container, label, value) {
+    const fact = document.createElement('div');
+    fact.className = 'mm-import-fact';
+    const labelEl = document.createElement('span');
+    labelEl.textContent = label;
+    const valueEl = document.createElement('strong');
+    valueEl.textContent = value;
+    fact.append(labelEl, valueEl);
+    container.appendChild(fact);
+}
+
+function renderImportReport(container, report, resource, path) {
+    container.replaceChildren();
+    const verdict = document.createElement('div');
+    verdict.className = 'mm-import-verdict';
+    const title = document.createElement('strong');
+    title.textContent = report.architecture
+        ? `${report.architecture} · ${report.tensor_count || 0} tensors`
+        : 'GGUF compatibility report';
+    const badge = document.createElement('span');
+    const compatibility = report.compatibility || 'unsupported';
+    badge.className = `mm-import-verdict-badge ${compatibility}`;
+    badge.textContent = compatibility;
+    verdict.append(title, badge);
+    container.appendChild(verdict);
+
+    const facts = document.createElement('div');
+    facts.className = 'mm-import-facts';
+    appendImportFact(facts, 'Source', formatImportBytes(resource.source_bytes));
+    appendImportFact(facts, 'Recovered FP16', formatImportBytes(resource.estimated_fp16_bytes));
+    appendImportFact(facts, 'Disk required', formatImportBytes(resource.required_disk_bytes));
+    appendImportFact(facts, 'Disk headroom', resource.disk_sufficient === true
+        ? 'Available'
+        : (resource.disk_sufficient === false ? 'Insufficient' : 'Unknown'));
+    appendImportFact(facts, 'Memory', resource.ram_guidance?.replaceAll('_', ' ') || 'Unknown');
+    appendImportFact(facts, 'Engine fallback', 'llama.cpp');
+    container.appendChild(facts);
+
+    const reasons = [
+        ...(report.unsupported_reasons || []),
+        ...(report.missing_profile_fields || []).map(value => `Missing profile: ${value}`),
+        ...(report.missing_assets || []).map(value => `Missing asset: ${value}`),
+        ...(report.warnings || []),
+    ].slice(0, 8);
+    if (reasons.length) {
+        const list = document.createElement('ul');
+        list.className = 'mm-import-reasons';
+        reasons.forEach(reason => {
+            const item = document.createElement('li');
+            item.textContent = reason;
+            list.appendChild(item);
+        });
+        container.appendChild(list);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'mm-import-actions';
+    const start = document.createElement('button');
+    start.type = 'button';
+    start.className = 'mm-action-btn mm-action-btn--switch';
+    start.textContent = 'Recover experimental FP16';
+    const allowed = report.compatibility === 'experimental'
+        && exactImportProfile(path)
+        && importLabAvailability?.local_execution_available
+        && resource.disk_sufficient === true;
+    start.disabled = !allowed;
+    start.title = allowed
+        ? 'Create a separate non-launchable MLX recovery cache'
+        : 'Recovery requires Apple Silicon, disk headroom, and an exact supported profile';
+    start.addEventListener('click', () => startImportJob(path));
+    actions.appendChild(start);
+    container.appendChild(actions);
+}
+
+async function startImportJob(path) {
+    try {
+        await importLabJson('/api/models/import-lab/jobs', {
+            method: 'POST', headers: apiHeaders(true), body: JSON.stringify({ source_path: path }),
+        });
+        showToast('Experimental recovery queued', 'success');
+        await loadImportJobs();
+    } catch (error) {
+        showToast(`Recovery could not start: ${error.message}`, 'error');
+    }
+}
+
+async function cancelImportJob(id) {
+    try {
+        await importLabJson(`/api/models/import-lab/jobs/${encodeURIComponent(id)}/cancel`, {
+            method: 'POST', headers: apiHeaders(),
+        });
+        await loadImportJobs();
+    } catch (error) {
+        showToast(`Cancellation failed: ${error.message}`, 'error');
+    }
+}
+
+async function forgetImportJob(id) {
+    try {
+        await importLabJson(`/api/models/import-lab/jobs/${encodeURIComponent(id)}`, {
+            method: 'DELETE', headers: apiHeaders(),
+        });
+        await loadImportJobs();
+    } catch (error) {
+        showToast(`Cleanup failed: ${error.message}`, 'error');
+    }
+}
+
+async function loadImportJobs() {
+    const container = document.getElementById('mm-import-jobs-list');
+    if (!container) return;
+    try {
+        const jobs = await importLabJson('/api/models/import-lab/jobs', { headers: apiHeaders() });
+        renderImportJobs(container, jobs);
+        const active = jobs.some(job => job.can_cancel);
+        clearTimeout(importLabPollTimer);
+        if (active) importLabPollTimer = setTimeout(loadImportJobs, 800);
+        const newlyComplete = jobs.filter(job => job.state === 'complete' && !importLabCompletedJobs.has(job.id));
+        if (newlyComplete.length) {
+            newlyComplete.forEach(job => importLabCompletedJobs.add(job.id));
+            invalidateModelInventory();
+        }
+    } catch (error) {
+        container.replaceChildren(Object.assign(document.createElement('div'), {
+            className: 'mm-import-empty-state', textContent: error.message,
+        }));
+    }
+}
+
+function renderImportJobs(container, jobs) {
+    container.replaceChildren();
+    if (!jobs.length) {
+        container.appendChild(Object.assign(document.createElement('div'), {
+            className: 'mm-import-empty-state', textContent: 'No recovery jobs yet.',
+        }));
+        return;
+    }
+    jobs.slice().reverse().forEach(job => {
+        const card = document.createElement('article');
+        card.className = 'mm-import-job';
+        const top = document.createElement('div');
+        top.className = 'mm-import-job-top';
+        const message = document.createElement('strong');
+        message.textContent = job.message;
+        const state = document.createElement('span');
+        state.className = 'mm-import-job-state';
+        state.textContent = job.state;
+        top.append(message, state);
+        const progress = document.createElement('div');
+        progress.className = 'mm-import-progress';
+        const progressPercent = Math.max(0, Math.min(100, job.progress_percent || 0));
+        progress.setAttribute('role', 'progressbar');
+        progress.setAttribute('aria-label', `Recovery progress: ${job.phase || job.state}`);
+        progress.setAttribute('aria-valuemin', '0');
+        progress.setAttribute('aria-valuemax', '100');
+        progress.setAttribute('aria-valuenow', String(progressPercent));
+        const fill = document.createElement('span');
+        fill.style.width = `${progressPercent}%`;
+        progress.appendChild(fill);
+        card.append(top, progress);
+        if (Array.isArray(job.diagnostics) && job.diagnostics.length) {
+            const diagnostics = document.createElement('div');
+            diagnostics.className = 'mm-import-diagnostics';
+            diagnostics.textContent = job.diagnostics.join('\n');
+            card.appendChild(diagnostics);
+        }
+        const actions = document.createElement('div');
+        actions.className = 'mm-import-actions';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'mm-action-btn';
+        if (job.can_cancel) {
+            button.textContent = 'Cancel and clean staging';
+            button.addEventListener('click', () => cancelImportJob(job.id));
+        } else {
+            button.textContent = 'Clear job';
+            button.addEventListener('click', () => forgetImportJob(job.id));
+        }
+        actions.appendChild(button);
+        card.appendChild(actions);
+        container.appendChild(card);
+    });
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initModels() {
@@ -1256,6 +1763,8 @@ export function initModels() {
     document.querySelectorAll('#models-modal .mm-tab').forEach(tab => {
         tab.addEventListener('click', () => {
             const target = tab.dataset.tab;
+            const summary = document.getElementById('models-summary');
+            if (summary) summary.style.visibility = target === 'library' ? '' : 'hidden';
             document.querySelectorAll('#models-modal .mm-tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('#models-modal .mm-tab-panel').forEach(p => p.classList.remove('active'));
             tab.classList.add('active');
@@ -1263,6 +1772,10 @@ export function initModels() {
             if (panel) panel.classList.add('active');
             if (target === 'download') {
                 initHfDownloadTab();
+            } else if (target === 'import-lab') {
+                initImportLab();
+            } else if (target === 'library' && !inventoryCache) {
+                loadModels();
             }
         });
     });
@@ -1522,7 +2035,8 @@ async function onHfFileSelected(file, repoId, downloadPanel) {
                 onComplete: (downloadId, localPath) => {
                     hfState.currentDownloadIds.add(downloadId);
                     // Refresh library tab
-                    loadModels();
+                    invalidateModelInventory();
+                    loadModels({ refresh: true });
                 },
                 onValidationError: (msg) => {
                     // hfStartDownload now shows its own toast for most cases.
@@ -1811,6 +2325,7 @@ async function updateVramDisplay(file) {
             ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
             : { 'Content-Type': 'application/json' };
         const body = {
+            backend: 'llama_cpp',
             hf_repo_id: hfState.selectedRepoId || '',
             hf_file_path: file?.path || file?.name || '',
             model_size_bytes: modelBytes,
@@ -2120,4 +2635,3 @@ function guessQuantFromName(name) {
     if (lower.includes('f16') || lower.includes('bf16')) return 'f16';
     return 'q4_k_m';
 }
-

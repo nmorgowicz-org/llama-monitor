@@ -12,17 +12,11 @@ pub struct LlamaMetrics {
     pub prompt_tokens_total: u64,
     pub generation_tokens_total: u64,
     pub tokens_per_decode: f64,
-    #[serde(skip_serializing)]
     pub predicted_tokens_total: u64,
-    #[serde(skip_serializing)]
     pub kv_cache_tokens: u64,
-    #[serde(skip_serializing)]
     pub kv_cache_max: u64,
-    #[serde(skip_serializing)]
     pub kv_cache_tokens_available: bool,
-    #[serde(skip_serializing)]
     pub kv_cache_tokens_source: String,
-    #[serde(skip_serializing)]
     pub kv_cache_high_water: u64,
     pub context_live_tokens: u64,
     pub context_live_tokens_available: bool,

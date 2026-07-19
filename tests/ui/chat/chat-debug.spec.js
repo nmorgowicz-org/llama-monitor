@@ -17,6 +17,11 @@ test.describe('debug prompt inspector', () => {
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
     // Ensure chat view is visible
     await expect(page.locator('#page-chat')).toBeVisible({ timeout: 5000 });

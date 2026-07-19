@@ -594,7 +594,7 @@ export async function _doSendChat(tab, options = {}) {
         requestPayload,
     };
 
-     chat.busy = true;
+    chat.busy = true;
     setChatBusyUI(true);
     chat.abortController = new AbortController();
 
@@ -685,14 +685,18 @@ export async function _doSendChat(tab, options = {}) {
                 if (!line.startsWith('data:')) continue;
                 const payload = line.slice(5).trim();
                 if (payload === '[DONE]') continue;
+                let obj;
                 try {
-                    const obj = JSON.parse(payload);
-
+                    obj = JSON.parse(payload);
+                } catch { continue; }
+                if (typeof obj.error === 'string' && obj.error) {
+                    throw new Error(obj.error);
+                }
+                try {
                     if (obj.usage) {
                         tokenUsage = obj.usage;
-                        continue;
                     }
-                    if (obj.timings && obj.choices?.[0]?.finish_reason) {
+                    if (!obj.usage && obj.timings && obj.choices?.[0]?.finish_reason) {
                         tokenUsage = {
                             prompt_tokens: obj.timings.prompt_n || 0,
                             completion_tokens: obj.timings.predicted_n || 0,
@@ -703,7 +707,6 @@ export async function _doSendChat(tab, options = {}) {
                             tab._lastDebugData.draftN = obj.timings.draft_n ?? null;
                             tab._lastDebugData.draftNAccepted = obj.timings.draft_n_accepted ?? null;
                         }
-                        continue;
                     }
 
                     const delta = obj.choices?.[0]?.delta;
@@ -754,7 +757,9 @@ export async function _doSendChat(tab, options = {}) {
                         // Submit already forced scroll-to-bottom; this gives maximum reading room.
                         if (isFirstToken && msgEl) chatScrollToEl(msgEl);
                     }
-                } catch { /* malformed chunk — skip */ }
+                } catch (error) {
+                    if (error instanceof Error) throw error;
+                }
             }
             if (typeof chatScroll === 'function') chatScroll();
         }

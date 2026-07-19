@@ -1,4 +1,4 @@
-// ── Spawn Wizard E2E Tests (Phase 3 + Phase 4) ───────────────────────────────
+// ── Spawn Wizard E2E Tests (Phases 3, 4, and Rapid-MLX Phase 6) ──────────────
 // Tests for:
 // - HF model search integration
 // - Third-party model import
@@ -9,7 +9,420 @@
 
 import { test, expect } from '@playwright/test';
 
-test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
+test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
+    test('engine classifier leaves bare HF repos ambiguous and recognizes GGUF inventory', async ({ page }) => {
+        await page.goto('/');
+        const result = await page.evaluate(async () => {
+            const { classifyWizardArtifact } = await import('/js/features/spawn-wizard.js');
+            return {
+                bareRepo: classifyWizardArtifact({ hfRepo: 'owner/model', hfFile: '', quantFiles: [] }),
+                ggufRepo: classifyWizardArtifact({
+                    hfRepo: 'owner/model',
+                    hfFile: '',
+                    quantFiles: [{ path: 'model-Q4_K_M.gguf' }],
+                }),
+                mlx: classifyWizardArtifact({
+                    path: '/models/Qwen-MLX',
+                    localMeta: { source_kind: 'mlx_directory' },
+                }),
+                arbitraryFile: classifyWizardArtifact({ path: '/models/README.txt' }),
+            };
+        });
+
+        expect(result).toEqual({
+            bareRepo: 'unknown',
+            ggufRepo: 'gguf',
+            mlx: 'mlx_directory',
+            arbitraryFile: 'unknown',
+        });
+    });
+
+    test.use({ animationBehavior: 'disabled' });
+
+    test('external Rapid-MLX runtime can be recommended and an explicit llama.cpp choice is preserved', async ({ page }) => {
+        await page.route('**/api/llama-binary/platform-info', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ rapid_mlx_local_available: true, auto_backend: 'metal' }),
+        }));
+        await page.route('**/api/rapid-mlx/runtime/status', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ runtime: { supported: true, active: null } }),
+        }));
+        await page.route('**/api/rapid-mlx/recommend', async route => {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    recommended_backend: 'rapid_mlx',
+                    state: 'ready',
+                    reason: 'A compatible external Rapid-MLX runtime is ready.',
+                }),
+            });
+        });
+
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+        await page.evaluate(async () => {
+            const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+            openSpawnWizard({
+                localPath: '/models/Qwen-MLX',
+                localModel: { source_kind: 'mlx_directory', path: '/models/Qwen-MLX' },
+            });
+        });
+        await page.locator('.wizard-engine-card').first().waitFor({ state: 'visible', timeout: 5000 });
+        await page.locator('.wizard-engine-card[data-engine="llama_cpp"]').click();
+
+        await expect(page.locator('.wizard-engine-card[data-engine="llama_cpp"]')).toHaveClass(/selected/);
+        await expect(page.locator('#wizard-engine-reason')).toContainText('manual llama.cpp choice is preserved');
+    });
+
+    test('Rapid-MLX payload is backend-exclusive while its preset preserves shared sampling', async ({ page }) => {
+        await page.goto('/');
+        const payloads = await page.evaluate(async () => {
+            const {
+                buildSpawnPayload,
+                buildPresetPayload,
+                launchPortForPayload,
+                supportsTunePanelForPayload,
+                wizardState,
+            } = await import('/js/features/spawn-wizard.js');
+            wizardState.engine.selected = 'rapid_mlx';
+            wizardState.model.source = 'local';
+            wizardState.model.path = '/models/Qwen-MLX';
+            wizardState.access.port = 9123;
+            wizardState.access.bindHost = '127.0.0.1';
+            wizardState.access.apiKey = 'rapid-secret';
+            wizardState.hardware.gpuLayers = 'all';
+            wizardState.hardware.contextSize = 131072;
+            wizardState.hardware.cacheTypeK = 'q4_0';
+            wizardState.hardware.temperature = 0.42;
+            wizardState.hardware.topP = 0.88;
+            wizardState.hardware.topK = 32;
+            wizardState.hardware.minP = 0.06;
+            wizardState.hardware.repeatPenalty = 1.07;
+            wizardState.hardware.presencePenalty = 0.15;
+            wizardState.hardware.maxTokens = 2048;
+            wizardState.hardware.seed = 7;
+            const spawn = buildSpawnPayload();
+            return {
+                spawn,
+                preset: buildPresetPayload(),
+                launchPort: launchPortForPayload(spawn),
+                supportsTune: supportsTunePanelForPayload(spawn),
+            };
+        });
+
+        expect(payloads.spawn).toEqual({
+            backend: 'rapid_mlx',
+            rapid_mlx: {
+                model_source: { kind: 'mlx_directory', path: '/models/Qwen-MLX' },
+                served_model_name: null,
+                host: '127.0.0.1',
+                port: 9123,
+                api_key: 'rapid-secret',
+            },
+        });
+        expect(payloads.spawn).not.toHaveProperty('gpu_layers');
+        expect(payloads.spawn).not.toHaveProperty('context_size');
+        expect(payloads.spawn).not.toHaveProperty('ctk');
+        expect(payloads.launchPort).toBe(9123);
+        expect(payloads.supportsTune).toBe(true);
+        expect(payloads.preset).toMatchObject({
+            backend: 'rapid_mlx',
+            temperature: 0.42,
+            top_p: 0.88,
+            top_k: 32,
+            min_p: 0.06,
+            repeat_penalty: 1.07,
+            presence_penalty: 0.15,
+            max_tokens: 2048,
+            seed: 7,
+            api_key: 'rapid-secret',
+        });
+        expect(payloads.preset.rapid_mlx).not.toHaveProperty('api_key');
+        const saveResult = await page.evaluate(async preset => {
+            const headers = window.authHeaders ? window.authHeaders() : {};
+            const response = await fetch('/api/presets', {
+                method: 'POST',
+                headers: { ...headers, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...preset, name: 'Rapid protected key test' }),
+            });
+            return { ok: response.ok, status: response.status, body: await response.text() };
+        }, payloads.preset);
+        expect(saveResult, saveResult.body).toMatchObject({ ok: true });
+    });
+
+    test('Rapid-MLX template restores typed source and reopening clears stale engine state', async ({ page }) => {
+        await page.goto('/');
+        const state = await page.evaluate(async () => {
+            const { openSpawnWizard, closeSpawnWizard, buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js');
+            openSpawnWizard({
+                templatePreset: {
+                    backend: 'rapid_mlx',
+                    temperature: 0.3,
+                    top_p: 0.91,
+                    top_k: 44,
+                    min_p: 0.08,
+                    repeat_penalty: 1.09,
+                    presence_penalty: 0.2,
+                    max_tokens: 3072,
+                    seed: 17,
+                    rapid_mlx: {
+                        model_source: { kind: 'hugging_face_repo', repo_id: 'mlx-community/Qwen', revision: 'v2' },
+                        host: '127.0.0.1',
+                        port: 9000,
+                    },
+                },
+            });
+            const restored = buildSpawnPayload();
+            const sampling = {
+                temperature: wizardState.hardware.temperature,
+                topP: wizardState.hardware.topP,
+                topK: wizardState.hardware.topK,
+                minP: wizardState.hardware.minP,
+                repeatPenalty: wizardState.hardware.repeatPenalty,
+                presencePenalty: wizardState.hardware.presencePenalty,
+                maxTokens: wizardState.hardware.maxTokens,
+                seed: wizardState.hardware.seed,
+            };
+            closeSpawnWizard();
+            openSpawnWizard();
+            return {
+                restored,
+                sampling,
+                reset: { selected: wizardState.engine.selected, explicit: wizardState.engine.explicit },
+            };
+        });
+
+        expect(state.restored.rapid_mlx.model_source).toEqual({
+            kind: 'hugging_face_repo',
+            repo_id: 'mlx-community/Qwen',
+            revision: 'v2',
+        });
+        expect(state.restored.rapid_mlx.port).toBe(9000);
+        expect(state.sampling).toEqual({
+            temperature: 0.3,
+            topP: 0.91,
+            topK: 44,
+            minP: 0.08,
+            repeatPenalty: 1.09,
+            presencePenalty: 0.2,
+            maxTokens: 3072,
+            seed: 17,
+        });
+        expect(state.reset).toEqual({ selected: 'llama_cpp', explicit: false });
+    });
+
+    test('alias and authoritative Hugging Face sources restore into navigable Rapid-MLX templates', async ({ page }) => {
+        await page.route('**/api/llama-binary/platform-info', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ rapid_mlx_local_available: true, auto_backend: 'metal' }),
+        }));
+        await page.route('**/api/rapid-mlx/runtime/status', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ runtime: { supported: true, active: { version: '0.10.10' } } }),
+        }));
+        await page.route('**/api/rapid-mlx/recommend', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                recommended_backend: 'rapid_mlx',
+                state: 'ready',
+                reason: 'This source is native to the verified Rapid-MLX resolution path.',
+            }),
+        }));
+
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+        await page.evaluate(async () => {
+            const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+            openSpawnWizard({
+                templatePreset: {
+                    backend: 'rapid_mlx',
+                    rapid_mlx: {
+                        model_source: { kind: 'alias', value: 'team/production-model' },
+                        host: '127.0.0.1',
+                        port: 8001,
+                    },
+                },
+            });
+        });
+        await page.locator('#spawn-model-path').waitFor({ state: 'visible', timeout: 5000 });
+        await expect(page.locator('#spawn-model-path')).toHaveValue('team/production-model');
+        await expect(page.locator('#wizard-next-btn')).toBeEnabled();
+        await page.locator('#wizard-next-btn').click();
+        await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
+
+        await page.evaluate(async () => {
+            const { closeSpawnWizard, openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+            closeSpawnWizard();
+            openSpawnWizard({
+                templatePreset: {
+                    backend: 'rapid_mlx',
+                    rapid_mlx: {
+                        model_source: {
+                            kind: 'authoritative_safetensors',
+                            source: {
+                                kind: 'hugging_face_repo',
+                                repo_id: 'owner/source-model',
+                                revision: 'release-2',
+                            },
+                            revision_or_hash: 'release-2',
+                            recipe: 'q6',
+                        },
+                        host: '127.0.0.1',
+                        port: 8001,
+                    },
+                },
+            });
+        });
+        await page.locator('#spawn-hf-repo').waitFor({ state: 'visible', timeout: 5000 });
+        await expect(page.locator('#spawn-hf-repo')).toHaveValue('owner/source-model');
+        await expect(page.locator('#wizard-next-btn')).toBeEnabled();
+        await page.locator('#wizard-next-btn').click();
+        await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
+    });
+
+    test('recommendations select llama.cpp for GGUF and Rapid-MLX for a typed MLX directory', async ({ page }) => {
+        await page.route('**/api/llama-binary/platform-info', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ rapid_mlx_local_available: true, auto_backend: 'metal' }),
+        }));
+        await page.route('**/api/rapid-mlx/runtime/status', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ runtime: { supported: true, active: { version: '0.10.10' } } }),
+        }));
+        await page.route('**/api/rapid-mlx/recommend', async route => {
+            const { artifact_kind: kind } = route.request().postDataJSON();
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify(kind === 'gguf'
+                    ? { recommended_backend: 'llama_cpp', state: 'ready', reason: 'GGUF runs natively with llama.cpp.' }
+                    : { recommended_backend: 'rapid_mlx', state: 'ready', reason: 'This source is native to Rapid-MLX.' }),
+            });
+        });
+
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+        await page.evaluate(async () => {
+            const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+            openSpawnWizard({ localPath: '/models/model.gguf' });
+        });
+        await page.locator('.wizard-engine-card').first().waitFor({ state: 'visible', timeout: 5000 });
+        await expect(page.locator('.wizard-engine-card[data-engine="llama_cpp"]')).toHaveClass(/selected/);
+        await page.locator('.wizard-engine-card[data-engine="rapid_mlx"]').click();
+        await expect(page.locator('#wizard-next-btn')).toBeDisabled();
+        await expect(page.locator('#wizard-footer-hint')).toContainText('GGUF runs with llama.cpp');
+        await page.locator('.wizard-engine-card[data-engine="llama_cpp"]').click();
+
+        await page.evaluate(async () => {
+            const { closeSpawnWizard, openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+            closeSpawnWizard();
+            openSpawnWizard({
+                localPath: '/models/model-mlx',
+                localModel: {
+                    path: '/models/model-mlx',
+                    size_bytes: 6_450_000_000,
+                    source_kind: 'mlx_directory',
+                    model_source: { kind: 'mlx_directory', path: '/models/model-mlx' },
+                },
+            });
+        });
+        await page.locator('.wizard-engine-card').first().waitFor({ state: 'visible', timeout: 5000 });
+        await expect(page.locator('.wizard-engine-card[data-engine="rapid_mlx"]')).toHaveClass(/selected/);
+        await expect(page.locator('#wizard-engine-reason')).toContainText('native to Rapid-MLX');
+        await expect(page.locator('#wizard-binary-prereq')).toBeHidden();
+        await expect(page.locator('.model-source-card[data-source="import"]')).toBeHidden();
+
+        await page.locator('.wizard-engine-card[data-engine="llama_cpp"]').click();
+        await expect(page.locator('#wizard-next-btn')).toBeDisabled();
+        await expect(page.locator('#wizard-footer-hint')).toContainText('requires Rapid-MLX');
+        await page.locator('.wizard-engine-card[data-engine="rapid_mlx"]').click();
+
+        await page.locator('#wizard-next-btn').click();
+        await expect(page.locator('#rapid-hardware-panel')).toBeVisible();
+        await expect(page.locator('#wizard-step-2 > .hw-vram-sidebar')).toBeHidden();
+    });
+
+    test('typed Rapid-MLX sources round-trip unchanged and llama.cpp payloads exclude Rapid-MLX config', async ({ page }) => {
+        await page.goto('/');
+        const result = await page.evaluate(async () => {
+            const { buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js');
+            const sources = [
+                { kind: 'mlx_directory', path: '/models/mlx' },
+                { kind: 'hugging_face_repo', repo_id: 'mlx-community/model', revision: 'release-1' },
+                { kind: 'alias', value: 'team-model' },
+                {
+                    kind: 'authoritative_safetensors',
+                    source: { kind: 'hugging_face_repo', repo_id: 'owner/source', revision: 'abc123' },
+                    revision_or_hash: 'abc123',
+                    recipe: 'q6',
+                },
+            ];
+            wizardState.engine.selected = 'rapid_mlx';
+            const roundTrips = sources.map(source => {
+                wizardState.model.rapidMlxSource = source;
+                return buildSpawnPayload().rapid_mlx.model_source;
+            });
+            wizardState.engine.selected = 'llama_cpp';
+            wizardState.model.source = 'local';
+            wizardState.model.path = '/models/model.gguf';
+            const llama = buildSpawnPayload();
+            return { sources, roundTrips, llama };
+        });
+
+        expect(result.roundTrips).toEqual(result.sources);
+        expect(result.llama.backend).toBe('llama_cpp');
+        expect(result.llama).not.toHaveProperty('rapid_mlx');
+    });
+
+    test('unsupported Rapid-MLX local launch is visibly blocked with actionable guidance', async ({ page }) => {
+        await page.route('**/api/llama-binary/platform-info', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ rapid_mlx_local_available: false, auto_backend: 'cuda' }),
+        }));
+        await page.route('**/api/rapid-mlx/runtime/status', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ runtime: { supported: false, active: null } }),
+        }));
+        await page.route('**/api/rapid-mlx/recommend', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                recommended_backend: null,
+                state: 'platform_unavailable',
+                reason: 'Local Rapid-MLX requires Apple Silicon macOS; remote attachment remains available.',
+            }),
+        }));
+
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+        await page.evaluate(async () => {
+            const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+            openSpawnWizard({
+                localPath: '/models/model-mlx',
+                localModel: { source_kind: 'mlx_directory', path: '/models/model-mlx' },
+            });
+        });
+        await page.locator('.wizard-engine-card').first().waitFor({ state: 'visible', timeout: 5000 });
+        await page.locator('.wizard-engine-card[data-engine="rapid_mlx"]').click();
+
+        await expect(page.locator('.wizard-engine-card[data-engine="rapid_mlx"]')).toHaveClass(/is-unavailable/);
+        await expect(page.locator('[data-engine-badge="rapid_mlx"]')).toContainText('Apple Silicon only');
+        await expect(page.locator('#wizard-engine-reason')).toContainText('remote attachment remains available');
+        await expect(page.locator('#wizard-next-btn')).toBeDisabled();
+        await expect(page.locator('#wizard-footer-hint')).toContainText('Apple Silicon macOS');
+    });
     test('HF model search returns results', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');
@@ -350,7 +763,7 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
 
         // Hardware step must still be active and visible after the layout change
         await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
-        await expect(page.locator('#wizard-step-2 .wizard-section-title').first()).toContainText('Configure hardware');
+        await expect(page.locator('#wizard-step-2 > .wizard-main .wizard-section-title', { hasText: 'Configure hardware' })).toBeVisible();
     });
 
     test('Spawn payload leaves fit parameters unset until the toggle is enabled', async ({ page }) => {

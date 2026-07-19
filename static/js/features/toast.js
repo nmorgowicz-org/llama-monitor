@@ -186,31 +186,40 @@ export function initToast() {
  */
 export async function showConfirmDialog(title, message, confirmLabel = 'Confirm') {
     const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
+    overlay.className = 'modal-overlay app-confirm-overlay active';
     overlay.style.zIndex = '2000';
-    overlay.style.display = 'grid';
 
     const dialog = document.createElement('div');
-    dialog.className = 'modal';
-    dialog.style.width = '420px';
-    dialog.style.padding = '14px 16px';
+    dialog.className = 'modal app-confirm-dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+
+    const dialogId = `app-confirm-${Date.now()}`;
+    const titleId = `${dialogId}-title`;
+    const messageId = `${dialogId}-message`;
+    dialog.setAttribute('aria-labelledby', titleId);
+    dialog.setAttribute('aria-describedby', messageId);
+
+    const icon = document.createElement('div');
+    icon.className = 'app-confirm-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = '✓';
+
+    const copy = document.createElement('div');
+    copy.className = 'app-confirm-copy';
 
     const titleEl = document.createElement('div');
-    titleEl.style.fontSize = '15px';
-    titleEl.style.fontWeight = '600';
-    titleEl.style.marginBottom = '8px';
+    titleEl.className = 'app-confirm-title';
+    titleEl.id = titleId;
     titleEl.textContent = title;
 
     const msgEl = document.createElement('div');
-    msgEl.style.fontSize = '13px';
-    msgEl.style.color = 'var(--color-text-muted)';
-    msgEl.style.marginBottom = '12px';
+    msgEl.className = 'app-confirm-message';
+    msgEl.id = messageId;
     msgEl.textContent = message;
 
     const actions = document.createElement('div');
-    actions.style.display = 'flex';
-    actions.style.justifyContent = 'flex-end';
-    actions.style.gap = '8px';
+    actions.className = 'app-confirm-actions';
 
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
@@ -225,7 +234,16 @@ export async function showConfirmDialog(title, message, confirmLabel = 'Confirm'
     return new Promise(resolve => {
         let decided = false;
 
+        function onKeydown(e) {
+            if (e.key === 'Escape' && !decided) {
+                decided = true;
+                cleanup();
+                resolve(false);
+            }
+        }
+
         function cleanup() {
+            document.removeEventListener('keydown', onKeydown);
             if (overlay.parentElement) overlay.remove();
         }
 
@@ -252,22 +270,18 @@ export async function showConfirmDialog(title, message, confirmLabel = 'Confirm'
             }
         });
 
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && !decided) {
-                decided = true;
-                cleanup();
-                resolve(false);
-            }
-        });
+        document.addEventListener('keydown', onKeydown);
 
         actions.appendChild(cancelBtn);
         actions.appendChild(confirmBtn);
-        dialog.appendChild(titleEl);
-        dialog.appendChild(msgEl);
+        copy.appendChild(titleEl);
+        copy.appendChild(msgEl);
+        dialog.appendChild(icon);
+        dialog.appendChild(copy);
         dialog.appendChild(actions);
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
-        confirmBtn.focus();
+        cancelBtn.focus();
     });
 }
 
@@ -275,32 +289,51 @@ export async function showConfirmDialog(title, message, confirmLabel = 'Confirm'
  * Minimal text prompt dialog matching app style.
  * Returns user text or null if cancelled.
  */
-export async function showPromptDialog(title, message, defaultValue = '') {
+export async function showPromptDialog(title, message, defaultValue = '', options = {}) {
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
+    overlay.className = 'modal-overlay app-prompt-overlay';
     overlay.style.zIndex = '2000';
     overlay.style.display = 'grid';
 
     const dialog = document.createElement('div');
-    dialog.className = 'modal';
+    dialog.className = 'modal app-prompt-dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
     dialog.style.width = '420px';
     dialog.style.padding = '14px 16px';
 
+    const dialogId = `app-prompt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const titleId = `${dialogId}-title`;
+    const messageId = `${dialogId}-message`;
+    dialog.setAttribute('aria-labelledby', titleId);
+    dialog.setAttribute('aria-describedby', messageId);
+
     const titleEl = document.createElement('div');
+    titleEl.className = 'app-prompt-title';
+    titleEl.id = titleId;
     titleEl.style.fontSize = '15px';
     titleEl.style.fontWeight = '600';
     titleEl.style.marginBottom = '8px';
     titleEl.textContent = title;
 
     const msgEl = document.createElement('div');
+    msgEl.className = 'app-prompt-message';
+    msgEl.id = messageId;
     msgEl.style.fontSize = '13px';
     msgEl.style.color = 'var(--color-text-muted)';
     msgEl.style.marginBottom = '10px';
     msgEl.textContent = message;
 
     const input = document.createElement('input');
-    input.type = 'text';
+    input.className = 'app-prompt-input';
+    input.setAttribute('aria-label', options.inputLabel || title);
+    input.type = options.type || 'text';
     input.value = defaultValue;
+    input.autocomplete = 'off';
+    input.spellcheck = false;
     input.style.width = '100%';
     input.style.boxSizing = 'border-box';
     input.style.padding = '8px 10px';
@@ -313,6 +346,7 @@ export async function showPromptDialog(title, message, defaultValue = '') {
     input.style.outline = 'none';
 
     const actions = document.createElement('div');
+    actions.className = 'app-prompt-actions';
     actions.style.display = 'flex';
     actions.style.justifyContent = 'flex-end';
     actions.style.gap = '8px';
@@ -325,13 +359,34 @@ export async function showPromptDialog(title, message, defaultValue = '') {
     const okBtn = document.createElement('button');
     okBtn.type = 'button';
     okBtn.className = 'btn btn-modal-save';
-    okBtn.textContent = 'OK';
+    okBtn.textContent = options.confirmLabel || 'OK';
 
     return new Promise(resolve => {
         let decided = false;
 
+        function onDocumentKeydown(e) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                handleCancel();
+                return;
+            }
+            if (e.key !== 'Tab') return;
+            const focusable = [input, cancelBtn, okBtn].filter(element => !element.disabled);
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (e.shiftKey && document.activeElement === first) {
+                e.preventDefault();
+                last.focus();
+            } else if (!e.shiftKey && document.activeElement === last) {
+                e.preventDefault();
+                first.focus();
+            }
+        }
+
         function cleanup() {
+            document.removeEventListener('keydown', onDocumentKeydown);
             if (overlay.parentElement) overlay.remove();
+            if (previouslyFocused?.isConnected) previouslyFocused.focus();
         }
 
         function handleCancel() {
@@ -358,9 +413,7 @@ export async function showPromptDialog(title, message, defaultValue = '') {
             if (e.target === overlay) handleCancel();
         });
 
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') handleCancel();
-        });
+        document.addEventListener('keydown', onDocumentKeydown);
 
         actions.appendChild(cancelBtn);
         actions.appendChild(okBtn);

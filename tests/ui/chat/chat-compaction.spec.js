@@ -89,6 +89,11 @@ test.describe('context compaction', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
     await expect(page.locator('#page-chat')).toBeVisible();
 
@@ -245,6 +250,11 @@ test.describe('compact confirmation modal', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
 
     // Create or switch to an isolated test tab so we don't pollute user data.
@@ -356,6 +366,11 @@ test.describe('auto_compact_summarize default', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
 
     const value = await page.evaluate(async () => {

@@ -52,17 +52,17 @@ impl ApiError {
 
     pub(crate) fn from_reqwest(err: reqwest::Error) -> Self {
         if err.is_timeout() {
-            return Self::gateway_timeout("Timed out waiting for the active llama-server.");
+            return Self::gateway_timeout("Timed out waiting for the active inference runtime.");
         }
 
         if err.is_connect() {
-            return Self::gateway("Cannot connect to the active llama-server.");
+            return Self::gateway("Cannot connect to the active inference runtime.");
         }
 
         let detail = err.to_string();
         if detail.contains("error sending request") || detail.contains("connection reset") {
             return Self::gateway(
-                "The active llama-server dropped the request before streaming started.",
+                "The active inference runtime dropped the request before streaming started.",
             );
         }
 
@@ -78,7 +78,7 @@ impl ApiError {
             || lower.contains("no available slot")
         {
             let message = if detail.is_empty() {
-                "The active llama-server is busy with another request."
+                "The active inference runtime is busy with another request."
             } else {
                 detail
             };
@@ -86,7 +86,10 @@ impl ApiError {
         }
 
         let message = if detail.is_empty() {
-            format!("Upstream llama-server returned HTTP {}.", status.as_u16())
+            format!(
+                "Upstream inference runtime returned HTTP {}.",
+                status.as_u16()
+            )
         } else {
             format!("Upstream HTTP {}: {detail}", status.as_u16())
         };

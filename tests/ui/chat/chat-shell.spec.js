@@ -16,6 +16,11 @@ test.describe('chat UI shell', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
     await expect(page.locator('#page-chat')).toBeVisible();
   });
@@ -61,6 +66,11 @@ test.describe('chat tabs', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
     await expect(page.locator('#page-chat')).toBeVisible();
   });
@@ -191,6 +201,11 @@ test.describe('pin and favorite tabs', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
     await expect(page.locator('#page-chat')).toBeVisible();
 
@@ -322,6 +337,11 @@ test.describe('chat tab normalization', () => {
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
   });
 
@@ -364,6 +384,11 @@ test.describe('chat history pagination', () => {
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
     await expect(page.locator('#page-chat.active')).toBeVisible({ timeout: 5000 });
     // Wait for bootstrap's initChatTabs to finish before the test seeds state
@@ -458,6 +483,11 @@ test.describe('chat message export', () => {
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
   });
 
@@ -502,6 +532,11 @@ test.describe('message edit and regenerate', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
+    await page.waitForSelector('#view-monitor', { state: 'attached', timeout: 5000 });
+    await page.waitForFunction(() => {
+      const monitor = document.getElementById('view-monitor');
+      return monitor && getComputedStyle(monitor).display !== 'none';
+    }, { timeout: 5000 });
     await page.getByRole('button', { name: /chat/i }).click();
     // Ensure chat view is visible (active class is not always reliable)
     await expect(page.locator('#page-chat')).toBeVisible({ timeout: 5000 });

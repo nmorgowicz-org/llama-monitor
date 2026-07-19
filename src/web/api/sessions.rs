@@ -1,12 +1,20 @@
+use std::net::TcpStream;
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use warp::Filter;
 
 use crate::config::AppConfig;
-use crate::llama::server::{ServerConfig, start_server, stop_server};
-use crate::state::{self as app_state, AppState, SessionMode, SessionStatus};
+use crate::inference::launch::{
+    launch_local, request_from_api_payload, request_from_preset, request_from_session,
+};
+use crate::llama::server::stop_server;
+use crate::state::{
+    self as app_state, AppState, DoctorFinding, DoctorFindingType, DoctorSeverity, FixAction,
+    SessionMode, SessionStatus,
+};
 
 use super::common::{ApiCtx, ApiError, ApiRoute, box_reply};
 use super::common::{
@@ -26,6 +34,10 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .or(api_check_endpoint_health(config.clone()).map(box_reply))
         .unify()
+        .or(api_llama_cpp_diagnostics(state.clone(), config.clone()).map(box_reply))
+        .unify()
+        .or(api_apply_fix(state.clone(), config.clone()).map(box_reply))
+        .unify()
         .or(api_create_session(state.clone(), config.clone()).map(box_reply))
         .unify()
         .or(api_delete_session(state.clone(), config.clone()).map(box_reply))
@@ -44,7 +56,7 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .or(api_detach(state.clone(), config.clone()).map(box_reply))
         .unify()
-        .or(api_kill_llama(state, config).map(box_reply))
+        .or(api_kill_server(state, config).map(box_reply))
         .unify()
         .boxed()
 }
@@ -212,6 +224,336 @@ fn api_check_endpoint_health(
         )
 }
 
+fn api_llama_cpp_diagnostics(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "sessions" / "llama-cpp-diagnostics")
+        .and(warp::path::end())
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            let state = state.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let mut findings = Vec::new();
+                findings.extend(check_llama_server_binary(&cfg.llama_server_path));
+
+                // Model/port parity checks use the active session's llama.cpp launch
+                // config when available; otherwise these are skipped (nothing to
+                // check against — the default model path is preset-specific, not
+                // in AppConfig).
+                let active_session_id = state.active_session_id.lock().unwrap().clone();
+                if !active_session_id.is_empty() {
+                    let launch = state
+                        .sessions
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .find(|s| s.id == active_session_id)
+                        .and_then(|s| s.launch.clone());
+                    if let Some(crate::inference::launch::LocalLaunchRequest::LlamaCpp(config)) =
+                        launch
+                    {
+                        if !config.model_path.is_empty() {
+                            findings
+                                .extend(check_gguf_path(std::path::Path::new(&config.model_path)));
+                        }
+                        findings.extend(check_port_available(config.port));
+                    }
+                }
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "findings": findings
+                    }),
+                )))
+            }
+        })
+}
+
+fn check_llama_server_binary(bin_path: &std::path::Path) -> Vec<DoctorFinding> {
+    let mut findings = Vec::new();
+
+    if bin_path.as_os_str().is_empty() {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Issue,
+            message: "llama.cpp server binary path is not configured".to_string(),
+            section: "binary".to_string(),
+            fix: None,
+        });
+        return findings;
+    }
+
+    if !bin_path.exists() {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Issue,
+            message: format!(
+                "llama.cpp server binary not found at {}",
+                bin_path.display()
+            ),
+            section: "binary".to_string(),
+            fix: None,
+        });
+        return findings;
+    }
+
+    let version_output = Command::new(bin_path).arg("--help").output();
+
+    match version_output {
+        Ok(output) if output.status.success() => {
+            let text = String::from_utf8_lossy(&output.stdout);
+            if text.contains("llama-server") {
+                findings.push(DoctorFinding {
+                    finding_type: DoctorFindingType::LlamaCpp,
+                    severity: DoctorSeverity::Ok,
+                    message: "llama.cpp server binary is present and executable".to_string(),
+                    section: "binary".to_string(),
+                    fix: None,
+                });
+            } else {
+                findings.push(DoctorFinding {
+                    finding_type: DoctorFindingType::LlamaCpp,
+                    severity: DoctorSeverity::Warning,
+                    message: "llama.cpp server binary exists but help output looks unusual"
+                        .to_string(),
+                    section: "binary".to_string(),
+                    fix: None,
+                });
+            }
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            findings.push(DoctorFinding {
+                finding_type: DoctorFindingType::LlamaCpp,
+                severity: DoctorSeverity::Warning,
+                message: format!(
+                    "llama.cpp server binary exists but returned error: {}",
+                    stderr.trim().lines().next().unwrap_or("unknown")
+                ),
+                section: "binary".to_string(),
+                fix: None,
+            });
+        }
+        Err(e) => {
+            findings.push(DoctorFinding {
+                finding_type: DoctorFindingType::LlamaCpp,
+                severity: DoctorSeverity::Issue,
+                message: format!("Failed to execute llama.cpp server binary: {e}"),
+                section: "binary".to_string(),
+                fix: None,
+            });
+        }
+    }
+
+    findings
+}
+
+fn check_gguf_path(gguf_path: &std::path::Path) -> Vec<DoctorFinding> {
+    let mut findings = Vec::new();
+
+    if gguf_path.as_os_str().is_empty() {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Issue,
+            message: "Default model (GGUF) path is not configured".to_string(),
+            section: "model".to_string(),
+            fix: None,
+        });
+        return findings;
+    }
+
+    if !gguf_path.exists() {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Issue,
+            message: format!("Default model file not found at {}", gguf_path.display()),
+            section: "model".to_string(),
+            fix: None,
+        });
+        return findings;
+    }
+
+    if !matches!(gguf_path.extension(), Some(ext) if ext == "gguf") {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Warning,
+            message: "Default model file does not have .gguf extension".to_string(),
+            section: "model".to_string(),
+            fix: None,
+        });
+    } else {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Ok,
+            message: format!(
+                "Default model file found at {}",
+                gguf_path.file_name().unwrap_or_default().to_string_lossy()
+            ),
+            section: "model".to_string(),
+            fix: None,
+        });
+    }
+
+    findings
+}
+
+fn check_port_available(port: u16) -> Vec<DoctorFinding> {
+    let mut findings: Vec<DoctorFinding> = Vec::new();
+
+    let is_in_use = TcpStream::connect(("127.0.0.1", port))
+        .map(|stream| {
+            stream
+                .set_read_timeout(Some(Duration::from_millis(100)))
+                .is_ok()
+        })
+        .unwrap_or(false);
+
+    if is_in_use {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Warning,
+            message: format!(
+                "Port {} is already in use; a new server may fail to bind",
+                port
+            ),
+            section: "network".to_string(),
+            fix: None,
+        });
+    } else {
+        findings.push(DoctorFinding {
+            finding_type: DoctorFindingType::LlamaCpp,
+            severity: DoctorSeverity::Ok,
+            message: format!("Port {} is available for binding", port),
+            section: "network".to_string(),
+            fix: None,
+        });
+    }
+
+    findings
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ApplyFixRequest {
+    fix: FixAction,
+}
+
+fn api_apply_fix(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "diagnostics" / "apply-fix")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<ApplyFixRequest>())
+        .and(with_app_config(app_config))
+        .and_then(
+            move |auth: Option<String>, req: ApplyFixRequest, cfg: Arc<AppConfig>| {
+                let state = state.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let fix_action = req.fix;
+
+                    let active_session_id = state.active_session_id.lock().unwrap().clone();
+                    if active_session_id.is_empty() {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "No active session"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ),
+                        ));
+                    }
+
+                    let preset_id = {
+                        let sessions = state.sessions.lock().unwrap();
+                        sessions
+                            .iter()
+                            .find(|s| s.id == active_session_id)
+                            .and_then(|s| {
+                                if s.preset_id.is_empty() {
+                                    None
+                                } else {
+                                    Some(s.preset_id.clone())
+                                }
+                            })
+                    };
+
+                    let Some(preset_id) = preset_id else {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Active session has no preset ID"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ),
+                        ));
+                    };
+
+                    // Apply fix to preset's RapidMlxConfig
+                    let mut presets = state.presets.lock().unwrap();
+                    let preset = presets.iter_mut().find(|p| p.id == preset_id);
+                    let Some(preset) = preset else {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Preset not found"
+                                })),
+                                warp::http::StatusCode::NOT_FOUND,
+                            ),
+                        ));
+                    };
+
+                    let config = preset.rapid_mlx.as_mut();
+                    let Some(config) = config else {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Preset does not use Rapid-MLX backend"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ),
+                        ));
+                    };
+
+                    match fix_action {
+                        FixAction::AddToolCallParser => config.tool_call_parser = true,
+                        FixAction::EnableAutoToolChoice => config.auto_tool_choice = true,
+                        FixAction::AddNoThinking => config.no_thinking = true,
+                    }
+
+                    let presets_path = state.presets_path.clone();
+                    drop(presets);
+                    if let Err(e) =
+                        crate::presets::save_presets(&presets_path, &state.presets.lock().unwrap())
+                    {
+                        eprintln!("[warn] Failed to save presets after applying fix: {e}");
+                    }
+
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({
+                            "ok": true,
+                            "applied": req.fix
+                        }),
+                    )))
+                }
+            },
+        )
+}
+
 fn api_create_session(
     state: AppState,
     app_config: Arc<AppConfig>,
@@ -338,7 +680,9 @@ fn api_get_active_session(
                                 "mode": mode_str,
                                 "status": s.status,
                                 "last_active": s.last_active,
-                                "preset_id": s.preset_id
+                                "preset_id": s.preset_id,
+                                "backend": s.backend,
+                                "model_identity": s.model_identity
                             })),
                         ))
                     }
@@ -377,8 +721,13 @@ fn api_get_active_session_readiness(
                 };
 
                 let (endpoint, api_key) = match session.mode {
-                    SessionMode::Spawn { port, api_key, .. } => {
-                        (format!("http://127.0.0.1:{port}"), api_key)
+                    SessionMode::Spawn {
+                        port,
+                        bind_host,
+                        api_key,
+                    } => {
+                        let host = super::upstream::local_connect_host(bind_host.as_deref());
+                        (format!("http://{host}:{port}"), api_key)
                     }
                     SessionMode::Attach { endpoint, api_key } => (endpoint, api_key),
                 };
@@ -395,12 +744,22 @@ fn api_get_active_session_readiness(
                     req
                 };
 
-                let root_ok = with_auth(client.get(&endpoint)).send().await.is_ok();
-                let health_ok = with_auth(client.get(format!("{endpoint}/health")))
-                    .send()
-                    .await
-                    .is_ok();
-                let ready = root_ok || health_ok;
+                let ready = match session.backend {
+                    crate::inference::InferenceBackend::RapidMlx => {
+                        with_auth(client.get(format!("{endpoint}/health/ready")))
+                            .send()
+                            .await
+                            .is_ok_and(|response| response.status().is_success())
+                    }
+                    crate::inference::InferenceBackend::LlamaCpp => {
+                        let root_ok = with_auth(client.get(&endpoint)).send().await.is_ok();
+                        let health_ok = with_auth(client.get(format!("{endpoint}/health")))
+                            .send()
+                            .await
+                            .is_ok();
+                        root_ok || health_ok
+                    }
+                };
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
@@ -408,6 +767,8 @@ fn api_get_active_session_readiness(
                         "ready": ready,
                         "endpoint": endpoint,
                         "status": session.status,
+                        "backend": session.backend,
+                        "model_identity": session.model_identity,
                     }),
                 )))
             }
@@ -435,6 +796,30 @@ fn api_get_capabilities(
                 let endpoint_kind = state.current_endpoint_kind();
                 let session_kind = state.current_session_kind();
                 let tray_mode = state.tray_mode.lock().unwrap().clone();
+                let active_session = state.get_active_session();
+                let backend = active_session.as_ref().map(|session| session.backend);
+                let model_identity = active_session
+                    .as_ref()
+                    .and_then(|session| session.model_identity.clone());
+                let inference_features = match active_session.as_ref() {
+                    Some(session) if matches!(session.mode, SessionMode::Spawn { .. }) => state
+                        .backend
+                        .lock()
+                        .ok()
+                        .and_then(|backend| match (session.backend, backend.as_ref()) {
+                            (
+                                crate::inference::InferenceBackend::LlamaCpp,
+                                Some(crate::inference::backend::BackendAdapter::LlamaCpp(adapter)),
+                            ) => Some(adapter.capabilities().clone()),
+                            (
+                                crate::inference::InferenceBackend::RapidMlx,
+                                Some(crate::inference::backend::BackendAdapter::RapidMlx(adapter)),
+                            ) => Some(adapter.capabilities().clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default(),
+                    _ => crate::inference::capabilities::CapabilitySet::default(),
+                };
 
                 let (system_reason, gpu_reason, cpu_temp_reason) =
                     state.calculate_availability_reasons();
@@ -444,6 +829,9 @@ fn api_get_capabilities(
                         "capabilities": capabilities,
                         "endpoint_kind": endpoint_kind,
                         "session_kind": session_kind,
+                        "inference_backend": backend,
+                        "model_identity": model_identity,
+                        "inference_features": inference_features,
                         "tray_mode": tray_mode,
                         "availability": {
                             "system": system_reason,
@@ -537,16 +925,11 @@ fn api_spawn_session_with_preset(
                 }
                 LAST_SPAWN_SESSION.store(now, Ordering::Release);
 
-                let port: u16 = match payload.get("port") {
-                    Some(v) => {
-                        if let Some(p) = v.as_u64() {
-                            p as u16
-                        } else {
-                            8001
-                        }
-                    }
-                    None => 8001,
-                };
+                let requested_port = payload
+                    .get("port")
+                    .and_then(|value| value.as_u64())
+                    .and_then(|port| u16::try_from(port).ok());
+                let port = requested_port.unwrap_or(8001);
                 let name: String = match payload.get("name") {
                     Some(v) => {
                         if let Some(s) = v.as_str() {
@@ -558,17 +941,71 @@ fn api_spawn_session_with_preset(
                     None => format!("Session on port {}", port),
                 };
 
+                if let Some(restored_id) = payload.get("session_id").and_then(|v| v.as_str()) {
+                    let session = state
+                        .get_sessions()
+                        .into_iter()
+                        .find(|session| session.id == restored_id);
+                    let Some(session) = session else {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"ok": false, "error": "Restored session not found"})),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ),
+                        ));
+                    };
+                    let presets = state.presets.lock().unwrap().clone();
+                    let transient_api_key = payload.get("api_key").and_then(|v| v.as_str());
+                    let request = match request_from_session(&session, &presets, transient_api_key) {
+                        Ok(request) => request,
+                        Err(error) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({"ok": false, "error": error.to_string()})),
+                                    warp::http::StatusCode::BAD_REQUEST,
+                                ),
+                            ));
+                        }
+                    };
+                    let response_backend = request.backend();
+                    let response_port = request.port();
+                    let previous_active_id = state.active_session_id.lock().unwrap().clone();
+                    state.set_active_session(restored_id);
+                    return match launch_local(Arc::new(state.clone()), request, &app_config).await {
+                        Ok(()) => {
+                            state.update_session_status(restored_id, SessionStatus::Running);
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({"ok": true, "session_id": restored_id, "backend": response_backend, "port": response_port})),
+                            ))
+                        }
+                        Err(error) => {
+                            restore_active_session_after_failed_launch(
+                                &state,
+                                restored_id,
+                                &previous_active_id,
+                            );
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({"ok": false, "error": error.to_string()})),
+                                    warp::http::StatusCode::BAD_REQUEST,
+                                ),
+                            ))
+                        }
+                    };
+                }
+
                 let Some(preset_id) = payload
                     .get("preset_id")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string())
                 else {
-                    let config: ServerConfig = match serde_json::from_value(payload.clone()) {
-                        Ok(config) => config,
+                    let request = match request_from_api_payload(&payload) {
+                        Ok(request) => request,
                         Err(e) => {
                             return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                warp::reply::json(
-                                    &serde_json::json!({"ok": false, "error": format!("Invalid spawn payload: {}", e)}),
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
+                                    warp::http::StatusCode::BAD_REQUEST,
                                 ),
                             ));
                         }
@@ -576,27 +1013,29 @@ fn api_spawn_session_with_preset(
 
                     let session_name = if name != format!("Session on port {}", port) {
                         name.clone()
-                    } else if !config.model_path.is_empty() {
-                        let filename = std::path::Path::new(&config.model_path)
+                    } else if !request.model_identity().is_empty() {
+                        let identity = request.model_identity();
+                        let filename = std::path::Path::new(&identity)
                             .file_name()
                             .and_then(|s| s.to_str())
-                            .unwrap_or(&config.model_path);
+                            .unwrap_or(&identity);
                         format!("Local: {}", filename)
-                    } else if let Some(repo) = config.hf_repo.as_ref() {
-                        format!("HF: {}", repo)
                     } else {
                         name.clone()
                     };
 
                     let session_id = app_state::generate_session_id();
-                    let session = app_state::Session::new_spawn(
+                    let mut session = app_state::Session::new_spawn_with_backend(
                         session_id.clone(),
                         session_name,
-                        config.port,
+                        request.port(),
                         String::new(),
-                        config.bind_host.clone(),
-                        config.api_key.clone(),
+                        request.bind_host(),
+                        request.api_key(),
+                        request.backend(),
+                        Some(request.model_identity()),
                     );
+                    session.launch = Some(request.for_persistence());
 
                     if !state.add_session(session) {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -607,21 +1046,24 @@ fn api_spawn_session_with_preset(
                     }
 
                     state.set_active_session(&session_id);
+                    let response_backend = request.backend();
+                    let response_port = request.port();
 
-                    match start_server(&state, config, &app_config).await {
+                    match launch_local(Arc::new(state.clone()), request, &app_config).await {
                         Ok(()) => {
                             state.update_session_status(&session_id, SessionStatus::Running);
                             return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                                 warp::reply::json(
-                                    &serde_json::json!({"ok": true, "session_id": session_id}),
+                                    &serde_json::json!({"ok": true, "session_id": session_id, "backend": response_backend, "port": response_port}),
                                 ),
                             ));
                         }
                         Err(e) => {
                             state.remove_session(&session_id);
                             return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                warp::reply::json(
-                                    &serde_json::json!({"ok": false, "error": e.to_string()}),
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
+                                    warp::http::StatusCode::BAD_REQUEST,
                                 ),
                             ));
                         }
@@ -640,15 +1082,29 @@ fn api_spawn_session_with_preset(
                     }
                 };
 
+                let request = match request_from_preset(&preset, requested_port) {
+                    Ok(request) => request,
+                    Err(error) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"ok": false, "error": error.to_string()})),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ),
+                        ));
+                    }
+                };
                 let session_id = app_state::generate_session_id();
-                let session = app_state::Session::new_spawn(
+                let mut session = app_state::Session::new_spawn_with_backend(
                     session_id.clone(),
                     name.clone(),
-                    port,
+                    request.port(),
                     preset_id,
-                    preset.bind_host.clone(),
-                    preset.api_key.clone(),
+                    request.bind_host(),
+                    request.api_key(),
+                    request.backend(),
+                    Some(request.model_identity()),
                 );
+                session.launch = Some(request.for_persistence());
 
                 if !state.add_session(session) {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
@@ -657,119 +1113,110 @@ fn api_spawn_session_with_preset(
                 }
 
                 state.set_active_session(&session_id);
+                let response_backend = request.backend();
+                let response_port = request.port();
 
-                let config = ServerConfig {
-                    model_path: preset.model_path.clone(),
-                    hf_repo: preset.hf_repo.clone(),
-                    context_size: preset.context_size,
-                    ctk: preset.ctk.clone(),
-                    ctv: preset.ctv.clone(),
-                    tensor_split: preset.tensor_split.clone(),
-                    batch_size: preset.batch_size,
-                    ubatch_size: preset.ubatch_size,
-        no_mmap: if cfg!(target_os = "macos") && preset.mlock {
-            false
-        } else {
-            preset.no_mmap
-        },
-                    port,
-                    ngram_spec: preset.ngram_spec,
-                    parallel_slots: preset.parallel_slots,
-                    temperature: preset.temperature,
-                    top_p: preset.top_p,
-                    top_k: preset.top_k,
-                    min_p: preset.min_p,
-                    repeat_penalty: preset.repeat_penalty,
-                    presence_penalty: preset.presence_penalty,
-                    n_cpu_moe: preset.n_cpu_moe,
-                    gpu_layers: preset.gpu_layers,
-                    mlock: preset.mlock,
-                    flash_attn: preset.flash_attn.clone(),
-                    split_mode: preset.split_mode.clone(),
-                    main_gpu: preset.main_gpu,
-                    threads: preset.threads,
-                    threads_batch: preset.threads_batch,
-                    rope_scaling: preset.rope_scaling.clone(),
-                    rope_freq_base: preset.rope_freq_base,
-                    rope_freq_scale: preset.rope_freq_scale,
-                    spec: crate::llama::server::SpecDecodeConfig {
-                        draft_model: preset.draft_model.clone(),
-                        draft_min: preset.draft_min,
-                        draft_max: preset.draft_max,
-                        spec_ngram_size: preset.spec_ngram_size,
-                        spec_type: preset.spec_type.clone(),
-                        spec_default: preset.spec_default,
-                        spec_draft_n_max: preset.spec_draft_n_max,
-                        spec_draft_n_min: preset.spec_draft_n_min,
-                        spec_draft_p_split: preset.spec_draft_p_split,
-                        spec_draft_p_min: preset.spec_draft_p_min,
-                        spec_draft_ngl: preset.spec_draft_ngl,
-                        spec_draft_device: preset.spec_draft_device.clone(),
-                        spec_draft_cpu_moe: preset.spec_draft_cpu_moe,
-                        spec_draft_n_cpu_moe: preset.spec_draft_n_cpu_moe,
-                        spec_draft_type_k: preset.spec_draft_type_k.clone(),
-                        spec_draft_type_v: preset.spec_draft_type_v.clone(),
-                        spec_ngram_mod_n_min: preset.spec_ngram_mod_n_min,
-                        spec_ngram_mod_n_max: preset.spec_ngram_mod_n_max,
-                        spec_ngram_mod_n_match: preset.spec_ngram_mod_n_match,
-                        spec_ngram_simple_size_n: preset.spec_ngram_simple_size_n,
-                        spec_ngram_simple_size_m: preset.spec_ngram_simple_size_m,
-                        spec_ngram_simple_min_hits: preset.spec_ngram_simple_min_hits,
-                        spec_ngram_map_k_size_n: preset.spec_ngram_map_k_size_n,
-                        spec_ngram_map_k_size_m: preset.spec_ngram_map_k_size_m,
-                        spec_ngram_map_k_min_hits: preset.spec_ngram_map_k_min_hits,
-                        spec_ngram_map_k4v_size_n: preset.spec_ngram_map_k4v_size_n,
-                        spec_ngram_map_k4v_size_m: preset.spec_ngram_map_k4v_size_m,
-                        spec_ngram_map_k4v_min_hits: preset.spec_ngram_map_k4v_min_hits,
-                    },
-                    kv_unified: preset.kv_unified,
-                    cache_idle_slots: preset.cache_idle_slots,
-                    cache_ram_mib: preset.cache_ram_mib,
-                    fit_enabled: preset.fit_enabled,
-                    fit_ctx: preset.fit_ctx,
-                    fit_target: preset.fit_target.clone(),
-                    fit_print: preset.fit_print,
-                    seed: preset.seed,
-                    system_prompt_file: preset.system_prompt_file.clone(),
-                    extra_args: preset.extra_args.clone(),
-                    bind_host: preset.bind_host.clone(),
-                    chat_template_file: preset.chat_template_file.clone(),
-                    mmproj: preset.mmproj.clone(),
-                    grammar: preset.grammar.clone(),
-                    json_schema: preset.json_schema.clone(),
-                    cache_type_k: preset.cache_type_k.clone(),
-                    cache_type_v: preset.cache_type_v.clone(),
-                    max_tokens: preset.max_tokens,
-                    api_key: preset.api_key.clone(),
-                    alias: preset.alias.clone(),
-                    benchmark_mode: preset.benchmark_mode,
-                    enable_thinking: preset.enable_thinking,
-                    preserve_thinking: preset.preserve_thinking,
-                    tool_call_format: preset.tool_call_format.clone(),
-                    reasoning: preset.reasoning.clone(),
-                    reasoning_budget: preset.reasoning_budget,
-                    reasoning_budget_message: preset.reasoning_budget_message.clone(),
-                    image_min_tokens: preset.image_min_tokens,
-                    image_max_tokens: preset.image_max_tokens,
-                    ..Default::default()
-                };
-
-                match start_server(&state, config, &app_config).await {
+                match launch_local(Arc::new(state.clone()), request, &app_config).await {
                     Ok(()) => {
                         state.update_session_status(&session_id, SessionStatus::Running);
                         Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                            &serde_json::json!({"ok": true, "session_id": session_id}),
+                            &serde_json::json!({"ok": true, "session_id": session_id, "backend": response_backend, "port": response_port}),
                         )))
                     }
                     Err(e) => {
                         state.remove_session(&session_id);
-                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": e.to_string()}),
-                        )))
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ),
+                        ))
                     }
                 }
             }
         })
+}
+
+fn restore_active_session_after_failed_launch(
+    state: &AppState,
+    failed_session_id: &str,
+    previous_active_id: &str,
+) {
+    let failed_session_is_still_active =
+        state.active_session_id.lock().unwrap().as_str() == failed_session_id;
+    if failed_session_is_still_active {
+        state.set_active_session(previous_active_id);
+    }
+}
+
+fn is_private_or_loopback_ip(ip: std::net::IpAddr) -> bool {
+    ip.is_loopback()
+        || matches!(ip, std::net::IpAddr::V4(v4)
+            if v4.octets()[0] == 10
+                || (v4.octets()[0] == 172 && (16..=31).contains(&v4.octets()[1]))
+                || (v4.octets()[0] == 192 && v4.octets()[1] == 168))
+}
+
+async fn discover_rapid_model_identity(
+    client: &reqwest::Client,
+    endpoint: &str,
+    api_key: Option<&str>,
+) -> Result<Option<String>, ()> {
+    use futures_util::StreamExt;
+
+    const MAX_MODELS_RESPONSE_BYTES: usize = 64 * 1024;
+    let mut request = client.get(format!("{endpoint}/v1/models"));
+    if let Some(key) = api_key.filter(|key| !key.is_empty()) {
+        request = request.bearer_auth(key);
+    }
+    let response = request.send().await.map_err(|_| ())?;
+    if !response.status().is_success() {
+        return Err(());
+    }
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| ())?;
+        if body.len().saturating_add(chunk.len()) > MAX_MODELS_RESPONSE_BYTES {
+            return Err(());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    let value = serde_json::from_slice::<serde_json::Value>(&body).map_err(|_| ())?;
+    let identity = value
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|models| models.first())
+        .and_then(|model| model.get("id"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    Ok(identity)
+}
+
+async fn inference_diagnostics_available(
+    client: &reqwest::Client,
+    endpoint: &str,
+    backend: crate::inference::InferenceBackend,
+    api_key: Option<&str>,
+) -> bool {
+    let diagnostics_path = match backend {
+        crate::inference::InferenceBackend::LlamaCpp => "/health",
+        crate::inference::InferenceBackend::RapidMlx => "/v1/status",
+    };
+    let mut request = client.get(format!(
+        "{}{diagnostics_path}",
+        endpoint.trim_end_matches('/')
+    ));
+    if let Some(key) = api_key.filter(|key| !key.is_empty()) {
+        request = request.bearer_auth(key);
+    }
+    match backend {
+        crate::inference::InferenceBackend::RapidMlx => request
+            .send()
+            .await
+            .is_ok_and(|response| response.status().is_success()),
+        crate::inference::InferenceBackend::LlamaCpp => request.send().await.is_ok(),
+    }
 }
 
 fn api_attach(
@@ -782,6 +1229,7 @@ fn api_attach(
         .and(warp::path::end())
         .and(warp::post())
         .and(warp::header::headers_cloned())
+        .and(warp::body::content_length_limit(16 * 1024))
         .and(warp::body::json())
         .and(with_app_config(app_config))
         .and_then(move |headers: warp::http::HeaderMap,
@@ -831,18 +1279,14 @@ fn api_attach(
                                 ));
                             }
                             if let Some(host) = parsed.host_str()
-                                && let Ok(ip) = host.parse::<std::net::IpAddr>() {
-                                    let private = matches!(ip, std::net::IpAddr::V4(v4)
-                                        if v4.octets()[0] == 10
-                                            || (v4.octets()[0] == 172 && (4..=11).contains(&v4.octets()[1]))
-                                            || (v4.octets()[0] == 192 && v4.octets()[1] == 168));
-                                    if !ip.is_loopback() && !private {
-                                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
-                                            warp::reply::json(&serde_json::json!({"ok": false, "error": "Endpoint must be on a private network"})),
-                                            warp::http::StatusCode::OK,
-                                        ));
-                                    }
-                                }
+                                && let Ok(ip) = host.parse::<std::net::IpAddr>()
+                                && !is_private_or_loopback_ip(ip)
+                            {
+                                return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({"ok": false, "error": "Endpoint must be on a private network"})),
+                                    warp::http::StatusCode::OK,
+                                ));
+                            }
                             s.to_string()
                         } else {
                             return Ok::<_, warp::Rejection>(warp::reply::with_status(
@@ -863,6 +1307,29 @@ fn api_attach(
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_string());
+                let backend = match payload.get("backend") {
+                    Some(value) => match serde_json::from_value::<
+                        crate::inference::InferenceBackend,
+                    >(value.clone()) {
+                        Ok(backend) => backend,
+                        Err(_) => {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "backend must be llama_cpp or rapid_mlx"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+                    },
+                    None => crate::inference::InferenceBackend::LlamaCpp,
+                };
+                let mut model_identity = payload
+                    .get("model_identity")
+                    .and_then(|value| value.as_str())
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string);
 
                 let (api_key, _spawn_match_id) = {
                     let mut effective_key = caller_api_key.clone();
@@ -914,18 +1381,26 @@ fn api_attach(
                     }
                 };
 
-                eprintln!("[info] Health-checking llama-server at {}", endpoint);
-                let mut health_req = client.get(&endpoint);
+                eprintln!("[info] Health-checking inference runtime at {}", endpoint);
+                let health_url = match backend {
+                    crate::inference::InferenceBackend::LlamaCpp => endpoint.clone(),
+                    crate::inference::InferenceBackend::RapidMlx => {
+                        format!("{}/health/ready", endpoint.trim_end_matches('/'))
+                    }
+                };
+                let mut health_req = client.get(&health_url);
                 if let Some(ref key) = api_key {
                     health_req = health_req.header("Authorization", format!("Bearer {}", key));
                 }
                 let server_up = match health_req.send().await {
-                    Ok(resp) => {
-                        eprintln!("[info] llama-server health check status: {}", resp.status());
-                        true
-                    }
+                    Ok(resp) => match backend {
+                        crate::inference::InferenceBackend::LlamaCpp => true,
+                        crate::inference::InferenceBackend::RapidMlx => {
+                            resp.status().is_success()
+                        }
+                    },
                     Err(e) => {
-                        eprintln!("[warn] llama-server health check failed: {}", e);
+                        eprintln!("[warn] inference runtime health check failed: {}", e);
                         false
                     }
                 };
@@ -933,23 +1408,58 @@ fn api_attach(
                     return Ok::<_, warp::Rejection>(warp::reply::with_status(
                         warp::reply::json(&serde_json::json!({
                             "ok": false,
-                            "error": format!("Cannot reach llama-server at {}. Is it running?", endpoint)
+                            "error": format!("Cannot reach the selected inference runtime at {}. Is it ready?", endpoint)
                         })),
                         warp::http::StatusCode::OK,
                     ));
                 }
 
-                let mut metrics_req = client.get(format!("{}/health", endpoint.trim_end_matches('/')));
-                if let Some(ref key) = api_key {
-                    metrics_req = metrics_req.header("Authorization", format!("Bearer {}", key));
+                if backend == crate::inference::InferenceBackend::RapidMlx {
+                    let discovered_model = match discover_rapid_model_identity(
+                        &client,
+                        endpoint.trim_end_matches('/'),
+                        api_key.as_deref(),
+                    )
+                    .await
+                    {
+                        Ok(identity) => identity,
+                        Err(()) => {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Rapid-MLX model discovery failed; verify the endpoint and API key"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+                    };
+                    if model_identity.is_none() {
+                        model_identity = discovered_model;
+                    }
+                    if model_identity.is_none() {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Rapid-MLX model identity could not be discovered; enter its served model name"
+                            })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ));
+                    }
                 }
-                let metrics_available = metrics_req.send().await.is_ok();
+
+                let metrics_available = inference_diagnostics_available(
+                    &client,
+                    &endpoint,
+                    backend,
+                    api_key.as_deref(),
+                )
+                .await;
 
                 let existing_session_id = {
                     let sessions = state.sessions.lock().unwrap();
                     let mut id = sessions.iter().find(|s| {
                         if let SessionMode::Attach { endpoint: ep, .. } = &s.mode {
-                            *ep == endpoint
+                            *ep == endpoint && s.backend == backend
                         } else {
                             false
                         }
@@ -965,7 +1475,7 @@ fn api_attach(
                                     port,
                                     ..
                                 } = &s.mode {
-                                    *port == port_num
+                                    *port == port_num && s.backend == backend
                                 } else {
                                     false
                                 }
@@ -980,12 +1490,14 @@ fn api_attach(
                     id
                 } else {
                     let session_id = crate::state::generate_session_id();
-                    let session = crate::state::Session::new_attach(
+                    let mut session = crate::state::Session::new_attach(
                         session_id.clone(),
                         format!("Attached: {}", endpoint),
                         endpoint,
                         api_key.clone(),
                     );
+                    session.backend = backend;
+                    session.model_identity = model_identity.clone();
                     if !state.add_session(session) {
                         return Ok::<_, warp::Rejection>(warp::reply::with_status(
                             warp::reply::json(&serde_json::json!({"ok": false, "error": "Maximum sessions reached"})),
@@ -998,6 +1510,16 @@ fn api_attach(
                 {
                     let mut sessions = state.sessions.lock().unwrap();
                     if let Some(s) = sessions.iter_mut().find(|s| s.id == session_id) {
+                        s.backend = backend;
+                        s.model_identity = model_identity.clone();
+                        s.launch_requires_api_key = api_key.is_some();
+                        if let SessionMode::Attach {
+                            api_key: session_key,
+                            ..
+                        } = &mut s.mode
+                        {
+                            *session_key = api_key.clone();
+                        }
                         s.last_connected_at = now;
                         s.connect_count += 1;
                         s.last_error = None;
@@ -1009,8 +1531,10 @@ fn api_attach(
                 Ok::<_, warp::Rejection>(warp::reply::with_status(
                     warp::reply::json(&serde_json::json!({
                         "ok": true,
+                        "backend": backend,
+                        "model_identity": model_identity,
                         "warning": if !metrics_available {
-                            Some("llama-server is running but metrics endpoint (/health) is unavailable. Inference metrics will not be available. Start llama-server with --metrics flag to enable metrics.")
+                            Some("The inference runtime is ready, but its diagnostics endpoint is unavailable.")
                         } else {
                             None
                         }
@@ -1074,13 +1598,13 @@ fn api_detach(
         })
 }
 
-fn api_kill_llama(
+fn api_kill_server(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let app_config = app_config.clone();
 
-    warp::path!("api" / "kill-llama")
+    warp::path!("api" / "kill-server")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<serde_json::Value>())
@@ -1113,9 +1637,24 @@ fn api_kill_llama(
                     ));
                 }
 
-                state.push_log("[monitor] kill-llama: kill-llama requested (best-effort)".into());
-                if let Err(e) = stop_server(&state).await {
-                    state.push_log(format!("[monitor] stop_server fallback: {}", e));
+                state.push_log("[monitor] kill-server: kill-server requested (best-effort)".into());
+                let had_managed_process = state.server_child.lock().await.is_some()
+                    || state.supervisor.lock().await.is_some();
+                match stop_server(&state).await {
+                    Ok(()) if had_managed_process => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({ "ok": true })),
+                        ));
+                    }
+                    Ok(()) => {
+                        state.push_log(
+                            "[monitor] kill-server: no supervised process; trying legacy process cleanup"
+                                .into(),
+                        );
+                    }
+                    Err(e) => {
+                        state.push_log(format!("[monitor] stop_server fallback: {}", e));
+                    }
                 }
 
                 #[cfg(target_os = "windows")]
@@ -1192,4 +1731,234 @@ fn api_kill_llama(
                 }
             }
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_restore_rolls_back_active_session() {
+        let state = AppState::default();
+        assert!(state.add_session(app_state::Session::new_spawn(
+            "previous".into(),
+            "Previous".into(),
+            8001,
+            String::new(),
+            None,
+            None,
+        )));
+        assert!(state.add_session(app_state::Session::new_spawn(
+            "failed".into(),
+            "Failed".into(),
+            8002,
+            String::new(),
+            None,
+            None,
+        )));
+        assert!(state.set_active_session("previous"));
+        assert!(state.set_active_session("failed"));
+
+        restore_active_session_after_failed_launch(&state, "failed", "previous");
+
+        assert_eq!(state.active_session_id.lock().unwrap().as_str(), "previous");
+    }
+
+    #[test]
+    fn failed_restore_does_not_overwrite_newer_active_selection() {
+        let state = AppState::default();
+        for id in ["previous", "failed", "newer"] {
+            assert!(state.add_session(app_state::Session::new_spawn(
+                id.into(),
+                id.into(),
+                8001,
+                String::new(),
+                None,
+                None,
+            )));
+        }
+        assert!(state.set_active_session("newer"));
+
+        restore_active_session_after_failed_launch(&state, "failed", "previous");
+
+        assert_eq!(state.active_session_id.lock().unwrap().as_str(), "newer");
+    }
+
+    #[tokio::test]
+    async fn rapid_model_discovery_supports_open_and_protected_endpoints() {
+        let route = warp::path!("v1" / "models")
+            .and(warp::header::optional::<String>("authorization"))
+            .map(|authorization: Option<String>| {
+                if authorization
+                    .as_deref()
+                    .is_some_and(|value| value != "Bearer correct-key")
+                {
+                    warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({"error": "unauthorized"})),
+                        warp::http::StatusCode::UNAUTHORIZED,
+                    )
+                } else {
+                    warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "data": [{"id": "served-rapid-model"}]
+                        })),
+                        warp::http::StatusCode::OK,
+                    )
+                }
+            });
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        tokio::spawn(warp::serve(route).run(([127, 0, 0, 1], port)));
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        let endpoint = format!("http://127.0.0.1:{port}");
+        let client = reqwest::Client::new();
+
+        assert_eq!(
+            discover_rapid_model_identity(&client, &endpoint, None)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("served-rapid-model")
+        );
+        assert_eq!(
+            discover_rapid_model_identity(&client, &endpoint, Some("correct-key"))
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("served-rapid-model")
+        );
+        assert!(
+            discover_rapid_model_identity(&client, &endpoint, Some("wrong-key"))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn rapid_diagnostics_require_a_successful_authenticated_status() {
+        let route = warp::path!("v1" / "status")
+            .and(warp::header::optional::<String>("authorization"))
+            .map(|authorization: Option<String>| {
+                let status = if authorization.as_deref() == Some("Bearer correct-key") {
+                    warp::http::StatusCode::OK
+                } else {
+                    warp::http::StatusCode::UNAUTHORIZED
+                };
+                warp::reply::with_status(warp::reply::json(&serde_json::json!({})), status)
+            });
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        tokio::spawn(warp::serve(route).run(([127, 0, 0, 1], port)));
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        let endpoint = format!("http://127.0.0.1:{port}");
+        let client = reqwest::Client::new();
+
+        assert!(
+            inference_diagnostics_available(
+                &client,
+                &endpoint,
+                crate::inference::InferenceBackend::RapidMlx,
+                Some("correct-key"),
+            )
+            .await
+        );
+        assert!(
+            !inference_diagnostics_available(
+                &client,
+                &endpoint,
+                crate::inference::InferenceBackend::RapidMlx,
+                Some("wrong-key"),
+            )
+            .await
+        );
+    }
+
+    #[test]
+    fn attach_ip_policy_uses_the_full_rfc1918_172_range() {
+        for ip in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.1",
+            "172.31.255.254",
+            "192.168.1.2",
+        ] {
+            assert!(is_private_or_loopback_ip(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in [
+            "172.4.0.1",
+            "172.11.0.1",
+            "172.15.255.254",
+            "172.32.0.1",
+            "8.8.8.8",
+        ] {
+            assert!(!is_private_or_loopback_ip(ip.parse().unwrap()), "{ip}");
+        }
+    }
+
+    #[test]
+    fn doctor_check_gguf_path_nonexistent_is_an_issue() {
+        let path = std::path::Path::new("/tmp/llama-monitor-test-doctor/does-not-exist.gguf");
+        let findings = check_gguf_path(path);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, DoctorSeverity::Issue);
+        assert_eq!(findings[0].finding_type, DoctorFindingType::LlamaCpp);
+        assert!(findings[0].fix.is_none());
+    }
+
+    #[test]
+    fn doctor_check_gguf_path_empty_path_is_an_issue() {
+        let findings = check_gguf_path(std::path::Path::new(""));
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, DoctorSeverity::Issue);
+    }
+
+    #[test]
+    fn doctor_check_gguf_path_existing_gguf_file_is_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model.gguf");
+        std::fs::write(&path, b"fake gguf bytes").unwrap();
+
+        let findings = check_gguf_path(&path);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, DoctorSeverity::Ok);
+    }
+
+    #[test]
+    fn doctor_check_gguf_path_wrong_extension_is_a_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("model.bin");
+        std::fs::write(&path, b"fake bytes").unwrap();
+
+        let findings = check_gguf_path(&path);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, DoctorSeverity::Warning);
+    }
+
+    #[test]
+    fn doctor_check_port_available_reports_bound_port_as_in_use() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let findings = check_port_available(port);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, DoctorSeverity::Warning);
+        assert!(findings[0].message.contains(&port.to_string()));
+
+        drop(listener);
+    }
+
+    #[test]
+    fn doctor_check_port_available_reports_free_port_as_ok() {
+        // Bind then immediately drop to obtain a port that is very likely free,
+        // then verify the check reports it as available.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let findings = check_port_available(port);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].severity, DoctorSeverity::Ok);
+    }
 }

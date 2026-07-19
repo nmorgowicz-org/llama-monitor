@@ -8,8 +8,8 @@ use crate::chat_storage::ChatStorage;
 use crate::config::{TLSConfig, decrypt_value, encrypt_value};
 use crate::gpu::GpuMetrics;
 use crate::gpu::env::GpuEnv;
+use crate::inference::llama_cpp::ServerConfig;
 use crate::llama::metrics::LlamaMetrics;
-use crate::llama::server::ServerConfig;
 use crate::models::DiscoveredModel;
 use crate::presets;
 use crate::presets::ModelPreset;
@@ -111,7 +111,62 @@ fn sensor_bridge_setup_available() -> bool {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+impl crate::inference::supervisor::BackendObserver for AppState {
+    fn on_log_line(&self, line: &str) {
+        self.push_log(line.to_string());
+    }
+    fn on_crash(&self, exit_status: std::process::ExitStatus, tail: Vec<String>) {
+        let reason = if exit_status.success() {
+            "Local inference backend exited normally".to_string()
+        } else if let Some(code) = exit_status.code() {
+            match code {
+                137 | 9 => format!(
+                    "Local inference backend was terminated (code {}). This often means out-of-memory (OOM). Try a smaller context or a different model.",
+                    code
+                ),
+                _ => format!(
+                    "Local inference backend exited unexpectedly (code {}). Check the server logs for details.",
+                    code
+                ),
+            }
+        } else {
+            "Local inference backend was killed by an external signal.".to_string()
+        };
+
+        let tail_text = if tail.is_empty() {
+            "\nNo backend output captured before it was killed.".to_string()
+        } else {
+            format!(
+                "\nLast relevant backend log lines:\n{}",
+                tail.iter()
+                    .map(|l| format!("  {l}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        };
+
+        let reason_display = if exit_status.success()
+            || exit_status.code() == Some(137)
+            || exit_status.code() == Some(9)
+        {
+            reason
+        } else {
+            format!("{}{}", reason, tail_text)
+        };
+
+        self.push_log(format!("[monitor] {}", reason_display));
+        let active_id = {
+            let aid = self.active_session_id.lock().unwrap();
+            aid.clone()
+        };
+        if !active_id.is_empty() {
+            use crate::state::SessionStatus;
+            self.update_session_status(&active_id, SessionStatus::Error(reason_display));
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, Default)]
 pub struct MetricsCapabilities {
     pub inference: bool,
     pub system: bool,
@@ -368,10 +423,12 @@ pub enum SessionMode {
         #[serde(default)]
         bind_host: Option<String>,
         #[serde(default)]
+        #[serde(skip_serializing)]
         api_key: Option<String>,
     },
     Attach {
         endpoint: String,
+        #[serde(default, skip_serializing)]
         api_key: Option<String>,
     },
 }
@@ -393,6 +450,15 @@ pub struct Session {
     pub id: String,
     #[serde(default)]
     pub name: String,
+    #[serde(default)]
+    pub backend: crate::inference::InferenceBackend,
+    #[serde(default)]
+    pub model_identity: Option<String>,
+    /// Secret-scrubbed backend-owned request used to restore direct spawns.
+    #[serde(default)]
+    pub launch: Option<crate::inference::launch::LocalLaunchRequest>,
+    #[serde(default)]
+    pub launch_requires_api_key: bool,
     #[serde(default)]
     pub mode: SessionMode,
     #[serde(default)]
@@ -427,10 +493,38 @@ impl Session {
         bind_host: Option<String>,
         api_key: Option<String>,
     ) -> Self {
+        Self::new_spawn_with_backend(
+            id,
+            name,
+            port,
+            preset_id,
+            bind_host,
+            api_key,
+            crate::inference::InferenceBackend::LlamaCpp,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_spawn_with_backend(
+        id: String,
+        name: String,
+        port: u16,
+        preset_id: String,
+        bind_host: Option<String>,
+        api_key: Option<String>,
+        backend: crate::inference::InferenceBackend,
+        model_identity: Option<String>,
+    ) -> Self {
         let now = Self::now();
+        let launch_requires_api_key = api_key.as_ref().is_some_and(|key| !key.is_empty());
         Self {
             id,
             name,
+            backend,
+            model_identity,
+            launch: None,
+            launch_requires_api_key,
             mode: SessionMode::Spawn {
                 port,
                 bind_host,
@@ -448,9 +542,14 @@ impl Session {
 
     pub fn new_attach(id: String, name: String, endpoint: String, api_key: Option<String>) -> Self {
         let now = Self::now();
+        let launch_requires_api_key = api_key.as_ref().is_some_and(|key| !key.is_empty());
         Self {
             id,
             name,
+            backend: crate::inference::InferenceBackend::LlamaCpp,
+            model_identity: None,
+            launch: None,
+            launch_requires_api_key,
             mode: SessionMode::Attach { endpoint, api_key },
             status: SessionStatus::Disconnected,
             preset_id: String::new(),
@@ -651,17 +750,32 @@ pub fn generate_session_id() -> String {
 pub struct AppState {
     pub gpu_metrics: Arc<Mutex<BTreeMap<String, GpuMetrics>>>,
     pub llama_metrics: Arc<Mutex<LlamaMetrics>>,
+    /// Latest backend-neutral inference sample. Cleared when the active backend changes.
+    pub inference_metrics: Arc<Mutex<Option<crate::inference::metrics::InferenceMetricsSnapshot>>>,
+    pub inference_poll_sequence: Arc<std::sync::atomic::AtomicU64>,
+    pub inference_poll_failed: Arc<AtomicBool>,
+    pub inference_metrics_session_id: Arc<Mutex<String>>,
+    pub inference_poll_failures: Arc<std::sync::atomic::AtomicU64>,
     pub server_logs: Arc<Mutex<VecDeque<String>>>,
     // Stores the PID of the running llama-server child.  The Child handle itself
     // is moved directly into the death_watcher task so it can call wait(); stop_server
     // kills by PID so it never needs to hold the handle.
+    #[allow(dead_code)]
     pub server_child: Arc<tokio::sync::Mutex<Option<u32>>>,
     pub server_stopping: Arc<AtomicBool>, // True when stop_server is in progress (for death-watcher coordination)
     // Fired by the death_watcher when the child exits during an intentional stop,
     // so stop_server can unblock and know the port has been released.
+    #[allow(dead_code)]
     pub server_exit_notify: Arc<tokio::sync::Notify>,
     pub server_running: Arc<Mutex<bool>>, // Whether active endpoint is reachable (for inference)
     pub local_server_running: Arc<Mutex<bool>>, // Whether a local llama-server was spawned by this app
+    pub backend: Arc<Mutex<Option<crate::inference::backend::BackendAdapter>>>,
+    pub supervisor: Arc<tokio::sync::Mutex<Option<Arc<crate::inference::supervisor::Supervisor>>>>,
+    pub local_launch_request: Arc<Mutex<Option<crate::inference::launch::LocalLaunchRequest>>>,
+    /// Serializes local inference process start/stop transitions.
+    pub server_lifecycle: Arc<tokio::sync::Mutex<()>>,
+    /// Monotonic ownership token for local process lifecycle operations.
+    pub server_generation: Arc<std::sync::atomic::AtomicU64>,
     pub server_config: Arc<Mutex<Option<ServerConfig>>>,
     pub llama_poll_notify: Arc<tokio::sync::Notify>,
     pub agent_poll_notify: Arc<tokio::sync::Notify>,
@@ -696,7 +810,11 @@ pub struct AppState {
     pub remote_agent_protocol_too_old: Arc<Mutex<bool>>,
     pub chat_storage: Arc<ChatStorage>,
     pub tls_config: Arc<Mutex<TLSConfig>>,
+    /// Retains llama.cpp's single-request safety contract.
     pub monitor_inference_gate: Arc<tokio::sync::Semaphore>,
+    /// Rapid-MLX supports continuous batching, but llama-monitor keeps a fixed
+    /// application-side bound so one client cannot create an unbounded queue.
+    pub rapid_mlx_inference_gate: Arc<tokio::sync::Semaphore>,
     pub last_spawn_cmd: Arc<Mutex<String>>,
 
     // Sleep/low-power mode (T-042/T-043)
@@ -706,6 +824,74 @@ pub struct AppState {
     pub sleep_mode_config: Arc<Mutex<SleepModeConfig>>,
     pub sleep_notify: Arc<tokio::sync::Notify>,
     pub last_activity_at: Arc<std::sync::atomic::AtomicU64>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            gpu_metrics: Arc::new(Mutex::new(BTreeMap::new())),
+            llama_metrics: Arc::new(Mutex::new(LlamaMetrics::default())),
+            inference_metrics: Arc::new(Mutex::new(None)),
+            inference_poll_sequence: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            inference_poll_failed: Arc::new(AtomicBool::new(false)),
+            inference_metrics_session_id: Arc::new(Mutex::new(String::new())),
+            inference_poll_failures: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            server_logs: Arc::new(Mutex::new(VecDeque::new())),
+            server_child: Arc::new(tokio::sync::Mutex::new(None)),
+            server_stopping: Arc::new(AtomicBool::new(false)),
+            server_exit_notify: Arc::new(tokio::sync::Notify::new()),
+            server_running: Arc::new(Mutex::new(false)),
+            local_server_running: Arc::new(Mutex::new(false)),
+            server_config: Arc::new(Mutex::new(None)),
+            llama_poll_notify: Arc::new(tokio::sync::Notify::new()),
+            agent_poll_notify: Arc::new(tokio::sync::Notify::new()),
+            presets: Arc::new(Mutex::new(Vec::new())),
+            presets_path: PathBuf::new(),
+            templates: Arc::new(Mutex::new(Vec::new())),
+            templates_path: PathBuf::new(),
+            discovered_models: Arc::new(Mutex::new(Vec::new())),
+            models_dir: None,
+            model_tags: Arc::new(Mutex::new(ModelTags::default())),
+            model_tags_path: PathBuf::new(),
+            preset_collections: Arc::new(Mutex::new(
+                crate::collections::PresetCollections::default(),
+            )),
+            gpu_env: Arc::new(Mutex::new(GpuEnv::default())),
+            gpu_env_path: PathBuf::new(),
+            ui_settings: Arc::new(Mutex::new(UiSettings::default())),
+            ui_settings_path: PathBuf::new(),
+            system_metrics: Arc::new(Mutex::new(SystemMetrics::default())),
+            sessions: Arc::new(Mutex::new(Vec::new())),
+            active_session_id: Arc::new(Mutex::new(String::new())),
+            sessions_path: PathBuf::new(),
+            capabilities: Arc::new(Mutex::new(MetricsCapabilities::default())),
+            endpoint_kind: Arc::new(Mutex::new(EndpointKind::Unknown)),
+            session_kind: Arc::new(Mutex::new(SessionKind::None)),
+            tray_mode: Arc::new(Mutex::new(TrayMode::Headless)),
+            remote_agent_connected: Arc::new(Mutex::new(false)),
+            remote_agent_health_reachable: Arc::new(Mutex::new(false)),
+            remote_agent_url: Arc::new(Mutex::new(None)),
+            remote_agent_version: Arc::new(Mutex::new(None)),
+            remote_agent_update_available: Arc::new(Mutex::new(false)),
+            remote_agent_protocol_version: Arc::new(Mutex::new(None)),
+            remote_agent_protocol_too_old: Arc::new(Mutex::new(false)),
+            chat_storage: Arc::new(ChatStorage::default()),
+            tls_config: Arc::new(Mutex::new(TLSConfig::default())),
+            monitor_inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
+            rapid_mlx_inference_gate: Arc::new(tokio::sync::Semaphore::new(4)),
+            last_spawn_cmd: Arc::new(Mutex::new(String::new())),
+            backend: Arc::new(Mutex::new(None)),
+            supervisor: Arc::new(tokio::sync::Mutex::new(None)),
+            local_launch_request: Arc::new(Mutex::new(None)),
+            server_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
+            server_generation: Arc::new(AtomicU64::new(0)),
+            sleep_mode: Arc::new(AtomicU8::new(0)),
+            sleep_mode_manual: Arc::new(AtomicBool::new(false)),
+            sleep_mode_config: Arc::new(Mutex::new(SleepModeConfig::default())),
+            sleep_notify: Arc::new(tokio::sync::Notify::new()),
+            last_activity_at: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        }
+    }
 }
 
 impl AppState {
@@ -726,7 +912,7 @@ impl AppState {
         let model_tags_path = paths.model_tags_path;
         let discovered = models_dir
             .as_ref()
-            .and_then(|dir| crate::models::scan_models_dir(dir).ok())
+            .and_then(|dir| crate::models::scan_gguf_library(dir).ok())
             .unwrap_or_default();
         let model_tags = ModelTags::load(&model_tags_path);
         let preset_collections = {
@@ -766,6 +952,11 @@ impl AppState {
         let state = Self {
             gpu_metrics: Arc::new(Mutex::new(BTreeMap::new())),
             llama_metrics: Arc::new(Mutex::new(LlamaMetrics::default())),
+            inference_metrics: Arc::new(Mutex::new(None)),
+            inference_poll_sequence: Arc::new(AtomicU64::new(0)),
+            inference_poll_failed: Arc::new(AtomicBool::new(false)),
+            inference_metrics_session_id: Arc::new(Mutex::new(String::new())),
+            inference_poll_failures: Arc::new(AtomicU64::new(0)),
             server_logs: Arc::new(Mutex::new(VecDeque::new())),
             server_child: Arc::new(tokio::sync::Mutex::new(None)),
             server_stopping: Arc::new(AtomicBool::new(false)),
@@ -806,7 +997,13 @@ impl AppState {
             chat_storage,
             tls_config: Arc::new(Mutex::new(tls_config)),
             monitor_inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
+            rapid_mlx_inference_gate: Arc::new(tokio::sync::Semaphore::new(4)),
             last_spawn_cmd: Arc::new(Mutex::new(String::new())),
+            backend: Arc::new(Mutex::new(None)),
+            supervisor: Arc::new(tokio::sync::Mutex::new(None)),
+            local_launch_request: Arc::new(Mutex::new(None)),
+            server_lifecycle: Arc::new(tokio::sync::Mutex::new(())),
+            server_generation: Arc::new(AtomicU64::new(0)),
             sleep_mode: Arc::new(AtomicU8::new(0)), // 0 = Off (full monitoring)
             sleep_mode_manual: Arc::new(AtomicBool::new(false)),
             sleep_mode_config: Arc::new(Mutex::new(sleep_cfg)),
@@ -1425,6 +1622,55 @@ fn local_interface_ips() -> Vec<IpAddr> {
     ips
 }
 
+// ── Inference diagnostics ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FixAction {
+    AddToolCallParser,
+    EnableAutoToolChoice,
+    AddNoThinking,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DoctorFinding {
+    #[serde(rename = "type")]
+    pub finding_type: DoctorFindingType,
+    pub severity: DoctorSeverity,
+    pub message: String,
+    #[serde(default)]
+    pub section: String,
+    #[serde(default)]
+    pub fix: Option<FixAction>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DoctorFindingType {
+    Environment,
+    Preset,
+    LlamaCpp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DoctorSeverity {
+    Ok,
+    Warning,
+    Issue,
+}
+
+impl DoctorSeverity {
+    pub fn from_glyph(glyph: char) -> Self {
+        match glyph {
+            '✓' => Self::Ok,
+            '⚠' | '!' => Self::Warning,
+            '✗' | '×' => Self::Issue,
+            _ => Self::Warning,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1681,6 +1927,84 @@ mod tests {
         assert!(!state.calculate_capabilities().host_metrics);
 
         let _ = std::fs::remove_file(sessions_path);
+    }
+
+    #[test]
+    fn legacy_spawn_session_without_backend_defaults_to_llama_cpp() {
+        let session: Session = serde_json::from_value(serde_json::json!({
+            "id": "legacy",
+            "name": "Legacy",
+            "mode": { "Spawn": { "port": 8001 } }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            session.backend,
+            crate::inference::InferenceBackend::LlamaCpp
+        );
+        assert!(session.model_identity.is_none());
+    }
+
+    #[test]
+    fn session_serialization_never_persists_endpoint_api_keys() {
+        let mut session = Session::new_spawn(
+            "private".into(),
+            "Private".into(),
+            8001,
+            String::new(),
+            None,
+            Some("do-not-write".into()),
+        );
+        session.model_identity = Some("/models/private.gguf".into());
+        session.launch = Some(
+            crate::inference::launch::LocalLaunchRequest::LlamaCpp(Box::new(
+                crate::inference::llama_cpp::ServerConfig {
+                    model_path: "/models/private.gguf".into(),
+                    port: 8001,
+                    api_key: Some("do-not-write".into()),
+                    ..Default::default()
+                },
+            ))
+            .for_persistence(),
+        );
+        let json = serde_json::to_string(&session).unwrap();
+        assert!(!json.contains("do-not-write"));
+        assert!(json.contains("launch_requires_api_key"));
+
+        let restored: Session = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            restored.backend,
+            crate::inference::InferenceBackend::LlamaCpp
+        );
+        assert_eq!(
+            restored.model_identity.as_deref(),
+            Some("/models/private.gguf")
+        );
+        assert!(restored.launch_requires_api_key);
+        assert!(matches!(
+            restored.launch,
+            Some(crate::inference::launch::LocalLaunchRequest::LlamaCpp(_))
+        ));
+        assert!(matches!(
+            restored.mode,
+            SessionMode::Spawn { api_key: None, .. }
+        ));
+
+        let attached = Session::new_attach(
+            "private-attach".into(),
+            "Private attach".into(),
+            "http://127.0.0.1:9000".into(),
+            Some("attach-secret".into()),
+        );
+        let json = serde_json::to_string(&attached).unwrap();
+        assert!(!json.contains("attach-secret"));
+        assert!(attached.launch_requires_api_key);
+        let restored: Session = serde_json::from_str(&json).unwrap();
+        assert!(restored.launch_requires_api_key);
+        assert!(matches!(
+            restored.mode,
+            SessionMode::Attach { api_key: None, .. }
+        ));
     }
 
     #[test]

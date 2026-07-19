@@ -19,6 +19,7 @@
  * Quick examples:
  *   node tests/ui/capture.mjs --list-scenarios
  *   node tests/ui/capture.mjs --scenario welcome
+ *   node tests/ui/capture.mjs --scenario rapid-preset
  *   SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario chat
  *   SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario guided-gen
  *   SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
@@ -124,6 +125,7 @@ function printUsage() {
 Scenarios:
   Core
     welcome          Welcome screen, auth shell, and setup wizard button (no attach required)
+    free-cache       Native Free Cache confirmation on the welcome screen
     chat             Chat, telemetry, logs
 
   Chat Features
@@ -132,8 +134,9 @@ Scenarios:
     chat-history-qa  History Q&A panel (ask questions about conversation)
 
   Models and Presets
-    models-v2        Models modal: discovery summary, third-party scan, HF download panel
+    models-v2        Models modal: typed inventory, Import Lab, and HF download panel
     preset-editor    Preset editor: model/context, GPU, and advanced tabs
+    rapid-preset     Rapid-MLX welcome cards and preset editor (legacy and typed sources)
 
   Configuration
     settings         Settings modal, preferences, persona, models, shortcuts
@@ -141,9 +144,11 @@ Scenarios:
     filebrowser      File browser modal (Browse buttons in Config modal, modal open)
     panels           Chat config panels (behavior, model, style, debug)
     dashboard        Server tab, GPU section
+    dashboard-rapid-mlx  Deterministic Rapid-MLX telemetry cards (dark and light)
 
   Setup wizard
      spawn-wizard           Steps 1–6: profiles, model, VRAM, parameters, summary, start/close
+     spawn-wizard-engines   llama.cpp/Rapid-MLX engine cards and Rapid-MLX hardware handoff
      spawn-wizard-gif       Animated GIF walking through all setup wizard steps (1→2→3→4→5→6)
      spawn-wizard-hf-download  HF download panel: idle options and simulated progress
 
@@ -176,6 +181,7 @@ Examples:
   SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
   SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario settings --close-up
   SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario spawn-wizard --no-attach
+  SCREENSHOT_PORT=8898 node tests/ui/capture.mjs --scenario spawn-wizard-engines --no-attach
   SCREENSHOT_PORT=8897 node tests/ui/capture.mjs --scenario spawn-wizard-gif --no-attach
   SCREENSHOT_PORT=8900 node tests/ui/capture.mjs --scenario tune-panel
   SCREENSHOT_PORT=8901 node tests/ui/capture.mjs --scenario llama-updater
@@ -219,6 +225,44 @@ function seedConfig() {
             fs.copyFileSync(cpExample, cpDest);
         }
     }
+}
+
+function seedRapidMlxCapturePreset() {
+    const preset = [{
+        id: 'capture-rapid-mlx',
+        name: 'Qwen 3.6 · Rapid-MLX (legacy source)',
+        backend: 'rapid_mlx',
+        rapid_mlx: {
+            model_path: 'mlx-community/Qwen3-30B-A3B-4bit',
+            served_model_name: 'qwen3-rapid',
+            host: '127.0.0.1',
+            port: 9123,
+            log_level: 'INFO',
+        },
+        model_path: '',
+        port: 9123,
+        context_size: 131072,
+    }, {
+        id: 'capture-rapid-mlx-typed',
+        name: 'Qwen 3.6 · Rapid-MLX (typed source)',
+        backend: 'rapid_mlx',
+        rapid_mlx: {
+            model_source: {
+                kind: 'hugging_face_repo',
+                repo_id: 'mlx-community/Qwen3.6-35B-A3B-4bit',
+                revision: 'main',
+            },
+            served_model_name: 'qwen36-typed',
+            host: '127.0.0.1',
+            port: 9124,
+            log_level: 'INFO',
+        },
+        model_path: '',
+        port: 9124,
+        context_size: 65536,
+    }];
+    fs.mkdirSync(TEMP_APP_CONFIG_DIR, { recursive: true });
+    fs.writeFileSync(join(TEMP_APP_CONFIG_DIR, 'presets.json'), JSON.stringify(preset, null, 2));
 }
 
 function cleanupTempHome() {
@@ -333,25 +377,27 @@ async function switchTab(page, tabName) {
 async function attachToServer(page, remoteServer = REMOTE_SERVER) {
     console.log(`[CAPTURE] Attaching to remote server at ${remoteServer}...`);
 
-    // Intercept the /api/attach response to log the real error
+    // Set up listener for /api/attach response.
     const attachPromise = new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
-            reject(new Error('Attach API request timed out (no /api/attach response within 30s)'));
-        }, 30000);
-        page.once('response', async (response) => {
+            reject(new Error('Attach API request timed out (no /api/attach response within 45s)'));
+        }, 45000);
+        const handler = async (response) => {
             if (!response.url().includes('/api/attach')) return;
             clearTimeout(timeout);
+            page.off('response', handler);
             try {
                 const body = await response.text();
                 console.log(`[CAPTURE] /api/attach response ${response.status()}: ${body.trim()}`);
-                resolve();
             } catch (e) {
-                console.log(`[CAPTURE] /api/attach response ${response.status()} (read error: ${e.message})`);
-                resolve();
+                console.log(`[CAPTURE] /api/attach response ${response.status()} (read: ${e.message})`);
             }
-        });
+            resolve();
+        };
+        page.on('response', handler);
     });
 
+    // Fill the endpoint URL.
     await page.waitForSelector('#setup-endpoint-url', { visible: true });
     await page.$eval('#setup-endpoint-url', (input, url) => {
         input.value = url;
@@ -360,20 +406,31 @@ async function attachToServer(page, remoteServer = REMOTE_SERVER) {
     }, remoteServer);
     await sleep(200);
 
-    const attachBtn = await page.$('#setup-attach-btn');
-    if (!attachBtn) {
-        throw new Error('Attach button #setup-attach-btn not found');
-    }
-    console.log('[CAPTURE] Clicking attach button...');
-    await attachBtn.click();
+    // Instead of relying on a DOM click, call the SPA's doAttachFromSetup() directly
+    // so the attach flow is deterministic in headless environments.
+    console.log('[CAPTURE] Invoking doAttachFromSetup()...');
+    const attachResult = await page.evaluate(async () => {
+        try {
+            const { doAttachFromSetup } = await import('/js/features/attach-detach.js');
+            if (typeof doAttachFromSetup === 'function') {
+                await doAttachFromSetup();
+                return 'called_doAttachFromSetup';
+            }
+        } catch (err) {
+            console.error('[CAPTURE] doAttachFromSetup error:', err);
+            return 'doAttachFromSetup_error: ' + (err.message || err);
+        }
+        return 'doAttachFromSetup_not_found';
+    });
+    console.log('[CAPTURE] doAttachFromSetup result:', attachResult);
 
-    // Wait for both the API response and the monitor view
+    // Wait for both the API response and the monitor view.
     await Promise.all([
         attachPromise,
         waitForMonitor(page),
     ]);
 
-    // Optional: confirm endpoint displayed (use #endpoint-url, not #endpoint-url-display)
+    // Optional: confirm endpoint displayed.
     await page.waitForFunction(
         endpoint => document.getElementById('endpoint-url')?.textContent?.includes(endpoint),
         { timeout: 5000 }
@@ -976,8 +1033,17 @@ async function scenarioWelcome(ctx, options) {
     // Shot 1: the arrival screen with both cards visible.
     await captureShot(page, 'welcome-welcome.png', { fullPage: true });
 
-    // Shot 2: Open setup wizard and capture step 0 so the
-    // two screenshots tell a clear before→after story.
+    // Shot 2: verify the backend-specific Rapid-MLX attach fields in place.
+    const backendSelect = await page.$('#setup-endpoint-backend');
+    if (backendSelect) {
+        await page.select('#setup-endpoint-backend', 'rapid_mlx');
+        await sleep(200);
+        await captureShot(page, 'welcome-rapid-mlx-attach.png', { fullPage: true });
+        await page.select('#setup-endpoint-backend', 'llama_cpp');
+    }
+
+    // Shot 3: Open setup wizard and capture step 0 so the screenshots
+    // tell a clear before→after story.
     const spawnBtn = await page.$('#setup-spawn-wizard-btn');
     if (spawnBtn) {
         try {
@@ -1009,6 +1075,128 @@ async function scenarioWelcome(ctx, options) {
 
     const authPort = await findAvailablePort(DEFAULT_PORT + 1);
     await captureAuthShell(authPort, options.viewport);
+}
+
+async function scenarioFreeCache(ctx) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    const dialogState = await page.evaluate(async () => {
+        try {
+            const { confirmFreeCacheCleanup } = await import('/js/features/setup-view.js');
+            void confirmFreeCacheCleanup(12.4 * 1024 ** 3);
+            const dialog = document.querySelector('.app-confirm-dialog');
+            const overlay = document.querySelector('.app-confirm-overlay');
+            const rect = dialog?.getBoundingClientRect();
+            return {
+                shown: !!dialog,
+                dialogDisplay: dialog ? getComputedStyle(dialog).display : null,
+                dialogOpacity: dialog ? getComputedStyle(dialog).opacity : null,
+                dialogWidth: rect?.width || 0,
+                dialogHeight: rect?.height || 0,
+                overlayDisplay: overlay ? getComputedStyle(overlay).display : null,
+                overlayVisibility: overlay ? getComputedStyle(overlay).visibility : null,
+            };
+        } catch (error) {
+            return { shown: false, error: error?.message || String(error) };
+        }
+    });
+    if (!dialogState.shown) {
+        throw new Error(`Free Cache confirmation did not open: ${dialogState.error || 'dialog missing'}`);
+    }
+    if (dialogState.overlayDisplay === 'none' || dialogState.overlayVisibility === 'hidden'
+        || dialogState.dialogWidth === 0 || dialogState.dialogHeight === 0) {
+        throw new Error(`Free Cache confirmation is hidden: ${JSON.stringify(dialogState)}`);
+    }
+    await sleep(250);
+    await captureShot(page, 'welcome-free-cache-confirm.png', { fullPage: true });
+    await page.evaluate(() => {
+        document.documentElement.dataset.theme = 'light';
+    });
+    await sleep(200);
+    await captureShot(page, 'welcome-free-cache-confirm-light.png', { fullPage: true });
+}
+
+async function scenarioRapidPreset(ctx) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    await page.waitForSelector('.launch-card[data-preset-id="capture-rapid-mlx"]', {
+        visible: true,
+        timeout: 10000,
+    });
+    await sleep(250);
+    await captureShot(page, 'welcome-rapid-mlx-preset.png', { fullPage: true });
+
+    await page.click('.launch-card[data-preset-id="capture-rapid-mlx"] .launch-card-btn-edit');
+    await page.waitForSelector('#preset-modal.open.preset-editor--rapid-mlx', { visible: true });
+    await sleep(200);
+    await captureShot(page, 'rapid-mlx-preset-editor.png', { fullPage: true });
+    await page.evaluate(() => {
+        document.querySelector('#preset-modal .preset-editor-nav [data-section="server"]')?.click();
+    });
+    await sleep(200);
+    await captureShot(page, 'rapid-mlx-preset-editor-server.png', { fullPage: true });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(200);
+    await captureShot(page, 'rapid-mlx-preset-editor-server-light.png', { fullPage: true });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+    await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
+    await sleep(200);
+    await captureShot(page, 'rapid-mlx-preset-editor-server-narrow.png', { fullPage: true });
+    await page.setViewport(DEFAULT_VIEWPORT);
+    await page.evaluate(() => document.getElementById('preset-modal-close')?.click());
+    await page.waitForSelector('#preset-modal.open', { hidden: true });
+
+    // New presets use typed model sources. Capture the card and the modal it
+    // actually opens as a pair: the current product defect can otherwise make
+    // a "typed source" filename silently contain the legacy preset editor.
+    const typedCardState = await page.evaluate(() => {
+        const card = document.querySelector('.launch-card[data-preset-id="capture-rapid-mlx-typed"]');
+        if (!card) return null;
+        card.scrollIntoView({ block: 'center' });
+        return {
+            id: card.dataset.presetId,
+            name: card.querySelector('.launch-card-name')?.textContent?.trim() || '',
+            model: card.querySelector('.launch-card-model')?.textContent?.trim() || '',
+        };
+    });
+    if (!typedCardState) throw new Error('rapid-preset: typed source card was not rendered');
+    await sleep(200);
+    await captureShot(page, 'rapid-mlx-typed-source-card-before-edit.png', { fullPage: true });
+    await page.evaluate(() => {
+        document.querySelector('.launch-card[data-preset-id="capture-rapid-mlx-typed"] .launch-card-btn-edit')?.click();
+    });
+    await page.waitForSelector('#preset-modal.open.preset-editor--rapid-mlx', { visible: true });
+    await sleep(200);
+    const openedTypedState = await page.evaluate(() => ({
+        id: document.getElementById('modal-preset-id')?.value || '',
+        name: document.getElementById('modal-name')?.value || '',
+        model: document.getElementById('modal-model-path')?.value || '',
+    }));
+    console.log(`[rapid-preset] typed card requested ${typedCardState.id}; modal opened ${openedTypedState.id || '(none)'}`);
+    await captureShot(page, 'rapid-mlx-typed-card-edit-result.png', { fullPage: true });
+    await page.evaluate(() => document.getElementById('preset-modal-close')?.click());
+
+    const promptState = await page.evaluate(async () => {
+        const { showPromptDialog } = await import('/js/features/toast.js');
+        void showPromptDialog(
+            'Restore protected model',
+            'Enter the API key for this session. It is used only for this launch and is not saved.',
+            '',
+            { type: 'password', confirmLabel: 'Restore' },
+        );
+        const input = document.querySelector('.modal-overlay .modal input[type="password"]');
+        return { shown: !!input, inputType: input?.type || null };
+    });
+    if (!promptState.shown || promptState.inputType !== 'password') {
+        throw new Error(`Protected restore modal did not open correctly: ${JSON.stringify(promptState)}`);
+    }
+    await sleep(250);
+    await captureShot(page, 'welcome-rapid-mlx-restore-key.png', { fullPage: true });
+    await page.evaluate(() => {
+        document.documentElement.dataset.theme = 'light';
+    });
+    await sleep(200);
+    await captureShot(page, 'welcome-rapid-mlx-restore-key-light.png', { fullPage: true });
 }
 
 // ── Core Chat ───────────────────────────────────────────────────────────────────
@@ -1582,6 +1770,94 @@ async function scenarioModels(ctx, options) {
 async function scenarioModelsV2(ctx, options) {
     const { page, baseUrl } = ctx;
     await gotoApp(page, baseUrl);
+    await page.evaluate(() => {
+        localStorage.setItem('llama-monitor-models-prefs', JSON.stringify({
+            viewMode: 'cards',
+            showMmproj: true,
+            showMain: true,
+            showSplit: true,
+            showDraftModels: true,
+        }));
+    });
+    await page.reload({ waitUntil: 'networkidle0' });
+    await page.waitForSelector('html.modules-ready', { timeout: 15000 });
+    await page.evaluate(() => {
+        const typedInventory = [
+            { model_name: 'Qwen 3.6 35B', filename: 'qwen-35b-Q6_K.gguf', path: '/models/gguf/qwen-35b-Q6_K.gguf', format: 'gguf', source: 'local', lifecycle: 'ready', compatibility: 'verified', supported_backends: ['llama_cpp'], size_display: '25.4 GiB', quant_type: 'Q6_K' },
+            { model_name: 'Qwen 3 MLX 4-bit', filename: 'mlx-community/Qwen3-8B-4bit', path: '/models/cache/huggingface/qwen3-mlx', format: 'mlx', source: 'hugging_face', lifecycle: 'ready', compatibility: 'provisional', supported_backends: ['rapid_mlx'], size_display: '4.8 GiB' },
+            { model_name: 'Gemma conversion', filename: 'gemma-official-conversion', path: '/models/mlx/converted/gemma', format: 'mlx', source: 'official_conversion', lifecycle: 'converting', compatibility: 'verified', supported_backends: ['rapid_mlx'], size_display: '12.1 GiB' },
+            { model_name: 'Recovered FP16 (Experimental)', filename: 'fp16', path: '/models/rapid-mlx/imports/recovered/fp16', format: 'mlx', source: 'recovered_gguf', lifecycle: 'ready', compatibility: 'experimental', supported_backends: [], size_display: '272.4 MiB', quant_type: 'F16 recovered' },
+            { model_name: 'Re-quantized MLX (Experimental)', filename: 'model', path: '/models/rapid-mlx/requantized/quant/model', format: 'mlx', source: 'requantized_mlx', lifecycle: 'ready', compatibility: 'experimental', supported_backends: [], size_display: '146.5 MiB', quant_type: 'affine_8bit_g64' },
+            { model_name: 'Staged download', filename: 'model.safetensors.part', path: '/models/.staging/downloads/model.safetensors.part', format: 'unknown', source: 'legacy', lifecycle: 'incomplete', compatibility: 'unknown', supported_backends: [] },
+            { model_name: 'Invalid tokenizer bundle', filename: 'broken-transformers-model', path: '/models/transformers/broken', format: 'transformers', source: 'local', lifecycle: 'invalid', compatibility: 'unsupported', supported_backends: [] },
+            { model_name: 'Gemma vision projector', filename: 'gemma-mmproj.gguf', path: '/models/gguf/gemma-mmproj.gguf', format: 'gguf', source: 'local', lifecycle: 'ready', compatibility: 'verified', supported_backends: ['llama_cpp'], companion_kind: 'mmproj' },
+            { model_name: 'Qwen draft companion', filename: 'qwen-draft.gguf', path: '/models/gguf/qwen-draft.gguf', format: 'gguf', source: 'local', lifecycle: 'ready', compatibility: 'verified', supported_backends: ['llama_cpp'], companion_kind: 'draft', is_draft_assistant: true },
+        ];
+        window.__captureRapidMlxAvailable = true;
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (input, init) => {
+            const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+            if (url.pathname === '/api/models') {
+                return Promise.resolve(new Response(JSON.stringify(typedInventory), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                }));
+            }
+            if (url.pathname === '/api/hf/download-dir') {
+                return Promise.resolve(new Response(JSON.stringify({ dir: '/models', configured: true }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                }));
+            }
+            if (url.pathname === '/api/llama-binary/platform-info') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    os: window.__captureRapidMlxAvailable ? 'macos' : 'linux',
+                    arch: window.__captureRapidMlxAvailable ? 'aarch64' : 'x86_64',
+                    rapid_mlx_local_available: window.__captureRapidMlxAvailable,
+                    rapid_mlx_local_requirement: 'Rapid-MLX local execution requires macOS on Apple Silicon',
+                }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                }));
+            }
+            if (url.pathname === '/api/models/import-lab/availability') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    local_execution_available: window.__captureRapidMlxAvailable,
+                    platform_requirement: 'Apple Silicon macOS',
+                    supported_profile: 'smollm2-135m-instruct-llama-v1',
+                    compatibility: 'experimental',
+                    launchable: false,
+                    fallback_engine: 'llama.cpp',
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/models/gguf/import/compatibility/preview') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    architecture: 'llama', tensor_count: 272, compatibility: 'experimental',
+                    missing_profile_fields: [], missing_assets: [],
+                    warnings: ['Experimental profile; llama.cpp remains available'],
+                    unsupported_reasons: [],
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/models/import-lab/resource-estimate') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    source_bytes: 146456727, estimated_fp16_bytes: 272437300,
+                    required_disk_bytes: 1081741896, available_disk_bytes: 53687091200,
+                    available_ram_bytes: 34359738368, disk_sufficient: true,
+                    ram_guidance: 'comfortable',
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/models/import-lab/jobs') {
+                return Promise.resolve(new Response(JSON.stringify([{
+                    id: 'capture-job', state: 'recovering', phase: 'recovering_fp16',
+                    progress_percent: 63,
+                    message: 'Recovering tensors into an isolated non-launchable staging cache',
+                    can_cancel: true,
+                    diagnostics: ['Original GGUF will not be modified', 'Validated exact Q8_0 recovery profile'],
+                }]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            return originalFetch(input, init);
+        };
+    });
     if (!options.noAttach) {
         try { await attachToServer(page); } catch {}
     }
@@ -1591,8 +1867,49 @@ async function scenarioModelsV2(ctx, options) {
     await page.waitForSelector('#models-modal.open', { timeout: 8000 });
     await sleep(1500);
     await captureShot(page, 'models-discovery-overview.png', { fullPage: true });
+    await captureShot(page, 'models-inventory-dark.png', { fullPage: true });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(250);
+    await captureShot(page, 'models-inventory-light.png', { fullPage: true });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+    await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
+    await sleep(250);
+    await captureShot(page, 'models-inventory-narrow.png', { fullPage: true });
+    await page.setViewport(DEFAULT_VIEWPORT);
+    await sleep(250);
+    await page.evaluate(() => {
+        document.getElementById('models-modal')?.classList.remove('open');
+        window.__captureRapidMlxAvailable = false;
+        window.openModelsModal?.();
+    });
+    await sleep(500);
+    await captureShot(page, 'models-inventory-non-apple.png', { fullPage: true });
 
-    // 2. Switch to Download tab and simulate a download in progress.
+    // 2. Exercise the app-native Import Lab with deterministic compatibility,
+    // resource, and progress data. These stills are the R4 design source of truth.
+    await page.evaluate(() => {
+        window.__captureRapidMlxAvailable = true;
+        document.documentElement.dataset.theme = 'dark';
+        document.querySelector('.mm-tab[data-tab="import-lab"]')?.click();
+    });
+    await page.waitForSelector('#mm-import-platform');
+    await page.type('#mm-import-source', 'gguf/SmolLM2-135M-Instruct-Q8_0.gguf');
+    await page.click('#mm-import-analyze');
+    await page.waitForSelector('.mm-import-verdict-badge.experimental');
+    await sleep(350);
+    await captureShot(page, 'models-import-lab-dark.png', { fullPage: true });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(250);
+    await captureShot(page, 'models-import-lab-light.png', { fullPage: true });
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+    await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
+    await sleep(250);
+    await captureShot(page, 'models-import-lab-reduced-narrow.png', { fullPage: true });
+    await page.setViewport(DEFAULT_VIEWPORT);
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+
+    // 3. Switch to Download tab and simulate a download in progress.
     await page.evaluate(() => {
         const downloadTab = document.querySelector('.mm-tab[data-tab="download"]');
         if (downloadTab) downloadTab.click();
@@ -1639,8 +1956,10 @@ async function scenarioPresetEditor(ctx, options) {
         console.log('[CAPTURE] #preset-new-btn not found; skipping preset-editor scenario');
         return;
     }
-    await newBtn.click();
-    await page.waitForSelector('#preset-modal', { timeout: 6000 });
+    // The button can exist while an ancestor is still transitioning, which
+    // makes Puppeteer's clickable-point calculation fail intermittently.
+    await page.evaluate(() => document.getElementById('preset-new-btn')?.click());
+    await page.waitForSelector('#preset-modal.open', { visible: true, timeout: 6000 });
     await sleep(800);
 
     // Capture Model+Context section (default active)
@@ -1816,6 +2135,54 @@ async function scenarioDashboard(ctx, options) {
         console.log('[CAPTURE] Hardware section not visible; capturing at current scroll position.');
     }
     await captureShot(page, 'dashboard-gpu-section.png');
+}
+
+async function scenarioDashboardRapidMlx(ctx) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    await page.evaluate(async () => {
+        const { switchView } = await import('/js/features/setup-view.js');
+        const { renderRapidMlxCards } = await import('/js/features/rapid-mlx-cards.js');
+        switchView('monitor');
+        document.querySelectorAll('.sidebar-btn').forEach(button => {
+            button.classList.toggle('active', button.dataset.tab === 'server');
+        });
+        document.querySelectorAll('.page').forEach(pageElement => {
+            pageElement.classList.toggle('active', pageElement.id === 'page-server');
+        });
+        renderRapidMlxCards({
+            health: 'Ok', ready: true, model: 'mlx-community/Qwen3-30B-A3B-4bit', uptime_seconds: 3723,
+            prompt_tokens_per_second: 812.4, generation_tokens_per_second: 38.7,
+            running_requests: 1, waiting_requests: 0,
+            active_memory_bytes: 12884901888, peak_memory_bytes: 15032385536, cache_memory_bytes: 536870912,
+            global_cache_hit_rate: 0.82, global_cache_entries: 184,
+            cache_metrics: { hit_rate: 0.82, entry_count: 184, current_memory_bytes: 536870912 },
+            completed_requests_total: 247, prompt_tokens_total: 182430, completion_tokens_total: 58420,
+        }, 1, false, 'capture-rapid');
+        const ids = [...document.querySelectorAll('#rapid-mlx-card-grid [data-card-id]')].map(card => card.dataset.cardId);
+        const expected = ['runtime', 'throughput', 'queue', 'memory', 'cache', 'totals'];
+        if (JSON.stringify(ids) !== JSON.stringify(expected)) throw new Error('Unexpected full Rapid card composition: ' + ids.join(','));
+    });
+    // Allow the shared premium card entrance sequence to settle before the dark still.
+    await sleep(1200);
+    await captureElementScreenshot(page, '#inference-section', 'dashboard-rapid-mlx-dark.png', { padding: 24 });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(300);
+    await captureElementScreenshot(page, '#inference-section', 'dashboard-rapid-mlx-light.png', { padding: 24 });
+    await page.evaluate(async () => {
+        const { renderRapidMlxCards } = await import('/js/features/rapid-mlx-cards.js');
+        document.documentElement.dataset.theme = 'dark';
+        renderRapidMlxCards({
+            health: 'Ok', ready: true, model: 'mlx-community/Small-4bit',
+            running_requests: 0, waiting_requests: 0,
+            active_memory_bytes: 1073741824,
+        }, 1, false, 'capture-rapid-partial');
+        const ids = [...document.querySelectorAll('#rapid-mlx-card-grid [data-card-id]')].map(card => card.dataset.cardId);
+        const expected = ['runtime', 'queue', 'memory'];
+        if (JSON.stringify(ids) !== JSON.stringify(expected)) throw new Error('Unexpected partial Rapid card composition: ' + ids.join(','));
+    });
+    await sleep(300);
+    await captureElementScreenshot(page, '#inference-section', 'dashboard-rapid-mlx-partial.png', { padding: 24 });
 }
 
 // Validation pass for sparkline layouts and clipped section captures.
@@ -3198,6 +3565,80 @@ async function scenarioSpawnWizard(ctx, options) {
     await sleep(400);
 }
 
+async function scenarioSpawnWizardEngines(ctx) {
+    const { page, baseUrl } = ctx;
+    await loadAppDocument(page, baseUrl);
+
+    await page.evaluate(() => {
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (input, init) => {
+            const url = new URL(typeof input === 'string' ? input : input.url, window.location.origin);
+            if (url.pathname === '/api/rapid-mlx/runtime/status') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    runtime: { supported: true, active: { version: '0.10.10' } },
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/rapid-mlx/recommend') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    recommended_backend: 'rapid_mlx',
+                    state: 'ready',
+                    reason: 'This source is native to the verified Rapid-MLX resolution path.',
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            return originalFetch(input, init);
+        };
+    });
+
+    await page.evaluate(async () => {
+        const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+        openSpawnWizard({
+            localPath: '/models/mlx-community/Qwen3.5-9B-MLX-4bit',
+            localModel: {
+                path: '/models/mlx-community/Qwen3.5-9B-MLX-4bit',
+                size_bytes: 6_450_000_000,
+                source_kind: 'mlx_directory',
+                model_source: {
+                    kind: 'mlx_directory',
+                    path: '/models/mlx-community/Qwen3.5-9B-MLX-4bit',
+                },
+            },
+        });
+    });
+    await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 10000 });
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
+        { timeout: 5000 }
+    );
+    await page.waitForFunction(
+        () => document.querySelector('.wizard-engine-card[data-engine="rapid_mlx"]')?.classList.contains('selected'),
+        { timeout: 5000 }
+    );
+    await sleep(350);
+
+    await captureShot(page, 'spawn-wizard-engines-dark.png', { fullPage: true });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(250);
+    await captureShot(page, 'spawn-wizard-engines-light.png', { fullPage: true });
+
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+    await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
+    await sleep(250);
+    await captureShot(page, 'spawn-wizard-engines-reduced-narrow.png', { fullPage: true });
+
+    await page.setViewport(DEFAULT_VIEWPORT);
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
+        { timeout: 5000 }
+    );
+    await sleep(300);
+    await captureShot(page, 'spawn-wizard-rapid-mlx-hardware.png', { fullPage: true });
+
+    console.log('[CAPTURE] Scenario "spawn-wizard-engines" complete.');
+}
+
 // Setup wizard HF download panel: idle options + simulated progress.
 async function scenarioSpawnWizardHfDownload(ctx, options) {
     const { page, baseUrl } = ctx;
@@ -3682,13 +4123,177 @@ async function scenarioAppearancePalette(ctx, options) {
         }));
         document.documentElement.dataset.theme = 'dark';
     });
-
     console.log('[CAPTURE] Scenario "appearance-palette" complete.');
+}
+
+// ── Rapid-MLX Runtime Manager, Engine Indicator, and Settings Card ──
+// Captures the Rapid-MLX runtime management UI in Settings and the nav bar engine indicator.
+
+async function scenarioRapidMlxRuntime(ctx, options) {
+    const { page, baseUrl } = ctx;
+
+    // Load app without attach (uses auth bypass).
+    await loadAppDocument(page, baseUrl);
+
+    // Mock Rapid-MLX runtime endpoints.
+    await page.evaluate(() => {
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (input, init) => {
+            const url = new URL(typeof input === 'string' ? input : input.url, window.location.origin);
+            const path = url.pathname;
+
+            // Status: active managed runtime
+            if (path === '/api/rapid-mlx/runtime/status') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    runtime: {
+                        supported: true,
+                        active: {
+                            version: '0.10.10',
+                            source: 'managed',
+                            path: '~/.config/llama-monitor/runtimes/rapid-mlx/0.10.10/venv/bin/rapid-mlx',
+                        },
+                        last_known_good: { version: '0.10.9' },
+                        update_available: '0.10.11',
+                    },
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+
+            // Releases list
+            if (path === '/api/rapid-mlx/runtime/releases') {
+                return Promise.resolve(new Response(JSON.stringify([
+                    { version: '0.10.11', tag: 'v0.10.11', prerelease: false, published_at: '2026-07-14T12:00:00Z', body: 'Bug fixes and performance improvements for prefix caching.' },
+                    { version: '0.10.10', tag: 'v0.10.10', prerelease: false, published_at: '2026-07-10T08:00:00Z', body: 'Stable release with updated capability profile.' },
+                    { version: '0.10.9', tag: 'v0.10.9', prerelease: false, published_at: '2026-06-28T10:00:00Z', body: 'Initial verified release baseline.' },
+                ]), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+
+            return originalFetch(input, init);
+        };
+    });
+
+    // Simulate active session WebSocket data for engine indicator.
+    await page.evaluate(() => {
+        const wsData = {
+            backend: 'rapid_mlx',
+            active_session_status: 'running',
+            active_session_model_identity: 'mlx-community/Qwen3.5-9B-MLX-4bit',
+        };
+        if (window.__llamaMonitorUpdateCockpit) {
+            window.__llamaMonitorUpdateCockpit(wsData);
+        }
+        // Also inject via a more general hook in case refreshTopCockpit reads a shared object.
+        if (!window.__wsData) window.__wsData = {};
+        Object.assign(window.__wsData, wsData);
+    });
+    await sleep(400);
+
+    // ── 1. Settings: Rapid-MLX Runtime card (Advanced pane) ──
+    try {
+        await page.evaluate(() => { window.openSettingsModal?.(); });
+        await page.waitForSelector('#settings-modal.open', { timeout: 5000 });
+        await sleep(600);
+
+        // Switch to Advanced tab where the Rapid-MLX Runtime card lives.
+        const advTab = await page.$('#settings-modal .settings-tab[data-tab="advanced"]');
+        if (advTab) {
+            await advTab.click();
+            await sleep(500);
+        }
+
+        // Look for the Rapid-MLX Runtime card.
+        const runtimeCard = await page.$('#rapid-mlx-runtime-summary');
+        if (runtimeCard) {
+            await captureShot(page, 'settings-rapid-mlx-runtime-card.png', { fullPage: true });
+            await captureCloseUp(page, '#settings-modal', 'settings-rapid-mlx-runtime-card.png', options);
+        }
+    } catch (e) {
+        console.log('[CAPTURE] Settings Rapid-MLX card failed, continuing...');
+    }
+
+    // ── 2. Rapid-MLX Runtime Manager modal ──
+    try {
+        const manageBtn = await page.$('#rapid-mlx-manage-btn');
+        if (manageBtn) {
+            await manageBtn.click();
+            await sleep(600);
+            await page.waitForSelector('#rapid-mlx-modal.open', { timeout: 5000 });
+            await sleep(400);
+
+            // Dark desktop
+            await captureShot(page, 'rapid-mlx-runtime-manager-dark.png', { fullPage: true });
+
+            // Light desktop
+            await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+            await sleep(250);
+            await captureShot(page, 'rapid-mlx-runtime-manager-light.png', { fullPage: true });
+
+            // Narrow layout
+            await page.setViewport({ width: 480, height: 900, deviceScaleFactor: 1 });
+            await sleep(250);
+            await captureShot(page, 'rapid-mlx-runtime-manager-narrow.png', { fullPage: true });
+
+            // Reduced motion
+            await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+            await sleep(200);
+            await captureShot(page, 'rapid-mlx-runtime-manager-reduced.png', { fullPage: true });
+
+            // Reset viewport
+            await page.setViewport(DEFAULT_VIEWPORT);
+            await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
+            await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+        }
+    } catch (e) {
+        console.log('[CAPTURE] Runtime manager modal failed, continuing...');
+    }
+
+    // Close settings modal.
+    try {
+        await page.keyboard.press('Escape');
+        await sleep(200);
+    } catch {}
+
+    // ── 3. Engine indicator in nav bar (with simulated generation active) ──
+    try {
+        // Force refreshTopCockpit to render the engine indicator with our mocked data.
+        await page.evaluate(async () => {
+            // Ensure backend/model identity are present.
+            const wsData = {
+                backend: 'rapid_mlx',
+                active_session_status: 'running',
+                active_session_model_identity: 'mlx-community/Qwen3.5-9B-MLX-4bit',
+                local_status: { slot_generation_active: true },
+            };
+            if (window.__llamaMonitorUpdateCockpit) {
+                window.__llamaMonitorUpdateCockpit(wsData);
+            }
+        });
+        await sleep(300);
+
+        // Check engine indicator is visible.
+        const indicatorVisible = await page.evaluate(() => {
+            const el = document.getElementById('engine-indicator');
+            return el && getComputedStyle(el).display !== 'none';
+        });
+
+        if (indicatorVisible) {
+            // Full nav bar with indicator
+            const navBar = await page.$('#top-bar');
+            if (navBar) {
+                await captureCloseUp(page, '#top-bar', 'nav-engine-indicator.png', options);
+            }
+        }
+    } catch (e) {
+        console.log('[CAPTURE] Engine indicator capture failed, continuing...');
+    }
+
+    console.log('[CAPTURE] Scenario "rapid-mlx-runtime" complete.');
 }
 
 const SCENARIOS = {
     // Core
     welcome: scenarioWelcome,
+    'free-cache': scenarioFreeCache,
+    'rapid-preset': scenarioRapidPreset,
     chat: scenarioChat,
     // Chat features
     'guided-gen': scenarioGuidedGen,
@@ -3704,8 +4309,10 @@ const SCENARIOS = {
     panels: scenarioPanels,
     models: scenarioModels,
     dashboard: scenarioDashboard,
+    'dashboard-rapid-mlx': scenarioDashboardRapidMlx,
     // Setup wizard
     'spawn-wizard': scenarioSpawnWizard,
+    'spawn-wizard-engines': scenarioSpawnWizardEngines,
     'spawn-wizard-gif': scenarioSpawnWizardGif,
     'spawn-wizard-hf-download': scenarioSpawnWizardHfDownload,
     // New features (spawn-llama-server-v2)
@@ -3713,6 +4320,8 @@ const SCENARIOS = {
     'benchmark-results': scenarioBenchmarkResults,
     'llama-updater': scenarioLlamaUpdater,
     'chat-history-qa': scenarioChatHistoryQA,
+    // Rapid-MLX runtime and engine indicator
+    'rapid-mlx-runtime': scenarioRapidMlxRuntime,
     // Validation
     sparkline: scenarioSparkline,
     gifs: scenarioGifs,
@@ -3749,6 +4358,9 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
         console.log(`[CAPTURE] Using running llama-monitor at ${baseUrl} for scenario "${scenarioName}"...`);
     } else {
         seedConfig();
+        if (scenarioName === 'rapid-preset') {
+            seedRapidMlxCapturePreset();
+        }
         const port = await findAvailablePort();
         const extraArgs = [];
 

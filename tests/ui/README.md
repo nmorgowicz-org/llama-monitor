@@ -68,9 +68,13 @@ node tests/ui/capture.mjs --list-scenarios
 | Scenario | Purpose |
 |----------|---------|
 | `welcome` | Welcome/setup screen plus form-auth shell without remote attach |
+| `free-cache` | Native Free Cache confirmation shown over the welcome/setup screen |
 | `chat` | Core chat view, telemetry overlay, and logs |
 | `guided-gen` | Context notes, suggestions, quick guide, director, surprise, explicit mode |
 | `sidebar` | Chat sidebar, message-search flyout, context menu, title filter |
+| `models-v2` | Typed model inventory, Import Lab, and Hugging Face download surfaces |
+| `preset-editor` | llama.cpp preset model, GPU, and advanced sections |
+| `rapid-preset` | Rapid-MLX welcome cards and preset editor with legacy and typed model-source fixtures |
 | `settings` | Settings modal, performance tab, advanced tab, user preferences, persona, models, shortcuts |
 | `panels` | Behavior, model, style, and prompt-debug surfaces |
 | `dashboard` | Server tab and GPU section |
@@ -86,6 +90,9 @@ node tests/ui/capture.mjs --list-scenarios
 # Welcome screen only
 node tests/ui/capture.mjs --scenario welcome
 
+# Free Cache confirmation
+node tests/ui/capture.mjs --scenario free-cache
+
 # Core chat / logs / telemetry
 SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario chat
 
@@ -94,6 +101,9 @@ SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario guided-gen
 
 # Sidebar and search surfaces
 SCREENSHOT_PORT=8893 node tests/ui/capture.mjs --scenario sidebar
+
+# Rapid-MLX preset cards and editor source-contract coverage
+SCREENSHOT_PORT=8902 node tests/ui/capture.mjs --scenario rapid-preset --no-attach
 
 # Settings and modal surfaces
 SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario settings

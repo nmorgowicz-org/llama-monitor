@@ -2663,3 +2663,83 @@
 [data-theme="light"] .metric-footnote {
   color: var(--color-text-secondary);
 }
+.rapid-telemetry-grid {
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.rapid-telemetry-card {
+    min-height: 150px;
+}
+
+.rapid-metric-list {
+    display: grid;
+    gap: 12px;
+    margin-top: 18px;
+}
+
+.rapid-telemetry-card h3.widget-metric-label {
+    margin: 0;
+    font: inherit;
+}
+
+.rapid-metric {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    color: var(--color-text-secondary);
+}
+
+.rapid-metric strong {
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.rapid-progress {
+    display: grid;
+    gap: 10px;
+}
+
+.rapid-progress-label {
+    display: flex;
+    justify-content: space-between;
+    color: var(--color-text-secondary);
+}
+
+.rapid-progress-label strong {
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.rapid-progress-track {
+    height: 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--border-subtle);
+}
+
+.rapid-progress-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: var(--color-accent);
+    transition: width 180ms ease;
+}
+
+.rapid-telemetry-card.is-stale {
+    opacity: 0.72;
+}
+
+.rapid-telemetry-loading {
+    grid-column: 1 / -1;
+    padding: 18px 20px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    color: var(--color-text-secondary);
+    background: var(--surface-card-base);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rapid-telemetry-card,
+    .rapid-progress-fill { transition: none; }
+}

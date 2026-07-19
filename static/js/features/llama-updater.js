@@ -6,6 +6,7 @@
 // any build (including older ones) can be installed from there.
 
 import { showToast } from './toast.js';
+import { attachModalFocusTrap, detachModalFocusTrap, fetchReleaseList, buildReleaseBadges } from './updater-shared.js';
 
 const LLAMA_CPP_REPO = 'https://github.com/ggml-org/llama.cpp';
 const PR_LINK_RE = /#(\d+)/g;
@@ -129,6 +130,13 @@ async function openVersionModal() {
   modal.classList.add('open');
   document.body.style.overflow = 'hidden';
 
+  // Move focus to close button for accessibility.
+  const closeBtn = document.getElementById('llama-version-modal-close');
+  if (closeBtn) closeBtn.focus();
+
+  // Attach Escape key and tab-scope handlers.
+  attachModalFocusTrap(modal, closeVersionModal);
+
   await loadReleaseList();
 }
 
@@ -138,6 +146,7 @@ function closeVersionModal() {
   modal.style.display = 'none';
   modal.classList.remove('open');
   document.body.style.overflow = '';
+  detachModalFocusTrap(modal);
   // Reset notes pane for next open
   const empty = document.getElementById('llama-version-notes-empty');
   const content = document.getElementById('llama-version-notes-content');
@@ -153,9 +162,7 @@ async function loadReleaseList() {
 
   try {
     const headers = window.authHeaders ? window.authHeaders() : {};
-    const resp = await fetch('/api/llama-binary/releases', { headers });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
+    const data = await fetchReleaseList('/api/llama-binary/releases');
     if (data.error) throw new Error(data.error);
 
     const releases = data.releases ?? [];
@@ -255,20 +262,12 @@ function buildReleaseRow(release, isLatest) {
   tagEl.className = 'llama-version-row-tag';
   tagEl.textContent = tag;
 
-  const badges = document.createElement('span');
-  badges.className = 'llama-version-row-badges';
-  if (isLatest) {
-    const b = document.createElement('span');
-    b.className = 'llama-version-badge llama-version-badge--latest';
-    b.textContent = 'latest';
-    badges.appendChild(b);
-  }
-  if (isCurrent) {
-    const b = document.createElement('span');
-    b.className = 'llama-version-badge llama-version-badge--installed';
-    b.textContent = 'installed';
-    badges.appendChild(b);
-  }
+  const badges = buildReleaseBadges({
+    wrapperClass: 'llama-version-row-badges',
+    badgeClass: 'llama-version-badge',
+    isLatest,
+    isCurrent,
+  });
 
   const meta = document.createElement('span');
   meta.className = 'llama-version-row-age';
@@ -334,6 +333,8 @@ async function installRelease(btn, release) {
     // skip the explicit restart call to avoid a double-restart that kills the new process.
     if (data.server_restarted) {
       showToast(`Installed ${tag}`, 'success', 'Server restarted. Chat may reconnect shortly.');
+    } else if (data.restart_applicable === false) {
+      showToast(`Installed ${tag}`, 'success', sha || 'llama.cpp binary updated.');
     } else {
       showToast(`Installed ${tag}`, 'success', sha || 'Installed. Click to restart server.');
 

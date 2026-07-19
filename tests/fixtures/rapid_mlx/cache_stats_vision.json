@@ -1,0 +1,6 @@
+{
+  "multimodal_kv_cache": { "entries": 2 },
+  "pixel_values_cache": { "entries": 1 },
+  "pil_image_cache": { "entries": 1 },
+  "unknown_future_cache": true
+}

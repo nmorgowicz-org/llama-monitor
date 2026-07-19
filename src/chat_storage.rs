@@ -220,6 +220,14 @@ pub struct SearchResultsPage {
 
 // ── Storage ───────────────────────────────────────────────────────────────────
 
+impl Default for ChatStorage {
+    fn default() -> Self {
+        let random_id: u32 = rand::random();
+        let path = std::env::temp_dir().join(format!("llama_monitor_test_{}.db", random_id));
+        Self::open(&path).expect("Failed to open test chat database")
+    }
+}
+
 pub struct ChatStorage {
     // Option so restore_from_path can atomically close and reopen the connection
     // while holding the mutex exclusively. It is None only during that brief window.

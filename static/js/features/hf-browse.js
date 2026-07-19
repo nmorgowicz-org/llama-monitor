@@ -66,6 +66,7 @@ function getAuthHeaders() {
 //
 // params:
 //   query, author, sort, limit          – search params
+//   format                              – 'gguf' | 'mlx' (default 'gguf')
 //   container                           – DOM element to render into
 //   filelistContainer                   – optional element to hide when showing results
 //   quickpicksContainer                 – optional element holding quick-pick buttons (for loading/active state)
@@ -78,6 +79,7 @@ export async function hfSearch({
   author,
   sort,
   limit,
+  format = 'gguf',
   minParamB = 0,
   cursor = null,
   append = false,
@@ -135,6 +137,7 @@ export async function hfSearch({
       sort: sort || 'downloads',
       limit: limit || 20,
       cursor: cursor || undefined,
+      format,
     };
 
     const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
@@ -172,7 +175,7 @@ export async function hfSearch({
       container.replaceChildren(empty);
       if (hasMore) {
         const moreBtn = _makeLoadMoreBtn(() => hfSearch({
-          query, author, sort, limit, minParamB, cursor: nextCursor, append: true,
+          query, author, sort, limit, format, minParamB, cursor: nextCursor, append: true,
           container, filelistContainer, quickpicksContainer,
           discoverPillsContainerId, onOpenCardPanel, onSelectModel,
         }));
@@ -265,7 +268,7 @@ export async function hfSearch({
 
     if (hasMore) {
       const moreBtn = _makeLoadMoreBtn(() => hfSearch({
-        query, author, sort, limit, minParamB, cursor: nextCursor, append: true,
+        query, author, sort, limit, format, minParamB, cursor: nextCursor, append: true,
         _cascadeDepth: 0,
         container, filelistContainer, quickpicksContainer,
         discoverPillsContainerId, onOpenCardPanel, onSelectModel,
@@ -280,7 +283,7 @@ export async function hfSearch({
     const visibleCount = container.querySelectorAll('.hf-search-result').length;
     if (hasMore && visibleCount < 10 && _cascadeDepth < 3) {
       hfSearch({
-        query, author, sort, limit, minParamB, cursor: nextCursor, append: true,
+        query, author, sort, limit, format, minParamB, cursor: nextCursor, append: true,
         _cascadeDepth: _cascadeDepth + 1,
         container, filelistContainer, quickpicksContainer,
         discoverPillsContainerId, onOpenCardPanel, onSelectModel,
@@ -871,4 +874,61 @@ function _dlCancelPoll(panelEl) {
     clearTimeout(panelEl._hfDlPollTimer);
     panelEl._hfDlPollTimer = null;
   }
+}
+
+// ── Format toggle chip ────────────────────────────────────────────────────────
+// Create a GGUF/MLX toggle chip that callers can attach to their search controls.
+// Returns the toggle container element. Caller is responsible for passing the
+// current format into hfSearch() via container.dataset.hfSearchFormat or by
+// listening for the 'change' event.
+//
+// params:
+//   container            – DOM element to append the toggle into
+//   defaultFormat        – 'gguf' | 'mlx' (default 'gguf')
+//   onChange             – (format) => void  called when toggle switches
+
+export function hfCreateFormatToggle({ container, defaultFormat = 'gguf', onChange }) {
+  if (!container) return null;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'hf-format-toggle';
+  wrap.style.cssText = 'display:flex;gap:0;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);';
+
+  const makeBtn = (fmt, label) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `hf-format-btn${fmt === defaultFormat ? ' hf-format-btn--active' : ''}`;
+    btn.dataset.format = fmt;
+    btn.textContent = label;
+    btn.style.cssText =
+      'padding:2px 8px;font-size:10px;font-weight:600;border:none;cursor:pointer;' +
+      'color:rgba(255,255,255,0.5);background:transparent;transition:all 0.15s ease;';
+    btn.addEventListener('click', () => {
+      wrap.querySelectorAll('.hf-format-btn').forEach(b => {
+        b.classList.remove('hf-format-btn--active');
+        b.style.cssText =
+          b.style.cssText.replace(/color:[^;]+;|background:[^;]+;/g, '') +
+          'color:rgba(255,255,255,0.5);background:transparent;';
+      });
+      btn.classList.add('hf-format-btn--active');
+      btn.style.cssText =
+        btn.style.cssText.replace(/color:[^;]+;|background:[^;]+;/g, '') +
+        'color:#fff;background:rgba(99,102,241,0.85);';
+      container.dataset.hfSearchFormat = fmt;
+      if (onChange) onChange(fmt);
+    });
+    if (fmt === defaultFormat) {
+      btn.style.cssText =
+        btn.style.cssText.replace(/color:[^;]+;|background:[^;]+;/g, '') +
+        'color:#fff;background:rgba(99,102,241,0.85);';
+    }
+    return btn;
+  };
+
+  wrap.appendChild(makeBtn('gguf', 'GGUF'));
+  wrap.appendChild(makeBtn('mlx', 'MLX'));
+  container.dataset.hfSearchFormat = defaultFormat;
+  container.appendChild(wrap);
+
+  return wrap;
 }

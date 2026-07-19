@@ -1,5 +1,6 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock};
 
 use warp::Filter;
 
@@ -8,8 +9,575 @@ use crate::state::AppState;
 
 use super::common::{
     ApiCtx, ApiRoute, check_api_token, check_db_admin_token, unauthorized_api_token,
+    unauthorized_db_admin_token,
 };
 use crate::llama::vram_estimator::gguf_arch_to_heuristic_name;
+
+static MODEL_LIBRARY_MIGRATION_RUNNING: AtomicBool = AtomicBool::new(false);
+static MODEL_INVENTORY_SCAN_RUNNING: AtomicBool = AtomicBool::new(false);
+static IMPORT_RESOURCE_ESTIMATE_GATE: LazyLock<Arc<tokio::sync::Semaphore>> =
+    LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
+
+struct MigrationExecutionGuard;
+
+struct InventoryScanGuard;
+
+impl MigrationExecutionGuard {
+    fn acquire() -> Option<Self> {
+        MODEL_LIBRARY_MIGRATION_RUNNING
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for MigrationExecutionGuard {
+    fn drop(&mut self) {
+        MODEL_LIBRARY_MIGRATION_RUNNING.store(false, Ordering::Release);
+    }
+}
+
+impl InventoryScanGuard {
+    fn acquire() -> Option<Self> {
+        MODEL_INVENTORY_SCAN_RUNNING
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for InventoryScanGuard {
+    fn drop(&mut self) {
+        MODEL_INVENTORY_SCAN_RUNNING.store(false, Ordering::Release);
+    }
+}
+
+fn error_reply(
+    status: warp::http::StatusCode,
+    error: impl ToString,
+) -> Box<dyn warp::reply::Reply> {
+    Box::new(warp::reply::with_status(
+        warp::reply::json(&serde_json::json!({ "ok": false, "error": error.to_string() })),
+        status,
+    ))
+}
+
+fn migration_persistence_files(state: &AppState) -> Vec<PathBuf> {
+    vec![
+        state.presets_path.clone(),
+        state.sessions_path.clone(),
+        state.model_tags_path.clone(),
+        state.ui_settings_path.clone(),
+    ]
+}
+
+fn migration_import_roots(state: &AppState, models_dir: &std::path::Path) -> Vec<PathBuf> {
+    state
+        .model_tags_path
+        .parent()
+        .filter(|config_root| *config_root != models_dir && config_root.is_dir())
+        .map(|path| vec![path.to_path_buf()])
+        .unwrap_or_default()
+}
+
+fn shared_hf_hub() -> Option<PathBuf> {
+    dirs::home_dir()
+        .map(|home| home.join(".cache/huggingface/hub"))
+        .filter(|path| path.is_dir())
+}
+
+fn api_model_inventory(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "inventory")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let state = state.clone();
+            let config = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                let models_dir = get_effective_models_dir(&state)
+                    .unwrap_or_else(|| config.default_models_dir.clone());
+                let Some(scan_guard) = InventoryScanGuard::acquire() else {
+                    return Ok(error_reply(
+                        warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        "A model inventory scan is already running",
+                    ));
+                };
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    tokio::task::spawn_blocking(move || {
+                        let _scan_guard = scan_guard;
+                        crate::models::library::inventory(&models_dir)
+                    }),
+                )
+                .await;
+                match result {
+                    Ok(Ok(Ok(inventory))) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                        &inventory,
+                    ))
+                        as Box<dyn warp::reply::Reply>),
+                    Ok(Ok(Err(error))) => {
+                        Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error))
+                    }
+                    Ok(Err(error)) => Ok(error_reply(
+                        warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                        error,
+                    )),
+                    Err(_) => Ok(error_reply(
+                        warp::http::StatusCode::REQUEST_TIMEOUT,
+                        "Model inventory timed out",
+                    )),
+                }
+            }
+        })
+}
+
+fn api_rapid_model_resolver_preview(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "rapid-mlx" / "resolve" / "preview")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<
+            crate::inference::rapid_mlx::model_resolver::RapidMlxModelSource,
+        >())
+        .and_then(move |auth: Option<String>, source| {
+            let state = state.clone();
+            let config = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                let models_dir = get_effective_models_dir(&state)
+                    .unwrap_or_else(|| config.default_models_dir.clone());
+                let context = crate::inference::rapid_mlx::model_resolver::RapidMlxResolveContext {
+                    models_dir,
+                    python_executable: PathBuf::from(if cfg!(windows) {
+                        "python.exe"
+                    } else {
+                        "python3"
+                    }),
+                    runtime_version:
+                        crate::inference::rapid_mlx::compatibility::LATEST_QUALIFIED_VERSION_TEXT
+                            .into(),
+                    hf_token: None,
+                    verified_aliases: Vec::new(),
+                    execute_conversion: false,
+                };
+                let preview =
+                    crate::inference::rapid_mlx::model_resolver::preview_async(source, context)
+                        .await
+                        .map_err(|error| {
+                            warp::reject::custom(super::ApiError::internal(error.to_string()))
+                        })?;
+                Ok::<_, warp::Rejection>(
+                    Box::new(warp::reply::json(&preview)) as Box<dyn warp::reply::Reply>
+                )
+            }
+        })
+}
+
+fn api_gguf_import_compatibility_preview(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "gguf" / "import" / "compatibility" / "preview")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<
+            crate::models::gguf_import::GgufImportPreviewRequest,
+        >())
+        .and_then(
+            move |auth: Option<String>,
+                  request: crate::models::gguf_import::GgufImportPreviewRequest| {
+                let state = state.clone();
+                let config = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &config) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let models_dir = get_effective_models_dir(&state)
+                        .unwrap_or_else(|| config.default_models_dir.clone());
+                    match crate::models::gguf_import::inspect_async(request.path, models_dir).await
+                    {
+                        Ok(report) => Ok::<_, warp::Rejection>(
+                            Box::new(warp::reply::json(&report)) as Box<dyn warp::reply::Reply>,
+                        ),
+                        Err(error) => Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error)),
+                    }
+                }
+            },
+        )
+}
+
+fn import_lab_context(
+    state: &AppState,
+    config: &AppConfig,
+) -> crate::models::gguf_recovery::RecoveryContext {
+    let models_dir =
+        get_effective_models_dir(state).unwrap_or_else(|| config.default_models_dir.clone());
+    let config_dir = state
+        .model_tags_path
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| {
+            models_dir
+                .parent()
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_else(|| models_dir.clone())
+        });
+    crate::models::gguf_recovery::RecoveryContext {
+        models_dir,
+        config_dir,
+    }
+}
+
+fn api_import_lab_availability(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "import-lab" / "availability")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let config = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                Ok::<_, warp::Rejection>(Box::new(warp::reply::json(&serde_json::json!({
+                    "local_execution_available": crate::models::import_lab::local_execution_available(),
+                    "platform_requirement": "Apple Silicon macOS",
+                    "supported_profile": "smollm2-135m-instruct-llama-v1",
+                    "compatibility": "experimental",
+                    "launchable": false,
+                    "fallback_engine": "llama.cpp"
+                }))) as Box<dyn warp::reply::Reply>)
+            }
+        })
+}
+
+fn api_import_lab_resource_estimate(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "import-lab" / "resource-estimate")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<
+            crate::models::gguf_import::GgufImportPreviewRequest,
+        >())
+        .and_then(
+            move |auth: Option<String>,
+                  request: crate::models::gguf_import::GgufImportPreviewRequest| {
+                let state = state.clone();
+                let config = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &config) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let context = import_lab_context(&state, &config);
+                    let models_dir = context.models_dir.clone();
+                    let path = request.path;
+                    if let Err(error) =
+                        crate::models::import_lab::validate_library_relative_path(&path)
+                    {
+                        return Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error));
+                    }
+                    let permit = match IMPORT_RESOURCE_ESTIMATE_GATE.clone().try_acquire_owned() {
+                        Ok(permit) => permit,
+                        Err(_) => {
+                            return Ok(error_reply(
+                                warp::http::StatusCode::TOO_MANY_REQUESTS,
+                                "Resource estimation is busy; retry shortly",
+                            ));
+                        }
+                    };
+                    let result = tokio::time::timeout(
+                        std::time::Duration::from_secs(15),
+                        tokio::task::spawn_blocking(move || {
+                            // A timed-out blocking task cannot be forcibly cancelled. Keep
+                            // its permit until the task really exits so request bursts can
+                            // never exceed this bounded disk/metadata worker pool.
+                            let _permit = permit;
+                            crate::models::import_lab::resource_estimate(&models_dir, &path)
+                        }),
+                    )
+                    .await;
+                    match result {
+                        Ok(Ok(Ok(estimate))) => {
+                            Ok::<_, warp::Rejection>(Box::new(warp::reply::json(&estimate))
+                                as Box<dyn warp::reply::Reply>)
+                        }
+                        Ok(Ok(Err(error))) => {
+                            Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error))
+                        }
+                        Ok(Err(error)) => Ok(error_reply(
+                            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            error,
+                        )),
+                        Err(_) => Ok(error_reply(
+                            warp::http::StatusCode::REQUEST_TIMEOUT,
+                            "Resource estimate timed out",
+                        )),
+                    }
+                }
+            },
+        )
+}
+
+fn api_import_lab_jobs(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    let list_config = app_config.clone();
+    let list = warp::path!("api" / "models" / "import-lab" / "jobs")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let config = list_config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                    &crate::models::import_lab::jobs(),
+                )) as Box<dyn warp::reply::Reply>)
+            }
+        });
+
+    let start = warp::path!("api" / "models" / "import-lab" / "jobs")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<
+            crate::models::import_lab::ImportJobStartRequest,
+        >())
+        .and_then(
+            move |auth: Option<String>,
+                  request: crate::models::import_lab::ImportJobStartRequest| {
+                let state = state.clone();
+                let config = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &config) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    match crate::models::import_lab::start_job(
+                        import_lab_context(&state, &config),
+                        request,
+                    ) {
+                        Ok(job) => Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
+                            warp::reply::json(&job),
+                            warp::http::StatusCode::ACCEPTED,
+                        ))
+                            as Box<dyn warp::reply::Reply>),
+                        Err(error) => Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error)),
+                    }
+                }
+            },
+        );
+    list.or(start).unify()
+}
+
+fn api_import_lab_job_actions(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    let status_config = app_config.clone();
+    let status = warp::path!("api" / "models" / "import-lab" / "jobs" / String)
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |id: String, auth: Option<String>| {
+            let config = status_config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                match crate::models::import_lab::job(&id) {
+                    Some(job) => Ok::<_, warp::Rejection>(
+                        Box::new(warp::reply::json(&job)) as Box<dyn warp::reply::Reply>
+                    ),
+                    None => Ok(error_reply(
+                        warp::http::StatusCode::NOT_FOUND,
+                        "Import job was not found",
+                    )),
+                }
+            }
+        });
+    let cancel_config = app_config.clone();
+    let cancel = warp::path!("api" / "models" / "import-lab" / "jobs" / String / "cancel")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |id: String, auth: Option<String>| {
+            let config = cancel_config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                match crate::models::import_lab::cancel_job(&id) {
+                    Ok(job) => Ok::<_, warp::Rejection>(
+                        Box::new(warp::reply::json(&job)) as Box<dyn warp::reply::Reply>
+                    ),
+                    Err(error) => Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error)),
+                }
+            }
+        });
+    let forget = warp::path!("api" / "models" / "import-lab" / "jobs" / String)
+        .and(warp::delete())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |id: String, auth: Option<String>| {
+            let config = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                match crate::models::import_lab::forget_job(&id) {
+                    Ok(()) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({"ok": true}),
+                    ))
+                        as Box<dyn warp::reply::Reply>),
+                    Err(error) => Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error)),
+                }
+            }
+        });
+    status.or(cancel).unify().or(forget).unify()
+}
+
+fn api_library_migration_preview(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "library" / "migration" / "preview")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<MigrationPreviewRequest>())
+        .and_then(
+            move |auth: Option<String>, request: MigrationPreviewRequest| {
+                let state = state.clone();
+                let config = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &config) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let models_dir = get_effective_models_dir(&state)
+                        .unwrap_or_else(|| config.default_models_dir.clone());
+                    let persistence = migration_persistence_files(&state);
+                    let imports = migration_import_roots(&state, &models_dir);
+                    let shared_hf = shared_hf_hub();
+                    let result = tokio::time::timeout(
+                        std::time::Duration::from_secs(10),
+                        tokio::task::spawn_blocking(move || {
+                            crate::models::library::plan_migration_selected_hf(
+                                &models_dir,
+                                &persistence,
+                                &imports,
+                                &request.hf_repos,
+                                shared_hf.as_deref(),
+                            )
+                        }),
+                    )
+                    .await;
+                    match result {
+                        Ok(Ok(Ok(plan))) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                            &plan,
+                        ))
+                            as Box<dyn warp::reply::Reply>),
+                        Ok(Ok(Err(error))) => {
+                            Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error))
+                        }
+                        Ok(Err(error)) => Ok(error_reply(
+                            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            error,
+                        )),
+                        Err(_) => Ok(error_reply(
+                            warp::http::StatusCode::REQUEST_TIMEOUT,
+                            "Migration preview timed out",
+                        )),
+                    }
+                }
+            },
+        )
+}
+
+#[derive(serde::Deserialize)]
+struct MigrationPreviewRequest {
+    #[serde(default)]
+    hf_repos: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ExecuteMigrationRequest {
+    #[serde(default)]
+    plan_id: String,
+    #[serde(default)]
+    confirmation: String,
+    #[serde(default)]
+    hf_repos: Vec<String>,
+}
+
+fn api_library_migration_execute(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "library" / "migration" / "execute")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<ExecuteMigrationRequest>())
+        .and_then(move |auth: Option<String>, request: ExecuteMigrationRequest| {
+            let state = state.clone();
+            let config = app_config.clone();
+            async move {
+                if !check_db_admin_token(&auth, &config) { return Ok(unauthorized_db_admin_token()); }
+                if request.confirmation != "MIGRATE_MODEL_LIBRARY" || request.plan_id.len() != 64 {
+                    return Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, "Migration requires the preview plan_id and confirmation MIGRATE_MODEL_LIBRARY"));
+                }
+                let Some(_execution_guard) = MigrationExecutionGuard::acquire() else {
+                    return Ok(error_reply(
+                        warp::http::StatusCode::CONFLICT,
+                        "A model-library migration is already running",
+                    ));
+                };
+                let models_dir = get_effective_models_dir(&state).unwrap_or_else(|| config.default_models_dir.clone());
+                let persistence = migration_persistence_files(&state);
+                let imports = migration_import_roots(&state, &models_dir);
+                let shared_hf = shared_hf_hub();
+                let plan_id = request.plan_id;
+                let hf_repos = request.hf_repos;
+                let migration_state = state.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    // Hold every persistence lock across disk rewrite and memory refresh so
+                    // ordinary saves cannot race the journaled migration.
+                    let mut presets_guard = migration_state.presets.lock().unwrap();
+                    let mut sessions_guard = migration_state.sessions.lock().unwrap();
+                    let mut tags_guard = migration_state.model_tags.lock().unwrap();
+                    let mut settings_guard = migration_state.ui_settings.lock().unwrap();
+                    let plan = crate::models::library::execute_migration_selected_hf(
+                        &models_dir, &persistence, &imports, &hf_repos, shared_hf.as_deref(), &plan_id,
+                    )?;
+                    crate::models::library::rewrite_in_memory_paths(&mut *presets_guard, &plan)?;
+                    crate::models::library::rewrite_in_memory_paths(&mut *sessions_guard, &plan)?;
+                    crate::models::library::rewrite_in_memory_paths(&mut *tags_guard, &plan)?;
+                    crate::models::library::rewrite_in_memory_paths(&mut *settings_guard, &plan)?;
+                    Ok::<_, anyhow::Error>(plan)
+                }).await;
+                match result {
+                    Ok(Ok(plan)) => {
+                        if let Ok(discovered) =
+                            crate::models::scan_gguf_library(&plan.models_dir)
+                        {
+                            *state.discovered_models.lock().unwrap() = discovered;
+                        }
+                        Ok::<_, warp::Rejection>(Box::new(warp::reply::json(&serde_json::json!({ "ok": true, "plan": plan }))) as Box<dyn warp::reply::Reply>)
+                    }
+                    Ok(Err(error)) => Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error)),
+                    Err(error) => Ok(error_reply(warp::http::StatusCode::INTERNAL_SERVER_ERROR, error)),
+                }
+            }
+        })
+}
 
 /// Returns the user-configured models directory, or None if not set.
 pub(crate) fn get_effective_models_dir(state: &AppState) -> Option<PathBuf> {
@@ -439,29 +1007,79 @@ fn api_get_models(
         .and(warp::get())
         .and(warp::header::optional::<String>("authorization"))
         .and_then(move |auth: Option<String>| {
+            let state = state.clone();
             let cfg = app_config.clone();
-            if !check_api_token(&auth, &cfg) {
-                return futures_util::future::ready(Ok(unauthorized_api_token()));
-            }
-            let models = state.discovered_models.lock().unwrap().clone();
-            let tags = state.model_tags.lock().unwrap().tags.clone();
-            let models_with_tags: Vec<serde_json::Value> = models
-                .into_iter()
-                .map(|m| {
-                    let model_path = m.path.to_string_lossy().to_string();
-                    let cls = crate::models::classify_model(&m);
-                    let mut obj = serde_json::to_value(m).unwrap_or_default();
-                    if let Some(model_obj) = obj.as_object_mut() {
-                        let model_tags = tags.get(&model_path).cloned().unwrap_or_default();
-                        model_obj.insert("tags".into(), serde_json::json!(model_tags));
-                        model_obj.insert("classification".into(), serde_json::json!(cls));
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let models_dir = get_effective_models_dir(&state)
+                    .unwrap_or_else(|| cfg.default_models_dir.clone());
+                let Some(scan_guard) = InventoryScanGuard::acquire() else {
+                    return Ok(error_reply(
+                        warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        "A model inventory scan is already running",
+                    ));
+                };
+                let inventory = match tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    tokio::task::spawn_blocking(move || {
+                        let _scan_guard = scan_guard;
+                        crate::models::library::inventory(&models_dir)
+                    }),
+                )
+                .await
+                {
+                    Ok(Ok(Ok(inventory))) => inventory,
+                    Ok(Ok(Err(error))) => {
+                        return Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error));
                     }
-                    obj
-                })
-                .collect();
-            futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                Box::new(warp::reply::json(&models_with_tags)),
-            ))
+                    Ok(Err(error)) => {
+                        return Ok(error_reply(
+                            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            error,
+                        ));
+                    }
+                    Err(_) => {
+                        return Ok(error_reply(
+                            warp::http::StatusCode::REQUEST_TIMEOUT,
+                            "Model inventory timed out",
+                        ));
+                    }
+                };
+                let tags = state.model_tags.lock().unwrap().tags.clone();
+                let legacy = state.discovered_models.lock().unwrap().clone();
+                let models_with_tags: Vec<serde_json::Value> = inventory
+                    .entries
+                    .iter()
+                    .map(|entry| {
+                        let model_path = entry.path.to_string_lossy().to_string();
+                        let mut obj = serde_json::to_value(entry).unwrap_or_default();
+                        if let Some(model_obj) = obj.as_object_mut() {
+                            model_obj.insert(
+                                "tags".into(),
+                                serde_json::json!(
+                                    tags.get(&model_path).cloned().unwrap_or_default()
+                                ),
+                            );
+                            if let Some(model) =
+                                legacy.iter().find(|model| model.path == entry.path)
+                            {
+                                model_obj.insert(
+                                    "classification".into(),
+                                    serde_json::json!(crate::models::classify_model(model)),
+                                );
+                            } else {
+                                model_obj.insert("classification".into(), serde_json::Value::Null);
+                            }
+                        }
+                        obj
+                    })
+                    .collect();
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &models_with_tags,
+                )))
+            }
         })
 }
 
@@ -478,7 +1096,7 @@ fn api_refresh_models(
                 return futures_util::future::ready(Ok(unauthorized_api_token()));
             }
             if let Some(ref dir) = state.models_dir {
-                match crate::models::scan_models_dir(dir) {
+                match crate::models::scan_gguf_library(dir) {
                     Ok(discovered) => {
                         let count = discovered.len();
                         *state.discovered_models.lock().unwrap() = discovered;
@@ -889,6 +1507,51 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .boxed();
     r = r
+        .or(api_model_inventory(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_rapid_model_resolver_preview(
+            state.clone(),
+            config.clone(),
+        ))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_gguf_import_compatibility_preview(
+            state.clone(),
+            config.clone(),
+        ))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_import_lab_availability(config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_import_lab_resource_estimate(
+            state.clone(),
+            config.clone(),
+        ))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_import_lab_jobs(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_import_lab_job_actions(config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_library_migration_preview(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_library_migration_execute(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
         .or(api_models_download_cancel(state.clone(), config.clone()))
         .unify()
         .boxed();
@@ -938,4 +1601,197 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .boxed();
     r
+}
+
+#[cfg(test)]
+mod phase5_auth_tests {
+    use super::*;
+    use crate::web::auth::AuthManager;
+    use warp::http::StatusCode;
+
+    fn test_routes() -> ApiRoute {
+        let config = Arc::new(AppConfig::for_test(
+            Some("api-secret".to_string()),
+            Some("admin-secret".to_string()),
+        ));
+        routes(ApiCtx {
+            state: AppState::default(),
+            auth: AuthManager::new(None, None, &crate::config::TLSConfig::default().mode),
+            config,
+        })
+    }
+
+    #[tokio::test]
+    async fn phase5_read_routes_require_api_token() {
+        for (method, path, body) in [
+            ("GET", "/api/models/inventory", None),
+            ("GET", "/api/models/import-lab/availability", None),
+            ("GET", "/api/models/import-lab/jobs", None),
+            ("GET", "/api/models/import-lab/jobs/missing", None),
+            (
+                "POST",
+                "/api/models/import-lab/resource-estimate",
+                Some(r#"{"path":"gguf/model.gguf"}"#),
+            ),
+            (
+                "POST",
+                "/api/models/import-lab/jobs",
+                Some(r#"{"source_path":"gguf/model.gguf"}"#),
+            ),
+            ("POST", "/api/models/import-lab/jobs/missing/cancel", None),
+            ("DELETE", "/api/models/import-lab/jobs/missing", None),
+            (
+                "POST",
+                "/api/models/rapid-mlx/resolve/preview",
+                Some(r#"{"kind":"alias","value":"model"}"#),
+            ),
+            (
+                "POST",
+                "/api/models/gguf/import/compatibility/preview",
+                Some(r#"{"path":"gguf/model.gguf"}"#),
+            ),
+            (
+                "POST",
+                "/api/models/library/migration/preview",
+                Some(r#"{}"#),
+            ),
+        ] {
+            let mut request = warp::test::request().method(method).path(path);
+            if let Some(body) = body {
+                request = request
+                    .header("content-type", "application/json")
+                    .body(body);
+            }
+            let response = request.reply(&test_routes()).await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn migration_execute_rejects_api_token_without_db_admin_token() {
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/models/library/migration/execute")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body(r#"{"plan_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","confirmation":"MIGRATE_MODEL_LIBRARY"}"#)
+            .reply(&test_routes())
+            .await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn resolver_preview_returns_bad_request_for_malformed_json() {
+        let routes = test_routes().recover(crate::web::handle_rejection);
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/models/rapid-mlx/resolve/preview")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body("{")
+            .reply(&routes)
+            .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn gguf_import_preview_returns_bad_request_for_malformed_json_and_traversal() {
+        let routes = test_routes().recover(crate::web::handle_rejection);
+        let malformed = warp::test::request()
+            .method("POST")
+            .path("/api/models/gguf/import/compatibility/preview")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body("{")
+            .reply(&routes)
+            .await;
+        assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+
+        let traversal = warp::test::request()
+            .method("POST")
+            .path("/api/models/gguf/import/compatibility/preview")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body(r#"{"path":"../outside.gguf"}"#)
+            .reply(&routes)
+            .await;
+        assert_eq!(traversal.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn import_lab_read_routes_accept_api_token_and_missing_job_is_not_found() {
+        let routes = test_routes().recover(crate::web::handle_rejection);
+        for path in [
+            "/api/models/import-lab/availability",
+            "/api/models/import-lab/jobs",
+        ] {
+            let response = warp::test::request()
+                .method("GET")
+                .path(path)
+                .header("authorization", "Bearer api-secret")
+                .reply(&routes)
+                .await;
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+        }
+        let missing = warp::test::request()
+            .method("GET")
+            .path("/api/models/import-lab/jobs/missing")
+            .header("authorization", "Bearer api-secret")
+            .reply(&routes)
+            .await;
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn import_lab_write_routes_return_bad_request_for_invalid_json_and_paths() {
+        let routes = test_routes().recover(crate::web::handle_rejection);
+        let malformed = warp::test::request()
+            .method("POST")
+            .path("/api/models/import-lab/jobs")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body("{")
+            .reply(&routes)
+            .await;
+        assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+
+        let unknown_field = warp::test::request()
+            .method("POST")
+            .path("/api/models/import-lab/jobs")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body(r#"{"source_path":"gguf/model.gguf","unexpected":true}"#)
+            .reply(&routes)
+            .await;
+        assert_eq!(unknown_field.status(), StatusCode::BAD_REQUEST);
+
+        let traversal = warp::test::request()
+            .method("POST")
+            .path("/api/models/import-lab/resource-estimate")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body(r#"{"path":"../outside.gguf"}"#)
+            .reply(&routes)
+            .await;
+        assert_eq!(traversal.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn import_lab_resource_estimates_fail_fast_when_worker_pool_is_saturated() {
+        let permits = IMPORT_RESOURCE_ESTIMATE_GATE
+            .clone()
+            .acquire_many_owned(2)
+            .await
+            .unwrap();
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/models/import-lab/resource-estimate")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body(r#"{"path":"gguf/model.gguf"}"#)
+            .reply(&test_routes())
+            .await;
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        drop(permits);
+    }
 }

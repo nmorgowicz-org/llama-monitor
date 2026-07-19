@@ -10,12 +10,28 @@
 //! - HF token management
 
 use anyhow::{Context, Result};
-use hf_hub::api::sync::ApiBuilder;
-use hf_hub::{Repo, RepoType};
+use hf_hub::{HFClient, HFClientSync};
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use std::path::Path;
 use std::sync::LazyLock;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+
+fn hf_build_client(token: Option<String>) -> anyhow::Result<HFClientSync> {
+    let async_client = if let Some(tok) = token {
+        HFClient::builder().token(tok).build()
+    } else {
+        HFClient::new()
+    }
+    .map_err(|e| anyhow::anyhow!("Failed to build HF async client: {e}"))?;
+    HFClientSync::from_inner(async_client)
+        .map_err(|e| anyhow::anyhow!("Failed to build HF sync client: {e}"))
+}
+
+pub fn hf_resolve_download_url(repo_id: &str, file_path: &str) -> String {
+    let encoded_path = utf8_percent_encode(file_path, NON_ALPHANUMERIC).to_string();
+    format!("https://huggingface.co/{repo_id}/resolve/main/{encoded_path}")
+}
 
 static HF_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
@@ -428,17 +444,20 @@ pub async fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
 /// List repo files; filters for GGUF if gguf_only=true.
 #[allow(dead_code)]
 pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileInfo>> {
-    let api = ApiBuilder::new()
-        .with_token(hf_load_token())
-        .build()
-        .context("Failed to build HF API client")?;
-    let info = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+    let (owner, name) = repo_id
+        .split_once('/')
+        .context("repo_id must be in owner/name format")?;
+    let client = hf_build_client(hf_load_token())?;
+    let info = client
+        .model(owner, name)
         .info()
+        .send()
         .context("Failed to list repo files")?;
 
-    Ok(info
+    let siblings = info
         .siblings
+        .context("HF API did not return file listing (siblings)")?;
+    Ok(siblings
         .iter()
         .filter(|s| !gguf_only || s.rfilename.to_ascii_lowercase().ends_with(".gguf"))
         .map(|s| HfFileInfo {
@@ -452,16 +471,20 @@ pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileIn
 /// Get info for a single file in a repo.
 #[allow(dead_code)]
 pub fn hf_get_file_info(repo_id: &str, path: &str) -> Result<HfFileInfo> {
-    let api = ApiBuilder::new()
-        .with_token(hf_load_token())
-        .build()
-        .context("Failed to build HF API client")?;
-    let info = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+    let (owner, name) = repo_id
+        .split_once('/')
+        .context("repo_id must be in owner/name format")?;
+    let client = hf_build_client(hf_load_token())?;
+    let info = client
+        .model(owner, name)
         .info()
+        .send()
         .context("Failed to list repo files")?;
 
-    info.siblings
+    let siblings = info
+        .siblings
+        .context("HF API did not return file listing (siblings)")?;
+    siblings
         .iter()
         .find(|s| s.rfilename == path)
         .map(|s| HfFileInfo {
@@ -483,13 +506,7 @@ pub async fn fetch_gguf_header_metadata(
     repo_id: &str,
     file_path: &str,
 ) -> Result<crate::llama::gguf_meta::GgufMetadata, String> {
-    let api = ApiBuilder::new()
-        .with_token(hf_load_token())
-        .build()
-        .map_err(|e| format!("Failed to build HF API client: {e}"))?;
-    let url = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
-        .url(file_path);
+    let url = hf_resolve_download_url(repo_id, file_path);
     if url.is_empty() {
         return Err(format!(
             "Could not resolve HF URL for {repo_id}/{file_path}"
@@ -534,6 +551,47 @@ pub async fn fetch_gguf_header_metadata(
     Err(format!("could not parse GGUF header: {last_err}"))
 }
 
+/// Fetch and parse an MLX model's `config.json` directly from a HuggingFace repo.
+///
+/// Unlike the GGUF header (which is range-fetched because the file can be many GB), MLX's
+/// `config.json` is always small JSON, so this does a plain GET of the whole file.
+pub async fn fetch_mlx_config(
+    repo_id: &str,
+    file_path: &str,
+) -> Result<crate::inference::rapid_mlx::mlx_meta::MlxConfig, String> {
+    let url = hf_resolve_download_url(repo_id, file_path);
+    if url.is_empty() {
+        return Err(format!(
+            "Could not resolve HF URL for {repo_id}/{file_path}"
+        ));
+    }
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+    let mut req = client.get(&url);
+    if let Some(token) = hf_load_token() {
+        req = req.bearer_auth(token);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "HF returned HTTP {} for {file_path}",
+            resp.status()
+        ));
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("reading config.json: {e}"))?;
+    crate::inference::rapid_mlx::mlx_meta::parse_mlx_config(&bytes)
+}
+
 /// Stream-download a file from HF with optional resume.
 /// Returns total bytes written.
 #[allow(dead_code)]
@@ -544,13 +602,7 @@ pub async fn hf_download_file_stream(
     local_path: &Path,
     resume_from: u64,
 ) -> Result<u64> {
-    let api = ApiBuilder::new()
-        .with_token(token.map(String::from))
-        .build()
-        .context("Failed to build HF API client")?;
-    let url = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
-        .url(path);
+    let url = hf_resolve_download_url(repo_id, path);
     if url.is_empty() {
         anyhow::bail!("Failed to resolve HF URL for {path}");
     }
@@ -619,6 +671,24 @@ pub async fn hf_download_file_stream(
 
 // ── Search and browse ─────────────────────────────────────────────────────────
 
+/// Model format filter for HF search (GGUF vs MLX).
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HfModelFormat {
+    #[default]
+    Gguf,
+    Mlx,
+}
+
+impl HfModelFormat {
+    fn as_api_filter(self) -> &'static str {
+        match self {
+            HfModelFormat::Gguf => "gguf",
+            HfModelFormat::Mlx => "mlx",
+        }
+    }
+}
+
 /// Full search request parameters.
 #[derive(Debug, Clone, Default)]
 pub struct HfSearchParams {
@@ -630,6 +700,8 @@ pub struct HfSearchParams {
     pub limit: usize,
     /// Opaque cursor from the HF API `Link` response header for pagination.
     pub cursor: Option<String>,
+    /// Model format filter (GGUF default for backward compatibility).
+    pub format: HfModelFormat,
 }
 
 /// Parse the `cursor=` value out of a HF API `Link: <url>; rel="next"` header.
@@ -677,8 +749,7 @@ pub async fn hf_search_models(
         if let Some(ref cursor) = params.cursor {
             p.append_pair("cursor", cursor);
         }
-        // Always filter for GGUF
-        p.append_pair("filter", "gguf");
+        p.append_pair("filter", params.format.as_api_filter());
     }
 
     let mut req = HF_HTTP_CLIENT.get(url);
@@ -820,14 +891,19 @@ async fn list_repo_gguf_files(
         .await
         .unwrap_or_default();
 
-    let api = ApiBuilder::new()
-        .with_token(token)
-        .build()
-        .map_err(|e| format!("Failed to build HF API client: {e}"))?;
-    let info = api
-        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+    let (owner, name) = repo_id
+        .split_once('/')
+        .ok_or_else(|| format!("Invalid repo_id format: {repo_id}"))?;
+    let client = hf_build_client(token).map_err(|e| format!("Failed to build HF client: {e}"))?;
+    let info = client
+        .model(owner, name)
         .info()
+        .send()
         .map_err(|e| format!("Failed to list repo files: {e}"))?;
+
+    let siblings = info
+        .siblings
+        .ok_or_else(|| format!("HF API did not return file listing (siblings) for {repo_id}"))?;
 
     // Infer provider from repo owner
     let repo_owner = repo_id.split('/').next().unwrap_or("");
@@ -836,7 +912,7 @@ async fn list_repo_gguf_files(
     let family = {
         let from_repo = infer_family_from_name(repo_id);
         if from_repo.is_empty() {
-            info.siblings
+            siblings
                 .iter()
                 .map(|s| infer_family_from_name(&s.rfilename))
                 .find(|candidate| !candidate.is_empty())
@@ -846,8 +922,7 @@ async fn list_repo_gguf_files(
         }
     };
     let mmproj_preference = mmproj_preference_for_family(&family);
-    let mut result: Vec<HfGgufFile> = info
-        .siblings
+    let mut result: Vec<HfGgufFile> = siblings
         .iter()
         .map(|s| s.rfilename.as_str())
         .filter(|name| name.to_ascii_lowercase().ends_with(".gguf"))
@@ -1169,6 +1244,53 @@ async fn fetch_file_sizes(
     }
 
     Ok(map)
+}
+
+/// Sum total weight size for an MLX model repo from the HF tree API.
+///
+/// Used by the VRAM estimator when it receives an HF-repo-style alias as
+/// `model_path` (e.g. "mlx-community/Qwen3-30B-A3B-4bit") and no
+/// `model_size_bytes` was supplied. The huggingface-rs client's
+/// list/get-file-info helpers do not expose sizes, so this goes directly
+/// to the raw tree endpoint which does include LFS sizes.
+pub async fn resolve_mlx_repo_size_bytes(repo_id: &str) -> Result<Option<u64>> {
+    let url = format!("https://huggingface.co/api/models/{repo_id}/tree/main");
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(t) = hf_load_token() {
+        req = req.bearer_auth(t);
+    }
+
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(_) => return Ok(None),
+    };
+    if !resp.status().is_success() {
+        return Ok(None);
+    }
+
+    let items: Vec<serde_json::Value> = match resp.json().await {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+
+    let mut total: u64 = 0;
+    for item in items {
+        let path = item.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        if !path.ends_with(".safetensors") {
+            continue;
+        }
+        let size = item
+            .get("lfs")
+            .and_then(|lfs| lfs.get("size"))
+            .and_then(|v| v.as_u64())
+            .or_else(|| item.get("size").and_then(|v| v.as_u64()))
+            .unwrap_or(0);
+        if size > 0 {
+            total = total.saturating_add(size);
+        }
+    }
+
+    if total > 0 { Ok(Some(total)) } else { Ok(None) }
 }
 
 /// Sort rank for quant labels (lower = higher quality / bigger file = shown first).
@@ -1513,6 +1635,7 @@ pub async fn hf_resolve_origin(filename: &str, size_bytes: u64) -> Result<HfReso
             sort: HfSort::Downloads,
             limit: 15,
             cursor: None,
+            format: HfModelFormat::Gguf,
         };
         let result = hf_search_models(&params).await;
         match result {
@@ -2243,6 +2366,14 @@ mod tests {
     #[tokio::test]
     async fn test_hf_get_model_info_smoke() {
         let _ = hf_get_model_info("gpt2").await;
+    }
+
+    #[test]
+    fn hf_model_format_as_api_filter_threads_mlx_vs_gguf() {
+        assert_eq!(HfModelFormat::Gguf.as_api_filter(), "gguf");
+        assert_eq!(HfModelFormat::Mlx.as_api_filter(), "mlx");
+        // Default (backward-compat) must remain Gguf.
+        assert_eq!(HfModelFormat::default().as_api_filter(), "gguf");
     }
 
     #[test]

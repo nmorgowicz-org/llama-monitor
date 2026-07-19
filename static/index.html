@@ -173,6 +173,10 @@
             <button id="llama-pill" class="top-nav-pill llama-pill-idle" style="display:none;" type="button" title="llama-server binary version">
               <span id="llama-pill-version">b—</span>
             </button>
+            <div id="engine-indicator" class="engine-indicator" style="display:none;" title="Active engine and model">
+              <span class="engine-indicator-label"></span>
+              <span class="engine-indicator-dot"></span>
+            </div>
             <button id="update-pill" class="top-nav-pill" style="display:none;">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/>
@@ -326,7 +330,12 @@
                             <span class="setup-section-title">Manual</span>
                         </div>
                         <div class="setup-card-form">
+                            <select class="setup-input setup-select" id="setup-endpoint-backend" aria-label="Inference engine">
+                                <option value="llama_cpp">llama.cpp</option>
+                                <option value="rapid_mlx">Rapid-MLX</option>
+                            </select>
                             <input type="url" class="setup-input" id="setup-endpoint-url" placeholder="http://192.168.x.x:8080" autocomplete="off" required aria-label="Server URL">
+                            <input type="text" class="setup-input" id="setup-endpoint-model" placeholder="Model name (auto-detect)" autocomplete="off" aria-label="Served model name" hidden>
                             <input type="password" class="setup-input" id="setup-endpoint-api-key" placeholder="API key (optional)" aria-label="API key (optional)">
                             <button class="setup-btn setup-btn-primary setup-btn-connect" id="setup-attach-btn">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
@@ -517,7 +526,7 @@
                 <div class="control-bar" id="controls">
                     <!-- Zone 1: Spawn new server (primary) -->
                     <div class="control-bar-zone control-bar-spawn-zone">
-                        <button class="btn btn-spawn-wizard" id="btn-control-spawn" title="Open the setup wizard to configure and start a local llama-server">
+                        <button class="btn btn-spawn-wizard" id="btn-control-spawn" title="Open the setup wizard to configure and start a local inference server">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
                             Setup
                         </button>
@@ -698,7 +707,7 @@
                         Performance & metrics
                         <span class="metric-badge" id="inference-historic-badge" style="display:none;">Historic</span>
                         <span class="inference-log-tail-group" id="inference-log-tail-group" style="display:none;">
-                            <span class="metric-badge inference-log-tail-btn" id="inference-log-tail-badge" title="Show a small live tail of llama-server logs">Live log tail</span>
+                            <span class="metric-badge inference-log-tail-btn" id="inference-log-tail-badge" title="Show a small live tail of inference server logs">Live log tail</span>
                             <span class="inference-log-tail-btn-small" id="inference-log-tail-minus" title="Show fewer log lines">−</span>
                             <span class="inference-log-tail-btn-small" id="inference-log-tail-plus" title="Show more log lines">+</span>
                             <span class="metric-badge inference-log-tail-btn benchmark-pill" id="benchmark-pill" title="Benchmark performance and get optimization suggestions">Benchmark</span>
@@ -1901,7 +1910,7 @@
                         <button class="log-font-size" id="log-font-size-btn" type="button" title="Reset log font size">13px</button>
                         <button class="log-tool-btn log-font-btn" id="log-font-increase-btn" type="button" title="Increase log font size" aria-label="Increase log font size">+</button>
                     </div>
-                    <button class="log-tool-btn" id="log-cmd-btn" title="Show the llama-server command used to spawn this session">
+                    <button class="log-tool-btn" id="log-cmd-btn" title="Show the inference server command used to spawn this session">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
                         <span>Command</span>
                     </button>
@@ -1939,7 +1948,7 @@
                             <div class="logs-console-line logs-console-caret">waiting for a local process…</div>
                         </div>
                     </div>
-                    <h3>Console logs stay on the host that launched `llama-server`</h3>
+                    <h3>Console logs stay on the host that launched the inference server</h3>
                     <p>Remote servers still stream inference metrics into the dashboard, but stdout and stderr are only available when this app owns the local process. Start a local server to watch the live console here.</p>
                     <div class="logs-empty-capabilities">
                         <div class="logs-capability-chip">Inference metrics: live</div>
@@ -2266,9 +2275,25 @@
                          <input type="text" id="set-remote-agent-ssh-command" placeholder='optional override, e.g. start "" /B llama-monitor.exe --agent --agent-host 0.0.0.0 --agent-port 7779'>
                      </label>
                  </details>
-             </details>
+                         </details>
 
-        </div>
+                         <!-- Rapid-MLX escape-hatch flags (advanced tuning only) -->
+                         <details class="wizard-advanced-collapse" id="rapid-mlx-advanced-section" style="margin-top:14px;display:none;">
+                             <summary style="cursor:pointer;font-size:0.82rem;font-weight:600;color:#8b5cf6;padding:4px 0;">
+                                 Rapid-MLX advanced tuning <span style="font-weight:400;color:var(--color-text-muted);font-size:0.78rem;margin-left:6px;">(optional)</span>
+                             </summary>
+                             <div style="padding-top:6px;">
+                                 <div class="field-hint" style="margin-bottom:8px;">
+                                     Curated CLI flags for PFlash caching, speculative decoding, and hybrid attention.
+                                     Only safe, allowlisted options are exposed — no free-text injection.
+                                 </div>
+                                 <div id="rapid-mlx-advanced-flags" style="display:grid;grid-template-columns:1fr;gap:8px;">
+                                     <!-- Dynamically populated by spawn-wizard.js from escape_hatch descriptors -->
+                                 </div>
+                             </div>
+                         </details>
+
+                     </div>
         <div class="modal-buttons">
             <button type="button" class="btn btn-modal-cancel" id="config-modal-cancel">Cancel</button>
             <button type="button" class="btn btn-modal-save" id="config-modal-save">Save</button>
@@ -2562,10 +2587,12 @@
                             </div>
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-model-path" title="Absolute path to the .gguf model file on disk">Model Path <span class="pe-required">*</span></label>
-                                <div class="pe-input-row">
+                                <div class="pe-input-row" style="align-items:center;">
                                     <input type="text" class="pe-input" id="modal-model-path" required>
                                     <button type="button" class="btn-sm btn-preset" id="preset-browse-model-btn" title="Browse filesystem for .gguf files">Browse</button>
+                                    <div id="preset-hf-format-toggle-wrap"></div>
                                 </div>
+                                <div class="hf-search-results" id="preset-hf-search-results" style="display:none;"></div>
                                 <div class="pe-arch-info" id="pe-arch-info"></div>
                                 <span class="field-error-msg" role="alert">Model path is required</span>
                             </div>
@@ -3135,6 +3162,25 @@
                                     <input type="text" class="pe-input" id="modal-api-key" placeholder="(none)">
                                 </div>
                             </div>
+                            <div class="pe-row" id="pe-row-rapid-reasoning">
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-enable-thinking" title="Default sent as enable_thinking on every chat request that doesn't override it.">Thinking Mode</label>
+                                    <select class="pe-select" id="modal-rapid-enable-thinking">
+                                        <option value="">(unset — client decides)</option>
+                                        <option value="true">on</option>
+                                        <option value="false">off</option>
+                                    </select>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-reasoning-effort" title="Default sent as reasoning_effort on every chat request that doesn't override it.">Reasoning Effort</label>
+                                    <select class="pe-select" id="modal-rapid-reasoning-effort">
+                                        <option value="">(unset)</option>
+                                        <option value="low">low</option>
+                                        <option value="medium">medium</option>
+                                        <option value="high">high</option>
+                                    </select>
+                                </div>
+                            </div>
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-max-tokens" title="Maximum tokens to generate per request. Empty = unlimited (model's context limit).">Max Tokens</label>
@@ -3174,7 +3220,7 @@
                             </div>
 
                             <div class="pe-field">
-                                <label class="pe-label" for="modal-extra-args" title="Additional llama-server CLI flags (space-separated). Example: --log-verbosity 2 --no-perf">Extra Args</label>
+                                <label class="pe-label" for="modal-extra-args" title="Additional inference server CLI flags (space-separated). Example: --log-verbosity 2 --no-perf">Extra Args</label>
                                 <input type="text" class="pe-input" id="modal-extra-args" placeholder="--flag1 value1 --flag2">
                             </div>
                         </div>
@@ -3335,6 +3381,23 @@
             <!-- Step 2: Model -->
             <div class="wizard-step" id="wizard-step-1">
                 <div class="wizard-main">
+                    <section class="wizard-engine-section" aria-labelledby="wizard-engine-title">
+                        <div class="wizard-section-title" id="wizard-engine-title">Choose your inference engine</div>
+                        <div class="wizard-section-desc">Pick the runtime that matches your model. We’ll recommend one as soon as the model source is clear, without replacing a choice you make.</div>
+                        <div class="wizard-engine-cards" role="radiogroup" aria-label="Inference engine">
+                            <button type="button" class="wizard-engine-card selected" data-engine="llama_cpp" role="radio" aria-checked="true">
+                                <span class="wizard-engine-mark">L</span>
+                                <span class="wizard-engine-copy"><strong>llama.cpp</strong><small>Native GGUF · widest platform support</small></span>
+                                <span class="wizard-engine-badge" data-engine-badge="llama_cpp">Recommended for GGUF</span>
+                            </button>
+                            <button type="button" class="wizard-engine-card" data-engine="rapid_mlx" role="radio" aria-checked="false">
+                                <span class="wizard-engine-mark rapid">R</span>
+                                <span class="wizard-engine-copy"><strong>Rapid-MLX</strong><small>Native MLX · optimized for Apple Silicon</small></span>
+                                <span class="wizard-engine-badge" data-engine-badge="rapid_mlx">Checking runtime…</span>
+                            </button>
+                        </div>
+                        <div class="wizard-engine-reason" id="wizard-engine-reason" role="status">Select a model and we’ll explain the best engine.</div>
+                    </section>
                     <div>
                         <div class="wizard-section-title">Select your model</div>
                         <div class="wizard-section-desc">
@@ -3532,6 +3595,9 @@
                         <div class="ct-actions" id="ct-actions"></div>
                     </div>
 
+                    <!-- Rapid-MLX model profile hints (shown when Rapid-MLX engine + model profile available) -->
+                    <div id="rapid-mlx-profile-hints" style="display:none;margin-top:10px;"></div>
+
                     <!-- Quant advisor (shown after model + param count known) -->
                     <div class="quant-advisor" id="quant-advisor" style="display:none;">
                         <div class="quant-advisor-header">
@@ -3569,6 +3635,14 @@
 
             <!-- Step 3: Hardware -->
             <div class="wizard-step" id="wizard-step-2" tabindex="-1">
+                <div class="rapid-hardware-panel" id="rapid-hardware-panel" hidden>
+                    <div class="rapid-hardware-orb">R</div>
+                    <div class="rapid-hardware-content">
+                        <div class="wizard-section-title">Backend-specific memory controls</div>
+                        <p>Rapid-MLX owns Metal placement, cache blocks, and batching for this launch. These runtime controls remain separate from llama.cpp configuration.</p>
+                        <div class="rapid-hardware-note">No llama.cpp GPU-layer, KV quantization, mmap, or speculative-decoding flags will be included.</div>
+                    </div>
+                </div>
                 <div class="wizard-main">
                     <div>
                         <div class="wizard-section-title">Configure hardware</div>
@@ -4273,10 +4347,10 @@
                     <div class="sampling-params-section" style="margin-top:14px;">
                         <div class="hw-section-divider">Extra arguments</div>
                         <div class="sampling-field" style="margin-top:8px;">
-                            <label for="spawn-extra-args" title="Advanced: additional llama-server CLI flags.">Extra command-line arguments</label>
+                            <label for="spawn-extra-args" title="Advanced: additional inference server CLI flags.">Extra command-line arguments</label>
                             <input type="text" id="spawn-extra-args" placeholder="e.g. --log-verbosity 2 --no-perf">
                         </div>
-                        <div class="field-hint" style="margin-top:4px;">Passed directly to llama-server after all other flags. Use this for any option the wizard doesn't expose.</div>
+                        <div class="field-hint" style="margin-top:4px;">Passed directly to the inference server after all other flags. Use this for any option the wizard doesn't expose.</div>
                     </div>
 
                     <div class="summary-list" id="spawn-summary-list"></div>
@@ -4422,8 +4496,6 @@
 </div>
 
 <!-- Models Modal -->
-
-<!-- Models Modal -->
 <div class="modal-overlay" id="models-modal">
     <div class="models-manager-shell">
         <!-- Header -->
@@ -4437,6 +4509,11 @@
                 <button class="mm-tab" type="button" data-tab="download">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                     Download
+                </button>
+                <button class="mm-tab" type="button" data-tab="import-lab">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M9 3h6"/><path d="M10 9h4"/><path d="M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/></svg>
+                    Import Lab
+                    <span class="mm-tab-beta">Experimental</span>
                 </button>
             </div>
             <div class="models-manager-header-right">
@@ -4460,6 +4537,38 @@
             <div class="mm-model-grid" id="models-list">
                 <div class="mm-loading">Scanning...</div>
             </div>
+        </div>
+
+        <div class="mm-tab-panel mm-import-lab" data-tab="import-lab" id="mm-import-lab">
+            <div class="mm-import-hero">
+                <div>
+                    <span class="mm-import-kicker">Local format recovery</span>
+                    <h3>Inspect first. Convert only when proven safe.</h3>
+                    <p>Analyze a GGUF without reading its weights. Unsupported models stay on llama.cpp; exact experimental profiles can recover a separate, non-launchable MLX copy.</p>
+                </div>
+                <div class="mm-import-platform" id="mm-import-platform" role="status">Checking local capabilities…</div>
+            </div>
+            <div class="mm-import-workbench">
+                <section class="mm-import-source-card">
+                    <label for="mm-import-source">GGUF path inside your model library</label>
+                    <div class="mm-import-source-row">
+                        <input id="mm-import-source" type="text" autocomplete="off" placeholder="gguf/My-Finetune-Q6_K.gguf" aria-describedby="mm-import-source-help">
+                        <button type="button" class="mm-action-btn mm-action-btn--switch" id="mm-import-analyze">Analyze</button>
+                    </div>
+                    <p id="mm-import-source-help">Library-relative paths only. The original GGUF is never modified.</p>
+                    <div class="mm-import-engine-note" id="mm-import-engine-note">llama.cpp remains the default engine until analysis proves an exact recovery profile.</div>
+                </section>
+                <section class="mm-import-report" id="mm-import-report" aria-live="polite">
+                    <div class="mm-import-empty-state">Choose a GGUF to see compatibility, assets, quantization, and resource headroom.</div>
+                </section>
+            </div>
+            <section class="mm-import-jobs" aria-labelledby="mm-import-jobs-title">
+                <div class="mm-import-jobs-head">
+                    <div><span class="mm-import-kicker">Recovery activity</span><h3 id="mm-import-jobs-title">Jobs and diagnostics</h3></div>
+                    <button type="button" class="mm-lib-btn mm-lib-btn--labeled" id="mm-import-jobs-refresh">Refresh</button>
+                </div>
+                <div id="mm-import-jobs-list" class="mm-import-jobs-list" aria-live="polite"><div class="mm-import-empty-state">No recovery jobs yet.</div></div>
+            </section>
         </div>
 
         <!-- Download tab (wizard-style two-column layout) -->
@@ -4956,7 +5065,7 @@
                             Auto-Pause
                         </div>
                         <p class="settings-help">
-                            Automatically pause dashboard monitoring when you're not looking. The llama-server keeps running; use the Monitoring chip in the nav bar to pause manually.
+                            Automatically pause dashboard monitoring when you're not looking. The inference server keeps running; use the Monitoring chip in the nav bar to pause manually.
                         </p>
 
                         <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:6px 0;">
@@ -5045,6 +5154,15 @@
                             <input type="checkbox" id="settings-auto-update" checked>
                             <span>Check for updates automatically</span>
                         </label>
+                    </div>
+                    <div class="settings-card" style="margin-top:14px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:4px;">Rapid-MLX Runtime</div>
+                        <div id="rapid-mlx-runtime-summary" style="font-size:12px;color:var(--color-text-muted);margin-bottom:6px;">
+                            Checking status…
+                        </div>
+                        <button type="button" class="btn btn-secondary" id="rapid-mlx-manage-btn" style="margin-top:6px;font-size:11px;">
+                            Manage Versions
+                        </button>
                     </div>
                 </div>
 
@@ -6320,6 +6438,57 @@
                     <div class="llama-version-notes-content" id="llama-version-notes-content" style="display:none;">
                         <div class="llama-version-notes-tag" id="llama-version-notes-tag"></div>
                         <div class="llama-version-notes-body markdown-body" id="llama-version-notes-body"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+<!-- ── Rapid-MLX Runtime Manager Modal ─────────────────────────────────── -->
+<div class="modal-overlay" id="rapid-mlx-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="rapid-mlx-modal-title">
+    <div class="rapid-mlx-modal-shell">
+        <div class="rapid-mlx-modal-header">
+            <div class="rapid-mlx-modal-title-row">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                <h2 class="rapid-mlx-modal-title" id="rapid-mlx-modal-title">Rapid-MLX Runtime</h2>
+            </div>
+            <button class="rapid-mlx-modal-close" id="rapid-mlx-modal-close" type="button" aria-label="Close">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="rapid-mlx-modal-status" id="rapid-mlx-status-text">Checking runtime…</div>
+        <div class="rapid-mlx-modal-actions">
+            <button id="rapid-mlx-upgrade-btn" class="rapid-mlx-action-btn" type="button" style="display:none;">Upgrade</button>
+            <button id="rapid-mlx-repair-btn" class="rapid-mlx-action-btn" type="button" style="display:none;">Repair</button>
+            <button id="rapid-mlx-rollback-btn" class="rapid-mlx-action-btn rapid-mlx-action-btn-soft" type="button" style="display:none;">Rollback</button>
+        </div>
+        <div class="rapid-mlx-modal-body">
+            <div class="rapid-mlx-panes">
+                <div class="rapid-mlx-pane-list">
+                    <div class="rapid-mlx-list-header">
+                        <span>Published Versions</span>
+                    </div>
+                    <div class="rapid-mlx-releases-list" id="rapid-mlx-releases-list">
+                        <div class="rapid-mlx-loading">Loading versions…</div>
+                    </div>
+                </div>
+                <div class="rapid-mlx-pane-notes">
+                    <div class="rapid-mlx-notes-empty" id="rapid-mlx-notes-empty">
+                        <span>Select a version to see details</span>
+                    </div>
+                    <div class="rapid-mlx-notes-content" id="rapid-mlx-release-notes" style="display:none;"></div>
+                    <div class="rapid-mlx-notes-changelog" id="rapid-mlx-changelog" style="display:none;">
+                        <div class="rapid-mlx-changelog-header" id="rapid-mlx-changelog-header">
+                            <span class="rapid-mlx-changelog-title">What's new</span>
+                            <button type="button" class="rapid-mlx-changelog-toggle" id="rapid-mlx-changelog-toggle" aria-expanded="false">
+                                <span class="rapid-mlx-changelog-chevron">▼</span>
+                            </button>
+                        </div>
+                        <div class="rapid-mlx-changelog-body" id="rapid-mlx-changelog-body" style="display:none;">
+                            <div class="rapid-mlx-changelog-loading">Loading changelog…</div>
+                        </div>
                     </div>
                 </div>
             </div>

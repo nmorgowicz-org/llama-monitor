@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -5,6 +6,8 @@ use warp::Filter;
 use warp::http::StatusCode;
 
 use crate::config::AppConfig;
+use crate::inference::InferenceBackend;
+use crate::inference::rapid_mlx::discovery::Discovery;
 use crate::state::AppState;
 
 use super::common::{ApiCtx, ApiRoute, check_api_token, unauthorized_api_token};
@@ -13,6 +16,171 @@ use super::common::{ApiCtx, ApiRoute, check_api_token, unauthorized_api_token};
 
 static BENCHMARK_LAST_TS: std::sync::LazyLock<std::sync::Mutex<u64>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(0u64));
+
+/// Build the argv (excluding the binary itself) for a `rapid-mlx bench` invocation.
+/// `rapid-mlx bench` requires a positional `model` argument immediately after the
+/// `bench` subcommand — without it the CLI exits with code 2 ("the following
+/// arguments are required: model"). Kept as a pure function so the exact argument
+/// order/shape can be unit-tested without spawning a process.
+fn build_rapid_mlx_bench_args(model: &str, base_url: &str, tier: &str) -> Vec<String> {
+    vec![
+        "bench".to_string(),
+        model.to_string(),
+        "--base-url".to_string(),
+        base_url.to_string(),
+        "--tier".to_string(),
+        tier.to_string(),
+    ]
+}
+
+/// Run `rapid-mlx bench <model> --base-url ... --tier speed` against a running
+/// server and parse its text output into normalized benchmark metrics.
+async fn run_rapid_mlx_bench(
+    base_url: &str,
+    model: &str,
+    binary_path: Option<PathBuf>,
+    managed_path: Option<PathBuf>,
+) -> Result<Option<(f64, f64, f64)>, String> {
+    if model.is_empty() {
+        return Err(
+            "No model identity is known for the active Rapid-MLX session; rapid-mlx bench requires a model argument.".to_string(),
+        );
+    }
+
+    let (binary, _) = Discovery::resolve_binary(binary_path.as_deref(), managed_path.as_deref())
+        .await
+        .map_err(|e| format!("rapid-mlx binary not found: {e}"))?;
+
+    // Version-guard the text scrape: below MIN_TRUSTED_MINOR the bench output
+    // layout is not verified, so degrade to a clear no-result instead of risking
+    // a garbage parse. Mirrors the same guard used for `rapid-mlx info` in
+    // info_query.rs.
+    let version_trusted = matches!(
+        crate::inference::rapid_mlx::info_query::cached_version(&binary).await,
+        Ok(Some((_, minor))) if minor >= crate::inference::rapid_mlx::info_query::MIN_TRUSTED_MINOR
+    );
+    if !version_trusted {
+        return Err(
+            "Unsupported rapid-mlx version: bench output parsing is only verified from 0.10.x onward. Update rapid-mlx or use the llama.cpp backend.".to_string(),
+        );
+    }
+
+    let args = build_rapid_mlx_bench_args(model, base_url, "speed");
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(90),
+        tokio::process::Command::new(&binary).args(&args).output(),
+    )
+    .await
+    .map_err(|_| "rapid-mlx bench timed out after 90 s".to_string())?
+    .map_err(|e| format!("failed to run rapid-mlx bench: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let text = format!("{stdout}\n{stderr}");
+
+    let prompt_tps = parse_rapid_mlx_throughput(&text, "prompt")
+        .or_else(|| parse_rapid_mlx_throughput(&text, "prefill"));
+    let gen_tps = parse_rapid_mlx_throughput(&text, "generation")
+        .or_else(|| parse_rapid_mlx_throughput(&text, "gen"));
+    let ttft_ms = parse_rapid_mlx_ttft(&text);
+
+    match (prompt_tps, gen_tps, ttft_ms) {
+        (Some(pps), Some(gps), Some(ttft)) => Ok(Some((pps, gps, ttft))),
+        _ => Ok(None),
+    }
+}
+
+/// Extract a throughput number (tokens/s) from rapid-mlx bench text output.
+/// Matches legacy label-based patterns like "prompt: 42.3 t/s" or "Prefill throughput: 85 tokens/s",
+/// plus the real CLI's key=value format: "tps=198.3" on the PASS line (generation throughput).
+fn parse_rapid_mlx_throughput(text: &str, label: &str) -> Option<f64> {
+    let label_lower = label.to_lowercase();
+    for line in text.lines() {
+        let lower = line.to_lowercase();
+        if lower.contains(&label_lower)
+            && (lower.contains("t/s") || lower.contains("tokens/s") || lower.contains("tok/s"))
+            && let Some(val) = extract_first_float(line)
+        {
+            return Some(val);
+        }
+    }
+    // Real rapid-mlx 0.10.x CLI emits a single `tps=` value on the PASS line
+    // (generation throughput). Match it for labels "generation"/"gen"/"throughput".
+    if label_lower == "generation" || label_lower == "gen" || label_lower == "throughput" {
+        for line in text.lines() {
+            if let Some(idx) = line.find("tps=")
+                && let Some(val) = extract_first_float(&line[idx + 4..])
+            {
+                return Some(val);
+            }
+        }
+    }
+    None
+}
+
+/// Extract TTFT in milliseconds from rapid-mlx bench text output.
+/// Matches legacy label-based patterns like "TTFT: 123 ms" or "time to first token: 0.42 s",
+/// plus the real CLI's key=value format: "ttft=140ms" on the PASS line (smoke tier).
+fn parse_rapid_mlx_ttft(text: &str) -> Option<f64> {
+    // Real rapid-mlx 0.10.x CLI emits `ttft=140ms` on the PASS line (smoke tier).
+    for line in text.lines() {
+        if let Some(idx) = line.find("ttft=") {
+            let rest = &line[idx + 5..];
+            if let Some(val) = extract_first_float(rest) {
+                if rest.contains("ms") {
+                    return Some(val);
+                } else if rest.contains("s") && !rest.contains("ms") {
+                    return Some(val * 1000.0);
+                }
+                return Some(val);
+            }
+        }
+    }
+    // Legacy label-based patterns
+    for line in text.lines() {
+        let lower = line.to_lowercase();
+        if (lower.contains("ttft")
+            || lower.contains("time to first token")
+            || lower.contains("first token"))
+            && let Some(val) = extract_first_float(line)
+        {
+            if lower.contains("ms") {
+                return Some(val);
+            } else if lower.contains("s") {
+                return Some(val * 1000.0);
+            }
+            return Some(val);
+        }
+    }
+    None
+}
+
+/// Extract the first floating-point number from a line.
+fn extract_first_float(line: &str) -> Option<f64> {
+    let trimmed = line.trim();
+    let bytes = trimmed.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && !bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return None;
+    }
+    let mut j = i;
+    let mut has_dot = false;
+    while j < bytes.len() && (bytes[j].is_ascii_digit() || (!has_dot && bytes[j] == b'.')) {
+        if bytes[j] == b'.' {
+            has_dot = true;
+        }
+        j += 1;
+    }
+    if j <= i {
+        return None;
+    }
+    let slice = &trimmed[i..j];
+    slice.parse().ok()
+}
 
 fn api_benchmark(
     state: AppState,
@@ -68,7 +236,7 @@ fn api_benchmark(
                         Err(_) => {
                             return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                                 Box::new(warp::reply::json(&serde_json::json!({
-                                    "error": "No llama-server is currently running."
+                                    "error": "No inference runtime is currently running."
                                 }))),
                             );
                         }
@@ -76,30 +244,88 @@ fn api_benchmark(
                     if !running {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                             Box::new(warp::reply::json(&serde_json::json!({
-                                "error": "No llama-server is currently running."
+                                "error": "No inference runtime is currently running."
                             }))),
                         );
                     }
 
-                    // Build upstream URL
-                    let session = match state.get_active_session() {
-                        Some(s) => s,
-                        None => {
-                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                                Box::new(warp::reply::json(&serde_json::json!({
-                                    "error": "No active session."
-                                }))),
-                            );
-                        }
+                    let prepared = match super::upstream::prepare_inference_request(&state).await {
+                        Ok(prepared) => prepared,
+                        Err(error) => return Err(error),
                     };
-                    let url = match &session.mode {
-                        crate::state::SessionMode::Spawn { port, .. } => {
-                            format!("http://127.0.0.1:{port}/v1/chat/completions")
+
+                    // Backend-specific benchmark path
+                    if prepared.backend == InferenceBackend::RapidMlx {
+                        let base_url = prepared.url.clone();
+                        let binary_path = state
+                            .local_launch_request
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .and_then(|req| match req {
+                                crate::inference::launch::LocalLaunchRequest::RapidMlx(cfg) => {
+                                    cfg.executable_path.clone()
+                                }
+                                _ => None,
+                            });
+                        let managed_path = state
+                            .local_launch_request
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .and_then(|req| match req {
+                                crate::inference::launch::LocalLaunchRequest::RapidMlx(cfg) => {
+                                    cfg.managed_runtime_path.clone()
+                                }
+                                _ => None,
+                            });
+
+                        let model = prepared.model_identity().to_string();
+                        let bench_result =
+                            run_rapid_mlx_bench(&base_url, &model, binary_path, managed_path)
+                                .await;
+                        match bench_result {
+                            Ok(Some((prompt_tps, gen_tps, ttft_ms))) => {
+                                let benchmark =
+                                    crate::llama::spawn_wizard::classify_benchmark_result(
+                                        prompt_tps,
+                                        gen_tps,
+                                        ttft_ms,
+                                        None,
+                                        None,
+                                        0,
+                                    );
+                                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                    Box::new(warp::reply::json(&serde_json::json!({
+                                        "prompt_tokens_per_second": (benchmark.prompt_tokens_per_second * 100.0).round() / 100.0,
+                                        "gen_tokens_per_second": (benchmark.gen_tokens_per_second * 100.0).round() / 100.0,
+                                        "time_to_first_token_ms": (benchmark.time_to_first_token_ms * 100.0).round() / 100.0,
+                                        "verdict": benchmark.verdict,
+                                        "hints": benchmark.hints,
+                                        "suggestions": benchmark.suggestions,
+                                    }))),
+                                );
+                            }
+                            Ok(None) => {
+                                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                    Box::new(warp::reply::json(&serde_json::json!({
+                                        "error": "rapid-mlx bench completed but output could not be parsed. The tool's output format may have changed."
+                                    }))),
+                                );
+                            }
+                            Err(e) => {
+                                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                    Box::new(warp::reply::json(&serde_json::json!({
+                                        "error": format!("rapid-mlx bench failed: {e}")
+                                    }))),
+                                );
+                            }
                         }
-                        crate::state::SessionMode::Attach { endpoint, .. } => {
-                            format!("{endpoint}/v1/chat/completions")
-                        }
-                    };
+                    }
+
+                    // ── llama.cpp path (HTTP-driven against running server) ──────
+
+                    let url = prepared.url.clone();
 
                     let prompt =
                         "Explain in one sentence what llama.cpp is used for.";
@@ -113,6 +339,11 @@ fn api_benchmark(
                         // Disable thinking mode so Qwen3 reasoning tokens don't inflate TTFT
                         "chat_template_kwargs": {"enable_thinking": false},
                     });
+                    let payload = prepared.map_chat_body(
+                        &serde_json::to_vec(&payload).map_err(|error| {
+                            warp::reject::custom(super::ApiError::internal(error.to_string()))
+                        })?,
+                    )?;
 
                     let client = match reqwest::Client::builder()
                         .timeout(Duration::from_secs(55))
@@ -137,10 +368,13 @@ fn api_benchmark(
                             let mut generated_tokens = 0u64;
                             let mut prompt_tokens_reported = 0u64;
 
-                            let resp = match client
-                                .post(&url)
-                                .header("Content-Type", "application/json")
-                                .json(&payload)
+                            let resp = match prepared
+                                .authenticate(
+                                    client
+                                        .post(&url)
+                                        .header("Content-Type", "application/json")
+                                        .body(payload.clone()),
+                                )
                                 .send()
                                 .await
                             {
@@ -473,6 +707,7 @@ fn api_tune_ncpumoe(
                         available_vram_bytes,
                         ubatch_size,
                         is_unified_memory,
+                        crate::llama::vram_estimator::Backend::LlamaCpp,
                     );
 
                 if !verify {
@@ -562,6 +797,23 @@ fn api_bench_sweep(
                     return Ok(unauthorized_api_token());
                 }
 
+                // Depth sweep requires llama-bench; not available for Rapid-MLX.
+                let is_rapid_mlx = matches!(
+                    state.local_launch_request.lock().unwrap().as_ref(),
+                    Some(crate::inference::launch::LocalLaunchRequest::RapidMlx(_))
+                );
+                if is_rapid_mlx {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Depth sweep is not supported for Rapid-MLX — llama-bench (required for depth sweep) is a llama.cpp-only tool. Rapid-MLX does not expose KV-cache depth as a tunable parameter.",
+                            })),
+                            StatusCode::BAD_REQUEST,
+                        ),
+                    ));
+                }
+
                 // llama-bench needs the GPU to itself.
                 let running = state.server_running.lock().map(|g| *g).unwrap_or(false);
                 if running {
@@ -634,6 +886,25 @@ fn api_bench_batch_sweep(
             async move {
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
+                }
+
+                // Batch sweep is llama.cpp-only — Rapid-MLX does not expose batch/ubatch
+                // as standalone CLI knobs like llama-bench; they are baked into the
+                // server's internal scheduler and not safely tunable via rapid-mlx bench.
+                let is_rapid_mlx = matches!(
+                    state.local_launch_request.lock().unwrap().as_ref(),
+                    Some(crate::inference::launch::LocalLaunchRequest::RapidMlx(_))
+                );
+                if is_rapid_mlx {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Batch sweep is not supported for Rapid-MLX — it is a llama.cpp-only feature using llama-bench. Rapid-MLX does not expose batch/ubatch as standalone tunable knobs.",
+                            })),
+                            StatusCode::BAD_REQUEST,
+                        ),
+                    ));
                 }
 
                 let running = state.server_running.lock().map(|g| *g).unwrap_or(false);
@@ -837,6 +1108,22 @@ fn api_bench_mtp_sweep(
                     ));
                 }
 
+                let is_llama_cpp = matches!(
+                    state.local_launch_request.lock().unwrap().as_ref(),
+                    Some(crate::inference::launch::LocalLaunchRequest::LlamaCpp(_))
+                );
+                if !is_llama_cpp {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "MTP sweep is only supported by the llama.cpp backend."
+                            })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ),
+                    ));
+                }
+
                 // Read the current server config before we touch anything
                 let base_config = {
                     let guard = state.server_config.lock().unwrap();
@@ -957,7 +1244,12 @@ fn api_bench_mtp_sweep(
 
                     // Start with modified config
                     if let Err(e) =
-                        crate::llama::server::start_server(&state, probe_config, &cfg).await
+                        crate::llama::server::start_server(
+                            Arc::new(state.clone()),
+                            probe_config,
+                            &cfg,
+                        )
+                        .await
                     {
                         state.push_log(format!(
                             "[mtp-sweep] start_server failed for n_max={n_max}: {e}"
@@ -1042,8 +1334,12 @@ fn api_bench_mtp_sweep(
 
                     let _ = crate::llama::server::stop_server(&state).await;
                     tokio::time::sleep(Duration::from_secs(2)).await;
-                    let _ =
-                        crate::llama::server::start_server(&state, final_config, &cfg).await;
+                    let _ = crate::llama::server::start_server(
+                        Arc::new(state.clone()),
+                        final_config,
+                        &cfg,
+                    )
+                    .await;
                 }
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -1088,4 +1384,175 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .boxed();
     r
+}
+
+#[cfg(test)]
+mod rapid_mlx_bench_tests {
+    use super::*;
+
+    /// Real `rapid-mlx bench qwen3-0.6b-4bit --tier speed` output
+    /// (rapid-mlx 0.10.12, captured 2026-07-18). Note: the speed tier reports
+    /// a single `tps=` metric (generation throughput) — no separate prompt/prefill
+    /// throughput or TTFT line is emitted for this tier.
+    const WELL_FORMED_BENCH_OUTPUT: &str = "\
+Alias: qwen3-0.6b-4bit → mlx-community/Qwen3-0.6B-4bit
+Rapid-MLX bench — tier=speed model=mlx-community/Qwen3-0.6B-4bit
+============================================================
+  [server] booted mlx-community/Qwen3-0.6B-4bit on port 8500
+
+  [PASS] tier=speed duration=0.6s
+        PASS model=mlx-community/Qwen3-0.6B-4bit sampling=greedy tokens=117 chars=580 tps=198.3
+
+============================================================
+  OK: 1/1 tiers passed (speed=pass)
+  total: 2.6s
+";
+
+    #[test]
+    fn build_args_places_model_positional_immediately_after_bench() {
+        let args = build_rapid_mlx_bench_args("qwen3-0.6b-4bit", "http://127.0.0.1:8000", "speed");
+        assert_eq!(
+            args,
+            vec![
+                "bench",
+                "qwen3-0.6b-4bit",
+                "--base-url",
+                "http://127.0.0.1:8000",
+                "--tier",
+                "speed",
+            ]
+        );
+        assert_eq!(args[0], "bench");
+        assert_eq!(args[1], "qwen3-0.6b-4bit");
+    }
+
+    #[test]
+    fn build_args_handles_empty_model_without_panicking() {
+        let args = build_rapid_mlx_bench_args("", "http://127.0.0.1:8000", "speed");
+        assert_eq!(args[1], "");
+    }
+
+    #[test]
+    fn parses_generation_throughput_via_tps_from_real_speed_tier_output() {
+        // Real rapid-mlx speed tier emits a single `tps=` value (generation throughput)
+        // on the PASS line; no separate prompt/prefill throughput or TTFT.
+        let prompt_tps = parse_rapid_mlx_throughput(WELL_FORMED_BENCH_OUTPUT, "prompt")
+            .or_else(|| parse_rapid_mlx_throughput(WELL_FORMED_BENCH_OUTPUT, "prefill"));
+        let gen_tps = parse_rapid_mlx_throughput(WELL_FORMED_BENCH_OUTPUT, "generation")
+            .or_else(|| parse_rapid_mlx_throughput(WELL_FORMED_BENCH_OUTPUT, "gen"));
+
+        assert_eq!(prompt_tps, None);
+        assert_eq!(gen_tps, Some(198.3));
+    }
+
+    #[test]
+    fn speed_tier_output_has_no_ttft() {
+        // Real rapid-mlx speed tier does not emit a TTFT line.
+        let ttft = parse_rapid_mlx_ttft(WELL_FORMED_BENCH_OUTPUT);
+        assert_eq!(ttft, None);
+    }
+
+    #[test]
+    fn parses_ttft_and_converts_seconds_to_milliseconds() {
+        let text = "time to first token: 0.42 s\n";
+        assert_eq!(parse_rapid_mlx_ttft(text), Some(420.0));
+    }
+
+    #[test]
+    fn throughput_parser_returns_none_on_malformed_output_without_panicking() {
+        let malformed = "unexpected format\nno numbers here at all\n";
+        assert_eq!(parse_rapid_mlx_throughput(malformed, "prompt"), None);
+        assert_eq!(parse_rapid_mlx_throughput(malformed, "generation"), None);
+    }
+
+    #[test]
+    fn throughput_parser_returns_none_on_empty_output_without_panicking() {
+        assert_eq!(parse_rapid_mlx_throughput("", "prompt"), None);
+        assert_eq!(parse_rapid_mlx_ttft(""), None);
+        assert_eq!(extract_first_float(""), None);
+    }
+
+    #[test]
+    fn ttft_parser_returns_none_when_no_ttft_line_present() {
+        let text = "Prefill throughput: 100.0 tokens/s\nGeneration throughput: 50.0 t/s\n";
+        assert_eq!(parse_rapid_mlx_ttft(text), None);
+    }
+
+    #[test]
+    fn extract_first_float_handles_leading_labels_and_units() {
+        assert_eq!(extract_first_float("TTFT: 123 ms"), Some(123.0));
+        assert_eq!(extract_first_float("prefill: 42.3 t/s"), Some(42.3));
+        assert_eq!(extract_first_float("no digits here"), None);
+        assert_eq!(extract_first_float("trailing dot 5."), Some(5.0));
+    }
+
+    #[test]
+    fn parses_ttft_from_real_smoke_tier_ttft_key() {
+        // Real rapid-mlx smoke tier: `ttft=140ms` on the PASS line.
+        let text = "\
+Alias: qwen3-0.6b-4bit → mlx-community/Qwen3-0.6B-4bit
+Rapid-MLX bench — tier=smoke model=mlx-community/Qwen3-0.6B-4bit
+============================================================
+  [server] booted mlx-community/Qwen3-0.6B-4bit on port 8500
+
+  [PASS] tier=smoke duration=0.2s
+        PASS model=mlx-community/Qwen3-0.6B-4bit ttft=140ms response='Hello! 2 + 2 equals 4.'
+
+============================================================
+  OK: 1/1 tiers passed (smoke=pass)
+  total: 3.2s
+";
+        assert_eq!(parse_rapid_mlx_ttft(text), Some(140.0));
+    }
+
+    #[test]
+    fn well_formed_fixture_has_no_llama_bench_labels() {
+        // Verify the rapid-mlx fixture contains no llama-bench labels.
+        assert!(
+            !WELL_FORMED_BENCH_OUTPUT.contains("llama-bench"),
+            "rapid-mlx fixture must not contain 'llama-bench'"
+        );
+        assert!(
+            !WELL_FORMED_BENCH_OUTPUT.contains("llama_bench"),
+            "rapid-mlx fixture must not contain 'llama_bench'"
+        );
+        assert!(
+            !WELL_FORMED_BENCH_OUTPUT.contains("llama.cpp"),
+            "rapid-mlx fixture must not contain 'llama.cpp'"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_rapid_mlx_bench_rejects_empty_model_before_spawning() {
+        let result = run_rapid_mlx_bench(
+            "http://127.0.0.1:8000",
+            "",
+            Some(PathBuf::from("/nonexistent/rapid-mlx")),
+            None,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("model"));
+    }
+
+    /// Contract test against the real CLI, mirroring
+    /// `info_query::parses_real_rapid_mlx_info_output_contract`. Not run in CI —
+    /// requires a real rapid-mlx install and (for a non-empty parse) a live
+    /// server at --base-url. A follow-up live pass exercises the full,
+    /// server-backed contract; this stub only pins the argv shape against the
+    /// installed CLI's own `--help`.
+    #[tokio::test]
+    #[ignore = "requires rapid-mlx CLI installed; run manually to verify against real output"]
+    async fn rapid_mlx_bench_help_still_documents_a_positional_model_arg() {
+        let output = std::process::Command::new("rapid-mlx")
+            .args(["bench", "--help"])
+            .output()
+            .expect("rapid-mlx CLI must be installed for this contract test");
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            text.contains("model"),
+            "rapid-mlx bench --help no longer documents a `model` argument; \
+             update build_rapid_mlx_bench_args if the CLI contract changed"
+        );
+    }
 }

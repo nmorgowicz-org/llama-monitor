@@ -278,6 +278,142 @@ pub fn compute_headroom(available_vram_bytes: u64, is_unified_memory: bool) -> f
     f64::min(base_fraction, cap_fraction)
 }
 
+// ── Backend-neutral estimator input ───────────────────────────────────────────
+
+/// Which inference backend the estimate is for. Both backends share the same `ModelArch` and
+/// `VramBreakdown` shapes; this only selects the overhead/headroom calibration, since llama.cpp
+/// (Metal/CUDA/ROCm) and Rapid-MLX have different runtime memory behavior even when both run on
+/// the same unified-memory hardware.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Backend {
+    /// llama.cpp (CUDA/ROCm/Metal via `is_unified_memory`).
+    #[default]
+    LlamaCpp,
+    /// Rapid-MLX. Apple-Silicon/unified-memory only; never uses the discrete-GPU overhead path
+    /// regardless of `is_unified_memory`.
+    RapidMlx,
+}
+
+/// How much of a `VramBreakdown` is backed by real measurements versus a formula-based
+/// approximation or a degraded (heuristic-fallback) architecture guess.
+///
+/// llama.cpp's Metal/discrete overhead constants are calibrated against real hardware
+/// measurements (see `metal_overhead_bytes` / `discrete_overhead_bytes` doc comments) — those
+/// paths report `Measured`. Rapid-MLX has no equivalent hardware calibration yet (see
+/// `mlx_overhead_bytes`), so any estimate using it must report `Approximate`, never `Measured`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstimateEvidence {
+    /// Overhead calibration is backed by real hardware measurements and architecture fields
+    /// came from real metadata (GGUF tensor directory / MLX config + safetensors index).
+    #[default]
+    Measured,
+    /// Architecture fields are real, but the overhead model itself is a documented formula-based
+    /// approximation pending real hardware calibration (currently: all Rapid-MLX estimates).
+    Approximate,
+    /// One or more required architecture fields were missing/unrecognized and a name/param
+    /// heuristic was used instead of real model metadata.
+    Degraded,
+}
+
+/// Extra, backend-specific inputs to `full_estimate` that don't apply to every backend and
+/// therefore default to inert values (`Backend::LlamaCpp`, `EstimateEvidence::Measured`, zero
+/// prefix-cache reservation) for all existing GGUF callers.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EstimatorOptions {
+    pub backend: Backend,
+    pub evidence: EstimateEvidence,
+    /// Rapid-MLX prefix-cache compression (int4/int8) budget, in bytes, computed by the caller
+    /// via `mlx_prefix_cache_bytes`. This is a SEPARATE stored-cache budget, not a reduction of
+    /// active-context KV: cached entries are decompressed before being reused as active KV, so
+    /// compressing them does not shrink the active KV footprint. Always 0 for GGUF.
+    pub mlx_prefix_cache_bytes: u64,
+}
+
+/// Rapid-MLX (unified-memory) overhead — context-INDEPENDENT part, in bytes.
+///
+/// **Not yet calibrated against real Apple Silicon Rapid-MLX measurements.** Rapid-MLX's
+/// graph-compile/buffer-pooling behavior differs from llama.cpp's Metal backend (different
+/// kernel fusion, KV cache layout, and MLX's lazy-evaluation graph cache), so llama.cpp's
+/// Metal constants (`metal_overhead_base_bytes`) are deliberately NOT reused here. This is a
+/// documented, formula-based approximation, partially calibrated against real Rapid-MLX
+/// 0.10.12 hardware measurements on an Apple M5 Max (see per-branch notes below). Any estimate
+/// using this function MUST be reported with `EstimateEvidence::Approximate`, never `Measured`,
+/// since only two architectures have been directly measured so far.
+pub fn mlx_overhead_base_bytes(arch: &ModelArch, ubatch_size: u32) -> u64 {
+    if arch.n_layers == 0 {
+        return 256 * 1024 * 1024; // unknown arch: flat reserve
+    }
+    let mib = 1024.0 * 1024.0;
+    const SAFETY_MARGIN: f64 = 1.25;
+    // Dense (non-local-attn): validated against mlx-community/Qwen3-0.6B-4bit (28 layers) —
+    // predicted total (596MB) matched the server's self-reported steady-state Metal `active`
+    // memory (0.6GB) to within ~1% at ctx=2048. The original Metal-derived 4.3 value holds.
+    //
+    // Local-attn (Gemma3/Gemma4-style sliding window): the previous 8.8 value was an unvalidated
+    // copy of llama.cpp's Metal local-attn coefficient. Measured against
+    // mlx-community/gemma-3-1b-it-4bit (26 layers, sliding_window=512): the server's
+    // self-reported Metal `active` memory stayed flat at 0.8GB across the whole generation
+    // (steps 256-1792), while the old coefficient predicted a 1061MB total against a 732MB
+    // weight file — a ~260MB (33%) overhead over-prediction. Lowered to 5.5, which predicts a
+    // ~938MB total (still conservative, ~17% over the observed 800MB) for the same run.
+    // Single-model sample — recalibrate once a larger Gemma4 local-attn model has been measured.
+    let per_layer = (if arch.has_local_attn() { 5.5 } else { 4.3 }) * SAFETY_MARGIN;
+    let base = per_layer * arch.n_layers as f64 + 0.035 * ubatch_size as f64 * SAFETY_MARGIN;
+    (base.max(160.0) * mib) as u64
+}
+
+/// Fraction of KV-cache bytes reserved for Rapid-MLX context-scaling working buffers.
+///
+/// Approximation only (see `mlx_overhead_base_bytes`): derived from Metal's measured 6.5%
+/// (`METAL_KV_OVERHEAD_FRACTION`), inflated to a more conservative 8% given the lack of a
+/// direct Rapid-MLX measurement to validate against.
+pub const MLX_KV_OVERHEAD_FRACTION: f64 = 0.08;
+
+/// Rapid-MLX context-SCALING overhead, in bytes. See `mlx_overhead_base_bytes` for the
+/// approximate-evidence caveat that applies to this function too.
+pub fn mlx_overhead_ctx_bytes(kv_cache_bytes: u64) -> u64 {
+    (kv_cache_bytes as f64 * MLX_KV_OVERHEAD_FRACTION) as u64
+}
+
+/// Total Rapid-MLX (unified-memory-only) overhead beyond weights + KV + mmproj + MTP, in
+/// bytes. Formula-based approximation — see `mlx_overhead_base_bytes` for why llama.cpp's
+/// Metal constants are not reused and why this must be reported as `EstimateEvidence::Approximate`.
+pub fn mlx_overhead_bytes(arch: &ModelArch, ubatch_size: u32, kv_cache_bytes: u64) -> u64 {
+    mlx_overhead_base_bytes(arch, ubatch_size) + mlx_overhead_ctx_bytes(kv_cache_bytes)
+}
+
+/// Rapid-MLX compressed prefix-cache budget, in bytes.
+///
+/// This models the SEPARATE stored-cache budget for previously-computed prefixes that
+/// Rapid-MLX keeps compressed (int4/int8) on disk/in memory. It is intentionally NOT a
+/// reduction of `kv_cache_bytes`: cached entries are decompressed back to the active compute
+/// dtype before being reused as active KV, so the active-request KV footprint is unaffected by
+/// how much prefix cache exists. `cached_tokens` is the number of tokens' worth of prefix the
+/// caller wants budgeted (0 = no reservation, the default when the caller hasn't configured a
+/// cache budget). `compression_bits` is 4 or 8; any other value is treated as 8 (uncompressed
+/// int8 baseline) to fail safe (never under-reserve).
+pub fn mlx_prefix_cache_bytes(arch: &ModelArch, cached_tokens: u64, compression_bits: u8) -> u64 {
+    if cached_tokens == 0 || arch.n_layers == 0 {
+        return 0;
+    }
+    let bytes_per_elem = match compression_bits {
+        4 => 0.5,
+        8 => 1.0,
+        _ => 1.0,
+    };
+    let effective_layers = if arch.is_hybrid_attn() {
+        arch.n_attn_layers
+    } else {
+        arch.n_layers
+    } as f64;
+    let kv_heads = arch.n_kv_heads.max(1) as f64;
+    let head_dim = arch.head_dim.max(1) as f64;
+    // K + V, one "slot" (prefix cache is shared, not per-parallel-slot).
+    (effective_layers * kv_heads * head_dim * cached_tokens as f64 * 2.0 * bytes_per_elem) as u64
+}
+
 // ── Estimate model file size from param count ─────────────────────────────────
 
 /// Default bits-per-weight for unknown quantizations.
@@ -316,6 +452,15 @@ pub struct VramBreakdown {
     pub ram_headroom_bytes: i64,
     pub recommendation: VramRecommendation,
     pub note: String,
+    /// Rapid-MLX compressed prefix-cache budget (bytes). Always 0 for GGUF/llama.cpp. This is
+    /// a separate stored-cache budget, NOT a reduction of `kv_cache_bytes` — see
+    /// `mlx_prefix_cache_bytes` for why cached (compressed) entries don't shrink active KV.
+    #[serde(default)]
+    pub mlx_prefix_cache_bytes: u64,
+    /// How much of this breakdown is backed by real hardware measurements vs. a formula-based
+    /// approximation or a degraded (heuristic-fallback) architecture guess.
+    #[serde(default)]
+    pub evidence: EstimateEvidence,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -346,6 +491,7 @@ pub fn full_estimate(
     available_vram_bytes: u64,
     available_ram_bytes: u64,
     is_unified_memory: bool,
+    opts: EstimatorOptions,
 ) -> VramBreakdown {
     let (weight_vram, ram) = if is_unified_memory {
         (model_size_bytes, 0)
@@ -363,12 +509,13 @@ pub fn full_estimate(
     // Platform-specific overhead, both calibrated against real VRAM/footprint measurements:
     // discrete GPUs → RTX-5090 model (scratch + MoE/Gemma base + context-scaling attention
     // buffers); unified memory → Apple M5 Max model (per-layer base + ~6.5% of KV).
-    let overhead = if is_unified_memory {
-        metal_overhead_bytes(arch, ubatch_size, kv)
-    } else {
-        discrete_overhead_bytes(arch, ubatch_size, context_size)
+    let overhead = match opts.backend {
+        Backend::RapidMlx => mlx_overhead_bytes(arch, ubatch_size, kv),
+        Backend::LlamaCpp if is_unified_memory => metal_overhead_bytes(arch, ubatch_size, kv),
+        Backend::LlamaCpp => discrete_overhead_bytes(arch, ubatch_size, context_size),
     };
-    let total = weight_vram + kv + linear_state + mmproj + mtp + overhead;
+    let mlx_cache = opts.mlx_prefix_cache_bytes;
+    let total = weight_vram + kv + linear_state + mmproj + mtp + overhead + mlx_cache;
     let headroom = available_vram_bytes as i64 - total as i64;
     let ram_headroom = available_ram_bytes as i64 - ram as i64;
 
@@ -435,6 +582,8 @@ pub fn full_estimate(
         ram_headroom_bytes: ram_headroom,
         recommendation,
         note,
+        mlx_prefix_cache_bytes: mlx_cache,
+        evidence: opts.evidence,
     }
 }
 
@@ -461,6 +610,7 @@ pub fn max_context(
     headroom_fraction: f64,
     n_ctx_train: Option<u64>,
     is_unified_memory: bool,
+    backend: Backend,
 ) -> u64 {
     if available_vram_bytes == 0 {
         return 0;
@@ -470,20 +620,24 @@ pub fn max_context(
     let mtp = mtp_overhead_bytes(model_size_bytes, arch.mtp_depth);
     let linear_state = arch.linear_attn_state_bytes; // constant; doesn't scale with context
     // Context-INDEPENDENT overhead goes into the fixed budget. The context-SCALING part is
-    // charged against the KV budget: discrete GPUs add a per-token slope; Metal's scales as a
+    // charged against the KV budget: discrete GPUs add a per-token slope; Metal/MLX scale as a
     // fraction of the KV cache, so we reserve it by shrinking the KV budget by that factor.
-    let (base_overhead, overhead_slope, kv_overhead_mult) = if is_unified_memory {
-        (
+    let (base_overhead, overhead_slope, kv_overhead_mult) = match backend {
+        Backend::RapidMlx => (
+            mlx_overhead_base_bytes(arch, ubatch_size),
+            0.0,
+            1.0 + MLX_KV_OVERHEAD_FRACTION,
+        ),
+        Backend::LlamaCpp if is_unified_memory => (
             metal_overhead_base_bytes(arch, ubatch_size),
             0.0,
             1.0 + METAL_KV_OVERHEAD_FRACTION,
-        )
-    } else {
-        (
+        ),
+        Backend::LlamaCpp => (
             discrete_overhead_base_bytes(arch, ubatch_size),
             discrete_overhead_ctx_bytes_per_token(arch, ubatch_size),
             1.0,
-        )
+        ),
     };
     let fixed = weight_vram + mmproj + mtp + linear_state + base_overhead;
 
@@ -658,6 +812,7 @@ pub fn auto_size(
     preferred_fit_granularity: u64,
     is_unified_memory: bool,
     n_ctx_train: Option<u64>,
+    backend: Backend,
 ) -> AutoSizeResult {
     let fit_gran = preferred_fit_granularity.max(512);
     let parallel_slots = requested_parallel_slots.max(1);
@@ -678,6 +833,7 @@ pub fn auto_size(
             available_vram_bytes,
             ubatch,
             is_unified_memory,
+            backend,
         )
     } else {
         0
@@ -703,6 +859,7 @@ pub fn auto_size(
         headroom,
         n_ctx_train,
         is_unified_memory,
+        backend,
     );
 
     let breakdown = full_estimate(
@@ -718,6 +875,15 @@ pub fn auto_size(
         available_vram_bytes,
         0,
         is_unified_memory,
+        EstimatorOptions {
+            backend,
+            evidence: if backend == Backend::RapidMlx {
+                EstimateEvidence::Approximate
+            } else {
+                EstimateEvidence::Measured
+            },
+            ..Default::default()
+        },
     );
 
     // ── Step 4: Warnings ──────────────────────────────────────────────────────
@@ -776,6 +942,7 @@ pub fn auto_size(
         &kv_k,
         is_unified_memory,
         n_ctx_train,
+        backend,
     );
 
     AutoSizeResult {
@@ -810,11 +977,12 @@ pub fn find_min_cpu_moe_to_fit_weights(
     available_vram_bytes: u64,
     ubatch_size: u32,
     is_unified_memory: bool,
+    backend: Backend,
 ) -> i32 {
-    let overhead = if is_unified_memory {
-        metal_overhead_base_bytes(arch, ubatch_size)
-    } else {
-        discrete_overhead_base_bytes(arch, ubatch_size)
+    let overhead = match backend {
+        Backend::RapidMlx => mlx_overhead_base_bytes(arch, ubatch_size),
+        Backend::LlamaCpp if is_unified_memory => metal_overhead_base_bytes(arch, ubatch_size),
+        Backend::LlamaCpp => discrete_overhead_base_bytes(arch, ubatch_size),
     };
     let target = (available_vram_bytes * 80 / 100).saturating_sub(
         overhead + arch.mmproj_bytes + mtp_overhead_bytes(model_size_bytes, arch.mtp_depth),
@@ -859,6 +1027,7 @@ fn build_scenarios(
     recommended_kv: &str,
     is_unified_memory: bool,
     n_ctx_train: Option<u64>,
+    backend: Backend,
 ) -> Vec<ContextScenario> {
     let mut scenarios = Vec::new();
     let headroom = compute_headroom(available_vram_bytes, is_unified_memory);
@@ -883,6 +1052,7 @@ fn build_scenarios(
             headroom,
             n_ctx_train,
             is_unified_memory,
+            backend,
         );
         let bd = full_estimate(
             model_size_bytes,
@@ -897,6 +1067,15 @@ fn build_scenarios(
             available_vram_bytes,
             0,
             is_unified_memory,
+            EstimatorOptions {
+                backend,
+                evidence: if backend == Backend::RapidMlx {
+                    EstimateEvidence::Approximate
+                } else {
+                    EstimateEvidence::Measured
+                },
+                ..Default::default()
+            },
         );
         let warn = if _use_case == UseCase::Agentic && kv_elem_bytes(kk) < 1.0 {
             Some("⚠ Below q8_0 — not recommended for agents".into())
@@ -933,6 +1112,7 @@ fn build_scenarios(
             headroom,
             n_ctx_train,
             is_unified_memory,
+            backend,
         );
         let bd = full_estimate(
             model_size_bytes,
@@ -947,6 +1127,15 @@ fn build_scenarios(
             available_vram_bytes,
             0,
             is_unified_memory,
+            EstimatorOptions {
+                backend,
+                evidence: if backend == Backend::RapidMlx {
+                    EstimateEvidence::Approximate
+                } else {
+                    EstimateEvidence::Measured
+                },
+                ..Default::default()
+            },
         );
         scenarios.push(ContextScenario {
             label: format!("Extended ({}× CPU offload)", aggressive_cpu),
@@ -1003,6 +1192,7 @@ pub struct QuantOption {
 /// `available_vram_bytes`: effective available memory (caller must subtract OS overhead on unified)
 /// `use_case`: affects the recommended-quant choice
 /// `is_unified_memory`: true for Apple Silicon — tightens headroom and fits check
+#[allow(clippy::too_many_arguments)]
 pub fn quant_comparison_table(
     param_b: f64,
     arch: &ModelArch,
@@ -1011,6 +1201,7 @@ pub fn quant_comparison_table(
     _use_case: UseCase,
     parallel_slots: u32,
     is_unified_memory: bool,
+    backend: Backend,
 ) -> Vec<QuantOption> {
     // Quants we show in the advisor (sorted from highest to lowest quality)
     let show_quants = [
@@ -1048,10 +1239,10 @@ pub fn quant_comparison_table(
         // Without this check, a model that fills all available memory shows as fitting even though
         // there's no budget left for inference context.
         let min_kv = kv_cache_bytes(arch, 8192, parallel_slots, "q8_0", "q8_0");
-        let oh = if is_unified_memory {
-            metal_overhead_base_bytes(arch, 512)
-        } else {
-            discrete_overhead_base_bytes(arch, 512)
+        let oh = match backend {
+            Backend::RapidMlx => mlx_overhead_base_bytes(arch, 512),
+            Backend::LlamaCpp if is_unified_memory => metal_overhead_base_bytes(arch, 512),
+            Backend::LlamaCpp => discrete_overhead_base_bytes(arch, 512),
         };
         let fits = model_bytes + oh + min_kv < available_vram_bytes;
 
@@ -1068,6 +1259,7 @@ pub fn quant_comparison_table(
             headroom,
             None, // pre-download advisor: VRAM-limited maxes only
             is_unified_memory,
+            backend,
         );
         let max_q4 = max_context(
             model_bytes,
@@ -1082,6 +1274,7 @@ pub fn quant_comparison_table(
             headroom,
             None, // pre-download advisor: VRAM-limited maxes only
             is_unified_memory,
+            backend,
         );
 
         let mut notes = Vec::new();

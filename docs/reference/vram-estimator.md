@@ -1,6 +1,35 @@
 # VRAM Estimator Reference
 
-## Memory-pool and active-parameter behavior
+The VRAM estimator (`src/llama/vram_estimator/`) is backend-aware. It produces
+estimates for both:
+
+- **llama.cpp** (CUDA/ROCm/Metal) — based on GGUF metadata or name heuristics.
+- **Rapid-MLX** (Apple Silicon, unified memory only) — based on MLX `config.json` +
+  safetensors index or name heuristics.
+
+Both backends share the same `ModelArch` struct, the same KV cache and MoE formulas,
+and the same `VramBreakdown` output shape. They differ in:
+
+- Overhead calibration:
+  - llama.cpp Metal: calibrated on Apple M5 Max.
+  - llama.cpp CUDA/ROCm: calibrated on RTX 5090.
+  - Rapid-MLX: formula-based approximation with a 25% safety margin; not yet
+    hardware-calibrated (see "Rapid-MLX overhead" section).
+- How model metadata is read:
+  - llama.cpp: GGUF tensor directory / header introspection (primary) or name heuristic (fallback).
+  - Rapid-MLX: MLX `config.json` + `model.safetensors.index.json` (primary) or name heuristic (fallback).
+- Evidence:
+  - llama.cpp: `Measured` when GGUF-backed; `Degraded` when only name-based.
+  - Rapid-MLX: always at best `Approximate` (never `Measured`) until calibrated;
+    `Degraded` when config fields are incomplete.
+
+All VRAM bars in the UI (Spawn Wizard, Preset Editor, Setup view, and the Models-modal
+HF-browse preview) are driven by the backend `/api/vram-estimate` with the appropriate
+`backend` field — there is no client-side VRAM/KV formula. Pre-download, the backend
+fetches the model's real metadata (GGUF header or MLX config) from HuggingFace so even
+the browse preview uses the model's real architecture.
+
+## Memory-pool and active-parameter behavior (llama.cpp GGUF)
 
 GGUF tensor shapes are the source of truth for MoE active parameters:
 
@@ -617,18 +646,50 @@ If both are provided, `mmproj_bytes` takes precedence. The path is resolved rela
 
 ### POST /api/vram-estimate
 
-Architecture-aware VRAM breakdown endpoint.
+Architecture-aware, backend-aware VRAM breakdown endpoint.
 
 - Requires: `api-token` (Authorization header)
-- Requires (body): **either** `model_path` (local file) **or** `hf_repo_id` + `hf_file_path` + `model_size_bytes` (pre-download HuggingFace introspection)
+- Requires (body):
+  - For llama.cpp: **either** `model_path` (local GGUF file) **or** `hf_repo_id` + `hf_file_path` + `model_size_bytes`.
+  - For Rapid-MLX: **either** `model_path` (local MLX directory or HF-repo-style alias) **or** `hf_repo_id` + optional `hf_file_path` + `model_size_bytes`.
 - Optional (body): `n_ctx`, `gpu_layers`, `parallel_slots`, `ubatch_size`, `ctk`, `ctv`, `n_cpu_moe`, `available_vram_bytes`, `available_ram_bytes`, `is_unified_memory`, `mmproj_path`, `mmproj_bytes`
-  - `gpu_layers` (int): for dense models on discrete GPU: how many layers on GPU; negative = all-GPU, zero = all-CPU.
+  - `gpu_layers` (int): for dense models on discrete GPU (llama.cpp): how many layers on GPU; negative = all-GPU, zero = all-CPU.
   - `available_ram_bytes` (u64): system RAM available; used to check CPU-offloaded weight budget.
-- Behavior:
+- Backend selection:
+  - The `backend` field (preferred) or legacy `engine` alias selects the inference backend:
+    - `"llama_cpp"` (default, omitted): GGUF-based llama.cpp path.
+    - `"rapid_mlx"` / `"mlx"`: Rapid-MLX path (Apple Silicon / unified memory only).
+- llama.cpp behavior (default):
   - **Local path**: reads GGUF metadata from `model_path` (primary); falls back to `from_name_and_params()` on parse failure.
   - **HuggingFace (no local file yet)**: `crate::hf::fetch_gguf_header_metadata()` issues an HTTP **Range** request for the first few MB of the `.gguf` (the KV header sits at the file start), parses it with `read_gguf_metadata_from_bytes()`, and uses the caller-supplied `model_size_bytes` (from the HF file listing) for weights. This gives the model's **real** architecture before downloading 16 GB. Requires HTTP 206 (partial content); on any failure (gated repo, offline, no range support) it falls back to the name heuristic so the caller still gets a rough estimate.
+- Rapid-MLX behavior:
+  - `is_unified_memory` is forced to `true` server-side (no discrete-GPU/CPU-spill path).
+  - **Local path**: `model_path` is interpreted as an MLX model directory; `src/inference/rapid_mlx/mlx_meta.rs` reads:
+    - `config.json` (HF-transformers-style architecture fields, MoE fields, sliding-window fields, `quantization` block, draft/speculative sidecar).
+    - `model.safetensors.index.json` for exact weight-byte accounting (`metadata.total_size` when present, otherwise the real on-disk shard file sizes).
+  - **HF-repo-style alias**: if `model_path` is not a local directory but matches `"org/repo"` (e.g. `"mlx-community/Qwen3-30B-A3B-4bit"`), it is treated as an `hf_repo_id`; the server fetches `config.json` from HuggingFace.
+  - **Explicit `hf_repo_id`**: for Rapid-MLX, `hf_repo_id` (+ optional `hf_file_path`, defaults to `config.json`) fetches `config.json` directly (`crate::hf::fetch_mlx_config` — a plain GET, no range-fetch needed since the file is small). `model_size_bytes` is required.
+  - **Degraded**: if required config fields (`hidden_size`, `num_hidden_layers`, `num_attention_heads`) are missing or unrecognized, the architecture is built via `ModelArch::from_name_and_params()` and `evidence` is set to `"degraded"`. This never silently presents a heuristic guess as authoritative.
+  - Optional `mlx_prefix_cache_tokens` + `mlx_prefix_cache_bits` (4 or 8, default 8) reserve a **separate** stored budget for Rapid-MLX's compressed prefix cache. This is intentionally NOT a reduction of `kv_cache_bytes`: cached entries are decompressed back to the active compute dtype before reuse, so active-request KV is unaffected by how much prefix cache exists.
 - Output fields: `weights_bytes`, `kv_cache_bytes`, `linear_attn_state_bytes`, `mmproj_bytes`, `mtp_bytes`, `overhead_bytes`, `total_bytes`, `available_bytes`, `headroom_bytes`, `ram_bytes`, `available_ram_bytes`, `ram_headroom_bytes`, `recommendation`, `note`
-- Consumers: Spawn Wizard, Preset Editor, Setup view, **and the Models modal HF-browse preview bar** (`updateVramDisplay` in `static/js/features/models.js`) — all share this one endpoint, so they all get identical, GGUF-accurate numbers. There is no client-side VRAM/KV formula anymore.
+- Additional output fields (both backends; zero/"measured" for GGUF llama.cpp):
+  - `mlx_prefix_cache_bytes` (u64) — the separate compressed prefix-cache budget described above (non-zero only for Rapid-MLX).
+  - `evidence` (`"measured"` | `"approximate"` | `"degraded"`) — how much of the breakdown is backed by real hardware calibration vs. a formula-based approximation vs. a heuristic fallback from incomplete metadata:
+    - `"measured"`: llama.cpp with GGUF metadata and hardware-calibrated overhead (Metal or discrete). This is the strongest guarantee.
+    - `"approximate"`: Rapid-MLX with real MLX config metadata but an uncalibrated overhead formula (see next section). Every Rapid-MLX estimate is at best `"approximate"`.
+    - `"degraded"`: one or more required architecture fields were missing/unrecognized and a name/param heuristic was used instead of real model metadata (applies to both backends).
+- Consumers: Spawn Wizard, Preset Editor, Setup view, **and the Models modal HF-browse preview bar** (`updateVramDisplay` in `static/js/features/models.js`) — all share this one endpoint. The Spawn Wizard's VRAM bar tooltip appends a plain-text note when `evidence` is `"approximate"` or `"degraded"`. No independent client-side VRAM math exists — this is always backend-driven only.
+
+### Rapid-MLX overhead — approximate, not yet hardware-calibrated
+
+Unlike llama.cpp's Metal (`metal_overhead_bytes`) and discrete-GPU (`discrete_overhead_bytes`) overhead, which are calibrated against real measured hardware footprints (see "Backend-Specific Accuracy" below), **Rapid-MLX's overhead (`mlx_overhead_bytes` in `src/llama/vram_estimator/estimate.rs`) is a documented, formula-based approximation**:
+
+- Same per-layer order of magnitude as the Metal calibration, inflated by:
+  - A fixed 25% safety margin on the base per-layer/ubatch cost.
+  - A conservative 8% KV overhead fraction (vs. Metal's measured 6.5%).
+- It is **not** derived from real Apple Silicon Rapid-MLX measurements and must not be presented as such.
+- Every estimate with `Backend::RapidMlx` sets `EstimateEvidence::Approximate` (or `Degraded` when the source config was incomplete).
+- Recalibrating this against real Rapid-MLX process-footprint measurements (same methodology as "Recalibrating the discrete overhead" and "Recalibrating the Metal overhead") is an open follow-up.
 
 ### API helpers (`build_arch_from_body`)
 
@@ -646,13 +707,16 @@ The VRAM bars consume `/api/vram-estimate` directly (single source of truth) —
 
 ## Backend-Specific Accuracy
 
-| Backend | Model size | KV cache | Discrete overhead | Total accuracy |
+| Backend | Model size | KV cache | Overhead | Total accuracy |
 |---------|-----------|----------|-----------------|----------------|
-| Metal (Apple Silicon) | ✓ exact from file | ✓ formula | ✓ M5 Max-calibrated (`metal_overhead_bytes`) | ±0.05 GiB |
-| CUDA (Windows/Linux) | ✓ exact from file | ✓ formula | ✓ calibrated when n_embd known | ±0.5 GiB |
-| CUDA, n_embd unknown | ✓ exact from file | ✓ formula | 256 MB fallback | ~2–3 GiB low |
+| llama.cpp Metal (Apple Silicon) | ✓ exact from GGUF | ✓ formula | ✓ M5 Max-calibrated (`metal_overhead_bytes`) | ±0.05 GiB |
+| llama.cpp CUDA (Windows/Linux) | ✓ exact from GGUF | ✓ formula | ✓ calibrated when n_embd known | ±0.5 GiB |
+| llama.cpp CUDA, n_embd unknown | ✓ exact from GGUF | ✓ formula | 256 MB fallback | ~2–3 GiB low |
+| Rapid-MLX (Apple Silicon) | ✓ from safetensors / HF | ✓ formula | Approximate (25% safety margin) | Not yet calibrated |
 
 Discrete overhead (CUDA/ROCm) is calibrated on RTX 5090 32 GB using measurement-grounded formulas. When `n_embd` is unknown (no GGUF or missing `embedding_length`), it falls back to a 256 MB flat reserve and underestimates overhead.
+
+Rapid-MLX overhead is formula-based (see "Rapid-MLX overhead" above) and deliberately conservative.
 
 **Mac M5 Max calibration** (Q5_K_S, 262k ctx, q8_0 KV):
 
@@ -709,7 +773,7 @@ KV BPE is used only for KV cache estimation (`kv_cache_bytes`). The `ctk` / `ctv
 
 ---
 
-## GGUF Metadata Integration
+## GGUF Metadata Integration (llama.cpp)
 
 When a GGUF file is present, `gguf_meta.rs` reads the model's real KV header and `GgufMetadata::to_model_metadata()` builds the metadata struct. `ModelMetadata::to_arch()` (in `spawn_wizard.rs`) then converts it into `ModelArch`.
 
@@ -760,6 +824,40 @@ The GGUF arch string `"qwen35"` is mapped via `gguf_arch_to_heuristic_name()` (l
 
 ---
 
+## MLX Metadata Integration (Rapid-MLX)
+
+For Rapid-MLX models, metadata comes from `config.json` + `model.safetensors.index.json`
+instead of a GGUF header. See `src/inference/rapid_mlx/mlx_meta.rs`.
+
+- **config.json** (primary): an HF-transformers-style architecture config:
+  - Required for "exact" evidence: `hidden_size`, `num_hidden_layers`, `num_attention_heads`.
+  - MoE: `num_experts`, `num_experts_per_tok` (and alternate field names via `#[serde(alias)]`).
+  - Sliding-window: `sliding_window`, `sliding_window_pattern`.
+  - Rapid-MLX `quantization` block: `bits`, `group_size`.
+  - Draft/MTP: `draft_model` or `speculative_config` sub-configs.
+  - Vision: presence of `vision_config` flags the model as needing an mmproj-equivalent budget.
+- **model.safetensors.index.json**:
+  - Used for exact weight-byte accounting:
+    - `metadata.total_size` when present (HF-exported indexes).
+    - Otherwise, on-disk shard file sizes are summed.
+  - Shard names are validated: no absolute paths, no `..` traversal, `.safetensors` only.
+- **Evidence**:
+  - `MlxMetaEvidence::Exact`: required fields are present → architecture is built directly from config.
+  - `MlxMetaEvidence::Degraded`: one or more required fields missing → architecture falls back to `ModelArch::from_name_and_params()` and is then overridden with any real fields present.
+- **Mapping to `ModelArch`**:
+  - `MlxMetadata::to_arch()` mirrors `ModelMetadata::to_arch()`: it maps MLX fields into
+    the shared `ModelArch` (layers, heads, KV heads, head_dim, MoE, sliding-window, etc.).
+  - Exact per-layer byte size is computed from real on-disk/HF-listed size:
+    `bytes_per_layer = model_size_bytes / n_layers`.
+- **HuggingFace pre-download**:
+  - For Rapid-MLX, the VRAM estimator can fetch `config.json` from an HF repo without range-fetching:
+    `crate::hf::fetch_mlx_config(repo_id, config_file)`.
+  - Weight size is resolved from the HF tree API (`crate::hf::resolve_mlx_repo_size_bytes`).
+  - If `config.json` fetch fails or is missing required fields, the model is still estimable
+    via the name heuristic with `evidence = "degraded"`.
+
+---
+
 ## Known Limitations and Calibration Notes
 
 | Issue | Scope | Status |
@@ -773,6 +871,7 @@ The GGUF arch string `"qwen35"` is mapped via `gguf_arch_to_heuristic_name()` (l
 | `expert_fraction` default 0.65 is a rough average | All MoE models | Overridden per-family; calibrate when architecture is public |
 | `discrete_overhead_base_bytes` uses 256 MB fallback when n_embd unknown | Any model without GGUF `embedding_length` | Conservative; may over-reserve vs actual CUDA usage |
 | Name heuristics are heuristic-only fallback | All pre-download / no-GGUF estimates | Do not rely on them when a GGUF file is present — GGUF is authoritative |
+| Rapid-MLX overhead is approximate | All Rapid-MLX estimates | 25% safety margin + 8% KV fraction; recalibration via process footprint is an open task |
 
 ---
 
@@ -826,6 +925,30 @@ Findings: Metal overhead = a per-layer base (4.3 MiB/layer dense, 8.8 MiB/layer 
 
 ---
 
+## Recalibrating the MLX overhead (Apple Silicon, Rapid-MLX)
+
+The Rapid-MLX overhead constants (`mlx_overhead_base_bytes`, `MLX_KV_OVERHEAD_FRACTION`) in
+`estimate.rs` are currently formula-based, not measurement-grounded. The current formula:
+
+- Uses Metal's measured per-layer base (4.3/8.8 MiB) × 1.25 (25% safety margin).
+- Uses 8% of KV bytes for context-scaling buffers vs. Metal's 6.5%.
+
+To recalibrate against real Rapid-MLX process-footprint measurements:
+
+- Use the same M5 Max physical-footprint methodology as "Recalibrating the Metal overhead":
+  - Start the Rapid-MLX server with a known model and context.
+  - Read `footprint <pid>` / `vmmap --summary <pid>` → "Physical footprint".
+  - With mmap-style file-backed weights (where applicable), the footprint minus KV
+    approximates the overhead component.
+- Compare against the current `mlx_overhead_bytes` values.
+- If measurements consistently show a lower fraction, reduce the 25% margin and 8% KV
+  fraction accordingly; once calibrated, switch `EstimateEvidence` from `Approximate`
+  to `Measured` for Rapid-MLX (and update this file).
+
+Until that work is done, Rapid-MLX overhead must continue to be reported as `Approximate`.
+
+---
+
 ## Adding a New Model Family
 
 When a new architecture is released:
@@ -846,11 +969,12 @@ When a new architecture is released:
 
 | File | Purpose |
 |------|---------|
-| `src/llama/vram_estimator/estimate.rs` | Estimation logic (`full_estimate`, `max_context`, `kv_cache_bytes`, overhead functions) |
+| `src/llama/vram_estimator/estimate.rs` | Estimation logic (`full_estimate`, `max_context`, `kv_cache_bytes`, overhead functions; both backends) |
 | `src/llama/vram_estimator/arch_heuristics.rs` | `ModelArch` struct + per-family heuristics + `gguf_arch_to_heuristic_name()` |
 | `src/llama/vram_estimator/quant_table.rs` | BPW and KV BPE table |
 | `src/llama/vram_estimator/tests.rs` | Unit tests including calibration assertions |
 | `src/llama/spawn_wizard.rs` | `ModelMetadata::to_arch()` (GGUF → ModelArch); auto_size orchestration wrapper |
-| `src/llama/gguf_meta.rs` | GGUF metadata reader; `GgufMetadata::to_model_metadata()` (feeds ground-truth arch values) |
-| `src/web/api/vram.rs` | `/api/vram/*` route handlers; `mmproj_path` → `mmproj_bytes` stat; `build_arch_from_body()` |
+| `src/llama/gguf_meta.rs` | GGUF metadata reader (llama.cpp); `GgufMetadata::to_model_metadata()` |
+| `src/inference/rapid_mlx/mlx_meta.rs` | MLX metadata reader (Rapid-MLX); `MlxMetadata::to_arch()`; safetensors index; evidence |
+| `src/web/api/vram.rs` | `/api/vram/*` route handlers; dual-backend routing; `build_arch_from_body()` |
 | `docs/reference/setup-wizard.md` | Wizard UI and API reference; links here for estimation details |

@@ -341,6 +341,23 @@ test('configuration explains local executable, GPU, and explicit SSH flow', asyn
 });
 
 test.describe('responsive shell', () => {
+  test('attach form reveals model identity only for Rapid-MLX', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('html.modules-ready');
+
+    const backend = page.locator('#setup-endpoint-backend');
+    const model = page.locator('#setup-endpoint-model');
+    await expect(backend).toHaveValue('llama_cpp');
+    await expect(model).toBeHidden();
+
+    await backend.selectOption('rapid_mlx');
+    await expect(model).toBeVisible();
+    await expect(model).toHaveAttribute('placeholder', /auto-detect/i);
+
+    await backend.selectOption('llama_cpp');
+    await expect(model).toBeHidden();
+  });
+
   test('mobile layout keeps navigation and endpoint form usable', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');

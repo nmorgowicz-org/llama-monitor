@@ -1,0 +1,26 @@
+{
+  "status": "idle",
+  "model": "mlx-community/Qwen3-0.6B-4bit",
+  "uptime_s": 42.5,
+  "generation_tps": 0.0,
+  "prompt_tps": 0.0,
+  "num_running": 0,
+  "num_waiting": 0,
+  "total_requests_processed": 3,
+  "total_prompt_tokens": 128,
+  "total_completion_tokens": 64,
+  "metal": {
+    "active_memory_gb": 1.0,
+    "peak_memory_gb": 1.25,
+    "cache_memory_gb": 0.0
+  },
+  "cache": {
+    "hits": 8,
+    "misses": 2,
+    "hit_rate": 0.8,
+    "current_memory_bytes": 4096,
+    "entry_count": 4
+  },
+  "requests": [],
+  "future_release_field": { "ignored": true }
+}

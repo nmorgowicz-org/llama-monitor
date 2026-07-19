@@ -21,6 +21,7 @@ Internally, the API is implemented as a modular warp router in `src/web/api/mod.
 - `metrics` — system/metrics endpoints
 - `models` — model scan, downloads, GGUF metadata
 - `presets` — preset CRUD
+- `rapid_mlx_runtime` — Rapid-MLX runtime install, upgrade, repair, rollback, status, releases
 - `remote_agent` — remote agent install/manage via SSH
 - `self_update` — in-place update of llama-monitor
 - `sensor_bridge` — Windows sensor-bridge service
@@ -270,29 +271,41 @@ Request:
 
 ```json
 {
-  "endpoint": "http://192.168.1.50:8001"
+  "endpoint": "http://192.168.1.50:8001",
+  "backend": "rapid_mlx",
+  "model_identity": "served-model-name",
+  "api_key": "optional-runtime-key"
 }
 ```
+
+`backend` defaults to `llama_cpp` for compatibility. Rapid-MLX attach uses
+`/health/ready`, authenticates `/v1/models` and `/v1/status` when a key is supplied,
+and discovers `model_identity` from `/v1/models` when it is omitted. API keys remain
+transient and are never serialized with the session.
 
 Success response:
 
 ```json
 {
   "ok": true,
+  "backend": "rapid_mlx",
+  "model_identity": "served-model-name",
   "warning": null
 }
 ```
 
-Before attaching, the server checks that the endpoint is reachable by sending a GET request to the endpoint URL. If the server cannot be reached, attach fails with:
+Before attaching, llama-monitor performs the selected backend's non-mutating readiness
+check. It does not guess the backend from an OpenAI-compatible response.
 
 ```json
 {
   "ok": false,
-  "error": "Cannot reach llama-server at <endpoint>. Is it running?"
+  "error": "Cannot reach the selected inference runtime at <endpoint>. Is it ready?"
 }
 ```
 
-If the server is reachable but `/health` is unavailable, attach still succeeds and `warning` explains that Performance & metrics will be missing.
+If the runtime is ready but its diagnostics endpoint is unavailable, attach still
+succeeds and `warning` explains that diagnostics are unavailable.
 
 ### `POST /api/detach`
 Auth: api-token.
@@ -648,20 +661,32 @@ Route handlers: `src/web/api/models.rs`.
 
 ### `GET /api/models`
 Auth: api-token.
-Returns the current scan result for the configured `models_dir`.
-
-The response now includes per-model `tags` and `classification` fields (derived from filename heuristics):
+Returns the unified typed inventory for the configured `models_dir` as an array. Legacy
+GGUF fields remain available, while every entry also reports its format, source,
+lifecycle, compatibility, supported backends, companion kind, and typed Rapid-MLX
+source when applicable. GGUF entries retain `tags` and filename-derived
+`classification` fields.
 
 ```json
 [
   {
-    "path": "/models/Qwen3.5-27B-Q4_0.gguf",
+    "path": "/models/gguf/Qwen3.5-27B-Q4_0.gguf",
     "filename": "Qwen3.5-27B-Q4_0.gguf",
     "size_bytes": 4680000000,
     "size_display": "4.4 GB",
     "quant_type": "Q4_0",
     "model_name": "Qwen3.5-27B",
     "is_split": false,
+    "format": "gguf",
+    "source": "local",
+    "lifecycle": "ready",
+    "compatibility": "verified",
+    "supported_backends": ["llama_cpp"],
+    "companion_kind": null,
+    "model_source": {
+      "kind": "gguf_file",
+      "path": "/models/gguf/Qwen3.5-27B-Q4_0.gguf"
+    },
     "tags": [],
     "classification": { "is_mtp": false, "is_moe": false, "is_vision": false }
   }
@@ -671,6 +696,120 @@ The response now includes per-model `tags` and `classification` fields (derived 
 Improved quant detection (branch-specific):
 - Now recognizes `-IQ` and `_IQ` patterns (e.g., IQ2_XXS, IQ3_M).
 - MTP models: files ending in `-mtp.gguf` (Unsloth naming) are marked as MTP and shown with a badge in the UI.
+
+### `GET /api/models/inventory`
+Auth: api-token.
+
+Returns `{ models_dir, entries, truncated }`. `entries` uses the same typed inventory
+objects as `GET /api/models`; this wrapper also reports the canonical library root and
+whether the 10,000-entry safety bound was reached.
+
+### `POST /api/models/rapid-mlx/resolve/preview`
+Auth: api-token.
+
+Validates a tagged Rapid-MLX model source without downloading, converting, or launching
+it. The response state is `ready`, `conversion_required`, `unsupported_source`, or
+`invalid`, with warnings and remediation. GGUF returns `unsupported_source` and retains
+the llama.cpp recommendation.
+
+### `POST /api/models/gguf/import/compatibility/preview`
+Auth: api-token.
+
+Performs a converter-free, network-free metadata inspection for experimental
+GGUF-to-MLX recovery. `path` must be library-relative, and its canonical target must be a
+non-symlinked `.gguf` file inside the configured `models_dir`. Absolute and root-relative
+paths are rejected rather than accepted from user input.
+
+```json
+{
+  "path": "gguf/model-Q6_K.gguf"
+}
+```
+
+The versioned response includes bounded source identity, authoritative architecture,
+tensor/quant inventory, tokenizer/config/auxiliary-asset observations, compatibility,
+exact missing fields/assets, warnings, resource estimate, and remediation. A
+`bounded_gguf_header_sha256` identifies metadata plus the tensor directory; it is
+explicitly not a hash of all model weights. R1 produces no weights or launchable output.
+
+Malformed JSON, traversal, symlinks, non-GGUF files, paths outside the model library,
+incomplete headers, or metadata/tensor directories over 64 MiB return `400`.
+
+### `GET /api/models/import-lab/availability`
+Auth: api-token.
+
+Returns the local Apple-Silicon execution gate, exact experimental profile, llama.cpp
+fallback, and the invariant that recovered output is not launchable.
+
+### `POST /api/models/import-lab/resource-estimate`
+Auth: api-token.
+
+Accepts the same `{ "path": "gguf/model.gguf" }` library-relative request as the
+compatibility preview. It returns source and estimated recovered-FP16 bytes, required
+disk space, current disk/RAM headroom, and guidance. Metadata parsing runs in a bounded
+two-worker blocking pool with a 15-second route timeout. Invalid JSON and unsafe paths
+return `400`; saturation fails fast with `429`; a timeout returns `408`. A timed-out
+blocking task retains its worker permit until it exits, preventing hidden overcommit.
+
+### `GET /api/models/import-lab/jobs`
+Auth: api-token.
+
+Lists up to 32 retained in-memory recovery jobs. Jobs expose a typed state, phase,
+progress percentage, bounded diagnostics, cancellation availability, and an optional
+terminal result. Jobs do not resume after an app restart; completed cache manifests
+remain durable model-library provenance. Public failure diagnostics use stable,
+path-free messages rather than raw worker errors.
+
+### `POST /api/models/import-lab/jobs`
+Auth: api-token.
+
+Queues the exact supported experimental profile and returns `202`:
+
+```json
+{ "source_path": "gguf/SmolLM2-135M-Instruct-Q8_0.gguf" }
+```
+
+The path is canonicalized and rejected for traversal, symlink components, non-GGUF
+targets, or targets outside `models_dir` before a worker slot is consumed. One recovery
+worker runs at a time. The original GGUF is never modified and published results remain
+`experimental` and `launchable: false`.
+
+### `GET /api/models/import-lab/jobs/{id}`
+Auth: api-token. Returns one job or `404`.
+
+### `POST /api/models/import-lab/jobs/{id}/cancel`
+Auth: api-token. Requests cooperative process-group cancellation and staging cleanup.
+
+### `DELETE /api/models/import-lab/jobs/{id}`
+Auth: api-token. Removes a terminal in-memory job record. Active jobs cannot be removed,
+and this endpoint never deletes the source GGUF or a published cache.
+
+### `POST /api/models/library/migration/preview`
+Auth: api-token.
+
+Builds a non-mutating, bounded migration plan. The optional body selects only explicit
+legacy Hugging Face repositories:
+
+```json
+{ "hf_repos": ["mlx-community/Qwen3-0.6B-4bit"] }
+```
+
+### `POST /api/models/library/migration/execute`
+Auth: db-admin-token.
+
+Executes the exact previewed plan. Concurrent executions are rejected.
+
+```json
+{
+  "plan_id": "<64-character preview id>",
+  "confirmation": "MIGRATE_MODEL_LIBRARY",
+  "hf_repos": ["mlx-community/Qwen3-0.6B-4bit"]
+}
+```
+
+The repository selection must match the preview. The operation is journaled and
+restartable; a stale preview, collision, path escape, or changed persistence file is
+rejected before a new plan starts.
 
 ### `POST /api/models/refresh`
 Auth: api-token.
@@ -1077,11 +1216,28 @@ Inference admission behavior:
 
 ### `POST /api/chat/abort`
 Auth: api-token.
-Current no-op acknowledgement endpoint:
+Accepts an optional upstream request ID and attempts native cancellation only when the
+active backend advertises a verified compatible contract. Browser Stop closes local
+forwarding independently.
+
+Request body (optional for backward compatibility):
 
 ```json
-{ "ok": true }
+{ "request_id": "chatcmpl-123" }
 ```
+
+Runtimes without verified native cancellation return an explicit local-only result:
+
+```json
+{
+  "ok": true,
+  "cancelled": false,
+  "mode": "local_only",
+  "reason": "native cancellation is unavailable for this runtime"
+}
+```
+
+When native cancellation succeeds, `cancelled` is `true` and `mode` is `native`.
 
 ### `POST /api/chat/suggestions`
 Auth: api-token.
@@ -1899,6 +2055,9 @@ Endpoints to manage llama-server binary.
 Return current platform and backend information.
 
 - Auth: `api-token`.
+- `rapid_mlx_local_available` is true only for `macOS` on `aarch64`.
+- `rapid_mlx_local_requirement` provides the user-facing platform requirement used to
+  gate local configure actions. This does not prohibit attaching to a remote endpoint.
 
 ### `GET /api/llama-binary/latest`
 Return the latest available llama.cpp release.
@@ -1940,7 +2099,376 @@ Restart a locally running llama-server with the current binary (useful after ins
   - 200 with `ok: false` if:
     - No local server is running.
     - No saved server config found.
-    - Stop or restart fails.
+  - Stop or restart fails.
+
+## Rapid-MLX Runtime Management
+
+Route handlers: `src/web/api/rapid_mlx_runtime.rs`.
+
+Rapid-MLX is a supported inference backend for macOS Apple Silicon. Its runtime can be
+managed in-place: installed, upgraded, repaired, and rolled back using isolated, immutable
+environments. These endpoints:
+
+- Do not touch Homebrew, system Python, or external package managers.
+- Use a single-mutation model: only one runtime operation may run at a time.
+- Never modify a running environment in place; new versions are built separately and
+  activated after validation.
+- Always retain the previous known-good environment to allow rollback.
+- Never expose local filesystem paths in public JSON payloads.
+
+Mutations require `db-admin-token` and an explicit confirmation token.
+Read endpoints (status, releases, jobs) require `api-token`.
+
+### `GET /api/rapid-mlx/runtime/status`
+
+Auth: `api-token`.
+
+Returns the current managed runtime status, inventory, and recent jobs.
+
+Response:
+
+```json
+{
+  "runtime": {
+    "supported": true,
+    "installer_available": true,
+    "mutation_in_progress": false,
+    "rollback_available": true,
+    "active": {
+      "environment_id": "rapid-mlx-0.10.10",
+      "version": "0.10.10",
+      "release_channel": "stable",
+      "active": true,
+      "rollback_candidate": false,
+      "complete": true
+    },
+    "inventory": [
+      {
+        "environment_id": "rapid-mlx-0.10.10",
+        "version": "0.10.10",
+        "release_channel": "stable",
+        "active": true,
+        "rollback_candidate": false,
+        "complete": true
+      },
+      {
+        "environment_id": "rapid-mlx-0.10.9",
+        "version": "0.10.9",
+        "release_channel": "stable",
+        "active": false,
+        "rollback_candidate": true,
+        "complete": true
+      }
+    ]
+  },
+  "jobs": [
+    {
+      "id": "a1b2c3d4e5f6...",
+      "operation": "install",
+      "state": "complete",
+      "message": "Runtime validated and activated",
+      "version": "0.10.10",
+      "result": {
+        "active": {
+          "environment_id": "rapid-mlx-0.10.10",
+          "version": "0.10.10",
+          "release_channel": "stable",
+          "active": true,
+          "rollback_candidate": false,
+          "complete": true
+        },
+        "previous_environment_id": "rapid-mlx-0.10.9"
+      }
+    }
+  ]
+}
+```
+
+Fields:
+
+- `supported`: true if the platform is Apple Silicon macOS (Rapid-MLX requirement).
+- `installer_available`: true if `uv` or equivalent installer is available.
+- `mutation_in_progress`: true while an install/upgrade/repair/rollback job is active.
+- `rollback_available`: true if a previous known-good environment is retained.
+- `active`: current managed runtime or null.
+- `inventory`: retained environments (up to internal limit), each with active/rollback
+  candidate flags.
+- `jobs`: up to 16 most recent runtime operations.
+
+If the manager cannot initialize, the endpoint returns 500 with:
+
+```json
+{ "ok": false, "error": "Managed Rapid-MLX storage is unavailable" }
+```
+
+### `GET /api/rapid-mlx/runtime/releases`
+
+Auth: `api-token`.
+
+Lists recent non-draft Rapid-MLX releases discovered from the upstream GitHub release
+feed. Used for selecting a version in install/upgrade. Responses are cached for 5 minutes.
+
+Response:
+
+```json
+{
+  "releases": [
+    {
+      "version": "0.10.10",
+      "tag": "v0.10.10",
+      "channel": "stable",
+      "published_at": "2026-07-16T00:00:00Z"
+    },
+    {
+      "version": "0.10.11rc1",
+      "tag": "v0.10.11rc1",
+      "channel": "prerelease",
+      "published_at": "2026-07-17T00:00:00Z"
+    }
+  ]
+}
+```
+
+Notes:
+
+- Draft releases are excluded.
+- Versions below the configured floor are filtered out.
+- Prerelease channels must be selected explicitly and must match between request and
+  release metadata.
+
+If GitHub is unreachable or exceeds response bounds, returns 502:
+
+```json
+{ "ok": false, "error": "Rapid-MLX release discovery is temporarily unavailable" }
+```
+
+### `POST /api/rapid-mlx/recommend`
+
+Auth: `api-token`.
+
+Returns a deterministic backend recommendation based on artifact type, platform, and
+runtime compatibility.
+
+Request:
+
+```json
+{
+  "artifact_kind": "mlx_directory"
+}
+```
+
+Accepted `artifact_kind` values:
+
+- `gguf`: always recommends `llama_cpp`.
+- `mlx_directory`, `authoritative_safetensors`, `rapid_mlx_hf_repository`, `rapid_mlx_alias`:
+  recommends `rapid_mlx` if platform is Apple Silicon and a compatible runtime is present;
+  otherwise indicates runtime is required or platform is unavailable.
+- `unknown`: returns `manual_selection` with no recommendation.
+
+Response (ready):
+
+```json
+{
+  "recommended_backend": "rapid_mlx",
+  "state": "ready",
+  "reason": "This source is native to the verified Rapid-MLX resolution path."
+}
+```
+
+Response (GGUF):
+
+```json
+{
+  "recommended_backend": "llama_cpp",
+  "state": "ready",
+  "reason": "GGUF runs natively with llama.cpp."
+}
+```
+
+Response (platform missing):
+
+```json
+{
+  "recommended_backend": null,
+  "state": "platform_unavailable",
+  "reason": "Local Rapid-MLX requires Apple Silicon macOS; remote attachment remains available."
+}
+```
+
+Response (runtime required):
+
+```json
+{
+  "recommended_backend": null,
+  "state": "runtime_required",
+  "reason": "This model is Rapid-MLX compatible, but a compatible local runtime is required."
+}
+```
+
+Response (unknown):
+
+```json
+{
+  "recommended_backend": null,
+  "state": "manual_selection",
+  "reason": "Choose an engine after selecting a typed model source."
+}
+```
+
+### `POST /api/rapid-mlx/runtime/install`
+
+Auth: `db-admin-token`.
+
+Installs the specified Rapid-MLX version as a managed runtime. Requires Apple Silicon macOS;
+returns 400 if not available.
+
+Request:
+
+```json
+{
+  "version": "0.10.10",
+  "channel": "stable",
+  "confirm": "INSTALL_RAPID_MLX_RUNTIME"
+}
+```
+
+Rules:
+
+- `version` must match a published non-draft release exactly.
+- `channel` must match (`stable` or `prerelease`).
+- `confirm` must be exactly `INSTALL_RAPID_MLX_RUNTIME`.
+- Rejects unknown or extra fields with 400.
+
+If another runtime operation is in progress: 429
+
+```json
+{ "ok": false, "error": "Another managed Rapid-MLX runtime operation is already in progress" }
+```
+
+If platform not supported: 400
+
+```json
+{ "ok": false, "error": "Managed Rapid-MLX runtime changes require Apple Silicon macOS" }
+```
+
+Success: 202
+
+```json
+{ "job_id": "a1b2c3d4e5f6...", "state": "queued" }
+```
+
+Track progress via `GET /api/rapid-mlx/runtime/jobs/{job_id}`.
+
+### `POST /api/rapid-mlx/runtime/upgrade`
+
+Auth: `db-admin-token`.
+
+Upgrades to a newer Rapid-MLX version by installing a second environment, validating it,
+then activating it. The previous environment is kept as rollback candidate; it is never
+modified in place.
+
+Request uses the same shape as install, but with its own confirmation token:
+
+```json
+{
+  "version": "0.10.11",
+  "channel": "stable",
+  "confirm": "UPGRADE_RAPID_MLX_RUNTIME"
+}
+```
+
+Notes:
+
+- An active inference session is not restarted or rerouted automatically.
+- Same concurrency, versioning, and platform rules as install.
+- Returns 202 with `job_id` on success.
+
+### `POST /api/rapid-mlx/runtime/repair`
+
+Auth: `db-admin-token`.
+
+Rebuilds the currently active release in a new isolated environment and activates it,
+used when the managed runtime becomes corrupted or incomplete.
+
+Request:
+
+```json
+{
+  "confirm": "REPAIR_RAPID_MLX_RUNTIME"
+}
+```
+
+Rules:
+
+- The active runtime must be verifiable against published release metadata.
+- If not verifiable, returns 400:
+  `{ "ok": false, "error": "The active managed Rapid-MLX runtime could not be verified against published release metadata" }`
+- Same concurrency rules; returns 202 with `job_id` on success.
+
+### `POST /api/rapid-mlx/runtime/rollback`
+
+Auth: `db-admin-token`.
+
+Restores the previous known-good managed runtime when available.
+
+Request:
+
+```json
+{
+  "confirm": "ROLLBACK_RAPID_MLX_RUNTIME"
+}
+```
+
+Rules:
+
+- No-op if no previous known-good environment exists:
+  `{ "ok": false, "error": "No previous known-good Rapid-MLX runtime is available" }`
+- Revalidates that environment before activation.
+- Returns 202 with `job_id` on success.
+
+### `GET /api/rapid-mlx/runtime/jobs/{id}`
+
+Auth: `api-token`.
+
+Returns the state of a specific runtime operation job.
+
+Response:
+
+```json
+{
+  "id": "a1b2c3d4e5f6...",
+  "operation": "install",
+  "state": "complete",
+  "message": "Runtime validated and activated",
+  "version": "0.10.10",
+  "result": {
+    "active": {
+      "environment_id": "rapid-mlx-0.10.10",
+      "version": "0.10.10",
+      "release_channel": "stable",
+      "active": true,
+      "rollback_candidate": false,
+      "complete": true
+    },
+    "previous_environment_id": "rapid-mlx-0.10.9"
+  }
+}
+```
+
+Fields:
+
+- `operation`: one of `install`, `upgrade`, `repair`, `rollback`.
+- `state`: one of `queued`, `running`, `complete`, `failed`.
+- `message`: path-safe human-readable status; never exposes internal filesystem paths.
+- `version`: version associated with the operation (if applicable).
+- `result`: present on success; contains `active` runtime metadata and optional
+  `previous_environment_id`.
+
+If the job is not found, returns 404:
+
+```json
+{ "ok": false, "error": "Runtime operation was not found" }
+```
 
 ## Remote Agent
 

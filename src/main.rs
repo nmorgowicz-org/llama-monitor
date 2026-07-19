@@ -18,6 +18,7 @@ mod collections;
 mod config;
 mod gpu;
 mod hf;
+mod inference;
 mod lhm;
 mod lhm_persistence;
 mod llama;

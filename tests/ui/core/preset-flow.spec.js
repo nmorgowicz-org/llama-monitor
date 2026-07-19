@@ -18,6 +18,23 @@ function preset(id, name, modelPath = `/models/${id}.gguf`) {
   };
 }
 
+function rapidPreset(id = 'rapid', name = 'Rapid model') {
+  return {
+    id,
+    name,
+    backend: 'rapid_mlx',
+    model_path: '',
+    hf_repo: null,
+    rapid_mlx: {
+      model_path: '/models/mlx-community/Qwen3-4B-4bit',
+      host: '127.0.0.1',
+      port: 9123,
+      served_model_name: 'qwen3-rapid',
+      log_level: 'info',
+    },
+  };
+}
+
 async function installPresetMocks(page, options = {}) {
   const state = {
     presets: [...(options.presets || [preset('original', 'Original'), preset('other', 'Other')])],
@@ -25,6 +42,7 @@ async function installPresetMocks(page, options = {}) {
     postCount: 0,
     putCount: 0,
     spawnPayloads: [],
+    attachPayloads: [],
   };
 
   await page.route('**/api/settings', route => route.fulfill({
@@ -33,16 +51,25 @@ async function installPresetMocks(page, options = {}) {
     body: JSON.stringify({ preset_id: options.savedPresetId || state.presets[0]?.id || '' }),
   }));
 
-  await page.route('**/api/sessions/active/readiness', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ ok: true, ready: true }),
-  }));
+  await page.route('**/api/sessions/active/readiness', async route => {
+    if (options.readinessDelay) await new Promise(resolve => setTimeout(resolve, options.readinessDelay));
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, ready: true }),
+    });
+  });
 
   await page.route('**/api/sessions/active', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify(state.active),
+  }));
+
+  await page.route('**/api/sessions/recent', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ sessions: options.sessions || [], active_session_id: '' }),
   }));
 
   await page.route('**/api/db/admin-token', route => route.fulfill({
@@ -62,7 +89,21 @@ async function installPresetMocks(page, options = {}) {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ ok: true, session_id: 'spawned-session' }),
+      body: JSON.stringify({
+        ok: true,
+        session_id: 'spawned-session',
+        backend: options.spawnBackend || 'llama_cpp',
+        port: options.spawnPort || 8001,
+      }),
+    });
+  });
+
+  await page.route('**/api/attach', async route => {
+    state.attachPayloads.push(route.request().postDataJSON());
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true }),
     });
   });
 
@@ -203,5 +244,127 @@ test.describe('preset flow', () => {
     await expect.poll(() => state.putCount).toBe(1);
     expect(state.presets.filter(p => p.name === 'Wizard preset')).toHaveLength(1);
     expect(state.presets.find(p => p.name === 'Wizard preset')?.id).toBe('wizard-id');
+  });
+
+  test('Rapid welcome start sends preset identity only and shows the resolved server port', async ({ page }) => {
+    const state = await installPresetMocks(page, {
+      presets: [rapidPreset()],
+      savedPresetId: 'rapid',
+      spawnBackend: 'rapid_mlx',
+      spawnPort: 9123,
+      readinessDelay: 250,
+    });
+    await boot(page);
+
+    await expect(page.locator('#preset-select')).toHaveValue('rapid');
+    const start = page.evaluate(async () => {
+      const { doStart } = await import('/js/features/attach-detach.js');
+      await doStart();
+    });
+
+    await expect(page.locator('.toast').filter({ hasText: 'Loading model on port 9123' })).toBeVisible();
+    await start;
+    expect(state.spawnPayloads).toEqual([{ preset_id: 'rapid' }]);
+  });
+
+  test('Rapid editor save and duplicate preserve backend-owned configuration', async ({ page }) => {
+    const original = rapidPreset();
+    const rapidConfig = structuredClone(original.rapid_mlx);
+    const state = await installPresetMocks(page, {
+      presets: [original],
+      savedPresetId: 'rapid',
+    });
+    await boot(page);
+
+    await page.evaluate(async () => {
+      const { openPresetModal } = await import('/js/features/presets.js');
+      openPresetModal('edit');
+    });
+    await expect(page.locator('#modal-model-path')).toHaveValue(rapidConfig.model_path);
+    await expect(page.locator('.preset-nav-item:visible')).toHaveCount(2);
+    await page.locator('#modal-name').fill('Rapid renamed');
+    await page.locator('#modal-model-path').fill('mlx-community/Qwen3-8B-4bit');
+    await page.locator('.preset-nav-item[data-section="advanced"]').click();
+    await page.locator('#modal-port').fill('9234');
+    await page.locator('#btn-modal-save').click();
+    await expect(page.locator('#btn-modal-save')).toHaveText('Confirm Save');
+    await page.locator('#btn-modal-save').click();
+    await expect.poll(() => state.putCount).toBe(1);
+    expect(state.presets.find(p => p.id === 'rapid')?.rapid_mlx).toEqual({
+      ...rapidConfig,
+      model_path: 'mlx-community/Qwen3-8B-4bit',
+      port: 9234,
+    });
+
+    const editedRapidConfig = structuredClone(state.presets.find(p => p.id === 'rapid').rapid_mlx);
+
+    await page.evaluate(async () => {
+      const { openPresetModal } = await import('/js/features/presets.js');
+      openPresetModal('edit');
+    });
+    await page.locator('#preset-modal-duplicate').click();
+    await expect.poll(() => state.postCount).toBe(1);
+    expect(state.presets.find(p => p.id === 'copy-1')?.rapid_mlx).toEqual(editedRapidConfig);
+  });
+
+  test('protected session restore uses the native password modal and transient key', async ({ page }) => {
+    const state = await installPresetMocks(page, {
+      sessions: [{
+        id: 'protected-session',
+        name: 'Private model',
+        backend: 'llama_cpp',
+        launch_requires_api_key: true,
+        launch: {
+          backend: 'llama_cpp',
+          config: { model_path: '/models/private.gguf', port: 8001 },
+        },
+        mode: { Spawn: { port: 8001 } },
+        status: 'Stopped',
+      }],
+      spawnPort: 8001,
+    });
+    await boot(page);
+
+    const restoreButton = page.locator('.setup-spawn-restore-card .setup-endpoint-connect');
+    await expect(restoreButton).toHaveText('Restore');
+    await restoreButton.click();
+
+    const prompt = page.locator('.modal-overlay .modal').filter({ hasText: 'Restore protected model' });
+    await expect(prompt).toBeVisible();
+    await expect(prompt.locator('input[type="password"]')).toBeVisible();
+    await prompt.locator('input').fill('transient-only');
+    await prompt.getByRole('button', { name: 'Restore' }).click();
+
+    await expect.poll(() => state.spawnPayloads.length).toBe(1);
+    expect(state.spawnPayloads[0]).toEqual({
+      session_id: 'protected-session',
+      api_key: 'transient-only',
+    });
+  });
+
+  test('protected attached endpoint reconnects with a transient native prompt key', async ({ page }) => {
+    const state = await installPresetMocks(page, {
+      sessions: [{
+        id: 'protected-attach',
+        name: 'Protected endpoint',
+        launch_requires_api_key: true,
+        mode: { Attach: { endpoint: 'http://127.0.0.1:9000' } },
+        status: 'Disconnected',
+      }],
+    });
+    await boot(page);
+
+    await page.locator('.setup-endpoint-card .setup-endpoint-connect').click();
+    const prompt = page.getByRole('dialog', { name: 'Reconnect to protected endpoint' });
+    await expect(prompt).toBeVisible();
+    await prompt.locator('input[type="password"]').fill('attach-transient');
+    await prompt.getByRole('button', { name: 'Reconnect' }).click();
+
+    await expect.poll(() => state.attachPayloads.length).toBe(1);
+    expect(state.attachPayloads[0]).toEqual({
+      endpoint: 'http://127.0.0.1:9000',
+      api_key: 'attach-transient',
+      backend: 'llama_cpp',
+    });
   });
 });

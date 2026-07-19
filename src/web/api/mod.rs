@@ -20,6 +20,7 @@ mod metrics;
 mod models;
 #[path = "presets.rs"]
 mod preset_routes;
+mod rapid_mlx_runtime;
 mod remote_agent;
 mod self_update;
 mod sensor_bridge;
@@ -29,7 +30,7 @@ mod spawn_wizard;
 mod templates;
 mod tls;
 mod tokens;
-mod upstream;
+pub(crate) mod upstream;
 mod vram;
 
 pub(crate) use common::ApiError;
@@ -68,6 +69,7 @@ pub fn api_routes(
     let sessions_routes = sessions::routes(ctx.clone());
     let lhm_routes = lhm::routes(ctx.clone());
     let remote_agent_routes = remote_agent::routes(ctx.clone());
+    let rapid_mlx_runtime_routes = rapid_mlx_runtime::routes(ctx.clone());
     let sensor_bridge_routes = sensor_bridge::routes(ctx.clone());
 
     let metrics_routes = metrics::routes(ctx.clone());
@@ -93,6 +95,7 @@ pub fn api_routes(
         .or(config_routes)
         .or(lhm_routes)
         .or(remote_agent_routes)
+        .or(rapid_mlx_runtime_routes)
         .or(sensor_bridge_routes)
         .or(metrics_routes)
         .or(tls_routes)
@@ -974,5 +977,117 @@ mod tests {
             "/api/llama-binary/update",
             Some("{}")
         ),
+        (
+            route_rapid_mlx_runtime_status,
+            "GET",
+            "/api/rapid-mlx/runtime/status",
+            None
+        ),
+        (
+            route_rapid_mlx_runtime_releases,
+            "GET",
+            "/api/rapid-mlx/runtime/releases",
+            None
+        ),
+        (
+            route_rapid_mlx_recommend,
+            "POST",
+            "/api/rapid-mlx/recommend",
+            Some("{}")
+        ),
+        (
+            route_rapid_mlx_runtime_install,
+            "POST",
+            "/api/rapid-mlx/runtime/install",
+            Some("{}")
+        ),
+        (
+            route_rapid_mlx_runtime_upgrade,
+            "POST",
+            "/api/rapid-mlx/runtime/upgrade",
+            Some("{}")
+        ),
+        (
+            route_rapid_mlx_runtime_repair,
+            "POST",
+            "/api/rapid-mlx/runtime/repair",
+            Some("{}")
+        ),
+        (
+            route_rapid_mlx_runtime_rollback,
+            "POST",
+            "/api/rapid-mlx/runtime/rollback",
+            Some("{}")
+        ),
+        (
+            route_rapid_mlx_runtime_job,
+            "GET",
+            "/api/rapid-mlx/runtime/jobs/missing",
+            None
+        ),
     ];
+
+    #[tokio::test]
+    async fn rapid_mlx_runtime_mutations_require_db_admin_token() {
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/rapid-mlx/runtime/repair")
+            .header("Content-Type", "application/json")
+            .header("Authorization", "Bearer test-token")
+            .body(r#"{"confirm":"REPAIR_RAPID_MLX_RUNTIME"}"#)
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 401);
+        assert!(String::from_utf8_lossy(response.body()).contains("db-admin-token required"));
+    }
+
+    #[tokio::test]
+    async fn rapid_mlx_runtime_rejects_inexact_confirmation() {
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/rapid-mlx/runtime/rollback")
+            .header("Content-Type", "application/json")
+            .header("Authorization", "Bearer db-admin-token")
+            .body(r#"{"confirm":"rollback"}"#)
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 400);
+        assert!(String::from_utf8_lossy(response.body()).contains("ROLLBACK_RAPID_MLX_RUNTIME"));
+    }
+
+    #[tokio::test]
+    async fn rapid_mlx_runtime_rejects_malformed_and_unknown_json() {
+        for body in [
+            r#"{"confirm": "REPAIR_RAPID_MLX_RUNTIME""#,
+            r#"{"confirm":"REPAIR_RAPID_MLX_RUNTIME","extra":true}"#,
+        ] {
+            let routes = make_all_routes().recover(super::super::handle_rejection);
+            let response = warp::test::request()
+                .method("POST")
+                .path("/api/rapid-mlx/runtime/repair")
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer db-admin-token")
+                .body(body)
+                .reply(&routes)
+                .await;
+            assert_eq!(
+                response.status(),
+                400,
+                "unexpected response: {}",
+                String::from_utf8_lossy(response.body())
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn rapid_mlx_runtime_job_reads_accept_api_token() {
+        let response = warp::test::request()
+            .method("GET")
+            .path("/api/rapid-mlx/runtime/jobs/missing")
+            .header("Authorization", "Bearer test-token")
+            .reply(&make_all_routes())
+            .await;
+        assert_eq!(response.status(), 404);
+        assert!(String::from_utf8_lossy(response.body()).contains("not found"));
+    }
 }

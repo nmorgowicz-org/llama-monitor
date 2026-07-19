@@ -185,14 +185,14 @@ fn api_generate_keywords(
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
                 }
-                let (url, _permit) = prepare_inference_request(&state).await?;
+                let prepared = prepare_inference_request(&state).await?;
 
                 let prompt = format!(
                     "Generate 3-5 focus keywords for a story category called \"{}\". Return only the keywords, separated by commas. No explanation.",
                     req.category
                 );
 
-                let client = build_upstream_client(std::time::Duration::from_secs(30))?;
+                let client = build_upstream_client()?;
                 let payload = serde_json::json!({
                     "messages": [
                         {"role": "system", "content": "You generate focus keywords. Return only the keywords, comma-separated, with no explanation."},
@@ -204,12 +204,21 @@ fn api_generate_keywords(
                     "temperature": 0.7,
                     "max_tokens": 128,
                 });
+                let payload = prepared.map_chat_body(
+                    &serde_json::to_vec(&payload).map_err(|error| {
+                        warp::reject::custom(ApiError::internal(error.to_string()))
+                    })?,
+                )?;
+                let url = prepared.url.clone();
 
                 let response = send_upstream_request_with_retry(|| {
-                    client
-                        .post(&url)
-                        .header("Content-Type", "application/json")
-                        .json(&payload)
+                    prepared.authenticate(
+                        client
+                            .post(&url)
+                            .timeout(std::time::Duration::from_secs(30))
+                            .header("Content-Type", "application/json")
+                            .body(payload.clone()),
+                    )
                 })
                 .await?;
 
@@ -389,8 +398,8 @@ fn api_chat_suggestions(
                     serde_json::json!({"role": "user", "content": prompt}),
                 ];
 
-                let (url, _permit) = prepare_inference_request(&state).await?;
-                let client = build_upstream_client(std::time::Duration::from_secs(30))?;
+                let prepared = prepare_inference_request(&state).await?;
+                let client = build_upstream_client()?;
                 let payload = serde_json::json!({
                     "messages": suggestion_messages,
                     "stream": true,
@@ -401,12 +410,21 @@ fn api_chat_suggestions(
                     "temperature": temperature,
                     "max_tokens": 512,
                 });
+                let payload = prepared.map_chat_body(
+                    &serde_json::to_vec(&payload).map_err(|error| {
+                        warp::reject::custom(ApiError::internal(error.to_string()))
+                    })?,
+                )?;
+                let url = prepared.url.clone();
 
                 let response = send_upstream_request_with_retry(|| {
-                    client
-                        .post(&url)
-                        .header("Content-Type", "application/json")
-                        .json(&payload)
+                    prepared.authenticate(
+                        client
+                            .post(&url)
+                            .timeout(std::time::Duration::from_secs(30))
+                            .header("Content-Type", "application/json")
+                            .body(payload.clone()),
+                    )
                 })
                 .await?;
 
@@ -565,7 +583,7 @@ fn parse_suggestions(input: &str) -> Vec<String> {
                     entry
                         .as_str()
                         .map(clean_fragment)
-                        .and_then(|value| if value.is_empty() { None } else { Some(value) })
+                        .filter(|value| !value.is_empty())
                 })
                 .collect();
 

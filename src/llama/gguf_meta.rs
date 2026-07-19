@@ -7,14 +7,61 @@
 //!
 //! GGUF format reference: <https://github.com/ggml-org/ggml/blob/master/docs/gguf.md>
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
-use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 
 // ── Format constants ──────────────────────────────────────────────────────────
 
 const GGUF_MAGIC: &[u8; 4] = b"GGUF";
+
+/// Maximum header size accepted by the experimental import inspector. This includes
+/// GGUF KV metadata and the tensor-info directory, but never tensor weight data.
+pub const MAX_INSPECTION_HEADER_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Strict, bounded facts from the GGUF header that are needed for import policy.
+#[derive(Debug, Clone)]
+pub struct GgufHeaderInventory {
+    pub version: u32,
+    pub tensor_count: u64,
+    pub header_bytes: u64,
+    pub quant_types: BTreeMap<String, u64>,
+    pub metadata_keys: Vec<String>,
+}
+
+struct BoundedReader<R> {
+    inner: R,
+    limit: u64,
+}
+
+impl<R: Read + Seek> Read for BoundedReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let position = self.inner.stream_position()?;
+        let remaining = self.limit.saturating_sub(position);
+        if remaining == 0 && !buffer.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "GGUF inspection limit exceeded",
+            ));
+        }
+        let length = usize::try_from(remaining.min(buffer.len() as u64)).unwrap_or(buffer.len());
+        self.inner.read(&mut buffer[..length])
+    }
+}
+
+impl<R: Read + Seek> Seek for BoundedReader<R> {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
+        let next = self.inner.seek(position)?;
+        if next > self.limit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "GGUF inspection limit exceeded",
+            ));
+        }
+        Ok(next)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -451,6 +498,169 @@ pub fn read_gguf_metadata(path: &Path) -> Result<GgufMetadata, String> {
     // Exact file size lets us measure per-tensor bytes from the tensor directory layout.
     let file_size = file.metadata().ok().map(|m| m.len());
     read_gguf_metadata_reader(BufReader::with_capacity(64 * 1024, file), file_size)
+}
+
+/// Inventory a complete local GGUF header without reading tensor weight data.
+///
+/// Unlike the general metadata reader, this entry point is fail-closed: it requires a
+/// complete tensor directory, rejects headers over `max_header_bytes`, and reports every
+/// tensor quantization type. It is intended to run inside a bounded blocking task.
+pub fn read_gguf_header_inventory(
+    path: &Path,
+    max_header_bytes: u64,
+) -> Result<GgufHeaderInventory, String> {
+    let file = File::open(path).map_err(|e| format!("Cannot open '{}': {e}", path.display()))?;
+    let file_size = file
+        .metadata()
+        .map_err(|e| format!("Cannot stat '{}': {e}", path.display()))?
+        .len();
+    let bounded = BoundedReader {
+        inner: file,
+        limit: max_header_bytes,
+    };
+    let mut r = BufReader::with_capacity(64 * 1024, bounded);
+
+    let mut magic = [0u8; 4];
+    r.read_exact(&mut magic)
+        .map_err(|e| format!("Cannot read GGUF magic: {e}"))?;
+    if &magic != GGUF_MAGIC {
+        return Err(format!("Data is not a GGUF file (magic: {magic:02x?})"));
+    }
+    let version = read_u32(&mut r)?;
+    if version == 0 || version > 3 {
+        return Err(format!("Unsupported GGUF version {version}"));
+    }
+    let (tensor_count, kv_count) = if version == 1 {
+        (read_u32(&mut r)? as u64, read_u32(&mut r)? as u64)
+    } else {
+        (read_u64(&mut r)?, read_u64(&mut r)?)
+    };
+    if tensor_count == 0 || tensor_count > 1_000_000 {
+        return Err(format!("Implausible tensor_count {tensor_count}"));
+    }
+    if kv_count > 100_000 {
+        return Err(format!("Implausible kv_count {kv_count}"));
+    }
+
+    let mut metadata_keys = Vec::with_capacity((kv_count as usize).min(4096));
+    let mut alignment = 32u64;
+    for _ in 0..kv_count {
+        let key = read_str(&mut r, version)?;
+        let vtype = read_u32(&mut r)?;
+        let value = read_value(&mut r, vtype, version)?;
+        if key == "general.alignment" {
+            alignment = value.as_u32().unwrap_or(32) as u64;
+        }
+        metadata_keys.push(key);
+        ensure_header_bound(&mut r, file_size, max_header_bytes)?;
+    }
+
+    let mut quant_types = BTreeMap::new();
+    let mut tensor_offsets = Vec::with_capacity(tensor_count as usize);
+    for _ in 0..tensor_count {
+        let _name = read_str(&mut r, version)?;
+        let n_dims = read_u32(&mut r)?;
+        if n_dims > 8 {
+            return Err(format!("Implausible tensor n_dims {n_dims}"));
+        }
+        for _ in 0..n_dims {
+            if version == 1 {
+                let _ = read_u32(&mut r)?;
+            } else {
+                let _ = read_u64(&mut r)?;
+            }
+        }
+        let ggml_type = read_u32(&mut r)?;
+        let offset = read_u64(&mut r)?;
+        tensor_offsets.push(offset);
+        *quant_types.entry(ggml_type_name(ggml_type)).or_insert(0) += 1;
+        ensure_header_bound(&mut r, file_size, max_header_bytes)?;
+    }
+    let header_bytes = r
+        .stream_position()
+        .map_err(|e| format!("Cannot measure GGUF header: {e}"))?;
+    let data_start = header_bytes.div_ceil(alignment.max(1)) * alignment.max(1);
+    if data_start >= file_size {
+        return Err("GGUF has no tensor data after its header".into());
+    }
+    let data_bytes = file_size - data_start;
+    if let Some(offset) = tensor_offsets.iter().find(|offset| **offset >= data_bytes) {
+        return Err(format!(
+            "GGUF tensor offset {offset} is outside the {data_bytes}-byte tensor data section"
+        ));
+    }
+    Ok(GgufHeaderInventory {
+        version,
+        tensor_count,
+        header_bytes,
+        quant_types,
+        metadata_keys,
+    })
+}
+
+fn ensure_header_bound<R: Seek>(
+    r: &mut R,
+    file_size: u64,
+    max_header_bytes: u64,
+) -> Result<(), String> {
+    let position = r
+        .stream_position()
+        .map_err(|e| format!("Cannot measure GGUF header: {e}"))?;
+    if position > file_size {
+        return Err("GGUF header extends beyond end of file".into());
+    }
+    if position > max_header_bytes {
+        return Err(format!(
+            "GGUF metadata and tensor directory exceed the {max_header_bytes}-byte inspection limit"
+        ));
+    }
+    Ok(())
+}
+
+fn ggml_type_name(value: u32) -> String {
+    // Names follow ggml's stable `ggml_type` numeric ABI. Unknown values are retained
+    // explicitly so policy can reject them instead of guessing.
+    match value {
+        0 => "F32",
+        1 => "F16",
+        2 => "Q4_0",
+        3 => "Q4_1",
+        6 => "Q5_0",
+        7 => "Q5_1",
+        8 => "Q8_0",
+        9 => "Q8_1",
+        10 => "Q2_K",
+        11 => "Q3_K",
+        12 => "Q4_K",
+        13 => "Q5_K",
+        14 => "Q6_K",
+        15 => "Q8_K",
+        16 => "IQ2_XXS",
+        17 => "IQ2_XS",
+        18 => "IQ3_XXS",
+        19 => "IQ1_S",
+        20 => "IQ4_NL",
+        21 => "IQ3_S",
+        22 => "IQ2_S",
+        23 => "IQ4_XS",
+        24 => "I8",
+        25 => "I16",
+        26 => "I32",
+        27 => "I64",
+        28 => "F64",
+        29 => "IQ1_M",
+        30 => "BF16",
+        31 => "Q4_0_4_4",
+        32 => "Q4_0_4_8",
+        33 => "Q4_0_8_8",
+        34 => "TQ1_0",
+        35 => "TQ2_0",
+        36 => "IQ4_NL_4_4",
+        37 => "IQ4_NL_4_8",
+        38 => "IQ4_NL_8_8",
+        _ => return format!("UNKNOWN_{value}"),
+    }
+    .into()
 }
 
 /// Parse GGUF metadata from an in-memory buffer — e.g. the first few MB of a remote file

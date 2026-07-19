@@ -3,8 +3,10 @@ use std::sync::Arc;
 use warp::Filter;
 
 use crate::config::AppConfig;
+use crate::inference::launch::validate_preset_backend_config;
 use crate::presets::{self, ModelPreset};
 use crate::state::AppState;
+use crate::web::safe_json_body;
 
 use super::{
     ApiCtx, ApiRoute, box_reply, check_api_token, unauthorized_api_token, with_app_config,
@@ -29,6 +31,29 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed()
 }
 
+fn preset_for_api(mut preset: ModelPreset) -> ModelPreset {
+    preset.api_key_configured =
+        preset.api_key_configured || preset.api_key.as_ref().is_some_and(|key| !key.is_empty());
+    preset.api_key = None;
+    preset.clear_api_key = false;
+    preset
+}
+
+fn merge_preset_api_key(updated: &mut ModelPreset, existing_api_key: Option<String>) {
+    if updated.clear_api_key {
+        updated.api_key = None;
+    } else if updated
+        .api_key
+        .as_deref()
+        .map(str::is_empty)
+        .unwrap_or(true)
+    {
+        updated.api_key = existing_api_key;
+    }
+    updated.api_key_configured = updated.api_key.as_ref().is_some_and(|key| !key.is_empty());
+    updated.clear_api_key = false;
+}
+
 fn api_get_presets(
     state: AppState,
     app_config: Arc<AppConfig>,
@@ -38,7 +63,14 @@ fn api_get_presets(
         .and(warp::header::optional::<String>("authorization"))
         .and(with_app_config(app_config))
         .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
-            let presets = state.presets.lock().unwrap().clone();
+            let presets: Vec<_> = state
+                .presets
+                .lock()
+                .unwrap()
+                .clone()
+                .into_iter()
+                .map(preset_for_api)
+                .collect();
             if !check_api_token(&auth, &cfg) {
                 return futures_util::future::ready(Ok(unauthorized_api_token()));
             }
@@ -67,7 +99,9 @@ fn api_get_preset(
                 };
                 futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                     Box::new(warp::reply::json(&match preset {
-                        Some(preset) => serde_json::json!({"ok": true, "preset": preset}),
+                        Some(preset) => {
+                            serde_json::json!({"ok": true, "preset": preset_for_api(preset)})
+                        }
                         None => serde_json::json!({"ok": false, "error": "preset not found"}),
                     })),
                 ))
@@ -82,15 +116,29 @@ fn api_create_preset(
     warp::path!("api" / "presets")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json())
+        .and(safe_json_body::<ModelPreset>())
         .and_then(move |auth: Option<String>, mut preset: ModelPreset| {
             let cfg = app_config.clone();
             if !check_api_token(&auth, &cfg) {
                 return futures_util::future::ready(Ok(unauthorized_api_token()));
             }
+            if let Err(error) = validate_preset_backend_config(&preset) {
+                return futures_util::future::ready(Ok::<
+                    Box<dyn warp::reply::Reply>,
+                    warp::Rejection,
+                >(Box::new(
+                    warp::reply::with_status(
+                        warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": error.to_string()}),
+                        ),
+                        warp::http::StatusCode::BAD_REQUEST,
+                    ),
+                )));
+            }
             if preset.id.trim().is_empty() {
                 preset.id = presets::next_id();
             }
+            preset.api_key_configured = preset.api_key.as_ref().is_some_and(|key| !key.is_empty());
 
             // Populate GGUF metadata if model_path is set
             presets::ensure_gguf_metadata(&mut preset);
@@ -100,7 +148,7 @@ fn api_create_preset(
             let _ = presets::save_presets(&state.presets_path, &presets);
             futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                 Box::new(warp::reply::json(
-                    &serde_json::json!({"ok": true, "preset": preset}),
+                    &serde_json::json!({"ok": true, "preset": preset_for_api(preset)}),
                 )),
             ))
         })
@@ -113,14 +161,36 @@ fn api_update_preset(
     warp::path!("api" / "presets" / String)
         .and(warp::put())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json())
+        .and(safe_json_body::<ModelPreset>())
         .and_then(
             move |id: String, auth: Option<String>, mut updated: ModelPreset| {
                 let cfg = app_config.clone();
                 if !check_api_token(&auth, &cfg) {
                     return futures_util::future::ready(Ok(unauthorized_api_token()));
                 }
+                if let Err(error) = validate_preset_backend_config(&updated) {
+                    return futures_util::future::ready(Ok::<
+                        Box<dyn warp::reply::Reply>,
+                        warp::Rejection,
+                    >(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": error.to_string()}),
+                            ),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ),
+                    )));
+                }
                 updated.id = id.clone();
+
+                let existing_api_key = state
+                    .presets
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|preset| preset.id == id)
+                    .and_then(|preset| preset.api_key.clone());
+                merge_preset_api_key(&mut updated, existing_api_key);
 
                 // If model_path changed, reset GGUF-derived fields so we refresh from new file.
                 let previous_model_path = {
@@ -145,7 +215,7 @@ fn api_update_preset(
                     let _ = presets::save_presets(&state.presets_path, &presets);
                     futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                         Box::new(warp::reply::json(
-                            &serde_json::json!({"ok": true, "preset": updated}),
+                            &serde_json::json!({"ok": true, "preset": preset_for_api(updated)}),
                         )),
                     ))
                 } else {
@@ -212,3 +282,43 @@ fn api_reset_presets(
 }
 
 // ── Template API ───────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn api_redacts_key_but_reports_configured_marker() {
+        let preset = preset_for_api(ModelPreset {
+            api_key: Some("secret".into()),
+            ..Default::default()
+        });
+        let json = serde_json::to_value(preset).unwrap();
+        assert!(json["api_key"].is_null());
+        assert_eq!(json["api_key_configured"], true);
+        assert!(!json.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn update_preserves_replaces_or_explicitly_clears_existing_key() {
+        let mut preserve = ModelPreset::default();
+        merge_preset_api_key(&mut preserve, Some("existing".into()));
+        assert_eq!(preserve.api_key.as_deref(), Some("existing"));
+
+        let mut replace = ModelPreset {
+            api_key: Some("replacement".into()),
+            ..Default::default()
+        };
+        merge_preset_api_key(&mut replace, Some("existing".into()));
+        assert_eq!(replace.api_key.as_deref(), Some("replacement"));
+        assert!(replace.api_key_configured);
+
+        let mut clear = ModelPreset {
+            clear_api_key: true,
+            ..Default::default()
+        };
+        merge_preset_api_key(&mut clear, Some("existing".into()));
+        assert!(clear.api_key.is_none());
+        assert!(!clear.api_key_configured);
+    }
+}

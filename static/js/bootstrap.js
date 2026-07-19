@@ -42,6 +42,7 @@ import { initCommandPalette } from './features/workspace-command-palette.js';
 import { initSpawnWizard, showSpawnRoute, closeSpawnWizard } from './features/spawn-wizard.js';
 import { initTunePanel } from './features/tune-panel.js';
 import { initLlamaUpdater } from './features/llama-updater.js';
+import { initRapidMlxUpdater } from './features/rapid-mlx-updater.js';
 import { initTemplateAutoupdater } from './features/template-autoupdater.js';
 import { HF_DISCOVER_CATEGORIES } from './features/hf-browse.js';
 import { initGlobalTooltip } from './core/tooltip.js';
@@ -161,6 +162,7 @@ async function initializeApp() {
     initSpawnWizard();
     initTunePanel();
     initLlamaUpdater();
+    initRapidMlxUpdater();
     initTemplateAutoupdater();
 
     // Initialize chat tabs only after token bootstrap and feature init complete.

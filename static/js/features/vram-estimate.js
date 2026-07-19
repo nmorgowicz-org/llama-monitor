@@ -16,7 +16,13 @@ function buildEstimateBody(state) {
 
   const modelPath = m.path || m.localPath || '';
 
+  // Backend discriminator: the Rust estimator shares one normalized breakdown shape across
+  // llama.cpp/GGUF and Rapid-MLX, selected by this field (defaults to llama.cpp server-side
+  // when omitted). Wired from the engine-selection state set up in Phase 6B1.
+  const backend = state.engine?.selected === 'rapid_mlx' ? 'rapid_mlx' : 'llama_cpp';
+
   const body = {
+    backend,
     model_path: modelPath,
     n_ctx: hw.contextSize || 4096,
     parallel_slots: hw.parallelSlots || 1,

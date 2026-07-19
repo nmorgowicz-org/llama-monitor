@@ -4,11 +4,13 @@ use std::sync::Arc;
 use warp::Filter;
 
 use crate::config::AppConfig;
+use crate::inference::launch::launch_local;
+use crate::inference::llama_cpp::ServerConfig;
 use crate::llama::llama_cpp_downloader::{
     ReleaseQuery, cleanup_old_binaries, download_and_extract, get_release_by_tag, list_releases,
     select_assets,
 };
-use crate::llama::server::{ServerConfig, start_server, stop_server};
+use crate::llama::server::{start_server, stop_server};
 use crate::state::AppState;
 use crate::web::safe_json_body;
 
@@ -138,7 +140,6 @@ fn api_llama_binary_latest(
                         ));
                     }
                 }
-
                 // Fetch from GitHub
                 let client = match reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(20))
@@ -506,6 +507,8 @@ fn api_llama_binary_platform_info(
                         "label":        label,
                         "backends":     backends,
                         "multi_backend": os == "windows" || os == "linux",
+                        "rapid_mlx_local_available": crate::inference::rapid_mlx::ensure_local_platform_supported().is_ok(),
+                        "rapid_mlx_local_requirement": "Rapid-MLX local execution requires macOS on Apple Silicon",
                     }),
                 )))
             }
@@ -574,14 +577,8 @@ fn api_llama_binary_update(
                 // Allow updating while running: keep the current server alive while
                 // network/download/preflight work happens, then stop only for the
                 // final install window.
-                let mut previous_config: Option<ServerConfig> = None;
-                {
-                    let local_running = *state.local_server_running.lock().unwrap();
-                    if local_running {
-                        let cfg_lock = state.server_config.lock().unwrap();
-                        previous_config = cfg_lock.clone();
-                    }
-                }
+                let previous_config = llama_update_restart_config(&state);
+                let restart_applicable = previous_config.is_some();
 
                 let dest_path = cfg.llama_server_path.clone();
 
@@ -1027,7 +1024,7 @@ fn api_llama_binary_update(
                         "[monitor] llama-binary/update: restarting llama-server with previous config".into(),
                     );
 
-                    match start_server(&state, rc, &cfg).await {
+                    match start_server(Arc::new(state.clone()), rc, &cfg).await {
                         Ok(()) => {
                             state.push_log(
                                 "[monitor] llama-binary/update: llama-server restarted successfully".into(),
@@ -1070,10 +1067,25 @@ fn api_llama_binary_update(
                         // True when the backend already restarted the server; frontend
                         // must skip its own /api/llama/restart call to avoid a double-restart.
                         "server_restarted": server_restarted,
+                        // False when no llama.cpp backend was active (including Rapid-MLX).
+                        "restart_applicable": restart_applicable,
                     }),
                 )))
             }
         })
+}
+
+fn llama_update_restart_config(state: &AppState) -> Option<ServerConfig> {
+    let local_running = *state.local_server_running.lock().unwrap();
+    let llama_cpp_active = matches!(
+        state.local_launch_request.lock().unwrap().as_ref(),
+        Some(crate::inference::launch::LocalLaunchRequest::LlamaCpp(_))
+    );
+    if local_running && llama_cpp_active {
+        state.server_config.lock().unwrap().clone()
+    } else {
+        None
+    }
 }
 
 /// POST /api/llama/restart — restart the running llama-server with the current
@@ -1105,17 +1117,17 @@ fn api_llama_restart(
                     ));
                 }
 
-                // Read and save server_config BEFORE stop_server clears it
-                let saved_config = {
-                    let guard = state_clone.server_config.lock().unwrap();
+                // Preserve the backend-owned request before stop clears it.
+                let saved_request = {
+                    let guard = state_clone.local_launch_request.lock().unwrap();
                     guard.clone()
                 };
 
-                let Some(config) = saved_config else {
+                let Some(request) = saved_request else {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
                             "ok": false,
-                            "error": "No saved server configuration found."
+                            "error": "No saved local launch configuration found."
                         })),
                     ));
                 };
@@ -1140,8 +1152,8 @@ fn api_llama_restart(
                     pause_start.elapsed().as_millis()
                 ));
 
-                // Restart with the same config (uses the current llama_server_path)
-                if let Err(e) = start_server(&state_clone, config, &cfg).await {
+                // Restart the same backend with its backend-owned configuration.
+                if let Err(e) = launch_local(Arc::new(state_clone.clone()), request, &cfg).await {
                     state.push_log(format!("[monitor] restart: start_server failed: {}", e));
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
@@ -1163,6 +1175,21 @@ fn api_llama_restart(
 
 #[cfg(test)]
 mod tests {
-    // Route presence and auth guard for llama_binary endpoints is covered
-    // by the full-tree smoke tests in api::tests::route_smoke_tests!.
+    use super::*;
+
+    #[test]
+    fn llama_update_does_not_restart_rapid_mlx_backend() {
+        let state = AppState::default();
+        *state.local_server_running.lock().unwrap() = true;
+        *state.server_config.lock().unwrap() = Some(ServerConfig::default());
+        *state.local_launch_request.lock().unwrap() =
+            Some(crate::inference::launch::LocalLaunchRequest::RapidMlx(
+                Box::new(crate::inference::rapid_mlx::RapidMlxConfig {
+                    model_path: "/models/rapid".into(),
+                    ..Default::default()
+                }),
+            ));
+
+        assert!(llama_update_restart_config(&state).is_none());
+    }
 }

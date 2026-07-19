@@ -2,9 +2,11 @@
 // View transitions, animations, quick stats, and view state initialization.
 
 import { setupViewState, chat, sessionState } from '../core/app-state.js';
-import { doAttachFromSetup } from './attach-detach.js';
+import { getPlatformInfo } from '../core/platform-info.js';
+import { doAttachFromSetup, doRestoreSession } from './attach-detach.js';
+import { presetModelSource } from './presets.js';
 import { escapeHtml } from '../core/format.js';
-import { showToast, showConfirmDialog } from './toast.js';
+import { showToast, showConfirmDialog, showPromptDialog } from './toast.js';
 import Router from './router.js';
 
 // ── Model / preset classification (from GGUF-derived metadata) ────────────────
@@ -35,6 +37,15 @@ const FAMILY_LABEL_MAP = {
     granite: 'Granite',
     starcoder: 'StarCoder',
 };
+
+export function confirmFreeCacheCleanup(reclaimableBytes) {
+    const reclaimableGb = (reclaimableBytes / (1024 ** 3)).toFixed(1);
+    return showConfirmDialog(
+        'Free system cache',
+        `macOS can reclaim about ${reclaimableGb} GB of cached data. Running apps are not closed, but files and apps may load a little more slowly until the cache is rebuilt.`,
+        'Free cache'
+    );
+}
 
 function classifyPreset(preset) {
     const family = preset.family || null;
@@ -262,10 +273,10 @@ export async function fetchAndRenderMemoryBar() {
 
     try {
         const headers = window.authHeaders ? window.authHeaders() : {};
-        const [sysResp, gpuResp, platResp, limResp] = await Promise.all([
+        const [sysResp, gpuResp, platformInfo, limResp] = await Promise.all([
             fetch('/metrics/system', { headers }),
             fetch('/metrics/gpu', { headers }),
-            fetch('/api/llama-binary/platform-info', { headers }),
+            getPlatformInfo().catch(() => null),
             fetch('/api/system/metal-gpu-limit', { headers }),
         ]);
 
@@ -304,9 +315,8 @@ export async function fetchAndRenderMemoryBar() {
 
         // Fallback: if GPU metrics haven't populated yet (mactop race on startup),
         // detect unified memory from platform-info (independent of mactop).
-        if (!isUnified && platResp.ok) {
-            const plat = await platResp.json();
-            if (plat.auto_backend === 'metal') {
+        if (!isUnified && platformInfo) {
+            if (platformInfo.auto_backend === 'metal') {
                 isUnified = true;
                 if (!metalGpuLimitMb && limResp.ok) {
                     const lim = await limResp.json();
@@ -414,10 +424,23 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
     // Wire "Free cache" button (macOS only)
     if (purgeBtn && reclaimableBytes >= 3 * 1024 ** 3) {
         purgeBtn.onclick = async () => {
-            if (!confirm('Flush system caches to free memory?\nThis will not affect running apps, but some data may reload slightly slower.')) return;
+            const confirmed = await confirmFreeCacheCleanup(reclaimableBytes);
+            if (!confirmed) return;
+
+            const originalLabel = purgeBtn.textContent;
+            purgeBtn.disabled = true;
+            purgeBtn.setAttribute('aria-busy', 'true');
+            purgeBtn.textContent = 'Freeing…';
             try {
                 const token = await _fetchDbAdminTokenForSystemAction();
-                if (!token) { showToast('Unable to authorize memory purge.'); return; }
+                if (!token) {
+                    showToast(
+                        'Could not authorize cache cleanup',
+                        'error',
+                        'Open Configuration and confirm the administrator token is available.'
+                    );
+                    return;
+                }
                 const resp = await fetch('/system/purge', {
                     method: 'POST',
                     headers: {
@@ -428,14 +451,22 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
                 });
                 const out = await resp.json().catch(() => null);
                 if (!resp.ok || out?.error) {
-                    showToast(out?.error || 'Memory purge failed.');
+                    showToast('Cache cleanup failed', 'error', out?.error || 'macOS could not free the cache.');
                 } else {
-                    showToast('System caches flushed.');
+                    showToast(
+                        'Cache cleanup complete',
+                        'success',
+                        'Memory availability is being refreshed.'
+                    );
                     // Re-render bar + cards to reflect new free memory.
                     setTimeout(fetchAndRenderMemoryBar, 600);
                 }
             } catch {
-                showToast('Error while attempting to flush caches.');
+                showToast('Cache cleanup failed', 'error', 'The system action could not be completed.');
+            } finally {
+                purgeBtn.disabled = false;
+                purgeBtn.removeAttribute('aria-busy');
+                purgeBtn.textContent = originalLabel;
             }
         };
     }
@@ -847,9 +878,14 @@ function _buildLaunchCard(preset, activePresetId) {
     const isRunning = !isExample && sessionState.serverRunning && preset.id === activePresetId && activePresetId;
     if (isRunning) card.classList.add('launch-card--running');
 
+    const modelSource = preset.backend === 'rapid_mlx'
+        ? (preset.rapid_mlx?.model_path || '')
+        : (preset.model_path || preset.hf_repo || '');
     const modelFile = (preset.model_path || '').split(/[/\\]/).pop() ||
+                      (preset.backend === 'rapid_mlx' ? modelSource.split(/[/\\]/).pop() : '') ||
                       (preset.hf_repo ? preset.hf_repo.split('/').slice(-1)[0] : '');
     const hasModel = !!modelFile;
+    const backendLabel = preset.backend === 'rapid_mlx' ? 'Rapid-MLX' : 'llama-server';
 
     const ctxK = preset.context_size ? Math.round(preset.context_size / 1024) : 128;
     const ctxDisplay = ctxK >= 1000 ? `${(ctxK / 1024).toFixed(1)}M context` : `${ctxK}k context`;
@@ -868,6 +904,7 @@ function _buildLaunchCard(preset, activePresetId) {
             <div class="launch-card-chips">
                 <span class="launch-chip">${ctxDisplay}</span>
                 <span class="launch-chip">${ctkDisplay}</span>
+                ${preset.backend === 'rapid_mlx' ? '<span class="launch-chip launch-chip--accent">Rapid-MLX</span>' : ''}
             </div>
             <div class="launch-card-actions">
                 <button class="launch-card-btn-start launch-card-btn-start--configure" type="button"
@@ -923,7 +960,7 @@ function _buildLaunchCard(preset, activePresetId) {
             <div class="launch-card-actions">
                 <button class="launch-card-btn-edit" type="button">Edit</button>
                 <button class="launch-card-btn-start ${hasModel ? '' : 'launch-card-btn-start--configure'}" type="button"
-                    title="${hasModel ? 'Start the llama-server with this preset' : 'Open the setup wizard to set up a model for this preset'}">
+                    title="${hasModel ? `Start ${backendLabel} with this preset` : 'Open the setup wizard to set up a model for this preset'}">
                     ${hasModel ? '▶ Start' : 'Set up model →'}
                 </button>
                 <button class="launch-card-btn-trash" type="button" title="Delete preset">
@@ -1003,7 +1040,9 @@ async function _fetchCardVramEstimates(availBytes, availRamBytes, isUnified, bud
 
     await Promise.all([...cards].map(async (card) => {
         const preset = presets.find(p => p.id === card.dataset.presetId);
-        if (!preset?.model_path) return;
+        const modelPath = presetModelSource(preset);
+        if (!modelPath) return;
+        const isRapidMlx = preset?.backend === 'rapid_mlx';
         const vramEl = card.querySelector('.launch-card-vram');
         if (!vramEl) return;
 
@@ -1013,7 +1052,7 @@ async function _fetchCardVramEstimates(availBytes, availRamBytes, isUnified, bud
                 method: 'POST',
                 headers: { ...headers, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    model_path: preset.model_path,
+                    model_path: modelPath,
                     n_ctx: preset.context_size || 131072,
                     ctk: preset.ctk || 'q8_0',
                     ctv: preset.ctv || 'q8_0',
@@ -1024,6 +1063,7 @@ async function _fetchCardVramEstimates(availBytes, availRamBytes, isUnified, bud
                     available_vram_bytes: availBytes,
                     available_ram_bytes: availRamBytes,
                     is_unified_memory: isUnified,
+                    ...(isRapidMlx ? { backend: 'rapid_mlx' } : {}),
                 }),
             });
             if (!resp.ok) return;
@@ -1253,10 +1293,10 @@ export function renderRecentEndpoints(sessions, activeId) {
     if (!list || !container) return;
 
     const allSessions = Array.isArray(sessions) ? sessions : [];
-    // Only attach sessions appear in the recent list — spawn sessions can't be
-    // "resumed" (you'd need to re-spawn), so they are only used to stamp last-launch
-    // timestamps on preset cards.
+    // Attach sessions reconnect to their endpoint. Spawn sessions restore their
+    // persisted, secret-scrubbed launch envelope.
     const attachSessions = allSessions.filter(session => !!session.mode?.Attach);
+    const spawnSessions = allSessions.filter(session => !!session.mode?.Spawn);
 
     if (!allSessions.length) {
         container.style.display = 'none';
@@ -1264,7 +1304,7 @@ export function renderRecentEndpoints(sessions, activeId) {
         return;
     }
 
-    container.style.display = attachSessions.length ? '' : 'none';
+    container.style.display = (attachSessions.length || spawnSessions.length) ? '' : 'none';
     list.innerHTML = '';
 
     // Stamp preset cards with the last time they were spawned (for "last launched" display).
@@ -1278,8 +1318,7 @@ export function renderRecentEndpoints(sessions, activeId) {
     }
     _applyLastLaunchedToCards();
 
-    // buildCard is only called for Attach sessions — Spawn sessions cannot be
-    // "resumed" from here (you'd need to re-spawn via a preset card).
+    // Attach and Spawn cards use distinct reconnect/restore paths below.
     const buildCard = (session) => {
         const card = document.createElement('div');
         card.className = 'setup-endpoint-card';
@@ -1313,7 +1352,7 @@ export function renderRecentEndpoints(sessions, activeId) {
 
         const metaEl = document.createElement('div');
         metaEl.className = 'setup-endpoint-meta';
-        const metaParts = [];
+        const metaParts = [session.backend === 'rapid_mlx' ? 'Rapid-MLX' : 'llama.cpp'];
         if (activeId && session.id === activeId) metaParts.push('Active workspace');
         else if (session.status === 'Running') metaParts.push('Last seen running');
         else if (session.status === 'Disconnected') metaParts.push('Ready to reconnect');
@@ -1334,12 +1373,29 @@ export function renderRecentEndpoints(sessions, activeId) {
         const connectBtn = document.createElement('button');
         connectBtn.className = 'setup-endpoint-connect';
 
-        const doConnect = () => {
+        const doConnect = async () => {
+            let reconnectApiKey = apiKey;
+            if (session.launch_requires_api_key && !reconnectApiKey) {
+                reconnectApiKey = await showPromptDialog(
+                    'Reconnect to protected endpoint',
+                    'Enter the API key for this endpoint. It is used only for this connection and is not saved.',
+                    '',
+                    { type: 'password', confirmLabel: 'Reconnect' },
+                );
+                if (reconnectApiKey == null) return;
+            }
             const urlInput = document.getElementById('setup-endpoint-url');
             if (urlInput) urlInput.value = endpoint;
             const apiKeyInput = document.getElementById('setup-endpoint-api-key');
-            if (apiKeyInput) apiKeyInput.value = apiKey;
-            doAttachFromSetup();
+            if (apiKeyInput) apiKeyInput.value = reconnectApiKey;
+            const backendInput = document.getElementById('setup-endpoint-backend');
+            if (backendInput) {
+                backendInput.value = session.backend === 'rapid_mlx' ? 'rapid_mlx' : 'llama_cpp';
+                backendInput.dispatchEvent(new Event('change'));
+            }
+            const modelInput = document.getElementById('setup-endpoint-model');
+            if (modelInput) modelInput.value = session.model_identity || '';
+            await doAttachFromSetup();
         };
 
         connectBtn.textContent = activeId && session.id === activeId
@@ -1357,6 +1413,52 @@ export function renderRecentEndpoints(sessions, activeId) {
     };
 
     attachSessions.forEach(session => list.appendChild(buildCard(session)));
+    spawnSessions.forEach(session => {
+        const card = document.createElement('div');
+        card.className = 'setup-endpoint-card setup-spawn-restore-card';
+        const infoWrap = document.createElement('div');
+        infoWrap.className = 'setup-endpoint-info';
+        const nameEl = document.createElement('div');
+        nameEl.className = 'setup-endpoint-name';
+        nameEl.textContent = session.name || session.model_identity || 'Saved model';
+        const detailEl = document.createElement('div');
+        detailEl.className = 'setup-endpoint-url';
+        detailEl.textContent = session.backend === 'rapid_mlx' ? 'Rapid-MLX' : 'llama.cpp';
+        const metaEl = document.createElement('div');
+        metaEl.className = 'setup-endpoint-meta';
+        metaEl.textContent = session.launch_requires_api_key
+            ? 'API key required to restore'
+            : 'Ready to restore';
+        infoWrap.append(nameEl, detailEl, metaEl);
+        const restoreBtn = document.createElement('button');
+        restoreBtn.className = 'setup-endpoint-connect';
+        restoreBtn.textContent = 'Restore';
+        const restore = async () => {
+            let apiKey = null;
+            if (session.launch_requires_api_key) {
+                apiKey = await showPromptDialog(
+                    'Restore protected model',
+                    'Enter the API key for this session. It is used only for this launch and is not saved.',
+                    '',
+                    { type: 'password', confirmLabel: 'Restore' },
+                );
+                if (apiKey == null) return;
+            }
+            restoreBtn.disabled = true;
+            try {
+                await doRestoreSession(session.id, apiKey);
+                showToast('Session restored', 'success');
+            } catch (error) {
+                showToast(`Restore failed: ${error.message}`, 'error');
+            } finally {
+                restoreBtn.disabled = false;
+            }
+        };
+        restoreBtn.addEventListener('click', event => { event.stopPropagation(); restore(); });
+        card.addEventListener('click', restore);
+        card.append(infoWrap, restoreBtn);
+        list.appendChild(card);
+    });
 
     // Live health-check attach sessions that aren't already confirmed Running
     attachSessions.forEach((session, i) => {
