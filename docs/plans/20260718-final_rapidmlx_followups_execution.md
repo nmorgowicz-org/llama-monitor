@@ -51,9 +51,11 @@ Stable Markdown headings are authoritative references. The line hints below are 
 5. Read only the additional design, cache, contract, matrix, and evidence sections routed by the active phase card below.
 6. Revalidate mutable upstream facts used by that phase. Follow comprehensive Section 14.
 7. Resolve every blocking decision for the phase. Do not let a Builder decide it implicitly.
-8. Brief one bounded Builder with the exact comprehensive-plan phase.
-9. After the Builder handoff, inspect the actual diff and brief a fresh Verifier.
-10. Update this ledger only after independent verification.
+8. Split large phases into independent parts (§4.1): any phase with 5+ files, 3+ distinct deliverables, or ≈140k+ budget should split into 2-4 parts. Example: Phase 3 (12 builder items) splits into Part A (items 1-7), Part B (item 6 probe), Part C (items 8-12).
+9. Brief one bounded Builder with the exact comprehensive-plan line ranges for that part only.
+10. After the Builder handoff, inspect the actual diff and brief a fresh Verifier for that part.
+11. Update this ledger only after independent verification of each part.
+12. Compress conversation after each verified phase to maintain context window.
 
 Do not begin at Phase 1 merely because it changes code. Phase 0 freezes evidence and decisions needed to prevent later rework.
 
@@ -92,14 +94,17 @@ Do not mechanically rewrite links after small line drift. Update this table only
 
 ## 4. Global Execution Rules
 
-### 4.1 Context boundaries
+### 4.1 Context management (CRITICAL)
 
-- One phase per Builder context.
-- One phase per Verifier context.
-- Do not combine phases because an earlier phase was short.
-- Stop at a compilable checkpoint before approaching 200k context.
-- Spawn a fresh continuation agent with a structured handoff when a phase must be split.
-- The final Verifier checks the complete phase, including work from continuation agents.
+Sub-agents (Builder/Verifier) do NOT have compression tools. They blow context on large phases and degrade quality via auto-compaction. Coordinator (which has compression) MUST enforce these rules:
+
+- **Split large phases into independent parts.** Any phase with multiple distinct deliverables or covering significant code (≈140k+ budget, 5+ files, or 3+ logical concerns) MUST be split into 2-4 independent parts. Example: Phase 3's 12 builder items split into Part A (capability snapshots + deps), Part B (on-device probe), Part C (endpoint matrix + MTP + sampling).
+- **One part per Builder context, one part per Verifier context.** Sequential: Part A Builder → Part A Verifier → remediate → Part B Builder → Part B Verifier → etc. Never parallel parts.
+- **Do NOT give sub-agents the entire comprehensive plan.** They will read thousands of lines and blow context before doing meaningful work. Provide ONLY exact line ranges: e.g. "read Phase 3 builder items 1-7 at lines 1718-1730" not "read Phase 3 in full."
+- **Targeted reads only.** Sub-agent briefs must specify line ranges for every comprehensive-plan reference: gaps, decisions, contracts, phase sections. Never say "read Section X" without line numbers.
+- **Do not combine phases** because an earlier phase was short.
+- **Coordinator compresses after each verified phase** to maintain a clean context window.
+- The phase Verifier (or final part Verifier) checks the complete phase, including work from all parts.
 
 ### 4.2 Agent authority
 
@@ -366,7 +371,10 @@ Section 8.2 item 6 is the additional non-A-ID foreground/background authority ga
 ### 7.1 Builder brief
 
 ```text
-You are the Builder for Phase <N>.
+You are the Builder for Phase <N><Part>.
+
+**CRITICAL: You do not have compression. DO NOT read the entire comprehensive plan — it is ~2300 lines and you will blow context.**
+Read ONLY the exact line ranges specified below.
 
 Authoritative plan:
 docs/plans/20260718-final_rapidmlx_followups.md
@@ -374,12 +382,11 @@ docs/plans/20260718-final_rapidmlx_followups.md
 Execution companion:
 docs/plans/20260718-final_rapidmlx_followups_execution.md
 
-Read completely (use targeted line ranges — DO NOT read the entire plan):
+Read completely (exact ranges ONLY):
 - repository AGENTS.md
 - comprehensive plan Section 9 (~line 1422–1512)
-- comprehensive Phase <N> (~line <start>–<end> from Section 11)
-- routed supporting sections only: e.g. "gap 3.2 (~line 232–246), decision D5 (~line 1370–1380), contract 7.1 (~line 1198–1210)"
-- NEVER say "read Phase N in full" without providing the exact line range; sub-agents will blow context
+- comprehensive Phase <N> specific builder items ONLY: e.g. "Phase 3 builder items 1-7 at lines 1718-1730"
+- routed supporting sections ONLY: e.g. "gap 3.8 (~line 351-362), decision D13 (~line 627-638)"
 
 Frozen state:
 - branch:
