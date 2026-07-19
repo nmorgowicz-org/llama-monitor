@@ -136,6 +136,7 @@ Scenarios:
   Models and Presets
     models-v2        Models modal: typed inventory, Import Lab, and HF download panel
     preset-editor    Preset editor: model/context, GPU, and advanced tabs
+    rapid-preset     Rapid-MLX welcome cards and preset editor (legacy and typed sources)
 
   Configuration
     settings         Settings modal, preferences, persona, models, shortcuts
@@ -229,7 +230,7 @@ function seedConfig() {
 function seedRapidMlxCapturePreset() {
     const preset = [{
         id: 'capture-rapid-mlx',
-        name: 'Qwen 3.6 · Rapid-MLX',
+        name: 'Qwen 3.6 · Rapid-MLX (legacy source)',
         backend: 'rapid_mlx',
         rapid_mlx: {
             model_path: 'mlx-community/Qwen3-30B-A3B-4bit',
@@ -241,6 +242,24 @@ function seedRapidMlxCapturePreset() {
         model_path: '',
         port: 9123,
         context_size: 131072,
+    }, {
+        id: 'capture-rapid-mlx-typed',
+        name: 'Qwen 3.6 · Rapid-MLX (typed source)',
+        backend: 'rapid_mlx',
+        rapid_mlx: {
+            model_source: {
+                kind: 'hugging_face_repo',
+                repo_id: 'mlx-community/Qwen3.6-35B-A3B-4bit',
+                revision: 'main',
+            },
+            served_model_name: 'qwen36-typed',
+            host: '127.0.0.1',
+            port: 9124,
+            log_level: 'INFO',
+        },
+        model_path: '',
+        port: 9124,
+        context_size: 65536,
     }];
     fs.mkdirSync(TEMP_APP_CONFIG_DIR, { recursive: true });
     fs.writeFileSync(join(TEMP_APP_CONFIG_DIR, 'presets.json'), JSON.stringify(preset, null, 2));
@@ -1111,7 +1130,51 @@ async function scenarioRapidPreset(ctx) {
     await page.waitForSelector('#preset-modal.open.preset-editor--rapid-mlx', { visible: true });
     await sleep(200);
     await captureShot(page, 'rapid-mlx-preset-editor.png', { fullPage: true });
-    await page.click('#preset-modal-close');
+    await page.evaluate(() => {
+        document.querySelector('#preset-modal .preset-editor-nav [data-section="server"]')?.click();
+    });
+    await sleep(200);
+    await captureShot(page, 'rapid-mlx-preset-editor-server.png', { fullPage: true });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(200);
+    await captureShot(page, 'rapid-mlx-preset-editor-server-light.png', { fullPage: true });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+    await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
+    await sleep(200);
+    await captureShot(page, 'rapid-mlx-preset-editor-server-narrow.png', { fullPage: true });
+    await page.setViewport(DEFAULT_VIEWPORT);
+    await page.evaluate(() => document.getElementById('preset-modal-close')?.click());
+    await page.waitForSelector('#preset-modal.open', { hidden: true });
+
+    // New presets use typed model sources. Capture the card and the modal it
+    // actually opens as a pair: the current product defect can otherwise make
+    // a "typed source" filename silently contain the legacy preset editor.
+    const typedCardState = await page.evaluate(() => {
+        const card = document.querySelector('.launch-card[data-preset-id="capture-rapid-mlx-typed"]');
+        if (!card) return null;
+        card.scrollIntoView({ block: 'center' });
+        return {
+            id: card.dataset.presetId,
+            name: card.querySelector('.launch-card-name')?.textContent?.trim() || '',
+            model: card.querySelector('.launch-card-model')?.textContent?.trim() || '',
+        };
+    });
+    if (!typedCardState) throw new Error('rapid-preset: typed source card was not rendered');
+    await sleep(200);
+    await captureShot(page, 'rapid-mlx-typed-source-card-before-edit.png', { fullPage: true });
+    await page.evaluate(() => {
+        document.querySelector('.launch-card[data-preset-id="capture-rapid-mlx-typed"] .launch-card-btn-edit')?.click();
+    });
+    await page.waitForSelector('#preset-modal.open.preset-editor--rapid-mlx', { visible: true });
+    await sleep(200);
+    const openedTypedState = await page.evaluate(() => ({
+        id: document.getElementById('modal-preset-id')?.value || '',
+        name: document.getElementById('modal-name')?.value || '',
+        model: document.getElementById('modal-model-path')?.value || '',
+    }));
+    console.log(`[rapid-preset] typed card requested ${typedCardState.id}; modal opened ${openedTypedState.id || '(none)'}`);
+    await captureShot(page, 'rapid-mlx-typed-card-edit-result.png', { fullPage: true });
+    await page.evaluate(() => document.getElementById('preset-modal-close')?.click());
 
     const promptState = await page.evaluate(async () => {
         const { showPromptDialog } = await import('/js/features/toast.js');
@@ -1893,8 +1956,10 @@ async function scenarioPresetEditor(ctx, options) {
         console.log('[CAPTURE] #preset-new-btn not found; skipping preset-editor scenario');
         return;
     }
-    await newBtn.click();
-    await page.waitForSelector('#preset-modal', { timeout: 6000 });
+    // The button can exist while an ancestor is still transitioning, which
+    // makes Puppeteer's clickable-point calculation fail intermittently.
+    await page.evaluate(() => document.getElementById('preset-new-btn')?.click());
+    await page.waitForSelector('#preset-modal.open', { visible: true, timeout: 6000 });
     await sleep(800);
 
     // Capture Model+Context section (default active)
