@@ -374,11 +374,12 @@ docs/plans/20260718-final_rapidmlx_followups.md
 Execution companion:
 docs/plans/20260718-final_rapidmlx_followups_execution.md
 
-Read completely:
+Read completely (use targeted line ranges — DO NOT read the entire plan):
 - repository AGENTS.md
-- comprehensive plan Section 9
-- comprehensive Phase <N>
-- these routed supporting sections: <list>
+- comprehensive plan Section 9 (~line 1422–1512)
+- comprehensive Phase <N> (~line <start>–<end> from Section 11)
+- routed supporting sections only: e.g. "gap 3.2 (~line 232–246), decision D5 (~line 1370–1380), contract 7.1 (~line 1198–1210)"
+- NEVER say "read Phase N in full" without providing the exact line range; sub-agents will blow context
 
 Frozen state:
 - branch:
@@ -451,13 +452,13 @@ Return a focused Builder handoff. A fresh verification pass will follow.
 
 Only the Coordinator updates this table after independent verification.
 
-**Last updated:** 2026-07-19 by Coordinator (Phases 0→1 verified complete, Phase 2 Builder spawned)
+**Last updated:** 2026-07-19 by Coordinator (Phase 0 verified; Phase 1 re-verified via 4 targeted passes all PASS; Phase 2 verified + hard gate 3 remediated frontend JS model_source_view adoption; HEAD f425b6e; Phase 3 next)
 
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|
 | 0 | Verified complete | handoff.md | PASS (0 gaps) | phase-0/ | None |
-| 1 | Verified complete | handoff.md | PASS WITH NOTES (2 gaps→remediated) | phase-1/ | None |
-| 2 | Verified complete | handoff.md | PASS (1 condition: fmt pre-existing) | phase-2/ | None |
+| 1 | Verified complete | handoff.md | PASS (re-verified: 4 targeted passes all PASS) | phase-1/ | None |
+| 2 | Verified complete | handoff.md | PASS (hard gate 3→remediated: frontend JS) | phase-2/ | None |
 | 3 | Not started | — | — | — | Phases 1–2 |
 | 4 | Not started | — | — | — | Phase 0 fixtures, Phase 2 identity |
 | 5a | Not started | — | — | — | Phases 3–4 (execution policy + estimator core, own gate + fresh Verifier) |
