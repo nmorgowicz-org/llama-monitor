@@ -3,6 +3,37 @@ use crate::inference::rapid_mlx::RapidMlxConfig;
 use anyhow::Result;
 use std::path::Path;
 
+/// Current preset schema version (D32).
+/// v1: initial version with schema_version field; typed Rapid-MLX model_source
+///     is authoritative; legacy model_path is read-migrated but never re-written.
+pub const PRESET_SCHEMA_VERSION: u32 = 1;
+
+/// Forward-migrate a preset from any known version to current.
+/// Returns `true` if migration was applied, `false` if already current.
+pub fn migrate_preset(preset: &mut ModelPreset) -> bool {
+    let from_version = preset.schema_version.unwrap_or(0);
+    if from_version >= PRESET_SCHEMA_VERSION {
+        return false;
+    }
+    let mut migrated = false;
+    // v0 → v1: typed Rapid-MLX model_source migration
+    if from_version < 1 {
+        if let Some(rapid) = preset.rapid_mlx.as_mut()
+            && rapid.model_source.is_none()
+            && !rapid.model_path.is_empty()
+            && let Ok(source) =
+                crate::inference::rapid_mlx::model_resolver::source_from_legacy_model_path(
+                    &rapid.model_path,
+                )
+        {
+            rapid.model_source = Some(source);
+            migrated = true;
+        }
+        preset.schema_version = Some(1);
+    }
+    migrated
+}
+
 fn null_as_zero_u32<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
     use serde::Deserialize;
     Ok(Option::<u32>::deserialize(d)?.unwrap_or(0))
@@ -17,6 +48,9 @@ pub struct ModelPreset {
     #[serde(default = "next_id")]
     pub id: String,
     pub name: String,
+    /// Schema version for forward migration (D32). `None` means v0 (pre-migration).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_version: Option<u32>,
     /// Missing in legacy presets; serde defaults those to llama.cpp.
     #[serde(default)]
     pub backend: InferenceBackend,
@@ -287,6 +321,16 @@ pub fn load_presets(path: &Path) -> Vec<ModelPreset> {
         match std::fs::read_to_string(path) {
             Ok(contents) => match serde_json::from_str::<Vec<ModelPreset>>(&contents) {
                 Ok(mut presets) if !presets.is_empty() => {
+                    // D32: forward-migrate presets from prior schema versions.
+                    let mut any_migrated = false;
+                    for preset in presets.iter_mut() {
+                        if migrate_preset(preset) {
+                            any_migrated = true;
+                        }
+                    }
+                    if any_migrated {
+                        let _ = save_presets(path, &presets);
+                    }
                     // Backfill GGUF-derived metadata (architecture_kind, active_params_b,
                     // expert counts, etc.) for presets saved before these fields existed,
                     // then persist so the welcome page / launch cards render correctly

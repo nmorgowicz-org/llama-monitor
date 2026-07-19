@@ -9,6 +9,191 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, OnceLock};
 
+/// Typed, frontend-safe codec for a Rapid-MLX model source (D5 / Gap 3.2).
+/// Rust owns parsing, validation, canonicalization, and safe edit semantics.
+/// Frontend never flattens a typed source into a lossy string and then reconstructs it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct RapidMlxModelSourceView {
+    /// One of: "mlx_directory", "hugging_face_repo", "alias", "authoritative_safetensors", "gguf_file", "unknown"
+    pub kind: String,
+    /// Human-readable display name for UI
+    pub display_name: String,
+    /// Canonical identity string (repo@revision, local path, or alias value)
+    pub canonical_identity: String,
+    /// Hugging Face repo ID (if applicable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_id: Option<String>,
+    /// Immutable revision/commit (if applicable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
+    /// Local filesystem path (if applicable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
+    /// MLX conversion recipe for safetensors sources
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversion_recipe: Option<String>,
+    /// Provenance hash (for conversion sources)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance_hash: Option<String>,
+    /// Fields editable by the user for this source kind
+    pub editable_fields: Vec<String>,
+    /// Whether this source is launchable in principle
+    pub launchable: bool,
+    /// Warnings/diagnostics for this source
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
+impl RapidMlxModelSourceView {
+    /// Create a view from a typed source. Never opens legacy `model_path`.
+    pub fn from_source(source: &RapidMlxModelSource) -> Self {
+        match source {
+            RapidMlxModelSource::MlxDirectory { path } => Self {
+                kind: "mlx_directory".into(),
+                display_name: path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.to_string_lossy().into_owned()),
+                canonical_identity: path.to_string_lossy().into_owned(),
+                repo_id: None,
+                revision: None,
+                local_path: Some(path.to_string_lossy().into_owned()),
+                conversion_recipe: None,
+                provenance_hash: None,
+                editable_fields: vec!["local_path".into()],
+                launchable: true,
+                warnings: vec![],
+            },
+            RapidMlxModelSource::HuggingFaceRepo { repo_id, revision } => Self {
+                kind: "hugging_face_repo".into(),
+                display_name: repo_id.clone(),
+                canonical_identity: format!("{repo_id}@{revision}"),
+                repo_id: Some(repo_id.clone()),
+                revision: Some(revision.clone()),
+                local_path: None,
+                conversion_recipe: None,
+                provenance_hash: None,
+                editable_fields: vec!["repo_id".into(), "revision".into()],
+                launchable: true,
+                warnings: vec![],
+            },
+            RapidMlxModelSource::Alias { value } => Self {
+                kind: "alias".into(),
+                display_name: value.clone(),
+                canonical_identity: value.clone(),
+                repo_id: None,
+                revision: None,
+                local_path: None,
+                conversion_recipe: None,
+                provenance_hash: None,
+                editable_fields: vec!["canonical_identity".into()],
+                launchable: true,
+                warnings: vec!["Free-form alias is validated by Rapid-MLX at launch".into()],
+            },
+            RapidMlxModelSource::AuthoritativeSafetensors {
+                source: st_source,
+                revision_or_hash,
+                recipe,
+            } => Self {
+                kind: "authoritative_safetensors".into(),
+                display_name: match st_source {
+                    AuthoritativeSafetensorsSource::LocalDirectory { path } => path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| path.to_string_lossy().into_owned()),
+                    AuthoritativeSafetensorsSource::HuggingFaceRepo { repo_id, revision } => {
+                        format!("{repo_id}@{revision}")
+                    }
+                },
+                canonical_identity: match st_source {
+                    AuthoritativeSafetensorsSource::LocalDirectory { path } => {
+                        path.to_string_lossy().into_owned()
+                    }
+                    AuthoritativeSafetensorsSource::HuggingFaceRepo { repo_id, revision } => {
+                        format!("{repo_id}@{revision}")
+                    }
+                },
+                repo_id: match st_source {
+                    AuthoritativeSafetensorsSource::LocalDirectory { .. } => None,
+                    AuthoritativeSafetensorsSource::HuggingFaceRepo { repo_id, .. } => {
+                        Some(repo_id.clone())
+                    }
+                },
+                revision: match st_source {
+                    AuthoritativeSafetensorsSource::LocalDirectory { .. } => None,
+                    AuthoritativeSafetensorsSource::HuggingFaceRepo { revision, .. } => {
+                        Some(revision.clone())
+                    }
+                },
+                local_path: match st_source {
+                    AuthoritativeSafetensorsSource::LocalDirectory { path } => {
+                        Some(path.to_string_lossy().into_owned())
+                    }
+                    AuthoritativeSafetensorsSource::HuggingFaceRepo { .. } => None,
+                },
+                conversion_recipe: Some(String::from(match recipe {
+                    MlxConversionRecipe::Fp16 => "fp16",
+                    MlxConversionRecipe::Bf16 => "bf16",
+                    MlxConversionRecipe::Q4 => "q4",
+                    MlxConversionRecipe::Q6 => "q6",
+                    MlxConversionRecipe::Q8 => "q8",
+                })),
+                provenance_hash: Some(revision_or_hash.clone()),
+                editable_fields: vec!["revision".into(), "conversion_recipe".into()],
+                launchable: false,
+                warnings: vec![
+                    "Requires official safetensors-to-MLX conversion".into(),
+                    format!("Conversion uses pinned official mlx-lm=={PINNED_MLX_LM_VERSION}"),
+                ],
+            },
+            RapidMlxModelSource::GgufFile { path } => Self {
+                kind: "gguf_file".into(),
+                display_name: path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.to_string_lossy().into_owned()),
+                canonical_identity: path.to_string_lossy().into_owned(),
+                repo_id: None,
+                revision: None,
+                local_path: Some(path.to_string_lossy().into_owned()),
+                conversion_recipe: None,
+                provenance_hash: None,
+                editable_fields: vec!["local_path".into()],
+                launchable: false,
+                warnings: vec![
+                    "GGUF files must be run with llama.cpp".into(),
+                    "Use the separate experimental Phase 5.5 import workflow when available".into(),
+                ],
+            },
+        }
+    }
+
+    /// Create an error view when no typed source is configured.
+    #[allow(dead_code)]
+    pub fn empty() -> Self {
+        Self {
+            kind: "unknown".into(),
+            display_name: "No model configured".into(),
+            canonical_identity: "".into(),
+            repo_id: None,
+            revision: None,
+            local_path: None,
+            conversion_recipe: None,
+            provenance_hash: None,
+            editable_fields: vec![],
+            launchable: false,
+            warnings: vec!["No model source configured for this Rapid-MLX preset".into()],
+        }
+    }
+
+    /// Check if this source is valid for launch.
+    #[allow(dead_code)]
+    pub fn is_valid(&self) -> bool {
+        self.launchable && self.warnings.is_empty() && !self.canonical_identity.is_empty()
+    }
+}
+
 const MAX_BLOCKING_RESOLVER_TASKS: usize = 2;
 
 pub const PINNED_MLX_LM_VERSION: &str = "0.31.3";
@@ -108,8 +293,10 @@ pub struct ResolvedRapidMlxLaunchModel {
     pub warnings: Vec<String>,
     #[serde(default)]
     pub remediation: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trust_remote_code_required: Option<bool>,
     #[serde(skip)]
-    environment: BTreeMap<OsString, OsString>,
+    pub environment: BTreeMap<OsString, OsString>,
 }
 
 impl ResolvedRapidMlxLaunchModel {
@@ -127,6 +314,7 @@ impl ResolvedRapidMlxLaunchModel {
             required_environment: Vec::new(),
             warnings: vec!["Free-form alias is validated by Rapid-MLX at launch".into()],
             remediation: Vec::new(),
+            trust_remote_code_required: None,
             environment: BTreeMap::new(),
         })
     }
@@ -355,6 +543,11 @@ pub async fn resolve(
             if context.hf_token.is_some() {
                 output.required_environment.push("HF_TOKEN".into());
             }
+            // Security: detect if this HF repo requires trust_remote_code (custom Python code).
+            // Data-only repos (safetensors + config.json only) launch normally.
+            // Repos with custom code require revision-scoped user consent.
+            output.trust_remote_code_required =
+                Some(run_resolver_blocking(move || needs_trust_remote_code(&snapshot)).await?);
             output
         }
         RapidMlxModelSource::Alias { value } => {
@@ -443,6 +636,7 @@ fn resolved(
         required_environment: Vec::new(),
         warnings: Vec::new(),
         remediation: Vec::new(),
+        trust_remote_code_required: None,
         environment: BTreeMap::new(),
     }
 }
@@ -514,6 +708,58 @@ fn reject_app_staging_directory(path: &Path, models_dir: &Path) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Detect whether this locally downloaded HF model directory requires
+/// trust_remote_code to load. A repo is considered safe (data-only) when it
+/// only contains safetensors/weights and standard config files. Custom-code
+/// repos are those that declare transformers main_class / auto_map entries or
+/// include model loading scripts (main.py, modeling_*.py) that rapid-mlx
+/// would need to execute.
+fn needs_trust_remote_code(model_dir: &Path) -> Result<bool> {
+    // Check config.json for transformers main_class or auto_map indicators
+    let config_path = model_dir.join("config.json");
+    if config_path.is_file() {
+        let content = match fs::read_to_string(&config_path) {
+            Ok(c) => c,
+            Err(_) => return Ok(false), // safe default: assume data-only on read error
+        };
+        let value: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(_) => return Ok(false), // safe default: assume data-only on parse error
+        };
+        // main_class indicates a custom model class must be imported
+        if value.get("main_class").and_then(|v| v.as_str()).is_some() {
+            return Ok(true);
+        }
+        // auto_map with non-standard classes indicates custom code loading
+        if let Some(auto_map) = value.get("auto_map").and_then(|v| v.as_object()) {
+            for (_, class_value) in auto_map {
+                if let Some(class_str) = class_value.as_str()
+                    && !class_str.starts_with("Auto")
+                    && !class_str.contains("transformers.models")
+                    && !class_str.contains("transformers_modules")
+                {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    // Check for custom Python loaders that rapid-mlx would execute
+    if let Ok(entries) = fs::read_dir(model_dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let file_name = entry.file_name();
+            let name = file_name.to_string_lossy().to_lowercase();
+            if name == "main.py"
+                || (name.starts_with("modeling_") && name.ends_with(".py"))
+                || (name.starts_with("configuration_") && name.ends_with(".py"))
+            {
+                return Ok(true);
+            }
+        }
+    }
+    // Default: data-only repo is safe
+    Ok(false)
 }
 
 fn validate_if_app_conversion(path: &Path, models_dir: &Path) -> Result<()> {
@@ -1623,5 +1869,71 @@ mod tests {
             preview(&source, &context).state,
             ResolverPreviewState::Invalid
         ));
+    }
+
+    #[test]
+    fn needs_trust_remote_code_data_only_safe() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("config.json"),
+            r#"{"architectures":["MLXModel"]}"#,
+        )
+        .unwrap();
+        fs::write(dir.path().join("model.safetensors"), b"weights").unwrap();
+        assert!(!needs_trust_remote_code(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn needs_trust_remote_code_main_class_detected() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("config.json"),
+            r#"{"main_class":"CustomModel"}"#,
+        )
+        .unwrap();
+        assert!(needs_trust_remote_code(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn needs_trust_remote_code_auto_map_custom_detected() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("config.json"),
+            r#"{"auto_map":{"AutoModelForCausalLM":"my_module.MyModel"}}"#,
+        )
+        .unwrap();
+        assert!(needs_trust_remote_code(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn needs_trust_remote_code_auto_map_standard_safe() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("config.json"),
+            r#"{"auto_map":{"AutoModelForCausalLM":"transformers.models.qwen2.Qwen2ForCausalLM"}}"#,
+        )
+        .unwrap();
+        assert!(!needs_trust_remote_code(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn needs_trust_remote_code_modeling_py_detected() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("modeling_custom.py"), b"def run(): pass").unwrap();
+        assert!(needs_trust_remote_code(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn needs_trust_remote_code_main_py_detected() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("main.py"), b"print('hi')").unwrap();
+        assert!(needs_trust_remote_code(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn needs_trust_remote_code_config_parse_error_safe() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("config.json"), b"not json").unwrap();
+        assert!(!needs_trust_remote_code(dir.path()).unwrap());
     }
 }

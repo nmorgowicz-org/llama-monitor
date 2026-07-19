@@ -13,7 +13,9 @@ pub mod updater;
 
 use self::command::RapidMlxCommandBuilder;
 use self::compatibility::CompatibilityProfile;
-use self::model_resolver::{RapidMlxModelSource, ResolvedRapidMlxLaunchModel};
+use self::model_resolver::{
+    RapidMlxModelSource, RapidMlxModelSourceView, ResolvedRapidMlxLaunchModel,
+};
 use self::runtime::RuntimeMetadata;
 use crate::inference::capabilities::CapabilitySet;
 use crate::inference::metrics::InferenceMetricsSnapshot;
@@ -58,10 +60,14 @@ pub struct RapidMlxConfig {
     /// Default applied to chat requests that omit `reasoning_effort`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// User consent for HF repos requiring trust_remote_code (custom Python code).
+    /// Revision-scoped: must be re-confirmed when revision changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trust_remote_code_consent: Option<String>,
     /// Diagnostic fix flags: set by the diagnostics panel to patch launch behavior.
     /// These are diagnostic helpers only, not general-purpose escape hatches.
-    #[serde(default)]
-    pub tool_call_parser: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_parser: Option<String>,
     #[serde(default)]
     pub auto_tool_choice: bool,
     #[serde(default)]
@@ -70,6 +76,10 @@ pub struct RapidMlxConfig {
     /// Validated against an allowlist at load time; no free-text CLI injection.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub escape_hatch_flags: Vec<(String, serde_json::Value)>,
+    /// Computed view of the model source for API responses and UI display.
+    /// Never persisted to disk; populated by preset_for_api().
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub model_source_view: Option<RapidMlxModelSourceView>,
 }
 
 fn default_host() -> String {
@@ -119,19 +129,35 @@ impl Default for RapidMlxConfig {
             api_key: None,
             enable_thinking: None,
             reasoning_effort: None,
-            tool_call_parser: false,
+            trust_remote_code_consent: None,
+            tool_call_parser: None,
             auto_tool_choice: false,
             no_thinking: false,
             escape_hatch_flags: Vec::new(),
+            model_source_view: None,
         }
     }
 }
 
 impl RapidMlxConfig {
+    /// Typed source wins; legacy model_path is only a launch-time fallback.
+    /// Never opens legacy data to produce a view (Gap 3.2).
     pub fn effective_model_source(&self) -> Result<RapidMlxModelSource> {
         self.model_source.clone().map(Ok).unwrap_or_else(|| {
             self::model_resolver::source_from_legacy_model_path(&self.model_path)
         })
+    }
+
+    /// Typed source view for display/edit/clone/save/estimate/library/launch.
+    /// Uses only `model_source`; ignores legacy `model_path` entirely (Gap 3.2).
+    /// Returns empty view when no typed source is configured — this is the
+    /// "No model configured" signal that the frontend must show.
+    #[allow(dead_code)]
+    pub fn model_source_view(&self) -> RapidMlxModelSourceView {
+        match &self.model_source {
+            Some(source) => RapidMlxModelSourceView::from_source(source),
+            None => RapidMlxModelSourceView::empty(),
+        }
     }
 
     pub fn validate_access(&self, fallback_api_key: Option<&str>) -> Result<()> {
@@ -164,7 +190,8 @@ pub struct RapidMlxAdapter {
     pub max_cache_blocks: Option<u32>,
     pub enable_thinking: Option<bool>,
     pub reasoning_effort: Option<String>,
-    pub tool_call_parser: bool,
+    pub trust_remote_code_consent: Option<String>,
+    pub tool_call_parser: Option<String>,
     pub auto_tool_choice: bool,
     pub no_thinking: bool,
     pub escape_hatch_flags: Vec<(String, serde_json::Value)>,
@@ -208,7 +235,8 @@ impl RapidMlxAdapter {
             max_cache_blocks: None,
             enable_thinking: None,
             reasoning_effort: None,
-            tool_call_parser: false,
+            trust_remote_code_consent: None,
+            tool_call_parser: None,
             auto_tool_choice: false,
             no_thinking: false,
             escape_hatch_flags: Vec::new(),
@@ -292,7 +320,8 @@ impl RapidMlxAdapter {
         };
 
         let builder = builder
-            .tool_call_parser(self.tool_call_parser)
+            .trust_remote_code_consent(self.trust_remote_code_consent.clone())
+            .tool_call_parser(self.tool_call_parser.clone())
             .auto_tool_choice(self.auto_tool_choice)
             .no_thinking(self.no_thinking)
             .escape_hatch_flags(self.escape_hatch_flags.clone());

@@ -1186,7 +1186,7 @@ fn build_flag_advisor_findings(
         .filter(|value| !value.is_empty());
 
     if let Some(tool_format) = tool_format {
-        if !config.tool_call_parser {
+        if config.tool_call_parser.is_none() {
             findings.push(DoctorFinding {
                 finding_type: DoctorFindingType::Preset,
                 severity: DoctorSeverity::Warning,
@@ -1202,7 +1202,7 @@ fn build_flag_advisor_findings(
                 finding_type: DoctorFindingType::Preset,
                 severity: DoctorSeverity::Warning,
                 message: format!(
-                    "Model declares tool format '{tool_format}' but the active preset does not pass --auto-tool-choice"
+                    "Model declares tool format '{tool_format}' but the active preset does not pass --enable-auto-tool-choice"
                 ),
                 section: "Preset Flags".to_string(),
                 fix: Some(FixAction::EnableAutoToolChoice),
@@ -1600,10 +1600,12 @@ Run with `--verbose` for details on each check.
             api_key: None,
             enable_thinking: None,
             reasoning_effort: None,
-            tool_call_parser: false,
+            trust_remote_code_consent: None,
+            tool_call_parser: None,
             auto_tool_choice: false,
             no_thinking: false,
             escape_hatch_flags: Vec::new(),
+            model_source_view: None,
         };
 
         let findings = build_flag_advisor_findings(&profile, &config);
@@ -1643,10 +1645,12 @@ Run with `--verbose` for details on each check.
             api_key: None,
             enable_thinking: None,
             reasoning_effort: None,
-            tool_call_parser: true,
+            trust_remote_code_consent: None,
+            tool_call_parser: Some("openai".to_string()),
             auto_tool_choice: true,
             no_thinking: false,
             escape_hatch_flags: Vec::new(),
+            model_source_view: None,
         };
 
         let findings = build_flag_advisor_findings(&profile, &config);
@@ -1674,10 +1678,12 @@ Run with `--verbose` for details on each check.
             api_key: None,
             enable_thinking: Some(false),
             reasoning_effort: None,
-            tool_call_parser: false,
+            trust_remote_code_consent: None,
+            tool_call_parser: None,
             auto_tool_choice: false,
             no_thinking: false,
             escape_hatch_flags: Vec::new(),
+            model_source_view: None,
         };
 
         let findings = build_flag_advisor_findings(&profile, &config);

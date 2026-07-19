@@ -36,6 +36,16 @@ fn preset_for_api(mut preset: ModelPreset) -> ModelPreset {
         preset.api_key_configured || preset.api_key.as_ref().is_some_and(|key| !key.is_empty());
     preset.api_key = None;
     preset.clear_api_key = false;
+    // D5: compute model_source_view for Rapid-MLX presets (never persisted, API-only).
+    if let Some(ref mut config) = preset.rapid_mlx
+        && let Some(ref source) = config.model_source
+    {
+        config.model_source_view = Some(
+            crate::inference::rapid_mlx::model_resolver::RapidMlxModelSourceView::from_source(
+                source,
+            ),
+        );
+    }
     preset
 }
 

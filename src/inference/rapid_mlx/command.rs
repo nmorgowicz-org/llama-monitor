@@ -1,5 +1,7 @@
 use crate::inference::rapid_mlx::compatibility::ServeCapabilities;
-use crate::inference::rapid_mlx::model_resolver::ResolvedRapidMlxLaunchModel;
+use crate::inference::rapid_mlx::model_resolver::{
+    RapidMlxModelSource, ResolvedRapidMlxLaunchModel,
+};
 use crate::inference::supervisor::SupervisedLaunch;
 use anyhow::Result;
 use std::ffi::OsString;
@@ -14,9 +16,10 @@ pub struct RapidMlxCommandBuilder {
     timeout: Option<u32>,
     max_cache_blocks: Option<u32>,
     api_key: Option<String>,
-    tool_call_parser: bool,
+    tool_call_parser: Option<String>,
     auto_tool_choice: bool,
     no_thinking: bool,
+    trust_remote_code_consent: Option<String>,
     escape_hatch_flags: Vec<(String, serde_json::Value)>,
 }
 
@@ -31,9 +34,10 @@ impl RapidMlxCommandBuilder {
             timeout: None,
             max_cache_blocks: None,
             api_key: None,
-            tool_call_parser: false,
+            tool_call_parser: None,
             auto_tool_choice: false,
             no_thinking: false,
+            trust_remote_code_consent: None,
             escape_hatch_flags: Vec::new(),
         }
     }
@@ -73,8 +77,8 @@ impl RapidMlxCommandBuilder {
         self
     }
 
-    pub fn tool_call_parser(mut self, enable: bool) -> Self {
-        self.tool_call_parser = enable;
+    pub fn tool_call_parser(mut self, parser: Option<String>) -> Self {
+        self.tool_call_parser = parser;
         self
     }
 
@@ -85,6 +89,11 @@ impl RapidMlxCommandBuilder {
 
     pub fn no_thinking(mut self, enable: bool) -> Self {
         self.no_thinking = enable;
+        self
+    }
+
+    pub fn trust_remote_code_consent(mut self, consent: Option<String>) -> Self {
+        self.trust_remote_code_consent = consent;
         self
     }
 
@@ -135,11 +144,12 @@ impl RapidMlxCommandBuilder {
 
         // Diagnostic fix flags — not guarded by capability checks since they are
         // only activated by the diagnostics panel, never by default.
-        if self.tool_call_parser {
+        if let Some(parser) = self.tool_call_parser {
             args.push("--tool-call-parser".to_string());
+            args.push(parser);
         }
         if self.auto_tool_choice {
-            args.push("--auto-tool-choice".to_string());
+            args.push("--enable-auto-tool-choice".to_string());
         }
         if self.no_thinking {
             args.push("--no-thinking".to_string());
@@ -176,6 +186,14 @@ impl RapidMlxCommandBuilder {
                 .map(|(name, value)| (name.clone(), value.clone())),
         );
 
+        // Security: enforce revision-scoped consent for repos requiring trust_remote_code.
+        // When the resolved model marks trust_remote_code_required=true, launch is blocked
+        // unless the user has explicitly consented for that specific repo@revision.
+        if self.model.trust_remote_code_required == Some(true) {
+            validate_trust_consent(&self.model, &self.trust_remote_code_consent)?;
+            env.push((OsString::from("HF_TRUST_REMOTE_CODE"), OsString::from("1")));
+        }
+
         Ok(SupervisedLaunch {
             program: binary_path,
             args: os_args,
@@ -188,6 +206,52 @@ impl RapidMlxCommandBuilder {
             ),
         })
     }
+}
+
+/// Validate trust_remote_code consent matches "repo_id@revision" format and corresponds to the
+/// resolved model's HF source. Blocks launch on missing consent, format error, or mismatch.
+fn validate_trust_consent(
+    model: &ResolvedRapidMlxLaunchModel,
+    consent: &Option<String>,
+) -> Result<()> {
+    let consent_str = consent
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("This model requires trust_remote_code (custom Python code execution). Consent must be granted for this specific repo and revision before launching."))?;
+
+    if consent_str.is_empty() {
+        anyhow::bail!("trust_remote_code consent must not be empty");
+    }
+
+    let (consent_repo, consent_revision) = consent_str.rsplit_once('@').ok_or_else(|| {
+        anyhow::anyhow!(
+            "trust_remote_code consent must be in format repo_id@revision (e.g. org/model@main)"
+        )
+    })?;
+
+    match &model.original_input {
+        RapidMlxModelSource::HuggingFaceRepo { repo_id, revision } => {
+            if consent_repo != repo_id {
+                anyhow::bail!(
+                    "trust_remote_code consent repo mismatch: expected {repo_id}, got {consent_repo}"
+                );
+            }
+            if consent_revision != revision {
+                anyhow::bail!(
+                    "trust_remote_code consent revision mismatch for {repo_id}: expected {revision}, got {consent_revision}"
+                );
+            }
+        }
+        RapidMlxModelSource::MlxDirectory { .. }
+        | RapidMlxModelSource::GgufFile { .. }
+        | RapidMlxModelSource::Alias { .. }
+        | RapidMlxModelSource::AuthoritativeSafetensors { .. } => {
+            anyhow::bail!(
+                "trust_remote_code consent requires an HF repo source; model source kind does not support revision-scoped consent"
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn serde_value_to_flag_arg(value: &serde_json::Value) -> String {
@@ -286,7 +350,7 @@ mod tests {
     #[test]
     fn escape_hatch_flags_are_applied_correctly() {
         let flags = vec![
-            ("force-spec-decode".into(), serde_json::Value::Bool(true)),
+            ("force-hybrid".into(), serde_json::Value::Bool(true)),
             ("no-hybrid".into(), serde_json::Value::Bool(false)),
             ("pflash".into(), serde_json::Value::String("always".into())),
             (
@@ -305,10 +369,171 @@ mod tests {
         .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
         .unwrap();
         let args = args(&launch);
-        assert!(args.contains(&"--force-spec-decode".to_string()));
+        assert!(args.contains(&"--force-hybrid".to_string()));
         assert!(!args.contains(&"--no-hybrid".to_string()));
         assert!(args.windows(2).any(|p| p == ["--pflash", "always"]));
         assert!(args.windows(2).any(|p| p == ["--pflash-threshold", "128"]));
         assert!(args.windows(2).any(|p| p == ["--pflash-keep-ratio", "0.7"]));
+    }
+
+    #[test]
+    fn trust_consent_blocks_without_consent() {
+        let model = ResolvedRapidMlxLaunchModel {
+            launch_argument: "org/model".into(),
+            display_name: "org/model".into(),
+            source_kind: crate::inference::rapid_mlx::model_resolver::ResolvedRapidMlxSourceKind::FreeFormAlias,
+            original_input: RapidMlxModelSource::HuggingFaceRepo {
+                repo_id: "org/model".into(),
+                revision: "main".into(),
+            },
+            conversion: None,
+            required_environment: Vec::new(),
+            warnings: Vec::new(),
+            remediation: Vec::new(),
+            trust_remote_code_required: Some(true),
+            environment: std::collections::BTreeMap::new(),
+        };
+        let launch = RapidMlxCommandBuilder::new(model)
+            .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline());
+        let err = launch.unwrap_err().to_string();
+        assert!(
+            err.contains("trust_remote_code"),
+            "expected trust error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn trust_consent_accepts_valid_match() {
+        let model = ResolvedRapidMlxLaunchModel {
+            launch_argument: "org/model".into(),
+            display_name: "org/model".into(),
+            source_kind: crate::inference::rapid_mlx::model_resolver::ResolvedRapidMlxSourceKind::FreeFormAlias,
+            original_input: RapidMlxModelSource::HuggingFaceRepo {
+                repo_id: "org/model".into(),
+                revision: "main".into(),
+            },
+            conversion: None,
+            required_environment: Vec::new(),
+            warnings: Vec::new(),
+            remediation: Vec::new(),
+            trust_remote_code_required: Some(true),
+            environment: std::collections::BTreeMap::new(),
+        };
+        let launch = RapidMlxCommandBuilder::new(model)
+            .trust_remote_code_consent(Some("org/model@main".into()))
+            .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline());
+        assert!(launch.is_ok(), "unexpected error: {:?}", launch);
+        let envs: Vec<_> = launch.unwrap().env;
+        assert!(
+            envs.iter()
+                .any(|(n, v)| n == "HF_TRUST_REMOTE_CODE" && v == "1")
+        );
+    }
+
+    #[test]
+    fn trust_consent_rejects_repo_mismatch() {
+        let model = ResolvedRapidMlxLaunchModel {
+            launch_argument: "org/model".into(),
+            display_name: "org/model".into(),
+            source_kind: crate::inference::rapid_mlx::model_resolver::ResolvedRapidMlxSourceKind::FreeFormAlias,
+            original_input: RapidMlxModelSource::HuggingFaceRepo {
+                repo_id: "org/model".into(),
+                revision: "main".into(),
+            },
+            conversion: None,
+            required_environment: Vec::new(),
+            warnings: Vec::new(),
+            remediation: Vec::new(),
+            trust_remote_code_required: Some(true),
+            environment: std::collections::BTreeMap::new(),
+        };
+        let launch = RapidMlxCommandBuilder::new(model)
+            .trust_remote_code_consent(Some("other/model@main".into()))
+            .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline());
+        let err = launch.unwrap_err().to_string();
+        assert!(
+            err.contains("repo mismatch"),
+            "expected repo mismatch, got: {err}"
+        );
+    }
+
+    #[test]
+    fn trust_consent_rejects_revision_mismatch() {
+        let model = ResolvedRapidMlxLaunchModel {
+            launch_argument: "org/model".into(),
+            display_name: "org/model".into(),
+            source_kind: crate::inference::rapid_mlx::model_resolver::ResolvedRapidMlxSourceKind::FreeFormAlias,
+            original_input: RapidMlxModelSource::HuggingFaceRepo {
+                repo_id: "org/model".into(),
+                revision: "main".into(),
+            },
+            conversion: None,
+            required_environment: Vec::new(),
+            warnings: Vec::new(),
+            remediation: Vec::new(),
+            trust_remote_code_required: Some(true),
+            environment: std::collections::BTreeMap::new(),
+        };
+        let launch = RapidMlxCommandBuilder::new(model)
+            .trust_remote_code_consent(Some("org/model@bad-revision".into()))
+            .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline());
+        let err = launch.unwrap_err().to_string();
+        assert!(
+            err.contains("revision mismatch"),
+            "expected revision mismatch, got: {err}"
+        );
+    }
+
+    #[test]
+    fn trust_consent_rejects_invalid_format() {
+        let model = ResolvedRapidMlxLaunchModel {
+            launch_argument: "org/model".into(),
+            display_name: "org/model".into(),
+            source_kind: crate::inference::rapid_mlx::model_resolver::ResolvedRapidMlxSourceKind::FreeFormAlias,
+            original_input: RapidMlxModelSource::HuggingFaceRepo {
+                repo_id: "org/model".into(),
+                revision: "main".into(),
+            },
+            conversion: None,
+            required_environment: Vec::new(),
+            warnings: Vec::new(),
+            remediation: Vec::new(),
+            trust_remote_code_required: Some(true),
+            environment: std::collections::BTreeMap::new(),
+        };
+        let launch = RapidMlxCommandBuilder::new(model)
+            .trust_remote_code_consent(Some("just-repo".into()))
+            .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline());
+        let err = launch.unwrap_err().to_string();
+        assert!(
+            err.contains("repo_id@revision"),
+            "expected format error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn trust_consent_rejects_non_hf_source() {
+        let model = ResolvedRapidMlxLaunchModel {
+            launch_argument: "/local/path".into(),
+            display_name: "/local/path".into(),
+            source_kind: crate::inference::rapid_mlx::model_resolver::ResolvedRapidMlxSourceKind::FreeFormAlias,
+            original_input: RapidMlxModelSource::MlxDirectory {
+                path: PathBuf::from("/local/path"),
+            },
+            conversion: None,
+            required_environment: Vec::new(),
+            warnings: Vec::new(),
+            remediation: Vec::new(),
+            trust_remote_code_required: Some(true),
+            environment: std::collections::BTreeMap::new(),
+        };
+        let launch = RapidMlxCommandBuilder::new(model)
+            .trust_remote_code_consent(Some("org/model@main".into()))
+            .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline());
+        let err = launch.unwrap_err().to_string();
+        assert!(
+            err.contains("revision-scoped consent"),
+            "expected source error, got: {err}"
+        );
     }
 }

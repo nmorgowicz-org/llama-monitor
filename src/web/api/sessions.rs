@@ -530,7 +530,9 @@ fn api_apply_fix(
                     };
 
                     match fix_action {
-                        FixAction::AddToolCallParser => config.tool_call_parser = true,
+                        FixAction::AddToolCallParser => {
+                            config.tool_call_parser = Some("openai".to_string())
+                        }
                         FixAction::EnableAutoToolChoice => config.auto_tool_choice = true,
                         FixAction::AddNoThinking => config.no_thinking = true,
                     }

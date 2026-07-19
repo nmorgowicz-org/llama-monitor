@@ -95,23 +95,6 @@ pub const ALLOWED_ESCAPE_FLAGS: &[EscapeFlagDescriptor] = &[
         enum_options: None,
         default: None,
     },
-    // ── Spec-decode force toggles ───────────────────────────────────────────────
-    EscapeFlagDescriptor {
-        flag: "force-spec-decode",
-        value_type: "bool",
-        description: "Force speculative decoding",
-        tooltip: "Override runtime heuristics and always enable speculative decoding, even if the model or hardware would normally disable it.",
-        enum_options: None,
-        default: None,
-    },
-    EscapeFlagDescriptor {
-        flag: "no-spec-decode",
-        value_type: "bool",
-        description: "Disable speculative decoding",
-        tooltip: "Force speculative decoding off regardless of model capabilities or runtime auto-detection.",
-        enum_options: None,
-        default: None,
-    },
     // ── Hybrid force toggles ────────────────────────────────────────────────────
     EscapeFlagDescriptor {
         flag: "force-hybrid",

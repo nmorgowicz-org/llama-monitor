@@ -688,6 +688,7 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         rapid_mlx: None,
         id: crate::presets::next_id(),
         name,
+        schema_version: None,
         model_path,
         context_size,
         ctk: "f16".into(),

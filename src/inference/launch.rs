@@ -428,7 +428,8 @@ pub async fn construct_adapter(
             adapter.max_cache_blocks = config.max_cache_blocks;
             adapter.enable_thinking = config.enable_thinking;
             adapter.reasoning_effort = config.reasoning_effort.clone();
-            adapter.tool_call_parser = config.tool_call_parser;
+            adapter.trust_remote_code_consent = config.trust_remote_code_consent.clone();
+            adapter.tool_call_parser = config.tool_call_parser.clone();
             adapter.auto_tool_choice = config.auto_tool_choice;
             adapter.no_thinking = config.no_thinking;
             if let Err(invalid) = crate::inference::rapid_mlx::escape_hatch::validate_escape_flags(
@@ -813,7 +814,7 @@ mod tests {
             rapid_mlx: Some(RapidMlxConfig {
                 model_path: "/models/rapid".into(),
                 escape_hatch_flags: vec![
-                    ("force-spec-decode".into(), serde_json::Value::Bool(true)),
+                    ("force-hybrid".into(), serde_json::Value::Bool(true)),
                     (
                         "pflash-threshold".into(),
                         serde_json::Value::Number(serde_json::Number::from(64)),
@@ -823,6 +824,8 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert!(validate_preset_backend_config(&preset).is_ok());
+        if let Err(e) = validate_preset_backend_config(&preset) {
+            panic!("validation failed: {}", e);
+        }
     }
 }

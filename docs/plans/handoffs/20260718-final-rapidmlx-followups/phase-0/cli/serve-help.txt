@@ -1,0 +1,430 @@
+usage: rapid-mlx serve [-h] [--served-model-name SERVED_MODEL_NAME]
+                       [--force-disk-check] [--host HOST] [--port PORT]
+                       [--listen-fd FD]
+                       [--log-level {DEBUG,INFO,WARNING,ERROR}]
+                       [--max-num-seqs MAX_NUM_SEQS]
+                       [--max-concurrent-requests MAX_CONCURRENT_REQUESTS]
+                       [--prefill-batch-size PREFILL_BATCH_SIZE]
+                       [--completion-batch-size COMPLETION_BATCH_SIZE]
+                       [--enable-prefix-cache] [--disable-prefix-cache]
+                       [--prefix-cache-size PREFIX_CACHE_SIZE]
+                       [--cache-memory-mb CACHE_MEMORY_MB]
+                       [--cache-memory-percent CACHE_MEMORY_PERCENT]
+                       [--hybrid-cache-entries HYBRID_CACHE_ENTRIES]
+                       [--response-cache-entries RESPONSE_CACHE_ENTRIES]
+                       [--no-memory-aware-cache]
+                       [--prefix-cache-index {radix,hash}]
+                       [--kv-cache-dtype {bf16,int8,int4}] [--reasoning]
+                       [--kv-cache-quantization]
+                       [--kv-cache-quantization-bits {4,8}]
+                       [--kv-cache-quantization-group-size KV_CACHE_QUANTIZATION_GROUP_SIZE]
+                       [--kv-cache-min-quantize-tokens KV_CACHE_MIN_QUANTIZE_TOKENS]
+                       [--kv-cache-turboquant [{v4,k8v4,none}]]
+                       [--kv-cache-turboquant-bits {3,4}]
+                       [--kv-cache-turboquant-group-size KV_CACHE_TURBOQUANT_GROUP_SIZE]
+                       [--kv-disk-checkpoint-interval KV_DISK_CHECKPOINT_INTERVAL]
+                       [--stream-interval STREAM_INTERVAL]
+                       [--max-tokens MAX_TOKENS]
+                       [--speculative-config SPECULATIVE_CONFIG]
+                       [--gpu-memory-utilization GPU_MEMORY_UTILIZATION]
+                       [--use-paged-cache]
+                       [--paged-cache-block-size PAGED_CACHE_BLOCK_SIZE]
+                       [--max-cache-blocks MAX_CACHE_BLOCKS] [--enable-audio]
+                       [--prefill-step-size PREFILL_STEP_SIZE]
+                       [--mcp-config MCP_CONFIG] [--api-key API_KEY]
+                       [--cors-origins ORIGIN [ORIGIN ...]]
+                       [--rate-limit RATE_LIMIT]
+                       [--max-request-bytes MAX_REQUEST_BYTES]
+                       [--timeout TIMEOUT] [--enable-auto-tool-choice]
+                       [--tool-call-parser TOOL_CALL_PARSER]
+                       [--enable-tool-logits-bias]
+                       [--reasoning-parser {gemma4,qwen3,hy_v3,hy3,deepseek_r1,vibethinker,glm4,gpt_oss,harmony,minimax,ui_tars}]
+                       [--no-thinking] [--no-tool-call-parser]
+                       [--no-reasoning-parser] [--force-hybrid] [--no-hybrid]
+                       [--force-spec-decode] [--no-spec-decode]
+                       [--force-openai-harmony-streaming]
+                       [--no-openai-harmony-streaming] [--gc-control]
+                       [--no-gc-control] [--pin-system-prompt] [--mllm]
+                       [--no-mllm] [--default-temperature DEFAULT_TEMPERATURE]
+                       [--default-top-p DEFAULT_TOP_P]
+                       [--default-top-k DEFAULT_TOP_K]
+                       [--default-min-p DEFAULT_MIN_P]
+                       [--default-repetition-penalty DEFAULT_REPETITION_PENALTY]
+                       [--default-presence-penalty DEFAULT_PRESENCE_PENALTY]
+                       [--default-frequency-penalty DEFAULT_FREQUENCY_PENALTY]
+                       [--cloud-model CLOUD_MODEL]
+                       [--cloud-threshold CLOUD_THRESHOLD]
+                       [--cloud-api-base CLOUD_API_BASE]
+                       [--cloud-api-key CLOUD_API_KEY]
+                       [--embedding-model EMBEDDING_MODEL]
+                       [--watchdog-ppid PID] [--pflash {off,auto,always}]
+                       [--pflash-threshold PFLASH_THRESHOLD]
+                       [--pflash-keep-ratio PFLASH_KEEP_RATIO]
+                       [--pflash-min-keep-tokens PFLASH_MIN_KEEP_TOKENS]
+                       [--pflash-sink-tokens PFLASH_SINK_TOKENS]
+                       [--pflash-tail-tokens PFLASH_TAIL_TOKENS]
+                       [--pflash-block-size PFLASH_BLOCK_SIZE]
+                       [--pflash-query-window PFLASH_QUERY_WINDOW]
+                       [--pflash-stride-blocks PFLASH_STRIDE_BLOCKS]
+                       [--pflash-include-tools]
+                       model
+
+positional arguments:
+  model                 Model to serve
+
+options:
+  -h, --help            show this help message and exit
+  --served-model-name SERVED_MODEL_NAME
+                        The model name used in the API. If not specified, the
+                        model argument is used.
+  --force-disk-check    Skip the pre-flight disk-space check that aborts when
+                        the model is larger than free disk. Use only if you
+                        know the HF cache lives on a different filesystem
+                        (e.g. external drive via HF_HOME).
+  --host HOST           Host to bind (default: 127.0.0.1, loopback-only). Pass
+                        0.0.0.0 (or "") to expose the server on every
+                        interface (LAN reachable) — only do this once the
+                        bearer-auth posture has been reviewed. The wildcard
+                        bind also widens the PortSweep collision window: macOS
+                        lets a wildcard listener coexist with a more-specific
+                        (127.0.0.1) listener on the same port, so a second
+                        server may start and silently shadow the first on the
+                        loopback path. The pre-flight bind check below probes
+                        127.0.0.1 explicitly whenever --host is a wildcard
+                        alias to keep that bypass closed.
+  --port PORT           Port to bind
+  --listen-fd FD        File descriptor of a pre-bound listening socket
+                        (3-1023). Used for socket activation
+                        (launchd/systemd/parent-process supervision) —
+                        supervisor binds the loopback socket, validates auth
+                        secret, then execve's into rapid-mlx. When set,
+                        --host/--port are ignored for binding.
+  --log-level {DEBUG,INFO,WARNING,ERROR}
+                        Log level for Python logging and uvicorn (case-
+                        insensitive)
+  --max-num-seqs MAX_NUM_SEQS
+                        Max concurrent sequences
+  --max-concurrent-requests MAX_CONCURRENT_REQUESTS
+                        Admission cap on in-flight requests (queued +
+                        running). When exceeded, new requests return HTTP 503
+                        with Retry-After. Default 256; operators on memory-
+                        constrained devices may want to set this near ``--max-
+                        num-seqs`` to limit queue depth.
+  --prefill-batch-size PREFILL_BATCH_SIZE
+                        Prefill batch size
+  --completion-batch-size COMPLETION_BATCH_SIZE
+                        Completion batch size
+  --enable-prefix-cache
+                        Enable prefix caching for repeated prompts (default:
+                        enabled)
+  --disable-prefix-cache
+                        Disable prefix caching
+  --prefix-cache-size PREFIX_CACHE_SIZE
+                        Max entries in prefix cache (default: 100, legacy mode
+                        only)
+  --cache-memory-mb CACHE_MEMORY_MB
+                        Cache memory limit in MB (default: auto-detect ~20% of
+                        RAM)
+  --cache-memory-percent CACHE_MEMORY_PERCENT
+                        Fraction of available RAM for cache if auto-detecting
+                        (default: 0.20)
+  --hybrid-cache-entries HYBRID_CACHE_ENTRIES
+                        Retain up to N non-trimmable prefix-cache entries for
+                        prefix-extension reuse (a stable prefix + a new suffix
+                        each turn); 0 disables (default: 0). Covers both
+                        hybrid recurrent-state (GatedDeltaNet/Mamba) AND
+                        sliding-window (Gemma 4, GPT-OSS) models. Best for
+                        stable-system-prompt / long-context agent workloads.
+                        An identical exact re-request of a rotated sliding-
+                        window prompt falls back to a full prefill (byte-equal
+                        to cold).
+  --response-cache-entries RESPONSE_CACHE_ENTRIES
+                        Retain up to N fully-computed deterministic (greedy)
+                        chat responses; a completely repeated request returns
+                        the stored completion verbatim with zero GPU decode. 0
+                        disables (default: 0). Only temperature==0 / top_k==1
+                        requests are cached — sampled requests are never
+                        short-circuited.
+  --no-memory-aware-cache
+                        Disable memory-aware cache, use legacy entry-count
+                        based cache
+  --prefix-cache-index {radix,hash}
+                        Prefix-cache lookup index: 'radix' (default, R15-P1)
+                        uses a token trie for O(prefix_len) lookups and
+                        surfaces dedup-bytes-saved on /metrics; 'hash' falls
+                        back to the legacy bisect-over-sorted-keys path.
+  --kv-cache-dtype {bf16,int8,int4}
+                        KV cache dtype (R15 #300, default: int4). Apple
+                        Silicon decode is memory-bandwidth-bound; int4 yields
+                        ~4× less bandwidth per decode step with 97-98% quality
+                        retention. Sliding-window (Gemma 3, GPT-OSS) and MLA
+                        (DeepSeek V3+, Kimi K2.5) models auto-downgrade to
+                        bf16. Use --reasoning for AIME / hard math.
+  --reasoning           Reasoning profile: pins --kv-cache-dtype to int8
+                        regardless of the dtype flag (sub-4-bit drops -20pt on
+                        AIME-class math for Qwen3 thinking variants).
+  --kv-cache-quantization
+                        [deprecated alias of --kv-cache-dtype int8] Quantize
+                        stored KV caches to reduce memory (8-bit by default).
+                        When both flags are passed, this one wins for
+                        backwards compatibility.
+  --kv-cache-quantization-bits {4,8}
+                        Bit width for KV cache quantization (default: 8)
+  --kv-cache-quantization-group-size KV_CACHE_QUANTIZATION_GROUP_SIZE
+                        Group size for KV cache quantization (default: 64)
+  --kv-cache-min-quantize-tokens KV_CACHE_MIN_QUANTIZE_TOKENS
+                        Minimum tokens for quantization to apply (default:
+                        256)
+  --kv-cache-turboquant [{v4,k8v4,none}]
+                        Enable TurboQuant KV-cache compression. ``v4``
+                        (default when the flag is bare) is V-only 3-4 bit
+                        Lloyd-Max with K in FP16; ``k8v4`` is the R15 Phase 4
+                        mix — K at 8-bit Walsh-Hadamard + V at 4-bit Lloyd-Max
+                        (~4.6x KV compression on dense models); ``none`` is
+                        the explicit off-switch — overrides the alias-driven
+                        ``turboquant_tier=k8v4_verified`` default so the
+                        operator can A/B the bare FP16 KV path. Experimental —
+                        mutually exclusive with --kv-cache-quantization.
+  --kv-cache-turboquant-bits {3,4}
+                        V-side bit width for TurboQuant (default: auto-select
+                        by head_dim — 3-bit for head_dim>=96, 4-bit for
+                        head_dim=64). Ignored when --kv-cache-turboquant=k8v4
+                        (V is pinned to 4-bit there).
+  --kv-cache-turboquant-group-size KV_CACHE_TURBOQUANT_GROUP_SIZE
+                        Group size for TurboQuant V-side quantization
+                        (default: 32)
+  --kv-disk-checkpoint-interval KV_DISK_CHECKPOINT_INTERVAL
+                        Token interval at which the scheduler snapshots KV
+                        state to ~/.cache/rapid-mlx/kv_checkpoints/ for resume
+                        / shared-prefix reload (R15 #296, default 256). 0
+                        disables. Pairs with the
+                        RAPID_MLX_KV_CHECKPOINT_MAX_BYTES env var (default 20
+                        GiB) for the oldest-first disk-cap eviction policy.
+  --stream-interval STREAM_INTERVAL
+                        Tokens to batch before streaming (1=smooth,
+                        higher=throughput)
+  --max-tokens MAX_TOKENS
+                        Default max tokens for generation (default: 32768)
+  --speculative-config SPECULATIVE_CONFIG
+                        vLLM-style speculative decoding JSON config. This
+                        frontend parses method/model/num_speculative_tokens
+                        now. DFlash requires the rapid-mlx[dflash] extra and
+                        is available with '{"method":"dflash"}', DDTree with
+                        '{"method":"ddtree"}', and MTP with '{"method":"mtp","
+                        num_speculative_tokens":3,"disable_auto_k":false}'.
+                        SuffixDecoding is an explicit, workload-specific flag
+                        for high prompt/output-overlap traffic and is
+                        available with
+                        '{"method":"suffix","num_speculative_tokens":8}'.
+  --gpu-memory-utilization GPU_MEMORY_UTILIZATION
+                        Fraction of device memory for Metal allocation limit
+                        and emergency cache clear threshold (0.0-1.0, default:
+                        0.90). Increase to 0.95 for large models (200GB+) that
+                        need more memory headroom.
+  --use-paged-cache     Use paged KV cache for memory efficiency
+                        (experimental)
+  --paged-cache-block-size PAGED_CACHE_BLOCK_SIZE
+                        Tokens per cache block (default: 64)
+  --max-cache-blocks MAX_CACHE_BLOCKS
+                        Maximum number of cache blocks (default: 1000)
+  --enable-audio        Mount the ``/v1/audio/*`` routes even when the loaded
+                        model is text-only. Useful for side-car deployments
+                        that proxy audio requests to a separate process.
+                        Audio-capable models (kokoro / whisper / parakeet /
+                        chatterbox / vibevoice / voxcpm) auto-mount the routes
+                        — this flag is only needed on text-mode boots.
+  --prefill-step-size PREFILL_STEP_SIZE
+                        Chunk size for prompt prefill processing. Larger
+                        values use more memory but can improve prefill
+                        throughput. (default: 2048)
+  --mcp-config MCP_CONFIG
+                        Path to MCP configuration file (JSON/YAML) for tool
+                        integration
+  --api-key API_KEY     API key for authentication (if not set, falls back to
+                        the RAPID_MLX_API_KEY env var; if neither, no auth
+                        required)
+  --cors-origins ORIGIN [ORIGIN ...]
+                        Allowed CORS origins (default: * for all origins).
+                        Example: --cors-origins http://localhost:3000
+                        https://myapp.com
+  --rate-limit RATE_LIMIT
+                        Rate limit requests per minute per client (0 =
+                        disabled)
+  --max-request-bytes MAX_REQUEST_BYTES
+                        Maximum HTTP request body size in bytes (default: 8
+                        MiB = 8388608). Requests over this cap are rejected
+                        with HTTP 413 before JSON parsing or tokenization
+                        runs. 0 disables the cap. Falls back to the
+                        RAPID_MLX_MAX_REQUEST_BYTES env var if unset.
+  --timeout TIMEOUT     Default request timeout in seconds (default: 1800 = 30
+                        min)
+  --enable-auto-tool-choice
+                        Enable auto tool choice for supported models. Use
+                        --tool-call-parser to specify which parser to use.
+  --tool-call-parser TOOL_CALL_PARSER
+                        Select the tool call parser for the model. Canonical
+                        options: auto (auto-detect), mistral,
+                        qwen/qwen3/qwen3_xml (reasoning models,
+                        <tool_call>JSON</tool_call> format),
+                        qwen3_coder/qwen3_coder_xml (Coder model,
+                        <function=NAME> XML format), llama/llama3/llama4,
+                        hermes/nous, deepseek/deepseek_v3/deepseek_v31,
+                        kimi/moonshot/kimi_k2, granite/granite3,
+                        nemotron/nemotron3, xlam, functionary/meetkai,
+                        glm47/glm4, minimax/minimax_m2, harmony/gpt-
+                        oss/gpt_oss, gemma4/gemma_4, seed_oss/seed. Run
+                        `python -c 'from vllm_mlx.tool_parsers import ToolPars
+                        erManager;print(sorted(ToolParserManager.tool_parsers)
+                        )'` for the live list. Required for --enable-auto-
+                        tool-choice.
+  --enable-tool-logits-bias
+                        Bias logits toward structural tool call tokens for
+                        faster generation. Only active when --tool-call-parser
+                        is also set. Currently supports minimax.
+  --reasoning-parser {gemma4,qwen3,hy_v3,hy3,deepseek_r1,vibethinker,glm4,gpt_oss,harmony,minimax,ui_tars}
+                        Enable reasoning content extraction with specified
+                        parser. Extracts <think>...</think> tags into
+                        reasoning_content field. Options: gemma4, qwen3,
+                        hy_v3, hy3, deepseek_r1, vibethinker, glm4, gpt_oss,
+                        harmony, minimax, ui_tars.
+  --no-thinking         Disable reasoning/thinking parser even if auto-
+                        detected. Thinking tokens will appear as regular
+                        content. Useful for faster responses when chain-of-
+                        thought is not needed.
+  --no-tool-call-parser
+                        Force-disable tool-call parser auto-detection from the
+                        alias profile. Escape hatch (SOP §10) when
+                        AliasProfile's auto-selected parser misfires for a
+                        specific deployment. Mutually exclusive with --tool-
+                        call-parser.
+  --no-reasoning-parser
+                        Force-disable reasoning parser auto-detection from the
+                        alias profile. Distinct from --no-thinking (which also
+                        suppresses the chain-of-thought prompt template) —
+                        this flag ONLY skips the auto-config step. Mutually
+                        exclusive with --reasoning-parser.
+  --force-hybrid        Force-treat the model as a hybrid (linear-attention /
+                        Mamba) architecture even when AliasProfile says
+                        otherwise. Disables spec/suffix decode paths that are
+                        unsound on hybrids. Mutually exclusive with --no-
+                        hybrid.
+  --no-hybrid           Force-treat the model as non-hybrid (full attention)
+                        even when AliasProfile says it's hybrid. Use when the
+                        profile mis-labels your model and you want spec/suffix
+                        decode enabled. Mutually exclusive with --force-
+                        hybrid.
+  --force-spec-decode   Force-enable speculative-decode eligibility even when
+                        AliasProfile says the model doesn't support it. Risky
+                        on hybrid models — use only when you've verified the
+                        profile is wrong. Mutually exclusive with --no-spec-
+                        decode.
+  --no-spec-decode      Force-disable speculative-decode eligibility (suffix /
+                        MTP / DFlash / DDTree) even when AliasProfile says the
+                        model supports it. Mutually exclusive with --force-
+                        spec-decode.
+  --force-openai-harmony-streaming
+                        Force-on: construct HarmonyStreamingRouter even when
+                        the compat gate would reject. Use to debug a
+                        regression in the gate itself; production should leave
+                        this off. Mutually exclusive with --no-openai-harmony-
+                        streaming.
+  --no-openai-harmony-streaming
+                        Force-off: skip the HarmonyStreamingRouter upgrade and
+                        use the legacy custom harmony state machine even on
+                        matched-vocab gpt-oss tokenizers. Escape hatch for a
+                        hypothetical false positive in the compat gate.
+                        Mutually exclusive with --force-openai-harmony-
+                        streaming.
+  --gc-control          Enable Python GC pausing during generation to avoid
+                        latency spikes (default: enabled)
+  --no-gc-control       Disable GC control (allow normal Python GC during
+                        generation)
+  --pin-system-prompt   Auto-pin system prompt in prefix cache to prevent
+                        eviction under memory pressure
+  --mllm                Force load model as multimodal (vision) even if name
+                        doesn't match auto-detection patterns
+  --no-mllm, --text-only
+                        Force load model as text-only LLM even when auto-
+                        detection would route it to the multimodal/VLM path.
+                        Escape hatch for incomplete vision-tower checkpoints
+                        (#393) and text-only forks of multimodal architectures
+                        whose config.json still declares vision_config.
+  --default-temperature DEFAULT_TEMPERATURE
+                        Override default temperature for all requests
+                        (default: use model default)
+  --default-top-p DEFAULT_TOP_P
+                        Override default top_p for all requests (default: use
+                        model default)
+  --default-top-k DEFAULT_TOP_K
+                        Override default top_k for all requests (default: use
+                        model default)
+  --default-min-p DEFAULT_MIN_P
+                        Override default min_p for all requests (default: use
+                        model default)
+  --default-repetition-penalty DEFAULT_REPETITION_PENALTY
+                        Override default repetition_penalty for all requests
+                        (default: use model default)
+  --default-presence-penalty DEFAULT_PRESENCE_PENALTY
+                        Override default presence_penalty for all requests
+                        (default: use model default)
+  --default-frequency-penalty DEFAULT_FREQUENCY_PENALTY
+                        Override default frequency_penalty for all requests
+                        (default: use model default)
+  --cloud-model CLOUD_MODEL
+                        Cloud model string for litellm (e.g.
+                        'anthropic/claude-sonnet-4-5-20250929'). When set,
+                        large-context requests are routed to the cloud
+                        provider.
+  --cloud-threshold CLOUD_THRESHOLD
+                        New token threshold to trigger cloud routing (default:
+                        20000). Only requests with more new (uncached) tokens
+                        than this are routed.
+  --cloud-api-base CLOUD_API_BASE
+                        Custom API base URL for cloud model (for OpenAI-
+                        compatible providers like Zhipu).
+  --cloud-api-key CLOUD_API_KEY
+                        API key for cloud model (overrides environment
+                        variable).
+  --embedding-model EMBEDDING_MODEL
+                        Pre-load an embedding model at startup (e.g. mlx-
+                        community/embeddinggemma-300m-6bit). Requires the
+                        [embeddings] extra: pip install 'rapid-
+                        mlx[embeddings]'.
+  --watchdog-ppid PID   Self-terminate when the parent with this PID dies
+                        (defeats orphan-sidecar after SIGKILL on the
+                        supervisor). Honors $RAPID_MLX_WATCHDOG_PPID as a
+                        fallback. Set to 0 / unset to disable.
+  --pflash {off,auto,always}
+                        Enable PFlash long-prompt prefill compression (off,
+                        auto, always). Default: 'always' for verified aliases
+                        (Qwen3.5 / Qwen3.6 family per #287), 'off' for
+                        everything else.
+  --pflash-threshold PFLASH_THRESHOLD
+                        Minimum prompt tokens before --pflash auto compresses
+                        (default: 32768).
+  --pflash-keep-ratio PFLASH_KEEP_RATIO
+                        Fraction of prompt tokens to keep when compressing
+                        (default: 0.20 — matches the bench-validated profile
+                        in PR #649: TTFT 3.87x-8.5x, needle recall 5/5 across
+                        tested cells).
+  --pflash-min-keep-tokens PFLASH_MIN_KEEP_TOKENS
+                        Minimum tokens to keep when compressing (default:
+                        2048).
+  --pflash-sink-tokens PFLASH_SINK_TOKENS
+                        Leading prompt tokens always kept by PFlash (default:
+                        256).
+  --pflash-tail-tokens PFLASH_TAIL_TOKENS
+                        Trailing prompt tokens always kept by PFlash (default:
+                        2048).
+  --pflash-block-size PFLASH_BLOCK_SIZE
+                        Middle-token scoring block size (default: 128).
+  --pflash-query-window PFLASH_QUERY_WINDOW
+                        Trailing query window used to score middle blocks
+                        (default: 512).
+  --pflash-stride-blocks PFLASH_STRIDE_BLOCKS
+                        Keep every Nth middle block as an anchor during
+                        scoring (0 disables anchors, default: 8).
+  --pflash-include-tools
+                        Allow PFlash compression on prompts with tool
+                        definitions. By default tool prompts are skipped for
+                        tool-call reliability.

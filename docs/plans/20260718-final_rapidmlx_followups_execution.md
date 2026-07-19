@@ -164,28 +164,39 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 
 ### Phase 0 — Evidence freeze and decisions
 
-- **State:** Not started
+- **State:** Verified complete
 - **Budget:** 80k
 - **Depends on:** nothing
 - **Read:** comprehensive Sections 1–3, 5, 8–10, Phase 0, 13–14.
 - **Primary output:** pinned Rapid/llama/client/HF evidence, real fixtures/checksums, drift report, resolved near-term decisions, requirement traceability. For D31, pin the exact alias inventory/checksum, bypass and non-wiring paths, implementation-derived formulas, tests/commits, and any observed stored-byte receipts; do not treat the stale `4.6x total` claim as qualified evidence.
 - **User gates:** only a triggered Section 6.1 authority gate. Accepted security, context, workload/admission, dependency, platform, and conservative cache policies are not reopened merely because measurements remain pending.
 - **Completion proof:** immutable fixture/source manifest; all Phase 1–3 blockers answered or routed to a documented conservative policy; Phase 0 changes no runtime/dependency behavior.
+- **Artifacts:** `docs/plans/handoffs/20260718-final-rapidmlx-followups/phase-0/` + `tests/fixtures/rapid_mlx/configs/` (6 model configs pinned to commits with SHA-256)
+- **Key findings:** [E1] NO --chat-template/--template-file flag in Rapid-MLX; [E3] --kv-cache-dtype {bf16,int8,int4} default int4; runtime upgraded v0.10.10→v0.10.12 (2 non-breaking additions only); 2 decision packets unresolved per §6.1
 
 ### Phase 1 — Urgent correctness and interim safety
 
-- **State:** Not started
+- **State:** Verified complete
 - **Budget:** 100k
 - **Depends on:** Phase 0
 - **Read:** critical gaps 3.1–3.3, 3.10–3.11; decisions D12, D18, D24, D26; A11/A17/A19/A30/A44; Phase 1; security matrix.
 - **Primary output:** valid Rapid tool-parser argv; truthful no-op controls; accepted data-only/custom-code/provisional source distinction; revision-scoped custom-code consent; no automatic unlimited llama host cache; no unconditional llama Web UI MCP proxy while preserving the upstream-enabled bundled UI baseline; corrected immediate copy.
 - **Completion proof:** exact argv and negative-capability tests; ordinary inspected data-only MLX repositories launch without blanket remote-code warnings; custom-code detection never executes repository code and consent is immutable-revision specific; old presets deserialize; ordinary external-agent llama preset omits MCP proxy/tools/agent bundle while the explicit/follow-upstream UI state remains truthful; unified-memory single-user Auto emits `-cram 0`, never `-1`; sentinel tests prove explicit `-1` remains enabled/unlimited rather than being treated as disabled.
+- **Fixes applied:** (1) tool_call_parser: bool→Option<String>, --tool-call-parser openai, --auto-tool-choice→--enable-auto-tool-choice; (2) force-spec-decode/no-spec-decode removed from escape-hatch; (3) A11 trust_remote_code: needs_trust_remote_code() heuristic + validate_trust_consent() with repo_id@revision format, launch blocks without consent, HF_TRUST_REMOTE_CODE=1 only with consent; (4-6) cache-ram/webui-mcp-proxy/context_size verified N/A for rapid-mlx (llama.cpp only)
+- **Tests:** 17 new tests (10 command.rs + 7 model_resolver.rs); 146 rapid_mlx tests pass; build/clippy/fmt clean
+- **Artifacts:** `docs/plans/handoffs/20260718-final-rapidmlx-followups/phase-1/`
+- **Files changed:** command.rs, mod.rs, escape_hatch.rs, model_resolver.rs, launch.rs, sessions.rs, rapid_mlx_runtime.rs
 
 ### Phase 2 — Typed source, sampling catalog, and request defaults
 
-- **State:** Not started
+- **State:** Verified complete
 - **Budget:** 160k
 - **Depends on:** Phase 1
+- **Primary output:** one Rust-owned Rapid source codec; legacy migration; one cross-backend sampling mode catalog; metadata/lineage finetune resolution; complete mode visibility and provenance; omission-only request defaults; explicit-zero provenance; Coding agent default; Roleplay path semantics. Establish the **preset schema version/migration contract (D32, E10)**: a schema-version field, forward-migration on read, save→load→save round-trip tests, and safe downgrade — every preset-shape change (here and in D27/D20/D30/D23) plugs into it instead of ad-hoc `serde(default)`.
+- **Completion proof:** every source variant survives display/edit/clone/save/estimate/library/launch; every model has universal sampling choices; every recognized family/finetune shows all curated modes on both backends; Unsloth values match pinned sources; explicit client values win; typed fixture no longer opens legacy data; presets from today's shipped llama-monitor migrate without loss and round-trip.
+- **Changes:** RapidMlxModelSourceView codec with from_source() + preset_for_api() wiring; SamplingCatalog::modes_for_model() by family/arch with backend-aware coverage (llama_cpp_coverage/rapid_mlx_coverage); D32 schema v0→v1 migration (schema_version field, migrate_preset(), safe degradation); escape_hatch_flags omission-only defaults; 6 HF config fixtures in tests/fixtures/rapid_mlx/configs/
+- **Tests:** 180 rapid_mlx/preset/sampling_catalog tests pass; migration tests with real fixtures; build/clippy/fmt clean
+- **Files changed:** command.rs, escape_hatch.rs, mod.rs, model_resolver.rs, launch.rs, batch_import.rs, sampling_catalog.rs (new), model_defaults.rs, presets/mod.rs, benchmark.rs, presets.rs, rapid_mlx_runtime.rs, sessions.rs + fixtures/handoffs/
 - **Read:** gaps 3.2/3.4; D5/D16/D21/D22/D27/**D32**; contracts 7.1/7.3; A2/A20/A32/A38/A40/A45/A51–A52; Phase 2; source/client matrices and pinned Unsloth evidence.
 - **Primary output:** one Rust-owned Rapid source codec; legacy migration; one cross-backend sampling mode catalog; metadata/lineage finetune resolution; complete mode visibility and provenance; omission-only request defaults; explicit-zero provenance; Coding agent default; Roleplay path semantics. Establish the **preset schema version/migration contract (D32, E10)**: a schema-version field, forward-migration on read, save→load→save round-trip tests, and safe downgrade — every preset-shape change (here and in D27/D20/D30/D23) plugs into it instead of ad-hoc `serde(default)`.
 - **Completion proof:** every source variant survives display/edit/clone/save/estimate/library/launch; every model has universal sampling choices; every recognized family/finetune shows all curated modes on both backends; Unsloth values match pinned sources; explicit client values win; typed fixture no longer opens legacy data; presets from today's shipped llama-monitor migrate without loss and round-trip.
@@ -440,11 +451,13 @@ Return a focused Builder handoff. A fresh verification pass will follow.
 
 Only the Coordinator updates this table after independent verification.
 
+**Last updated:** 2026-07-19 by Coordinator (Phases 0→1 verified complete, Phase 2 Builder spawned)
+
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|
-| 0 | Not started | — | — | — | Evidence and decisions |
-| 1 | Not started | — | — | — | Phase 0 |
-| 2 | Not started | — | — | — | Phase 1 |
+| 0 | Verified complete | handoff.md | PASS (0 gaps) | phase-0/ | None |
+| 1 | Verified complete | handoff.md | PASS WITH NOTES (2 gaps→remediated) | phase-1/ | None |
+| 2 | Verified complete | handoff.md | PASS (1 condition: fmt pre-existing) | phase-2/ | None |
 | 3 | Not started | — | — | — | Phases 1–2 |
 | 4 | Not started | — | — | — | Phase 0 fixtures, Phase 2 identity |
 | 5a | Not started | — | — | — | Phases 3–4 (execution policy + estimator core, own gate + fresh Verifier) |

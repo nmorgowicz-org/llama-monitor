@@ -547,7 +547,7 @@ fn api_model_defaults(
                     ));
                 }
 
-                let presets = crate::llama::model_defaults::get_model_presets(
+                let presets = crate::llama::sampling_catalog::SamplingCatalog::modes_as_presets(
                     &name_or_repo,
                     size_bytes,
                     &tags,

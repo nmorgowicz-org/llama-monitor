@@ -5,6 +5,7 @@ pub mod llama_cpp_downloader;
 pub mod metrics;
 pub mod model_defaults;
 pub mod poller;
+pub mod sampling_catalog;
 pub mod server;
 pub mod spawn_wizard;
 pub mod vram_estimator;

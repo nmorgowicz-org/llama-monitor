@@ -1,0 +1,23 @@
+Name: mlx
+Version: 0.32.0
+Location: /Users/nick/.local/share/uv/tools/rapid-mlx/lib/python3.11/site-packages
+Requires: mlx-metal
+Required-by: mlx-lm, rapid-mlx
+---
+Name: mlx-lm
+Version: 0.31.3
+Location: /Users/nick/.local/share/uv/tools/rapid-mlx/lib/python3.11/site-packages
+Requires: jinja2, mlx, numpy, protobuf, pyyaml, sentencepiece, transformers
+Required-by: rapid-mlx
+---
+Name: rapid-mlx
+Version: 0.10.12
+Location: /Users/nick/.local/share/uv/tools/rapid-mlx/lib/python3.11/site-packages
+Requires: argcomplete, fastapi, huggingface-hub, jsonschema, mcp, mlx, mlx-lm, numpy, openai-harmony, psutil, pyyaml, requests, tabulate, tokenizers, tqdm, transformers, uvicorn, websockets
+Required-by:
+---
+Name: transformers
+Version: 5.12.1
+Location: /Users/nick/.local/share/uv/tools/rapid-mlx/lib/python3.11/site-packages
+Requires: huggingface-hub, numpy, packaging, pyyaml, regex, safetensors, tokenizers, tqdm, typer
+Required-by: mlx-lm, rapid-mlx

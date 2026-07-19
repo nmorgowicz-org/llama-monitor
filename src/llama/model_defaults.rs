@@ -80,6 +80,8 @@ pub struct ModelPreset {
 /// `gguf_arch` and `arch_family` are optional supplementary hints (from GGUF
 /// `general.architecture` and wizard family detection) used when the filename
 /// alone is insufficient — e.g. for distilled or renamed finetunes.
+/// Legacy function; superseded by `SamplingCatalog::modes_as_presets`.
+#[allow(dead_code)]
 pub fn get_model_presets(
     name_or_repo: &str,
     size_bytes: u64,
@@ -573,6 +575,9 @@ pub fn get_model_presets(
 /// - name_or_repo: model name or HuggingFace repo path.
 /// - size_bytes: model file size (used for MoE sizing hints).
 /// - tags: optional tags like "moe", "vision", "code".
+///
+/// Legacy function; superseded by `SamplingCatalog::modes_for_model`.
+#[allow(dead_code)]
 pub fn get_model_defaults(name_or_repo: &str, _size_bytes: u64, tags: &[String]) -> ModelDefaults {
     let lower = name_or_repo.to_ascii_lowercase();
     let is_moe = tags.iter().any(|t| t.eq_ignore_ascii_case("moe"))
