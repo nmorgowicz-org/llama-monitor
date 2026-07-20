@@ -474,9 +474,11 @@ Only the Coordinator updates this table after independent verification.
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|
 | 0 | Verified complete | handoff.md | PASS (0 gaps) | phase-0/ | None |
-| 1 | Verified complete | handoff.md | PASS (re-verified: 4 targeted passes all PASS) | phase-1/ | None |
-| 2 | Verified complete | handoff.md | PASS (hard gate 3→remediated: frontend JS) | phase-2/ | None |
-| 3 | Not started | — | — | — | Phases 1–2 |
+| 1 | Verified complete | handoff.md | PASS WITH NOTES (2 gaps→remediated) | phase-1/ | None |
+| 2 | Verified complete | handoff.md | PASS (1 condition: fmt pre-existing) | phase-2/ | None |
+| 3A | Verified complete | handoff.md | PASS WITH CONDITIONS (3, 1 blocks P14) | phase-3a/ | COND-P3A-T1 (finetune/alias test → Phase 8) |
+| 3B | Not started | — | — | — | Phase 3A |
+| 3C | Not started | — | — | — | Phase 3B |
 | 4 | Not started | — | — | — | Phase 0 fixtures, Phase 2 identity |
 | 5a | Not started | — | — | — | Phases 3–4 (execution policy + estimator core, own gate + fresh Verifier) |
 | 5b | Not started | — | — | — | Phase 5a Verified (memory-availability + reclaim + wired-limit + acquisition repairs) |
