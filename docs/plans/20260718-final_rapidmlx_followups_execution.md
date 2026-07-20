@@ -469,7 +469,7 @@ Return a focused Builder handoff. A fresh verification pass will follow.
 
 Only the Coordinator updates this table after independent verification.
 
-**Last updated:** 2026-07-19 by Coordinator (Phase 0 verified; Phase 1 re-verified via 4 targeted passes all PASS; Phase 2 verified + hard gate 3 remediated frontend JS model_source_view adoption; HEAD f425b6e; Phase 3 next)
+**Last updated:** 2026-07-19 by Coordinator (Phase 0-3 verified complete; HEAD bf20d55; Phase 4 next)
 
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|
@@ -478,7 +478,7 @@ Only the Coordinator updates this table after independent verification.
 | 2 | Verified complete | handoff.md | PASS (1 condition: fmt pre-existing) | phase-2/ | None |
 | 3A | Verified complete | handoff.md | PASS WITH CONDITIONS (3, 1 blocks P14) | phase-3a/ | COND-P3A-T1 (finetune/alias test → Phase 8) |
 | 3B | Verified complete | handoff.md | PASS WITH CONDITION (1, none block P14) | phase-3b/ | COND-P3B-R1 (CriticalFail UX → Phase 7) |
-| 3C | Not started | — | — | — | Phase 3B |
+| 3C | Verified complete | handoff.md | PASS (condition C-P3C-RAPID-HASH remediated inline) | phase-3c/ | None |
 | 4 | Not started | — | — | — | Phase 0 fixtures, Phase 2 identity |
 | 5a | Not started | — | — | — | Phases 3–4 (execution policy + estimator core, own gate + fresh Verifier) |
 | 5b | Not started | — | — | — | Phase 5a Verified (memory-availability + reclaim + wired-limit + acquisition repairs) |
