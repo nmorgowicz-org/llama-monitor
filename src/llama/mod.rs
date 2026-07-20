@@ -4,6 +4,7 @@ pub mod gguf_meta;
 pub mod llama_cpp_downloader;
 pub mod metrics;
 pub mod model_defaults;
+pub mod model_memory_profile;
 pub mod poller;
 pub mod sampling_catalog;
 pub mod server;
