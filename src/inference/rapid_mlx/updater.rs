@@ -172,6 +172,25 @@ struct EnvironmentManifest {
     runtime_source: RuntimeSource,
     compatibility_state: String,
     release_channel: ManagedReleaseChannel,
+    /// Resolved dependency receipt: exact packages installed with this environment.
+    /// Preserved for rollback; never hand-curated. Derived from upstream contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    resolved_receipt: Option<ResolvedDependencyReceipt>,
+}
+
+/// Resolved receipt for a managed environment.
+/// Records exact packages installed from Rapid's upstream contract + product-supported extras.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct ResolvedDependencyReceipt {
+    rapid_mlx_version: String,
+    packages: Vec<ResolvedPackage>,
+    installed_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct ResolvedPackage {
+    name: String,
+    version: String,
 }
 
 trait RuntimeProbe: Send + Sync {
@@ -418,6 +437,10 @@ impl RapidMlxRuntimeManager {
                     anyhow!("The staged Rapid-MLX runtime failed compatibility validation")
                 })?;
             require_verified_profile(exact_version, &profile)?;
+
+            // Capture resolved dependency receipt from the installed environment.
+            let resolved_receipt = capture_resolved_receipt(&binary, exact_version)?;
+
             let manifest = EnvironmentManifest {
                 schema_version: MANIFEST_SCHEMA_VERSION,
                 environment_id: environment_id.clone(),
@@ -427,6 +450,7 @@ impl RapidMlxRuntimeManager {
                 runtime_source: RuntimeSource::Managed,
                 compatibility_state: CompatibilityState::Verified.label().to_string(),
                 release_channel: release.channel,
+                resolved_receipt,
             };
             let environment = checked_existing_child(
                 &self.root,
@@ -1091,6 +1115,113 @@ async fn read_bounded<R: tokio::io::AsyncRead + Unpin>(reader: R) -> Result<()> 
         bail!("uv output exceeded its safety limit");
     }
     Ok(())
+}
+
+/// Capture the resolved dependency receipt from a newly installed managed environment.
+/// Uses `pip freeze` to record exact installed packages.
+/// Gracefully returns None if Python is unavailable or pip freeze fails.
+fn capture_resolved_receipt(
+    binary: &Path,
+    rapid_version: &str,
+) -> Result<Option<ResolvedDependencyReceipt>> {
+    // Find python in this environment
+    let python = match find_python_in_env(binary) {
+        Ok(p) => p,
+        Err(_) => return Ok(None),
+    };
+    let output = match run_pip_freeze(&python) {
+        Ok(o) => o,
+        Err(_) => return Ok(None),
+    };
+    let packages = parse_pip_freeze_output(&output);
+
+    if packages.is_empty() {
+        // If we can't enumerate packages, don't fail the install.
+        // Capability snapshot will still capture what it can from probing.
+        return Ok(None);
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    Ok(Some(ResolvedDependencyReceipt {
+        rapid_mlx_version: rapid_version.to_string(),
+        packages,
+        installed_at: now,
+    }))
+}
+
+fn find_python_in_env(binary: &Path) -> Result<PathBuf> {
+    let parent = binary.parent().ok_or_else(|| {
+        anyhow!(
+            "Cannot determine environment for Rapid-MLX binary at {}",
+            binary.display()
+        )
+    })?;
+
+    // Try bin/python3, bin/python (e.g., venv layout)
+    for name in ["python3", "python"] {
+        let candidate = parent.join(name);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+
+    // Try parent/bin/python3 (e.g., pipx/tool layout)
+    if let Some(grandparent) = parent.parent() {
+        for name in ["python3", "python"] {
+            let candidate = grandparent.join("bin").join(name);
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    bail!(
+        "Cannot locate Python interpreter for environment containing {}",
+        binary.display()
+    )
+}
+
+fn run_pip_freeze(python: &Path) -> Result<String> {
+    let output = std::process::Command::new(python)
+        .args(["-m", "pip", "freeze"])
+        .output()
+        .context("Failed to run pip freeze in managed environment")?;
+
+    if !output.status.success() {
+        return Err(anyhow!("pip freeze failed with status {}", output.status));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn parse_pip_freeze_output(text: &str) -> Vec<ResolvedPackage> {
+    let mut packages = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((name, version)) = parse_freeze_line(line) {
+            packages.push(ResolvedPackage { name, version });
+        }
+    }
+    packages.sort_by(|a, b| a.name.cmp(&b.name));
+    packages
+}
+
+fn parse_freeze_line(line: &str) -> Option<(String, String)> {
+    // Handle pkg===ver, pkg==ver
+    if let Some((name, ver)) = line.split_once("===") {
+        return Some((name.trim().to_string(), ver.trim().to_string()));
+    }
+    if let Some((name, ver)) = line.split_once("==") {
+        return Some((name.trim().to_string(), ver.trim().to_string()));
+    }
+    None
 }
 
 #[cfg(test)]

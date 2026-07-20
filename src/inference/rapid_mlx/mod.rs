@@ -1,3 +1,4 @@
+pub mod capabilities;
 pub mod changelog;
 pub mod command;
 pub mod compatibility;
@@ -254,16 +255,21 @@ impl RapidMlxAdapter {
         api_key: Option<String>,
     ) {
         let verified = compatibility.state == self::compatibility::CompatibilityState::Verified;
-        self.capabilities = if verified {
-            verified_capabilities()
+
+        // Derive capabilities from snapshot if available, otherwise fall back to
+        // the verified/provisional baseline sets. The snapshot is the source of
+        // truth for per-feature qualification.
+        if let Some(ref snapshot) = self.runtime.capability_snapshot {
+            self.capabilities = capabilities_from_snapshot(snapshot);
+            self.chat_fields = chat_fields_from_snapshot(snapshot);
+        } else if verified {
+            self.capabilities = verified_capabilities();
+            self.chat_fields = verified_chat_fields();
         } else {
-            provisional_capabilities()
-        };
-        self.chat_fields = if verified {
-            verified_chat_fields()
-        } else {
-            provisional_chat_fields()
-        };
+            self.capabilities = provisional_capabilities();
+            self.chat_fields = provisional_chat_fields();
+        }
+
         self.compatibility = compatibility;
         self.api_key = api_key.filter(|key| !key.is_empty());
         self.pollers
@@ -551,6 +557,8 @@ mod tests {
                 executable_path: "rapid-mlx".into(),
                 source: RuntimeSource::Managed,
                 version: "0.10.10".into(),
+                capability_snapshot: None,
+                resolved_receipt: None,
             },
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         );
@@ -560,6 +568,73 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&first, &second));
         assert!(!std::sync::Arc::ptr_eq(&first, &other));
     }
+}
+
+/// Derive CapabilitySet from a capability snapshot's qualified features.
+fn capabilities_from_snapshot(snapshot: &self::capabilities::CapabilitySnapshot) -> CapabilitySet {
+    fn is_available(q: &self::capabilities::FeatureQualification) -> bool {
+        matches!(q, self::capabilities::FeatureQualification::Available)
+    }
+
+    CapabilitySet {
+        tool_parsing: is_available(&snapshot.qualified_features.tool_parsing),
+        automatic_tool_choice: is_available(&snapshot.qualified_features.automatic_tool_choice),
+        reasoning_parser: is_available(&snapshot.qualified_features.reasoning_parser),
+        thinking_controls: is_available(&snapshot.qualified_features.thinking_controls),
+        guided_generation: is_available(&snapshot.qualified_features.guided_generation),
+        vision: is_available(&snapshot.qualified_features.vision),
+        embeddings: is_available(&snapshot.qualified_features.embeddings),
+        // Core capabilities always available when runtime is validated
+        status_memory_telemetry: true,
+        one_shot_launch: true,
+        ..Default::default()
+    }
+}
+
+/// Derive chat fields from a capability snapshot.
+fn chat_fields_from_snapshot(
+    snapshot: &self::capabilities::CapabilitySnapshot,
+) -> BTreeSet<&'static str> {
+    let mut fields = provisional_chat_fields();
+
+    // Always add fields available on verified runtime
+    fields.extend([
+        "stream_options",
+        "presence_penalty",
+        "frequency_penalty",
+        "logprobs",
+        "timeout",
+    ]);
+
+    // Add tool fields if tool parsing is available
+    if matches!(
+        snapshot.qualified_features.tool_parsing,
+        self::capabilities::FeatureQualification::Available
+    ) {
+        fields.extend(["tools", "tool_choice", "parallel_tool_calls"]);
+    }
+
+    // Add response_format if guided is available (structured generation)
+    if matches!(
+        snapshot.qualified_features.guided_generation,
+        self::capabilities::FeatureQualification::Available
+    ) {
+        fields.insert("response_format");
+    }
+
+    // Add thinking fields if reasoning/thinking controls available
+    if matches!(
+        snapshot.qualified_features.thinking_controls,
+        self::capabilities::FeatureQualification::Available
+    ) {
+        fields.extend([
+            "enable_thinking",
+            "chat_template_kwargs",
+            "reasoning_effort",
+        ]);
+    }
+
+    fields
 }
 
 fn verified_chat_fields() -> BTreeSet<&'static str> {
@@ -591,6 +666,8 @@ mod chat_tests {
                 executable_path: "rapid-mlx".into(),
                 source: runtime::RuntimeSource::Managed,
                 version: compatibility::LATEST_QUALIFIED_VERSION_TEXT.into(),
+                capability_snapshot: None,
+                resolved_receipt: None,
             },
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         )

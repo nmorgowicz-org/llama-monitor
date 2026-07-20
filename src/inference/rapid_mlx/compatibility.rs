@@ -1,3 +1,8 @@
+#![allow(clippy::collapsible_if)]
+
+use crate::inference::rapid_mlx::capabilities::{
+    self as cap, CapabilitySnapshot, ExecutableIdentity,
+};
 use crate::inference::rapid_mlx::runtime::RuntimeSource;
 use anyhow::{Context, Result, anyhow};
 use std::collections::BTreeSet;
@@ -38,15 +43,24 @@ pub struct ServeCapabilities {
 
 impl ServeCapabilities {
     pub fn from_help(help: &str) -> Self {
-        let flags = help
-            .split_whitespace()
+        let flags = Self::parse_flags(help);
+        Self { flags }
+    }
+
+    pub fn from_flags(flags: &[String]) -> Self {
+        Self {
+            flags: flags.iter().cloned().collect(),
+        }
+    }
+
+    fn parse_flags(help: &str) -> BTreeSet<String> {
+        help.split_whitespace()
             .filter_map(|token| {
                 let token = token.trim_matches(|c: char| matches!(c, ',' | '[' | ']' | '(' | ')'));
                 let flag = token.split_once('=').map_or(token, |(flag, _)| flag);
                 flag.starts_with("--").then(|| flag.to_string())
             })
-            .collect();
-        Self { flags }
+            .collect()
     }
 
     pub fn contains(&self, flag: &str) -> bool {
@@ -85,9 +99,39 @@ impl CompatibilityProfile {
             capabilities: ServeCapabilities::verified_baseline(),
         }
     }
+
+    /// Build a CompatibilityProfile from an existing capability snapshot.
+    pub fn from_snapshot(snapshot: &CapabilitySnapshot) -> Self {
+        Self {
+            state: if snapshot.source == cap::CapabilitySnapshotSource::ManualOverride
+                || snapshot.rapid_mlx_version.as_str() >= LATEST_QUALIFIED_VERSION_TEXT
+            {
+                CompatibilityState::Verified
+            } else {
+                CompatibilityState::Provisional
+            },
+            version: snapshot.rapid_mlx_version.clone(),
+            capabilities: ServeCapabilities::from_flags(&snapshot.serve_flags),
+        }
+    }
+}
+
+/// Construct a CompatibilityProfile from a capability snapshot.
+fn profile_from_snapshot(
+    snapshot: &CapabilitySnapshot,
+    _source: RuntimeSource,
+) -> CompatibilityProfile {
+    CompatibilityProfile::from_snapshot(snapshot)
 }
 
 pub async fn probe(binary: &Path, source: RuntimeSource) -> Result<CompatibilityProfile> {
+    // Check for cached capability snapshot first; use it if valid
+    if let Ok(identity) = ExecutableIdentity::from_path(binary) {
+        if let Some(snapshot) = cap::cached_snapshot(&identity) {
+            // Reuse compatible profile from snapshot when possible
+            return Ok(profile_from_snapshot(&snapshot, source));
+        }
+    }
     probe_with_policy(binary, source, false, PROBE_TIMEOUT, MAX_PROBE_OUTPUT_BYTES).await
 }
 
@@ -201,6 +245,11 @@ async fn probe_with_policy(
             )
         })?;
     }
+
+    // Generate capability snapshot from this probe; cache it for future use.
+    // This is lazy: we only do the full dependency/extra probe on first
+    // compatibility check; subsequent calls reuse the cached snapshot.
+    let _ = cap::generate_snapshot(binary, source).await;
 
     Ok(CompatibilityProfile {
         state: if source == RuntimeSource::Managed {

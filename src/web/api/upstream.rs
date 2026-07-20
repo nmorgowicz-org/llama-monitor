@@ -527,6 +527,8 @@ mod tests {
                     executable_path: "rapid-mlx".into(),
                     source: RuntimeSource::Managed,
                     version: "0.10.9".into(),
+                    capability_snapshot: None,
+                    resolved_receipt: None,
                 },
                 crate::inference::rapid_mlx::model_resolver::ResolvedRapidMlxLaunchModel::validated_alias("stale-model").unwrap(),
             ),

@@ -370,10 +370,21 @@ pub async fn construct_adapter(
                     )
                 })?;
             let version = profile.version.clone();
+            let capability_snapshot =
+                match crate::inference::rapid_mlx::capabilities::ExecutableIdentity::from_path(
+                    &executable_path,
+                ) {
+                    Ok(identity) => {
+                        crate::inference::rapid_mlx::capabilities::cached_snapshot(&identity)
+                    }
+                    Err(_) => None,
+                };
             let runtime = RuntimeMetadata {
                 executable_path,
                 source,
                 version,
+                capability_snapshot,
+                resolved_receipt: None,
             };
             let models_dir = state
                 .models_dir
