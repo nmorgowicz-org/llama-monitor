@@ -376,20 +376,19 @@ Section 8.2 item 6 is the additional non-A-ID foreground/background authority ga
 ```text
 You are the Builder for Phase <N><Part>.
 
-**CRITICAL: You do not have compression. DO NOT read the entire comprehensive plan — it is ~2300 lines and you will blow context.**
+**CRITICAL: You do not have compression. DO NOT read the entire plan — it is ~2300 lines and you will blow context.**
 Read ONLY the exact line ranges specified below.
 
-Authoritative plan:
-docs/plans/20260718-final_rapidmlx_followups.md
-
-Execution companion:
-docs/plans/20260718-final_rapidmlx_followups_execution.md
+File paths (use these EXACT paths):
+- Authoritative plan: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md
+- Execution companion: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups_execution.md
+- Repository rules: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/AGENTS.md
 
 Read completely (exact ranges ONLY):
-- repository AGENTS.md
-- comprehensive plan Section 9 (~line 1422–1512)
-- comprehensive Phase <N> specific builder items ONLY: e.g. "Phase 3 builder items 1-7 at lines 1718-1730"
-- routed supporting sections ONLY: e.g. "gap 3.8 (~line 351-362), decision D13 (~line 627-638)"
+- AGENTS.md: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/AGENTS.md (full file)
+- Plan Section 9 (Coordinator/Builder/Verifier protocol): /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md lines ~1422-1512
+- Plan Phase <N> specific builder items ONLY: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md lines <start>-<end>
+- Routed supporting sections ONLY: e.g. "/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md lines 351-362 (gap 3.8), lines 627-638 (D13)"
 
 Frozen state:
 - branch:
@@ -419,13 +418,21 @@ Return the structured handoff required by comprehensive Section 9.3.
 ### 7.2 Verifier brief
 
 ```text
-You are the fresh independent Verifier for Phase <N>.
+You are the fresh independent Verifier for Phase <N><Part>.
 
-Read completely:
-- repository AGENTS.md
-- comprehensive plan Section 9
-- comprehensive Phase <N>
-- these routed design/matrix/evidence sections: <list>
+**CRITICAL: You do not have compression. DO NOT read the entire plan — ~2300 lines will blow context.**
+Read ONLY exact line ranges specified below.
+
+File paths (use these EXACT paths):
+- Authoritative plan: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md
+- Execution companion: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups_execution.md
+- Repository rules: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/AGENTS.md
+
+Read completely (exact ranges ONLY):
+- AGENTS.md: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/AGENTS.md (full file)
+- Plan Section 9 (Verifier protocol): /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md lines ~1422-1512
+- Plan Phase <N> hard gates: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md lines <start>-<end>
+- Routed sections: /Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/plans/20260718-final_rapidmlx_followups.md lines <ranges>
 
 Frozen pre-phase HEAD:
 Builder handoff:
