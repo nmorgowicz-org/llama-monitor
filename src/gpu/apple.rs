@@ -182,42 +182,52 @@ pub fn read_iogpu_wired_limit_mb() -> u64 {
         .unwrap_or(0)
 }
 
-/// Maximum fraction of total RAM allowed for the wired limit.
-/// Rationale: on Apple Silicon with unified memory, the GPU wired pool is
-/// carved from the same physical memory used by the OS, CPU, and all apps.
-/// Allowing the wired limit to consume too much of RAM causes:
-/// - System UI freezes and launch delays (kernel cannot wire critical structures)
-/// - MLX process OOM kills under high KV pressure (no room for active weights)
-/// - Aggressive swap thrashing (compressor exhaustion)
-///
-/// Apple's own sysctl default is ~66% for ≤36 GB RAM and ~75% for larger.
-/// We permit up to 88% as the hard ceiling. This accommodates the user-verified
-/// M5 Max path (57,344 MiB on 64 GB = 87.5%) while preserving ~12% for OS/kernel
-/// and non-wired app memory. Going above 90% would risk kernel wiring failures
-/// under sustained GPU pressure.
-const WIRED_LIMIT_MAX_FRACTION: f64 = 0.88;
+/// Hard ceiling fraction for the wired limit (95% of RAM).
+/// This is the absolute maximum; users who set wired limit near this value
+/// are accepting the risk of system instability under heavy load.
+/// The recommended default is much lower (RAM minus 8GB reserve).
+const WIRED_LIMIT_HARD_CEILING_FRACTION: f64 = 0.95;
+
+/// Minimum RAM reserve (GiB) for systems ≤16GB.
+/// Smaller systems need more headroom for OS stability.
+const WIRED_LIMIT_RESERVE_SMALL_SYSTEM_GIB: u64 = 6;
+
+/// Default RAM reserve (GiB) for systems ≥24GB.
+/// Flat 8GB reserve works from 24GB up to 192GB+; users who want more GPU
+/// can override via Settings (Phase 7) or POST /api/system/wired-limit.
+const WIRED_LIMIT_RESERVE_DEFAULT_GIB: u64 = 8;
 
 /// Compute the maximum allowed wired limit in MiB for this machine.
 /// Returns None if total RAM cannot be determined.
-/// The bound is floor(total_ram_miB × 0.88) to protect OS stability.
+/// Hard ceiling: 95% of total RAM (absolute limit, never exceeds).
 pub fn wired_limit_max_mb(total_ram_bytes: u64) -> Option<u64> {
     if total_ram_bytes == 0 {
         return None;
     }
     let total_ram_mb = total_ram_bytes / (1024 * 1024);
-    let max_mb = (total_ram_mb as f64 * WIRED_LIMIT_MAX_FRACTION) as u64;
-    Some(max_mb.max(1))
+    let hard_ceiling_mb = (total_ram_mb as f64 * WIRED_LIMIT_HARD_CEILING_FRACTION) as u64;
+    Some(hard_ceiling_mb.max(1))
 }
 
 /// Compute the RAM-relative safe default wired limit when sysctl is unset (0).
-/// Matches Apple's behavior: ~75% of total RAM on Apple Silicon.
-/// This is the configured_ceiling_bytes default used by MemoryAvailabilitySnapshot.
+/// Tiered by RAM size:
+/// - ≤16 GB: total - 6 GB reserve (protects small systems from swap thrashing)
+/// - ≥24 GB: total - 8 GB reserve (matches user-verified 64 GB path: 57,344 MiB)
+///
+/// This is the configured_ceiling_bytes default used by MemoryAvailabilitySnapshot
+/// and the recommended value exposed in Settings (Phase 7).
 pub fn wired_limit_safe_default_mb(total_ram_bytes: u64) -> Option<u64> {
     if total_ram_bytes == 0 {
         return None;
     }
     let total_ram_mb = total_ram_bytes / (1024 * 1024);
-    Some((total_ram_mb as f64 * 0.75) as u64)
+    let total_ram_gb = total_ram_mb / 1024;
+    let reserve_mb = if total_ram_gb <= 16 {
+        WIRED_LIMIT_RESERVE_SMALL_SYSTEM_GIB * 1024
+    } else {
+        WIRED_LIMIT_RESERVE_DEFAULT_GIB * 1024
+    };
+    Some((total_ram_mb as i64 - reserve_mb as i64).max(1) as u64)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -248,7 +258,8 @@ pub struct WiredLimitSetResult {
 }
 
 /// Set the `iogpu.wired_limit_mb` sysctl with full hardening:
-/// - Bounded: refused if above RAM-relative max (88% of total RAM)
+/// - Bounded: refused if above 95% hard ceiling of total RAM
+/// - Recommended default: RAM minus 8GB reserve (tiered: 6GB for ≤16GB systems)
 /// - Readback-verified: actual value verified >= requested after write
 /// - Reversible: stores previous value for restore
 /// - Restart-aware: value may reset on reboot (documented, not claimed persistent)
@@ -423,25 +434,23 @@ pub fn wired_limit_behavior_notes() -> &'static str {
 mod tests {
     use super::*;
 
+    /// 8 GiB RAM system (base M1/M2)
+    const RAM_8GB_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+    /// 16 GiB RAM system (common config)
+    const RAM_16GB_BYTES: u64 = 16 * 1024 * 1024 * 1024;
     /// 32 GiB RAM system
     const RAM_32GB_BYTES: u64 = 32 * 1024 * 1024 * 1024;
     /// 64 GiB RAM system (M5 Max class)
     const RAM_64GB_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+    /// 128 GiB RAM system (M1 Ultra / M4 Max class)
+    const RAM_128GB_BYTES: u64 = 128 * 1024 * 1024 * 1024;
 
     #[test]
-    fn wired_limit_max_mb_32gb() {
-        let max = wired_limit_max_mb(RAM_32GB_BYTES).unwrap();
-        let expected = (32_768_f64 * 0.88) as u64;
-        assert_eq!(max, expected);
-        assert!(max > 0);
-    }
-
-    #[test]
-    fn wired_limit_max_mb_64gb() {
+    fn wired_limit_max_mb_95_pct_hard_ceiling() {
+        // 64GB: hard ceiling = 95% of 65536 = 62259
         let max = wired_limit_max_mb(RAM_64GB_BYTES).unwrap();
-        let expected = (65_536_f64 * 0.88) as u64;
+        let expected = (65_536_f64 * 0.95) as u64;
         assert_eq!(max, expected);
-        assert!(max > 0);
     }
 
     #[test]
@@ -450,10 +459,34 @@ mod tests {
     }
 
     #[test]
-    fn wired_limit_safe_default_mb_64gb() {
+    fn wired_limit_safe_default_mb_16gb_reserve_6gb() {
+        // ≤16GB: total - 6GB reserve = 10240 MB
+        let default_mb = wired_limit_safe_default_mb(RAM_16GB_BYTES).unwrap();
+        assert_eq!(default_mb, 10_240, "16GB system should reserve 6GB");
+    }
+
+    #[test]
+    fn wired_limit_safe_default_mb_8gb_reserve_6gb() {
+        // ≤16GB: total - 6GB reserve = 2048 MB (8GB - 6GB)
+        let default_mb = wired_limit_safe_default_mb(RAM_8GB_BYTES).unwrap();
+        assert_eq!(default_mb, 2_048, "8GB system should reserve 6GB");
+    }
+
+    #[test]
+    fn wired_limit_safe_default_mb_64gb_reserve_8gb() {
+        // ≥24GB: total - 8GB reserve = 57344 MB (matches user-verified path)
         let default_mb = wired_limit_safe_default_mb(RAM_64GB_BYTES).unwrap();
-        let expected = (65_536_f64 * 0.75) as u64;
-        assert_eq!(default_mb, expected);
+        assert_eq!(
+            default_mb, 57_344,
+            "64GB system should reserve 8GB (matches user-verified 57344 path)"
+        );
+    }
+
+    #[test]
+    fn wired_limit_safe_default_mb_128gb_reserve_8gb() {
+        // ≥24GB: total - 8GB reserve = 131072 - 8192 = 122880 MB
+        let default_mb = wired_limit_safe_default_mb(RAM_128GB_BYTES).unwrap();
+        assert_eq!(default_mb, 122_880, "128GB system should reserve 8GB");
     }
 
     #[test]

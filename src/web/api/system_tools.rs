@@ -200,10 +200,10 @@ fn run_purge() -> PurgeResult {
 struct WiredLimitGetResult {
     /// Current value of iogpu.wired_limit_mb from sysctl. 0 means using macOS default.
     current_mb: u64,
-    /// Maximum allowed value based on RAM-relative safe bound (88% of total RAM).
+    /// Maximum allowed value based on RAM-relative safe bound (95% of total RAM hard ceiling).
     /// 0 if not available (non-macOS or RAM unknown).
     max_mb: u64,
-    /// RAM-relative safe default when sysctl is unset (75% of total RAM).
+    /// RAM-relative safe default when sysctl is unset (tiered: total - 8GB for ≥24GB, total - 6GB for ≤16GB).
     /// 0 if not available.
     safe_default_mb: u64,
     /// Total system RAM in bytes.

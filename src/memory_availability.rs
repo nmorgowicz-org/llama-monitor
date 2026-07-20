@@ -126,8 +126,11 @@ fn build_macos_snapshot() -> MemoryAvailabilitySnapshot {
     let configured_ceiling_bytes = if wired_limit_mb > 0 {
         wired_limit_mb * 1024 * 1024
     } else {
-        // Default safe bound: ~75% of total RAM on Apple Silicon (per Apple/iogpu default behavior)
-        (total_bytes as f64 * 0.75) as u64
+        // Default safe bound: tiered reserve based on RAM size
+        // (≤16GB: -6GB, ≥24GB: -8GB). Uses wired_limit_safe_default_mb for consistency.
+        let safe_default_mb =
+            crate::gpu::apple::wired_limit_safe_default_mb(total_bytes).unwrap_or(0);
+        safe_default_mb * 1024 * 1024
     };
 
     // Metal working set: use the configured ceiling as the base (MLX reads this at init).
