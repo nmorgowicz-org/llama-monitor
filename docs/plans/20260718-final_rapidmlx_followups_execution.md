@@ -220,9 +220,13 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 
 ### Phase 4 — Normalized MLX architecture metadata
 
-- **State:** Not started
-- **Budget:** 170k
-- **Depends on:** Phase 0 fixtures and Phase 2 identity
+- **State:** Not started (splits into Parts A/B/C per §4.1)
+- **Budget:** 170k total (~55k A + ~55k B + ~60k C)
+- **Depends on:** Phase 0 fixtures and Phase 2 identity; A25
+- **Part A (~55k):** Core profile + config parsing — builder items 1-2 (~line 1745-1747); files: new backend-neutral memory-profile module, rapid_mlx/mlx_meta.rs, tests/fixtures/mlx_configs/; deliver: ModelMemoryProfile/LayerMemoryGroup types, nested text_config parser, wrapper-field protection
+- **Part B (~55k):** Architecture geometry — builder items 3-5 (~line 1747-1750); files: memory-profile module, rapid_mlx/mlx_meta.rs, tests/fixtures/mlx_configs/; deliver: Qwen3.6 DeltaNet/recurrent, Gemma4 heads/windows, MoE experts, MTP/companions ownership; hard gates: Qwen3.6/KV, Gemma4/global KV, recurrent state, no double-count
+- **Part C (~60k):** Math + context + data sources — builder items 6-8 (~line 1750-1754); files: memory-profile module, hf/mod.rs, models/library.rs, web/api/vram.rs, rapid_mlx/mlx_meta.rs, llama/vram_estimator/; deliver: context ceiling propagation, *8 bug fix, HF revision-aware lookup, local MLX config/index parsing, heuristic fallback; hard gate: no llama GGUF regression
+- **Read (exact ranges):** gap 3.5 (~291-311), gap 3.7 (~328-350), D1 (~475-489), D2 (~490-504), A25 (~1417), A53 (~1445), contract 7.2 (~1274-1295), Phase 4 builder items (~1745-1754), hard gates (~1758-1762)
 - **Read:** gaps 3.5/3.7; accepted D1/D2; contract 7.2; A25/A53; Phase 4; architecture matrix and HF config evidence.
 - **Primary output:** GGUF/MLX adapters into one evidence-bearing normalized geometry profile; full/local/linear/recurrent layer groups; nested config parsing; MoE/MTP/companions/context evidence; correct size math; no shared runtime math.
 - **Completion proof:** six real pinned family fixtures with independent expected facts; Qwen3.6 and Gemma4 KV/recurrent geometry correct; degraded evidence is field-specific.
