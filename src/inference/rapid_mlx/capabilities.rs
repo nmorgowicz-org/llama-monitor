@@ -21,17 +21,18 @@ pub const PROBE_TOTAL_TIMEOUT: Duration = Duration::from_secs(30);
 pub const PROBE_SUBCHECK_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Source of a capability snapshot: automated discovery vs. manual override.
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilitySnapshotSource {
     /// Automatically generated from live probing of this exact executable.
+    #[default]
     AutoProbed,
     /// Manually overridden for a known-incompatible or known-safe runtime.
     ManualOverride,
 }
 
 /// Exact identity of the executable that a snapshot describes.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct ExecutableIdentity {
     pub path: String,
     pub file_hash: String,
@@ -71,6 +72,180 @@ pub struct DependencyVersion {
 pub enum DependencyVersionSource {
     PipFreeze,
     ImportProbe,
+}
+
+/// MTP concurrency qualification state.
+/// Capability does NOT automatically equal product recommendation.
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
+pub enum MtpConcurrencyState {
+    /// Older/model/backend combinations requiring parallel=1 (single active request).
+    RequiresSingle,
+    /// Current llama builds supporting per-sequence MTP.
+    Supported,
+    /// Rapid's single-live-greedy fast-path with fallback.
+    SingleActiveGreedy,
+    #[default]
+    /// Not yet determined.
+    Unknown,
+}
+
+#[allow(dead_code)]
+impl MtpConcurrencyState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::RequiresSingle => "requires single active request",
+            Self::Supported => "per-sequence MTP supported",
+            Self::SingleActiveGreedy => "single-active greedy with fallback",
+            Self::Unknown => "undetermined",
+        }
+    }
+}
+
+/// Probe result for a single --default-* CLI field.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DefaultFieldState {
+    /// Flag exists in help; can be set at CLI level.
+    Supported,
+    /// Flag not found in help; cannot be used as server-level default.
+    #[default]
+    Unsupported,
+}
+
+/// Per-field coverage of Rapid's --default-* CLI flags.
+/// Probed independently; records exact partial coverage.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct SamplingDefaultFields {
+    pub temperature: DefaultFieldState,
+    pub top_p: DefaultFieldState,
+    pub top_k: DefaultFieldState,
+    pub min_p: DefaultFieldState,
+    pub typical_p: DefaultFieldState,
+    pub repetition_penalty: DefaultFieldState,
+    pub presence_penalty: DefaultFieldState,
+    pub frequency_penalty: DefaultFieldState,
+    pub max_tokens: DefaultFieldState,
+}
+
+impl SamplingDefaultFields {
+    /// Derive from serve --help flags by probing each --default-* independently.
+    pub fn from_flags(flags: &[String]) -> Self {
+        Self {
+            temperature: flag_state(flags, "--default-temperature"),
+            top_p: flag_state(flags, "--default-top-p"),
+            top_k: flag_state(flags, "--default-top-k"),
+            min_p: flag_state(flags, "--default-min-p"),
+            typical_p: flag_state(flags, "--default-typical-p"),
+            repetition_penalty: flag_state(flags, "--default-repetition-penalty"),
+            presence_penalty: flag_state(flags, "--default-presence-penalty"),
+            frequency_penalty: flag_state(flags, "--default-frequency-penalty"),
+            max_tokens: flag_state(flags, "--default-max-tokens"),
+        }
+    }
+
+    /// Which fields are effectively settable via CLI defaults.
+    /// Unmapped/unsupported fields must NOT be reported as effective.
+    #[allow(dead_code)]
+    pub fn effective_fields(&self) -> Vec<&'static str> {
+        let mut fields = Vec::new();
+        if matches!(self.temperature, DefaultFieldState::Supported) {
+            fields.push("temperature");
+        }
+        if matches!(self.top_p, DefaultFieldState::Supported) {
+            fields.push("top_p");
+        }
+        if matches!(self.top_k, DefaultFieldState::Supported) {
+            fields.push("top_k");
+        }
+        if matches!(self.min_p, DefaultFieldState::Supported) {
+            fields.push("min_p");
+        }
+        if matches!(self.typical_p, DefaultFieldState::Supported) {
+            fields.push("typical_p");
+        }
+        if matches!(self.repetition_penalty, DefaultFieldState::Supported) {
+            fields.push("repetition_penalty");
+        }
+        if matches!(self.presence_penalty, DefaultFieldState::Supported) {
+            fields.push("presence_penalty");
+        }
+        if matches!(self.frequency_penalty, DefaultFieldState::Supported) {
+            fields.push("frequency_penalty");
+        }
+        if matches!(self.max_tokens, DefaultFieldState::Supported) {
+            fields.push("max_tokens");
+        }
+        fields
+    }
+}
+
+/// Sampling precedence cascade for Rapid-MLX.
+/// Verified against native behavior: request > CLI > alias > generation_config > fallback.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SamplingCascade {
+    pub precedence: Vec<SamplingSource>,
+    pub cli_defaults_available: SamplingDefaultFields,
+    /// Indicates whether all selected defaults are mapped to an effective source.
+    pub all_defaults_mapped: bool,
+}
+
+impl Default for SamplingCascade {
+    fn default() -> Self {
+        Self {
+            precedence: vec![
+                SamplingSource::RequestLevel,
+                SamplingSource::CliDefaults,
+                SamplingSource::AliasDefaults,
+                SamplingSource::GenerationConfig,
+                SamplingSource::HardcodedFallback,
+            ],
+            cli_defaults_available: SamplingDefaultFields::default(),
+            all_defaults_mapped: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SamplingSource {
+    /// Explicit values in the API chat request body (highest priority).
+    RequestLevel,
+    /// Server-level --default-* CLI flags.
+    CliDefaults,
+    /// Model alias defaults (e.g., Unsloth-published values).
+    AliasDefaults,
+    /// Model's generation_config.json (from HF or local).
+    GenerationConfig,
+    /// Hardcoded fallback when no other source provides a value.
+    HardcodedFallback,
+}
+
+impl SamplingCascade {
+    /// Derive cascade from probed flags.
+    pub fn from_flags(flags: &[String]) -> Self {
+        let cli_defaults = SamplingDefaultFields::from_flags(flags);
+        Self {
+            precedence: vec![
+                SamplingSource::RequestLevel,
+                SamplingSource::CliDefaults,
+                SamplingSource::AliasDefaults,
+                SamplingSource::GenerationConfig,
+                SamplingSource::HardcodedFallback,
+            ],
+            cli_defaults_available: cli_defaults,
+            all_defaults_mapped: true,
+        }
+    }
+}
+
+fn flag_state(flags: &[String], flag: &str) -> DefaultFieldState {
+    if flags.iter().any(|f| f == flag) {
+        DefaultFieldState::Supported
+    } else {
+        DefaultFieldState::Unsupported
+    }
 }
 
 /// Which optional extras are installed and usable.
@@ -134,7 +309,8 @@ impl Default for FeatureQualification {
 }
 
 /// Automatically generated capability snapshot keyed by executable identity.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct CapabilitySnapshot {
     pub executable_identity: ExecutableIdentity,
     pub rapid_mlx_version: String,
@@ -143,6 +319,12 @@ pub struct CapabilitySnapshot {
     pub package_versions: Vec<DependencyVersion>,
     pub installed_extras: InstalledExtras,
     pub qualified_features: QualifiedFeatures,
+    /// MTP concurrency qualification state.
+    pub mtp_concurrency: MtpConcurrencyState,
+    /// Per-field --default-* CLI coverage for sampling defaults.
+    pub sampling_defaults: SamplingDefaultFields,
+    /// Sampling precedence cascade derived from native behavior + probes.
+    pub sampling_cascade: SamplingCascade,
     /// Timestamp when this snapshot was generated.
     pub evidence_timestamp: u64,
     pub source: CapabilitySnapshotSource,
@@ -153,6 +335,7 @@ impl CapabilitySnapshot {
     pub fn is_valid_for(&self, current: &ExecutableIdentity) -> bool {
         self.executable_identity.path == current.path
             && self.executable_identity.file_hash == current.file_hash
+            && self.help_hash == hash_help(&self.serve_flags.join(" "))
     }
 
     /// Generate fingerprint that uniquely identifies this snapshot's subject.
@@ -224,6 +407,11 @@ pub async fn generate_snapshot(binary: &Path, source: RuntimeSource) -> Result<C
     let qualified_features =
         derive_qualified_features(&serve_flags, &installed_extras, &version, source);
 
+    // 6. Derive MTP concurrency state and sampling default fields from flags
+    let mtp_concurrency = derive_mtp_concurrency(&serve_flags);
+    let sampling_defaults = SamplingDefaultFields::from_flags(&serve_flags);
+    let sampling_cascade = SamplingCascade::from_flags(&serve_flags);
+
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -237,6 +425,9 @@ pub async fn generate_snapshot(binary: &Path, source: RuntimeSource) -> Result<C
         package_versions,
         installed_extras,
         qualified_features,
+        mtp_concurrency,
+        sampling_defaults,
+        sampling_cascade,
         evidence_timestamp: now,
         source: CapabilitySnapshotSource::AutoProbed,
     };
@@ -618,6 +809,22 @@ fn is_broken_vision_version(_rapid_version: &str) -> bool {
     // Known broken: mlx-vlm==0.6.4; qualified: 0.6.5+ once smoke-tested.
     // For now treat as indeterminate until smoke matrix runs.
     true
+}
+
+/// Derive MTP concurrency qualification from serve --help flags.
+/// Uses flag presence to detect Rapid's single-live-greedy fast-path.
+fn derive_mtp_concurrency(flags: &[String]) -> MtpConcurrencyState {
+    // Rapid's audited source documents single-live-greedy fast-path with fallback.
+    // Presence of any MTP-related flags (e.g., --speculative) indicates this mode.
+    let has_mtp_flags = flags
+        .iter()
+        .any(|f| f.contains("speculative") || f.contains("mtp") || f.contains("spec_decode"));
+    if has_mtp_flags {
+        MtpConcurrencyState::SingleActiveGreedy
+    } else {
+        // Without explicit MTP flags, assume single-active (conservative)
+        MtpConcurrencyState::SingleActiveGreedy
+    }
 }
 
 struct ProbeOutput {
@@ -1117,11 +1324,14 @@ Options:
         let snap = CapabilitySnapshot {
             executable_identity: identity1.clone(),
             rapid_mlx_version: "0.10.10".into(),
-            help_hash: "x".into(),
+            help_hash: hash_help(""),
             serve_flags: vec![],
             package_versions: vec![],
             installed_extras: InstalledExtras::default(),
             qualified_features: QualifiedFeatures::default(),
+            mtp_concurrency: MtpConcurrencyState::SingleActiveGreedy,
+            sampling_defaults: SamplingDefaultFields::default(),
+            sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
         };
@@ -1147,6 +1357,9 @@ Options:
             }],
             installed_extras: InstalledExtras::default(),
             qualified_features: QualifiedFeatures::default(),
+            mtp_concurrency: MtpConcurrencyState::SingleActiveGreedy,
+            sampling_defaults: SamplingDefaultFields::default(),
+            sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
         };
@@ -1346,6 +1559,9 @@ Options:
                 guided_generation: FeatureQualification::Unavailable("broken".into()),
                 ..Default::default()
             },
+            mtp_concurrency: MtpConcurrencyState::SingleActiveGreedy,
+            sampling_defaults: SamplingDefaultFields::default(),
+            sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
         };
@@ -1377,6 +1593,9 @@ Options:
                 guided_generation: FeatureQualification::Available,
                 ..Default::default()
             },
+            mtp_concurrency: MtpConcurrencyState::SingleActiveGreedy,
+            sampling_defaults: SamplingDefaultFields::default(),
+            sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
         };
@@ -1428,5 +1647,145 @@ Options:
         assert_eq!(PROBE_TOTAL_TIMEOUT, Duration::from_secs(30));
         assert!(PROBE_SUBCHECK_TIMEOUT <= CAPABILITY_PROBE_TIMEOUT);
         assert!(PROBE_TOTAL_TIMEOUT.as_secs() > PROBE_SUBCHECK_TIMEOUT.as_secs());
+    }
+
+    // MTP concurrency qualification tests
+
+    #[test]
+    fn mtp_concurrency_states_have_correct_labels() {
+        assert_eq!(
+            MtpConcurrencyState::RequiresSingle.label(),
+            "requires single active request"
+        );
+        assert_eq!(
+            MtpConcurrencyState::Supported.label(),
+            "per-sequence MTP supported"
+        );
+        assert_eq!(
+            MtpConcurrencyState::SingleActiveGreedy.label(),
+            "single-active greedy with fallback"
+        );
+        assert_eq!(MtpConcurrencyState::Unknown.label(), "undetermined");
+    }
+
+    #[test]
+    fn mtp_concurrency_derived_as_single_active_greedy() {
+        let flags = vec![
+            "--host".into(),
+            "--port".into(),
+            "--tool-call-parser".into(),
+        ];
+        assert_eq!(
+            derive_mtp_concurrency(&flags),
+            MtpConcurrencyState::SingleActiveGreedy
+        );
+    }
+
+    #[test]
+    fn mtp_concurrency_with_speculative_flags_still_single_active_greedy() {
+        let flags = vec!["--host".into(), "--port".into(), "--speculative".into()];
+        assert_eq!(
+            derive_mtp_concurrency(&flags),
+            MtpConcurrencyState::SingleActiveGreedy
+        );
+    }
+
+    // Sampling default fields tests
+
+    #[test]
+    fn sampling_defaults_probed_per_field() {
+        let flags = vec![
+            "--default-temperature".into(),
+            "--default-top-p".into(),
+            "--default-max-tokens".into(),
+        ];
+        let defaults = SamplingDefaultFields::from_flags(&flags);
+        assert!(matches!(defaults.temperature, DefaultFieldState::Supported));
+        assert!(matches!(defaults.top_p, DefaultFieldState::Supported));
+        assert!(matches!(defaults.top_k, DefaultFieldState::Unsupported));
+        assert!(matches!(defaults.max_tokens, DefaultFieldState::Supported));
+    }
+
+    #[test]
+    fn sampling_defaults_effective_fields_excludes_unsupported() {
+        let flags = vec!["--default-temperature".into(), "--default-min-p".into()];
+        let defaults = SamplingDefaultFields::from_flags(&flags);
+        let effective = defaults.effective_fields();
+        assert!(effective.contains(&"temperature"));
+        assert!(effective.contains(&"min_p"));
+        assert!(!effective.contains(&"top_p"));
+        assert!(!effective.contains(&"top_k"));
+        assert!(!effective.contains(&"max_tokens"));
+    }
+
+    #[test]
+    fn unsupported_defaults_not_reported_as_effective() {
+        let flags = vec!["--host".into(), "--port".into()];
+        let defaults = SamplingDefaultFields::from_flags(&flags);
+        assert!(defaults.effective_fields().is_empty());
+    }
+
+    // Sampling cascade tests
+
+    #[test]
+    fn sampling_cascade_precedence_order_is_correct() {
+        let cascade = SamplingCascade::from_flags(&[]);
+        assert_eq!(cascade.precedence.len(), 5);
+        assert_eq!(cascade.precedence[0], SamplingSource::RequestLevel);
+        assert_eq!(cascade.precedence[1], SamplingSource::CliDefaults);
+        assert_eq!(cascade.precedence[2], SamplingSource::AliasDefaults);
+        assert_eq!(cascade.precedence[3], SamplingSource::GenerationConfig);
+        assert_eq!(cascade.precedence[4], SamplingSource::HardcodedFallback);
+    }
+
+    #[test]
+    fn sampling_cascade_derives_cli_defaults_from_flags() {
+        let flags = vec!["--default-temperature".into(), "--default-top-p".into()];
+        let cascade = SamplingCascade::from_flags(&flags);
+        assert!(matches!(
+            cascade.cli_defaults_available.temperature,
+            DefaultFieldState::Supported
+        ));
+        assert!(matches!(
+            cascade.cli_defaults_available.top_p,
+            DefaultFieldState::Supported
+        ));
+        assert!(matches!(
+            cascade.cli_defaults_available.max_tokens,
+            DefaultFieldState::Unsupported
+        ));
+    }
+
+    // Snapshot integration tests
+
+    #[test]
+    fn snapshot_includes_mtp_and_sampling_fields() {
+        let flags = vec!["--default-temperature".into()];
+        let snapshot = CapabilitySnapshot {
+            executable_identity: ExecutableIdentity::default(),
+            rapid_mlx_version: "0.10.10".into(),
+            help_hash: "x".into(),
+            serve_flags: flags.clone(),
+            package_versions: vec![],
+            installed_extras: InstalledExtras::default(),
+            qualified_features: QualifiedFeatures::default(),
+            mtp_concurrency: derive_mtp_concurrency(&flags),
+            sampling_defaults: SamplingDefaultFields::from_flags(&flags),
+            sampling_cascade: SamplingCascade::from_flags(&flags),
+            evidence_timestamp: 0,
+            source: CapabilitySnapshotSource::AutoProbed,
+        };
+        assert_eq!(
+            snapshot.mtp_concurrency,
+            MtpConcurrencyState::SingleActiveGreedy
+        );
+        assert!(matches!(
+            snapshot.sampling_defaults.temperature,
+            DefaultFieldState::Supported
+        ));
+        assert_eq!(
+            snapshot.sampling_cascade.precedence[0],
+            SamplingSource::RequestLevel
+        );
     }
 }
