@@ -1332,3 +1332,159 @@ fn empirical_calibration_gemma3_1b_mlx_matches_measured_active_memory() {
         over_prediction / 1_000_000
     );
 }
+
+// ── Byte-to-bit *8 conversion tests (Phase 4 Part C) ────────────────────────
+
+#[test]
+fn estimate_param_b_from_size_correctly_applies_byte_to_bit_conversion() {
+    // Core invariant: bytes = params × bpw / 8, so params = bytes × 8 / bpw
+    // This tests the *8 conversion factor that was previously missing.
+    let bpw = 4.85f64;
+    let params_b = 7.0f64; // 7 billion params
+    let expected_bytes = (params_b * 1e9 * bpw / 8.0) as u64;
+    let recovered_params = estimate_param_b_from_size(expected_bytes, bpw);
+    // Should recover ~7.0 billion within rounding tolerance
+    assert!(
+        (recovered_params - params_b).abs() < 0.01,
+        "Expected ~{params_b}B params, got {recovered_params}B"
+    );
+}
+
+#[test]
+fn estimate_param_b_from_size_roundtrip_with_model_size_estimation() {
+    // Verify estimate_model_size_bytes and estimate_param_b_from_size are true inverses.
+    let param_b = 30.0f64;
+    let quant = "q4_k_m";
+    let bytes = estimate_model_size_bytes(param_b, quant);
+    let bpw = find_quant(quant).map(|q| q.bpw).unwrap_or(4.85);
+    let recovered = estimate_param_b_from_size(bytes, bpw);
+    assert!(
+        (recovered - param_b).abs() < 0.1,
+        "Roundtrip failed: {param_b}B → {bytes}B → {recovered}B"
+    );
+}
+
+#[test]
+fn estimate_param_b_from_size_zero_and_edge_cases() {
+    assert_eq!(estimate_param_b_from_size(0, 4.85), 0.0);
+    assert_eq!(estimate_param_b_from_size(1_000_000_000, 0.0), 0.0);
+    assert_eq!(estimate_param_b_from_size(1_000_000_000, -1.0), 0.0);
+}
+
+// ── MLX estimator integration tests (Phase 4 Part C) ────────────────────────
+
+#[test]
+fn mlx_estimator_produces_reasonable_estimate_for_dense_model() {
+    // MLX path: use ModelMemoryProfile geometry → ModelArch → VRAM estimate.
+    // Qwen3-0.6B: 28 layers, dense, no MoE/MTP/recurrent.
+    let profile = crate::llama::model_memory_profile::ModelMemoryProfile {
+        weights: crate::llama::model_memory_profile::WeightComponents {
+            n_layers: crate::llama::model_memory_profile::EvidencedField {
+                value: 28,
+                field_evidence: "num_hidden_layers".into(),
+            },
+            n_head_kv: crate::llama::model_memory_profile::EvidencedField {
+                value: 8,
+                field_evidence: "num_key_value_heads".into(),
+            },
+            head_dim: crate::llama::model_memory_profile::EvidencedField {
+                value: 128,
+                field_evidence: "head_dim".into(),
+            },
+            n_embd: crate::llama::model_memory_profile::EvidencedField {
+                value: 1024,
+                field_evidence: "hidden_size".into(),
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let arch = ModelArch::from(&profile);
+    assert_eq!(arch.n_layers, 28);
+    assert_eq!(arch.n_kv_heads, 8);
+    assert_eq!(arch.head_dim, 128);
+
+    // Produce an MLX estimate with this arch.
+    let model_bytes = 380_000_000u64; // ~380MB for Qwen3-0.6B 4-bit
+    let bd = full_estimate(
+        model_bytes,
+        &arch,
+        4096,
+        "q4_0",
+        "q4_0",
+        1,
+        512,
+        0,
+        -1,
+        64 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: 0,
+        },
+    );
+    // Estimate must be non-zero and reasonable (> weights, < 2GB for this small model).
+    assert!(bd.total_bytes > model_bytes);
+    assert!(bd.total_bytes < 2_000_000_000);
+    assert_eq!(bd.evidence, EstimateEvidence::Approximate);
+}
+
+#[test]
+fn mlx_estimator_hybrid_attn_qwen36_does_not_treat_all_layers_as_kv() {
+    // Hard gate: Qwen3.6 full_attention_layer_count = block_count / full_attention_interval.
+    let profile = crate::llama::model_memory_profile::ModelMemoryProfile {
+        weights: crate::llama::model_memory_profile::WeightComponents {
+            n_layers: crate::llama::model_memory_profile::EvidencedField {
+                value: 64,
+                field_evidence: "text_config.num_hidden_layers".into(),
+            },
+            n_head_kv: crate::llama::model_memory_profile::EvidencedField {
+                value: 4,
+                field_evidence: "text_config.num_key_value_heads".into(),
+            },
+            head_dim: crate::llama::model_memory_profile::EvidencedField {
+                value: 128,
+                field_evidence: "text_config.head_dim".into(),
+            },
+            ..Default::default()
+        },
+        full_attention_interval: Some(4),
+        ..Default::default()
+    };
+    let arch = ModelArch::from(&profile);
+    // 64 / 4 = 16 attention layers, not 64.
+    assert_eq!(arch.n_attn_layers, 16);
+    assert_ne!(arch.n_attn_layers, 64);
+}
+
+#[test]
+fn gguf_meta_tests_no_regression() {
+    // Verify that GGUF path still works — no regression from MLX changes.
+    let arch = ModelArch::from_name_and_params("Qwen3-30B-A3B-Q4_K_M.gguf", 30.0);
+    assert!(arch.is_moe());
+    assert!(arch.n_experts > 0);
+    // llama.cpp discrete GPU estimate still works.
+    let bd = full_estimate(
+        16_000_000_000,
+        &arch,
+        8192,
+        "q8_0",
+        "q8_0",
+        1,
+        1024,
+        4,
+        -1,
+        32 * 1024 * 1024 * 1024,
+        0,
+        false,
+        EstimatorOptions {
+            backend: Backend::LlamaCpp,
+            evidence: EstimateEvidence::Measured,
+            mlx_prefix_cache_bytes: 0,
+        },
+    );
+    assert!(bd.total_bytes > 0);
+    assert_eq!(bd.evidence, EstimateEvidence::Measured);
+}

@@ -122,6 +122,12 @@ pub struct MlxConfig {
     /// RMS norm epsilon.
     #[serde(default)]
     pub rms_norm_eps: Option<f64>,
+    /// Reference to a separate text_config file (for recursive resolution).
+    #[serde(default, rename = "text_config_ref")]
+    pub text_config_ref: Option<String>,
+    /// Inner config resolved from text_config_ref (populated by HF fetcher).
+    #[serde(skip)]
+    pub text_config_inner: Option<Box<MlxConfig>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -350,11 +356,22 @@ fn extract_from_text_config(profile: &mut ModelMemoryProfile, tc: &serde_json::V
         profile.weights.rms_norm_eps.field_evidence = format!("{prefix}.rms_norm_eps");
     }
 
-    // Max position embeddings.
-    if let Some(v) = tc.get("max_position_embeddings").and_then(|v| v.as_u64()) {
+    // Context ceiling: max_position_embeddings (primary) or model_max_length (fallback).
+    // Per gap 3.5: "max_position_embeddings is parsed but not enforced in recommendations"
+    // — this ensures model_context_limit is set for all fixtures providing the field.
+    if let Some(v) = tc
+        .get("max_position_embeddings")
+        .or_else(|| tc.get("model_max_length"))
+        .and_then(|v| v.as_u64())
+        && v > 0
+    {
         profile.weights.max_position_embeddings.value = v as u32;
         profile.weights.max_position_embeddings.field_evidence =
-            format!("{prefix}.max_position_embeddings");
+            if tc.get("max_position_embeddings").is_some() {
+                format!("{prefix}.max_position_embeddings")
+            } else {
+                format!("{prefix}.model_max_length")
+            };
         profile.model_context_limit = Some(v as u32);
     }
 
@@ -666,11 +683,20 @@ fn extract_from_flat_config(profile: &mut ModelMemoryProfile, raw: &serde_json::
         profile.weights.rms_norm_eps.field_evidence = "rms_norm_eps".to_string();
     }
 
-    // Max position embeddings.
-    if let Some(v) = raw.get("max_position_embeddings").and_then(|v| v.as_u64()) {
+    // Context ceiling: max_position_embeddings (primary) or model_max_length (fallback).
+    if let Some(v) = raw
+        .get("max_position_embeddings")
+        .or_else(|| raw.get("model_max_length"))
+        .and_then(|v| v.as_u64())
+        && v > 0
+    {
         profile.weights.max_position_embeddings.value = v as u32;
         profile.weights.max_position_embeddings.field_evidence =
-            "max_position_embeddings".to_string();
+            if raw.get("max_position_embeddings").is_some() {
+                "max_position_embeddings".to_string()
+            } else {
+                "model_max_length".to_string()
+            };
         profile.model_context_limit = Some(v as u32);
     }
 
@@ -869,51 +895,121 @@ fn check_wrapper_field_conflicts(profile: &mut ModelMemoryProfile, raw: &serde_j
 
 // ── Safetensors index parsing (for Part C) ───────────────────────────────────────
 
-/// Parse a safetensors index into [`WeightComponents`] with evidence.
-pub fn parse_safetensors_index(index_path: &Path) -> Result<WeightComponents, String> {
+/// Safetensors index metadata parsed from model.safetensors.index.json.
+#[derive(Debug, Clone, Default)]
+pub struct SafetensorsIndexInfo {
+    /// Tensor name → shard file mapping.
+    pub weight_map: std::collections::BTreeMap<String, String>,
+    /// Unique shard files in order.
+    pub shard_files: Vec<String>,
+    /// Total tensor bytes from metadata (if present).
+    pub total_size_bytes: Option<u64>,
+    /// Quantization metadata (if present).
+    pub quant_bits: Option<u32>,
+    pub quant_group_size: Option<u32>,
+}
+
+/// Parse a safetensors index into [`SafetensorsIndexInfo`].
+///
+/// Extracts tensor names, shard assignments, and quantization metadata.
+/// This is used to verify weight totals match config geometry and to support
+/// the heuristic degradation path when config is missing.
+pub fn parse_safetensors_index(index_path: &Path) -> Result<SafetensorsIndexInfo, String> {
     let bytes = bounded_read(index_path, MAX_INDEX_BYTES)?;
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|e| format!("safetensors index: {e}"))?;
 
-    let weights = WeightComponents::default();
-
     // Validate weight_map.
-    let weight_map = value
+    let weight_map_value = value
         .get("weight_map")
         .and_then(|v| v.as_object())
         .ok_or_else(|| "safetensors index requires a weight_map object".to_string())?;
 
+    let mut weight_map: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
     let mut shard_files: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for v in weight_map.values() {
-        let Some(name) = v.as_str() else {
+    for (tensor_name, shard_val) in weight_map_value {
+        let Some(shard_name) = shard_val.as_str() else {
             return Err("safetensors index contains a non-string shard".into());
         };
-        let relative = Path::new(name);
+        let relative = Path::new(shard_name);
         if relative.is_absolute()
             || relative
                 .components()
                 .any(|part| matches!(part, std::path::Component::ParentDir))
-            || !name.ends_with(".safetensors")
+            || !shard_name.ends_with(".safetensors")
         {
             return Err(format!(
-                "safetensors index contains an unsafe shard path: {name}"
+                "safetensors index contains an unsafe shard path: {shard_name}"
             ));
         }
-        shard_files.insert(name.to_string());
+        weight_map.insert(tensor_name.clone(), shard_name.to_string());
+        shard_files.insert(shard_name.to_string());
     }
 
-    // Extract total_size from metadata.
-    if let Some(total) = value
-        .get("metadata")
+    // Extract metadata.
+    let metadata = value.get("metadata").and_then(|v| v.as_object());
+    let total_size_bytes = metadata
         .and_then(|m| m.get("total_size"))
-        .and_then(|t| t.as_u64())
-    {
-        // Record total weight bytes via n_ff (reused as storage; better field added in Part C).
-        // For now, we just validate and collect shard files.
-        let _ = total;
+        .and_then(|t| t.as_u64());
+    let quant_bits = metadata
+        .and_then(|m| m.get("quant_bits"))
+        .or_else(|| metadata.and_then(|m| m.get("bits")))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let quant_group_size = metadata
+        .and_then(|m| m.get("quant_group_size"))
+        .or_else(|| metadata.and_then(|m| m.get("group_size")))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+
+    Ok(SafetensorsIndexInfo {
+        weight_map,
+        shard_files: shard_files.into_iter().collect(),
+        total_size_bytes,
+        quant_bits,
+        quant_group_size,
+    })
+}
+
+/// Infer WeightComponents from safetensors index tensor names when config is unavailable.
+///
+/// This is the HEURISTIC DEGRADATION PATH — only used when config.json is missing or
+/// ambiguous. Never labeled as exact. Returns WeightComponents with field_evidence
+/// clearly marked as "heuristic from safetensors index".
+pub fn infer_weight_components_from_safetensors(index: &SafetensorsIndexInfo) -> WeightComponents {
+    let mut weights = WeightComponents::default();
+
+    // Count layers from tensor name patterns (e.g. "model.layers.0.attention.wq.weight").
+    let mut max_layer = 0u32;
+    for name in index.weight_map.keys() {
+        // Pattern: model.layers.N...
+        if let Some(start) = name.find(".layers.") {
+            let rest = &name[start + 8..];
+            if let Some(dot) = rest.find('.')
+                && let Ok(n) = rest[..dot].parse::<u32>()
+            {
+                max_layer = max_layer.max(n);
+            }
+        }
+    }
+    if max_layer > 0 {
+        weights.n_layers.value = max_layer + 1;
+        weights.n_layers.field_evidence = "heuristic from safetensors index tensor names".into();
     }
 
-    Ok(weights)
+    // Quantization from metadata (if present).
+    if let Some(bits) = index.quant_bits {
+        weights.quant_bits.value = bits;
+        weights.quant_bits.field_evidence = "heuristic from safetensors index metadata".into();
+    }
+    if let Some(gs) = index.quant_group_size {
+        weights.quant_group_size.value = gs;
+        weights.quant_group_size.field_evidence =
+            "heuristic from safetensors index metadata".into();
+    }
+
+    weights
 }
 
 // ── Legacy compatibility ──────────────────────────────────────────────────────────
@@ -1170,6 +1266,11 @@ mod tests {
         assert_eq!(profile.weights.n_head.value, 24);
         assert_eq!(profile.weights.n_head_kv.value, 4);
         assert_eq!(profile.weights.max_position_embeddings.value, 262144);
+        assert_eq!(
+            profile.weights.max_position_embeddings.field_evidence,
+            "text_config.max_position_embeddings"
+        );
+        assert_eq!(profile.model_context_limit, Some(262144));
 
         // full_attention_interval: 4 → 64/4 = 16 full attention layers.
         assert_eq!(profile.full_attention_interval, Some(4));
@@ -1265,6 +1366,10 @@ mod tests {
         assert_eq!(profile.weights.n_head.value, 16);
         assert_eq!(profile.weights.n_head_kv.value, 8);
 
+        // Context ceiling from text_config.
+        assert_eq!(profile.weights.max_position_embeddings.value, 262144);
+        assert_eq!(profile.model_context_limit, Some(262144));
+
         // Gemma4 global/local head geometry.
         assert!(profile.global_local_heads.is_some());
         let glh = profile.global_local_heads.as_ref().unwrap();
@@ -1347,6 +1452,14 @@ mod tests {
         assert_eq!(profile.weights.n_embd.value, 1024);
         assert_eq!(profile.weights.n_head.value, 16);
         assert_eq!(profile.weights.n_head_kv.value, 8);
+
+        // Context ceiling propagated from flat config with field_evidence.
+        assert_eq!(profile.weights.max_position_embeddings.value, 40960);
+        assert_eq!(
+            profile.weights.max_position_embeddings.field_evidence,
+            "max_position_embeddings"
+        );
+        assert_eq!(profile.model_context_limit, Some(40960));
 
         // All layers are full attention (flat config default).
         assert_eq!(profile.total_layer_count(), 28);
@@ -1501,9 +1614,94 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let weights = parse_safetensors_index(&index_path).unwrap();
-        // WeightComponents is currently a placeholder for Part C; just validate it parses.
-        let _ = weights;
+        let info = parse_safetensors_index(&index_path).unwrap();
+        assert_eq!(info.shard_files.len(), 1);
+        assert_eq!(info.total_size_bytes, Some(123_456_789));
+    }
+
+    #[test]
+    fn parse_safetensors_index_qwen3_06b_style_shapes() {
+        // Test with a realistic safetensors index structure for Qwen3-0.6B.
+        let dir = tempfile::tempdir().unwrap();
+        let index_path = dir.path().join("model.safetensors.index.json");
+        std::fs::write(
+            &index_path,
+            r#"{
+                "metadata": {"total_size": 378945612},
+                "weight_map": {
+                    "model.embed_tokens.weight": "model-00001-of-00002.safetensors",
+                    "model.layers.0.attention.wq.weight": "model-00001-of-00002.safetensors",
+                    "model.layers.0.attention.wkv.weight": "model-00001-of-00002.safetensors",
+                    "model.layers.27.attention.wo.weight": "model-00002-of-00002.safetensors",
+                    "model.norm.weight": "model-00002-of-00002.safetensors"
+                }
+            }"#,
+        )
+        .unwrap();
+        let info = parse_safetensors_index(&index_path).unwrap();
+        assert_eq!(info.shard_files.len(), 2);
+        assert_eq!(info.weight_map.len(), 5);
+        assert_eq!(info.total_size_bytes, Some(378_945_612));
+
+        // Heuristic inference from tensor names.
+        let weights = infer_weight_components_from_safetensors(&info);
+        assert_eq!(weights.n_layers.value, 28);
+        assert!(weights.n_layers.field_evidence.contains("heuristic"));
+    }
+
+    #[test]
+    fn heuristic_degradation_labeled_as_degraded_not_exact() {
+        // Hard gate: heuristics are never labeled exact.
+        let dir = tempfile::tempdir().unwrap();
+        let index_path = dir.path().join("model.safetensors.index.json");
+        std::fs::write(
+            &index_path,
+            r#"{
+                "metadata": {"bits": 4, "group_size": 64},
+                "weight_map": {
+                    "model.layers.5.attention.wq.weight": "model.safetensors"
+                }
+            }"#,
+        )
+        .unwrap();
+        let info = parse_safetensors_index(&index_path).unwrap();
+        let weights = infer_weight_components_from_safetensors(&info);
+
+        // All evidence must be labeled as heuristic.
+        assert!(weights.n_layers.field_evidence.contains("heuristic"));
+        assert!(weights.quant_bits.field_evidence.contains("heuristic"));
+        assert!(
+            weights
+                .quant_group_size
+                .field_evidence
+                .contains("heuristic")
+        );
+
+        // Verify the inferred values.
+        assert_eq!(weights.n_layers.value, 6);
+        assert_eq!(weights.quant_bits.value, 4);
+        assert_eq!(weights.quant_group_size.value, 64);
+    }
+
+    #[test]
+    fn heuristic_degradation_only_when_config_missing() {
+        // When config is present, use config geometry — heuristic is fallback only.
+        let json = r#"{
+            "hidden_size": 1024,
+            "num_hidden_layers": 28,
+            "num_attention_heads": 16
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+
+        // Config provides exact geometry.
+        assert_eq!(profile.weights.n_layers.value, 28);
+        assert!(
+            !profile
+                .weights
+                .n_layers
+                .field_evidence
+                .contains("heuristic")
+        );
     }
 
     // ── Part B: Architecture-specific geometry tests ──────────────────────────
@@ -1657,5 +1855,113 @@ mod tests {
         assert!(profile.embedded_mtp.is_none());
         assert_eq!(profile.full_attention_layer_count(), 28);
         assert_eq!(profile.total_layer_count(), 28);
+    }
+
+    // ── Part C: Context ceiling propagation tests ────────────────────────────
+
+    #[test]
+    fn context_ceiling_propagated_from_flat_config_max_position_embeddings() {
+        let json = r#"{
+            "hidden_size": 1024,
+            "num_hidden_layers": 10,
+            "num_attention_heads": 8,
+            "max_position_embeddings": 16384
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+        assert_eq!(profile.weights.max_position_embeddings.value, 16384);
+        assert_eq!(
+            profile.weights.max_position_embeddings.field_evidence,
+            "max_position_embeddings"
+        );
+        assert_eq!(profile.model_context_limit, Some(16384));
+    }
+
+    #[test]
+    fn context_ceiling_propagated_from_nested_text_config() {
+        let json = r#"{
+            "model_type": "test",
+            "text_config": {
+                "hidden_size": 1024,
+                "num_hidden_layers": 10,
+                "num_attention_heads": 8,
+                "max_position_embeddings": 131072
+            }
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+        assert_eq!(profile.weights.max_position_embeddings.value, 131072);
+        assert_eq!(
+            profile.weights.max_position_embeddings.field_evidence,
+            "text_config.max_position_embeddings"
+        );
+        assert_eq!(profile.model_context_limit, Some(131072));
+    }
+
+    #[test]
+    fn context_ceiling_fallback_to_model_max_length() {
+        // When max_position_embeddings is absent, model_max_length is used as fallback.
+        let json = r#"{
+            "hidden_size": 1024,
+            "num_hidden_layers": 10,
+            "num_attention_heads": 8,
+            "model_max_length": 65536
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+        assert_eq!(profile.weights.max_position_embeddings.value, 65536);
+        assert_eq!(
+            profile.weights.max_position_embeddings.field_evidence,
+            "model_max_length"
+        );
+        assert_eq!(profile.model_context_limit, Some(65536));
+    }
+
+    #[test]
+    fn context_ceiling_max_position_embeddings_takes_precedence_over_model_max_length() {
+        // max_position_embeddings is the canonical field; model_max_length only used as fallback.
+        let json = r#"{
+            "hidden_size": 1024,
+            "num_hidden_layers": 10,
+            "num_attention_heads": 8,
+            "max_position_embeddings": 32768,
+            "model_max_length": 65536
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+        assert_eq!(profile.weights.max_position_embeddings.value, 32768);
+        assert_eq!(
+            profile.weights.max_position_embeddings.field_evidence,
+            "max_position_embeddings"
+        );
+        assert_eq!(profile.model_context_limit, Some(32768));
+    }
+
+    #[test]
+    fn context_ceiling_all_fixtures_with_max_position_embeddings() {
+        // Hard gate: context ceiling present for ALL fixtures where config provides it.
+        for name in [
+            "mlx-community_Qwen3-0.6B-4bit.config.json",
+            "mlx-community_Qwen3-30B-A3B-4bit.config.json",
+            "mlx-community_Qwen3.6-27B-4bit.config.json",
+            "mlx-community_Qwen3.6-35B-A3B-4bit.config.json",
+            "mlx-community_gemma-4-26b-a4b-it-4bit.config.json",
+            "mlx-community_gemma-4-31b-it-4bit.config.json",
+        ] {
+            let bytes = load_fixture(name).unwrap();
+            let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+            assert!(
+                profile.model_context_limit.is_some(),
+                "{name}: model_context_limit must be set"
+            );
+            assert!(
+                !profile
+                    .weights
+                    .max_position_embeddings
+                    .field_evidence
+                    .is_empty(),
+                "{name}: field_evidence must be set"
+            );
+            assert!(
+                profile.weights.max_position_embeddings.value > 0,
+                "{name}: max_position_embeddings must be > 0"
+            );
+        }
     }
 }

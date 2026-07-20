@@ -1021,7 +1021,7 @@ async fn resolve_mlx_hf_size(repo_id: &str, model_size_override: Option<u64>) ->
 /// Returns (size, arch, evidence) or an error string.
 async fn mlx_hf_estimate_from_repo(
     repo_id: &str,
-    hf_file_path: &str,
+    _hf_file_path: &str,
     size: u64,
 ) -> Result<
     (
@@ -1036,12 +1036,10 @@ async fn mlx_hf_estimate_from_repo(
             "model_size_bytes is required when introspecting a HuggingFace MLX model",
         ));
     }
-    let config_file = if hf_file_path.is_empty() {
-        "config.json".to_string()
-    } else {
-        hf_file_path.to_string()
-    };
-    match crate::hf::fetch_mlx_config(repo_id, &config_file).await {
+    // CRITICAL: Always use config.json for MLX — never hf_file_path.
+    // hf_file_path is the model weight file (e.g. model.safetensors), not the config.
+    // This prevents the gap 3.7 defect where hf_file_path was misused as a config name.
+    match crate::hf::fetch_mlx_config(repo_id, "config.json").await {
         Ok(config) => {
             let meta = crate::inference::rapid_mlx::mlx_meta::metadata_from_config(config);
             let param_b = crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85);

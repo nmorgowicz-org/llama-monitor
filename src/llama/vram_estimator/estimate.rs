@@ -428,8 +428,12 @@ pub fn estimate_model_size_bytes(param_b: f64, quant: &str) -> u64 {
 /// Inverse of estimate_model_size_bytes: rough param_b from file size.
 ///
 /// Used when GGUF introspection fails and we must guess param_b from the file size.
+/// Correctly converts bytes→bits with the *8 factor: params = (bytes × 8) / 1e9 / bpw.
 pub fn estimate_param_b_from_size(size_bytes: u64, bpw: f64) -> f64 {
-    (size_bytes as f64) / 1e9 / bpw
+    if bpw <= 0.0 {
+        return 0.0;
+    }
+    (size_bytes as f64 * 8.0) / 1e9 / bpw
 }
 
 // ── Full VRAM estimate with breakdown ─────────────────────────────────────────

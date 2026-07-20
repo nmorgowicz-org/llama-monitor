@@ -419,6 +419,97 @@ impl ModelMemoryProfile {
     }
 }
 
+// ── MLX-specific conversion to ModelArch (A53-compliant) ────────────────────
+
+/// Convert a ModelMemoryProfile to the VRAM estimator's ModelArch for MLX models.
+///
+/// Per A53: this is the MLX geometry→arch path; it must NOT leak llama.cpp vocabulary
+/// into MLX estimates. The llama path uses GGUF metadata → ModelArch separately.
+impl From<&ModelMemoryProfile> for crate::llama::vram_estimator::ModelArch {
+    fn from(profile: &ModelMemoryProfile) -> Self {
+        let n_layers = profile.weights.n_layers.value;
+        let n_kv_heads = profile.weights.n_head_kv.value.max(1);
+        let head_dim = profile.weights.head_dim.value.max(1);
+
+        // Hybrid attention: full_attention_interval drives KV layers (Qwen3.5/3.6).
+        let n_attn_layers = if let Some(interval) = profile.full_attention_interval
+            && interval > 0
+            && n_layers > 0
+        {
+            n_layers / interval
+        } else {
+            n_layers
+        };
+
+        // MoE fields.
+        let (n_experts, n_experts_used, expert_fraction) = if let Some(experts) = &profile.experts {
+            (
+                experts.n_experts,
+                experts.top_k.unwrap_or(1),
+                if experts.n_experts > 0 { 0.65 } else { 0.0 },
+            )
+        } else {
+            (0, 0, 0.0)
+        };
+
+        // Sliding-window / global-local heads (Gemma4).
+        let (n_global_attn_layers, local_attn_window, local_kv_heads, global_head_dim) =
+            if let Some(glh) = &profile.global_local_heads {
+                (
+                    profile.full_attention_layer_count(),
+                    profile.sliding_window.unwrap_or(0),
+                    glh.num_local_key_value_heads.unwrap_or(n_kv_heads),
+                    glh.global_head_dim.unwrap_or(head_dim),
+                )
+            } else if let Some(window) = profile.sliding_window {
+                (0, window, n_kv_heads, head_dim)
+            } else {
+                (0, 0, n_kv_heads, head_dim)
+            };
+
+        // Recurrent state (DeltaNet/SSM).
+        let linear_attn_state_bytes = if let Some(rcg) = &profile.recurrent_state
+            && rcg.is_some()
+        {
+            let linear_layers = profile.linear_recurrent_layer_count();
+            if let Some(khd) = rcg.linear_key_head_dim
+                && let Some(knh) = rcg.linear_num_key_heads
+                && linear_layers > 0
+            {
+                (linear_layers as u64) * (khd as u64) * (knh as u64) * 8
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+
+        let mtp_depth = profile
+            .embedded_mtp
+            .as_ref()
+            .map(|m| m.n_layers)
+            .unwrap_or(0);
+
+        crate::llama::vram_estimator::ModelArch {
+            n_layers,
+            n_kv_heads,
+            head_dim,
+            n_embd: profile.weights.n_embd.value,
+            n_attn_layers,
+            n_experts,
+            n_experts_used,
+            expert_fraction,
+            n_global_attn_layers,
+            local_attn_window,
+            local_kv_heads,
+            global_head_dim,
+            linear_attn_state_bytes,
+            mtp_depth,
+            ..Default::default()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

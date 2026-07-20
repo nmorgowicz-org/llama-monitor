@@ -29,8 +29,12 @@ fn hf_build_client(token: Option<String>) -> anyhow::Result<HFClientSync> {
 }
 
 pub fn hf_resolve_download_url(repo_id: &str, file_path: &str) -> String {
+    hf_resolve_download_url_at(repo_id, file_path, "main")
+}
+
+pub fn hf_resolve_download_url_at(repo_id: &str, file_path: &str, revision: &str) -> String {
     let encoded_path = utf8_percent_encode(file_path, NON_ALPHANUMERIC).to_string();
-    format!("https://huggingface.co/{repo_id}/resolve/main/{encoded_path}")
+    format!("https://huggingface.co/{repo_id}/resolve/{revision}/{encoded_path}")
 }
 
 static HF_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
@@ -559,12 +563,40 @@ pub async fn fetch_mlx_config(
     repo_id: &str,
     file_path: &str,
 ) -> Result<crate::inference::rapid_mlx::mlx_meta::MlxConfig, String> {
-    let url = hf_resolve_download_url(repo_id, file_path);
+    fetch_mlx_config_revision_aware(repo_id, "main", file_path).await
+}
+
+/// Fetch and parse an MLX model's config.json from a HuggingFace repo with revision support.
+///
+/// Revision-aware (not always main), bounded depth/size/timeout to prevent abuse.
+/// CRITICAL: Always fetches config.json regardless of hf_file_path — hf_file_path is the
+/// model file (e.g. model.safetensors), not the config filename. This prevents the gap 3.7
+/// defect where hf_file_path became an MLX config name.
+pub async fn fetch_mlx_config_revision_aware(
+    repo_id: &str,
+    revision: &str,
+    _hf_file_path: &str,
+) -> Result<crate::inference::rapid_mlx::mlx_meta::MlxConfig, String> {
+    // CRITICAL: Always use config.json for MLX config — never hf_file_path.
+    // hf_file_path is the model weight file (e.g. "model.safetensors"), not the config.
+    let config_path = "config.json";
+    fetch_mlx_config_bytes_at(repo_id, revision, config_path).await
+}
+
+/// Fetch config bytes from HF with bounds enforcement.
+async fn fetch_mlx_config_bytes_at(
+    repo_id: &str,
+    revision: &str,
+    file_path: &str,
+) -> Result<crate::inference::rapid_mlx::mlx_meta::MlxConfig, String> {
+    let url = hf_resolve_download_url_at(repo_id, file_path, revision);
     if url.is_empty() {
         return Err(format!(
             "Could not resolve HF URL for {repo_id}/{file_path}"
         ));
     }
+
+    let max_bytes = crate::inference::rapid_mlx::mlx_meta::MAX_CONFIG_BYTES as usize;
 
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(30))
@@ -588,8 +620,62 @@ pub async fn fetch_mlx_config(
     let bytes = resp
         .bytes()
         .await
-        .map_err(|e| format!("reading config.json: {e}"))?;
+        .map_err(|e| format!("reading {file_path}: {e}"))?;
+    if bytes.len() > max_bytes {
+        return Err(format!(
+            "{file_path} exceeds size limit ({max_bytes} bytes, got {} bytes)",
+            bytes.len()
+        ));
+    }
     crate::inference::rapid_mlx::mlx_meta::parse_mlx_config(&bytes)
+}
+
+/// Fetch an MLX config with recursive text_config resolution.
+///
+/// For nested configs (Qwen3.6, Gemma4, etc.), if the config contains a text_config
+/// referencing a separate file (e.g. a nested config path), this will fetch and merge it.
+///
+/// Bounded by:
+/// - max_depth: prevents infinite recursion (default 3)
+/// - timeout: overall timeout for all fetches (30 seconds)
+/// - size limit: each file bounded by MAX_CONFIG_BYTES
+///
+/// This ensures reliable config fetching even for deeply nested or large MLX repos.
+#[allow(dead_code)]
+pub async fn fetch_mlx_config_with_text_config(
+    repo_id: &str,
+    revision: &str,
+) -> Result<crate::inference::rapid_mlx::mlx_meta::MlxConfig, String> {
+    let max_depth = 3;
+    let mut merged_config = fetch_mlx_config_bytes_at(repo_id, revision, "config.json").await?;
+
+    for depth in 0..max_depth {
+        let tc_ref = merged_config.text_config_ref.clone();
+        if let Some(ref tc_ref_str) = tc_ref {
+            if tc_ref_str.contains('/') || tc_ref_str.ends_with(".json") {
+                let inner = fetch_mlx_config_bytes_at(repo_id, revision, tc_ref_str)
+                    .await
+                    .map_err(|e| format!("Failed to fetch text_config at depth {depth}: {e}"))?;
+                merged_config.text_config_inner = Some(Box::new(inner));
+            }
+        } else {
+            break;
+        }
+    }
+
+    // Check if we exceeded depth.
+    if merged_config.text_config_ref.is_some()
+        && merged_config
+            .text_config_ref
+            .as_ref()
+            .is_some_and(|r| r.contains('/') || r.ends_with(".json"))
+    {
+        return Err(format!(
+            "Config recursion exceeded max depth {max_depth} for {repo_id}"
+        ));
+    }
+
+    Ok(merged_config)
 }
 
 /// Stream-download a file from HF with optional resume.

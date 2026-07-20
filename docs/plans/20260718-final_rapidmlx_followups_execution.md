@@ -220,7 +220,7 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 
 ### Phase 4 — Normalized MLX architecture metadata
 
-- **State:** Part A complete (Parts B/C pending)
+- **State:** Parts A+B complete (Part C pending)
 - **Budget:** 170k total (~55k A + ~55k B + ~60k C)
 - **Depends on:** Phase 0 fixtures and Phase 2 identity; A25
 - **Part A (~55k):** Core profile + config parsing — builder items 1-2 (~line 1745-1747); files: new backend-neutral memory-profile module, rapid_mlx/mlx_meta.rs, tests/fixtures/mlx_configs/; deliver: ModelMemoryProfile/LayerMemoryGroup types, nested text_config parser, wrapper-field protection
