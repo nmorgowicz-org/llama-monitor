@@ -10,7 +10,11 @@ use super::{ApiCtx, ApiReply, ApiRoute, check_api_token, unauthorized_api_token}
 
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     top_processes(ctx.clone())
-        .or(purge_memory(ctx))
+        .or(purge_memory(ctx.clone()))
+        .unify()
+        .or(wired_limit_get(ctx.clone()))
+        .unify()
+        .or(wired_limit_set(ctx.clone()))
         .unify()
         .boxed()
 }
@@ -188,4 +192,131 @@ fn run_purge() -> PurgeResult {
         ok: false,
         message: "Memory purge is only supported on macOS.".into(),
     }
+}
+
+// ── Wired-limit endpoints ─────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct WiredLimitGetResult {
+    /// Current value of iogpu.wired_limit_mb from sysctl. 0 means using macOS default.
+    current_mb: u64,
+    /// Maximum allowed value based on RAM-relative safe bound (88% of total RAM).
+    /// 0 if not available (non-macOS or RAM unknown).
+    max_mb: u64,
+    /// RAM-relative safe default when sysctl is unset (75% of total RAM).
+    /// 0 if not available.
+    safe_default_mb: u64,
+    /// Total system RAM in bytes.
+    total_ram_bytes: u64,
+    /// Behavioral notes about persistence and restart requirements.
+    behavior_notes: String,
+}
+
+#[derive(Deserialize)]
+struct WiredLimitSetRequest {
+    /// Requested wired limit in MiB. 0 clears to macOS default.
+    value_mb: u64,
+    /// Confirmation required: must be "set-wired-limit".
+    confirm: String,
+}
+
+fn wired_limit_get(ctx: ApiCtx) -> ApiRoute {
+    let config = ctx.config;
+    warp::path!("system" / "wired-limit")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let config = config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    let sys_info = crate::system::get_system_metrics();
+                    let total_ram_bytes = (sys_info.ram_total_gb * 1024.0 * 1024.0 * 1024.0) as u64;
+                    let current_mb = crate::gpu::apple::read_iogpu_wired_limit_mb();
+                    let max_mb =
+                        crate::gpu::apple::wired_limit_max_mb(total_ram_bytes).unwrap_or(0);
+                    let safe_default_mb =
+                        crate::gpu::apple::wired_limit_safe_default_mb(total_ram_bytes)
+                            .unwrap_or(0);
+                    let behavior_notes =
+                        crate::gpu::apple::wired_limit_behavior_notes().to_string();
+                    Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(
+                        &WiredLimitGetResult {
+                            current_mb,
+                            max_mb,
+                            safe_default_mb,
+                            total_ram_bytes,
+                            behavior_notes,
+                        },
+                    )))
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let result = WiredLimitGetResult {
+                        current_mb: 0,
+                        max_mb: 0,
+                        safe_default_mb: 0,
+                        total_ram_bytes: 0,
+                        behavior_notes:
+                            "Wired limit is only applicable on macOS with Apple Silicon.".into(),
+                    };
+                    Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(&result)))
+                }
+            }
+        })
+        .boxed()
+}
+
+fn wired_limit_set(ctx: ApiCtx) -> ApiRoute {
+    let config = ctx.config;
+    warp::path!("system" / "wired-limit")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json())
+        .and_then(move |auth: Option<String>, body: WiredLimitSetRequest| {
+            let config = config.clone();
+            async move {
+                if !check_db_admin_token(&auth, &config) {
+                    return Ok(unauthorized_db_admin_token());
+                }
+                if body.confirm != "set-wired-limit" {
+                    return Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(
+                        &crate::gpu::apple::WiredLimitSetResult {
+                            success: false,
+                            actual_mb: 0,
+                            previous_mb: 0,
+                            error: Some(crate::gpu::apple::WiredLimitError::SysctlFailed {
+                                reason: "Missing confirmation: confirm must be 'set-wired-limit'"
+                                    .into(),
+                            }),
+                        },
+                    )));
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    let sys_info = crate::system::get_system_metrics();
+                    let total_ram_bytes = (sys_info.ram_total_gb * 1024.0 * 1024.0 * 1024.0) as u64;
+                    let result =
+                        crate::gpu::apple::set_iogpu_wired_limit_mb(body.value_mb, total_ram_bytes);
+                    Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(&result)))
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    let result = crate::gpu::apple::WiredLimitSetResult {
+                        success: false,
+                        actual_mb: 0,
+                        previous_mb: 0,
+                        error: Some(crate::gpu::apple::WiredLimitError::SysctlFailed {
+                            reason: "Wired limit is only supported on macOS with Apple Silicon."
+                                .into(),
+                        }),
+                    };
+                    Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(&result)))
+                }
+            }
+        })
+        .boxed()
 }
