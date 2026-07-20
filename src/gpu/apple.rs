@@ -472,6 +472,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Triggers sysctl write attempt; run with --include-ignored only when sysctl is expected to work"]
     fn set_exceeds_ram_bound_rejected() {
         let max = wired_limit_max_mb(RAM_32GB_BYTES).unwrap();
         let result = set_iogpu_wired_limit_mb(max + 1000, RAM_32GB_BYTES);
@@ -489,6 +490,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Requires admin password (osascript sysctl write); run with --include-ignored or LLAMA_MONITOR_TEST_SYSCTL=1"]
     fn set_within_bounds_allows_m5_max_value() {
         let result = set_iogpu_wired_limit_mb(57_344, RAM_64GB_BYTES);
         if let Some(ref err) = result.error {
@@ -502,6 +504,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Requires admin password (osascript sysctl write); run with --include-ignored or LLAMA_MONITOR_TEST_SYSCTL=1"]
     fn restore_to_zero_clears_to_default() {
         let result = restore_iogpu_wired_limit_mb(0, RAM_32GB_BYTES);
         if let Some(ref err) = result.error {
@@ -515,6 +518,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Requires admin password (osascript sysctl write); run with --include-ignored or LLAMA_MONITOR_TEST_SYSCTL=1"]
     fn restore_to_previous_value_is_valid() {
         let result = restore_iogpu_wired_limit_mb(49_152, RAM_64GB_BYTES);
         if let Some(ref err) = result.error {
