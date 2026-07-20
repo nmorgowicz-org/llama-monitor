@@ -477,7 +477,7 @@ Only the Coordinator updates this table after independent verification.
 | 1 | Verified complete | handoff.md | PASS WITH NOTES (2 gaps→remediated) | phase-1/ | None |
 | 2 | Verified complete | handoff.md | PASS (1 condition: fmt pre-existing) | phase-2/ | None |
 | 3A | Verified complete | handoff.md | PASS WITH CONDITIONS (3, 1 blocks P14) | phase-3a/ | COND-P3A-T1 (finetune/alias test → Phase 8) |
-| 3B | Not started | — | — | — | Phase 3A |
+| 3B | Verified complete | handoff.md | PASS WITH CONDITION (1, none block P14) | phase-3b/ | COND-P3B-R1 (CriticalFail UX → Phase 7) |
 | 3C | Not started | — | — | — | Phase 3B |
 | 4 | Not started | — | — | — | Phase 0 fixtures, Phase 2 identity |
 | 5a | Not started | — | — | — | Phases 3–4 (execution policy + estimator core, own gate + fresh Verifier) |
