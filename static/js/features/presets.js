@@ -1360,6 +1360,14 @@ export function openPresetModal(mode, section, seedPreset = null) {
         if (document.getElementById('modal-rapid-prefix-cache-enabled')) {
             document.getElementById('modal-rapid-prefix-cache-enabled').checked = prefixCacheEnabled;
         }
+        // Phase 7 Part A: Rapid-MLX advanced controls (kv_cache_dtype, turboquant_mode, workload_scenario, reasoning_mode).
+        setOpt('modal-rapid-kv-cache-dtype', p.rapid_mlx?.kv_cache_dtype || '');
+        setOpt('modal-rapid-turboquant-mode', p.rapid_mlx?.turboquant_mode || '');
+        setOpt('modal-rapid-workload-scenario', p.rapid_mlx?.workload_scenario || '');
+        const reasoningModeChecked = !!p.rapid_mlx?.reasoning_mode;
+        if (document.getElementById('modal-rapid-reasoning-mode')) {
+            document.getElementById('modal-rapid-reasoning-mode').checked = reasoningModeChecked;
+        }
         setVal('modal-api-key', p.api_key || '');
         numOrEmpty('modal-max-tokens', p.max_tokens);
         numOrEmpty('modal-seed', p.seed);
@@ -1796,6 +1804,15 @@ function _buildFormPreset(existing) {
                     // Phase 6 Part B: prefix cache enabled toggle.
                     const pceInput = document.getElementById('modal-rapid-prefix-cache-enabled');
                     if (pceInput) out.prefix_cache_enabled = pceInput.checked;
+                    // Phase 7 Part A: Rapid-MLX advanced controls.
+                    const kvDtype = strVal('modal-rapid-kv-cache-dtype');
+                    const tqMode = strVal('modal-rapid-turboquant-mode');
+                    const wlScenario = strVal('modal-rapid-workload-scenario');
+                    const rmInput = document.getElementById('modal-rapid-reasoning-mode');
+                    if (kvDtype) out.kv_cache_dtype = kvDtype;
+                    if (tqMode) out.turboquant_mode = tqMode;
+                    if (wlScenario) out.workload_scenario = wlScenario;
+                    if (rmInput) out.reasoning_mode = rmInput.checked;
                     return out;
                 })(),
             } : null,

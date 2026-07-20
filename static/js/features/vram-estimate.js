@@ -160,7 +160,7 @@ function buildEstimateBodyFromWizardState(state) {
     reasoning_mode: hw.reasoningMode || false,
     turboquant_mode: hw.turboquantMode || null,
     // Workload scenario (when wizard populates it).
-    workload_scenario: state.workloadScenario || null,
+    workload_scenario: hw.workloadScenario || null,
     rapid_planning_context_tokens: hw.rapidPlanningContextTokens || null,
     rapid_retained_cache_tokens: hw.rapidRetainedCacheTokens || null,
     client_type: hw.clientType || null,
