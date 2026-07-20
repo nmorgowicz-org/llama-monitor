@@ -8,6 +8,7 @@ import { presetModelSource } from './presets.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showConfirmDialog, showPromptDialog } from './toast.js';
 import Router from './router.js';
+import { buildEstimateBody } from './vram-estimate.js';
 
 // ── Model / preset classification (from GGUF-derived metadata) ────────────────
 // No name-based guessing: labels come from preset.family and preset.size_class
@@ -1050,24 +1051,26 @@ async function _fetchCardVramEstimates(availBytes, availRamBytes, isUnified, bud
         if (!vramEl) return;
 
         try {
+            // Builder item 6: canonical body builder for cross-surface equality.
+            const body = buildEstimateBody({
+                backend: isRapidMlx ? 'rapid_mlx' : 'llama_cpp',
+                model_path: modelPath,
+                n_ctx: preset.context_size || 131072,
+                parallel_slots: preset.parallel_slots || 1,
+                ubatch_size: preset.ubatch_size || 1024,
+                ctk: isRapidMlx ? undefined : (preset.ctk || 'q8_0'),
+                ctv: isRapidMlx ? undefined : (preset.ctv || 'q8_0'),
+                n_cpu_moe: preset.n_cpu_moe || 0,
+                gpu_layers: preset.gpu_layers ?? -1,
+                available_vram_bytes: availBytes,
+                available_ram_bytes: availRamBytes,
+                is_unified_memory: isUnified,
+            });
             const headers = window.authHeaders ? window.authHeaders() : {};
             const resp = await fetch('/api/vram-estimate', {
                 method: 'POST',
                 headers: { ...headers, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model_path: modelPath,
-                    n_ctx: preset.context_size || 131072,
-                    ctk: preset.ctk || 'q8_0',
-                    ctv: preset.ctv || 'q8_0',
-                    parallel_slots: preset.parallel_slots || 1,
-                    ubatch_size: preset.ubatch_size || 1024,
-                    n_cpu_moe: preset.n_cpu_moe || 0,
-                    gpu_layers: preset.gpu_layers ?? -1,
-                    available_vram_bytes: availBytes,
-                    available_ram_bytes: availRamBytes,
-                    is_unified_memory: isUnified,
-                    ...(isRapidMlx ? { backend: 'rapid_mlx' } : {}),
-                }),
+                body: JSON.stringify(body),
             });
             if (!resp.ok) return;
             const data = await resp.json();

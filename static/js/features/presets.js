@@ -16,6 +16,7 @@ import {
     detectCommunityTemplateFamily,
 } from './chat-template-registry.js';
 import { hfSearch, hfCreateFormatToggle } from './hf-browse.js';
+import { buildEstimateBody } from './vram-estimate.js';
 
 let newPresetSeed = null;
 
@@ -957,21 +958,26 @@ export function updatePresetVram() {
         const gpuLayers = parseInt(document.getElementById('modal-gpu-layers')?.value);
         const mmprojPath = document.getElementById('modal-mmproj')?.value?.trim() || '';
         const available_vram_bytes = _presetAvailBytes();
-        const isRapidMlx = _currentModalPreset()?.backend === 'rapid_mlx';
-        const body = {
+        const currentPreset = _currentModalPreset();
+        const isRapidMlx = currentPreset?.backend === 'rapid_mlx';
+        const backend = isRapidMlx ? 'rapid_mlx' : 'llama_cpp';
+
+        // Builder item 6: use canonical body builder for cross-surface equality.
+        const body = buildEstimateBody({
+            backend,
             model_path: modelVal,
             n_ctx: nCtx,
-            ctk, ctv,
             parallel_slots: parallelSlots,
             ubatch_size: ubatch,
+            ctk: backend === 'llama_cpp' ? ctk : undefined,
+            ctv: backend === 'llama_cpp' ? ctv : undefined,
             n_cpu_moe: nCpuMoe,
             gpu_layers: Number.isFinite(gpuLayers) ? gpuLayers : -1,
             available_vram_bytes,
             available_ram_bytes: _presetAvailableRamBytes(),
             is_unified_memory: !!isUnified,
-            ...(isRapidMlx ? { backend: 'rapid_mlx' } : {}),
-            ...(mmprojPath ? { mmproj_path: mmprojPath } : {}),
-        };
+            mmproj_path: mmprojPath || null,
+        });
         const seq = ++_presetVramSeq;
         try {
             const headers = window.authHeaders
@@ -997,10 +1003,19 @@ function _renderPresetVram(el, data) {
     const avail   = data.available_bytes || 0;  // budget we sent
     const used    = data.total_bytes || 0;       // total model + context size
     const weights = data.weights_bytes || 0;
-    const kv      = data.kv_cache_bytes || 0;
+
+    // Builder item 6: Rapid-MLX active/retained KV split — distinct totals.
+    // For Rapid-MLX with workload_scenario: show active + retained separately.
+    // For llama.cpp or legacy calls: unified kv_cache_bytes.
+    const isRapidSplit = (data.active_kv_bytes || 0) > 0 && (data.retained_kv_bytes || 0) > 0;
+    const activeKV = data.active_kv_bytes || 0;
+    const retainedKV = data.retained_kv_bytes || 0;
+    const kv = isRapidSplit ? 0 : (data.kv_cache_bytes || 0); // unified KV when no split
     const mmproj  = data.mmproj_bytes || 0;
     const mtp     = data.mtp_bytes || 0;
     const overhead = data.overhead_bytes || 0;
+    const linearState = data.linear_attn_state_bytes || 0;
+    const tqTransient = data.turboquant_transient_peak_bytes || 0;
 
     // Bar 100% = budget so free headroom is visible; fall back to used if no budget
     const barTotal = avail > 0 ? avail : used;
@@ -1028,9 +1043,16 @@ function _renderPresetVram(el, data) {
 
     const parts = [];
     if (weights > 0) parts.push(`Weights ${fmt(weights)}`);
-    if (kv > 0) parts.push(`KV ${fmt(kv)}`);
+    if (isRapidSplit) {
+        if (activeKV > 0) parts.push(`Active KV ${fmt(activeKV)}`);
+        if (retainedKV > 0) parts.push(`Retained KV ${fmt(retainedKV)}`);
+    } else if (kv > 0) {
+        parts.push(`KV ${fmt(kv)}`);
+    }
+    if (linearState > 0) parts.push(`Linear attn ${fmt(linearState)}`);
     if (mmproj > 0) parts.push(`mmproj ${fmt(mmproj)}`);
     if (mtp > 0) parts.push(`MTP ${fmt(mtp)}`);
+    if (tqTransient > 0) parts.push(`TQ transient ${fmt(tqTransient)}`);
     if (overhead > 0) parts.push(`overhead ${fmt(overhead)}`);
     if (avail > 0 && free > 0) parts.push(`${fmt(free)} budget headroom`);
 
@@ -1068,15 +1090,29 @@ function _renderPresetVram(el, data) {
             `</div>`;
     }
 
+    // Builder item 6: distinct active/retained segments for Rapid-MLX when applicable.
+    const kvSegments = isRapidSplit
+        ? `<div class="vram-segment seg-active-kv" style="width:${pct(activeKV)}" title="Active KV Cache"></div>
+           <div class="vram-segment seg-retained-kv" style="width:${pct(retainedKV)}" title="Retained KV Cache"></div>`
+        : `<div class="vram-segment seg-kv" style="width:${pct(kv)}" title="KV Cache"></div>`;
+    const linearSeg = linearState > 0
+        ? `<div class="vram-segment seg-overhead" style="width:${pct(linearState)}" title="Linear Attention State"></div>`
+        : '';
+    const tqSeg = tqTransient > 0
+        ? `<div class="vram-segment seg-overhead" style="width:${pct(tqTransient)}" title="TurboQuant Transient"></div>`
+        : '';
+
     // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes the VRAM bar HTML
     el.innerHTML = window.DOMPurify.sanitize(`
         <div class="preset-vram-row">
             <span class="preset-memory-kind">${_presetIsUnified ? 'MEM' : 'VRAM'}</span>
             <div class="vram-bar">
                 <div class="vram-segment seg-weights" style="width:${pct(weights)}" title="Weights"></div>
-                <div class="vram-segment seg-kv" style="width:${pct(kv)}" title="KV Cache"></div>
+                ${kvSegments}
                 <div class="vram-segment seg-mmproj" style="width:${pct(mmproj)}" title="Vision Projector"></div>
                 <div class="vram-segment seg-mtp" style="width:${pct(mtp)}" title="MTP Heads"></div>
+                ${linearSeg}
+                ${tqSeg}
                 <div class="vram-segment seg-overhead" style="width:${pct(overhead)}" title="Overhead"></div>
                 <div class="vram-segment seg-free" style="width:${pct(free)}" title="Budget Headroom"></div>
             </div>

@@ -22,7 +22,7 @@ import {
   detectCommunityTemplateFamily,
 } from './chat-template-registry.js';
 import Router, { routeForCurrentView } from './router.js';
-import { scheduleEstimate, cancelEstimate } from './vram-estimate.js';
+import { scheduleEstimate, cancelEstimate, buildEstimateBody } from './vram-estimate.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune, requestDepthSweep, renderDepthSweep, requestBatchSweep, renderBatchSweep } from './tuning-cards.js';
 import { setHeaderMode } from './attach-detach.js';
@@ -4879,7 +4879,8 @@ async function clampAutoSizeResultToSizingMath(result, arch, modelBytes, availVr
   let adjusted = false;
 
   const tryEstimate = (ctx) => {
-    const body = {
+    // Builder item 6: canonical body builder for cross-surface equality.
+    const body = buildEstimateBody({
       backend: wizardState.engine.selected || 'llama_cpp',
       model_path: wizardState.model.path || '',
       n_ctx: ctx,
@@ -4890,9 +4891,9 @@ async function clampAutoSizeResultToSizingMath(result, arch, modelBytes, availVr
       n_cpu_moe: r.n_cpu_moe ?? hw.nCpuMoe ?? 0,
       available_vram_bytes: availVram,
       is_unified_memory: isUnifiedMemory(),
-      mmproj_path: wizardState.model.mmprojPath || '',
+      mmproj_path: wizardState.model.mmprojPath || null,
       mmproj_bytes: wizardState.arch.mmprojBytes || 0,
-    };
+    });
 
     return (async () => {
       try {
@@ -5414,10 +5415,18 @@ function updateVramDisplay() {
     const headroom = est.headroom_bytes || 0;
     const free = headroom; // backend headroom_bytes = available - total
     const weightVram = est.weights_bytes || 0;
-    const kv = est.kv_cache_bytes || 0;
+
+    // Builder item 6: Rapid-MLX active/retained KV split — distinct totals.
+    // When Rapid-MLX with workload_scenario returns separate active/retained values,
+    // display them distinctly. Otherwise use unified kv_cache_bytes.
+    const activeKV = est.active_kv_bytes || 0;
+    const retainedKV = est.retained_kv_bytes || 0;
+    const hasKVSplit = activeKV > 0 && retainedKV > 0;
+    const kv = hasKVSplit ? 0 : (est.kv_cache_bytes || 0); // unified KV when no split
     const mmproj = est.mmproj_bytes || 0;
     const mtp = est.mtp_bytes || 0;
     const linearState = est.linear_attn_state_bytes || 0;
+    const tqTransient = est.turboquant_transient_peak_bytes || 0;
     const oh = est.overhead_bytes || 0;
     const ramBytes = est.ram_bytes || 0;
     const recommendation = est.recommendation || 'risk';
@@ -5452,10 +5461,19 @@ function updateVramDisplay() {
     const denom = availVram > 0 ? availVram : total;
     if (denom > 0) {
       setSegWidth(dom.vSegWeights,  weightVram / denom);
-      setSegWidth(dom.vSegKv,       kv / denom);
+      // Builder item 6: show active/retained split for Rapid-MLX when available.
+      // When split is present, vSegKv shows active KV; vSegOverhead absorbs retained.
+      // This maintains visual distinction without requiring new DOM segments.
+      if (hasKVSplit) {
+        setSegWidth(dom.vSegKv,       (activeKV + retainedKV) / denom);
+        if (dom.vLegKvLabel) dom.vLegKvLabel.textContent = `KV ${formatGB(activeKV + retainedKV)} (active ${formatGB(activeKV)})`;
+      } else {
+        setSegWidth(dom.vSegKv,       kv / denom);
+        if (dom.vLegKvLabel) dom.vLegKvLabel.textContent = `KV ${formatGB(kv)}`;
+      }
       setSegWidth(dom.vSegMmproj,   mmproj / denom);
       setSegWidth(dom.vSegMtp,      mtp / denom);
-      setSegWidth(dom.vSegOverhead, oh / denom);
+      setSegWidth(dom.vSegOverhead, (oh + tqTransient) / denom);
       setSegWidth(dom.vSegFree,     Math.max(0, free) / denom);
       if (dom.vSegFree) dom.vSegFree.classList.toggle('over-budget', free < 0);
     }
@@ -5470,7 +5488,7 @@ function updateVramDisplay() {
 
     // Update legend labels
     if (dom.vLegWeightsLabel) dom.vLegWeightsLabel.textContent = `Weights ${formatGB(weightVram)}`;
-    if (dom.vLegKvLabel)       dom.vLegKvLabel.textContent       = `KV ${formatGB(kv)}`;
+    // KV label set above (with split annotation if applicable).
     if (mmproj > 0) {
       if (dom.vLegMmprojItem)  dom.vLegMmprojItem.style.display = '';
       if (dom.vLegMmprojLabel) dom.vLegMmprojLabel.textContent  = `mmproj ${formatGB(mmproj)}`;
@@ -5734,8 +5752,8 @@ async function renderScenarioCards(modelBytes, arch, availVram) {
   const fitResults = await Promise.all(
     scenarios.map(async (s) => {
       try {
-        const headers = (window.authHeaders ? window.authHeaders() : {});
-        const body = {
+        // Builder item 6: canonical body builder for cross-surface equality.
+        const body = buildEstimateBody({
           backend: wizardState.engine.selected || 'llama_cpp',
           model_path: wizardState.model.path || '',
           n_ctx: currentCtx,
@@ -5746,9 +5764,10 @@ async function renderScenarioCards(modelBytes, arch, availVram) {
           n_cpu_moe: hw.nCpuMoe || 0,
           available_vram_bytes: availVram,
           is_unified_memory: isUnifiedMemory(),
-          mmproj_path: wizardState.model.mmprojPath || '',
+          mmproj_path: wizardState.model.mmprojPath || null,
           mmproj_bytes: wizardState.arch.mmprojBytes || 0,
-        };
+        });
+        const headers = (window.authHeaders ? window.authHeaders() : {});
         const res = await fetch('/api/vram-estimate', {
           method: 'POST',
           headers: { ...headers, 'Content-Type': 'application/json' },
@@ -8582,36 +8601,38 @@ async function renderSummary() {
   }
 
   const ctxK = hw.cacheTypeK || 'q8_0', ctxV = hw.cacheTypeV || 'q8_0';
-  const kvSize = await (async () => {
-    if (rapid) return 0;
-    if (!modelBytes) return 0;
-    try {
-      const headers = (window.authHeaders ? window.authHeaders() : {});
-      const body = {
-        model_path: m.path || m.localPath || '',
-        n_ctx: hw.contextSize || 4096,
-        parallel_slots: hw.parallelSlots || 1,
-        ubatch_size: hw.ubatchSize || 2048,
-        ctk: ctxK,
-        ctv: ctxV,
-        n_cpu_moe: hw.nCpuMoe || 0,
-        available_vram_bytes: availVram,
-        is_unified_memory: isUnifiedMemory(),
-        mmproj_path: m.mmprojPath || '',
-        mmproj_bytes: m.mmprojBytes || 0,
-      };
-      const res = await fetch('/api/vram-estimate', {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) return 0;
-      const d = await res.json();
-      return (d.ok && d.kv_cache_bytes != null) ? d.kv_cache_bytes : 0;
-    } catch {
-      return 0;
-    }
-  })();
+   const kvSize = await (async () => {
+     if (rapid) return 0;
+     if (!modelBytes) return 0;
+     try {
+       // Builder item 6: canonical body builder for cross-surface equality.
+       const body = buildEstimateBody({
+         backend: 'llama_cpp',
+         model_path: m.path || m.localPath || '',
+         n_ctx: hw.contextSize || 4096,
+         parallel_slots: hw.parallelSlots || 1,
+         ubatch_size: hw.ubatchSize || 2048,
+         ctk: ctxK,
+         ctv: ctxV,
+         n_cpu_moe: hw.nCpuMoe || 0,
+         available_vram_bytes: availVram,
+         is_unified_memory: isUnifiedMemory(),
+         mmproj_path: m.mmprojPath || null,
+         mmproj_bytes: m.mmprojBytes || 0,
+       });
+       const headers = (window.authHeaders ? window.authHeaders() : {});
+       const res = await fetch('/api/vram-estimate', {
+         method: 'POST',
+         headers: { ...headers, 'Content-Type': 'application/json' },
+         body: JSON.stringify(body),
+       });
+       if (!res.ok) return 0;
+       const d = await res.json();
+       return (d.ok && d.kv_cache_bytes != null) ? d.kv_cache_bytes : 0;
+     } catch {
+       return 0;
+     }
+   })();
 
   const sharedRows = [
     { label: 'Engine',        value: rapid ? 'Rapid-MLX' : 'llama.cpp' },

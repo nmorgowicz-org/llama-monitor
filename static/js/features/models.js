@@ -7,6 +7,7 @@ import { getPlatformInfo } from '../core/platform-info.js';
 import { showToast, showToastWithActions } from './toast.js';
 import Router from './router.js';
 import { _showConfirm } from './presets.js';
+import { buildEstimateBody } from './vram-estimate.js';
 import {
     hfSearch,
     hfListFiles,
@@ -2327,23 +2328,24 @@ async function updateVramDisplay(file) {
     const mmprojBytes = hfState.mmprojBytes || 0;
     let data;
     try {
+        // Builder item 6: canonical body builder for cross-surface equality.
+        const body = buildEstimateBody({
+            backend: 'llama_cpp',
+            hf_repo_id: hfState.selectedRepoId || null,
+            hf_file_path: file?.path || file?.name || null,
+            model_size_bytes: modelBytes,
+            n_ctx: PREVIEW_CTX,
+            parallel_slots: 1,
+            ubatch_size: 512,
+            ctk: 'q8_0',
+            ctv: 'q8_0',
+            available_vram_bytes: availVram,
+            is_unified_memory: cachedUnified,
+            mmproj_bytes: mmprojBytes,
+        });
         const headers = window.authHeaders
             ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
             : { 'Content-Type': 'application/json' };
-        const body = {
-            backend: 'llama_cpp',
-            hf_repo_id: hfState.selectedRepoId || '',
-            hf_file_path: file?.path || file?.name || '',
-            model_size_bytes: modelBytes,
-            available_vram_bytes: availVram,
-            n_ctx: PREVIEW_CTX,
-            ctk: 'q8_0',
-            ctv: 'q8_0',
-            ubatch_size: 512,
-            parallel_slots: 1,
-            is_unified_memory: cachedUnified,
-            mmproj_bytes: mmprojBytes,
-        };
         const resp = await fetch('/api/vram-estimate', { method: 'POST', headers, body: JSON.stringify(body) });
         if (resp.ok) data = await resp.json();
     } catch {

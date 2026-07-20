@@ -57,6 +57,39 @@ fn api_vram_estimate_breakdown(
                     .unwrap_or("llama_cpp");
                 let is_rapid_mlx = matches!(backend_field, "rapid_mlx" | "mlx" | "rapid-mlx");
 
+                // ── Rapid-MLX execution policy (Phase 5a Part 5: cross-surface equality) ────
+                //
+                // Accept Rapid-native vocabulary only: kv_cache_dtype {bf16,int8,int4},
+                // reasoning_mode, turboquant_mode {v4,k8v4,none}. Per D1/D2: no llama
+                // ctk/ctv vocabulary for Rapid estimates. These map into RapidMlxExecutionPolicy
+                // for requested/effective distinction and reasons.
+                let rapid_kv_cache_dtype: Option<crate::llama::vram_estimator::execution_policy::KvCacheDtype> =
+                    body["kv_cache_dtype"]
+                        .as_str()
+                        .and_then(|s| {
+                            serde_json::from_str(&format!("\"{s}\"")).ok()
+                        });
+                let rapid_reasoning_mode = body["reasoning_mode"].as_bool().unwrap_or(false);
+                let rapid_turboquant_mode: Option<crate::llama::vram_estimator::execution_policy::TurboQuantMode> =
+                    body["turboquant_mode"]
+                        .as_str()
+                        .and_then(|s| {
+                            serde_json::from_str(&format!("\"{s}\"")).ok()
+                        });
+
+                // Construct the execution policy for Rapid-MLX (per D31 eligibility).
+                // Unknown/unqualified models → TurboQuant Disabled.
+                let rapid_execution_policy = if is_rapid_mlx {
+                    crate::llama::vram_estimator::execution_policy::RapidMlxExecutionPolicy::new_with_eligibility(
+                        rapid_kv_cache_dtype,
+                        rapid_reasoning_mode,
+                        rapid_turboquant_mode,
+                        crate::llama::vram_estimator::execution_policy::TurboQuantEligibility::NotQualified,
+                    )
+                } else {
+                    Default::default()
+                };
+
                 // Rapid-MLX prefix-cache compression budget (optional; 0 = no reservation).
                 let mlx_prefix_cache_tokens = body["mlx_prefix_cache_tokens"].as_u64().unwrap_or(0);
                 let mlx_prefix_cache_bits = body["mlx_prefix_cache_bits"].as_u64().unwrap_or(8) as u8;
@@ -293,6 +326,8 @@ fn api_vram_estimate_breakdown(
                         serde_json::from_value::<crate::llama::vram_estimator::MtpConfig>(serde_json::Value::Object(obj.clone())).ok()
                     });
 
+                // Use the execution policy's effective TurboQuant mode for the estimator.
+                // Per D31: effective_turboquant already has eligibility applied.
                 let opts = crate::llama::vram_estimator::EstimatorOptions {
                     backend: if is_rapid_mlx {
                         crate::llama::vram_estimator::Backend::RapidMlx
@@ -301,16 +336,12 @@ fn api_vram_estimate_breakdown(
                     },
                     evidence,
                     mlx_prefix_cache_bytes: mlx_cache_bytes,
-                    turboquant_mode: body["turboquant_mode"]
-                        .as_str()
-                        .and_then(|s| {
-                            serde_json::from_str::<crate::llama::vram_estimator::execution_policy::TurboQuantMode>(&format!("\"{s}\"")).ok()
-                        }),
+                    turboquant_mode: Some(rapid_execution_policy.effective_turboquant),
                     // Planning context tokens: explicit > scenario > 0 (legacy fallback).
                     rapid_planning_context_tokens,
                     rapid_retained_cache_tokens,
-                    // TurboQuant eligibility defaults to NotQualified unless capability snapshot confirms.
-                    turboquant_eligibility: Default::default(),
+                    // TurboQuant eligibility from the execution policy (D31).
+                    turboquant_eligibility: rapid_execution_policy.turboquant_eligibility,
                     mtp_config,
                     client_type: body["client_type"]
                         .as_str()
@@ -342,6 +373,25 @@ fn api_vram_estimate_breakdown(
                     opts,
                 );
 
+                // Builder item 6: canonical serialization includes execution_policy for
+                // requested/effective distinction and reasons. Cross-surface equality: every
+                // JS surface displays from this same canonical response.
+                let execution_policy_json = if is_rapid_mlx {
+                    serde_json::to_value(&rapid_execution_policy).unwrap_or(serde_json::Value::Null)
+                } else {
+                    serde_json::Value::Null
+                };
+                let workload_scenario_json = workload_scenario
+                    .as_ref()
+                    .and_then(|s| serde_json::to_value(s).ok())
+                    .unwrap_or(serde_json::Value::Null);
+                let effective_kv_dtype_json = if is_rapid_mlx {
+                    serde_json::to_value(rapid_execution_policy.effective_kv_dtype)
+                        .unwrap_or(serde_json::Value::Null)
+                } else {
+                    serde_json::Value::Null
+                };
+
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                     Box::new(warp::reply::json(&serde_json::json!({
                         "ok": true,
@@ -368,8 +418,11 @@ fn api_vram_estimate_breakdown(
                         "mtp_mode": serde_json::to_value(breakdown.mtp_mode).unwrap_or(serde_json::Value::Null),
                         "external_companion": serde_json::to_value(&breakdown.external_companion).unwrap_or(serde_json::Value::Null),
                         "mtp_admission": serde_json::to_value(&breakdown.mtp_admission).unwrap_or(serde_json::Value::Null),
-                        "client_type": serde_json::to_value(breakdown.client_type).unwrap_or(serde_json::Value::Null)
-                     }))),
+                        "client_type": serde_json::to_value(breakdown.client_type).unwrap_or(serde_json::Value::Null),
+                        "execution_policy": execution_policy_json,
+                        "workload_scenario": workload_scenario_json,
+                        "effective_kv_dtype": effective_kv_dtype_json,
+                      }))),
                 )
             }
         })
