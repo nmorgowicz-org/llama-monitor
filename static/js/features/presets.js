@@ -1050,6 +1050,8 @@ function _renderPresetVram(el, data) {
     const overhead = data.overhead_bytes || 0;
     const linearState = data.linear_attn_state_bytes || 0;
     const tqTransient = data.turboquant_transient_peak_bytes || 0;
+    // Phase 6 Part B: prefix cache budget display (informational, not consumed until active).
+    const prefixCacheBudget = data.prefix_cache_budget_bytes || 0;
 
     // Bar 100% = budget so free headroom is visible; fall back to used if no budget
     const barTotal = avail > 0 ? avail : used;
@@ -1089,6 +1091,8 @@ function _renderPresetVram(el, data) {
     if (tqTransient > 0) parts.push(`TQ transient ${fmt(tqTransient)}`);
     if (overhead > 0) parts.push(`overhead ${fmt(overhead)}`);
     if (avail > 0 && free > 0) parts.push(`${fmt(free)} budget headroom`);
+    // Phase 6 Part B: show prefix cache budget as informational (not consumed until active).
+    if (prefixCacheBudget > 0) parts.push(`Prefix cache budget ${fmt(prefixCacheBudget)}`);
 
     // Show post-load system RAM projection when we have live metrics
     const sys = lastSystemMetrics;
@@ -1351,6 +1355,11 @@ export function openPresetModal(mode, section, seedPreset = null) {
         numOrEmpty('modal-port', p.backend === 'rapid_mlx' ? p.rapid_mlx?.port : p.port);
         setOpt('modal-rapid-enable-thinking', p.rapid_mlx?.enable_thinking == null ? '' : String(!!p.rapid_mlx.enable_thinking));
         setOpt('modal-rapid-reasoning-effort', p.rapid_mlx?.reasoning_effort || '');
+        // Phase 6 Part B: prefix cache enabled checkbox (safe default: false).
+        const prefixCacheEnabled = p.rapid_mlx?.prefix_cache_enabled ?? false;
+        if (document.getElementById('modal-rapid-prefix-cache-enabled')) {
+            document.getElementById('modal-rapid-prefix-cache-enabled').checked = prefixCacheEnabled;
+        }
         setVal('modal-api-key', p.api_key || '');
         numOrEmpty('modal-max-tokens', p.max_tokens);
         numOrEmpty('modal-seed', p.seed);
@@ -1784,6 +1793,9 @@ function _buildFormPreset(existing) {
                     const out = {};
                     if (et != null) out.enable_thinking = et;
                     if (re) out.reasoning_effort = re;
+                    // Phase 6 Part B: prefix cache enabled toggle.
+                    const pceInput = document.getElementById('modal-rapid-prefix-cache-enabled');
+                    if (pceInput) out.prefix_cache_enabled = pceInput.checked;
                     return out;
                 })(),
             } : null,

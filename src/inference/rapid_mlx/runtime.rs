@@ -59,6 +59,12 @@ pub struct RuntimeMetadata {
     /// Last on-device probe result (user-driven, post-install/upgrade).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_probe_result: Option<ProbeResult>,
+    /// Phase 6 Part B: prefix cache configuration active for this runtime.
+    #[serde(default)]
+    pub prefix_cache_enabled: bool,
+    /// Phase 6 Part B: prefix cache budget in bytes (explicit or D30-computed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix_cache_budget_bytes: Option<u64>,
 }
 
 /// Resolved receipt of dependency installation for a managed environment.
@@ -89,6 +95,8 @@ impl Default for RuntimeMetadata {
             capability_snapshot: None,
             resolved_receipt: None,
             last_probe_result: None,
+            prefix_cache_enabled: false,
+            prefix_cache_budget_bytes: None,
         }
     }
 }

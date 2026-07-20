@@ -386,6 +386,8 @@ pub async fn construct_adapter(
                 capability_snapshot,
                 resolved_receipt: None,
                 last_probe_result: None,
+                prefix_cache_enabled: config.prefix_cache_enabled,
+                prefix_cache_budget_bytes: config.prefix_cache_budget_bytes,
             };
             let models_dir = state
                 .models_dir

@@ -6,7 +6,9 @@ use std::path::Path;
 /// Current preset schema version (D32).
 /// v1: initial version with schema_version field; typed Rapid-MLX model_source
 ///     is authoritative; legacy model_path is read-migrated but never re-written.
-pub const PRESET_SCHEMA_VERSION: u32 = 1;
+/// v2: Phase 6 Part B — prefix_cache_enabled and prefix_cache_budget_bytes fields;
+///     existing presets default to prefix_cache_enabled=false (safe default).
+pub const PRESET_SCHEMA_VERSION: u32 = 2;
 
 /// Forward-migrate a preset from any known version to current.
 /// Returns `true` if migration was applied, `false` if already current.
@@ -30,6 +32,14 @@ pub fn migrate_preset(preset: &mut ModelPreset) -> bool {
             migrated = true;
         }
         preset.schema_version = Some(1);
+    }
+    // v1 → v2: Phase 6 Part B — add prefix_cache_enabled (default false) and prefix_cache_budget_bytes.
+    // Existing presets remain with prefix_cache_enabled=false (safe default, never auto-enabled).
+    if preset.schema_version.unwrap_or(1) < 2 {
+        // Fields use #[serde(default)] so they deserialize safely; this migration
+        // just bumps the schema_version marker for forward-compatibility tracking.
+        preset.schema_version = Some(2);
+        migrated = true;
     }
     migrated
 }
@@ -778,5 +788,109 @@ mod tests {
         let loaded = load_presets(&path);
         assert_eq!(loaded.len(), 1);
         std::fs::remove_file(&path).ok();
+    }
+
+    // Phase 6 Part B: prefix cache persistence tests.
+
+    #[test]
+    fn test_prefix_cache_default_is_false() {
+        let config = crate::inference::rapid_mlx::RapidMlxConfig::default();
+        assert!(!config.prefix_cache_enabled);
+        assert!(config.prefix_cache_budget_bytes.is_none());
+    }
+
+    #[test]
+    fn test_prefix_cache_migration_v0_to_v2() {
+        // v0 preset (no schema_version) with RapidMlxConfig — should migrate to v2
+        // with prefix_cache_enabled=false (safe default).
+        let json = serde_json::json!({
+            "id": "test",
+            "name": "Test",
+            "backend": "rapid_mlx",
+            "rapid_mlx": {
+                "model_path": "/path/to/model",
+                "port": 8000
+            }
+        });
+        let mut preset: ModelPreset = serde_json::from_value(json).unwrap();
+        let migrated = migrate_preset(&mut preset);
+        assert!(migrated);
+        assert_eq!(preset.schema_version, Some(2));
+        // Safe default: prefix_cache_enabled=false
+        assert!(!preset.rapid_mlx.as_ref().unwrap().prefix_cache_enabled);
+    }
+
+    #[test]
+    fn test_prefix_cache_migration_v1_to_v2() {
+        // v1 preset with schema_version=1 — should migrate to v2.
+        let json = serde_json::json!({
+            "id": "test",
+            "name": "Test",
+            "schema_version": 1,
+            "backend": "rapid_mlx",
+            "rapid_mlx": {
+                "model_path": "/path/to/model",
+                "port": 8000
+            }
+        });
+        let mut preset: ModelPreset = serde_json::from_value(json).unwrap();
+        let migrated = migrate_preset(&mut preset);
+        assert!(migrated);
+        assert_eq!(preset.schema_version, Some(2));
+        // Safe default: prefix_cache_enabled=false
+        assert!(!preset.rapid_mlx.as_ref().unwrap().prefix_cache_enabled);
+    }
+
+    #[test]
+    fn test_prefix_cache_roundtrip_preserves_values() {
+        // Test that prefix_cache_enabled and prefix_cache_budget_bytes survive save/load.
+        let mut preset = ModelPreset {
+            id: "test".into(),
+            name: "Test".into(),
+            backend: crate::inference::InferenceBackend::RapidMlx,
+            rapid_mlx: Some(crate::inference::rapid_mlx::RapidMlxConfig {
+                model_path: "/path/to/model".into(),
+                prefix_cache_enabled: true,
+                prefix_cache_budget_bytes: Some(1073741824), // 1 GiB
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        migrate_preset(&mut preset);
+
+        let json = serde_json::to_value(&preset).unwrap();
+        let loaded: ModelPreset = serde_json::from_value(json).unwrap();
+
+        assert!(loaded.rapid_mlx.is_some());
+        let rapid = loaded.rapid_mlx.unwrap();
+        assert!(rapid.prefix_cache_enabled);
+        assert_eq!(rapid.prefix_cache_budget_bytes, Some(1073741824));
+    }
+
+    #[test]
+    fn test_prefix_cache_explicit_overrides_d30() {
+        // User explicit prefix_cache_budget_bytes should be preserved and used over D30 auto-compute.
+        let json = serde_json::json!({
+            "id": "test",
+            "name": "Test",
+            "schema_version": 2,
+            "backend": "rapid_mlx",
+            "rapid_mlx": {
+                "model_path": "/path/to/model",
+                "prefix_cache_enabled": true,
+                "prefix_cache_budget_bytes": 1572864000
+            }
+        });
+        let preset: ModelPreset = serde_json::from_value(json).unwrap();
+        let rapid = preset.rapid_mlx.unwrap();
+        assert!(rapid.prefix_cache_enabled);
+        assert_eq!(rapid.prefix_cache_budget_bytes, Some(1572864000u64));
+    }
+
+    #[test]
+    fn test_runtime_metadata_prefix_cache_defaults() {
+        let meta = crate::inference::rapid_mlx::runtime::RuntimeMetadata::default();
+        assert!(!meta.prefix_cache_enabled);
+        assert!(meta.prefix_cache_budget_bytes.is_none());
     }
 }

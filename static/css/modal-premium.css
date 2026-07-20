@@ -2283,6 +2283,14 @@
   display: grid;
 }
 
+/* Phase 6 Part B: Rapid-MLX-only prefix cache toggle; irrelevant to llama.cpp presets. */
+#pe-row-rapid-prefix-cache {
+  display: none;
+}
+#preset-modal.preset-editor--rapid-mlx #pe-row-rapid-prefix-cache {
+  display: block;
+}
+
 /* Rapid-MLX currently exposes only the launch fields the adapter can persist.
    Keep llama.cpp-only controls out of sight so edits can never be silently lost. */
 #preset-modal.preset-editor--rapid-mlx .preset-nav-item:not([data-section="model"]):not([data-section="advanced"]),
@@ -2290,8 +2298,8 @@
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-row,
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-toggles,
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .preset-memory-warning,
-#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] > .pe-section-body > :not(.pe-row:has(#modal-port)):not(#pe-row-rapid-reasoning),
-#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] .pe-field:not(:has(#modal-port)):not(:has(#modal-rapid-enable-thinking)):not(:has(#modal-rapid-reasoning-effort)),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] > .pe-section-body > :not(.pe-row:has(#modal-port)):not(#pe-row-rapid-reasoning):not(#pe-row-rapid-prefix-cache),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] .pe-field:not(:has(#modal-port)):not(:has(#modal-rapid-enable-thinking)):not(:has(#modal-rapid-reasoning-effort)):not(:has(#modal-rapid-prefix-cache-enabled)),
 #preset-modal.preset-editor--rapid-mlx #preset-browse-model-btn,
 #preset-modal.preset-editor--rapid-mlx #preset-vram-strip {
   display: none !important;

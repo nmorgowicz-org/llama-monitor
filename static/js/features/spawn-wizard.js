@@ -690,6 +690,8 @@ function cacheDom() {
   dom.vLegOverheadLabel = document.getElementById('vleg-overhead-label');
   dom.vLegFreeLabel     = document.getElementById('vleg-free-label');
   dom.vLegFreeDot       = document.getElementById('vleg-free-dot');
+  dom.vLegPrefixCacheItem = document.getElementById('vleg-prefix-cache');
+  dom.vLegPrefixCacheLabel = document.getElementById('vleg-prefix-cache-label');
   dom.vramScenarios   = document.getElementById('vram-scenarios');
   dom.ctxRailSummaryValue  = document.getElementById('ctx-rail-summary-value');
   dom.ctxRailSummaryStatus = document.getElementById('ctx-rail-summary-status');
@@ -5484,6 +5486,9 @@ function updateVramDisplay() {
     const oh = est.overhead_bytes || 0;
     const ramBytes = est.ram_bytes || 0;
     const recommendation = est.recommendation || 'risk';
+    // Phase 6 Part B: prefix cache budget display (informational, not consumed until active).
+    // Show when budget exists (backend returns > 0 when configured_ceiling_bytes > 0).
+    const prefixCacheBudget = est.prefix_cache_budget_bytes || 0;
     // Rapid-MLX overhead is a documented formula-based approximation (not yet calibrated
     // against real Apple Silicon measurements); surface that in the tooltip rather than
     // presenting it as precisely measured. Backend-driven — no local VRAM math here.
@@ -5560,6 +5565,14 @@ function updateVramDisplay() {
       const freeAbs = Math.abs(free);
       dom.vLegFreeLabel.textContent = free >= 0 ? `Free ${formatGB(free)}` : `Over ${formatGB(freeAbs)}`;
       if (dom.vLegFreeDot) dom.vLegFreeDot.style.background = free >= 0 ? '' : 'var(--color-error)';
+    }
+
+    // Phase 6 Part B: show prefix cache budget legend when budget exists.
+    if (prefixCacheBudget > 0) {
+      if (dom.vLegPrefixCacheItem) dom.vLegPrefixCacheItem.style.display = '';
+      if (dom.vLegPrefixCacheLabel) dom.vLegPrefixCacheLabel.textContent = `Prefix cache budget ${formatGB(prefixCacheBudget)}`;
+    } else {
+      if (dom.vLegPrefixCacheItem) dom.vLegPrefixCacheItem.style.display = 'none';
     }
 
     // Show/hide MoE panel

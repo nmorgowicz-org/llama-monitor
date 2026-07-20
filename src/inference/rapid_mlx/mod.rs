@@ -50,6 +50,17 @@ pub struct RapidMlxConfig {
     pub timeout: Option<u32>,
     #[serde(default)]
     pub max_cache_blocks: Option<u32>,
+    /// Phase 6 Part B: prefix cache persistence display toggle (safe default: false).
+    /// Controls whether prefix cache budget is shown in VRAM breakdowns and whether
+    /// the UI exposes prefix cache configuration. max_cache_blocks and D30 budget
+    /// are applied based on capability guidance regardless of this flag.
+    #[serde(default)]
+    pub prefix_cache_enabled: bool,
+    /// Phase 6 Part B: explicit prefix cache budget override in bytes.
+    /// When set, overrides the D30 auto-computed budget (configured_ceiling_bytes × 0.10).
+    /// User explicit values always win (hard gate).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix_cache_budget_bytes: Option<u64>,
     /// Accepted only on launch input. Secrets are never serialized into presets,
     /// sessions, or diagnostics.
     #[serde(default, skip_serializing)]
@@ -127,6 +138,8 @@ impl Default for RapidMlxConfig {
             log_level: default_log_level(),
             timeout: None,
             max_cache_blocks: None,
+            prefix_cache_enabled: false,
+            prefix_cache_budget_bytes: None,
             api_key: None,
             enable_thinking: None,
             reasoning_effort: None,
@@ -560,6 +573,8 @@ mod tests {
                 capability_snapshot: None,
                 resolved_receipt: None,
                 last_probe_result: None,
+                prefix_cache_enabled: false,
+                prefix_cache_budget_bytes: None,
             },
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         );
@@ -670,6 +685,8 @@ mod chat_tests {
                 capability_snapshot: None,
                 resolved_receipt: None,
                 last_probe_result: None,
+                prefix_cache_enabled: false,
+                prefix_cache_budget_bytes: None,
             },
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         )

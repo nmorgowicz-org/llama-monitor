@@ -530,6 +530,8 @@ mod tests {
                     capability_snapshot: None,
                     resolved_receipt: None,
                     last_probe_result: None,
+                    prefix_cache_enabled: false,
+                    prefix_cache_budget_bytes: None,
                 },
                 crate::inference::rapid_mlx::model_resolver::ResolvedRapidMlxLaunchModel::validated_alias("stale-model").unwrap(),
             ),

@@ -3162,25 +3162,33 @@
                                     <input type="text" class="pe-input" id="modal-api-key" placeholder="(none)">
                                 </div>
                             </div>
-                            <div class="pe-row" id="pe-row-rapid-reasoning">
-                                <div class="pe-field">
-                                    <label class="pe-label" for="modal-rapid-enable-thinking" title="Default sent as enable_thinking on every chat request that doesn't override it.">Thinking Mode</label>
-                                    <select class="pe-select" id="modal-rapid-enable-thinking">
-                                        <option value="">(unset — client decides)</option>
-                                        <option value="true">on</option>
-                                        <option value="false">off</option>
-                                    </select>
-                                </div>
-                                <div class="pe-field">
-                                    <label class="pe-label" for="modal-rapid-reasoning-effort" title="Default sent as reasoning_effort on every chat request that doesn't override it.">Reasoning Effort</label>
-                                    <select class="pe-select" id="modal-rapid-reasoning-effort">
-                                        <option value="">(unset)</option>
-                                        <option value="low">low</option>
-                                        <option value="medium">medium</option>
-                                        <option value="high">high</option>
-                                    </select>
-                                </div>
-                            </div>
+                             <div class="pe-row" id="pe-row-rapid-reasoning">
+                                 <div class="pe-field">
+                                     <label class="pe-label" for="modal-rapid-enable-thinking" title="Default sent as enable_thinking on every chat request that doesn't override it.">Thinking Mode</label>
+                                     <select class="pe-select" id="modal-rapid-enable-thinking">
+                                         <option value="">(unset — client decides)</option>
+                                         <option value="true">on</option>
+                                         <option value="false">off</option>
+                                     </select>
+                                 </div>
+                                 <div class="pe-field">
+                                     <label class="pe-label" for="modal-rapid-reasoning-effort" title="Default sent as reasoning_effort on every chat request that doesn't override it.">Reasoning Effort</label>
+                                     <select class="pe-select" id="modal-rapid-reasoning-effort">
+                                         <option value="">(unset)</option>
+                                         <option value="low">low</option>
+                                         <option value="medium">medium</option>
+                                         <option value="high">high</option>
+                                     </select>
+                                 </div>
+                             </div>
+                             <div class="pe-field pe-row-rapid-prefix-cache" id="pe-row-rapid-prefix-cache" style="display:none;">
+                                 <label class="pe-label pe-toggle-label" for="modal-rapid-prefix-cache-enabled" title="Enable prefix caching for Rapid-MLX. When enabled, repeated prompt prefixes reuse cached KV states instead of recomputing. Recommended for multi-turn agents with stable system prompts.">Prefix Cache <span class="pe-toggle-hint" id="pe-prefix-cache-hint"></span></label>
+                                 <div class="pe-toggle">
+                                     <input type="checkbox" class="pe-toggle-input" id="modal-rapid-prefix-cache-enabled">
+                                     <span class="pe-toggle-slider"></span>
+                                 </div>
+                                 <div class="pe-field-hint" id="pe-prefix-cache-hint-detail">When enabled, uses D30 auto-computed budget (10% of configured ceiling) unless explicitly set. Prefix cache is additive and budget-constrained — never unlimited.</div>
+                             </div>
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-max-tokens" title="Maximum tokens to generate per request. Empty = unlimited (model's context limit).">Max Tokens</label>
@@ -4100,15 +4108,16 @@
                                  title="Free headroom"></div>
                         </div>
 
-                        <!-- Legend row -->
-                        <div class="vram-legend">
-                            <span class="vleg-item" id="vleg-weights"><span class="vleg-dot seg-weights"></span><span id="vleg-weights-label">Weights —</span></span>
-                            <span class="vleg-item" id="vleg-kv"><span class="vleg-dot seg-kv"></span><span id="vleg-kv-label">KV —</span></span>
-                            <span class="vleg-item vleg-mmproj" id="vleg-mmproj" style="display:none;"><span class="vleg-dot seg-mmproj"></span><span id="vleg-mmproj-label">mmproj —</span></span>
-                            <span class="vleg-item vleg-mtp" id="vleg-mtp" style="display:none;"><span class="vleg-dot seg-mtp"></span><span id="vleg-mtp-label">MTP —</span></span>
-                            <span class="vleg-item"><span class="vleg-dot seg-overhead"></span><span id="vleg-overhead-label">OH —</span></span>
-                            <span class="vleg-item"><span class="vleg-dot seg-free" id="vleg-free-dot"></span><span id="vleg-free-label">Free —</span></span>
-                        </div>
+                         <!-- Legend row -->
+                         <div class="vram-legend">
+                             <span class="vleg-item" id="vleg-weights"><span class="vleg-dot seg-weights"></span><span id="vleg-weights-label">Weights —</span></span>
+                             <span class="vleg-item" id="vleg-kv"><span class="vleg-dot seg-kv"></span><span id="vleg-kv-label">KV —</span></span>
+                             <span class="vleg-item vleg-mmproj" id="vleg-mmproj" style="display:none;"><span class="vleg-dot seg-mmproj"></span><span id="vleg-mmproj-label">mmproj —</span></span>
+                             <span class="vleg-item vleg-mtp" id="vleg-mtp" style="display:none;"><span class="vleg-dot seg-mtp"></span><span id="vleg-mtp-label">MTP —</span></span>
+                             <span class="vleg-item"><span class="vleg-dot seg-overhead"></span><span id="vleg-overhead-label">OH —</span></span>
+                             <span class="vleg-item"><span class="vleg-dot seg-free" id="vleg-free-dot"></span><span id="vleg-free-label">Free —</span></span>
+                             <span class="vleg-item vleg-prefix-cache" id="vleg-prefix-cache" style="display:none;"><span class="vleg-dot seg-prefix-cache"></span><span id="vleg-prefix-cache-label">Prefix cache budget —</span></span>
+                         </div>
 
                         <div class="ctx-rail-summary" id="ctx-rail-summary">
                             <div class="ctx-rail-summary-row">

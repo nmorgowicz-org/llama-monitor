@@ -329,13 +329,23 @@ fn api_vram_estimate_breakdown(
                 // Phase 5b Part C: max_cache_blocks from preset config for prelaunch estimates.
                 let max_cache_blocks = body["max_cache_blocks"].as_u64().map(|v| v as u32);
 
-                // Phase 6 Part A: D30 prefix cache budget from MemoryAvailabilitySnapshot.
-                // When caller provides configured_ceiling_bytes, derive budget = ceiling × 0.10.
+                // Phase 6 Part B: prefix cache budget — user explicit value wins (hard gate).
+                // When caller provides configured_ceiling_bytes, derive D30 budget = ceiling × 0.10.
+                // When caller provides prefix_cache_budget_bytes explicitly, that overrides D30.
                 let configured_ceiling_bytes = body["configured_ceiling_bytes"].as_u64().unwrap_or(0);
-                let prefix_cache_budget_bytes = if is_rapid_mlx && configured_ceiling_bytes > 0 {
-                    (configured_ceiling_bytes as f64
-                        * crate::inference::rapid_mlx::capabilities::PREFIX_CACHE_BUDGET_FRACTION)
-                        as u64
+                let user_explicit_budget = body["prefix_cache_budget_bytes"].as_u64();
+                let prefix_cache_budget_bytes = if is_rapid_mlx {
+                    if let Some(explicit) = user_explicit_budget {
+                        // User explicit values win (hard gate).
+                        explicit
+                    } else if configured_ceiling_bytes > 0 {
+                        // D30: auto-computed from configured_ceiling_bytes.
+                        (configured_ceiling_bytes as f64
+                            * crate::inference::rapid_mlx::capabilities::PREFIX_CACHE_BUDGET_FRACTION)
+                            as u64
+                    } else {
+                        0
+                    }
                 } else {
                     0
                 };
