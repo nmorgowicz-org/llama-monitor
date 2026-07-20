@@ -1630,6 +1630,11 @@ pub enum FixAction {
     AddToolCallParser,
     EnableAutoToolChoice,
     AddNoThinking,
+    DisablePrefixCache,
+    AdjustPrefixCacheBudget(u64),
+    DisableMaxCacheBlocks,
+    SetPrefixCacheBudget(u64),
+    ReclaimBackendAllocatorCache,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -1650,6 +1655,7 @@ pub enum DoctorFindingType {
     Environment,
     Preset,
     LlamaCpp,
+    Cache,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

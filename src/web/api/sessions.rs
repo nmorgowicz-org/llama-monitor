@@ -535,6 +535,18 @@ fn api_apply_fix(
                         }
                         FixAction::EnableAutoToolChoice => config.auto_tool_choice = true,
                         FixAction::AddNoThinking => config.no_thinking = true,
+                        FixAction::DisablePrefixCache => config.prefix_cache_enabled = false,
+                        FixAction::AdjustPrefixCacheBudget(bytes) => {
+                            config.prefix_cache_budget_bytes = Some(bytes)
+                        }
+                        FixAction::DisableMaxCacheBlocks => config.max_cache_blocks = None,
+                        FixAction::SetPrefixCacheBudget(bytes) => {
+                            config.prefix_cache_budget_bytes = Some(bytes)
+                        }
+                        FixAction::ReclaimBackendAllocatorCache => {
+                            // Reclaim action handled via system_tools endpoint;
+                            // this fix_action is diagnostic-only and not applied here.
+                        }
                     }
 
                     let presets_path = state.presets_path.clone();

@@ -386,6 +386,26 @@ pub fn cache_snapshot(snapshot: CapabilitySnapshot) {
     cache.write().unwrap().insert(key, snapshot);
 }
 
+/// Generate a capability snapshot using the discovered binary.
+/// Uses Discovery::resolve_binary to find rapid-mlx, then generates the snapshot.
+/// Returns Ok(snapshot) if binary found and probe succeeds; Err if not available.
+#[allow(dead_code)]
+pub async fn generate_snapshot_from_discovery() -> Result<CapabilitySnapshot> {
+    use crate::inference::rapid_mlx::discovery::Discovery;
+
+    let (binary, source) = Discovery::resolve_binary(None, None)
+        .await
+        .context("Failed to discover Rapid-MLX binary")?;
+
+    // Check cache first
+    let identity = ExecutableIdentity::from_path(&binary)?;
+    if let Some(snap) = cached_snapshot(&identity) {
+        return Ok(snap);
+    }
+
+    generate_snapshot(&binary, source).await
+}
+
 /// Generate a capability snapshot by probing the given executable.
 pub async fn generate_snapshot(binary: &Path, source: RuntimeSource) -> Result<CapabilitySnapshot> {
     let identity = ExecutableIdentity::from_path(binary)?;
@@ -1054,6 +1074,137 @@ impl PrefixCacheGuidance {
             reasons_off_or_lower: reasons,
             block_size_bytes,
         }
+    }
+}
+
+/// Parameters for computing prefix cache diagnostic findings.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct CacheDiagnosticParams {
+    pub config_prefix_cache_enabled: bool,
+    pub config_prefix_cache_budget_bytes: Option<u64>,
+    pub config_max_cache_blocks: Option<u32>,
+    pub snapshot: CapabilitySnapshot,
+    pub configured_ceiling_bytes: u64,
+    pub current_safe_availability_bytes: u64,
+}
+
+/// Diagnostic findings produced by cache configuration analysis.
+#[allow(dead_code)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PrefixCacheDiagnosticFindings {
+    pub findings: Vec<CacheDiagnosticFinding>,
+}
+
+/// A single cache diagnostic finding.
+#[allow(dead_code)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CacheDiagnosticFinding {
+    pub code: String,
+    pub severity: String,
+    pub message: String,
+    pub fixable: bool,
+    pub fix_action: Option<String>,
+}
+
+impl CapabilitySnapshot {
+    /// Compute prefix cache diagnostic findings for a given configuration.
+    ///
+    /// Detects:
+    /// - budget_bytes > configured_ceiling_bytes (error/misconfiguration)
+    /// - max_cache_blocks set but --max-cache-blocks unsupported (warning)
+    /// - prefix_cache_enabled=true but budget_bytes=0 and low headroom (warning)
+    ///
+    /// User explicit values always win; findings are recommendations only.
+    #[allow(dead_code)]
+    pub fn compute_prefix_cache_findings(
+        &self,
+        params: &CacheDiagnosticParams,
+    ) -> PrefixCacheDiagnosticFindings {
+        let mut findings = Vec::new();
+
+        // Check 1: budget exceeds configured ceiling (misconfiguration)
+        if let Some(budget) = params.config_prefix_cache_budget_bytes {
+            if budget > params.configured_ceiling_bytes && params.configured_ceiling_bytes > 0 {
+                findings.push(CacheDiagnosticFinding {
+                    code: "CACHE_BUDGET_EXCEEDS_CEILING".into(),
+                    severity: "error".into(),
+                    message: format!(
+                        "Prefix cache budget ({}) exceeds configured ceiling ({}). Reduce budget or increase ceiling.",
+                        bytes_to_human(budget),
+                        bytes_to_human(params.configured_ceiling_bytes)
+                    ),
+                    fixable: true,
+                    fix_action: Some(format!("adjust_budget_{}", params.configured_ceiling_bytes as f64 * PREFIX_CACHE_BUDGET_FRACTION)
+                        .replace(".", "_")),
+                });
+            }
+        }
+
+        // Check 2: max_cache_blocks set but unsupported
+        if params.config_max_cache_blocks.is_some() {
+            let has_cache_flag = self.serve_flags.iter().any(|f| f == "--max-cache-blocks");
+            if !has_cache_flag {
+                findings.push(CacheDiagnosticFinding {
+                    code: "CACHE_BLOCKS_UNSUPPORTED".into(),
+                    severity: "warning".into(),
+                    message: "max_cache_blocks is configured but this runtime does not support --max-cache-blocks. The setting will be ignored.".into(),
+                    fixable: true,
+                    fix_action: Some("disable_blocks".into()),
+                });
+            }
+        }
+
+        // Check 3: prefix_cache_enabled but budget=0 and low headroom
+        if params.config_prefix_cache_enabled
+            && params.config_prefix_cache_budget_bytes == Some(0)
+            && params.current_safe_availability_bytes > 0
+        {
+            let headroom_ratio = if params.configured_ceiling_bytes > 0 {
+                params.current_safe_availability_bytes as f64
+                    / params.configured_ceiling_bytes as f64
+            } else {
+                0.0
+            };
+            // Low headroom = below 30% of ceiling available
+            if headroom_ratio < 0.30 {
+                let recommended = if params.configured_ceiling_bytes > 0 {
+                    (params.configured_ceiling_bytes as f64 * PREFIX_CACHE_BUDGET_FRACTION) as u64
+                } else {
+                    0
+                };
+                findings.push(CacheDiagnosticFinding {
+                    code: "CACHE_ENABLED_NO_BUDGET_LOW_HEADROOM".into(),
+                    severity: "warning".into(),
+                    message: format!(
+                        "Prefix cache is enabled but budget is 0 and memory headroom is low ({:.0}% of ceiling). Set a budget to prevent uncontrolled growth.",
+                        headroom_ratio * 100.0
+                    ),
+                    fixable: true,
+                    fix_action: Some(format!("set_budget_{}", recommended)),
+                });
+            }
+        }
+
+        PrefixCacheDiagnosticFindings { findings }
+    }
+
+    /// Check whether this snapshot supports --max-cache-blocks.
+    #[allow(dead_code)]
+    pub fn supports_max_cache_blocks(&self) -> bool {
+        self.serve_flags.iter().any(|f| f == "--max-cache-blocks")
+    }
+}
+
+fn bytes_to_human(bytes: u64) -> String {
+    if bytes >= 1_073_741_824 {
+        format!("{:.1} GiB", bytes as f64 / 1_073_741_824.0)
+    } else if bytes >= 1_048_576 {
+        format!("{:.1} MiB", bytes as f64 / 1_048_576.0)
+    } else if bytes >= 1_024 {
+        format!("{:.1} KiB", bytes as f64 / 1_024.0)
+    } else {
+        format!("{} B", bytes)
     }
 }
 

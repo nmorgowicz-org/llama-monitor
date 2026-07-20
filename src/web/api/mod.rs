@@ -13,6 +13,7 @@ mod common;
 mod config;
 mod db;
 mod debug;
+mod doctor;
 mod hf;
 mod lhm;
 mod llama_binary;
@@ -71,6 +72,7 @@ pub fn api_routes(
     let remote_agent_routes = remote_agent::routes(ctx.clone());
     let rapid_mlx_runtime_routes = rapid_mlx_runtime::routes(ctx.clone());
     let sensor_bridge_routes = sensor_bridge::routes(ctx.clone());
+    let doctor_routes = doctor::routes(ctx.clone());
 
     let metrics_routes = metrics::routes(ctx.clone());
     let tls_routes = tls::routes(ctx.clone());
@@ -97,6 +99,7 @@ pub fn api_routes(
         .or(remote_agent_routes)
         .or(rapid_mlx_runtime_routes)
         .or(sensor_bridge_routes)
+        .or(doctor_routes)
         .or(metrics_routes)
         .or(tls_routes)
         .or(llama_binary_routes)
