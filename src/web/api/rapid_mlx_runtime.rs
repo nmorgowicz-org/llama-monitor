@@ -270,9 +270,13 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .or(job_route(ctx.clone(), state.clone()))
         .unify()
-        .or(profile_route(ctx, state))
+        .or(profile_route(ctx.clone(), state.clone()))
         .unify()
         .or(escape_hatch_route())
+        .unify()
+        .or(prefix_cache_guidance_route(ctx.clone()))
+        .unify()
+        .or(runtime_metadata_route(ctx, state))
         .unify()
         .boxed()
 }
@@ -284,6 +288,201 @@ fn escape_hatch_route() -> ApiRoute {
             Box::new(warp::reply::json(
                 &crate::inference::rapid_mlx::escape_hatch::ALLOWED_ESCAPE_FLAGS,
             )) as ApiReply
+        })
+        .boxed()
+}
+
+fn runtime_metadata_route(ctx: ApiCtx, state: RuntimeApiState) -> ApiRoute {
+    let config = ctx.config;
+    warp::path!("api" / "rapid-mlx" / "runtime" / "metadata")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let config = config.clone();
+            let state = state.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                if crate::inference::rapid_mlx::ensure_local_platform_supported().is_err() {
+                    return Ok(json_error(
+                        StatusCode::BAD_REQUEST,
+                        "Rapid-MLX metadata queries require Apple Silicon macOS",
+                    ));
+                }
+                let manager_result = manager(&state);
+                let mut active_info: Option<(std::path::PathBuf, ManagedReleaseChannel)> = None;
+                if let Ok(manager) = &manager_result {
+                    let manager = manager.clone();
+                    if let Ok(Ok(status)) =
+                        tokio::task::spawn_blocking(move || manager.status()).await
+                        && let Some(active) = status.active
+                    {
+                        active_info = Some((active.executable_path, active.release_channel));
+                    }
+                }
+                let binary_path = active_info.as_ref().map(|(p, _)| p.as_path());
+                let Ok((binary, source)) =
+                    crate::inference::rapid_mlx::discovery::Discovery::resolve_binary(
+                        None,
+                        binary_path,
+                    )
+                    .await
+                else {
+                    return Ok(json_error(
+                        StatusCode::NOT_FOUND,
+                        "Rapid-MLX binary not found. Run rapid-mlx doctor or install via Settings.",
+                    ));
+                };
+                let allow_prerelease = active_info
+                    .as_ref()
+                    .is_some_and(|(p, c)| p == &binary && *c == ManagedReleaseChannel::Prerelease);
+                // Probe compatibility to trigger capability snapshot generation
+                if source
+                    == crate::inference::rapid_mlx::runtime::RuntimeSource::Managed
+                {
+                    if allow_prerelease {
+                        if crate::inference::rapid_mlx::compatibility::probe_published_managed_release(
+                            &binary,
+                            allow_prerelease,
+                        )
+                        .await
+                        .is_err()
+                        {
+                            return Ok(json_error(
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                "Rapid-MLX runtime probe failed",
+                            ));
+                        }
+                    } else if crate::inference::rapid_mlx::compatibility::probe(&binary, source)
+                        .await
+                        .is_err()
+                    {
+                        return Ok(json_error(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "Rapid-MLX runtime probe failed",
+                        ));
+                    }
+                } else if crate::inference::rapid_mlx::compatibility::probe(&binary, source).await
+                    .is_err()
+                {
+                    return Ok(json_error(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "Rapid-MLX runtime probe failed",
+                    ));
+                };
+
+                // Fetch the capability snapshot for this binary
+                let identity =
+                    match crate::inference::rapid_mlx::capabilities::ExecutableIdentity::from_path(
+                        &binary,
+                    ) {
+                        Ok(id) => id,
+                        Err(e) => {
+                            return Ok(json_error(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                format!("Failed to compute executable identity: {e}"),
+                            ));
+                        }
+                    };
+                let snapshot =
+                    match crate::inference::rapid_mlx::capabilities::cached_snapshot(&identity) {
+                    Some(s) => s,
+                    None => {
+                        return Ok(json_error(
+                            StatusCode::NOT_FOUND,
+                            "No capability snapshot available for this runtime",
+                        ));
+                    }
+                };
+
+                // D27: expose sampling defaults; only supported fields are effective
+                let effective_sampling_defaults = snapshot.sampling_defaults.effective_fields();
+
+                Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "version": snapshot.rapid_mlx_version,
+                        "source": source,
+                        "sampling_defaults": snapshot.sampling_defaults,
+                        "effective_sampling_default_fields": effective_sampling_defaults,
+                        "sampling_cascade": snapshot.sampling_cascade,
+                        "mtp_concurrency": snapshot.mtp_concurrency,
+                        "qualified_features": snapshot.qualified_features,
+                    }),
+                )))
+            }
+        })
+        .boxed()
+}
+
+fn prefix_cache_guidance_route(ctx: ApiCtx) -> ApiRoute {
+    let config = ctx.config;
+    warp::path!("api" / "rapid-mlx" / "runtime" / "prefix-cache-guidance")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<serde_json::Value>())
+        .map(move |auth: Option<String>, body: serde_json::Value| {
+            if !check_api_token(&auth, &config) {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({"ok": false, "error": "Unauthorized"})),
+                    warp::http::StatusCode::UNAUTHORIZED,
+                )) as ApiReply;
+            }
+            // Pure derivation from provided parameters — no runtime state needed.
+            // This is called by the wizard/preset editor to compute guidance.
+            let configured_ceiling_bytes =
+                body["configured_ceiling_bytes"].as_u64().unwrap_or(0u64);
+            let current_safe_bytes = body["current_safe_bytes"].as_u64().unwrap_or(0u64);
+            let estimated_model_overhead_bytes = body["estimated_model_overhead_bytes"]
+                .as_u64()
+                .unwrap_or(0u64);
+            let user_max_cache_blocks: Option<u32> =
+                body["user_max_cache_blocks"].as_u64().map(|v| v as u32);
+            let arch_n_embd = body["arch_n_embd"].as_u64().unwrap_or(0) as u32;
+            let arch_n_kv_heads = body["arch_n_kv_heads"].as_u64().unwrap_or(0) as u32;
+            let arch_head_dim = body["arch_head_dim"].as_u64().unwrap_or(0) as u32;
+            // Accept serve_flags from caller (from actual capability snapshot) so guidance
+            // reflects real runtime capabilities rather than synthetic assumptions.
+            let serve_flags: Vec<String> = body["serve_flags"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            // Use a synthetic capability snapshot with caller-provided serve_flags
+            let snapshot = crate::inference::rapid_mlx::capabilities::CapabilitySnapshot {
+                executable_identity: Default::default(),
+                rapid_mlx_version: String::new(),
+                help_hash: String::new(),
+                serve_flags,
+                package_versions: vec![],
+                installed_extras: Default::default(),
+                qualified_features: Default::default(),
+                mtp_concurrency: Default::default(),
+                sampling_defaults: Default::default(),
+                sampling_cascade: Default::default(),
+                evidence_timestamp: 0,
+                source: Default::default(),
+            };
+
+            let guidance = crate::inference::rapid_mlx::capabilities::PrefixCacheGuidance::derive(
+                &snapshot,
+                configured_ceiling_bytes,
+                current_safe_bytes,
+                estimated_model_overhead_bytes,
+                user_max_cache_blocks,
+                arch_n_embd,
+                arch_n_kv_heads,
+                arch_head_dim,
+            );
+
+            Box::new(warp::reply::json(&serde_json::json!({
+                "ok": true,
+                "guidance": guidance,
+            }))) as ApiReply
         })
         .boxed()
 }

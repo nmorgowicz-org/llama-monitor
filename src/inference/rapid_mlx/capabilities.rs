@@ -920,6 +920,143 @@ fn hash_file(path: &Path) -> Result<String> {
         .collect())
 }
 
+/// D30: Conservative default prefix cache fraction of configured ceiling.
+/// 10% is safe across architectures; can be calibrated higher per [escalate→device].
+pub const PREFIX_CACHE_BUDGET_FRACTION: f64 = 0.10;
+
+/// Prefix cache guidance derived from capability snapshot and memory availability.
+/// This is a recommendation only — never forced, never auto-applied (A31).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct PrefixCacheGuidance {
+    /// Whether prefix cache is supported by this runtime (capability confirmed).
+    pub supported: bool,
+    /// Whether a recommendation is being made (supported + headroom + not explicitly set).
+    pub should_recommend: bool,
+    /// Recommended cache block count derived from available memory.
+    /// Zero means no recommendation (insufficient headroom or not supported).
+    pub recommended_max_cache_blocks: u32,
+    /// D30: prefix cache budget in bytes, derived from configured_ceiling_bytes.
+    /// Budget = configured_ceiling_bytes × PREFIX_CACHE_BUDGET_FRACTION.
+    /// Conservative default; never unlimited (hard gate).
+    pub prefix_cache_budget_bytes: u64,
+    /// Human-readable reasons why guidance is off or reduced.
+    pub reasons_off_or_lower: Vec<String>,
+    /// Effective block size used in the calculation (n_embd × n_kv_heads × head_dim × dtype_bytes).
+    /// Zero if not computed (unsupported or not recommended).
+    pub block_size_bytes: u64,
+}
+
+/// Parameters for deriving prefix cache guidance.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct PrefixCacheGuidanceParams {
+    pub snapshot: CapabilitySnapshot,
+    pub memory_ceiling_bytes: u64,
+    pub current_safe_bytes: u64,
+    pub estimated_model_overhead_bytes: u64,
+    pub user_max_cache_blocks: Option<u32>,
+    pub arch_n_embd: u32,
+    pub arch_n_kv_heads: u32,
+    pub arch_head_dim: u32,
+}
+
+impl PrefixCacheGuidance {
+    /// Derive prefix cache guidance from capability snapshot and memory availability.
+    ///
+    /// Recommendation conditions (all must hold):
+    /// (a) Capability confirmed: --max-cache-blocks flag present in snapshot
+    /// (b) Sufficient memory headroom: safe availability > model overhead + headroom
+    /// (c) Not already set explicitly by user
+    ///
+    /// D30: budget is always derived from configured_ceiling_bytes × fraction,
+    /// independent of recommendation conditions (for API/wizard consumption).
+    ///
+    /// User explicit values always win (hard gate).
+    #[allow(clippy::too_many_arguments)]
+    pub fn derive(
+        snapshot: &CapabilitySnapshot,
+        memory_ceiling_bytes: u64,
+        current_safe_bytes: u64,
+        estimated_model_overhead_bytes: u64,
+        user_max_cache_blocks: Option<u32>,
+        arch_n_embd: u32,
+        arch_n_kv_heads: u32,
+        arch_head_dim: u32,
+    ) -> Self {
+        let mut reasons = Vec::new();
+
+        // (a) Capability: check for --max-cache-blocks flag
+        let has_cache_flag = snapshot
+            .serve_flags
+            .iter()
+            .any(|f| f == "--max-cache-blocks");
+        let supported = has_cache_flag;
+
+        if !supported {
+            reasons.push("Runtime does not expose --max-cache-blocks flag".into());
+        }
+
+        // D30: always compute budget from configured_ceiling_bytes
+        let prefix_cache_budget_bytes = if memory_ceiling_bytes > 0 {
+            (memory_ceiling_bytes as f64 * PREFIX_CACHE_BUDGET_FRACTION) as u64
+        } else {
+            0
+        };
+
+        // Block size: bf16 = 2 bytes per element (conservative)
+        let block_size_bytes = if arch_n_embd > 0 && arch_n_kv_heads > 0 && arch_head_dim > 0 {
+            (arch_n_embd as u64)
+                .saturating_mul(arch_n_kv_heads as u64)
+                .saturating_mul(arch_head_dim as u64)
+                .saturating_mul(2) // bf16
+        } else {
+            0
+        };
+
+        // (c) User explicit values win — never override
+        let user_explicit = user_max_cache_blocks.is_some();
+        if user_explicit {
+            reasons.push("User has explicitly set max_cache_blocks".into());
+        }
+
+        // (b) Memory headroom: safe availability > model overhead
+        let available_for_cache = current_safe_bytes
+            .saturating_sub(estimated_model_overhead_bytes)
+            .min(prefix_cache_budget_bytes); // D30: bounded by budget
+
+        let mut recommended_max_cache_blocks: u32 = 0;
+        let mut should_recommend = false;
+
+        if supported && !user_explicit && block_size_bytes > 0 && available_for_cache > 0 {
+            // Recommend blocks bounded by available memory and D30 budget
+            let blocks_from_memory =
+                (available_for_cache / block_size_bytes).min(u32::MAX as u64) as u32;
+            if blocks_from_memory > 0 {
+                recommended_max_cache_blocks = blocks_from_memory;
+                should_recommend = true;
+            } else {
+                reasons.push("Insufficient memory headroom for cache blocks".into());
+            }
+        } else if block_size_bytes == 0 {
+            reasons.push("Cannot compute block size (missing architecture fields)".into());
+        } else if !supported || user_explicit {
+            // Reasons already recorded above
+        } else {
+            reasons.push("Insufficient memory headroom for cache blocks".into());
+        }
+
+        Self {
+            supported,
+            should_recommend,
+            recommended_max_cache_blocks,
+            prefix_cache_budget_bytes,
+            reasons_off_or_lower: reasons,
+            block_size_bytes,
+        }
+    }
+}
+
 /// On-device, user-driven update-validation probe.
 ///
 /// Runs after managed install/upgrade. Validates:
@@ -1757,6 +1894,223 @@ Options:
     }
 
     // Snapshot integration tests
+
+    // Prefix cache guidance tests (Phase 6 Part A)
+
+    #[test]
+    fn prefix_cache_guidance_recommended_when_capability_and_headroom() {
+        let snapshot = CapabilitySnapshot {
+            executable_identity: ExecutableIdentity::default(),
+            rapid_mlx_version: "0.10.12".into(),
+            help_hash: "x".into(),
+            serve_flags: vec!["--max-cache-blocks".into(), "--host".into()],
+            package_versions: vec![],
+            installed_extras: InstalledExtras::default(),
+            qualified_features: QualifiedFeatures::default(),
+            mtp_concurrency: MtpConcurrencyState::SingleActiveGreedy,
+            sampling_defaults: SamplingDefaultFields::default(),
+            sampling_cascade: SamplingCascade::default(),
+            evidence_timestamp: 0,
+            source: CapabilitySnapshotSource::AutoProbed,
+        };
+        // 48GB ceiling, 40GB safe, 20GB model overhead → 20GB available for cache
+        // D30 budget = 48GB × 0.10 = 4.8GB
+        let guidance = PrefixCacheGuidance::derive(
+            &snapshot,
+            48 * 1024 * 1024 * 1024,
+            40 * 1024 * 1024 * 1024,
+            20 * 1024 * 1024 * 1024,
+            None,
+            4096, // n_embd
+            32,   // n_kv_heads
+            128,  // head_dim
+        );
+        assert!(guidance.supported);
+        assert!(guidance.should_recommend);
+        assert!(guidance.recommended_max_cache_blocks > 0);
+        // Budget should be ~4.8GB (10% of 48GB ceiling)
+        assert_eq!(
+            guidance.prefix_cache_budget_bytes,
+            ((48u64 * 1024 * 1024 * 1024) as f64 * 0.10) as u64
+        );
+        assert!(guidance.reasons_off_or_lower.is_empty());
+    }
+
+    #[test]
+    fn prefix_cache_guidance_not_recommended_when_no_capability_flag() {
+        let snapshot = CapabilitySnapshot {
+            executable_identity: ExecutableIdentity::default(),
+            rapid_mlx_version: "0.9.0".into(),
+            help_hash: "x".into(),
+            serve_flags: vec!["--host".into()], // no --max-cache-blocks
+            package_versions: vec![],
+            installed_extras: InstalledExtras::default(),
+            qualified_features: QualifiedFeatures::default(),
+            mtp_concurrency: MtpConcurrencyState::SingleActiveGreedy,
+            sampling_defaults: SamplingDefaultFields::default(),
+            sampling_cascade: SamplingCascade::default(),
+            evidence_timestamp: 0,
+            source: CapabilitySnapshotSource::AutoProbed,
+        };
+        let guidance = PrefixCacheGuidance::derive(
+            &snapshot,
+            48 * 1024 * 1024 * 1024,
+            40 * 1024 * 1024 * 1024,
+            20 * 1024 * 1024 * 1024,
+            None,
+            4096,
+            32,
+            128,
+        );
+        assert!(!guidance.supported);
+        assert!(!guidance.should_recommend);
+        assert_eq!(guidance.recommended_max_cache_blocks, 0);
+        assert!(
+            guidance
+                .reasons_off_or_lower
+                .iter()
+                .any(|r| r.contains("--max-cache-blocks"))
+        );
+    }
+
+    #[test]
+    fn prefix_cache_guidance_respects_user_explicit_value() {
+        let snapshot = CapabilitySnapshot {
+            executable_identity: ExecutableIdentity::default(),
+            rapid_mlx_version: "0.10.12".into(),
+            help_hash: "x".into(),
+            serve_flags: vec!["--max-cache-blocks".into()],
+            package_versions: vec![],
+            installed_extras: InstalledExtras::default(),
+            qualified_features: QualifiedFeatures::default(),
+            mtp_concurrency: MtpConcurrencyState::SingleActiveGreedy,
+            sampling_defaults: SamplingDefaultFields::default(),
+            sampling_cascade: SamplingCascade::default(),
+            evidence_timestamp: 0,
+            source: CapabilitySnapshotSource::AutoProbed,
+        };
+        let guidance = PrefixCacheGuidance::derive(
+            &snapshot,
+            48 * 1024 * 1024 * 1024,
+            40 * 1024 * 1024 * 1024,
+            20 * 1024 * 1024 * 1024,
+            Some(64), // user explicit
+            4096,
+            32,
+            128,
+        );
+        assert!(guidance.supported);
+        assert!(!guidance.should_recommend); // user explicit wins
+        assert!(
+            guidance
+                .reasons_off_or_lower
+                .iter()
+                .any(|r| r.contains("explicitly"))
+        );
+    }
+
+    #[test]
+    fn prefix_cache_guidance_no_recommendation_insufficient_headroom() {
+        let snapshot = CapabilitySnapshot {
+            executable_identity: ExecutableIdentity::default(),
+            rapid_mlx_version: "0.10.12".into(),
+            help_hash: "x".into(),
+            serve_flags: vec!["--max-cache-blocks".into()],
+            package_versions: vec![],
+            installed_extras: InstalledExtras::default(),
+            qualified_features: QualifiedFeatures::default(),
+            mtp_concurrency: MtpConcurrencyState::SingleActiveGreedy,
+            sampling_defaults: SamplingDefaultFields::default(),
+            sampling_cascade: SamplingCascade::default(),
+            evidence_timestamp: 0,
+            source: CapabilitySnapshotSource::AutoProbed,
+        };
+        // 48GB ceiling, 10GB safe, 20GB model overhead → negative available
+        let guidance = PrefixCacheGuidance::derive(
+            &snapshot,
+            48 * 1024 * 1024 * 1024,
+            10 * 1024 * 1024 * 1024,
+            20 * 1024 * 1024 * 1024,
+            None,
+            4096,
+            32,
+            128,
+        );
+        assert!(guidance.supported);
+        assert!(!guidance.should_recommend);
+        assert_eq!(guidance.recommended_max_cache_blocks, 0);
+        assert!(
+            guidance
+                .reasons_off_or_lower
+                .iter()
+                .any(|r| r.contains("headroom"))
+        );
+    }
+
+    #[test]
+    fn prefix_cache_budget_d30_within_configured_ceiling_fraction() {
+        let snapshot = CapabilitySnapshot {
+            executable_identity: ExecutableIdentity::default(),
+            rapid_mlx_version: "0.10.12".into(),
+            help_hash: "x".into(),
+            serve_flags: vec!["--max-cache-blocks".into()],
+            package_versions: vec![],
+            installed_extras: InstalledExtras::default(),
+            qualified_features: QualifiedFeatures::default(),
+            mtp_concurrency: MtpConcurrencyState::SingleActiveGreedy,
+            sampling_defaults: SamplingDefaultFields::default(),
+            sampling_cascade: SamplingCascade::default(),
+            evidence_timestamp: 0,
+            source: CapabilitySnapshotSource::AutoProbed,
+        };
+        let ceiling = 64 * 1024 * 1024 * 1024u64;
+        let guidance =
+            PrefixCacheGuidance::derive(&snapshot, ceiling, ceiling, 0, None, 4096, 32, 128);
+        // Budget = ceiling × 0.10, must be ≤ ceiling
+        assert!(guidance.prefix_cache_budget_bytes > 0);
+        assert!(guidance.prefix_cache_budget_bytes <= ceiling);
+        assert_eq!(
+            guidance.prefix_cache_budget_bytes,
+            (ceiling as f64 * 0.10) as u64
+        );
+    }
+
+    #[test]
+    fn prefix_cache_guidance_is_recommendation_only_never_forced() {
+        // Hard gate: guidance never auto-applies; requires user confirmation (A31).
+        let snapshot = CapabilitySnapshot {
+            executable_identity: ExecutableIdentity::default(),
+            rapid_mlx_version: "0.10.12".into(),
+            help_hash: "x".into(),
+            serve_flags: vec!["--max-cache-blocks".into()],
+            package_versions: vec![],
+            installed_extras: InstalledExtras::default(),
+            qualified_features: QualifiedFeatures::default(),
+            mtp_concurrency: MtpConcurrencyState::SingleActiveGreedy,
+            sampling_defaults: SamplingDefaultFields::default(),
+            sampling_cascade: SamplingCascade::default(),
+            evidence_timestamp: 0,
+            source: CapabilitySnapshotSource::AutoProbed,
+        };
+        let guidance = PrefixCacheGuidance::derive(
+            &snapshot,
+            48 * 1024 * 1024 * 1024,
+            40 * 1024 * 1024 * 1024,
+            20 * 1024 * 1024 * 1024,
+            None,
+            4096,
+            32,
+            128,
+        );
+        // has values but doesn't mutate anything — it's pure derivation
+        assert!(guidance.should_recommend);
+        // No side effects: snapshot unchanged, no auto-apply
+        assert!(
+            !snapshot
+                .serve_flags
+                .contains(&"--max-cache-blocks=64".into())
+        );
+    }
 
     #[test]
     fn snapshot_includes_mtp_and_sampling_fields() {

@@ -329,6 +329,17 @@ fn api_vram_estimate_breakdown(
                 // Phase 5b Part C: max_cache_blocks from preset config for prelaunch estimates.
                 let max_cache_blocks = body["max_cache_blocks"].as_u64().map(|v| v as u32);
 
+                // Phase 6 Part A: D30 prefix cache budget from MemoryAvailabilitySnapshot.
+                // When caller provides configured_ceiling_bytes, derive budget = ceiling × 0.10.
+                let configured_ceiling_bytes = body["configured_ceiling_bytes"].as_u64().unwrap_or(0);
+                let prefix_cache_budget_bytes = if is_rapid_mlx && configured_ceiling_bytes > 0 {
+                    (configured_ceiling_bytes as f64
+                        * crate::inference::rapid_mlx::capabilities::PREFIX_CACHE_BUDGET_FRACTION)
+                        as u64
+                } else {
+                    0
+                };
+
                 // Use the execution policy's effective TurboQuant mode for the estimator.
                 // Per D31: effective_turboquant already has eligibility applied.
                 let opts = crate::llama::vram_estimator::EstimatorOptions {
@@ -359,6 +370,7 @@ fn api_vram_estimate_breakdown(
                         })
                         .unwrap_or_default(),
                     max_cache_blocks,
+                    prefix_cache_budget_bytes,
                 };
 
                 let breakdown = crate::llama::vram_estimator::full_estimate(
@@ -423,11 +435,12 @@ fn api_vram_estimate_breakdown(
                         "mtp_mode": serde_json::to_value(breakdown.mtp_mode).unwrap_or(serde_json::Value::Null),
                         "external_companion": serde_json::to_value(&breakdown.external_companion).unwrap_or(serde_json::Value::Null),
                         "mtp_admission": serde_json::to_value(&breakdown.mtp_admission).unwrap_or(serde_json::Value::Null),
-                        "client_type": serde_json::to_value(breakdown.client_type).unwrap_or(serde_json::Value::Null),
-                        "execution_policy": execution_policy_json,
-                        "workload_scenario": workload_scenario_json,
-                        "effective_kv_dtype": effective_kv_dtype_json,
-                      }))),
+                         "client_type": serde_json::to_value(breakdown.client_type).unwrap_or(serde_json::Value::Null),
+                         "execution_policy": execution_policy_json,
+                         "workload_scenario": workload_scenario_json,
+                         "effective_kv_dtype": effective_kv_dtype_json,
+                         "prefix_cache_budget_bytes": breakdown.prefix_cache_budget_bytes,
+                       }))),
                 )
             }
         })
