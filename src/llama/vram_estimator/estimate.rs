@@ -320,7 +320,7 @@ pub enum EstimateEvidence {
 /// Extra, backend-specific inputs to `full_estimate` that don't apply to every backend and
 /// therefore default to inert values (`Backend::LlamaCpp`, `EstimateEvidence::Measured`, zero
 /// prefix-cache reservation) for all existing GGUF callers.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct EstimatorOptions {
     pub backend: Backend,
     pub evidence: EstimateEvidence,
@@ -344,6 +344,13 @@ pub struct EstimatorOptions {
     /// TurboQuant eligibility for the model. Per D31: unknown finetunes do NOT inherit
     /// alias qualification. Unknown/unqualified models → TurboQuant Disabled.
     pub turboquant_eligibility: super::execution_policy::TurboQuantEligibility,
+    /// Builder item 13: MTP configuration for Rapid-MLX estimation.
+    /// Controls embedded vs external MTP memory accounting.
+    pub mtp_config: Option<super::workload_scenarios::MtpConfig>,
+    /// Builder item 14: Client type for external-client vs app_fit variants.
+    pub client_type: super::workload_scenarios::ClientType,
+    /// D25: Concurrency policy for MTP admission.
+    pub concurrency_policy: super::workload_scenarios::ConcurrencyPolicy,
 }
 
 impl Default for EstimatorOptions {
@@ -357,6 +364,9 @@ impl Default for EstimatorOptions {
             rapid_planning_context_tokens: 0,
             rapid_retained_cache_tokens: 0,
             turboquant_eligibility: Default::default(),
+            mtp_config: None,
+            client_type: Default::default(),
+            concurrency_policy: Default::default(),
         }
     }
 }
@@ -517,6 +527,20 @@ pub struct VramBreakdown {
     /// be used; may differ from requested if model is unqualified.
     #[serde(default)]
     pub effective_turboquant: super::execution_policy::TurboQuantMode,
+    /// Builder item 13: MTP mode used for this estimate.
+    #[serde(default)]
+    pub mtp_mode: super::workload_scenarios::MtpMode,
+    /// Builder item 13: External drafter companion estimate (if MTP mode = External).
+    /// Total = primary breakdown total_bytes + external_companion.total_bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_companion: Option<super::workload_scenarios::ExternalCompanion>,
+    /// Builder item 13: D25 MTP admission result (warnings, concurrency policy).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mtp_admission: Option<super::workload_scenarios::MtpAdmissionResult>,
+    /// Builder item 14: Client type (app vs external client).
+    /// Used to distinguish external_client_fit vs app_fit variants.
+    #[serde(default)]
+    pub client_type: super::workload_scenarios::ClientType,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -641,7 +665,14 @@ pub fn full_estimate(
     // add the fixed recurrent state. This is constant — it does NOT grow with context.
     let linear_state = arch.linear_attn_state_bytes;
     let mmproj = arch.mmproj_bytes;
-    let mtp = mtp_overhead_bytes(model_size_bytes, arch.mtp_depth);
+    // Builder item 13: MTP memory uses explicit config when provided.
+    // Embedded MTP: counted in primary breakdown via primary_breakdown_mtp_bytes.
+    // External MTP: companion counted separately, primary_breakdown_mtp_bytes returns 0.
+    let mtp_config = opts.mtp_config.clone();
+    let mtp = match &mtp_config {
+        Some(cfg) => cfg.primary_breakdown_mtp_bytes(model_size_bytes),
+        None => mtp_overhead_bytes(model_size_bytes, arch.mtp_depth),
+    };
     // Platform-specific overhead, both calibrated against real VRAM/footprint measurements:
     // discrete GPUs → RTX-5090 model (scratch + MoE/Gemma base + context-scaling attention
     // buffers); unified memory → Apple M5 Max model (per-layer base + ~6.5% of KV).
@@ -719,6 +750,33 @@ pub fn full_estimate(
     // For Rapid-MLX with context split: active + retained. For legacy: unified value.
     let total_kv = active_kv + retained_kv_compressed;
 
+    // Builder item 13: D25 MTP admission.
+    // Only computed when MTP config is provided.
+    let (mtp_mode, external_companion, mtp_admission) = if let Some(ref cfg) = mtp_config {
+        let mode = cfg.mode;
+        let companion = cfg.external_drafter.clone();
+
+        // Compute admission result when MTP is enabled.
+        let admission = if mode != super::workload_scenarios::MtpMode::Disabled {
+            // Use default scenario for admission when none provided explicitly.
+            // The caller can refine this with actual workload info.
+            let scenario = super::workload_scenarios::WorkloadScenario::default();
+            Some(super::workload_scenarios::MtpAdmissionResult::compute(
+                mode,
+                &scenario,
+                arch.mtp_depth,
+                parallel_slots.max(1),
+                opts.concurrency_policy,
+            ))
+        } else {
+            None
+        };
+
+        (mode, companion, admission)
+    } else {
+        (super::workload_scenarios::MtpMode::Disabled, None, None)
+    };
+
     VramBreakdown {
         weights_bytes: weight_vram,
         kv_cache_bytes: total_kv,
@@ -744,6 +802,10 @@ pub fn full_estimate(
         mlx_prefix_cache_bytes: mlx_cache,
         evidence: opts.evidence,
         effective_turboquant,
+        mtp_mode,
+        external_companion,
+        mtp_admission,
+        client_type: opts.client_type,
     }
 }
 
@@ -1351,6 +1413,9 @@ pub struct QuantOption {
 /// `arch`: architecture (from introspection or `ModelArch::from_name_and_params`)
 /// `available_vram_bytes`: effective available memory (caller must subtract OS overhead on unified)
 /// `use_case`: affects the recommended-quant choice
+/// `workload_scenario`: optional workload scenario for workload-fit quant guidance.
+///   When present, replaces generic "8k context" with scenario-specific parameters.
+///   Recommended badge requires scenario-policy fit (Builder item 11).
 /// `is_unified_memory`: true for Apple Silicon — tightens headroom and fits check
 #[allow(clippy::too_many_arguments)]
 pub fn quant_comparison_table(
@@ -1358,7 +1423,8 @@ pub fn quant_comparison_table(
     arch: &ModelArch,
     model_name: &str,
     available_vram_bytes: u64,
-    _use_case: UseCase,
+    use_case: UseCase,
+    workload_scenario: Option<super::workload_scenarios::WorkloadScenario>,
     parallel_slots: u32,
     is_unified_memory: bool,
     backend: Backend,
@@ -1376,6 +1442,38 @@ pub fn quant_comparison_table(
     let lower_name = model_name.to_ascii_lowercase();
     let is_gemma4_qat = (lower_name.contains("gemma-4") || lower_name.contains("gemma4"))
         && lower_name.contains("qat");
+
+    // Builder item 11: use workload scenario parameters if provided, otherwise fall back to
+    // generic 8k context baseline. Unsloth values are preserved for agentic/coding modes.
+    let scenario_params = workload_scenario
+        .as_ref()
+        .map(|s| s.to_estimator_params(super::workload_scenarios::ClientType::App));
+
+    // Minimum context tokens for fit check: scenario-based or generic 8k fallback.
+    // Agentic/coding scenarios use higher minimums to ensure tool-calling coherence.
+    let min_fit_context_tokens = match use_case {
+        UseCase::Agentic => {
+            // Unsloth-recommended minimum for agentic workloads: 32K tokens
+            // Ensures enough room for tool-call context and reasoning.
+            scenario_params
+                .map(|p| p.planning_context_tokens.max(32_000))
+                .unwrap_or(32_000)
+        }
+        UseCase::General => scenario_params
+            .map(|p| p.planning_context_tokens.max(16_000))
+            .unwrap_or(8_192),
+        UseCase::Roleplay => {
+            // Roleplay needs long context for continuity, but lower precision is OK.
+            scenario_params
+                .map(|p| p.planning_context_tokens.max(32_000))
+                .unwrap_or(16_000)
+        }
+    };
+
+    // Effective parallel slots: scenario may override.
+    let effective_parallel_slots = scenario_params
+        .map(|p| p.parallel_slots)
+        .unwrap_or(parallel_slots.max(1));
 
     for &q_name in &show_quants {
         let qi = match find_quant(q_name) {
@@ -1395,10 +1493,15 @@ pub fn quant_comparison_table(
 
         let model_bytes = estimate_model_size_bytes(param_b, q_name);
         let model_gb = model_bytes as f64 / 1e9;
-        // A quant "fits" only if there's also room for a minimal useful KV cache (8 K tokens at q8_0).
-        // Without this check, a model that fills all available memory shows as fitting even though
-        // there's no budget left for inference context.
-        let min_kv = kv_cache_bytes(arch, 8192, parallel_slots, "q8_0", "q8_0");
+        // Builder item 11: use scenario-based minimum context instead of generic 8k.
+        // For agentic: 32K minimum ensures tool-calling coherence budget.
+        let min_kv = kv_cache_bytes(
+            arch,
+            min_fit_context_tokens,
+            effective_parallel_slots,
+            "q8_0",
+            "q8_0",
+        );
         let oh = match backend {
             Backend::RapidMlx => mlx_overhead_base_bytes(arch, 512),
             Backend::LlamaCpp if is_unified_memory => metal_overhead_base_bytes(arch, 512),
@@ -1406,12 +1509,13 @@ pub fn quant_comparison_table(
         };
         let fits = model_bytes + oh + min_kv < available_vram_bytes;
 
+        // Use scenario-aware parallel slots for max context computation.
         let max_q8 = max_context(
             model_bytes,
             arch,
             "q8_0",
             "q8_0",
-            parallel_slots,
+            effective_parallel_slots,
             512,
             0,
             available_vram_bytes,
@@ -1426,7 +1530,7 @@ pub fn quant_comparison_table(
             arch,
             "q4_0",
             "q4_0",
-            parallel_slots,
+            effective_parallel_slots,
             512,
             0,
             available_vram_bytes,

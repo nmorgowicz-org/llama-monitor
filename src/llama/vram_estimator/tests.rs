@@ -205,6 +205,7 @@ fn quant_comparison_table_marks_one_recommended() {
         "Qwen3.6-27B-Q4_K_M.gguf",
         32 * 1024 * 1024 * 1024,
         UseCase::General,
+        None,
         1,
         false,
         Backend::LlamaCpp,
@@ -529,6 +530,7 @@ fn gemma4_qat_q4_0_is_recommended_as_near_reference_quality() {
         "gemma-4-12B-it-qat-Q4_0.gguf",
         16 * 1024 * 1024 * 1024,
         UseCase::General,
+        None,
         1,
         false,
         Backend::LlamaCpp,
@@ -1226,6 +1228,7 @@ fn quant_comparison_table_rapid_mlx_diverges_from_llama_cpp() {
         "Qwen3-0.6B-MLX",
         16 * 1024 * 1024 * 1024,
         UseCase::General,
+        None,
         1,
         true,
         Backend::RapidMlx,
@@ -1236,6 +1239,7 @@ fn quant_comparison_table_rapid_mlx_diverges_from_llama_cpp() {
         "Qwen3-0.6B-GGUF",
         16 * 1024 * 1024 * 1024,
         UseCase::General,
+        None,
         1,
         true,
         Backend::LlamaCpp,
@@ -1531,6 +1535,7 @@ fn active_and_retained_totals_are_distinct_no_double_counting() {
             rapid_planning_context_tokens: 32768,
             rapid_retained_cache_tokens: 8192,
             turboquant_eligibility: Default::default(),
+            ..Default::default()
         },
     );
 
@@ -1594,6 +1599,7 @@ fn planning_context_tokens_used_for_active_kv_not_current_tokens() {
             rapid_planning_context_tokens: 65536,
             rapid_retained_cache_tokens: 4096,
             turboquant_eligibility: Default::default(),
+            ..Default::default()
         },
     );
 
@@ -1635,6 +1641,7 @@ fn turboquant_applies_only_to_retained_kv_not_active_weights_mtp_from_estimator(
             rapid_planning_context_tokens: 32768,
             rapid_retained_cache_tokens: 8192,
             turboquant_eligibility: Default::default(),
+            ..Default::default()
         },
     );
 
@@ -1659,6 +1666,7 @@ fn turboquant_applies_only_to_retained_kv_not_active_weights_mtp_from_estimator(
             rapid_planning_context_tokens: 32768,
             rapid_retained_cache_tokens: 8192,
             turboquant_eligibility: execution_policy::TurboQuantEligibility::Qualified,
+            ..Default::default()
         },
     );
 
@@ -1715,6 +1723,7 @@ fn turboquant_transient_peak_included_in_total_from_estimator() {
             rapid_planning_context_tokens: 32768,
             rapid_retained_cache_tokens: 8192,
             turboquant_eligibility: execution_policy::TurboQuantEligibility::Qualified,
+            ..Default::default()
         },
     );
 
@@ -1764,6 +1773,7 @@ fn unknown_fineturn_does_not_inherit_turboquant_from_estimator() {
             rapid_planning_context_tokens: 32768,
             rapid_retained_cache_tokens: 8192,
             turboquant_eligibility: execution_policy::TurboQuantEligibility::NotQualified,
+            ..Default::default()
         },
     );
 

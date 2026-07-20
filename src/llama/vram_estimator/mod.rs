@@ -13,6 +13,7 @@ mod arch_heuristics;
 mod estimate;
 pub mod execution_policy;
 mod quant_table;
+mod workload_scenarios;
 
 #[cfg(test)]
 mod tests;
@@ -23,3 +24,4 @@ pub use arch_heuristics::*;
 pub use estimate::*;
 #[allow(unused_imports)]
 pub use quant_table::*;
+pub use workload_scenarios::*;

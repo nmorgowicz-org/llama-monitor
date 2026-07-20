@@ -256,6 +256,43 @@ fn api_vram_estimate_breakdown(
                     0
                 };
 
+                // Builder item 11: accept optional workload_scenario. Scenario-derived parameters
+                // only apply when explicit client values are omitted (Phase 2 omission-only rule).
+                let workload_scenario: Option<crate::llama::vram_estimator::WorkloadScenario> =
+                    body["workload_scenario"]
+                        .as_str()
+                        .and_then(|s| {
+                            serde_json::from_str::<crate::llama::vram_estimator::WorkloadScenario>(&format!("\"{s}\"")).ok()
+                        })
+                        .or_else(|| {
+                            body["workload_scenario"]
+                                .as_object()
+                                .and_then(|obj| serde_json::to_value(obj).ok())
+                                .and_then(|val| {
+                                    serde_json::from_value::<crate::llama::vram_estimator::WorkloadScenario>(val).ok()
+                                })
+                        });
+
+                // Scenario-derived tokens only fill gaps where explicit client values are omitted.
+                let scenario_params = workload_scenario.as_ref().map(|s| s.to_estimator_params(
+                    crate::llama::vram_estimator::ClientType::App,
+                ));
+                let explicit_planning = body["rapid_planning_context_tokens"].as_u64();
+                let explicit_retained = body["rapid_retained_cache_tokens"].as_u64();
+                let rapid_planning_context_tokens = explicit_planning
+                    .or_else(|| scenario_params.map(|p| p.planning_context_tokens))
+                    .unwrap_or(0);
+                let rapid_retained_cache_tokens = explicit_retained
+                    .or_else(|| scenario_params.map(|p| p.retained_cache_tokens))
+                    .unwrap_or(0);
+
+                // Builder item 13: MTP configuration from request body.
+                let mtp_config: Option<crate::llama::vram_estimator::MtpConfig> = body["mtp_config"]
+                    .as_object()
+                    .and_then(|obj| {
+                        serde_json::from_value::<crate::llama::vram_estimator::MtpConfig>(serde_json::Value::Object(obj.clone())).ok()
+                    });
+
                 let opts = crate::llama::vram_estimator::EstimatorOptions {
                     backend: if is_rapid_mlx {
                         crate::llama::vram_estimator::Backend::RapidMlx
@@ -269,12 +306,24 @@ fn api_vram_estimate_breakdown(
                         .and_then(|s| {
                             serde_json::from_str::<crate::llama::vram_estimator::execution_policy::TurboQuantMode>(&format!("\"{s}\"")).ok()
                         }),
-                    // Planning context tokens for Rapid-MLX: separate from current active tokens.
-                    // If not provided, estimator uses unified context_size for backward compatibility.
-                    rapid_planning_context_tokens: body["rapid_planning_context_tokens"].as_u64().unwrap_or(0),
-                    rapid_retained_cache_tokens: body["rapid_retained_cache_tokens"].as_u64().unwrap_or(0),
+                    // Planning context tokens: explicit > scenario > 0 (legacy fallback).
+                    rapid_planning_context_tokens,
+                    rapid_retained_cache_tokens,
                     // TurboQuant eligibility defaults to NotQualified unless capability snapshot confirms.
                     turboquant_eligibility: Default::default(),
+                    mtp_config,
+                    client_type: body["client_type"]
+                        .as_str()
+                        .and_then(|s| {
+                            serde_json::from_str::<crate::llama::vram_estimator::ClientType>(&format!("\"{s}\"")).ok()
+                        })
+                        .unwrap_or_default(),
+                    concurrency_policy: body["concurrency_policy"]
+                        .as_str()
+                        .and_then(|s| {
+                            serde_json::from_str::<crate::llama::vram_estimator::ConcurrencyPolicy>(&format!("\"{s}\"")).ok()
+                        })
+                        .unwrap_or_default(),
                 };
 
                 let breakdown = crate::llama::vram_estimator::full_estimate(
@@ -315,8 +364,12 @@ fn api_vram_estimate_breakdown(
                         "note": breakdown.note,
                         "mlx_prefix_cache_bytes": breakdown.mlx_prefix_cache_bytes,
                         "evidence": serde_json::to_value(breakdown.evidence).unwrap_or(serde_json::Value::Null),
-                        "effective_turboquant": serde_json::to_value(breakdown.effective_turboquant).unwrap_or(serde_json::Value::Null)
-                    }))),
+                        "effective_turboquant": serde_json::to_value(breakdown.effective_turboquant).unwrap_or(serde_json::Value::Null),
+                        "mtp_mode": serde_json::to_value(breakdown.mtp_mode).unwrap_or(serde_json::Value::Null),
+                        "external_companion": serde_json::to_value(&breakdown.external_companion).unwrap_or(serde_json::Value::Null),
+                        "mtp_admission": serde_json::to_value(&breakdown.mtp_admission).unwrap_or(serde_json::Value::Null),
+                        "client_type": serde_json::to_value(breakdown.client_type).unwrap_or(serde_json::Value::Null)
+                     }))),
                 )
             }
         })
@@ -450,6 +503,23 @@ fn api_vram_quant_compare(
                     _ => crate::llama::vram_estimator::UseCase::General,
                 };
 
+                // Builder item 11: accept optional workload_scenario for workload-fit quant guidance.
+                // When present, replaces generic 8k context with scenario-specific parameters.
+                let workload_scenario: Option<crate::llama::vram_estimator::WorkloadScenario> =
+                    body["workload_scenario"]
+                        .as_str()
+                        .and_then(|s| {
+                            serde_json::from_str::<crate::llama::vram_estimator::WorkloadScenario>(&format!("\"{s}\"")).ok()
+                        })
+                        .or_else(|| {
+                            body["workload_scenario"]
+                                .as_object()
+                                .and_then(|obj| serde_json::to_value(obj).ok())
+                                .and_then(|val| {
+                                    serde_json::from_value::<crate::llama::vram_estimator::WorkloadScenario>(val).ok()
+                                })
+                        });
+
                 // Optionally accept explicit arch fields to improve accuracy when
                 // called after introspection.
                 let arch = build_arch_from_body(&body, &model_name, param_b);
@@ -460,6 +530,7 @@ fn api_vram_quant_compare(
                     &model_name,
                     available_vram_bytes,
                     use_case,
+                    workload_scenario,
                     parallel_slots,
                     is_unified_memory,
                     backend,
