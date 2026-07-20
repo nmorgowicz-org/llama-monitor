@@ -477,6 +477,36 @@ fn extract_from_text_config(profile: &mut ModelMemoryProfile, tc: &serde_json::V
         glh.global_head_dim_evidence = Some(format!("{prefix}.global_head_dim"));
         has_glh = true;
     }
+
+    // Local KV heads: derived from standard num_key_value_heads minus global KV heads.
+    // Per Gemma4 architecture: total KV = global KV + local KV.
+    if let Some(global_kv) = glh.num_global_key_value_heads
+        && let Some(total_kv) = tc
+            .get("num_key_value_heads")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32)
+        && total_kv > global_kv
+    {
+        glh.num_local_key_value_heads = Some(total_kv - global_kv);
+        glh.num_local_kv_evidence = Some(format!(
+            "derived: text_config.num_key_value_heads ({total_kv}) - text_config.num_global_key_value_heads ({global_kv})"
+        ));
+    }
+
+    // Local head dim: standard head_dim (Gemma4 uses same head_dim for local attention).
+    if let Some(v) = tc.get("head_dim").and_then(|v| v.as_u64()) {
+        glh.local_head_dim = Some(v as u32);
+        glh.local_head_dim_evidence = Some(format!("{prefix}.head_dim"));
+    }
+
+    // Local attention window: from sliding_window config.
+    if let Some(v) = tc.get("sliding_window").and_then(|v| v.as_u64())
+        && v > 0
+    {
+        glh.local_attn_window_size = Some(v as u32);
+        glh.local_attn_window_evidence = Some(format!("{prefix}.sliding_window"));
+    }
+
     if has_glh {
         profile.global_local_heads = Some(glh);
     }
@@ -721,16 +751,43 @@ fn extract_vision_component(profile: &mut ModelMemoryProfile, raw: &serde_json::
             vision.model_type = Some(mt.to_string());
             vision.model_type_evidence = Some("vision_config.model_type".into());
         }
+        // Vision encoder layers: num_hidden_layers (standard) or depth (Qwen3.6).
+        if let Some(layers) = vc
+            .get("num_hidden_layers")
+            .or_else(|| vc.get("depth"))
+            .and_then(|v| v.as_u64())
+        {
+            vision.encoder_layers = Some(layers as u32);
+            let key = if vc.get("num_hidden_layers").is_some() {
+                "vision_config.num_hidden_layers"
+            } else {
+                "vision_config.depth"
+            };
+            vision.encoder_layers_evidence = Some(key.into());
+        }
         profile.vision = Some(vision);
     }
 }
 
 fn extract_draft_config(profile: &mut ModelMemoryProfile, raw: &serde_json::Value) {
     // Draft model from wrapper config (MTP/companion).
+    // Per A25: embedded MTP tensors are part of main model geometry;
+    // external drafter/vision/embedding companions are tracked separately.
     let draft = raw
         .get("draft_model")
         .or_else(|| raw.get("speculative_config"));
     if let Some(d) = draft {
+        // Check if this is an external companion (references a separate model source).
+        let model_source = d.get("model").and_then(|v| v.as_str());
+        if let Some(src) = model_source {
+            // External companion: separate source with distinct provenance (A25).
+            profile.external_companions.push(ExternalCompanion {
+                companion_type: CompanionType::Drafter,
+                source: src.to_string(),
+                provenance: "draft_model.model".into(),
+            });
+        }
+
         let layers = d.get("num_hidden_layers").and_then(|v| v.as_u64());
         if let Some(n) = layers {
             if n > 0 {
@@ -1114,28 +1171,50 @@ mod tests {
         assert_eq!(profile.weights.n_head_kv.value, 4);
         assert_eq!(profile.weights.max_position_embeddings.value, 262144);
 
-        // full_attention_interval.
+        // full_attention_interval: 4 → 64/4 = 16 full attention layers.
         assert_eq!(profile.full_attention_interval, Some(4));
+        assert_eq!(
+            profile.full_attention_interval_evidence,
+            Some("text_config.full_attention_interval".into())
+        );
 
-        // Layer groups: 16 full + 48 linear.
+        // Layer groups: 16 full + 48 linear (from layer_types array).
         assert_eq!(profile.total_layer_count(), 64);
         assert_eq!(profile.full_attention_layer_count(), 16);
         assert_eq!(profile.linear_recurrent_layer_count(), 48);
         assert!(profile.is_hybrid_attention());
 
-        // Recurrent state geometry present.
+        // Recurrent state geometry with field_evidence.
         assert!(profile.recurrent_state.is_some());
         let rcg = profile.recurrent_state.as_ref().unwrap();
         assert_eq!(rcg.linear_conv_kernel_dim, Some(4));
+        assert!(rcg.linear_conv_kernel_dim_evidence.is_some());
         assert_eq!(rcg.linear_key_head_dim, Some(128));
+        assert!(rcg.linear_key_head_dim_evidence.is_some());
         assert_eq!(rcg.linear_num_key_heads, Some(16));
+        assert!(rcg.linear_num_key_heads_evidence.is_some());
         assert_eq!(rcg.linear_num_value_heads, Some(48));
+        assert!(rcg.linear_num_value_heads_evidence.is_some());
         assert_eq!(rcg.linear_value_head_dim, Some(128));
+        assert!(rcg.linear_value_head_dim_evidence.is_some());
         assert_eq!(rcg.mamba_ssm_dtype, Some("float32".into()));
+        assert!(rcg.mamba_ssm_dtype_evidence.is_some());
 
-        // MTP.
+        // MTP embedded.
         assert!(profile.embedded_mtp.is_some());
-        assert_eq!(profile.embedded_mtp.as_ref().unwrap().n_layers, 1);
+        let mtp = profile.embedded_mtp.as_ref().unwrap();
+        assert_eq!(mtp.n_layers, 1);
+        assert!(!mtp.field_evidence.is_empty());
+
+        // Vision component present.
+        assert!(profile.vision.is_some());
+        let vision = profile.vision.as_ref().unwrap();
+        assert!(vision.has_vision_config);
+        assert_eq!(vision.model_type, Some("qwen3_5".into()));
+        assert_eq!(vision.encoder_layers, Some(27));
+
+        // No external companions (vision is inline config, not separate source).
+        assert!(profile.external_companions.is_empty());
 
         // Used text_config.
         assert_eq!(profile.used_text_config, Some(true));
@@ -1151,18 +1230,29 @@ mod tests {
         assert_eq!(profile.weights.n_head.value, 16);
         assert_eq!(profile.weights.n_head_kv.value, 2);
 
-        // MoE.
+        // MoE: 256 total experts, 8 active per token.
         assert!(profile.is_moe());
         let experts = profile.experts.as_ref().unwrap();
         assert_eq!(experts.n_experts, 256);
+        assert!(!experts.field_evidence.is_empty());
         assert_eq!(experts.top_k, Some(8));
+        assert!(experts.top_k_evidence.is_some());
+        assert!(experts.moe_intermediate_size.is_some());
+        assert!(experts.shared_expert_intermediate_size.is_some());
 
-        // Layer groups: 10 full + 30 linear.
+        // Layer groups: 10 full + 30 linear (40 / full_attention_interval=4 = 10 full).
         assert_eq!(profile.total_layer_count(), 40);
         assert_eq!(profile.full_attention_layer_count(), 10);
         assert_eq!(profile.linear_recurrent_layer_count(), 30);
 
-        // Wrapper-field protection: outer wrapper has no num_hidden_layers here.
+        // Recurrent state geometry.
+        assert!(profile.recurrent_state.is_some());
+
+        // Vision component present.
+        assert!(profile.vision.is_some());
+
+        // No external companions.
+        assert!(profile.external_companions.is_empty());
     }
 
     #[test]
@@ -1180,6 +1270,13 @@ mod tests {
         let glh = profile.global_local_heads.as_ref().unwrap();
         assert_eq!(glh.num_global_key_value_heads, Some(2));
         assert_eq!(glh.global_head_dim, Some(512));
+        // Local KV: total (8) - global (2) = 6
+        assert_eq!(glh.num_local_key_value_heads, Some(6));
+        assert!(!glh.num_local_kv_evidence.as_ref().unwrap().is_empty());
+        assert_eq!(glh.local_head_dim, Some(256));
+        assert!(!glh.local_head_dim_evidence.as_ref().unwrap().is_empty());
+        assert_eq!(glh.local_attn_window_size, Some(1024));
+        assert!(!glh.local_attn_window_evidence.as_ref().unwrap().is_empty());
 
         // Layer groups: 5 full + 25 local.
         assert_eq!(profile.total_layer_count(), 30);
@@ -1193,6 +1290,15 @@ mod tests {
         let experts = profile.experts.as_ref().unwrap();
         assert_eq!(experts.n_experts, 128);
         assert_eq!(experts.top_k, Some(8));
+
+        // Vision component.
+        assert!(profile.vision.is_some());
+        let vision = profile.vision.as_ref().unwrap();
+        assert_eq!(vision.encoder_layers, Some(27));
+        assert_eq!(vision.model_type, Some("gemma4_vision".into()));
+
+        // No external companions in this config.
+        assert!(profile.external_companions.is_empty());
     }
 
     #[test]
@@ -1209,6 +1315,10 @@ mod tests {
         let glh = profile.global_local_heads.as_ref().unwrap();
         assert_eq!(glh.num_global_key_value_heads, Some(4));
         assert_eq!(glh.global_head_dim, Some(512));
+        // Local KV: total (16) - global (4) = 12
+        assert_eq!(glh.num_local_key_value_heads, Some(12));
+        assert_eq!(glh.local_head_dim, Some(256));
+        assert_eq!(glh.local_attn_window_size, Some(1024));
 
         // Layer groups: 10 full + 50 local.
         assert_eq!(profile.total_layer_count(), 60);
@@ -1217,6 +1327,14 @@ mod tests {
 
         // No MoE (dense).
         assert!(!profile.is_moe());
+
+        // Vision component.
+        assert!(profile.vision.is_some());
+        let vision = profile.vision.as_ref().unwrap();
+        assert_eq!(vision.encoder_layers, Some(27));
+
+        // No external companions.
+        assert!(profile.external_companions.is_empty());
     }
 
     #[test]
@@ -1235,6 +1353,13 @@ mod tests {
         assert_eq!(profile.full_attention_layer_count(), 28);
         assert_eq!(profile.linear_recurrent_layer_count(), 0);
 
+        // Dense: no MoE, no recurrent, no MTP, no vision.
+        assert!(!profile.is_moe());
+        assert!(profile.recurrent_state.is_none());
+        assert!(profile.embedded_mtp.is_none());
+        assert!(profile.vision.is_none());
+        assert!(profile.external_companions.is_empty());
+
         assert_eq!(profile.used_text_config, Some(false));
     }
 
@@ -1248,15 +1373,26 @@ mod tests {
         assert_eq!(profile.weights.n_head.value, 32);
         assert_eq!(profile.weights.n_head_kv.value, 4);
 
-        // MoE.
+        // MoE: 128 total experts, 8 active per token (flat config).
         assert!(profile.is_moe());
         let experts = profile.experts.as_ref().unwrap();
         assert_eq!(experts.n_experts, 128);
+        assert_eq!(experts.field_evidence, "num_experts");
         assert_eq!(experts.top_k, Some(8));
+        assert_eq!(
+            experts.top_k_evidence,
+            Some("num_experts_per_tok".to_string())
+        );
 
         // All layers full attention (flat config, no layer_types).
         assert_eq!(profile.total_layer_count(), 48);
         assert_eq!(profile.full_attention_layer_count(), 48);
+
+        // No recurrent state, no MTP, no vision, no external companions.
+        assert!(profile.recurrent_state.is_none());
+        assert!(profile.embedded_mtp.is_none());
+        assert!(profile.vision.is_none());
+        assert!(profile.external_companions.is_empty());
     }
 
     #[test]
@@ -1368,5 +1504,158 @@ mod tests {
         let weights = parse_safetensors_index(&index_path).unwrap();
         // WeightComponents is currently a placeholder for Part C; just validate it parses.
         let _ = weights;
+    }
+
+    // ── Part B: Architecture-specific geometry tests ──────────────────────────
+
+    #[test]
+    fn qwen36_deltanet_full_attention_layer_count_via_interval() {
+        // Hard gate: Qwen3.6 full_attention_layer_count = block_count / full_attention_interval
+        // NOT block_count (i.e., not all layers treated as full KV).
+        let bytes = load_fixture("mlx-community_Qwen3.6-27B-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        assert_eq!(profile.weights.n_layers.value, 64);
+        assert_eq!(profile.full_attention_interval, Some(4));
+        // 64 / 4 = 16 full attention layers (from layer_types).
+        assert_eq!(profile.full_attention_layer_count(), 16);
+        // 48 linear/recurrent layers.
+        assert_eq!(profile.linear_recurrent_layer_count(), 48);
+        // Must NOT equal total layers.
+        assert_ne!(
+            profile.full_attention_layer_count(),
+            profile.total_layer_count()
+        );
+    }
+
+    #[test]
+    fn gemma4_global_kv_included_not_zeroed() {
+        // Hard gate: Gemma4 global_kv_heads from config, not zeroed or ignored.
+        let bytes = load_fixture("mlx-community_gemma-4-26b-a4b-it-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        let glh = profile.global_local_heads.as_ref().unwrap();
+        assert_eq!(glh.num_global_key_value_heads, Some(2));
+        assert!(!glh.num_global_kv_evidence.as_ref().unwrap().is_empty());
+        assert_eq!(glh.global_head_dim, Some(512));
+        assert!(!glh.global_head_dim_evidence.as_ref().unwrap().is_empty());
+    }
+
+    #[test]
+    fn gemma4_local_kv_capped_by_sliding_window() {
+        // Hard gate: Gemma4 local KV capped by sliding window.
+        let bytes = load_fixture("mlx-community_gemma-4-26b-a4b-it-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        let glh = profile.global_local_heads.as_ref().unwrap();
+        // Local KV heads derived from total - global.
+        assert_eq!(glh.num_local_key_value_heads, Some(6));
+        assert!(glh.local_attn_window_size.is_some());
+        assert_eq!(glh.local_attn_window_size, Some(1024));
+    }
+
+    #[test]
+    fn recurrent_state_explicit_with_field_evidence() {
+        // Hard gate: Recurrent state is explicit with field_evidence.
+        let bytes = load_fixture("mlx-community_Qwen3.6-27B-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        let rcg = profile.recurrent_state.as_ref().unwrap();
+        // Every populated field has evidence.
+        assert!(rcg.linear_conv_kernel_dim_evidence.is_some());
+        assert!(rcg.linear_key_head_dim_evidence.is_some());
+        assert!(rcg.linear_num_key_heads_evidence.is_some());
+        assert!(rcg.linear_num_value_heads_evidence.is_some());
+        assert!(rcg.linear_value_head_dim_evidence.is_some());
+        assert!(rcg.mamba_ssm_dtype_evidence.is_some());
+    }
+
+    #[test]
+    fn moe_expert_topology_with_field_evidence() {
+        // Hard gate: MoE experts have field_evidence.
+        let bytes = load_fixture("mlx-community_Qwen3.6-35B-A3B-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        let experts = profile.experts.as_ref().unwrap();
+        assert_eq!(experts.n_experts, 256);
+        assert!(!experts.field_evidence.is_empty());
+        assert_eq!(experts.top_k, Some(8));
+        assert!(experts.top_k_evidence.is_some());
+    }
+
+    #[test]
+    fn external_companion_from_draft_model_source() {
+        // Per A25: external drafter with model source is tracked separately.
+        let json = r#"{
+            "hidden_size": 1024,
+            "num_hidden_layers": 10,
+            "num_attention_heads": 8,
+            "draft_model": {
+                "model": "mlx-community/drafter-model",
+                "num_hidden_layers": 3
+            }
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+
+        assert_eq!(profile.external_companions.len(), 1);
+        let companion = &profile.external_companions[0];
+        assert_eq!(companion.companion_type, CompanionType::Drafter);
+        assert_eq!(companion.source, "mlx-community/drafter-model");
+        assert_eq!(companion.provenance, "draft_model.model");
+
+        // MTP still tracked from layers.
+        assert!(profile.embedded_mtp.is_some());
+        assert_eq!(profile.embedded_mtp.as_ref().unwrap().n_layers, 3);
+    }
+
+    #[test]
+    fn no_double_counting_mtp_companions_from_main_geometry() {
+        // Hard gate: MTP/companions separate from main geometry.
+        let json = r#"{
+            "hidden_size": 1024,
+            "num_hidden_layers": 10,
+            "num_attention_heads": 8,
+            "mtp_num_hidden_layers": 2,
+            "draft_model": {
+                "model": "external-drafter",
+                "num_hidden_layers": 1
+            }
+        }"#;
+        let profile = parse_mlx_config_bytes_to_profile(json.as_bytes()).unwrap();
+
+        // Main geometry is 10 layers, not 10+2+1.
+        assert_eq!(profile.weights.n_layers.value, 10);
+        assert_eq!(profile.total_layer_count(), 10);
+
+        // MTP tracked separately.
+        assert!(profile.embedded_mtp.is_some());
+
+        // External companion tracked separately.
+        assert_eq!(profile.external_companions.len(), 1);
+    }
+
+    #[test]
+    fn gemma4_31b_dense_no_moe() {
+        // Hard gate: Gemma-4-31b global_kv=4, no MoE.
+        let bytes = load_fixture("mlx-community_gemma-4-31b-it-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        let glh = profile.global_local_heads.as_ref().unwrap();
+        assert_eq!(glh.num_global_key_value_heads, Some(4));
+
+        assert!(!profile.is_moe());
+    }
+
+    #[test]
+    fn qwen3_06b_dense_baseline() {
+        // Hard gate: Qwen3-0.6B dense geometry, no MoE/MTP/recurrent.
+        let bytes = load_fixture("mlx-community_Qwen3-0.6B-4bit.config.json").unwrap();
+        let profile = parse_mlx_config_bytes_to_profile(&bytes).unwrap();
+
+        assert!(!profile.is_moe());
+        assert!(profile.recurrent_state.is_none());
+        assert!(profile.embedded_mtp.is_none());
+        assert_eq!(profile.full_attention_layer_count(), 28);
+        assert_eq!(profile.total_layer_count(), 28);
     }
 }

@@ -210,6 +210,18 @@ pub struct GlobalLocalHeadGeometry {
     pub global_head_dim: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub global_head_dim_evidence: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_local_key_value_heads: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_local_kv_evidence: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_head_dim: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_head_dim_evidence: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_attn_window_size: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_attn_window_evidence: Option<String>,
 }
 
 impl GlobalLocalHeadGeometry {
@@ -244,11 +256,41 @@ pub struct VisionComponent {
     pub model_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_type_evidence: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encoder_layers: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encoder_layers_evidence: Option<String>,
 }
 
 impl VisionComponent {
     pub fn is_some(&self) -> bool {
         self.has_vision_config
+    }
+}
+
+/// Type of external companion component (per A25).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CompanionType {
+    #[default]
+    Drafter,
+    Vision,
+    Embedding,
+}
+
+/// External companion model: drafter, vision tower, or embedding model with separate provenance.
+/// Per A25: each companion is an explicit source component with separate download, provenance,
+/// lifecycle, and additive memory — never double-counted against main geometry.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ExternalCompanion {
+    pub companion_type: CompanionType,
+    pub source: String,
+    pub provenance: String,
+}
+
+impl ExternalCompanion {
+    pub fn is_some(&self) -> bool {
+        !self.source.is_empty() && !self.provenance.is_empty()
     }
 }
 
@@ -316,6 +358,8 @@ pub struct ModelMemoryProfile {
     pub global_local_heads: Option<GlobalLocalHeadGeometry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sliding_window: Option<u32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub external_companions: Vec<ExternalCompanion>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sliding_window_evidence: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
