@@ -1,9 +1,10 @@
 use crate::config::harden_file_permissions;
+use crate::inference::rapid_mlx::capabilities::run_update_validation_probe;
 use crate::inference::rapid_mlx::compatibility::{
     CompatibilityProfile, CompatibilityState, MINIMUM_VERIFIED_VERSION,
     probe_published_managed_release,
 };
-use crate::inference::rapid_mlx::runtime::RuntimeSource;
+use crate::inference::rapid_mlx::runtime::{ProbeResult, RuntimeSource};
 use anyhow::{Context, Result, anyhow, bail};
 use rand::TryRng;
 use rand::rngs::SysRng;
@@ -176,6 +177,10 @@ struct EnvironmentManifest {
     /// Preserved for rollback; never hand-curated. Derived from upstream contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     resolved_receipt: Option<ResolvedDependencyReceipt>,
+    /// Last on-device update-validation probe result. Stored for diagnostics.
+    /// User-driven: runs after managed install/upgrade, not silently.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_probe_result: Option<ProbeResult>,
 }
 
 /// Resolved receipt for a managed environment.
@@ -441,6 +446,10 @@ impl RapidMlxRuntimeManager {
             // Capture resolved dependency receipt from the installed environment.
             let resolved_receipt = capture_resolved_receipt(&binary, exact_version)?;
 
+            // Run the on-device update-validation probe.
+            // User-driven (triggered by install/upgrade), bounded (30s total, 8s per sub-check).
+            let probe_result = run_update_validation_probe(&binary, exact_version).await?;
+
             let manifest = EnvironmentManifest {
                 schema_version: MANIFEST_SCHEMA_VERSION,
                 environment_id: environment_id.clone(),
@@ -451,6 +460,7 @@ impl RapidMlxRuntimeManager {
                 compatibility_state: CompatibilityState::Verified.label().to_string(),
                 release_channel: release.channel,
                 resolved_receipt,
+                last_probe_result: Some(probe_result),
             };
             let environment = checked_existing_child(
                 &self.root,

@@ -385,6 +385,7 @@ pub async fn construct_adapter(
                 version,
                 capability_snapshot,
                 resolved_receipt: None,
+                last_probe_result: None,
             };
             let models_dir = state
                 .models_dir

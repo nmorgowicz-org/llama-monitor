@@ -559,6 +559,7 @@ mod tests {
                 version: "0.10.10".into(),
                 capability_snapshot: None,
                 resolved_receipt: None,
+                last_probe_result: None,
             },
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         );
@@ -668,6 +669,7 @@ mod chat_tests {
                 version: compatibility::LATEST_QUALIFIED_VERSION_TEXT.into(),
                 capability_snapshot: None,
                 resolved_receipt: None,
+                last_probe_result: None,
             },
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         )

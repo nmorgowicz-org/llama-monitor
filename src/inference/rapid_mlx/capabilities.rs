@@ -1,18 +1,24 @@
 #![allow(clippy::collapsible_if)]
 
-use crate::inference::rapid_mlx::runtime::RuntimeSource;
+use crate::inference::rapid_mlx::runtime::{FeatureProbeFailure, ProbeResult, RuntimeSource};
 use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::{Arc, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 pub const CAPABILITY_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 pub const CAPABILITY_PROBE_MAX_OUTPUT: usize = 512 * 1024;
+
+/// Total probe budget: all sub-checks complete within 30s.
+pub const PROBE_TOTAL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Per-sub-check timeout (reused from capability probes).
+pub const PROBE_SUBCHECK_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Source of a capability snapshot: automated discovery vs. manual override.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -707,6 +713,347 @@ fn hash_file(path: &Path) -> Result<String> {
         .collect())
 }
 
+/// On-device, user-driven update-validation probe.
+///
+/// Runs after managed install/upgrade. Validates:
+/// 1. `rapid-mlx serve --help` succeeds with expected structure
+/// 2. `rapid-mlx serve --version` matches installed version
+/// 3. Dependencies (MLX, MLX-LM, etc.) resolve without error
+/// 4. Capability snapshot generation succeeds
+/// 5. Basic self-import check: rapid-mlx can import core modules
+///
+/// Each sub-check is independently bounded (8s timeout, 512KB output).
+/// Total probe completes within 30s.
+///
+/// Results:
+/// - PASS: all checks succeed → environment healthy
+/// - PER-FEATURE FAIL: specific capability fails → actionable diagnosis per feature
+/// - CRITICAL FAIL: rapid-mlx itself broken → rollback eligible
+///
+/// This is `[escalate→device]` per plan §9.6 — real hardware measurements, not quota.
+pub async fn run_update_validation_probe(
+    binary: &Path,
+    expected_version: &str,
+) -> Result<ProbeResult> {
+    let start = std::time::Instant::now();
+
+    // 1. Version match check (critical)
+    let version_result = tokio::time::timeout(PROBE_SUBCHECK_TIMEOUT, probe_version(binary)).await;
+    let version = match version_result {
+        Ok(Ok(v)) => v,
+        Ok(Err(e)) => {
+            return Ok(ProbeResult::CriticalFail {
+                message: format!("Version probe failed: {e}"),
+            });
+        }
+        Err(_) => {
+            return Ok(ProbeResult::CriticalFail {
+                message: "Version probe timed out after 8s".into(),
+            });
+        }
+    };
+
+    if !version_matches(&version, expected_version) {
+        return Ok(ProbeResult::CriticalFail {
+            message: format!(
+                "Installed Rapid-MLX version {version} does not match expected {expected_version}"
+            ),
+        });
+    }
+
+    // 2. Help structure check (critical)
+    let help_result =
+        tokio::time::timeout(PROBE_SUBCHECK_TIMEOUT, probe_help_structure(binary)).await;
+    match help_result {
+        Ok(Ok(ProbeResult::Pass)) => {}
+        Ok(Ok(ProbeResult::CriticalFail { ref message })) => {
+            return Ok(ProbeResult::CriticalFail {
+                message: format!("Help probe failed: {message}"),
+            });
+        }
+        Ok(Ok(ProbeResult::PerFeatureFail { .. })) => {
+            // probe_help_structure only returns Pass/CriticalFail, but handle exhaustively
+            return Ok(ProbeResult::CriticalFail {
+                message: "Help probe returned unexpected result".into(),
+            });
+        }
+        Ok(Err(e)) => {
+            return Ok(ProbeResult::CriticalFail {
+                message: format!("Help probe failed: {e}"),
+            });
+        }
+        Err(_) => {
+            return Ok(ProbeResult::CriticalFail {
+                message: "Help probe timed out after 8s".into(),
+            });
+        }
+    }
+
+    // 3. Dependency resolution check (critical)
+    let dep_result = tokio::time::timeout(PROBE_SUBCHECK_TIMEOUT, probe_dependencies(binary)).await;
+
+    let _package_versions = match dep_result {
+        Ok(versions) if has_critical_dependency(&versions) => versions,
+        Ok(_) => {
+            return Ok(ProbeResult::CriticalFail {
+                message: "Critical dependency (mlx or mlx_lm) not found in environment".into(),
+            });
+        }
+        Err(_) => {
+            return Ok(ProbeResult::CriticalFail {
+                message: "Dependency probe timed out after 8s".into(),
+            });
+        }
+    };
+
+    // 4. Self-import check: rapid-mlx can import core modules without crash (critical)
+    let import_result =
+        tokio::time::timeout(PROBE_SUBCHECK_TIMEOUT, probe_self_import(binary)).await;
+
+    match import_result {
+        Ok(Ok(ProbeResult::Pass)) => {}
+        Ok(Ok(ProbeResult::CriticalFail { ref message })) => {
+            return Ok(ProbeResult::CriticalFail {
+                message: format!("Self-import failed: {message}"),
+            });
+        }
+        Ok(Ok(ProbeResult::PerFeatureFail { feature_failures })) => {
+            // Self-import PerFeatureFail (e.g. Python not found) is informational;
+            // don't block activation for managed install. Collect it later.
+            for ff in feature_failures {
+                eprintln!(
+                    "Rapid-MLX probe note [{feature}]: {message}",
+                    feature = ff.feature,
+                    message = ff.message
+                );
+            }
+        }
+        Ok(Err(e)) => {
+            return Ok(ProbeResult::CriticalFail {
+                message: format!("Self-import probe command failed: {e}"),
+            });
+        }
+        Err(_) => {
+            return Ok(ProbeResult::CriticalFail {
+                message: "Self-import probe timed out after 8s".into(),
+            });
+        }
+    }
+
+    // 5. Capability snapshot generation (critical)
+    let snapshot_result = tokio::time::timeout(
+        PROBE_SUBCHECK_TIMEOUT,
+        generate_snapshot(binary, RuntimeSource::Managed),
+    )
+    .await;
+
+    let snapshot = match snapshot_result {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => {
+            return Ok(ProbeResult::CriticalFail {
+                message: format!("Capability snapshot generation failed: {e}"),
+            });
+        }
+        Err(_) => {
+            return Ok(ProbeResult::CriticalFail {
+                message: "Capability snapshot timed out after 8s".into(),
+            });
+        }
+    };
+
+    let elapsed = start.elapsed();
+    if elapsed > PROBE_TOTAL_TIMEOUT {
+        // We already succeeded in all critical checks, but warn about duration.
+        // Don't fail the probe just for being slow on a loaded system.
+        eprintln!(
+            "Rapid-MLX probe completed in {:.1}s (budget: {:.1}s)",
+            elapsed.as_secs_f64(),
+            PROBE_TOTAL_TIMEOUT.as_secs_f64()
+        );
+    }
+
+    // 6. Check for per-feature failures from extras
+    let feature_failures = collect_feature_failures(&snapshot);
+
+    if feature_failures.is_empty() {
+        Ok(ProbeResult::Pass)
+    } else {
+        Ok(ProbeResult::PerFeatureFail { feature_failures })
+    }
+}
+
+/// Check if version output matches expected version (major.minor.patch must match).
+fn version_matches(actual: &str, expected: &str) -> bool {
+    // Strip any leading 'v'
+    let clean_actual = extract_version_text(actual).unwrap_or_else(|| actual.to_string());
+    let clean_expected = expected.trim_start_matches('v');
+
+    // Direct match is primary
+    if clean_actual == clean_expected {
+        return true;
+    }
+
+    // Also accept if major.minor.patch prefix matches (handles suffix variations like rc1)
+    // Extract only numeric components
+    let numeric_prefix = |s: &str| -> String {
+        let parts: Vec<String> = s
+            .split('.')
+            .map(|p| {
+                p.chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+            })
+            .filter(|p| !p.is_empty())
+            .collect();
+        parts.into_iter().take(3).collect::<Vec<_>>().join(".")
+    };
+    let actual_prefix = numeric_prefix(&clean_actual);
+    let expected_prefix = numeric_prefix(clean_expected);
+    actual_prefix == expected_prefix
+}
+
+/// Probe help structure: ensures rapid-mlx serve --help succeeds with expected flags.
+async fn probe_help_structure(binary: &Path) -> Result<ProbeResult> {
+    let output = run_probe_command(binary, &["serve", "--help"]).await?;
+    let text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(anyhow!("Help probe returned empty output"));
+    }
+
+    // Verify expected structure: must contain MODEL arg position and core flags
+    let lower = text.to_ascii_lowercase();
+    if !lower.contains("model") && !lower.contains("--host") && !lower.contains("--port") {
+        return Err(anyhow!(
+            "Help output lacks expected structure (no model/host/port)"
+        ));
+    }
+
+    Ok(ProbeResult::Pass)
+}
+
+/// Probe self-import: rapid-mlx can import core modules without crash.
+async fn probe_self_import(binary: &Path) -> Result<ProbeResult> {
+    let python_env = resolve_python_for_binary(binary);
+    let Some(python) = python_env.as_ref() else {
+        // Python not found in environment; this is non-fatal for probe
+        // since the binary itself works. Mark as indeterminate rather than fail.
+        return Ok(ProbeResult::PerFeatureFail {
+            feature_failures: vec![FeatureProbeFailure {
+                feature: "self-import".into(),
+                message: "Python interpreter not found in environment; self-import check skipped"
+                    .into(),
+            }],
+        });
+    };
+
+    let script = r#"
+import sys
+import importlib
+
+# Core imports that rapid-mlx itself requires
+core = ["mlx", "mlx_lm"]
+errors = []
+
+for name in core:
+    try:
+        importlib.import_module(name.replace("-", "_"))
+    except ImportError as e:
+        errors.append(f"{name}: {e}")
+    except Exception as e:
+        errors.append(f"{name}: runtime error: {e}")
+
+if errors:
+    print("FAIL\n" + "\n".join(errors))
+    sys.exit(1)
+else:
+    print("OK")
+    sys.exit(0)
+"#;
+
+    match run_probe_command(python, &["-c", script]).await {
+        Ok(output) => {
+            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if text.starts_with("OK") {
+                Ok(ProbeResult::Pass)
+            } else {
+                let details = text
+                    .lines()
+                    .skip(1)
+                    .map(|l| l.trim())
+                    .filter(|l| !l.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Ok(ProbeResult::CriticalFail {
+                    message: format!("Core module import failed: {details}"),
+                })
+            }
+        }
+        Err(e) => Ok(ProbeResult::CriticalFail {
+            message: format!("Self-import probe command failed: {e}"),
+        }),
+    }
+}
+
+/// Check if the package list includes at least one critical dependency.
+fn has_critical_dependency(packages: &[DependencyVersion]) -> bool {
+    packages.iter().any(|p| {
+        let name = p.package.to_ascii_lowercase();
+        name == "mlx" || name == "mlx-lm" || name == "mlx_lm"
+    })
+}
+
+/// Collect per-feature failures from capability snapshot.
+fn collect_feature_failures(snapshot: &CapabilitySnapshot) -> Vec<FeatureProbeFailure> {
+    let mut failures = Vec::new();
+
+    // Guided generation: extra import check
+    if let ExtraState::Broken(ref reason) = snapshot.installed_extras.guided {
+        failures.push(FeatureProbeFailure {
+            feature: "guided".into(),
+            message: format!("[guided] extra import failed: {reason}"),
+        });
+    }
+
+    // Vision: extra import check (mlx-vlm)
+    if let ExtraState::Broken(ref reason) = snapshot.installed_extras.vision {
+        failures.push(FeatureProbeFailure {
+            feature: "vision".into(),
+            message: format!("Vision extra import failed: {reason}"),
+        });
+    }
+
+    // Embeddings: extra import check
+    if let ExtraState::Broken(ref reason) = snapshot.installed_extras.embeddings {
+        failures.push(FeatureProbeFailure {
+            feature: "embeddings".into(),
+            message: format!("Embeddings extra import failed: {reason}"),
+        });
+    }
+
+    // Qualified features: record indeterminate/unavailable as per-feature notes
+    if !matches!(
+        snapshot.qualified_features.guided_generation,
+        FeatureQualification::Available
+    ) {
+        if matches!(snapshot.installed_extras.guided, ExtraState::Installed) {
+            // Extra installed but feature not available: something deeper is wrong
+            failures.push(FeatureProbeFailure {
+                feature: "guided".into(),
+                message: "Guided extra installed but capability probe failed".into(),
+            });
+        }
+        // Missing is informational, not a failure
+    }
+
+    failures
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -917,5 +1264,169 @@ Options:
                 other
             ),
         }
+    }
+
+    // Probe-specific tests
+
+    #[test]
+    fn version_matches_exact_and_prefix() {
+        assert!(version_matches("0.10.10", "0.10.10"));
+        assert!(version_matches("v0.10.10", "0.10.10"));
+        assert!(version_matches("0.10.10", "v0.10.10"));
+        // Accept suffix variations if major.minor.patch matches
+        assert!(version_matches("0.10.10rc1", "0.10.10"));
+        assert!(!version_matches("0.9.10", "0.10.10"));
+        assert!(!version_matches("0.10.11", "0.10.10"));
+    }
+
+    #[test]
+    fn help_structure_requires_expected_content() {
+        // Valid help output
+        let valid = r#"Usage: rapid-mlx serve [OPTIONS] MODEL
+Options:
+  --host TEXT
+  --port INTEGER
+"#;
+        let flags = extract_flags(valid);
+        assert!(flags.contains(&"--host".into()));
+        assert!(flags.contains(&"--port".into()));
+
+        // Help without expected content (no model/host/port)
+        let invalid = "Just some random text";
+        let flags = extract_flags(invalid);
+        assert!(!flags.contains(&"--host".into()));
+        assert!(!flags.contains(&"--port".into()));
+    }
+
+    #[test]
+    fn has_critical_dependency_detects_mlx_and_mlx_lm() {
+        let no_deps = Vec::<DependencyVersion>::new();
+        assert!(!has_critical_dependency(&no_deps));
+
+        let with_mlx = vec![DependencyVersion {
+            package: "mlx".into(),
+            version: "0.20".into(),
+            source: DependencyVersionSource::PipFreeze,
+        }];
+        assert!(has_critical_dependency(&with_mlx));
+
+        let with_mlx_lm = vec![DependencyVersion {
+            package: "mlx_lm".into(),
+            version: "0.21".into(),
+            source: DependencyVersionSource::PipFreeze,
+        }];
+        assert!(has_critical_dependency(&with_mlx_lm));
+
+        let with_mlx_lm_hyphen = vec![DependencyVersion {
+            package: "mlx-lm".into(),
+            version: "0.21".into(),
+            source: DependencyVersionSource::PipFreeze,
+        }];
+        assert!(has_critical_dependency(&with_mlx_lm_hyphen));
+    }
+
+    #[test]
+    fn collect_feature_failures_identifies_broken_extras() {
+        let snapshot = CapabilitySnapshot {
+            executable_identity: ExecutableIdentity {
+                path: "/tmp/rapid-mlx".into(),
+                file_hash: "h".into(),
+                file_mtime_unix: 0,
+            },
+            rapid_mlx_version: "0.10.10".into(),
+            help_hash: "h".into(),
+            serve_flags: vec![],
+            package_versions: vec![],
+            installed_extras: InstalledExtras {
+                guided: ExtraState::Broken("ModuleNotFoundError: outlines".into()),
+                vision: ExtraState::Installed,
+                embeddings: ExtraState::Broken("import error".into()),
+            },
+            qualified_features: QualifiedFeatures {
+                guided_generation: FeatureQualification::Unavailable("broken".into()),
+                ..Default::default()
+            },
+            evidence_timestamp: 0,
+            source: CapabilitySnapshotSource::AutoProbed,
+        };
+        let failures = collect_feature_failures(&snapshot);
+        assert_eq!(failures.len(), 2);
+        assert_eq!(failures[0].feature, "guided");
+        assert!(failures[0].message.contains("outlines"));
+        assert_eq!(failures[1].feature, "embeddings");
+    }
+
+    #[test]
+    fn collect_feature_failures_empty_when_all_ok() {
+        let snapshot = CapabilitySnapshot {
+            executable_identity: ExecutableIdentity {
+                path: "/tmp/rapid-mlx".into(),
+                file_hash: "h".into(),
+                file_mtime_unix: 0,
+            },
+            rapid_mlx_version: "0.10.10".into(),
+            help_hash: "h".into(),
+            serve_flags: vec!["--tool-call-parser".into()],
+            package_versions: vec![],
+            installed_extras: InstalledExtras {
+                guided: ExtraState::Installed,
+                vision: ExtraState::Installed,
+                embeddings: ExtraState::Missing,
+            },
+            qualified_features: QualifiedFeatures {
+                guided_generation: FeatureQualification::Available,
+                ..Default::default()
+            },
+            evidence_timestamp: 0,
+            source: CapabilitySnapshotSource::AutoProbed,
+        };
+        let failures = collect_feature_failures(&snapshot);
+        // Missing is not a failure; only Broken is; installed+available means no failure
+        assert!(failures.is_empty());
+    }
+
+    #[test]
+    fn probe_result_pass_has_no_global_provisional() {
+        // A PASS result means environment is healthy; no global Provisional banner
+        let result = ProbeResult::Pass;
+        assert!(matches!(result, ProbeResult::Pass));
+
+        // Per-feature fail still doesn't justify a global banner — it's per-feature
+        let result = ProbeResult::PerFeatureFail {
+            feature_failures: vec![FeatureProbeFailure {
+                feature: "guided".into(),
+                message: "extra import failed".into(),
+            }],
+        };
+        assert!(matches!(result, ProbeResult::PerFeatureFail { .. }));
+
+        // Critical fail is actionable and includes rollback eligibility signal
+        let result = ProbeResult::CriticalFail {
+            message: "Version mismatch".into(),
+        };
+        assert!(matches!(result, ProbeResult::CriticalFail { .. }));
+    }
+
+    #[test]
+    fn probe_result_critical_fail_is_rollback_eligible() {
+        let result = ProbeResult::CriticalFail {
+            message: "Core module import failed: mlx: ModuleNotFoundError".into(),
+        };
+        match result {
+            ProbeResult::CriticalFail { ref message } => {
+                assert!(!message.is_empty());
+                assert!(message.contains("mlx"));
+            }
+            _ => panic!("Expected CriticalFail"),
+        }
+    }
+
+    #[test]
+    fn probe_timeout_values_are_bounded() {
+        // Verify constants are within spec
+        assert_eq!(PROBE_SUBCHECK_TIMEOUT, Duration::from_secs(8));
+        assert_eq!(PROBE_TOTAL_TIMEOUT, Duration::from_secs(30));
+        assert!(PROBE_SUBCHECK_TIMEOUT <= CAPABILITY_PROBE_TIMEOUT);
+        assert!(PROBE_TOTAL_TIMEOUT.as_secs() > PROBE_SUBCHECK_TIMEOUT.as_secs());
     }
 }

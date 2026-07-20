@@ -529,6 +529,7 @@ mod tests {
                     version: "0.10.9".into(),
                     capability_snapshot: None,
                     resolved_receipt: None,
+                    last_probe_result: None,
                 },
                 crate::inference::rapid_mlx::model_resolver::ResolvedRapidMlxLaunchModel::validated_alias("stale-model").unwrap(),
             ),

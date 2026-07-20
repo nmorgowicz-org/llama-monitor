@@ -25,6 +25,9 @@ async fn test_rapid_mlx_platform_validation() {
         executable_path: PathBuf::from("/bin/ls"),
         version: "0.1.0".to_string(),
         source: RuntimeSource::Custom,
+        capability_snapshot: None,
+        resolved_receipt: None,
+        last_probe_result: None,
     };
     let adapter = RapidMlxAdapter::from_resolved(
         runtime,
@@ -113,6 +116,9 @@ async fn test_rapid_mlx_await_ready_success() {
         executable_path: PathBuf::from("/bin/ls"),
         version: "0.1.0".to_string(),
         source: RuntimeSource::Custom,
+        capability_snapshot: None,
+        resolved_receipt: None,
+        last_probe_result: None,
     };
     let mut adapter = RapidMlxAdapter::from_resolved(
         runtime,
@@ -144,6 +150,9 @@ async fn test_rapid_mlx_await_ready_failure() {
         executable_path: PathBuf::from("/bin/ls"),
         version: "0.1.0".to_string(),
         source: RuntimeSource::Custom,
+        capability_snapshot: None,
+        resolved_receipt: None,
+        last_probe_result: None,
     };
     let mut adapter = RapidMlxAdapter::from_resolved(
         runtime,
@@ -240,6 +249,9 @@ async fn rapid_native_cancellation_degrades_without_a_public_request_id_contract
         executable_path: "rapid-mlx".into(),
         version: "0.10.9".into(),
         source: RuntimeSource::Managed,
+        capability_snapshot: None,
+        resolved_receipt: None,
+        last_probe_result: None,
     };
     let mut supported = RapidMlxAdapter::from_resolved(
         runtime,
@@ -358,6 +370,9 @@ async fn fixture_lifecycle_discovers_loads_becomes_ready_and_stops() {
             executable_path: resolved,
             version: profile.version.clone(),
             source,
+            capability_snapshot: None,
+            resolved_receipt: None,
+            last_probe_result: None,
         },
         ResolvedRapidMlxLaunchModel::validated_alias("fixture-model").unwrap(),
     );
@@ -408,6 +423,9 @@ async fn fixture_early_exit_propagates_actionable_tail() {
             executable_path: resolved,
             version: profile.version.clone(),
             source,
+            capability_snapshot: None,
+            resolved_receipt: None,
+            last_probe_result: None,
         },
         ResolvedRapidMlxLaunchModel::validated_alias("fixture-model").unwrap(),
     );
