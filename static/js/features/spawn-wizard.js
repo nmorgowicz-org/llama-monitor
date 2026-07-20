@@ -238,6 +238,9 @@ export const wizardState = {
     reasoningBudget: null,
     reasoningMode: null,
     reasoningBudgetMessage: null,
+    kvCacheDtype: 'int4',
+    turboquantMode: 'none',
+    workloadScenario: 'interactive_chat',
     grammar: '',
     jsonSchema: '',
     alias: '',
@@ -567,6 +570,9 @@ function resetWizardState() {
   wizardState.hardware.reasoningMode = null;
   wizardState.hardware.reasoningBudget = null;
   wizardState.hardware.reasoningBudgetMessage = null;
+  wizardState.hardware.kvCacheDtype = '';
+  wizardState.hardware.turboquantMode = '';
+  wizardState.hardware.workloadScenario = '';
   if (dom.kvUnifiedSelect) dom.kvUnifiedSelect.value = '';
   if (dom.fitEnableSelect) dom.fitEnableSelect.value = '';
   if (dom.fitTargetWrap) dom.fitTargetWrap.style.display = 'none';
@@ -761,6 +767,13 @@ function cacheDom() {
   dom.fitEnableSelect = document.getElementById('spawn-fit-enable');
   dom.fitTargetWrap   = document.getElementById('spawn-fit-target-wrap');
   dom.cacheRamInput   = document.getElementById('spawn-cache-ram');
+
+  // Rapid-MLX advanced controls
+  dom.rapidAdvancedFields  = document.getElementById('spawn-rapid-advanced-fields');
+  dom.kvCacheDtypeSelect   = document.getElementById('spawn-kv-cache-dtype');
+  dom.turboquantModeSelect = document.getElementById('spawn-turboquant-mode');
+  dom.workloadScenarioSelect = document.getElementById('spawn-workload-scenario');
+  dom.reasoningModeCheck   = document.getElementById('spawn-rapid-reasoning-mode');
 
   // Step 4 (Summary)
   dom.summaryList      = document.getElementById('spawn-summary-list');
@@ -1251,12 +1264,76 @@ function bindEvents() {
     Router.navigate('/settings#models');
   });
 
-  // Binary prereq buttons
-  dom.prereqDownloadBtn?.addEventListener('click', _downloadBinaryForWizard);
-  dom.prereqSettingsBtn?.addEventListener('click', () => {
-    Router.navigate('/settings#session');
-    setTimeout(() => document.getElementById('set-server-path')?.focus(), 80);
-  });
+   // Binary prereq buttons
+   dom.prereqDownloadBtn?.addEventListener('click', _downloadBinaryForWizard);
+   dom.prereqSettingsBtn?.addEventListener('click', () => {
+     Router.navigate('/settings#session');
+     setTimeout(() => document.getElementById('set-server-path')?.focus(), 80);
+   });
+
+   // Rapid-MLX advanced controls
+   _bindRapidMlxAdvancedControls();
+}
+
+function _bindRapidMlxAdvancedControls() {
+  const scheduleVramUpdate = window.scheduleVramUpdate || (() => {});
+
+  const bindSel = (el, key) => {
+    if (!el || el.dataset.bound) return;
+    el.dataset.bound = '1';
+    el.addEventListener('change', () => {
+      wizardState.hardware[key] = el.value || '';
+      scheduleVramUpdate();
+    });
+  };
+
+  bindSel(dom.kvCacheDtypeSelect, 'kvCacheDtype');
+  bindSel(dom.turboquantModeSelect, 'turboquantMode');
+  bindSel(dom.workloadScenarioSelect, 'workloadScenario');
+
+  if (dom.reasoningModeCheck && !dom.reasoningModeCheck.dataset.bound) {
+    dom.reasoningModeCheck.dataset.bound = '1';
+    dom.reasoningModeCheck.addEventListener('change', () => {
+      wizardState.hardware.reasoningMode = !!dom.reasoningModeCheck.checked;
+      _applyReasoningModeLock();
+      scheduleVramUpdate();
+    });
+  }
+}
+
+function _applyReasoningModeLock() {
+  const locked = !!wizardState.hardware.reasoningMode;
+  if (!dom.kvCacheDtypeSelect) return;
+
+  if (locked) {
+    // Lock KV dtype to int8 visually; show overlay text but keep underlying value
+    dom.kvCacheDtypeSelect.classList.add('kv-dtype-locked');
+    dom.kvCacheDtypeSelect.title = 'Locked to int8 by reasoning mode';
+  } else {
+    dom.kvCacheDtypeSelect.classList.remove('kv-dtype-locked');
+    dom.kvCacheDtypeSelect.title = '';
+  }
+}
+
+function _applyRapidMlxDefaults() {
+  const h = wizardState.hardware;
+
+  if (!h.kvCacheDtype) {
+    h.kvCacheDtype = 'int4';
+    if (dom.kvCacheDtypeSelect) dom.kvCacheDtypeSelect.value = 'int4';
+  }
+  if (!h.turboquantMode) {
+    h.turboquantMode = 'none';
+    if (dom.turboquantModeSelect) dom.turboquantModeSelect.value = 'none';
+  }
+  if (!h.workloadScenario) {
+    h.workloadScenario = 'interactive_chat';
+    if (dom.workloadScenarioSelect) dom.workloadScenarioSelect.value = 'interactive_chat';
+  }
+  // reasoningMode defaults to false (unchecked); no explicit sync needed unless user set it
+
+  _applyReasoningModeLock();
+  window.scheduleVramUpdate?.();
 }
 
 async function refreshHfTokenState() {
@@ -2412,6 +2489,10 @@ function renderEngineSelection() {
   });
   dom.overlay?.classList.toggle('engine-rapid-mlx', selected === 'rapid_mlx');
   if (dom.rapidHardwarePanel) dom.rapidHardwarePanel.hidden = selected !== 'rapid_mlx';
+  if (dom.rapidAdvancedFields) {
+    dom.rapidAdvancedFields.style.display = selected === 'rapid_mlx' ? 'block' : 'none';
+    if (selected === 'rapid_mlx') _applyRapidMlxDefaults();
+  }
   if (dom.rapidMlxAdvancedSection) {
     dom.rapidMlxAdvancedSection.style.display = selected === 'rapid_mlx' ? '' : 'none';
     if (selected === 'rapid_mlx') ensureEscapeHatchRendered();
