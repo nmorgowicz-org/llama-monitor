@@ -22,6 +22,7 @@ mod inference;
 mod lhm;
 mod lhm_persistence;
 mod llama;
+mod memory_availability;
 mod model_download;
 mod models;
 mod platform;

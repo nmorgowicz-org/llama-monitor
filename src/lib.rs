@@ -13,6 +13,7 @@ pub mod inference;
 pub mod lhm;
 pub mod lhm_persistence;
 pub mod llama;
+pub mod memory_availability;
 pub mod model_download;
 pub mod models;
 pub mod platform;

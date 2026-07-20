@@ -2101,6 +2101,13 @@ function showStep(index) {
         renderHardwareModelHeader();
         _populateKvCacheOptions();
       });
+    } else {
+      // Rapid-MLX: fetch a fresh MemoryAvailabilitySnapshot — never stale llama/HF cache.
+      // This is the single source of truth per D30/A58.
+      fetchMemoryAvailability().then(() => {
+        scheduleVramUpdate();
+        renderHardwareModelHeader();
+      });
     }
     if (!rapid) {
       // Auto-hint thread count from system P-core count (Apple Silicon)
@@ -2134,9 +2141,17 @@ function showStep(index) {
     _fetchAndApplyModelSamplingDefaults();
   }
   if (index === 3) {
-    refreshHfTokenState().finally(() => {
-      Promise.all([fetchGpuVram(), fetchMetalGpuLimit()]).then(() => estimateVramFull().then(() => renderSummary()));
-    });
+    const rapid = wizardState.engine.selected === 'rapid_mlx';
+    if (rapid) {
+      // Rapid-MLX: use fresh snapshot, not cached llama GPU values
+      refreshHfTokenState().finally(() => {
+        fetchMemoryAvailability().then(() => estimateVramFull().then(() => renderSummary()));
+      });
+    } else {
+      refreshHfTokenState().finally(() => {
+        Promise.all([fetchGpuVram(), fetchMetalGpuLimit()]).then(() => estimateVramFull().then(() => renderSummary()));
+      });
+    }
   }
   if (index === 4) {
     _renderPresetParamsStep();
@@ -3026,6 +3041,12 @@ function computeHeadroom(availVram) {
 }
 
 function effectiveAvailBytes() {
+  // Prefer the live MemoryAvailabilitySnapshot when available (Phase 5b Part A).
+  // This ensures Rapid Wizard uses current_safe_availability from the single source
+  // of truth, never stale llama/HF caches or theoretical caps.
+  if (cachedMemorySnapshot && cachedMemorySnapshot.current_safe_availability_bytes > 0) {
+    return cachedMemorySnapshot.current_safe_availability_bytes;
+  }
   if (isUnifiedMemory() && cachedRamTotal > 0) {
     const cap = metalCap(cachedRamTotal);
     // Use the Metal cap as the budget. The cap was configured to leave OS headroom
@@ -3087,6 +3108,39 @@ async function fetchMetalGpuLimit() {
     if (!data.ok) return;
     cachedMetalGpuLimitMb = Number(data.limit_mb || 0);
   } catch {}
+}
+
+// ── MemoryAvailabilitySnapshot fetch (Phase 5b Part A) ────────────────────────
+//
+// Single source of truth for memory availability. Never reuses llama/HF cached
+// values. Used by Rapid Wizard and all fit surfaces per D30/A58.
+
+let cachedMemorySnapshot = null;
+
+async function fetchMemoryAvailability() {
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const resp = await fetch('/api/memory-availability', { headers });
+    if (!resp.ok) return null;
+    const data = await resp.json().catch(() => ({}));
+    if (!data.ok || !data.snapshot) return null;
+    cachedMemorySnapshot = data.snapshot;
+    // Update cached values from the snapshot for downstream consumers
+    if (cachedMemorySnapshot.total_unified_bytes > 0) {
+      cachedRamTotal = cachedMemorySnapshot.total_unified_bytes;
+      cachedRamUsed = cachedMemorySnapshot.total_unified_bytes
+        - cachedMemorySnapshot.free_bytes
+        - (cachedMemorySnapshot.speculative_bytes || 0);
+    }
+    if (cachedMemorySnapshot.metal_working_set_bytes > 0) {
+      cachedVram = cachedMemorySnapshot.configured_ceiling_bytes;
+      wizardState.vram.available = cachedMemorySnapshot.current_safe_availability_bytes;
+      wizardState.vram.availableRam = cachedMemorySnapshot.current_safe_availability_bytes;
+    }
+    return cachedMemorySnapshot;
+  } catch {
+    return null;
+  }
 }
 
 // ── Quant advisor (pre-download) ──────────────────────────────────────────────

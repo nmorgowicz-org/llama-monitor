@@ -1084,6 +1084,42 @@ fn api_get_metal_gpu_limit(
         })
 }
 
+/// GET /api/memory-availability — returns a live MemoryAvailabilitySnapshot.
+///
+/// This is the single source of truth for memory availability, used by:
+/// - Rapid Wizard (fresh fetch on init, never stale llama cache)
+/// - Model Browser / HF preview (configured_ceiling for stable capacity)
+/// - Preset editor (current_safe_availability for launch readiness)
+///
+/// Auth: requires api-token (data-reading endpoint).
+/// Performance: sub-second, uses cached system metrics where available.
+fn api_memory_availability(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "memory-availability")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                // Build a fresh snapshot — never stale cache from llama/HF paths.
+                let snapshot = crate::memory_availability::build_snapshot();
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "snapshot": snapshot,
+                    }),
+                )))
+            }
+        })
+}
+
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let state = ctx.state.clone();
     let config = ctx.config.clone();
@@ -1110,6 +1146,10 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r
         .or(api_set_metal_gpu_limit(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_memory_availability(state.clone(), config.clone()))
         .unify()
         .boxed();
     r
@@ -1379,5 +1419,103 @@ mod mlx_estimate_tests {
             None => panic!("missing evidence: {json}"),
         }
         assert!(json["weights_bytes"].as_u64().unwrap() > 0);
+    }
+
+    // ── MemoryAvailabilitySnapshot endpoint tests ─────────────────────────────
+
+    /// GET /api/memory-availability requires api-token (data-reading endpoint).
+    #[tokio::test]
+    async fn memory_availability_requires_api_token() {
+        let response = warp::test::request()
+            .method("GET")
+            .path("/api/memory-availability")
+            .reply(&test_routes())
+            .await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// GET /api/memory-availability returns all required fields and never calls
+    /// total_unified_bytes "available_memory_bytes".
+    #[tokio::test]
+    async fn memory_availability_returns_valid_snapshot_shape() {
+        let response = warp::test::request()
+            .method("GET")
+            .path("/api/memory-availability")
+            .header("authorization", "Bearer api-secret")
+            .reply(&test_routes())
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(response.body()).unwrap();
+        assert_eq!(json["ok"], serde_json::json!(true));
+        let snap = &json["snapshot"];
+        assert!(snap.get("total_unified_bytes").is_some());
+        assert!(snap.get("free_bytes").is_some());
+        assert!(snap.get("wired_bytes").is_some());
+        assert!(snap.get("active_bytes").is_some());
+        assert!(snap.get("speculative_bytes").is_some());
+        assert!(snap.get("pageout_bytes").is_some());
+        assert!(snap.get("metal_working_set_bytes").is_some());
+        assert!(snap.get("configured_ceiling_bytes").is_some());
+        assert!(snap.get("current_safe_availability_bytes").is_some());
+        assert!(snap.get("state").is_some());
+        assert!(snap.get("backend_specific").is_some());
+        assert!(snap.get("timestamp").is_some());
+        let body_str = serde_json::to_string(&json).unwrap();
+        assert!(
+            !body_str.contains("available_memory_bytes"),
+            "must NOT call total_unified_bytes 'available_memory_bytes'"
+        );
+    }
+
+    /// current_safe_availability_bytes must be ≤ configured_ceiling_bytes.
+    #[tokio::test]
+    async fn memory_availability_current_safe_leq_configured_ceiling() {
+        let response = warp::test::request()
+            .method("GET")
+            .path("/api/memory-availability")
+            .header("authorization", "Bearer api-secret")
+            .reply(&test_routes())
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(response.body()).unwrap();
+        let snap = &json["snapshot"];
+        let ceiling = snap["configured_ceiling_bytes"].as_u64().unwrap_or(0);
+        let safe_avail = snap["current_safe_availability_bytes"]
+            .as_u64()
+            .unwrap_or(0);
+        if ceiling > 0 {
+            assert!(
+                safe_avail <= ceiling,
+                "current_safe_availability_bytes ({}) must be <= configured_ceiling_bytes ({})",
+                safe_avail,
+                ceiling
+            );
+        }
+    }
+
+    /// state must be one of the four defined values.
+    #[tokio::test]
+    async fn memory_availability_state_is_valid_enum() {
+        let response = warp::test::request()
+            .method("GET")
+            .path("/api/memory-availability")
+            .header("authorization", "Bearer api-secret")
+            .reply(&test_routes())
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(response.body()).unwrap();
+        let state = json["snapshot"]["state"].as_str().unwrap();
+        let valid_states = [
+            "safe_now",
+            "conditional_after_reclaim",
+            "after_closing_apps",
+            "unsafe",
+        ];
+        assert!(
+            valid_states.contains(&state),
+            "state must be one of {:?}, got '{}'",
+            valid_states,
+            state
+        );
     }
 }
