@@ -244,9 +244,8 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 - **Phase 5a Parts:**
   - **5a-Part 1 (~40k):** Verified complete — Rapid execution policy types + MemoryBreakdown foundation — items 1-2; new execution_policy.rs with KvCacheDtype {bf16,int8,int4}, TurboQuantMode {v4,k8v4,none}, RapidMlxExecutionPolicy (reasoning→int8 override), MemoryBreakdown (8 additive components); 19 tests pass; committed 3bba01c
   - **5a-Part 2 (~45k):** Verified complete — TurboQuant/D31 + active vs retained separation — items 3-5; TurboQuant savings (K8V4=0.575, V4=0.34) on retained KV only; active/retained split via rapid_planning_context_tokens/rapid_retained_cache_tokens; transient_peak_bytes included; eligibility gating; 36 new tests, 49 total pass; committed 4410a0f
-  - **5a-Part 3 (~40k):** Verified complete — llama.cpp slot/unified-KV revalidation + MTP single-stream — items 8,9,12; no code changes needed (existing math correct); host cache/checkpoints correctly excluded; MTP overhead counted; 17 regression tests; 256 tests pass; committed [pending]
-  - **5a-Part 3 (~40k):** llama.cpp slot/unified-KV + MTP single-stream — items 8-9, 12; files: estimate.rs, web/api/vram.rs, tests; deliver: revalidated slot/unified-KV/host-cache math, --parallel 1 MTP policy, MTP recurrent/draft memory; hard gates: llama slot/context matches pinned runtime; no unbounded host cache as fit promise
-  - **5a-Part 4 (~45k):** Workload scenarios + quant-comparison rebasing + MTP modeling — items 10-14; files: estimate.rs, quant_table.rs, web/api/vram.rs, static/js/features/vram-estimate.js, spawn-wizard.js, presets.js, models.js; deliver: workload scenarios, workload-fit quant comparison, Rapid MTP embedded vs external inventory + D25 admission; hard gates: Recommended badge requires policy fit; MTP eligibility stops qualification; external companions additive
+  - **5a-Part 3 (~40k):** Verified complete — llama.cpp slot/unified-KV revalidation + MTP single-stream — items 8,9,12; no code changes needed (existing math correct); host cache/checkpoints correctly excluded; MTP overhead counted; 17 regression tests; 256 tests pass; committed 1b7fa34
+  - **5a-Part 4 (~45k):** Verified complete — workload scenarios + quant rebase + Rapid MTP modeling — items 10,11,13,14; 5 scenario types (InteractiveChat/CodingAgent/ToolResearchAgent/BatchEval/Roleplay); quant_comparison_table scenario-based; agentic min 32K; Rapid MTP embedded/external with D25 admission; ClientType (App vs ExternalClient); 1013-line workload_scenarios.rs new; 143 tests pass; committed 345127a
   - **5a-Part 5 (~40k):** Cross-surface equality wiring + calibration — items 6-7; files: web/api/vram.rs (canonical serialization), static/js/features/vram-estimate.js, spawn-wizard.js, presets.js, setup-view.js, models.js, tests/fixtures/calibration/; deliver: wizard/preset/welcome/Model Library/HF preview all consume same MemoryBreakdown from one API result; calibration envelope; hard gate: cross-surface estimate equality (5a exit gate)
 - **Phase 5b Parts:**
   - **5b-Part A (~55k):** MemoryAvailabilitySnapshot core + Rapid fresh-snapshot repair — item 15 + 18 sub-item; files: new memory_availability.rs or system.rs, gpu/apple.rs, web/api/vram.rs, rapid_mlx/{mod.rs,runtime.rs}, static/js/features/spawn-wizard.js; deliver: MemoryAvailabilitySnapshot struct (safe-now/conditional-after-reclaim/after-closing-apps/configured-ceiling/unsafe), GET /api/memory-availability, launch intent (additional vs replace), Rapid Wizard fresh snapshot fetch; hard gates: all surfaces same snapshot; Rapid no stale llama caches; no total unified called available
@@ -486,7 +485,7 @@ Return a focused Builder handoff. A fresh verification pass will follow.
 
 Only the Coordinator updates this table after independent verification.
 
-**Last updated:** 2026-07-19 by Coordinator (Phase 0-3 verified complete; HEAD bf20d55; Phase 4 next)
+**Last updated:** 2026-07-19 by Coordinator (Phase 0-4 verified complete; Phase 5a Parts 1-4 verified complete, Part 5 pending cross-surface equality; HEAD 345127a)
 
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|
@@ -497,7 +496,7 @@ Only the Coordinator updates this table after independent verification.
 | 3B | Verified complete | handoff.md | PASS WITH CONDITION (1, none block P14) | phase-3b/ | COND-P3B-R1 (CriticalFail UX → Phase 7) |
 | 3C | Verified complete | handoff.md | PASS (condition C-P3C-RAPID-HASH remediated inline) | phase-3c/ | None |
 | 4 | Verified complete | handoffs for A/B/C | PASS (all 3 parts) | ae42537 | None |
-| 5a | Not started | — | — | — | Phases 3–4 (execution policy + estimator core, own gate + fresh Verifier) |
+| 5a | Parts 1-4 verified, Part 5 pending | handoffs for P1-P4 | PASS (all 4 parts) | 345127a | Part 5 pending: cross-surface equality (5a exit gate) |
 | 5b | Not started | — | — | — | Phase 5a Verified (memory-availability + reclaim + wired-limit + acquisition repairs) |
 | 6 | Not started | — | — | — | Phase 5 (5a + 5b) |
 | 7 | Not started | — | — | — | Phases 2–3, 5–6 |
