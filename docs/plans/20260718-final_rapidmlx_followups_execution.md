@@ -220,8 +220,9 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 
 ### Phase 4 — Normalized MLX architecture metadata
 
-- **State:** Parts A+B complete (Part C pending)
+- **State:** Verified complete
 - **Budget:** 170k total (~55k A + ~55k B + ~60k C)
+- **Parts:** A (ModelMemoryProfile + config parsing), B (Qwen3.6/Gemma4/MoE/MTP geometry), C (context/*8/HF lookup/estimator integration)
 - **Depends on:** Phase 0 fixtures and Phase 2 identity; A25
 - **Part A (~55k):** Core profile + config parsing — builder items 1-2 (~line 1745-1747); files: new backend-neutral memory-profile module, rapid_mlx/mlx_meta.rs, tests/fixtures/mlx_configs/; deliver: ModelMemoryProfile/LayerMemoryGroup types, nested text_config parser, wrapper-field protection
 - **Part B (~55k):** Architecture geometry — builder items 3-5 (~line 1747-1750); files: memory-profile module, rapid_mlx/mlx_meta.rs, tests/fixtures/mlx_configs/; deliver: Qwen3.6 DeltaNet/recurrent, Gemma4 heads/windows, MoE experts, MTP/companions ownership; hard gates: Qwen3.6/KV, Gemma4/global KV, recurrent state, no double-count
@@ -483,7 +484,7 @@ Only the Coordinator updates this table after independent verification.
 | 3A | Verified complete | handoff.md | PASS WITH CONDITIONS (3, 1 blocks P14) | phase-3a/ | COND-P3A-T1 (finetune/alias test → Phase 8) |
 | 3B | Verified complete | handoff.md | PASS WITH CONDITION (1, none block P14) | phase-3b/ | COND-P3B-R1 (CriticalFail UX → Phase 7) |
 | 3C | Verified complete | handoff.md | PASS (condition C-P3C-RAPID-HASH remediated inline) | phase-3c/ | None |
-| 4 | Not started | — | — | — | Phase 0 fixtures, Phase 2 identity |
+| 4 | Verified complete | handoffs for A/B/C | PASS (all 3 parts) | ae42537 | None |
 | 5a | Not started | — | — | — | Phases 3–4 (execution policy + estimator core, own gate + fresh Verifier) |
 | 5b | Not started | — | — | — | Phase 5a Verified (memory-availability + reclaim + wired-limit + acquisition repairs) |
 | 6 | Not started | — | — | — | Phase 5 (5a + 5b) |
