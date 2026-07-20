@@ -11,6 +11,7 @@
 
 mod arch_heuristics;
 mod estimate;
+pub mod execution_policy;
 mod quant_table;
 
 #[cfg(test)]
