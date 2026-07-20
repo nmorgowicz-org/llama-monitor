@@ -10,6 +10,11 @@
 //!
 //! Per D1/D2/A53: this parser populates the shared geometry profile; it does not contain
 //! backend-specific allocation math or llama.cpp vocabulary.
+//!
+//! NOTE: dead_code allowed until Parts B/C wire up consumption (Phase 4 Part B: geometry
+//! population; Part C: HF lookup, context propagation, estimator integration).
+
+#![allow(dead_code)]
 
 use std::path::Path;
 

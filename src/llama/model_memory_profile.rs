@@ -7,6 +7,11 @@
 //! - The shared profile describes model geometry and components only.
 //! - Separate backend execution policies produce memory breakdowns from this geometry.
 //! - Every populated field carries field_evidence identifying its source.
+//!
+//! NOTE: dead_code allowed until Parts B/C wire up consumption (Phase 4 Part B: geometry
+//! population, MoE/MTP/companions; Part C: HF lookup, context propagation, estimator integration).
+
+#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 
