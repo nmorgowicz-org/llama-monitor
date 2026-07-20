@@ -369,7 +369,22 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
     // take a fraction (60%) as "likely reclaimable under pressure".
     const likelyReclaimable = reclaimableWithinCap * 0.6;
     const safeLimit = Math.min(cap, ramTotalBytes - osReserve);
-    const availNow = Math.max(0, Math.min(safeLimit, freeNow + likelyReclaimable - _MEM_SAFETY_MARGIN));
+    let availNow = Math.max(0, Math.min(safeLimit, freeNow + likelyReclaimable - _MEM_SAFETY_MARGIN));
+
+    // Phase 5b Part C: prefer the backend's MemoryAvailabilitySnapshot for
+    // current_safe_availability_bytes — the single source of truth.
+    try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const resp = await fetch('/api/memory-availability', { headers });
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.ok && data.snapshot && data.snapshot.current_safe_availability_bytes > 0) {
+                availNow = data.snapshot.current_safe_availability_bytes;
+            }
+        }
+    } catch {
+        // fall back to local calculation
+    }
 
     // If user purges: all reclaimable becomes free; new "available" =:
     const totalAfterPurge = cap - inUseBytes; // only GPU-usable matters

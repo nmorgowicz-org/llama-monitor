@@ -326,6 +326,9 @@ fn api_vram_estimate_breakdown(
                         serde_json::from_value::<crate::llama::vram_estimator::MtpConfig>(serde_json::Value::Object(obj.clone())).ok()
                     });
 
+                // Phase 5b Part C: max_cache_blocks from preset config for prelaunch estimates.
+                let max_cache_blocks = body["max_cache_blocks"].as_u64().map(|v| v as u32);
+
                 // Use the execution policy's effective TurboQuant mode for the estimator.
                 // Per D31: effective_turboquant already has eligibility applied.
                 let opts = crate::llama::vram_estimator::EstimatorOptions {
@@ -355,6 +358,7 @@ fn api_vram_estimate_breakdown(
                             serde_json::from_str::<crate::llama::vram_estimator::ConcurrencyPolicy>(&format!("\"{s}\"")).ok()
                         })
                         .unwrap_or_default(),
+                    max_cache_blocks,
                 };
 
                 let breakdown = crate::llama::vram_estimator::full_estimate(
@@ -413,6 +417,7 @@ fn api_vram_estimate_breakdown(
                         "recommendation": serde_json::to_value(&breakdown.recommendation).unwrap_or(serde_json::Value::Null),
                         "note": breakdown.note,
                         "mlx_prefix_cache_bytes": breakdown.mlx_prefix_cache_bytes,
+                        "max_cache_blocks_bytes": breakdown.max_cache_blocks_bytes,
                         "evidence": serde_json::to_value(breakdown.evidence).unwrap_or(serde_json::Value::Null),
                         "effective_turboquant": serde_json::to_value(breakdown.effective_turboquant).unwrap_or(serde_json::Value::Null),
                         "mtp_mode": serde_json::to_value(breakdown.mtp_mode).unwrap_or(serde_json::Value::Null),

@@ -2278,7 +2278,7 @@ async function fetchGpuVram() {
             const id = `${g.name || ''} ${g.vendor || ''} ${g.backend || ''}`;
             if (/apple|metal/i.test(id)) cachedUnified = true;
         }
-        if (totalVram > 0) cachedVram = totalVram;
+        if (totalVram > 0 && !cachedUnified) cachedVram = totalVram;
     } catch {
         // ignore
     }
@@ -2296,11 +2296,34 @@ async function fetchSystemRam() {
     }
 }
 
+/// Fetch MemoryAvailabilitySnapshot from the single backend source of truth.
+/// Uses current_safe_availability_bytes for fit determination (never total unified memory).
+async function fetchMemoryAvailability() {
+    try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const resp = await fetch('/api/memory-availability', { headers });
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        if (!data.ok || !data.snapshot) return null;
+        return data.snapshot;
+    } catch {
+        return null;
+    }
+}
+
 async function updateVramDisplay(file) {
     const panel = document.getElementById('mm-vram-panel');
     if (!panel) return;
 
-    const availVram = cachedVram || 0;
+    // Phase 5b Part C: On unified memory (Apple Silicon), use current_safe_availability_bytes
+    // from the MemoryAvailabilitySnapshot, NOT total unified memory.
+    let availVram = cachedVram || 0;
+    if (cachedUnified) {
+        const snapshot = await fetchMemoryAvailability();
+        if (snapshot && snapshot.current_safe_availability_bytes > 0) {
+            availVram = snapshot.current_safe_availability_bytes;
+        }
+    }
     if (!availVram) {
         panel.style.display = 'none';
         return;

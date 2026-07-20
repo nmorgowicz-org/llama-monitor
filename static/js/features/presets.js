@@ -592,20 +592,50 @@ function _triggerPresetHfSearch() {
 // ── Modal ──────────────────────────────────────────────────────────────────────
 
 // ── Performance advisor (config-time hints) ──────────────────────────────────
-let _presetAdvisorTimer = null;
+ let _presetAdvisorTimer = null;
 let _presetAdvisorSeq = 0;
 let _presetIsUnified = null; // cached platform check
 let _presetRamUsedBytes = 0;
 let _presetVramBytes = 0;
 let _presetRamBytes = 0;    // cached RAM total (bytes)
 let _presetMetalLimitMb = 0; // cached iogpu.wired_limit_mb (0 = use heuristic)
+let _presetSnapshot = null; // MemoryAvailabilitySnapshot — refreshed periodically
+let _presetSnapshotAge = 0; // timestamp when snapshot was fetched
 
 // ── VRAM live estimate ────────────────────────────────────────────────────────
 let _presetVramTimer = null;
 let _presetVramSeq = 0;
 
+/// Phase 5b Part C: Fetch MemoryAvailabilitySnapshot for accurate availability.
+/// Cached briefly (30s) to avoid excessive API calls while remaining responsive.
+async function _presetRefreshSnapshot() {
+    const now = Date.now();
+    // Refresh if we have no snapshot or it's older than 30 seconds.
+    if (_presetSnapshot && (now - _presetSnapshotAge) < 30000) {
+        return _presetSnapshot;
+    }
+    try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const resp = await fetch('/api/memory-availability', { headers });
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        if (!data.ok || !data.snapshot) return null;
+        _presetSnapshot = data.snapshot;
+        _presetSnapshotAge = now;
+        return _presetSnapshot;
+    } catch {
+        return null;
+    }
+}
+
 function _presetAvailBytes() {
     if (!_presetIsUnified) return _presetVramBytes;
+    // Phase 5b Part C: use current_safe_availability_bytes from the snapshot,
+    // NOT a stale fraction of total RAM.
+    if (_presetSnapshot && _presetSnapshot.current_safe_availability_bytes > 0) {
+        return _presetSnapshot.current_safe_availability_bytes;
+    }
+    // Fallback: stale heuristic (should not normally be used after snapshot is fetched).
     if (_presetRamBytes === 0) return 0;
     const limitBytes = _presetMetalLimitMb > 0 ? _presetMetalLimitMb * 1024 * 1024 : null;
     const fraction = _presetRamBytes <= 36 * 1024 ** 3 ? 2 / 3 : 3 / 4;
@@ -947,6 +977,10 @@ export function updatePresetVram() {
     clearTimeout(_presetVramTimer);
     _presetVramTimer = setTimeout(async () => {
         const isUnified = await _ensureUnifiedFlag();
+        // Phase 5b Part C: refresh memory state from the snapshot (no infinite cache).
+        if (isUnified) {
+            await _presetRefreshSnapshot();
+        }
         // Platform flag is now resolved — refresh the Apple Silicon mmap hint.
         updatePresetMmapHint();
         const nCtx = parseInt(document.getElementById('modal-context-size')?.value) || 131072;

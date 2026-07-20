@@ -485,7 +485,7 @@ Return a focused Builder handoff. A fresh verification pass will follow.
 
 Only the Coordinator updates this table after independent verification.
 
-**Last updated:** 2026-07-19 by Coordinator (Phase 0-4 verified complete; Phase 5a Parts 1-4 verified complete, Part 5 pending cross-surface equality; HEAD 345127a)
+**Last updated:** 2026-07-20 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-5 verified complete; Phase 5b Parts A-B verified complete (wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling); wired-limit GUI planned for Phase 7; HEAD dacc487)
 
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|

@@ -6,7 +6,7 @@ mod auth;
 mod benchmark;
 mod browse;
 mod chat;
-mod system_tools;
+pub(crate) mod system_tools;
 #[cfg(test)]
 pub(crate) use chat::legacy_chat_types;
 mod common;

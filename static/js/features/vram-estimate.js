@@ -44,6 +44,7 @@ let currentRequestId = 0;
 // @param {string|null} params.client_type — 'app' or 'external_client'
 // @param {string|null} params.concurrency_policy — 'single_active' or 'allow_overlap'
 // @param {Object|null} params.mtp_config — MTP configuration object
+// @param {number|null} params.max_cache_blocks — Rapid-MLX max_cache_blocks from preset
 // @returns {Object} request body ready for JSON.stringify
 export function buildEstimateBody(params) {
   const body = {
@@ -85,17 +86,19 @@ export function buildEstimateBody(params) {
     if (params.turboquant_mode) body.turboquant_mode = params.turboquant_mode;
   }
 
-  // Workload scenario (Phase 5a Part 4: scenario-aware estimates).
-  if (params.workload_scenario) body.workload_scenario = params.workload_scenario;
-  if (params.rapid_planning_context_tokens != null)
-    body.rapid_planning_context_tokens = params.rapid_planning_context_tokens;
-  if (params.rapid_retained_cache_tokens != null)
-    body.rapid_retained_cache_tokens = params.rapid_retained_cache_tokens;
-  if (params.client_type) body.client_type = params.client_type;
-  if (params.concurrency_policy) body.concurrency_policy = params.concurrency_policy;
-  if (params.mtp_config) body.mtp_config = params.mtp_config;
+    // Workload scenario (Phase 5a Part 4: scenario-aware estimates).
+    if (params.workload_scenario) body.workload_scenario = params.workload_scenario;
+    if (params.rapid_planning_context_tokens != null)
+        body.rapid_planning_context_tokens = params.rapid_planning_context_tokens;
+    if (params.rapid_retained_cache_tokens != null)
+        body.rapid_retained_cache_tokens = params.rapid_retained_cache_tokens;
+    if (params.client_type) body.client_type = params.client_type;
+    if (params.concurrency_policy) body.concurrency_policy = params.concurrency_policy;
+    if (params.mtp_config) body.mtp_config = params.mtp_config;
+    // Phase 5b Part C: max_cache_blocks from preset for prelaunch estimates.
+    if (params.max_cache_blocks != null) body.max_cache_blocks = params.max_cache_blocks;
 
-  return body;
+    return body;
 }
 
 // ── Fetch estimate (canonical API call) ──────────────────────────────────────

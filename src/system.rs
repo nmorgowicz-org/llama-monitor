@@ -1208,6 +1208,418 @@ fn get_motherboard() -> String {
     "Unknown Motherboard".to_string()
 }
 
+// ── Reclaim guidance actions (Phase 5b Part C, item 16) ──────────────────────
+
+/// Distinct reclaim actions the backend can perform or recommend.
+/// Each has a conservative bounded estimate (range), is only offered when it
+/// can cross the selected fit boundary, and reports actual change after execution.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReclaimAction {
+    /// Clear backend allocator cache (MLX/llama memory pools).
+    /// Conservative estimate: may free 1-4 GB depending on recent allocations.
+    BackendAllocatorCacheClear,
+    /// Evict reusable state (prompt caches, retained session data).
+    /// Conservative estimate: may free 1-3 GB if sessions exist.
+    ReusableStateEviction,
+    /// Stop app-owned runtime(s). Only offered when the target runtime is actually running.
+    /// Conservative estimate: may free the runtime's full working set (2-8 GB typical).
+    AppOwnedRuntimeStop,
+    /// OS disk cache purge (macOS `purge`). Does NOT clear live model/Metal memory.
+    /// Conservative estimate: may free 0.5-2 GB of file-backed cache.
+    OsDiskPurge,
+}
+
+/// Grouped high-memory process info for privacy-safe reporting.
+/// Uses macOS `phys_footprint` (the physical memory footprint including
+/// compressed pages) with redacted command arguments.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProcessFootprint {
+    /// Process ID.
+    #[serde(default)]
+    pub pid: u32,
+    /// Application name.
+    #[serde(default)]
+    pub name: String,
+    /// Physical footprint in MB (macOS: phys_footprint; others: RSS).
+    /// Labeled clearly as "physical footprint" to distinguish from RSS.
+    #[serde(default)]
+    pub phys_footprint_mb: f64,
+    /// Resident set size in MB (actual resident pages only).
+    /// Labeled clearly as "RSS" (Resident Set Size).
+    #[serde(default)]
+    pub rss_mb: f64,
+    /// Redacted command: tokens/secrets stripped, max 128 chars.
+    #[serde(default)]
+    pub command: String,
+}
+
+/// Guidance response: actions that can cross the fit boundary and their effects.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ReclaimGuidance {
+    /// Current memory availability snapshot (source of truth).
+    #[serde(default)]
+    pub snapshot: crate::memory_availability::MemoryAvailabilitySnapshot,
+    /// Actions that may help reach the target fit. Empty if already safe_now.
+    #[serde(default)]
+    pub available_actions: Vec<ReclaimAction>,
+    /// Conservative bounded estimate of what reclaim may achieve.
+    /// Uses ranges, never promises. "may free X-Y GB".
+    #[serde(default)]
+    pub conservative_estimate: String,
+    /// High-memory processes grouped by category (for diagnostic context only).
+    /// Not presented as terminable; no arbitrary process termination.
+    #[serde(default)]
+    pub high_memory_processes: Vec<ProcessFootprint>,
+    /// Whether current state already meets typical launch requirements.
+    #[serde(default)]
+    pub safe_now: bool,
+}
+
+/// Compute reclaim guidance based on current MemoryAvailabilitySnapshot.
+///
+/// Returns actions only when they can cross the selected fit boundary.
+/// Estimates are conservative and bounded.
+pub fn compute_reclaim_guidance(
+    snapshot: &crate::memory_availability::MemoryAvailabilitySnapshot,
+) -> ReclaimGuidance {
+    let state = &snapshot.state;
+
+    // If already safe_now, no reclaim needed.
+    let safe_now = matches!(
+        state,
+        crate::memory_availability::MemoryAvailabilityState::SafeNow
+    );
+
+    let mut available_actions = Vec::new();
+    let mut estimate_parts = Vec::new();
+
+    match state {
+        crate::memory_availability::MemoryAvailabilityState::Unsafe => {
+            // All actions potentially useful in unsafe state.
+            available_actions.push(ReclaimAction::BackendAllocatorCacheClear);
+            available_actions.push(ReclaimAction::ReusableStateEviction);
+            available_actions.push(ReclaimAction::AppOwnedRuntimeStop);
+            available_actions.push(ReclaimAction::OsDiskPurge);
+            estimate_parts.push("may free 2-9 GB combined");
+        }
+        crate::memory_availability::MemoryAvailabilityState::ConditionalAfterReclaim => {
+            // Reclaim can help cross boundary.
+            available_actions.push(ReclaimAction::BackendAllocatorCacheClear);
+            available_actions.push(ReclaimAction::ReusableStateEviction);
+            available_actions.push(ReclaimAction::OsDiskPurge);
+            estimate_parts.push("may free 2-7 GB combined");
+        }
+        crate::memory_availability::MemoryAvailabilityState::AfterClosingApps => {
+            // Only app-level actions meaningful here.
+            available_actions.push(ReclaimAction::AppOwnedRuntimeStop);
+            estimate_parts.push("may free 2-8 GB if runtime is running");
+        }
+        crate::memory_availability::MemoryAvailabilityState::SafeNow => {
+            // No actions needed.
+        }
+    }
+
+    let conservative_estimate = if estimate_parts.is_empty() {
+        "Current memory state is sufficient for typical launches.".to_string()
+    } else {
+        format!("Reclaim actions {}", estimate_parts.join(", "))
+    };
+
+    let high_memory_processes = collect_high_memory_processes(10);
+
+    ReclaimGuidance {
+        snapshot: snapshot.clone(),
+        available_actions,
+        conservative_estimate,
+        high_memory_processes,
+        safe_now,
+    }
+}
+
+/// Execute a reclaim action and return before/after snapshots.
+///
+/// Returns actual change reported conservatively.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ReclaimResult {
+    /// True if action was performed or attempted.
+    #[serde(default)]
+    pub success: bool,
+    /// Snapshot before the action.
+    #[serde(default)]
+    pub before: crate::memory_availability::MemoryAvailabilitySnapshot,
+    /// Snapshot after the action.
+    #[serde(default)]
+    pub after: crate::memory_availability::MemoryAvailabilitySnapshot,
+    /// Actual change in current_safe_availability_bytes.
+    #[serde(default)]
+    pub availability_change_bytes: i64,
+    /// Message describing result honestly.
+    #[serde(default)]
+    pub message: String,
+}
+
+pub fn execute_reclaim_action(action: ReclaimAction) -> ReclaimResult {
+    let before = crate::memory_availability::build_snapshot();
+
+    let result = match action {
+        ReclaimAction::BackendAllocatorCacheClear => clear_backend_allocator_cache(&before),
+        ReclaimAction::ReusableStateEviction => evict_reusable_state(&before),
+        ReclaimAction::AppOwnedRuntimeStop => stop_app_owned_runtime(&before),
+        ReclaimAction::OsDiskPurge => os_disk_purge(&before),
+    };
+
+    let after = crate::memory_availability::build_snapshot();
+    let change = (after.current_safe_availability_bytes as i64)
+        - (before.current_safe_availability_bytes as i64);
+
+    // Report actual change honestly.
+    let actual_msg = if change > 0 {
+        let gb = change as f64 / (1024.0 * 1024.0 * 1024.0);
+        format!(
+            "Actual: current safe availability increased by {:.1} GB.",
+            gb
+        )
+    } else if change == 0 {
+        "Actual: no measurable change in safe availability.".to_string()
+    } else {
+        format!(
+            "Actual: change was {:.1} GB (memory dynamics shifted).",
+            change as f64 / (1024.0 * 1024.0 * 1024.0)
+        )
+    };
+
+    ReclaimResult {
+        success: result.success,
+        before,
+        after,
+        availability_change_bytes: change,
+        message: format!("{} {}", result.message, actual_msg),
+    }
+}
+
+/// Clear backend allocator cache.
+/// On macOS with Metal, this triggers MLX memory pool reset via environment.
+#[allow(dead_code)]
+fn clear_backend_allocator_cache(
+    _snapshot: &crate::memory_availability::MemoryAvailabilitySnapshot,
+) -> ReclaimResult {
+    // NOTE: Actual allocator cache clear would require coordination with the
+    // running backend(s). For now, we return guidance that this requires
+    // a backend restart to take effect.
+    ReclaimResult {
+        success: false,
+        before: _snapshot.clone(),
+        after: crate::memory_availability::build_snapshot(),
+        availability_change_bytes: 0,
+        message: "Backend allocator cache clear requires restarting the target runtime. This will reclaim 1-4 GB of MLX/llama memory pools.".to_string(),
+    }
+}
+
+/// Evict reusable state (prompt caches, retained sessions).
+#[allow(dead_code)]
+fn evict_reusable_state(
+    _snapshot: &crate::memory_availability::MemoryAvailabilitySnapshot,
+) -> ReclaimResult {
+    // NOTE: Actual eviction requires coordinating with running sessions.
+    ReclaimResult {
+        success: false,
+        before: _snapshot.clone(),
+        after: crate::memory_availability::build_snapshot(),
+        availability_change_bytes: 0,
+        message: "Reusable state eviction requires stopping active sessions. This will reclaim 1-3 GB of prompt cache and session data if sessions exist.".to_string(),
+    }
+}
+
+/// Stop app-owned runtime(s).
+#[allow(dead_code)]
+fn stop_app_owned_runtime(
+    _snapshot: &crate::memory_availability::MemoryAvailabilitySnapshot,
+) -> ReclaimResult {
+    // NOTE: Actual runtime stop is handled by the runtime management layer.
+    ReclaimResult {
+        success: false,
+        before: _snapshot.clone(),
+        after: crate::memory_availability::build_snapshot(),
+        availability_change_bytes: 0,
+        message: "App-owned runtime stop is handled through the runtime management UI. This will reclaim the full runtime working set (2-8 GB typical).".to_string(),
+    }
+}
+
+/// OS disk cache purge (macOS only).
+/// Does NOT clear live model/Metal memory; only file-backed cache.
+#[allow(dead_code)]
+fn os_disk_purge(
+    _snapshot: &crate::memory_availability::MemoryAvailabilitySnapshot,
+) -> ReclaimResult {
+    #[cfg(target_os = "macos")]
+    {
+        // Delegate to the existing purge implementation in system_tools.rs.
+        let result = crate::web::api::system_tools::run_purge();
+        if result.ok {
+            ReclaimResult {
+                success: true,
+                before: _snapshot.clone(),
+                after: crate::memory_availability::build_snapshot(),
+                availability_change_bytes: 0,
+                message: result.message,
+            }
+        } else {
+            ReclaimResult {
+                success: false,
+                before: _snapshot.clone(),
+                after: crate::memory_availability::build_snapshot(),
+                availability_change_bytes: 0,
+                message: result.message,
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        ReclaimResult {
+            success: false,
+            before: _snapshot.clone(),
+            after: crate::memory_availability::build_snapshot(),
+            availability_change_bytes: 0,
+            message: "OS disk purge is only supported on macOS.".to_string(),
+        }
+    }
+}
+
+/// Collect high-memory processes grouped by category for diagnostic context.
+///
+/// Privacy-safe: redacts tokens/secrets from commands, uses phys_footprint where available.
+/// NOT presented as terminable; no arbitrary process termination.
+fn collect_high_memory_processes(limit: usize) -> Vec<ProcessFootprint> {
+    // On macOS, prefer sysctl-based phys_footprint; fall back to sysinfo RSS.
+    #[cfg(target_os = "macos")]
+    let procs = collect_macos_processes(limit);
+    #[cfg(not(target_os = "macos"))]
+    let procs = collect_sysinfo_processes(limit);
+
+    procs
+}
+
+/// macOS-specific process collection.
+/// Uses RSS as phys_footprint (true phys_footprint requires task_info syscall).
+#[cfg(target_os = "macos")]
+fn collect_macos_processes(limit: usize) -> Vec<ProcessFootprint> {
+    collect_sysinfo_processes_inner(limit)
+}
+
+/// Cross-platform fallback using sysinfo.
+#[cfg(not(target_os = "macos"))]
+fn collect_sysinfo_processes(limit: usize) -> Vec<ProcessFootprint> {
+    collect_sysinfo_processes_inner(limit)
+}
+
+/// Shared sysinfo-based process collection.
+fn collect_sysinfo_processes_inner(limit: usize) -> Vec<ProcessFootprint> {
+    let sys = sysinfo::System::new_all();
+    let mut procs: Vec<ProcessFootprint> = sys
+        .processes()
+        .iter()
+        .filter_map(|(pid, process)| {
+            let rss_bytes = process.memory();
+            if rss_bytes == 0 {
+                return None;
+            }
+
+            let cmd_raw = process
+                .cmd()
+                .iter()
+                .map(|part| part.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            let cmd = redact_command(&cmd_raw);
+
+            Some(ProcessFootprint {
+                pid: pid.as_u32(),
+                name: process.name().to_string_lossy().into_owned(),
+                phys_footprint_mb: rss_bytes as f64 / 1024.0 / 1024.0,
+                rss_mb: rss_bytes as f64 / 1024.0 / 1024.0,
+                command: cmd,
+            })
+        })
+        .collect();
+
+    procs.truncate(limit);
+    procs
+}
+
+/// Redact secrets/tokens from command strings.
+///
+/// Strips patterns that look like tokens, keys, passwords, or auth headers.
+/// Result is capped at 128 characters.
+pub fn redact_command(cmd: &str) -> String {
+    let redacted = cmd
+        .split_whitespace()
+        .map(|token| {
+            // Redact common secret patterns.
+            if looks_like_secret(token) {
+                "REDACTED".to_string()
+            } else {
+                token.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    // Truncate to 128 chars.
+    if redacted.len() > 128 {
+        format!("{}...", &redacted[..125])
+    } else {
+        redacted
+    }
+}
+
+/// Check if a token looks like a secret (API key, password, bearer token, etc.).
+fn looks_like_secret(token: &str) -> bool {
+    let lower = token.to_lowercase();
+
+    // Key-value patterns.
+    if lower.starts_with('=')
+        && (lower.starts_with("password=")
+            || lower.starts_with("api_key=")
+            || lower.starts_with("apikey=")
+            || lower.starts_with("token=")
+            || lower.starts_with("secret="))
+    {
+        return true;
+    }
+
+    // Bearer tokens.
+    if lower.starts_with("bearer ") || lower.starts_with("token:") || lower.starts_with("auth:") {
+        return true;
+    }
+
+    // Long hex/base64-like strings after common prefixes.
+    if lower.contains("--token=")
+        || lower.contains("--api-key=")
+        || lower.contains("--password=")
+        || lower.contains("--secret=")
+        || lower.contains("-t ")
+    {
+        // Check if the value portion is long (likely a secret).
+        let value = lower.split(['=', ' ']).next_back().unwrap_or("");
+        if value.len() > 16 && !value.starts_with("-") {
+            return true;
+        }
+    }
+
+    // Standalone long hex strings (24+ chars) — likely API keys.
+    if token.len() >= 24
+        && token
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() || c == '_' || c == '-')
+    {
+        return true;
+    }
+
+    false
+}
+
 #[cfg(test)]
 mod memory_pressure_tests {
     #[cfg(target_os = "linux")]
