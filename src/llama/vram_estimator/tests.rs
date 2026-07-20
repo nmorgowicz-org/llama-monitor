@@ -942,6 +942,7 @@ fn mlx_backend_uses_mlx_overhead_not_metal_overhead() {
             backend: Backend::RapidMlx,
             evidence: EstimateEvidence::Approximate,
             mlx_prefix_cache_bytes: 0,
+            ..Default::default()
         },
     );
     let llama_cpp_breakdown = full_estimate(
@@ -990,6 +991,7 @@ fn mlx_moe_architecture_is_recognized() {
             backend: Backend::RapidMlx,
             evidence: EstimateEvidence::Approximate,
             mlx_prefix_cache_bytes: 0,
+            ..Default::default()
         },
     );
     // Unified memory: weights are never CPU-split for Rapid-MLX.
@@ -1022,6 +1024,7 @@ fn mlx_prefix_cache_is_separate_stored_budget_not_active_kv_reduction() {
             backend: Backend::RapidMlx,
             evidence: EstimateEvidence::Approximate,
             mlx_prefix_cache_bytes: cache_bytes,
+            ..Default::default()
         },
     );
 
@@ -1085,6 +1088,7 @@ fn mlx_overhead_scales_with_context_via_kv_fraction() {
             backend: Backend::RapidMlx,
             evidence: EstimateEvidence::Approximate,
             mlx_prefix_cache_bytes: 0,
+            ..Default::default()
         },
     );
     let large_ctx = full_estimate(
@@ -1104,6 +1108,7 @@ fn mlx_overhead_scales_with_context_via_kv_fraction() {
             backend: Backend::RapidMlx,
             evidence: EstimateEvidence::Approximate,
             mlx_prefix_cache_bytes: 0,
+            ..Default::default()
         },
     );
     assert!(large_ctx.overhead_bytes > small_ctx.overhead_bytes);
@@ -1269,6 +1274,7 @@ fn empirical_calibration_qwen3_0_6b_mlx_matches_measured_active_memory() {
             backend: Backend::RapidMlx,
             evidence: EstimateEvidence::Approximate,
             mlx_prefix_cache_bytes: 0,
+            ..Default::default()
         },
     );
     let observed_active_bytes = 600_000_000u64;
@@ -1317,6 +1323,7 @@ fn empirical_calibration_gemma3_1b_mlx_matches_measured_active_memory() {
             backend: Backend::RapidMlx,
             evidence: EstimateEvidence::Approximate,
             mlx_prefix_cache_bytes: 0,
+            ..Default::default()
         },
     );
     let observed_active_bytes = 800_000_000u64;
@@ -1423,6 +1430,7 @@ fn mlx_estimator_produces_reasonable_estimate_for_dense_model() {
             backend: Backend::RapidMlx,
             evidence: EstimateEvidence::Approximate,
             mlx_prefix_cache_bytes: 0,
+            ..Default::default()
         },
     );
     // Estimate must be non-zero and reasonable (> weights, < 2GB for this small model).
@@ -1483,8 +1491,289 @@ fn gguf_meta_tests_no_regression() {
             backend: Backend::LlamaCpp,
             evidence: EstimateEvidence::Measured,
             mlx_prefix_cache_bytes: 0,
+            ..Default::default()
         },
     );
     assert!(bd.total_bytes > 0);
     assert_eq!(bd.evidence, EstimateEvidence::Measured);
+}
+
+// ── Phase 5a Part 2: TurboQuant/D31 + active vs retained tests ────────────────
+
+#[test]
+fn active_and_retained_totals_are_distinct_no_double_counting() {
+    let arch = ModelArch {
+        n_layers: 32,
+        n_kv_heads: 8,
+        head_dim: 128,
+        ..Default::default()
+    };
+    let model_bytes = estimate_model_size_bytes(7.0, "q4_k_m");
+
+    let bd = full_estimate(
+        model_bytes,
+        &arch,
+        0,
+        "int4",
+        "int4",
+        1,
+        1024,
+        0,
+        -1,
+        64 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: 0,
+            turboquant_mode: None,
+            rapid_planning_context_tokens: 32768,
+            rapid_retained_cache_tokens: 8192,
+            turboquant_eligibility: Default::default(),
+        },
+    );
+
+    assert!(bd.active_kv_bytes > 0, "active_kv_bytes must be nonzero");
+    assert!(
+        bd.retained_kv_bytes > 0,
+        "retained_kv_bytes must be nonzero"
+    );
+
+    assert_eq!(
+        bd.kv_cache_bytes,
+        bd.active_kv_bytes + bd.retained_kv_bytes,
+        "kv_cache_bytes must equal active + retained (no double counting)"
+    );
+
+    assert!(
+        bd.total_bytes
+            >= bd.weights_bytes + bd.active_kv_bytes + bd.retained_kv_bytes + bd.overhead_bytes,
+        "total_bytes must include all components"
+    );
+}
+
+#[test]
+fn standard_mode_not_mislabeled_as_fp16() {
+    let mode = execution_policy::TurboQuantMode::Disabled;
+    let savings = mode.retained_kv_savings_fraction();
+    assert_eq!(
+        savings, 0.0,
+        "Standard mode (Disabled) must have zero savings — it is int4 baseline, not FP16"
+    );
+}
+
+#[test]
+fn planning_context_tokens_used_for_active_kv_not_current_tokens() {
+    let arch = ModelArch {
+        n_layers: 32,
+        n_kv_heads: 8,
+        head_dim: 128,
+        ..Default::default()
+    };
+    let model_bytes = estimate_model_size_bytes(7.0, "q4_k_m");
+
+    let bd = full_estimate(
+        model_bytes,
+        &arch,
+        1000,
+        "int4",
+        "int4",
+        1,
+        1024,
+        0,
+        -1,
+        64 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: 0,
+            turboquant_mode: None,
+            rapid_planning_context_tokens: 65536,
+            rapid_retained_cache_tokens: 4096,
+            turboquant_eligibility: Default::default(),
+        },
+    );
+
+    assert!(
+        bd.active_kv_bytes > 300_000_000,
+        "active_kv_bytes ({}) must reflect planning context (64K), not legacy context_size (1K)",
+        bd.active_kv_bytes
+    );
+}
+
+#[test]
+fn turboquant_applies_only_to_retained_kv_not_active_weights_mtp_from_estimator() {
+    let arch = ModelArch {
+        n_layers: 32,
+        n_kv_heads: 8,
+        head_dim: 128,
+        ..Default::default()
+    };
+    let model_bytes = estimate_model_size_bytes(7.0, "q4_k_m");
+
+    let bd_baseline = full_estimate(
+        model_bytes,
+        &arch,
+        0,
+        "int4",
+        "int4",
+        1,
+        1024,
+        0,
+        -1,
+        64 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: 0,
+            turboquant_mode: None,
+            rapid_planning_context_tokens: 32768,
+            rapid_retained_cache_tokens: 8192,
+            turboquant_eligibility: Default::default(),
+        },
+    );
+
+    let bd_turbo = full_estimate(
+        model_bytes,
+        &arch,
+        0,
+        "int4",
+        "int4",
+        1,
+        1024,
+        0,
+        -1,
+        64 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: 0,
+            turboquant_mode: Some(execution_policy::TurboQuantMode::K8V4),
+            rapid_planning_context_tokens: 32768,
+            rapid_retained_cache_tokens: 8192,
+            turboquant_eligibility: execution_policy::TurboQuantEligibility::Qualified,
+        },
+    );
+
+    assert_eq!(
+        bd_baseline.active_kv_bytes, bd_turbo.active_kv_bytes,
+        "TurboQuant must NOT affect active_kv_bytes"
+    );
+    assert_eq!(
+        bd_baseline.weights_bytes, bd_turbo.weights_bytes,
+        "TurboQuant must NOT affect weights_bytes"
+    );
+    assert_eq!(
+        bd_baseline.mtp_bytes, bd_turbo.mtp_bytes,
+        "TurboQuant must NOT affect mtp_bytes"
+    );
+    assert!(
+        bd_turbo.retained_kv_bytes < bd_baseline.retained_kv_bytes,
+        "TurboQuant MUST reduce retained_kv_bytes"
+    );
+    assert_eq!(
+        bd_turbo.effective_turboquant,
+        execution_policy::TurboQuantMode::K8V4
+    );
+}
+
+#[test]
+fn turboquant_transient_peak_included_in_total_from_estimator() {
+    let arch = ModelArch {
+        n_layers: 32,
+        n_kv_heads: 8,
+        head_dim: 128,
+        ..Default::default()
+    };
+    let model_bytes = estimate_model_size_bytes(7.0, "q4_k_m");
+
+    let bd = full_estimate(
+        model_bytes,
+        &arch,
+        0,
+        "int4",
+        "int4",
+        1,
+        1024,
+        0,
+        -1,
+        64 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: 0,
+            turboquant_mode: Some(execution_policy::TurboQuantMode::K8V4),
+            rapid_planning_context_tokens: 32768,
+            rapid_retained_cache_tokens: 8192,
+            turboquant_eligibility: execution_policy::TurboQuantEligibility::Qualified,
+        },
+    );
+
+    assert!(
+        bd.turboquant_transient_peak_bytes > 0,
+        "turboquant_transient_peak_bytes must be nonzero when TurboQuant is active"
+    );
+    assert!(
+        bd.total_bytes
+            >= bd.weights_bytes
+                + bd.active_kv_bytes
+                + bd.retained_kv_bytes
+                + bd.turboquant_transient_peak_bytes
+                + bd.overhead_bytes,
+        "total_bytes must include turboquant_transient_peak_bytes"
+    );
+}
+
+#[test]
+fn unknown_fineturn_does_not_inherit_turboquant_from_estimator() {
+    let arch = ModelArch {
+        n_layers: 32,
+        n_kv_heads: 8,
+        head_dim: 128,
+        ..Default::default()
+    };
+    let model_bytes = estimate_model_size_bytes(7.0, "q4_k_m");
+
+    let bd = full_estimate(
+        model_bytes,
+        &arch,
+        0,
+        "int4",
+        "int4",
+        1,
+        1024,
+        0,
+        -1,
+        64 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: 0,
+            turboquant_mode: Some(execution_policy::TurboQuantMode::K8V4),
+            rapid_planning_context_tokens: 32768,
+            rapid_retained_cache_tokens: 8192,
+            turboquant_eligibility: execution_policy::TurboQuantEligibility::NotQualified,
+        },
+    );
+
+    assert_eq!(
+        bd.effective_turboquant,
+        execution_policy::TurboQuantMode::Disabled,
+        "Unknown finetune must NOT inherit TurboQuant qualification"
+    );
+    assert_eq!(
+        bd.turboquant_transient_peak_bytes, 0,
+        "Transient peak must be zero when TurboQuant is disabled"
+    );
 }

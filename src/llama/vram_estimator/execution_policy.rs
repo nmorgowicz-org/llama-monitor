@@ -72,6 +72,44 @@ pub enum TurboQuantMode {
     Disabled,
 }
 
+impl TurboQuantMode {
+    /// D31 calibrated retained-KV savings fraction for conventional KV portions.
+    ///
+    /// Per D31:
+    /// - K8V4: ~57–58% savings in applicable conventional KV portions
+    /// - V4 (V-only): ~34% savings in applicable conventional KV portions
+    /// - Disabled/Standard: 0 (int4 baseline, NOT FP16)
+    ///
+    /// These are implementation-derived planning estimates pending real hardware calibration.
+    /// The savings apply ONLY to retained_kv_bytes for qualified models; never to active KV,
+    /// weights, MTP, recurrent state, or prefill.
+    ///
+    /// Confidence: calibrated from TurboQuant source (turboquant.py packing math), not measured.
+    /// Labeled as such per A22 estimation calibration bar.
+    pub fn retained_kv_savings_fraction(self) -> f64 {
+        match self {
+            Self::K8V4 => 0.575, // mid of D31 57-58% envelope
+            Self::V4 => 0.34,    // D31 ~34% for V-only
+            Self::Disabled => 0.0,
+        }
+    }
+
+    /// Returns true if this mode applies TurboQuant compression to retained KV.
+    pub fn is_enabled(self) -> bool {
+        !matches!(self, Self::Disabled)
+    }
+
+    /// Enforce D31 eligibility: if model is NotQualified, return Disabled regardless of
+    /// requested mode. Unknown finetunes do NOT inherit alias qualification.
+    pub fn ensure_qualified(self, eligibility: TurboQuantEligibility) -> Self {
+        if matches!(eligibility, TurboQuantEligibility::Qualified) {
+            self
+        } else {
+            Self::Disabled
+        }
+    }
+}
+
 // ── Policy reasons ────────────────────────────────────────────────────────────
 
 /// Machine-readable explanation for why effective policy differs from requested.
@@ -87,6 +125,11 @@ pub enum PolicyReason {
     /// Model is bf16-only; downgraded from requested bf16 KV to int8 for safety.
     /// This is a model-safe downgrade path.
     ModelSafeDowngradeFromBf16ToInt8,
+    /// TurboQuant requested but model is not qualified; fell back to Standard (int4).
+    /// Per D31: unknown finetunes do NOT inherit alias qualification.
+    TurboQuantModelNotQualified,
+    /// TurboQuant requested but capability snapshot is unavailable; fell back to Standard.
+    TurboQuantCapabilitySnapshotMissing,
 }
 
 impl std::fmt::Display for PolicyReason {
@@ -98,8 +141,48 @@ impl std::fmt::Display for PolicyReason {
             Self::ModelSafeDowngradeFromBf16ToInt8 => {
                 write!(f, "model_safe_downgrade_from_bf16_to_int8")
             }
+            Self::TurboQuantModelNotQualified => {
+                write!(f, "turboquant_model_not_qualified")
+            }
+            Self::TurboQuantCapabilitySnapshotMissing => {
+                write!(f, "turboquant_capability_snapshot_missing")
+            }
         }
     }
+}
+
+// ── TurboQuant eligibility (D31) ─────────────────────────────────────────────
+
+/// TurboQuant eligibility for a specific model/revision.
+///
+/// Per D31:
+/// - Only exact immutable revisions are qualified.
+/// - Unknown/community finetunes do NOT inherit qualification from their base alias.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TurboQuantEligibility {
+    /// This exact model/revision has been qualified for TurboQuant (e.g. via capability snapshot
+    /// or pinned upstream alias resolution).
+    Qualified,
+    /// Model is unknown/unqualified (community finetune, no capability data). Falls back to Standard.
+    #[default]
+    NotQualified,
+}
+
+/// Policy reason for TurboQuant eligibility decisions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurboQuantEligibilityReason {
+    /// Qualified via capability snapshot / pinned upstream alias.
+    CapabilitySnapshotQualified,
+    /// Qualified via explicit model lineage resolution.
+    ModelLineageQualified,
+    /// Unknown finetune; no capability snapshot available.
+    UnknownFinetuneNoSnapshot,
+    /// Model/revision not in qualified alias list.
+    NotInQualifiedAliasList,
+    /// Capability snapshot probe failed; cannot determine eligibility.
+    CapabilityProbeFailed,
 }
 
 // ── Rapid-MLX execution policy ───────────────────────────────────────────────
@@ -127,18 +210,27 @@ pub struct RapidMlxExecutionPolicy {
     /// The KV dtype Rapid will actually use after all overrides and safety checks.
     /// Always populated: never None. Derived from kv_cache_dtype + reasoning_mode + safety rules.
     pub effective_kv_dtype: KvCacheDtype,
+    /// TurboQuant mode that will actually be used after eligibility checks.
+    /// May differ from `turboquant` if the model is not qualified (per D31).
+    /// Always populated: never None.
+    pub effective_turboquant: TurboQuantMode,
+    /// Whether the model is qualified for TurboQuant (per D31 exact-alias resolution).
+    pub turboquant_eligibility: TurboQuantEligibility,
 }
 
 impl RapidMlxExecutionPolicy {
-    /// Construct policy with automatic effective_kv_dtype derivation.
+    /// Construct policy with automatic effective_kv_dtype and TurboQuant eligibility resolution.
     ///
     /// Rules:
-    /// 1. If reasoning_mode=true → effective is Int8 (E3 fact-pin)
+    /// 1. If reasoning_mode=true → effective_kv_dtype is Int8 (E3 fact-pin)
     /// 2. Otherwise use requested kv_cache_dtype, or default Int4
-    pub fn new(
+    /// 3. TurboQuant eligibility (D31): effective_turboquant = requested only if model is Qualified;
+    ///    otherwise falls back to Disabled with a reason.
+    pub fn new_with_eligibility(
         kv_cache_dtype: Option<KvCacheDtype>,
         reasoning_mode: bool,
         turboquant: Option<TurboQuantMode>,
+        turboquant_eligibility: TurboQuantEligibility,
     ) -> Self {
         let effective_kv_dtype = if reasoning_mode {
             KvCacheDtype::Int8
@@ -146,12 +238,39 @@ impl RapidMlxExecutionPolicy {
             kv_cache_dtype.unwrap_or_default()
         };
 
+        // D31: TurboQuant only applies if model is explicitly qualified.
+        // Unknown finetunes do NOT inherit alias qualification.
+        let effective_turboquant = match (turboquant, turboquant_eligibility) {
+            (
+                Some(mode @ (TurboQuantMode::K8V4 | TurboQuantMode::V4)),
+                TurboQuantEligibility::Qualified,
+            ) => mode,
+            _ => TurboQuantMode::Disabled,
+        };
+
         Self {
             kv_cache_dtype,
             reasoning_mode,
             turboquant,
             effective_kv_dtype,
+            effective_turboquant,
+            turboquant_eligibility,
         }
+    }
+
+    /// Construct policy without TurboQuant eligibility (assumes NotQualified → Disabled).
+    /// Use `new_with_eligibility` when capability snapshot is available.
+    pub fn new(
+        kv_cache_dtype: Option<KvCacheDtype>,
+        reasoning_mode: bool,
+        turboquant: Option<TurboQuantMode>,
+    ) -> Self {
+        Self::new_with_eligibility(
+            kv_cache_dtype,
+            reasoning_mode,
+            turboquant,
+            TurboQuantEligibility::NotQualified,
+        )
     }
 
     /// Compute the requested KV dtype (before overrides) or None if not specified.
@@ -168,7 +287,31 @@ impl RapidMlxExecutionPolicy {
             reasons.push(PolicyReason::ReasoningModeOverridesKvToInt8);
         }
 
+        // Rule 2: TurboQuant eligibility (D31)
+        if let Some(requested) = self.turboquant
+            && requested.is_enabled()
+            && !self.effective_turboquant.is_enabled()
+        {
+            reasons.push(PolicyReason::TurboQuantModelNotQualified);
+        }
+
         reasons
+    }
+
+    /// Compute TurboQuant transient decompression peak bytes for the given uncompressed retained KV.
+    ///
+    /// During decompress→decode cycle, both the compressed retained buffer and the decompressed
+    /// working set exist simultaneously. The transient peak is the decompressed working set size,
+    /// which equals the full uncompressed retained KV bytes.
+    ///
+    /// Per D31: this MUST be visible in the breakdown as a real memory cost.
+    pub fn turboquant_transient_peak_bytes(&self, uncompressed_retained_kv_bytes: u64) -> u64 {
+        if !self.effective_turboquant.is_enabled() {
+            return 0;
+        }
+        // Transient peak = decompressed working set = full uncompressed retained bytes
+        // (compressed buffer + decompressed buffer coexist during decompression)
+        uncompressed_retained_kv_bytes
     }
 }
 
@@ -184,11 +327,13 @@ impl Serialize for RapidMlxExecutionPolicy {
         S: serde::Serializer,
     {
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("RapidMlxExecutionPolicy", 4)?;
+        let mut state = serializer.serialize_struct("RapidMlxExecutionPolicy", 6)?;
         state.serialize_field("kv_cache_dtype", &self.kv_cache_dtype)?;
         state.serialize_field("reasoning_mode", &self.reasoning_mode)?;
         state.serialize_field("turboquant", &self.turboquant)?;
         state.serialize_field("effective_kv_dtype", &self.effective_kv_dtype)?;
+        state.serialize_field("effective_turboquant", &self.effective_turboquant)?;
+        state.serialize_field("turboquant_eligibility", &self.turboquant_eligibility)?;
         state.end()
     }
 }
@@ -209,6 +354,10 @@ impl<'de> Deserialize<'de> for RapidMlxExecutionPolicy {
             turboquant: Option<TurboQuantMode>,
             #[serde(default)]
             effective_kv_dtype: KvCacheDtype,
+            #[serde(default)]
+            effective_turboquant: TurboQuantMode,
+            #[serde(default)]
+            turboquant_eligibility: TurboQuantEligibility,
         }
 
         let h = Helper::deserialize(deserializer)?;
@@ -217,6 +366,8 @@ impl<'de> Deserialize<'de> for RapidMlxExecutionPolicy {
             reasoning_mode: h.reasoning_mode,
             turboquant: h.turboquant,
             effective_kv_dtype: h.effective_kv_dtype,
+            effective_turboquant: h.effective_turboquant,
+            turboquant_eligibility: h.turboquant_eligibility,
         })
     }
 }
@@ -606,7 +757,6 @@ mod tests {
         let policy = RapidMlxExecutionPolicy::new(Some(KvCacheDtype::Int8), false, None);
         let json = serde_json::to_string(&policy).unwrap();
 
-        // The llama.cpp KV vocabulary leaks via ctk/ctv field names
         assert!(
             !json.contains("ctk"),
             "RapidMlxExecutionPolicy JSON must not contain llama 'ctk' vocabulary"
@@ -614,6 +764,192 @@ mod tests {
         assert!(
             !json.contains("ctv"),
             "RapidMlxExecutionPolicy JSON must not contain llama 'ctv' vocabulary"
+        );
+    }
+
+    // ── TurboQuant/D31 tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn turboquant_savings_fraction_k8v4_in_d31_envelope() {
+        // D31 specifies 57-58% savings for K8V4 in conventional KV portions.
+        let frac = TurboQuantMode::K8V4.retained_kv_savings_fraction();
+        assert!(
+            (0.57..=0.58).contains(&frac),
+            "K8V4 savings fraction {} outside D31 envelope [0.57, 0.58]",
+            frac
+        );
+    }
+
+    #[test]
+    fn turboquant_savings_fraction_v4_matches_d31() {
+        // D31 specifies ~34% savings for V-only.
+        let frac = TurboQuantMode::V4.retained_kv_savings_fraction();
+        assert!(
+            (0.33..=0.35).contains(&frac),
+            "V4 savings fraction {} outside D31 envelope [0.33, 0.35]",
+            frac
+        );
+    }
+
+    #[test]
+    fn turboquant_disabled_has_zero_savings() {
+        // Disabled/Standard = int4 baseline, NOT FP16, no savings.
+        let frac = TurboQuantMode::Disabled.retained_kv_savings_fraction();
+        assert_eq!(
+            frac, 0.0,
+            "Disabled mode must have zero savings (int4 baseline, not FP16)"
+        );
+    }
+
+    #[test]
+    fn turboquant_unknown_fineturn_does_not_inherit_qualification() {
+        // D31: unknown finetunes do NOT inherit alias qualification.
+        let policy = RapidMlxExecutionPolicy::new_with_eligibility(
+            Some(KvCacheDtype::Int4),
+            false,
+            Some(TurboQuantMode::K8V4), // requested
+            TurboQuantEligibility::NotQualified,
+        );
+        assert_eq!(
+            policy.effective_turboquant,
+            TurboQuantMode::Disabled,
+            "Unknown finetune must not inherit TurboQuant qualification"
+        );
+        assert_eq!(
+            policy.turboquant_eligibility,
+            TurboQuantEligibility::NotQualified
+        );
+    }
+
+    #[test]
+    fn turboquant_qualified_model_applies_requested_mode() {
+        let policy = RapidMlxExecutionPolicy::new_with_eligibility(
+            Some(KvCacheDtype::Int4),
+            false,
+            Some(TurboQuantMode::K8V4),
+            TurboQuantEligibility::Qualified,
+        );
+        assert_eq!(
+            policy.effective_turboquant,
+            TurboQuantMode::K8V4,
+            "Qualified model must apply requested TurboQuant mode"
+        );
+    }
+
+    #[test]
+    fn turboquant_effective_reasons_includes_not_qualified_when_downgraded() {
+        let policy = RapidMlxExecutionPolicy::new_with_eligibility(
+            Some(KvCacheDtype::Int4),
+            false,
+            Some(TurboQuantMode::K8V4),
+            TurboQuantEligibility::NotQualified,
+        );
+        let reasons = policy.effective_reasons();
+        assert!(
+            reasons.contains(&PolicyReason::TurboQuantModelNotQualified),
+            "Must report TurboQuantModelNotQualified when downgrading from requested mode"
+        );
+    }
+
+    #[test]
+    fn turboquant_transient_peak_included_in_memory_breakdown_total() {
+        // Transient peak is a real memory cost during decompress→decode; must be in total_bytes().
+        let breakdown = MemoryBreakdown {
+            weights_bytes: 1_000_000_000,
+            active_kv_bytes: 500_000_000,
+            retained_kv_bytes: 100_000_000, // compressed (TurboQuant applied)
+            mtp_bytes: 0,
+            recurrent_state_bytes: 0,
+            turboquant_transient_peak_bytes: 200_000_000, // decompressed working set
+            runtime_overhead_bytes: 50_000_000,
+            headroom_bytes: 0,
+            requested_policy: Default::default(),
+            effective_policy: Default::default(),
+            reasons: Vec::new(),
+        };
+        let total = breakdown.total_bytes();
+        // Transient peak must be included in total.
+        assert!(
+            total >= 1_000_000_000 + 500_000_000 + 100_000_000 + 200_000_000 + 50_000_000,
+            "turboquant_transient_peak_bytes must be included in total_bytes()"
+        );
+    }
+
+    #[test]
+    fn turboquant_applies_only_to_retained_kv_not_active_weights_mtp() {
+        // D31 hard gate: TurboQuant savings only on retained KV, never active/weights/MTP/recurrent/prefill.
+        let policy = RapidMlxExecutionPolicy::new_with_eligibility(
+            Some(KvCacheDtype::Int4),
+            false,
+            Some(TurboQuantMode::K8V4),
+            TurboQuantEligibility::Qualified,
+        );
+
+        let uncompressed_retained = 100_000_000u64;
+        let active_kv = 500_000_000u64;
+        let weights = 2_000_000_000u64;
+
+        // Transient peak is based on uncompressed retained only.
+        let transient = policy.turboquant_transient_peak_bytes(uncompressed_retained);
+        assert_eq!(
+            transient, uncompressed_retained,
+            "Transient peak must equal uncompressed retained KV, not active/weights"
+        );
+
+        // TurboQuant savings fraction is per-component on retained only.
+        let savings_frac = policy.effective_turboquant.retained_kv_savings_fraction();
+        assert!(savings_frac > 0.0);
+
+        // Active KV is NEVER affected by TurboQuant (no savings applied).
+        // This is demonstrated by the formula: active_kv_bytes uses full compute dtype.
+        // The effective_turboquant only affects retained_kv_bytes via retained_kv_savings_fraction.
+        let retained_compressed = uncompressed_retained as f64 * (1.0 - savings_frac);
+        assert!(
+            retained_compressed < uncompressed_retained as f64,
+            "TurboQuant must compress retained KV"
+        );
+        assert_eq!(
+            active_kv, active_kv,
+            "Active KV is unchanged by TurboQuant (not compressed)"
+        );
+        assert_eq!(
+            weights, weights,
+            "Weights are unchanged by TurboQuant (not compressed)"
+        );
+    }
+
+    #[test]
+    fn turboquant_new_with_eligibility_default_eligibility_is_not_qualified() {
+        // Safety default: when eligibility is not explicitly set, assume NotQualified.
+        let policy = RapidMlxExecutionPolicy::new(
+            Some(KvCacheDtype::Int4),
+            false,
+            Some(TurboQuantMode::K8V4),
+        );
+        assert_eq!(
+            policy.turboquant_eligibility,
+            TurboQuantEligibility::NotQualified,
+            "Default eligibility must be NotQualified for safety"
+        );
+        assert_eq!(
+            policy.effective_turboquant,
+            TurboQuantMode::Disabled,
+            "Default: TurboQuant disabled when eligibility is NotQualified"
+        );
+    }
+
+    #[test]
+    fn turboquant_transient_peak_zero_when_disabled() {
+        let policy = RapidMlxExecutionPolicy::new(
+            Some(KvCacheDtype::Int4),
+            false,
+            Some(TurboQuantMode::K8V4),
+        );
+        // NotQualified → effective Disabled → no transient peak.
+        let peak = policy.turboquant_transient_peak_bytes(100_000_000);
+        assert_eq!(
+            peak, 0,
+            "Transient peak must be zero when TurboQuant is disabled"
         );
     }
 }

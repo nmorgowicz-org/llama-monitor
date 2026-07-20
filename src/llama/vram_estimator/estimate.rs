@@ -320,7 +320,7 @@ pub enum EstimateEvidence {
 /// Extra, backend-specific inputs to `full_estimate` that don't apply to every backend and
 /// therefore default to inert values (`Backend::LlamaCpp`, `EstimateEvidence::Measured`, zero
 /// prefix-cache reservation) for all existing GGUF callers.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct EstimatorOptions {
     pub backend: Backend,
     pub evidence: EstimateEvidence,
@@ -329,6 +329,36 @@ pub struct EstimatorOptions {
     /// active-context KV: cached entries are decompressed before being reused as active KV, so
     /// compressing them does not shrink the active KV footprint. Always 0 for GGUF.
     pub mlx_prefix_cache_bytes: u64,
+    /// Rapid-MLX TurboQuant mode (from execution_policy.rs). Controls retained-KV savings.
+    /// Only applies to qualified models via capability snapshot (D31).
+    pub turboquant_mode: Option<super::execution_policy::TurboQuantMode>,
+    /// Planning-context tokens for Rapid-MLX estimation. This is the configurable max tokens
+    /// for the scenario (e.g. "128K for coding agent"), NOT the current active token count.
+    /// Active KV scales with this; retained KV is the prefix-cache budget. They are distinct.
+    /// Zero means use the legacy unified `context_size` parameter for backward compatibility.
+    pub rapid_planning_context_tokens: u64,
+    /// Retained prefix-cache tokens (separate from active generation tokens).
+    /// For Rapid-MLX: tokens of prefix cached between turns, subject to TurboQuant savings.
+    /// For llama.cpp: not applicable (0).
+    pub rapid_retained_cache_tokens: u64,
+    /// TurboQuant eligibility for the model. Per D31: unknown finetunes do NOT inherit
+    /// alias qualification. Unknown/unqualified models → TurboQuant Disabled.
+    pub turboquant_eligibility: super::execution_policy::TurboQuantEligibility,
+}
+
+impl Default for EstimatorOptions {
+    /// Backward-compatible defaults: llama.cpp, Measured evidence, zero Rapid-specific fields.
+    fn default() -> Self {
+        Self {
+            backend: Backend::LlamaCpp,
+            evidence: EstimateEvidence::Measured,
+            mlx_prefix_cache_bytes: 0,
+            turboquant_mode: None,
+            rapid_planning_context_tokens: 0,
+            rapid_retained_cache_tokens: 0,
+            turboquant_eligibility: Default::default(),
+        }
+    }
 }
 
 /// Rapid-MLX (unified-memory) overhead — context-INDEPENDENT part, in bytes.
@@ -441,12 +471,30 @@ pub fn estimate_param_b_from_size(size_bytes: u64, bpw: f64) -> f64 {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct VramBreakdown {
     pub weights_bytes: u64,
+    /// Total KV cache bytes. For llama.cpp and legacy Rapid calls: unified value.
+    /// For Rapid-MLX with planning context: sum of active_kv_bytes + retained_kv_bytes.
     pub kv_cache_bytes: u64,
+    /// Active KV cache for tokens in the current generation sequence (planning context).
+    /// For Rapid-MLX: scales with planning_context_tokens, NOT TurboQuant-affected.
+    /// For llama.cpp/legacy: 0 (uses unified kv_cache_bytes).
+    #[serde(default)]
+    pub active_kv_bytes: u64,
+    /// Retained prefix KV cache (reusable prompt storage between turns).
+    /// For Rapid-MLX: may be reduced by TurboQuant compression (D31).
+    /// For llama.cpp/legacy: 0 (uses unified kv_cache_bytes).
+    #[serde(default)]
+    pub retained_kv_bytes: u64,
     /// Fixed recurrent state for hybrid linear-attention layers (DeltaNet / SSM).
     /// Zero for standard transformers. Does not grow with context length.
     pub linear_attn_state_bytes: u64,
     pub mmproj_bytes: u64,
     pub mtp_bytes: u64,
+    /// TurboQuant transient decompression peak bytes. During decompress→decode cycle,
+    /// both compressed retained buffer and decompressed working set coexist.
+    /// Only nonzero when TurboQuant is active on qualified retained KV (D31).
+    /// Included in total_bytes as a real (short-lived) memory cost.
+    #[serde(default)]
+    pub turboquant_transient_peak_bytes: u64,
     pub overhead_bytes: u64,
     pub total_bytes: u64,
     pub available_bytes: u64,
@@ -465,6 +513,10 @@ pub struct VramBreakdown {
     /// approximation or a degraded (heuristic-fallback) architecture guess.
     #[serde(default)]
     pub evidence: EstimateEvidence,
+    /// Effective TurboQuant mode after eligibility resolution (D31). Shows what will actually
+    /// be used; may differ from requested if model is unqualified.
+    #[serde(default)]
+    pub effective_turboquant: super::execution_policy::TurboQuantMode,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -481,6 +533,14 @@ pub enum VramRecommendation {
 /// `is_unified_memory`: true for Apple Silicon and other unified-memory architectures where
 /// GPU and system RAM share the same pool. On unified memory there is no CPU spill path —
 /// exceeding available memory causes OS compression/paging, not a graceful fallback.
+///
+/// For Rapid-MLX backend:
+/// - Active KV is computed from `opts.rapid_planning_context_tokens` (scenario target, not current).
+/// - Retained KV is computed from `opts.rapid_retained_cache_tokens` (prefix-cache budget).
+/// - They are distinct; no component is double-counted.
+/// - TurboQuant (D31) applies ONLY to retained_kv_bytes; never to active KV, weights, MTP, recurrent, or prefill.
+/// - TurboQuant transient decompression peak is an explicit additive component.
+/// - If `rapid_planning_context_tokens` is 0, falls back to unified `context_size` for backward compatibility.
 #[allow(clippy::too_many_arguments)]
 pub fn full_estimate(
     model_size_bytes: u64,
@@ -504,7 +564,79 @@ pub fn full_estimate(
     } else {
         dense_weight_split(model_size_bytes, arch, gpu_layers)
     };
-    let kv = kv_cache_bytes(arch, context_size, parallel_slots, ctk, ctv);
+
+    // ── Active vs retained KV separation (Phase 5a Part 2) ──────────────────────
+    //
+    // For Rapid-MLX with planning-context info: active KV and retained KV are distinct.
+    // - active_kv: KV for tokens in the current generation sequence (planning context).
+    // - retained_kv: KV for prefix cache between turns, subject to TurboQuant savings.
+    // - They are NEVER double-counted.
+    //
+    // For llama.cpp or legacy Rapid calls (no planning_context_tokens): unified KV formula.
+
+    let is_rapid_with_context =
+        matches!(opts.backend, Backend::RapidMlx) && opts.rapid_planning_context_tokens > 0;
+
+    let (active_kv, retained_kv_uncompressed) = if is_rapid_with_context {
+        // Active KV: from planning context tokens (scenario target)
+        let active = kv_cache_bytes(
+            arch,
+            opts.rapid_planning_context_tokens,
+            parallel_slots.max(1),
+            ctk,
+            ctv,
+        );
+        // Retained KV (uncompressed): from prefix-cache tokens budget
+        // Single "slot" because prefix cache is shared, not per-parallel-slot.
+        let retained = kv_cache_bytes(arch, opts.rapid_retained_cache_tokens, 1, ctk, ctv);
+        (active, retained)
+    } else {
+        // Legacy path: unified KV (backward compatible with all existing callers).
+        let kv = kv_cache_bytes(arch, context_size, parallel_slots, ctk, ctv);
+        (kv, 0)
+    };
+
+    // ── TurboQuant savings on retained KV (D31) ─────────────────────────────────
+    //
+    // TurboQuant applies ONLY to qualified retained KV components. It is NOT a global multiplier.
+    // - active_kv_bytes: NO TurboQuant savings (active generation KV at full compute dtype).
+    // - weights_bytes: NO TurboQuant savings.
+    // - mtp_bytes: NO TurboQuant savings.
+    // - recurrent_state_bytes: NO TurboQuant savings.
+    // - prefill/transient: NO TurboQuant savings.
+    // - retained_kv_bytes: YES, TurboQuant savings apply here (prefix cache compression).
+    //
+    // Per D31: unknown finetunes do NOT inherit alias qualification. If eligibility is
+    // NotQualified, effective mode is Disabled → 0% savings.
+
+    let effective_turboquant = opts
+        .turboquant_mode
+        .unwrap_or(super::execution_policy::TurboQuantMode::Disabled)
+        .ensure_qualified(opts.turboquant_eligibility);
+
+    let turboquant_savings_fraction = effective_turboquant.retained_kv_savings_fraction();
+    let retained_kv_compressed =
+        if turboquant_savings_fraction > 0.0 && retained_kv_uncompressed > 0 {
+            let savings = (retained_kv_uncompressed as f64 * turboquant_savings_fraction) as u64;
+            retained_kv_uncompressed.saturating_sub(savings)
+        } else {
+            retained_kv_uncompressed
+        };
+
+    // TurboQuant transient decompression peak: during decompress→decode cycle, both compressed
+    // retained buffer and decompressed working set coexist. The peak is the decompressed size
+    // (which equals uncompressed retained KV). This is a real, short-lived memory cost that
+    // MUST be visible in the breakdown per D31.
+    let turboquant_transient_peak =
+        if effective_turboquant.is_enabled() && retained_kv_uncompressed > 0 {
+            retained_kv_uncompressed
+        } else {
+            0
+        };
+
+    // Combined KV for overhead calculations (Metal/MLX overhead scales with total KV footprint).
+    let kv_for_overhead = active_kv + retained_kv_compressed;
+
     // For hybrid linear-attention models (e.g. Qwen3-Coder-Next / DeltaNet):
     // add the fixed recurrent state. This is constant — it does NOT grow with context.
     let linear_state = arch.linear_attn_state_bytes;
@@ -514,12 +646,24 @@ pub fn full_estimate(
     // discrete GPUs → RTX-5090 model (scratch + MoE/Gemma base + context-scaling attention
     // buffers); unified memory → Apple M5 Max model (per-layer base + ~6.5% of KV).
     let overhead = match opts.backend {
-        Backend::RapidMlx => mlx_overhead_bytes(arch, ubatch_size, kv),
-        Backend::LlamaCpp if is_unified_memory => metal_overhead_bytes(arch, ubatch_size, kv),
+        Backend::RapidMlx => mlx_overhead_bytes(arch, ubatch_size, kv_for_overhead),
+        Backend::LlamaCpp if is_unified_memory => {
+            metal_overhead_bytes(arch, ubatch_size, kv_for_overhead)
+        }
         Backend::LlamaCpp => discrete_overhead_bytes(arch, ubatch_size, context_size),
     };
     let mlx_cache = opts.mlx_prefix_cache_bytes;
-    let total = weight_vram + kv + linear_state + mmproj + mtp + overhead + mlx_cache;
+    // TOTAL is additive: all components summed, none double-counted.
+    // TurboQuant transient peak is INCLUDED (it's a real memory cost during decompression).
+    let total = weight_vram
+        + active_kv
+        + retained_kv_compressed
+        + linear_state
+        + mmproj
+        + mtp
+        + turboquant_transient_peak
+        + overhead
+        + mlx_cache;
     let headroom = available_vram_bytes as i64 - total as i64;
     let ram_headroom = available_ram_bytes as i64 - ram as i64;
 
@@ -571,12 +715,23 @@ pub fn full_estimate(
         )
     };
 
+    // Backward-compatible total KV for existing consumers.
+    // For Rapid-MLX with context split: active + retained. For legacy: unified value.
+    let total_kv = active_kv + retained_kv_compressed;
+
     VramBreakdown {
         weights_bytes: weight_vram,
-        kv_cache_bytes: kv,
+        kv_cache_bytes: total_kv,
+        active_kv_bytes: if is_rapid_with_context { active_kv } else { 0 },
+        retained_kv_bytes: if is_rapid_with_context {
+            retained_kv_compressed
+        } else {
+            0
+        },
         linear_attn_state_bytes: linear_state,
         mmproj_bytes: mmproj,
         mtp_bytes: mtp,
+        turboquant_transient_peak_bytes: turboquant_transient_peak,
         overhead_bytes: overhead,
         total_bytes: total,
         available_bytes: available_vram_bytes,
@@ -588,6 +743,7 @@ pub fn full_estimate(
         note,
         mlx_prefix_cache_bytes: mlx_cache,
         evidence: opts.evidence,
+        effective_turboquant,
     }
 }
 

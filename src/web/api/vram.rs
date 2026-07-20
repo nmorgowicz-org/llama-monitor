@@ -264,6 +264,17 @@ fn api_vram_estimate_breakdown(
                     },
                     evidence,
                     mlx_prefix_cache_bytes: mlx_cache_bytes,
+                    turboquant_mode: body["turboquant_mode"]
+                        .as_str()
+                        .and_then(|s| {
+                            serde_json::from_str::<crate::llama::vram_estimator::execution_policy::TurboQuantMode>(&format!("\"{s}\"")).ok()
+                        }),
+                    // Planning context tokens for Rapid-MLX: separate from current active tokens.
+                    // If not provided, estimator uses unified context_size for backward compatibility.
+                    rapid_planning_context_tokens: body["rapid_planning_context_tokens"].as_u64().unwrap_or(0),
+                    rapid_retained_cache_tokens: body["rapid_retained_cache_tokens"].as_u64().unwrap_or(0),
+                    // TurboQuant eligibility defaults to NotQualified unless capability snapshot confirms.
+                    turboquant_eligibility: Default::default(),
                 };
 
                 let breakdown = crate::llama::vram_estimator::full_estimate(
@@ -287,9 +298,12 @@ fn api_vram_estimate_breakdown(
                         "ok": true,
                         "weights_bytes": breakdown.weights_bytes,
                         "kv_cache_bytes": breakdown.kv_cache_bytes,
+                        "active_kv_bytes": breakdown.active_kv_bytes,
+                        "retained_kv_bytes": breakdown.retained_kv_bytes,
                         "linear_attn_state_bytes": breakdown.linear_attn_state_bytes,
                         "mmproj_bytes": breakdown.mmproj_bytes,
                         "mtp_bytes": breakdown.mtp_bytes,
+                        "turboquant_transient_peak_bytes": breakdown.turboquant_transient_peak_bytes,
                         "overhead_bytes": breakdown.overhead_bytes,
                         "total_bytes": breakdown.total_bytes,
                         "available_bytes": breakdown.available_bytes,
@@ -300,7 +314,8 @@ fn api_vram_estimate_breakdown(
                         "recommendation": serde_json::to_value(&breakdown.recommendation).unwrap_or(serde_json::Value::Null),
                         "note": breakdown.note,
                         "mlx_prefix_cache_bytes": breakdown.mlx_prefix_cache_bytes,
-                        "evidence": serde_json::to_value(breakdown.evidence).unwrap_or(serde_json::Value::Null)
+                        "evidence": serde_json::to_value(breakdown.evidence).unwrap_or(serde_json::Value::Null),
+                        "effective_turboquant": serde_json::to_value(breakdown.effective_turboquant).unwrap_or(serde_json::Value::Null)
                     }))),
                 )
             }
