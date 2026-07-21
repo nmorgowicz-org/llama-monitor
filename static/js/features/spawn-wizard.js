@@ -236,11 +236,17 @@ export const wizardState = {
     preserveThinking: null,
     toolCallFormat: null,
     reasoningBudget: null,
-    reasoningMode: null,
     reasoningBudgetMessage: null,
     kvCacheDtype: 'int4',
-    turboquantMode: 'none',
+    turboquantMode: 'auto',
     workloadScenario: 'interactive_chat',
+    reasoningMode: null,
+    // Phase 7: Web UI (D26/A44)
+    webUiAvailability: 'auto',
+    webUiStaticPath: '',
+    webUiConfigJson: '',
+    // Phase 7: Sampling mode (D27)
+    samplingMode: 'auto',
     grammar: '',
     jsonSchema: '',
     alias: '',
@@ -571,8 +577,12 @@ function resetWizardState() {
   wizardState.hardware.reasoningBudget = null;
   wizardState.hardware.reasoningBudgetMessage = null;
   wizardState.hardware.kvCacheDtype = '';
-  wizardState.hardware.turboquantMode = '';
+  wizardState.hardware.turboquantMode = 'auto';
   wizardState.hardware.workloadScenario = '';
+  wizardState.hardware.webUiAvailability = 'auto';
+  wizardState.hardware.webUiStaticPath = '';
+  wizardState.hardware.webUiConfigJson = '';
+  wizardState.hardware.samplingMode = 'auto';
   if (dom.kvUnifiedSelect) dom.kvUnifiedSelect.value = '';
   if (dom.fitEnableSelect) dom.fitEnableSelect.value = '';
   if (dom.fitTargetWrap) dom.fitTargetWrap.style.display = 'none';
@@ -774,6 +784,10 @@ function cacheDom() {
   dom.turboquantModeSelect = document.getElementById('spawn-turboquant-mode');
   dom.workloadScenarioSelect = document.getElementById('spawn-workload-scenario');
   dom.reasoningModeCheck   = document.getElementById('spawn-rapid-reasoning-mode');
+  dom.samplingModeSelect   = document.getElementById('spawn-sampling-mode');
+  dom.webUiAvailabilitySelect = document.getElementById('spawn-webui-availability');
+  dom.webUiConfigJsonInput  = document.getElementById('spawn-webui-config-json');
+  dom.webUiStaticPathInput  = document.getElementById('spawn-webui-static-path');
 
   // Step 4 (Summary)
   dom.summaryList      = document.getElementById('spawn-summary-list');
@@ -1287,11 +1301,25 @@ function _bindRapidMlxAdvancedControls() {
     });
   };
 
-  bindSel(dom.kvCacheDtypeSelect, 'kvCacheDtype');
-  bindSel(dom.turboquantModeSelect, 'turboquantMode');
-  bindSel(dom.workloadScenarioSelect, 'workloadScenario');
+   bindSel(dom.kvCacheDtypeSelect, 'kvCacheDtype');
+   bindSel(dom.turboquantModeSelect, 'turboquantMode');
+   bindSel(dom.workloadScenarioSelect, 'workloadScenario');
+   bindSel(dom.samplingModeSelect, 'samplingMode');
+   bindSel(dom.webUiAvailabilitySelect, 'webUiAvailability');
 
-  if (dom.reasoningModeCheck && !dom.reasoningModeCheck.dataset.bound) {
+   // Web UI config JSON and static path inputs
+   const bindInput = (el, key) => {
+     if (!el || el.dataset.bound) return;
+     el.dataset.bound = '1';
+     el.addEventListener('input', () => {
+       wizardState.hardware[key] = el.value || '';
+       scheduleVramUpdate();
+     });
+   };
+   bindInput(dom.webUiConfigJsonInput, 'webUiConfigJson');
+   bindInput(dom.webUiStaticPathInput, 'webUiStaticPath');
+
+   if (dom.reasoningModeCheck && !dom.reasoningModeCheck.dataset.bound) {
     dom.reasoningModeCheck.dataset.bound = '1';
     dom.reasoningModeCheck.addEventListener('change', () => {
       wizardState.hardware.reasoningMode = !!dom.reasoningModeCheck.checked;
@@ -9413,6 +9441,29 @@ function _renderPresetParamsStep() {
       sections.push({ label: 'Speculative Decoding', rows });
     }
 
+   // Rapid-MLX Phase 7 advanced settings summary
+   if (rapid) {
+     const rapidRows = [];
+     const kvLabel = h.kvCacheDtype && h.kvCacheDtype !== 'int4' ? h.kvCacheDtype.toUpperCase() + (h.reasoningMode ? ' (reasoning lock)' : '') : 'int4';
+     rapidRows.push({ label: 'KV cache dtype', value: kvLabel });
+     rapidRows.push({ label: 'Prompt storage', value: h.turboquantMode === 'auto' ? 'Auto — runtime default' : h.turboquantMode === 'none' ? 'Standard (int4)' : h.turboquantMode === 'k8v4' ? 'TurboQuant K8V4' : 'TurboQuant V-only' });
+     if (h.workloadScenario && h.workloadScenario !== 'interactive_chat') {
+       rapidRows.push({ label: 'Workload scenario', value: { interactive_chat: 'Interactive Chat', coding_agent: 'Coding Agent', tool_research_agent: 'Tool Research Agent', batch_eval: 'Batch Evaluation', roleplay: 'Roleplay' }[h.workloadScenario] || h.workloadScenario });
+     }
+     if (h.samplingMode && h.samplingMode !== 'auto') {
+       rapidRows.push({ label: 'Sampling mode', value: { general: 'General', coding: 'Coding/Agentic', precise: 'Precise/Deterministic', creative: 'Creative/Roleplay', custom: 'Custom' }[h.samplingMode] || h.samplingMode });
+     }
+     if (h.reasoningMode) {
+       rapidRows.push({ label: 'Reasoning mode', value: 'On' });
+     }
+     if (h.webUiAvailability && h.webUiAvailability !== 'auto') {
+       rapidRows.push({ label: 'Web UI', value: h.webUiAvailability === 'on' ? 'On' : 'Off' });
+     }
+     if (rapidRows.length > 0) {
+       sections.push({ label: 'Rapid-MLX advanced', rows: rapidRows });
+     }
+   }
+
   if (!rapid && h.extraArgs) {
     sections.push({ label: 'Extra', rows: [{ label: 'Extra command-line arguments', value: h.extraArgs }] });
   }
@@ -9736,6 +9787,18 @@ export function buildSpawnPayload() {
         api_key: wizardState.access.apiKey || null,
         ...(h.enableThinking != null && { enable_thinking: h.enableThinking }),
         ...(escapeHatchFlags.length > 0 && { escape_hatch_flags: escapeHatchFlags }),
+        // Phase 7: KV/cache policy (D6 catalog IDs)
+        ...(h.kvCacheDtype && h.kvCacheDtype !== 'int4' && { kv_cache_dtype: h.kvCacheDtype }),
+        ...(h.turboquantMode && h.turboquantMode !== 'none' && h.turboquantMode !== 'auto' && { turboquant_mode: h.turboquantMode }),
+        ...(h.workloadScenario && h.workloadScenario !== 'interactive_chat' && { workload_scenario: h.workloadScenario }),
+        ...(h.reasoningMode && { reasoning_mode: 'on' }),
+        // Phase 7: Web UI (D26/A44)
+        ...(h.webUiAvailability && h.webUiAvailability !== 'auto' && { web_ui_availability: h.webUiAvailability }),
+        ...(h.webUiStaticPath && { web_ui_static_path: h.webUiStaticPath }),
+        ...(h.webUiConfigJson && { web_ui_config_json: h.webUiConfigJson }),
+        // Phase 7: Sampling mode (D27)
+        ...(h.samplingMode && h.samplingMode !== 'auto' && { sampling_mode: h.samplingMode }),
+        // Phase 7: Prompt storage (D31) — turboquant_mode already set above
       },
     };
   }

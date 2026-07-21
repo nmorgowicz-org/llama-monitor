@@ -1360,11 +1360,15 @@ export function openPresetModal(mode, section, seedPreset = null) {
         if (document.getElementById('modal-rapid-prefix-cache-enabled')) {
             document.getElementById('modal-rapid-prefix-cache-enabled').checked = prefixCacheEnabled;
         }
-        // Phase 7 Part A: Rapid-MLX advanced controls (kv_cache_dtype, turboquant_mode, workload_scenario, reasoning_mode).
+        // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
         setOpt('modal-rapid-kv-cache-dtype', p.rapid_mlx?.kv_cache_dtype || '');
-        setOpt('modal-rapid-turboquant-mode', p.rapid_mlx?.turboquant_mode || '');
+        setOpt('modal-rapid-turboquant-mode', p.rapid_mlx?.turboquant_mode || 'auto');
         setOpt('modal-rapid-workload-scenario', p.rapid_mlx?.workload_scenario || '');
-        const reasoningModeChecked = !!p.rapid_mlx?.reasoning_mode;
+        setOpt('modal-rapid-sampling-mode', p.rapid_mlx?.sampling_mode || 'auto');
+        setOpt('modal-rapid-webui-availability', p.rapid_mlx?.web_ui_availability || 'auto');
+        setVal('modal-rapid-webui-config-json', p.rapid_mlx?.web_ui_config_json || '');
+        setVal('modal-rapid-webui-static-path', p.rapid_mlx?.web_ui_static_path || '');
+        const reasoningModeChecked = !!p.rapid_mlx?.reasoning_mode && p.rapid_mlx?.reasoning_mode !== 'off';
         if (document.getElementById('modal-rapid-reasoning-mode')) {
             document.getElementById('modal-rapid-reasoning-mode').checked = reasoningModeChecked;
         }
@@ -1745,6 +1749,15 @@ function _configureBackendPresetEditor(preset) {
     const isRapid = preset?.backend === 'rapid_mlx';
     modal?.classList.toggle('preset-editor--rapid-mlx', isRapid);
 
+    // Phase 7: Toggle Rapid-MLX advanced rows based on backend (inline styles override CSS).
+    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-webui', 'pe-row-rapid-webui-expert'];
+    rapidRows.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = isRapid ? '' : 'none';
+    });
+    const prefixCacheRow = document.getElementById('pe-row-rapid-prefix-cache');
+    if (prefixCacheRow) prefixCacheRow.style.display = isRapid ? '' : 'none';
+
     const modelLabel = document.querySelector('label[for="modal-model-path"]');
     const modelInput = document.getElementById('modal-model-path');
     const portLabel = document.querySelector('label[for="modal-port"]');
@@ -1804,15 +1817,24 @@ function _buildFormPreset(existing) {
                     // Phase 6 Part B: prefix cache enabled toggle.
                     const pceInput = document.getElementById('modal-rapid-prefix-cache-enabled');
                     if (pceInput) out.prefix_cache_enabled = pceInput.checked;
-                    // Phase 7 Part A: Rapid-MLX advanced controls.
+                    // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
                     const kvDtype = strVal('modal-rapid-kv-cache-dtype');
                     const tqMode = strVal('modal-rapid-turboquant-mode');
                     const wlScenario = strVal('modal-rapid-workload-scenario');
+                    const samplingMode = strVal('modal-rapid-sampling-mode');
+                    const webUiAvail = strVal('modal-rapid-webui-availability');
+                    const webUiConfig = strVal('modal-rapid-webui-config-json');
+                    const webUiStatic = strVal('modal-rapid-webui-static-path');
                     const rmInput = document.getElementById('modal-rapid-reasoning-mode');
                     if (kvDtype) out.kv_cache_dtype = kvDtype;
-                    if (tqMode) out.turboquant_mode = tqMode;
-                    if (wlScenario) out.workload_scenario = wlScenario;
-                    if (rmInput) out.reasoning_mode = rmInput.checked;
+                    if (tqMode && tqMode !== 'auto') out.turboquant_mode = tqMode;
+                    if (wlScenario && wlScenario !== 'interactive_chat') out.workload_scenario = wlScenario;
+                    if (samplingMode && samplingMode !== 'auto') out.sampling_mode = samplingMode;
+                    if (rmInput) out.reasoning_mode = rmInput.checked ? 'on' : null;
+                    // Web UI (D26/A44)
+                    if (webUiAvail && webUiAvail !== 'auto') out.web_ui_availability = webUiAvail;
+                    if (webUiConfig) out.web_ui_config_json = webUiConfig;
+                    if (webUiStatic) out.web_ui_static_path = webUiStatic;
                     return out;
                 })(),
             } : null,

@@ -2305,6 +2305,20 @@
   display: grid;
 }
 
+/* Phase 7B1: Web UI group (D26/A44) — Advanced only. */
+#pe-row-rapid-webui {
+  display: none;
+}
+#preset-modal.preset-editor--rapid-mlx #pe-row-rapid-webui {
+  display: grid;
+}
+#pe-row-rapid-webui-expert {
+  display: none;
+}
+#preset-modal.preset-editor--rapid-mlx #pe-row-rapid-webui-expert {
+  display: block;
+}
+
 /* Rapid-MLX currently exposes only the launch fields the adapter can persist.
    Keep llama.cpp-only controls out of sight so edits can never be silently lost. */
 #preset-modal.preset-editor--rapid-mlx .preset-nav-item:not([data-section="model"]):not([data-section="advanced"]),
@@ -2312,8 +2326,8 @@
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-row,
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-toggles,
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .preset-memory-warning,
-#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] > .pe-section-body > :not(.pe-row:has(#modal-port)):not(#pe-row-rapid-reasoning):not(#pe-row-rapid-prefix-cache):not(#pe-row-rapid-advanced):not(#pe-row-rapid-workload),
-#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] .pe-field:not(:has(#modal-port)):not(:has(#modal-rapid-enable-thinking)):not(:has(#modal-rapid-reasoning-effort)):not(:has(#modal-rapid-prefix-cache-enabled)):not(:has(#modal-rapid-kv-cache-dtype)):not(:has(#modal-rapid-turboquant-mode)):not(:has(#modal-rapid-workload-scenario)):not(:has(#modal-rapid-reasoning-mode)),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] > .pe-section-body > :not(.pe-row:has(#modal-port)):not(#pe-row-rapid-reasoning):not(#pe-row-rapid-prefix-cache):not(#pe-row-rapid-advanced):not(#pe-row-rapid-workload):not(#pe-row-rapid-webui):not(#pe-row-rapid-webui-expert),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] .pe-field:not(:has(#modal-port)):not(:has(#modal-rapid-enable-thinking)):not(:has(#modal-rapid-reasoning-effort)):not(:has(#modal-rapid-prefix-cache-enabled)):not(:has(#modal-rapid-kv-cache-dtype)):not(:has(#modal-rapid-turboquant-mode)):not(:has(#modal-rapid-workload-scenario)):not(:has(#modal-rapid-reasoning-mode)):not(:has(#modal-rapid-sampling-mode)):not(:has(#modal-rapid-webui-availability)):not(:has(#modal-rapid-webui-config-json)):not(:has(#modal-rapid-webui-static-path)),
 #preset-modal.preset-editor--rapid-mlx #preset-browse-model-btn,
 #preset-modal.preset-editor--rapid-mlx #preset-vram-strip {
   display: none !important;

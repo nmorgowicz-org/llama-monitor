@@ -859,6 +859,27 @@
   display: block;
 }
 
+/* Rapid-MLX advanced details (Web UI group, D26/A44) */
+.rapid-advanced-details summary {
+  list-style: none;
+  padding: 4px 0;
+}
+.rapid-advanced-details summary::-webkit-details-marker,
+.rapid-advanced-details summary::marker {
+  display: none;
+}
+.rapid-advanced-details summary::before {
+  content: '▸ ';
+  font-size: 11px;
+  transition: transform 0.15s ease;
+}
+.rapid-advanced-details[open] summary::before {
+  transform: rotate(90deg);
+}
+.rapid-advanced-details .hardware-grid {
+  margin-top: 6px;
+}
+
 /* Hardware summary card */
 
 .hardware-summary {

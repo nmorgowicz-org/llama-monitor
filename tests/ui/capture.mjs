@@ -1135,6 +1135,19 @@ async function scenarioRapidPreset(ctx) {
     });
     await sleep(200);
     await captureShot(page, 'rapid-mlx-preset-editor-server.png', { fullPage: true });
+
+    // Phase 7B1: Capture Rapid-MLX advanced tab with Phase 7 controls (KV dtype,
+    // reusable prompt storage, workload scenario, sampling mode, reasoning mode, Web UI).
+    await page.evaluate(() => {
+        const navBtn = document.querySelector('#preset-modal .preset-editor-nav [data-section="advanced"]');
+        if (navBtn) navBtn.click();
+    });
+    await page.waitForFunction(
+        () => document.querySelector('.preset-editor-section[data-section="advanced"].active'),
+        { timeout: 5000 }
+    );
+    await sleep(250);
+    await captureShot(page, 'rapid-mlx-preset-editor-advanced.png', { fullPage: true });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
     await sleep(200);
     await captureShot(page, 'rapid-mlx-preset-editor-server-light.png', { fullPage: true });
@@ -3635,6 +3648,26 @@ async function scenarioSpawnWizardEngines(ctx) {
     );
     await sleep(300);
     await captureShot(page, 'spawn-wizard-rapid-mlx-hardware.png', { fullPage: true });
+
+    // Phase 7: Capture Rapid-MLX advanced controls (KV dtype, turboquant, workload scenario,
+    // sampling mode, reasoning mode, Web UI group). The advanced section is auto-shown when
+    // Rapid-MLX is selected; scroll into view to ensure visibility.
+    await page.evaluate(() => {
+        const advancedFields = document.getElementById('spawn-rapid-advanced-fields');
+        if (advancedFields && advancedFields.classList.contains('visible')) {
+            advancedFields.scrollIntoView({ behavior: 'instant', block: 'start' });
+        }
+    });
+    await sleep(250);
+    await captureShot(page, 'spawn-wizard-rapid-mlx-advanced-controls.png', { fullPage: true });
+
+    // Capture with Web UI details expanded (D26/A44).
+    await page.evaluate(() => {
+        const details = document.getElementById('spawn-webui-details');
+        if (details) details.open = true;
+    });
+    await sleep(200);
+    await captureShot(page, 'spawn-wizard-rapid-mlx-webui-group.png', { fullPage: true });
 
     console.log('[CAPTURE] Scenario "spawn-wizard-engines" complete.');
 }

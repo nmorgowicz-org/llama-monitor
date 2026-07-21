@@ -3189,46 +3189,84 @@
                                   </div>
                                   <div class="pe-field-hint" id="pe-prefix-cache-hint-detail">When enabled, uses D30 auto-computed budget (10% of configured ceiling) unless explicitly set. Prefix cache is additive and budget-constrained — never unlimited.</div>
                               </div>
-                              <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-advanced" style="display:none;">
-                                  <div class="pe-field">
-                                      <label class="pe-label" for="modal-rapid-kv-cache-dtype" title="KV cache dtype controls memory vs precision for Rapid-MLX. int8 recommended for tool calling.">KV Cache Dtype</label>
-                                      <select class="pe-select" id="modal-rapid-kv-cache-dtype">
-                                          <option value="">(unset)</option>
-                                          <option value="bf16">bf16</option>
-                                          <option value="int8">int8</option>
-                                          <option value="int4">int4</option>
-                                      </select>
-                                  </div>
-                                  <div class="pe-field">
-                                      <label class="pe-label" for="modal-rapid-turboquant-mode" title="TurboQuant mode for compressed prefix cache storage in Rapid-MLX.">TurboQuant Mode</label>
-                                      <select class="pe-select" id="modal-rapid-turboquant-mode">
-                                          <option value="">(unset)</option>
-                                          <option value="none">none</option>
-                                          <option value="v4">v4</option>
-                                          <option value="k8v4">k8v4</option>
-                                      </select>
-                                  </div>
-                              </div>
-                              <div class="pe-row pe-row-rapid-workload" id="pe-row-rapid-workload" style="display:none;">
-                                  <div class="pe-field">
-                                      <label class="pe-label" for="modal-rapid-workload-scenario" title="Workload scenario for Rapid-MLX tuning. Affects VRAM defaults and KV precision recommendations.">Workload Scenario</label>
-                                      <select class="pe-select" id="modal-rapid-workload-scenario">
-                                          <option value="">(unset)</option>
-                                          <option value="interactive_chat">Interactive Chat</option>
-                                          <option value="coding_agent">Coding Agent</option>
-                                          <option value="tool_research_agent">Tool Research Agent</option>
-                                          <option value="batch_eval">Batch Evaluation</option>
-                                          <option value="roleplay">Roleplay</option>
-                                      </select>
-                                  </div>
-                                  <div class="pe-field">
-                                      <label class="pe-label pe-toggle-label" for="modal-rapid-reasoning-mode" title="Reasoning mode for Rapid-MLX. Overrides KV dtype to int8 when enabled.">Reasoning Mode</label>
-                                      <div class="pe-toggle">
-                                          <input type="checkbox" class="pe-toggle-input" id="modal-rapid-reasoning-mode">
-                                          <span class="pe-toggle-slider"></span>
-                                      </div>
-                                  </div>
-                              </div>
+                               <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-advanced" style="display:none;">
+                                   <div class="pe-field">
+                                       <label class="pe-label" for="modal-rapid-kv-cache-dtype" title="KV cache dtype controls memory vs precision for Rapid-MLX. int8 recommended for tool calling.">KV Cache Dtype</label>
+                                       <select class="pe-select" id="modal-rapid-kv-cache-dtype">
+                                           <option value="">(unset)</option>
+                                           <option value="bf16">bf16</option>
+                                           <option value="int8">int8</option>
+                                           <option value="int4">int4</option>
+                                       </select>
+                                   </div>
+                                   <div class="pe-field">
+                                       <label class="pe-label" for="modal-rapid-turboquant-mode" title="Reusable prompt storage policy. Compresses retained prefix snapshots only — does not reduce active-generation KV or model weights.">Reusable Prompt Storage</label>
+                                       <select class="pe-select" id="modal-rapid-turboquant-mode">
+                                           <option value="auto">Auto — runtime default</option>
+                                           <option value="">(unset)</option>
+                                           <option value="none">Standard — int4 retained storage</option>
+                                           <option value="k8v4">TurboQuant K8V4 — Advanced trial</option>
+                                           <option value="v4">TurboQuant V-only — Expert legacy</option>
+                                       </select>
+                                   </div>
+                               </div>
+                               <div class="pe-row pe-row-rapid-workload" id="pe-row-rapid-workload" style="display:none;">
+                                   <div class="pe-field">
+                                       <label class="pe-label" for="modal-rapid-workload-scenario" title="Workload scenario for Rapid-MLX tuning. Affects VRAM defaults and KV precision recommendations.">Workload Scenario</label>
+                                       <select class="pe-select" id="modal-rapid-workload-scenario">
+                                           <option value="">(unset)</option>
+                                           <option value="interactive_chat">Interactive Chat</option>
+                                           <option value="coding_agent">Coding Agent</option>
+                                           <option value="tool_research_agent">Tool Research Agent</option>
+                                           <option value="batch_eval">Batch Evaluation</option>
+                                           <option value="roleplay">Roleplay</option>
+                                       </select>
+                                   </div>
+                                   <div class="pe-field">
+                                       <label class="pe-label" for="modal-rapid-sampling-mode" title="Sampling mode sets server-level defaults for temperature, top_p, etc. Explicit client values always override.">Sampling Mode</label>
+                                       <select class="pe-select" id="modal-rapid-sampling-mode">
+                                           <option value="auto">Auto — model/author defaults</option>
+                                           <option value="">(unset)</option>
+                                           <option value="general">General — balanced</option>
+                                           <option value="coding">Coding/Agentic</option>
+                                           <option value="precise">Precise/Deterministic</option>
+                                           <option value="creative">Creative/Roleplay</option>
+                                           <option value="custom">Custom — use explicit values</option>
+                                       </select>
+                                   </div>
+                               </div>
+                               <div class="pe-row pe-row-rapid-reasoning" id="pe-row-rapid-reasoning" style="display:none;">
+                                   <div class="pe-field">
+                                       <label class="pe-label pe-toggle-label" for="modal-rapid-reasoning-mode" title="Reasoning mode for Rapid-MLX. Overrides KV dtype to int8 when enabled.">Reasoning Mode</label>
+                                       <div class="pe-toggle">
+                                           <input type="checkbox" class="pe-toggle-input" id="modal-rapid-reasoning-mode">
+                                           <span class="pe-toggle-slider"></span>
+                                       </div>
+                                   </div>
+                               </div>
+                               <!-- Web UI group (D26/A44) — Advanced only -->
+                               <div class="pe-row pe-row-rapid-webui" id="pe-row-rapid-webui" style="display:none;">
+                                   <div class="pe-field">
+                                       <label class="pe-label" for="modal-rapid-webui-availability" title="Controls whether the bundled Web UI is served. Auto follows the upstream build default.">Web UI Availability</label>
+                                       <select class="pe-select" id="modal-rapid-webui-availability">
+                                           <option value="auto">Auto — follow upstream</option>
+                                           <option value="">(unset)</option>
+                                           <option value="on">On — force enable</option>
+                                           <option value="off">Off — disable</option>
+                                       </select>
+                                   </div>
+                                   <div class="pe-field">
+                                       <label class="pe-label" for="modal-rapid-webui-config-json" title="Validated JSON for --ui-config or path for --ui-config-file.">Config JSON / file</label>
+                                       <input type="text" class="pe-input" id="modal-rapid-webui-config-json" placeholder="JSON or config file path">
+                                   </div>
+                               </div>
+                               <div class="pe-row pe-row-rapid-webui-expert" id="pe-row-rapid-webui-expert" style="display:none;">
+                                   <div class="pe-field">
+                                       <label class="pe-label" for="modal-rapid-webui-static-path" title="Expert-only: custom static UI path via --path. Must be relative, no traversal.">Custom Static Path <span style="color:#f85149; font-size:10px;">EXPERT</span></label>
+                                       <input type="text" class="pe-input" id="modal-rapid-webui-static-path" placeholder="relative/path/to/ui">
+                                       <div class="pe-field-hint">Not required for bundled UI. Traversal and absolute paths rejected.</div>
+                                   </div>
+                               </div>
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-max-tokens" title="Maximum tokens to generate per request. Empty = unlimited (model's context limit).">Max Tokens</label>
@@ -3689,6 +3727,103 @@
                         <div class="wizard-section-title">Backend-specific memory controls</div>
                         <p>Rapid-MLX owns Metal placement, cache blocks, and batching for this launch. These runtime controls remain separate from llama.cpp configuration.</p>
                         <div class="rapid-hardware-note">No llama.cpp GPU-layer, KV quantization, mmap, or speculative-decoding flags will be included.</div>
+
+                        <!-- Phase 7: Rapid-MLX advanced controls (moved here from wizard-main so they're visible) -->
+                        <div class="rapid-only" id="spawn-rapid-advanced-fields" style="display:none;">
+                            <div class="wizard-section-title" style="margin-top:16px;">Rapid-MLX advanced</div>
+                            <div class="field-hint" style="margin-bottom:10px;">Execution policy controls for KV precision, caching, workload tuning, and server features.</div>
+                            <div class="hardware-grid">
+                                <!-- KV cache dtype (Phase 7) -->
+                                <div class="hardware-field">
+                                    <label for="spawn-kv-cache-dtype" title="KV cache dtype controls memory vs precision. int8 recommended for tool calling; bf16 for maximum quality; int4 for memory-constrained setups.">KV cache dtype</label>
+                                    <select id="spawn-kv-cache-dtype">
+                                        <option value="int4">int4 — memory saving</option>
+                                        <option value="int8">int8 — recommended (tool calling)</option>
+                                        <option value="bf16">bf16 — highest precision</option>
+                                    </select>
+                                    <div class="field-hint">Memory vs precision tradeoff; int8 recommended for tool calling. Locked to int8 when Reasoning mode is enabled.</div>
+                                </div>
+                                <!-- Reusable prompt storage (D31) -->
+                                <div class="hardware-field">
+                                    <label for="spawn-turboquant-mode" title="Reusable prompt storage policy. Compresses retained prefix snapshots only — does not reduce active-generation KV or model weights.">Reusable prompt storage</label>
+                                    <select id="spawn-turboquant-mode">
+                                        <option value="auto" selected>Auto — runtime default</option>
+                                        <option value="none">Standard — int4 retained storage</option>
+                                        <option value="k8v4">TurboQuant K8V4 — Advanced trial</option>
+                                        <option value="v4">TurboQuant V-only — Expert legacy</option>
+                                    </select>
+                                    <div class="field-hint">Retained-prefix compression only. Does not save active KV or weights. Coding agents benefit most; Roleplay defaults to Standard.</div>
+                                </div>
+                                <!-- Workload scenario (Phase 7) -->
+                                <div class="hardware-field">
+                                    <label for="spawn-workload-scenario" title="Workload scenario tunes KV cache precision and context defaults for your use case.">Workload scenario</label>
+                                    <select id="spawn-workload-scenario">
+                                        <option value="interactive_chat">Interactive Chat</option>
+                                        <option value="coding_agent">Coding Agent</option>
+                                        <option value="tool_research_agent">Tool Research Agent</option>
+                                        <option value="batch_eval">Batch Evaluation</option>
+                                        <option value="roleplay">Roleplay</option>
+                                    </select>
+                                    <div class="field-hint">Select the workload pattern that best matches your use case. Adjusts VRAM defaults automatically.</div>
+                                </div>
+                                <!-- Sampling mode (D27) -->
+                                <div class="hardware-field">
+                                    <label for="spawn-sampling-mode" title="Sampling mode sets server-level defaults for temperature, top_p, etc. Explicit client values always override.">Sampling mode</label>
+                                    <select id="spawn-sampling-mode">
+                                        <option value="auto" selected>Auto — model/author defaults</option>
+                                        <option value="general">General — balanced</option>
+                                        <option value="coding">Coding/Agentic</option>
+                                        <option value="precise">Precise/Deterministic</option>
+                                        <option value="creative">Creative/Roleplay</option>
+                                        <option value="custom">Custom — use explicit values</option>
+                                    </select>
+                                    <div class="field-hint">Creates server defaults; explicit client parameters always win. Model/author defaults recommended for finetunes.</div>
+                                </div>
+                            </div>
+                            <!-- Reasoning mode toggle (Phase 7) -->
+                            <div class="kv-inline-row" style="margin-top:8px;">
+                                <div class="kv-inline-field">
+                                    <label class="kv-unified-toggle">
+                                        <input type="checkbox" id="spawn-rapid-reasoning-mode">
+                                        <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
+                                        <span class="kv-unified-text">Reasoning mode</span>
+                                    </label>
+                                </div>
+                                <div class="kv-inline-field" style="flex:999 1 320px;">
+                                    <div class="field-hint" style="margin:0;">Overrides KV dtype to int8 for reasoning models. KV dtype selector is fixed when enabled.</div>
+                                </div>
+                            </div>
+                            <!-- Web UI group (D26/A44) — Advanced details -->
+                            <details class="rapid-advanced-details" id="spawn-webui-details" style="margin-top:10px;">
+                                <summary style="cursor:pointer; font-weight:500; color:var(--accent);">llama-server Web UI (Advanced)</summary>
+                                <div style="padding:8px 0; font-size:12px;">
+                                    <div class="hardware-grid">
+                                        <div class="hardware-field">
+                                            <label for="spawn-webui-availability" title="Controls whether the bundled Web UI is served. Auto follows the upstream build default.">Web UI availability</label>
+                                            <select id="spawn-webui-availability">
+                                                <option value="auto" selected>Auto — follow upstream</option>
+                                                <option value="on">On — force enable</option>
+                                                <option value="off">Off — disable</option>
+                                            </select>
+                                            <div class="field-hint">Auto preserves the build default. The bundled UI is available per the explicit setting above.</div>
+                                        </div>
+                                        <div class="hardware-field">
+                                            <label for="spawn-webui-config-json" title="Validated JSON for --ui-config or path for --ui-config-file. For reusable settings, prefer a file workflow.">Config JSON / file</label>
+                                            <input type="text" id="spawn-webui-config-json" placeholder="JSON or config file path">
+                                            <div class="field-hint">Valid JSON string or canonicalized file path. Safe failure on invalid input.</div>
+                                        </div>
+                                    </div>
+                                    <div class="hardware-grid" style="margin-top:6px;">
+                                        <div class="hardware-field">
+                                            <label for="spawn-webui-static-path" title="Expert-only: custom static UI path via --path. Must be relative, no traversal.">Custom static path <span style="color:#f85149; font-size:10px;">EXPERT</span></label>
+                                            <input type="text" id="spawn-webui-static-path" placeholder="relative/path/to/ui">
+                                            <div class="field-hint">Not required for bundled UI. Traversal and absolute paths rejected.</div>
+                                        </div>
+                                    </div>
+                                    <div class="field-hint" style="margin-top:6px;">MCP proxy is Off by default and not exposed here (Experimental). Built-in tools/--agent are absent pending separate approval.</div>
+                                </div>
+                            </details>
+                        </div>
                     </div>
                 </div>
                 <div class="wizard-main">
@@ -4030,58 +4165,9 @@
                             </div>
                         </details>
 
-                    </div>
+                     </div>
 
-                    <!-- Rapid-MLX advanced controls (backend-gated) -->
-                    <div class="rapid-only" id="spawn-rapid-advanced-fields" style="display:none;">
-                        <div class="wizard-section-title">Rapid-MLX advanced</div>
-                        <div class="field-hint" style="margin-bottom:10px;">Execution policy controls for prefix cache precision, compression, and workload tuning.</div>
-                        <div class="hardware-grid">
-                            <div class="hardware-field">
-                                <label for="spawn-kv-cache-dtype" title="KV cache dtype controls memory vs precision. int8 recommended for tool calling; bf16 for maximum quality; int4 for memory-constrained setups.">KV cache dtype</label>
-                                <select id="spawn-kv-cache-dtype">
-                                    <option value="bf16">bf16 — highest precision</option>
-                                    <option value="int8">int8 — recommended (tool calling)</option>
-                                    <option value="int4">int4 — memory saving</option>
-                                </select>
-                                <div class="field-hint">Memory vs precision tradeoff; int8 recommended for tool calling.</div>
-                            </div>
-                            <div class="hardware-field">
-                                <label for="spawn-turboquant-mode" title="TurboQuant mode for compressed prefix cache storage. v4/k8v4 for high retention workloads; none for standard behavior.">TurboQuant mode</label>
-                                <select id="spawn-turboquant-mode">
-                                    <option value="none" selected>none — standard</option>
-                                    <option value="v4">v4 — aggressive compression</option>
-                                    <option value="k8v4">k8v4 — mixed precision</option>
-                                </select>
-                                <div class="field-hint">Compressed prefix cache; v4/k8v4 for high retention workloads.</div>
-                            </div>
-                            <div class="hardware-field">
-                                <label for="spawn-workload-scenario" title="Workload scenario tunes KV cache precision and context defaults for your use case.">Workload scenario</label>
-                                <select id="spawn-workload-scenario">
-                                    <option value="interactive_chat">Interactive Chat</option>
-                                    <option value="coding_agent">Coding Agent</option>
-                                    <option value="tool_research_agent">Tool Research Agent</option>
-                                    <option value="batch_eval">Batch Evaluation</option>
-                                    <option value="roleplay">Roleplay</option>
-                                </select>
-                                <div class="field-hint">Select the workload pattern that best matches your use case. Adjusts VRAM defaults automatically.</div>
-                            </div>
-                        </div>
-                        <div class="kv-inline-row" style="margin-top:8px;">
-                            <div class="kv-inline-field">
-                                <label class="kv-unified-toggle">
-                                    <input type="checkbox" id="spawn-rapid-reasoning-mode">
-                                    <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
-                                    <span class="kv-unified-text">Reasoning mode</span>
-                                </label>
-                            </div>
-                            <div class="kv-inline-field" style="flex:999 1 320px;">
-                                <div class="field-hint" style="margin:0;">Overrides KV dtype to int8 for reasoning models. KV dtype selector is fixed when enabled.</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Download panel (moved here — shown when entering hardware step for HF models) -->
+                     <!-- Download panel (moved here — shown when entering hardware step for HF models) -->
                     <div class="hf-download-panel" id="hf-download-panel" style="display:none;">
                         <!-- Idle: ready to download -->
                         <div id="hf-dlp-idle">
