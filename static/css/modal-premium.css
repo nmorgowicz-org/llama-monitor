@@ -2305,18 +2305,12 @@
   display: grid;
 }
 
-/* Phase 7B1: Web UI group (D26/A44) — Advanced only. */
+/* Phase 7B1: Web UI group (D26/A44) — llama.cpp llama-server feature; hide for Rapid-MLX presets. */
 #pe-row-rapid-webui {
   display: none;
 }
-#preset-modal.preset-editor--rapid-mlx #pe-row-rapid-webui {
-  display: grid;
-}
 #pe-row-rapid-webui-expert {
   display: none;
-}
-#preset-modal.preset-editor--rapid-mlx #pe-row-rapid-webui-expert {
-  display: block;
 }
 
 /* Rapid-MLX currently exposes only the launch fields the adapter can persist.

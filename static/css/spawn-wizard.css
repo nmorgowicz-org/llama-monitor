@@ -5785,7 +5785,7 @@
 .rapid-hardware-panel { width:min(680px,calc(100% - 40px)); margin:0 auto; padding:28px; gap:20px; align-items:flex-start; border:1px solid color-mix(in srgb,#8b5cf6 38%,var(--border-color)); border-radius:18px; background:radial-gradient(circle at 8% 15%,rgba(139,92,246,.18),transparent 34%),var(--surface-1); }
 .rapid-hardware-panel:not([hidden]) { display:flex; flex-direction:column; }
 .rapid-hardware-panel p { color:var(--text-muted); line-height:1.6; }
-.rapid-hardware-orb { flex:0 0 52px; height:52px; display:grid; place-items:center; border-radius:16px; color:#f4efff; font-size:21px; font-weight:900; background:linear-gradient(145deg,#805ad5,#3c286f); box-shadow:0 12px 30px rgba(100,65,175,.28); }
+.rapid-hardware-orb { flex:0 0 32px; height:32px; display:grid; place-items:center; border-radius:8px; color:#f4efff; font-size:14px; font-weight:700; background:linear-gradient(145deg,#805ad5,#3c286f); }
 .rapid-hardware-content { flex:1; min-width:0; }
 .rapid-hardware-note { margin-top:12px; padding:10px 12px; border-radius:10px; color:#cfc1f4; background:rgba(109,70,180,.14); font-size:11px; }
 

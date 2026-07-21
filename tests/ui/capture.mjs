@@ -1129,12 +1129,7 @@ async function scenarioRapidPreset(ctx) {
     await page.click('.launch-card[data-preset-id="capture-rapid-mlx"] .launch-card-btn-edit');
     await page.waitForSelector('#preset-modal.open.preset-editor--rapid-mlx', { visible: true });
     await sleep(200);
-    await captureShot(page, 'rapid-mlx-preset-editor.png', { fullPage: true });
-    await page.evaluate(() => {
-        document.querySelector('#preset-modal .preset-editor-nav [data-section="server"]')?.click();
-    });
-    await sleep(200);
-    await captureShot(page, 'rapid-mlx-preset-editor-server.png', { fullPage: true });
+    await captureShot(page, 'rapid-mlx-preset-editor-model.png', { fullPage: true });
 
     // Phase 7B1: Capture Rapid-MLX advanced tab with Phase 7 controls (KV dtype,
     // reusable prompt storage, workload scenario, sampling mode, reasoning mode, Web UI).
@@ -1150,11 +1145,11 @@ async function scenarioRapidPreset(ctx) {
     await captureShot(page, 'rapid-mlx-preset-editor-advanced.png', { fullPage: true });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
     await sleep(200);
-    await captureShot(page, 'rapid-mlx-preset-editor-server-light.png', { fullPage: true });
+    await captureShot(page, 'rapid-mlx-preset-editor-advanced-light.png', { fullPage: true });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
     await sleep(200);
-    await captureShot(page, 'rapid-mlx-preset-editor-server-narrow.png', { fullPage: true });
+    await captureShot(page, 'rapid-mlx-preset-editor-advanced-narrow.png', { fullPage: true });
     await page.setViewport(DEFAULT_VIEWPORT);
     await page.evaluate(() => document.getElementById('preset-modal-close')?.click());
     await page.waitForSelector('#preset-modal.open', { hidden: true });

@@ -3792,43 +3792,13 @@
                                         <span class="kv-unified-text">Reasoning mode</span>
                                     </label>
                                 </div>
-                                <div class="kv-inline-field" style="flex:999 1 320px;">
-                                    <div class="field-hint" style="margin:0;">Overrides KV dtype to int8 for reasoning models. KV dtype selector is fixed when enabled.</div>
-                                </div>
-                            </div>
-                            <!-- Web UI group (D26/A44) — Advanced details -->
-                            <details class="rapid-advanced-details" id="spawn-webui-details" style="margin-top:10px;">
-                                <summary style="cursor:pointer; font-weight:500; color:var(--accent);">llama-server Web UI (Advanced)</summary>
-                                <div style="padding:8px 0; font-size:12px;">
-                                    <div class="hardware-grid">
-                                        <div class="hardware-field">
-                                            <label for="spawn-webui-availability" title="Controls whether the bundled Web UI is served. Auto follows the upstream build default.">Web UI availability</label>
-                                            <select id="spawn-webui-availability">
-                                                <option value="auto" selected>Auto — follow upstream</option>
-                                                <option value="on">On — force enable</option>
-                                                <option value="off">Off — disable</option>
-                                            </select>
-                                            <div class="field-hint">Auto preserves the build default. The bundled UI is available per the explicit setting above.</div>
-                                        </div>
-                                        <div class="hardware-field">
-                                            <label for="spawn-webui-config-json" title="Validated JSON for --ui-config or path for --ui-config-file. For reusable settings, prefer a file workflow.">Config JSON / file</label>
-                                            <input type="text" id="spawn-webui-config-json" placeholder="JSON or config file path">
-                                            <div class="field-hint">Valid JSON string or canonicalized file path. Safe failure on invalid input.</div>
-                                        </div>
-                                    </div>
-                                    <div class="hardware-grid" style="margin-top:6px;">
-                                        <div class="hardware-field">
-                                            <label for="spawn-webui-static-path" title="Expert-only: custom static UI path via --path. Must be relative, no traversal.">Custom static path <span style="color:#f85149; font-size:10px;">EXPERT</span></label>
-                                            <input type="text" id="spawn-webui-static-path" placeholder="relative/path/to/ui">
-                                            <div class="field-hint">Not required for bundled UI. Traversal and absolute paths rejected.</div>
-                                        </div>
-                                    </div>
-                                    <div class="field-hint" style="margin-top:6px;">MCP proxy is Off by default and not exposed here (Experimental). Built-in tools/--agent are absent pending separate approval.</div>
-                                </div>
-                            </details>
-                        </div>
-                    </div>
-                </div>
+                                 <div class="kv-inline-field" style="flex:999 1 320px;">
+                                     <div class="field-hint" style="margin:0;">Overrides KV dtype to int8 for reasoning models. KV dtype selector is fixed when enabled.</div>
+                                 </div>
+                             </div>
+                         </div>
+                     </div>
+                 </div>
                 <div class="wizard-main">
                     <div>
                         <div class="wizard-section-title">Configure hardware</div>

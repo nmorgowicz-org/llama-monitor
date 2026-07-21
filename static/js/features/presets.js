@@ -71,6 +71,16 @@ function isRunningStatus(status) {
 export function presetModelSource(preset) {
     const rapidMlx = preset?.rapid_mlx;
     if (preset?.backend === 'rapid_mlx') {
+        const ms = rapidMlx?.model_source;
+        if (ms?.kind === 'hugging_face_repo') {
+            return ms.repo_id || '';
+        }
+        if (ms?.kind === 'mlx_directory') {
+            return ms.path || '';
+        }
+        if (ms?.kind === 'alias') {
+            return ms.value || '';
+        }
         return rapidMlx?.model_source_view?.canonical_identity
             || rapidMlx?.model_source_view?.display_name
             || rapidMlx?.model_path || '';
