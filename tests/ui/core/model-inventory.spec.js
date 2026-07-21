@@ -104,7 +104,7 @@ async function openInventory(page, options) {
 }
 
 test.describe('typed model inventory', () => {
-  test('renders every inventory dimension and companion as accessible first-class badges', async ({ page }) => {
+  test('@fake-data-bypass renders every inventory dimension and companion as accessible first-class badges', async ({ page }) => {
     await openInventory(page);
 
     for (const label of [
@@ -135,7 +135,7 @@ test.describe('typed model inventory', () => {
     await expect(page.getByRole('button', { name: 'Delete this model from library' })).toHaveCount(3);
   });
 
-  test('search sort filter and view changes reuse inventory and platform state', async ({ page }) => {
+  test('@fake-data-bypass search sort filter and view changes reuse inventory and platform state', async ({ page }) => {
     const requests = { models: 0, platform: 0 };
     await openInventory(page, { requests });
     expect(requests).toEqual({ models: 1, platform: 1 });
@@ -151,7 +151,7 @@ test.describe('typed model inventory', () => {
     expect(requests).toEqual({ models: 1, platform: 1 });
   });
 
-  test('creates a typed Rapid-MLX preset from a ready inventory entry', async ({ page }) => {
+  test('@fake-data-bypass creates a typed Rapid-MLX preset from a ready inventory entry', async ({ page }) => {
     let savedPreset = null;
     await page.route('**/api/presets', async route => {
       if (route.request().method() === 'POST') {
@@ -198,7 +198,7 @@ test.describe('typed model inventory', () => {
     expect(savedPreset.model_path).toBe('');
   });
 
-  test('copies the stable repo id for a typed Hugging Face source', async ({ page, context }) => {
+  test('@fake-data-bypass copies the stable repo id for a typed Hugging Face source', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await openInventory(page);
 
@@ -208,7 +208,7 @@ test.describe('typed model inventory', () => {
       .toBe('mlx-community/model');
   });
 
-  test('gates local Rapid-MLX actions off Apple Silicon without hiding model inventory', async ({ page }) => {
+  test('@fake-data-bypass gates local Rapid-MLX actions off Apple Silicon without hiding model inventory', async ({ page }) => {
     await openInventory(page, { rapidMlxAvailable: false });
 
     const rapidCard = page.locator('.mm-model-card').filter({ hasText: 'HF MLX' });
@@ -218,7 +218,7 @@ test.describe('typed model inventory', () => {
     await expect(rapidCard.getByRole('button', { name: 'Copy Path' })).toBeVisible();
   });
 
-  test('remains coherent in light, narrow, and reduced-motion presentation', async ({ page }) => {
+  test('@fake-data-bypass remains coherent in light, narrow, and reduced-motion presentation', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize({ width: 390, height: 844 });
     await openInventory(page);

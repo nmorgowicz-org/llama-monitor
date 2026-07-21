@@ -1,5 +1,13 @@
 // playwright.config.js
 //
+// Test tags (informational; do not affect CI execution):
+//   @in-memory-test     — runs JS logic against fake state in page.evaluate(); no backend
+//   @fake-data-bypass   — uses mocked API responses or injected DOM data
+//   @runtime-required   — needs a live model instance; gated behind env flag
+//
+// LLAMA_MONITOR_HAS_RUNTIME=1 enables tests that require a real model endpoint.
+// These tests are NEVER mandatory for CI.
+//
 // IMPORTANT (NEVER KILL PORT 7778):
 //
 // When running tests while a live llama-monitor (or AI coding session)

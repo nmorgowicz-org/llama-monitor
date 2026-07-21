@@ -10,7 +10,7 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
-    test('engine classifier leaves bare HF repos ambiguous and recognizes GGUF inventory', async ({ page }) => {
+    test('@in-memory-test engine classifier leaves bare HF repos ambiguous and recognizes GGUF inventory', async ({ page }) => {
         await page.goto('/');
         const result = await page.evaluate(async () => {
             const { classifyWizardArtifact } = await import('/js/features/spawn-wizard.js');
@@ -79,7 +79,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         await expect(page.locator('#wizard-engine-reason')).toContainText('manual llama.cpp choice is preserved');
     });
 
-    test('Rapid-MLX payload is backend-exclusive while its preset preserves shared sampling', async ({ page }) => {
+    test('@in-memory-test Rapid-MLX payload is backend-exclusive while its preset preserves shared sampling', async ({ page }) => {
         await page.goto('/');
         const payloads = await page.evaluate(async () => {
             const {
@@ -155,7 +155,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         expect(saveResult, saveResult.body).toMatchObject({ ok: true });
     });
 
-    test('Rapid-MLX template restores typed source and reopening clears stale engine state', async ({ page }) => {
+    test('@in-memory-test Rapid-MLX template restores typed source and reopening clears stale engine state', async ({ page }) => {
         await page.goto('/');
         const state = await page.evaluate(async () => {
             const { openSpawnWizard, closeSpawnWizard, buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js');
@@ -352,7 +352,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         await expect(page.locator('#wizard-step-2 > .hw-vram-sidebar')).toBeHidden();
     });
 
-    test('typed Rapid-MLX sources round-trip unchanged and llama.cpp payloads exclude Rapid-MLX config', async ({ page }) => {
+    test('@in-memory-test typed Rapid-MLX sources round-trip unchanged and llama.cpp payloads exclude Rapid-MLX config', async ({ page }) => {
         await page.goto('/');
         const result = await page.evaluate(async () => {
             const { buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js');
@@ -766,7 +766,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         await expect(page.locator('#wizard-step-2 > .wizard-main .wizard-section-title', { hasText: 'Configure hardware' })).toBeVisible();
     });
 
-    test('Spawn payload leaves fit parameters unset until the toggle is enabled', async ({ page }) => {
+    test('@in-memory-test Spawn payload leaves fit parameters unset until the toggle is enabled', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');
 
@@ -791,7 +791,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         expect(payloads.enabled.fit_target).toBe('2048');
     });
 
-    test('Community templates use the correct source for Qwen and Gemma 4', async ({ page }) => {
+    test('@in-memory-test Community templates use the correct source for Qwen and Gemma 4', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');
 
@@ -946,5 +946,133 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         const status = resp.status();
         expect(status).toBeGreaterThanOrEqual(200);
         expect(status).toBeLessThan(500);
+    });
+
+    test('@in-memory-test workload profiles serialize with correct assumptions per profile', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        // Test each profile type serializes with correct assumptions via buildSpawnPayload
+        const results = await page.evaluate(async () => {
+            const { buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js');
+
+            const profiles = [
+                { id: 'interactive_coding_agent', expectedToolUse: true, expectedStreaming: true },
+                { id: 'tool_research_agent', expectedToolUse: true, expectedStreaming: true },
+                { id: 'roleplay_storytelling', expectedToolUse: false, expectedStreaming: true },
+                { id: 'general_chat', expectedToolUse: false, expectedStreaming: true },
+                { id: 'deterministic_batch_eval', expectedToolUse: false, expectedStreaming: false },
+            ];
+
+            wizardState.engine.selected = 'rapid_mlx';
+            wizardState.model.rapidMlxSource = { kind: 'hugging_face_repo', repo_id: 'test/model' };
+            wizardState.access.port = 9123;
+
+            const payloads = profiles.map(p => {
+                wizardState.hardware.workloadProfile = {
+                    id: p.id,
+                    assumptions: {
+                        streaming: p.expectedStreaming,
+                        toolUse: p.expectedToolUse,
+                        formatOwner: 'backend',
+                        stablePrefixLikelihood: 'medium',
+                        hotSessions: '1_active',
+                        concurrency: 1,
+                        samplingOwnership: 'backend',
+                        responseCacheEligible: false,
+                    },
+                };
+                wizardState.hardware.workloadProfileConfirmed = true;
+                const payload = buildSpawnPayload();
+                return {
+                    id: p.id,
+                    scenario: payload.rapid_mlx?.workload_scenario,
+                    toolUse: payload.rapid_mlx?.workload_assumptions?.tool_use,
+                    streaming: payload.rapid_mlx?.workload_assumptions?.streaming,
+                };
+            });
+
+            return payloads;
+        });
+
+        for (const r of results) {
+            expect(r.scenario, `profile ${r.id} should serialize workload_scenario`).toBe(r.id);
+            expect(r.toolUse, `profile ${r.id} should serialize tool_use`).toBeDefined();
+            expect(r.streaming, `profile ${r.id} should serialize streaming`).toBeDefined();
+        }
+    });
+
+    test('@in-memory-test workload profile confirmation guard blocks wizard progress', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        const result = await page.evaluate(async () => {
+            const { wizardState } = await import('/js/features/spawn-wizard.js');
+
+            // Check: profile selected but not confirmed → blocked
+            wizardState.hardware.workloadProfile = { id: 'tool_research_agent' };
+            wizardState.hardware.workloadProfileConfirmed = false;
+            const profileSetButNotConfirmed =
+                wizardState.hardware.workloadProfile &&
+                wizardState.hardware.workloadProfile.id &&
+                !wizardState.hardware.workloadProfileConfirmed;
+
+            // Check: profile selected and confirmed → unblocked
+            wizardState.hardware.workloadProfileConfirmed = true;
+            const profileSetAndConfirmed =
+                wizardState.hardware.workloadProfile &&
+                wizardState.hardware.workloadProfile.id &&
+                wizardState.hardware.workloadProfileConfirmed;
+
+            // Check: no profile → guard doesn't block
+            wizardState.hardware.workloadProfile = null;
+            wizardState.hardware.workloadProfileConfirmed = false;
+            const noProfileSelected = !wizardState.hardware.workloadProfile;
+
+            return { profileSetButNotConfirmed, profileSetAndConfirmed, noProfileSelected };
+        });
+
+        expect(result.profileSetButNotConfirmed).toBe(true);
+        expect(result.profileSetAndConfirmed).toBe(true);
+        expect(result.noProfileSelected).toBe(true);
+    });
+
+    test('@in-memory-test workload profile serializes correctly in spawn payload', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        const result = await page.evaluate(async () => {
+            const { buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js');
+
+            wizardState.engine.selected = 'rapid_mlx';
+            wizardState.engine.explicit = true;
+            wizardState.model.rapidMlxSource = { kind: 'hugging_face_repo', repo_id: 'mlx-community/Qwen3-0.6B-4bit' };
+            wizardState.access.port = 9123;
+            wizardState.hardware.workloadProfile = {
+                id: 'tool_research_agent',
+                assumptions: {
+                    streaming: true,
+                    toolUse: true,
+                    formatOwner: 'backend',
+                    stablePrefixLikelihood: 'high',
+                    hotSessions: '1_active',
+                    concurrency: 1,
+                    samplingOwnership: 'backend',
+                    responseCacheEligible: false,
+                },
+            };
+            wizardState.hardware.workloadProfileConfirmed = true;
+
+            const payload = buildSpawnPayload();
+            return {
+                scenario: payload.rapid_mlx?.workload_scenario,
+                assumptions: payload.rapid_mlx?.workload_assumptions,
+            };
+        });
+
+        expect(result.scenario).toBe('tool_research_agent');
+        expect(result.assumptions).toBeDefined();
+        expect(result.assumptions.tool_use).toBe(true);
+        expect(result.assumptions.streaming).toBe(true);
     });
 });

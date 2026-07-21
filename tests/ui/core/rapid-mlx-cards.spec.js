@@ -18,7 +18,7 @@ async function render(page, sample, sequence, failed = false, session = 'rapid-a
   }, { sampleValue: sample, pollSequence: sequence, pollFailed: failed, sessionId: session, sampledAtUnixMs: sampledAt });
 }
 
-test.describe('Rapid-MLX dashboard card registry', () => {
+test.describe('@fake-data-bypass Rapid-MLX dashboard card registry', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
