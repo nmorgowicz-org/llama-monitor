@@ -331,15 +331,13 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 - **Commit:** f3d0153 (2026-07-21)
 - **Work:** SCENARIO_REQUIREMENTS table documenting mock vs real per scenario; extended spawn-wizard-engines with tool-research and deterministic profile captures; mock note on dashboard-rapid-mlx
 
-##### Phase 7B3 — Roleplay-specific controls
+##### Phase 7B3 — Roleplay-specific controls — VERIFIED
 
-- **State:** Not started
-- **Budget:** 40k
-- **Depends on:** 7B2 verified + 7.5 verified
-- **Scope:** item 8
-- **Work:** Long-context reserve, client-owned samplers/stops, chat-vs-text formatting owner, prompt-cache stability.
-- **Screenshot gates:** roleplay-specific UI
-- **Files:** `static/js/features/spawn-wizard.js`, presets.js, CSS, capture.mjs
+- **State:** Verified complete
+- **Commit:** 91468fb (2026-07-21)
+- **Screenshots:** spawn-wizard-roleplay-teaching.png
+- **Features:** Roleplay teaching panel explains long-context reserve, client-owned samplers/stops, chat-vs-text formatting owner, prompt-cache behavior without SillyTavern-specific server facts
+- **Tests:** 3 roleplay teaching tests in spawn-wizard.spec.js (all pass)
 
 ##### Phase 7B4 — Parallel slots/MTP teaching + endpoint compatibility
 
@@ -566,7 +564,7 @@ Return a focused Builder handoff. A fresh verification pass will follow.
 
 Only the Coordinator updates this table after independent verification.
 
-**Last updated:** 2026-07-21 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-4 verified Part 5 pending; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; Phase 7: 7A1-3 verified (774b611), 7B1 verified (31af56b), 7B2 verified (5d00ee0); Phase 7.5A (b16d50a), 7.5B (18397a7), 7.5C (f3d0153) verified — testing framework established; HEAD f3d0153)
+**Last updated:** 2026-07-21 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-4 verified Part 5 pending; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; Phase 7: 7A1-3 verified (774b611), 7B1 (31af56b), 7B2 (5d00ee0), 7B3 (91468fb) verified; Phase 7.5 verified (b16d50a/18397a7/f3d0153); HEAD 91468fb)
 
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|
@@ -585,7 +583,7 @@ Only the Coordinator updates this table after independent verification.
 | 7A3 | Verified complete | — | PASS (command-preview endpoint with auth, preset migration v3, 820 tests) | 774b611 | None |
 | 7B1 | Verified complete | — | PASS (existing controls wired to catalog, Web UI group, sampling selector, prompt storage, screenshots verified) | 31af56b | None |
 | 7B2 | Verified complete | — | PASS (workload profiles with editable assumptions, confirmation flow, screenshots verified) | 5d00ee0 | None |
-| 7B3 | Not started | — | — | — | 7B2 verified + screenshots approved |
+| 7B3 | Verified complete | — | PASS (roleplay teaching panel, 3 tests) | 91468fb | None |
 | 7B4 | Not started | — | — | — | 7B3 verified + screenshots approved |
 | 8 | Not started | — | — | — | Phases 2–5 |
 | 9 | Not started | — | — | — | Phases 2–3 |
