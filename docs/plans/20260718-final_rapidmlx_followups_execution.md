@@ -571,7 +571,7 @@ Only the Coordinator updates this table after independent verification.
 | 7A1 | Verified complete | — | PASS (settings.rs validated, mod.rs validated, 814 tests pass) | HEAD pending | None |
 | 7A2 | Verified complete | — | PASS (command.rs validated, launch.rs validated, mutual exclusions wired, 817 tests) | HEAD pending | None |
 | 7A3 | Verified complete | — | PASS (command-preview endpoint with auth, preset migration v3, 820 tests) | 774b611 | None |
-| 7B1 | Not started | — | — | — | 7A3 verified (prior UI exists, must be re-wired to catalog) |
+| 7B1 | Verified complete | — | PASS (existing controls wired to catalog, Web UI group, sampling selector, prompt storage, screenshots verified) | 31af56b | None |
 | 7B2 | Not started | — | — | — | 7B1 verified + screenshots approved |
 | 7B3 | Not started | — | — | — | 7B2 verified + screenshots approved |
 | 7B4 | Not started | — | — | — | 7B3 verified + screenshots approved |
