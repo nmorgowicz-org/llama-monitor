@@ -2033,8 +2033,13 @@ function showValidationError(msg, focusEl = null) {
   }
   el.textContent = msg;
   el.style.display = '';
-  focusEl?.focus?.();
+  // Scroll error visible, then if there's a focus target (e.g. confirmation checkbox),
+  // focus it and scroll it into view so the user sees both the error and the control to fix it.
   el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  if (focusEl) {
+    focusEl.focus?.();
+    focusEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 }
 
 function clearValidationError() {

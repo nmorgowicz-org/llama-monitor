@@ -3638,7 +3638,8 @@ async function scenarioSpawnWizardEngines(ctx) {
     await sleep(250);
     await captureShot(page, 'spawn-wizard-engines-reduced-narrow.png', { fullPage: true });
 
-    await page.setViewport(DEFAULT_VIEWPORT);
+    // Use taller viewport for spawn wizard so more content fits without overlap.
+    await page.setViewport({ width: 1440, height: 900 });
     await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
@@ -3646,75 +3647,81 @@ async function scenarioSpawnWizardEngines(ctx) {
         () => document.getElementById('wizard-step-2')?.classList.contains('active'),
         { timeout: 5000 }
     );
+    await sleep(500);
+
+    // Helper: scroll wizard-body to center an element in the viewport.
+    const scrollToElement = (selector, yOffset = 0) =>
+        page.evaluate((params) => {
+            const el = document.querySelector(params.selector);
+            const body = document.querySelector('.wizard-body');
+            if (!el || !body) return;
+            const rect = el.getBoundingClientRect();
+            const viewportCenter = body.clientHeight / 2;
+            body.scrollTop += rect.top - viewportCenter + params.offset;
+        }, { selector, offset: yOffset });
+
+    // spawn-wizard-rapid-mlx-hardware.png — Rapid-MLX panel header + Rapid-MLX advanced header (first capture, panel top).
+    await scrollToElement('#spawn-rapid-advanced-fields', -150);
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-rapid-mlx-hardware.png', { fullPage: true });
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-rapid-mlx-hardware.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-rapid-mlx-hardware.png');
 
-    // Phase 7: Capture Rapid-MLX advanced controls (KV dtype, turboquant, workload scenario,
-    // sampling mode, reasoning mode, Web UI group). The advanced section is auto-shown when
-    // Rapid-MLX is selected; scroll into view to ensure visibility.
+    // Capture workload profiles NEXT while Interactive Coding Agent is selected (default).
+    // spawn-wizard-workload-profiles.png — All 5 profile cards with Interactive Coding Agent selected (default).
+    await scrollToElement('#workload-profile-cards', -50);
+    await sleep(300);
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-workload-profiles.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-workload-profiles.png');
+
+    // Then select Roleplay for roleplay screenshot.
+    // spawn-wizard-workload-roleplay.png — Roleplay profile selected with its assumptions.
     await page.evaluate(() => {
-        const advancedFields = document.getElementById('spawn-rapid-advanced-fields');
-        if (advancedFields && advancedFields.classList.contains('visible')) {
-            advancedFields.scrollIntoView({ behavior: 'instant', block: 'start' });
-        }
+        const card = document.querySelector('.wp-card[data-profile-id="roleplay_storytelling"]');
+        if (card) card.click();
     });
-    await sleep(250);
-    await captureShot(page, 'spawn-wizard-rapid-mlx-advanced-controls.png', { fullPage: true });
+    await page.waitForFunction(
+        () => document.querySelector('.wp-card.selected[data-profile-id="roleplay_storytelling"]') !== null,
+        { timeout: 3000 }
+    );
+    await sleep(400);
+    // Scroll to show Roleplay card + assumptions panel.
+    await scrollToElement('#workload-assumptions-panel', -100);
+    await sleep(300);
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-workload-roleplay.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-workload-roleplay.png');
 
-    // Capture with Web UI details expanded (D26/A44).
+    // spawn-wizard-rapid-mlx-advanced-controls.png — KV dtype, Reusable prompt storage, Sampling mode dropdowns.
+    await scrollToElement('#spawn-kv-cache-dtype', -50);
+    await sleep(300);
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-rapid-mlx-advanced-controls.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-rapid-mlx-advanced-controls.png');
+
+    // spawn-wizard-rapid-mlx-webui-group.png — Web UI details expanded.
     await page.evaluate(() => {
         const details = document.getElementById('spawn-webui-details');
         if (details) details.open = true;
     });
-    await sleep(200);
-    await captureShot(page, 'spawn-wizard-rapid-mlx-webui-group.png', { fullPage: true });
-
-    // Phase 7B2: Workload profiles capture.
-    // Scroll the wizard-main container to show the assumptions panel (not just browser viewport).
-    await page.evaluate(() => {
-        const panel = document.getElementById('workload-assumptions-panel');
-        const wizardMain = document.querySelector('.wizard-main');
-        if (panel && wizardMain) {
-            panel.scrollIntoView({ behavior: 'instant', block: 'start' });
-            // Also scroll the wizard-main itself to ensure it shows
-            wizardMain.scrollTop += 200;
-        }
-    });
     await sleep(300);
+    await scrollToElement('#spawn-webui-details', -80);
+    await sleep(300);
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-rapid-mlx-webui-group.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-rapid-mlx-webui-group.png');
 
-    // Screenshot: profile cards + assumptions panel with Interactive Coding Agent selected (default).
-    await captureShot(page, 'spawn-wizard-workload-profiles.png', { fullPage: true });
-
-    // Screenshot: Roleplay profile selected with its assumptions visible.
-    await page.evaluate(() => {
-        const roleplayCard = document.querySelector('.wp-card[data-profile-id="roleplay_storytelling"]');
-        if (roleplayCard) roleplayCard.click();
-    });
-    await sleep(400);
-    await page.evaluate(() => {
-        const panel = document.getElementById('workload-assumptions-panel');
-        const wizardMain = document.querySelector('.wizard-main');
-        if (panel && wizardMain) {
-            panel.scrollIntoView({ behavior: 'instant', block: 'start' });
-            wizardMain.scrollTop += 200;
-        }
-    });
-    await sleep(200);
-    await captureShot(page, 'spawn-wizard-workload-roleplay.png', { fullPage: true });
-
-    // Screenshot: confirmation required (Next button disabled state).
+    // spawn-wizard-workload-confirmation-required.png — Error state when Next clicked without confirming.
     await page.evaluate(() => {
         const check = document.getElementById('workload-confirm-check');
-        if (check) check.checked = false;
-        const confirmArea = document.getElementById('workload-confirmation-area');
-        const wizardMain = document.querySelector('.wizard-main');
-        if (confirmArea && wizardMain) {
-            confirmArea.scrollIntoView({ behavior: 'instant', block: 'center' });
-            wizardMain.scrollTop += 100;
+        if (check) {
+            check.checked = false;
+            check.dispatchEvent(new Event('change', { bubbles: true }));
         }
     });
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await sleep(500);
+    // Scroll to show confirmation checkbox + error message at bottom.
+    await scrollToElement('#workload-confirm-check', 50);
     await sleep(300);
-    await captureShot(page, 'spawn-wizard-workload-confirmation-required.png', { fullPage: true });
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-workload-confirmation-required.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-workload-confirmation-required.png');
 
     console.log('[CAPTURE] Scenario "spawn-wizard-engines" complete.');
 }

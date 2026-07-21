@@ -3728,60 +3728,61 @@
                         <p>Rapid-MLX owns Metal placement, cache blocks, and batching for this launch. These runtime controls remain separate from llama.cpp configuration.</p>
                         <div class="rapid-hardware-note">No llama.cpp GPU-layer, KV quantization, mmap, or speculative-decoding flags will be included.</div>
 
-                        <!-- Phase 7: Rapid-MLX advanced controls (moved here from wizard-main so they're visible) -->
-                        <div class="rapid-only" id="spawn-rapid-advanced-fields" style="display:none;">
-                            <div class="wizard-section-title" style="margin-top:16px;">Rapid-MLX advanced</div>
-                            <div class="field-hint" style="margin-bottom:10px;">Execution policy controls for KV precision, caching, workload tuning, and server features.</div>
-                            <div class="hardware-grid">
-                                <!-- KV cache dtype (Phase 7) -->
-                                <div class="hardware-field">
-                                    <label for="spawn-kv-cache-dtype" title="KV cache dtype controls memory vs precision. int8 recommended for tool calling; bf16 for maximum quality; int4 for memory-constrained setups.">KV cache dtype</label>
-                                    <select id="spawn-kv-cache-dtype">
-                                        <option value="int4">int4 — memory saving</option>
-                                        <option value="int8">int8 — recommended (tool calling)</option>
-                                        <option value="bf16">bf16 — highest precision</option>
-                                    </select>
-                                    <div class="field-hint">Memory vs precision tradeoff; int8 recommended for tool calling. Locked to int8 when Reasoning mode is enabled.</div>
-                                </div>
-                                <!-- Reusable prompt storage (D31) -->
-                                <div class="hardware-field">
-                                    <label for="spawn-turboquant-mode" title="Reusable prompt storage policy. Compresses retained prefix snapshots only — does not reduce active-generation KV or model weights.">Reusable prompt storage</label>
-                                    <select id="spawn-turboquant-mode">
-                                        <option value="auto" selected>Auto — runtime default</option>
-                                        <option value="none">Standard — int4 retained storage</option>
-                                        <option value="k8v4">TurboQuant K8V4 — Advanced trial</option>
-                                        <option value="v4">TurboQuant V-only — Expert legacy</option>
-                                    </select>
-                                    <div class="field-hint">Retained-prefix compression only. Does not save active KV or weights. Coding agents benefit most; Roleplay defaults to Standard.</div>
-                                </div>
-                                 <!-- Workload profiles (Phase 7B2) -->
-                                 <div class="hardware-field workload-profiles-section">
-                                     <label title="Choose the workload profile that best matches your usage. Each profile sets explicit assumptions about streaming, tools, prompt ownership, caching, and more.">Workload profile</label>
-                                     <div id="workload-profile-cards" class="wp-cards-grid"></div>
-                                     <div class="field-hint">Select a profile to see its derived assumptions. Review and confirm before proceeding.</div>
+                         <!-- Phase 7: Rapid-MLX advanced controls (moved here from wizard-main so they're visible) -->
+                         <div class="rapid-only" id="spawn-rapid-advanced-fields" style="display:none;">
+                             <div class="wizard-section-title" style="margin-top:16px;">Rapid-MLX advanced</div>
+                             <div class="field-hint" style="margin-bottom:10px;">Execution policy controls for KV precision, caching, workload tuning, and server features.</div>
+                             <!-- Workload profiles (Phase 7B2) — placed first as foundational choice -->
+                             <div class="workload-profiles-section">
+                                 <label class="wizard-field-label" title="Choose the workload profile that best matches your usage. Each profile sets explicit assumptions about streaming, tools, prompt ownership, caching, and more.">Workload profile</label>
+                                 <div id="workload-profile-cards" class="wp-cards-grid"></div>
+                                 <div class="field-hint">Select a profile to see its derived assumptions. Review and confirm before proceeding.</div>
 
-                                     <!-- Assumptions panel (progressive disclosure) -->
-                                     <div id="workload-assumptions-panel" class="wp-assumptions-panel"></div>
+                                 <!-- Assumptions panel (progressive disclosure) -->
+                                 <div id="workload-assumptions-panel" class="wp-assumptions-panel"></div>
 
-                                     <!-- Confirmation requirement -->
-                                     <div id="workload-confirmation-area" class="wp-confirmation-area"></div>
+                                 <!-- Confirmation requirement -->
+                                 <div id="workload-confirmation-area" class="wp-confirmation-area"></div>
+                             </div>
+                             <!-- Hidden select for backward compat with existing bindings -->
+                             <select id="spawn-workload-scenario" style="display:none;"></select>
+                             <!-- Memory/exec controls below workload profile -->
+                             <div class="hardware-grid" style="margin-top:12px;">
+                                 <!-- KV cache dtype (Phase 7) -->
+                                 <div class="hardware-field">
+                                     <label for="spawn-kv-cache-dtype" title="KV cache dtype controls memory vs precision. int8 recommended for tool calling; bf16 for maximum quality; int4 for memory-constrained setups.">KV cache dtype</label>
+                                     <select id="spawn-kv-cache-dtype">
+                                         <option value="int4">int4 — memory saving</option>
+                                         <option value="int8">int8 — recommended (tool calling)</option>
+                                         <option value="bf16">bf16 — highest precision</option>
+                                     </select>
+                                     <div class="field-hint">Memory vs precision tradeoff; int8 recommended for tool calling. Locked to int8 when Reasoning mode is enabled.</div>
                                  </div>
-                                 <!-- Hidden select for backward compat with existing bindings -->
-                                 <select id="spawn-workload-scenario" style="display:none;"></select>
-                                <!-- Sampling mode (D27) -->
-                                <div class="hardware-field">
-                                    <label for="spawn-sampling-mode" title="Sampling mode sets server-level defaults for temperature, top_p, etc. Explicit client values always override.">Sampling mode</label>
-                                    <select id="spawn-sampling-mode">
-                                        <option value="auto" selected>Auto — model/author defaults</option>
-                                        <option value="general">General — balanced</option>
-                                        <option value="coding">Coding/Agentic</option>
-                                        <option value="precise">Precise/Deterministic</option>
-                                        <option value="creative">Creative/Roleplay</option>
-                                        <option value="custom">Custom — use explicit values</option>
-                                    </select>
-                                    <div class="field-hint">Creates server defaults; explicit client parameters always win. Model/author defaults recommended for finetunes.</div>
-                                </div>
-                            </div>
+                                 <!-- Reusable prompt storage (D31) -->
+                                 <div class="hardware-field">
+                                     <label for="spawn-turboquant-mode" title="Reusable prompt storage policy. Compresses retained prefix snapshots only — does not reduce active-generation KV or model weights.">Reusable prompt storage</label>
+                                     <select id="spawn-turboquant-mode">
+                                         <option value="auto" selected>Auto — runtime default</option>
+                                         <option value="none">Standard — int4 retained storage</option>
+                                         <option value="k8v4">TurboQuant K8V4 — Advanced trial</option>
+                                         <option value="v4">TurboQuant V-only — Expert legacy</option>
+                                     </select>
+                                     <div class="field-hint">Retained-prefix compression only. Does not save active KV or weights. Coding agents benefit most; Roleplay defaults to Standard.</div>
+                                 </div>
+                                 <!-- Sampling mode (D27) -->
+                                 <div class="hardware-field">
+                                     <label for="spawn-sampling-mode" title="Sampling mode sets server-level defaults for temperature, top_p, etc. Explicit client values always override.">Sampling mode</label>
+                                     <select id="spawn-sampling-mode">
+                                         <option value="auto" selected>Auto — model/author defaults</option>
+                                         <option value="general">General — balanced</option>
+                                         <option value="coding">Coding/Agentic</option>
+                                         <option value="precise">Precise/Deterministic</option>
+                                         <option value="creative">Creative/Roleplay</option>
+                                         <option value="custom">Custom — use explicit values</option>
+                                     </select>
+                                     <div class="field-hint">Creates server defaults; explicit client parameters always win. Model/author defaults recommended for finetunes.</div>
+                                 </div>
+                             </div>
                             <!-- Reasoning mode toggle (Phase 7) -->
                             <div class="kv-inline-row" style="margin-top:8px;">
                                 <div class="kv-inline-field">

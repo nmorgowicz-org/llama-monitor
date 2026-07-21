@@ -236,12 +236,13 @@
    Body
    ========================================================================== */
 
-/* wizard-body is always a flex column so every step can fill height and each
-   column scrolls independently — no JS class toggle needed. */
+/* wizard-body scrolls when step content exceeds wizard height, allowing fullPage
+   screenshot capture. Columns still scroll independently when needed. */
 .wizard-body {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   padding: 20px 20px 16px;
@@ -5781,8 +5782,8 @@
 .wizard-engine-badge { grid-column:1/-1; width:max-content; max-width:100%; padding:3px 7px; border-radius:999px; background:color-mix(in srgb,var(--theme-primary) 13%,transparent); color:var(--theme-primary); font-size:9px; font-weight:750; letter-spacing:.04em; text-transform:uppercase; }
 .wizard-engine-reason { min-height:18px; color:var(--text-muted); font-size:11px; line-height:1.5; }
 .model-source-card[hidden] { display:none; }
-.rapid-hardware-panel { width:min(680px,calc(100% - 40px)); margin:28px auto; padding:28px; gap:20px; align-items:flex-start; border:1px solid color-mix(in srgb,#8b5cf6 38%,var(--border-color)); border-radius:18px; background:radial-gradient(circle at 8% 15%,rgba(139,92,246,.18),transparent 34%),var(--surface-1); }
-.rapid-hardware-panel:not([hidden]) { display:flex; }
+.rapid-hardware-panel { width:min(680px,calc(100% - 40px)); margin:0 auto; padding:28px; gap:20px; align-items:flex-start; border:1px solid color-mix(in srgb,#8b5cf6 38%,var(--border-color)); border-radius:18px; background:radial-gradient(circle at 8% 15%,rgba(139,92,246,.18),transparent 34%),var(--surface-1); }
+.rapid-hardware-panel:not([hidden]) { display:flex; flex-direction:column; }
 .rapid-hardware-panel p { color:var(--text-muted); line-height:1.6; }
 .rapid-hardware-orb { flex:0 0 52px; height:52px; display:grid; place-items:center; border-radius:16px; color:#f4efff; font-size:21px; font-weight:900; background:linear-gradient(145deg,#805ad5,#3c286f); box-shadow:0 12px 30px rgba(100,65,175,.28); }
 .rapid-hardware-content { flex:1; min-width:0; }
@@ -5833,7 +5834,8 @@
    Workload Profiles (Phase 7B2)
    ========================================================================== */
 
-.workload-profiles-section { margin-top:8px; }
+.workload-profiles-section { margin-top:12px; display:flex; flex-direction:column; }
+.workload-profiles-section > label { font-size:11px; font-weight:600; color:var(--text-strong); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.06em; }
 
 .wp-cards-grid {
   display: grid;
