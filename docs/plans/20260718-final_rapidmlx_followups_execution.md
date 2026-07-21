@@ -295,26 +295,51 @@ Phase 7A = builder brief items 1–5 from `docs/plans/20260718-final_rapidmlx_fo
 - **Scope:** builder brief items 4-5 (command preview + migrations)
 - **Files:** `src/web/api/rapid_mlx_runtime.rs` (POST /api/rapid-mlx/command-preview), `src/presets/mod.rs` (v3 migration per D32), `src/web/api/mod.rs` (route registration)
 
-#### Phase 7B — Shared Wizard/Editor UI, teaching, captures, tests
+#### Phase 7B — Shared Wizard/Editor UI, teaching, captures, tests (split into 4 parts)
 
-- **State:** Builder active (UI implemented but unverified; commits 3437201/cbf4476 did Part B but labeled it Part A)
-- **Budget:** 120k
-- **Depends on:** Phase 7A verified complete (backend catalog must exist before UI wiring is valid)
-- **Read:** D6–D10/D16/D21–D26/D31; A5/A8/A16/A28/A49/A50; Phase 7 builder brief items 6–13; UI/client matrices.
-- **Scope (builder brief items 6–13):**
-  6. Preserve current tab/step shell until Phase 10; add new JS module baseline when applicable.
-  7. Add transparent workload inputs for all five accepted profiles; display derived assumptions and require confirmation.
-  8. For Roleplay: long-context reserve, client-owned samplers/stops, chat-vs-text formatting owner, prompt-cache stability.
-  9. Parallel slots / concurrency / MTP teaching with exact policy evidence.
-  10. Show endpoint compatibility per workload.
-  11. Advanced llama-server Web UI group (D26/A44): Auto/On/Off, open action, config JSON/file, Expert static path, proxy/tools separation.
-  12. Shared sampling mode selector in Wizard/Preset Editor.
-  13. Reusable prompt storage choices UI (D31).
-- **Primary output:** shared descriptor-driven UI components wired to Phase 7A backend catalog; workload profiles; teaching text; dark/light/narrow captures; module baseline update; capture.mjs extensions for Phase 7 advanced controls.
-- **Completion proof:** wizard/editor labels/defaults/help match; workload assumptions inspectable; Web UI opens/configures without enabling MCP proxy/tools; Network & Access is sole authority for bind/auth/TLS/CORS; screenshot captures for every Phase 7 control in both wizard and preset editor; baseline update committed.
-- **Files:** `static/js/features/spawn-wizard.js`, `static/js/features/presets.js`, `static/js/features/vram-estimate.js`, shared `static/js/features/` settings module, `static/index.html`, CSS files, `tests/ui/capture.mjs` (extend spawn-wizard-engines and rapid-preset scenarios for Phase 7 controls).
+Phase 7B = builder brief items 6–13. **Prior UI work exists** (commits 3437201/cbf4476) but must be validated/re-wired to Phase 7A backend catalog. Each part requires screenshot validation before proceeding.
 
-**Phase 7 exit gate:** one fresh Verifier evaluates the complete Phase 7 diff after both 7A and 7B are verified.
+##### Phase 7B1 — Wire existing controls + Web UI/sampling/prompt storage
+
+- **State:** Not started
+- **Budget:** 50k
+- **Depends on:** Phase 7A1-3 verified complete
+- **Scope:** items 6, 11-13 (partially built)
+- **Work:** Wire existing Phase 7 UI controls (KV dtype, turboquant, workload scenario, reasoning mode) to Phase 7A setting catalog; implement Web UI group (D26/A44), shared sampling selector, reusable prompt storage UI; capture.mjs extensions for Phase 7 advanced controls (spawn-wizard-engines advanced step, rapid-preset advanced tab); dark/light captures.
+- **Screenshot gates:** spawn-wizard-rapid-mlx-advanced-controls.png, rapid-mlx-preset-editor-advanced.png, Web UI group, sampling selector
+- **Files:** `static/js/features/spawn-wizard.js`, `static/js/features/presets.js`, `static/js/features/vram-estimate.js`, `static/index.html`, CSS, `tests/ui/capture.mjs`
+
+##### Phase 7B2 — Workload profiles + confirmation
+
+- **State:** Not started
+- **Budget:** 50k
+- **Depends on:** 7B1 verified + screenshots approved
+- **Scope:** item 7
+- **Work:** Transparent workload inputs for all 5 profiles; display derived streaming/tool/format/sampling/concurrency/cache assumptions; require confirmation.
+- **Screenshot gates:** each profile display, confirmation step
+- **Files:** `static/js/features/spawn-wizard.js`, presets.js, CSS, capture.mjs
+
+##### Phase 7B3 — Roleplay-specific controls
+
+- **State:** Not started
+- **Budget:** 40k
+- **Depends on:** 7B2 verified + screenshots approved
+- **Scope:** item 8
+- **Work:** Long-context reserve, client-owned samplers/stops, chat-vs-text formatting owner, prompt-cache stability.
+- **Screenshot gates:** roleplay-specific UI
+- **Files:** `static/js/features/spawn-wizard.js`, presets.js, CSS, capture.mjs
+
+##### Phase 7B4 — Parallel slots/MTP teaching + endpoint compatibility
+
+- **State:** Not started
+- **Budget:** 50k
+- **Depends on:** 7B3 verified + screenshots approved
+- **Scope:** items 9-10
+- **Work:** Active-generation/pool policy/MTP teaching with exact policy evidence; endpoint compatibility per workload.
+- **Screenshot gates:** MTP teaching, endpoint displays
+- **Files:** `static/js/features/spawn-wizard.js`, presets.js, CSS, capture.mjs
+
+**Phase 7 exit gate:** one fresh Verifier evaluates the complete Phase 7 diff after all of 7A and 7B are verified.
 
 ### Phase 8 — Hugging Face and Model Library
 
@@ -545,8 +570,11 @@ Only the Coordinator updates this table after independent verification.
 | 6 | Not started | — | — | — | Phase 5 (5a + 5b) |
 | 7A1 | Verified complete | — | PASS (settings.rs validated, mod.rs validated, 814 tests pass) | HEAD pending | None |
 | 7A2 | Verified complete | — | PASS (command.rs validated, launch.rs validated, mutual exclusions wired, 817 tests) | HEAD pending | None |
-| 7A3 | Verified complete | — | PASS (command-preview endpoint with auth, preset migration v3, 820 tests) | HEAD pending | None |
-| 7B | Builder active | commits 3437201/cbf4476 (mislabeled as "Part A") | — | — | Phase 7A1-3 verified (UI exists but backend catalog not wired) |
+| 7A3 | Verified complete | — | PASS (command-preview endpoint with auth, preset migration v3, 820 tests) | 774b611 | None |
+| 7B1 | Not started | — | — | — | 7A3 verified (prior UI exists, must be re-wired to catalog) |
+| 7B2 | Not started | — | — | — | 7B1 verified + screenshots approved |
+| 7B3 | Not started | — | — | — | 7B2 verified + screenshots approved |
+| 7B4 | Not started | — | — | — | 7B3 verified + screenshots approved |
 | 8 | Not started | — | — | — | Phases 2–5 |
 | 9 | Not started | — | — | — | Phases 2–3 |
 | 10 | Not started | — | — | — | Phases 7–9 and user IA decision |
