@@ -1661,6 +1661,67 @@ function _renderWorkloadAssumptions() {
       _editAssumption(key, item);
     });
   });
+
+  // Render roleplay-specific teaching when that profile is selected (Phase 7B3)
+  _renderRoleplayTeaching(wp.id);
+}
+
+// Render roleplay-specific teaching panel (Phase 7B3, D21).
+// Explains: long-context reserve, client-owned samplers/stops, chat-vs-text formatting owner, prompt-cache stability.
+// Truthful: explains patterns without asserting SillyTavern is the only way.
+export function _renderRoleplayTeaching(profileId) {
+  const container = document.getElementById('wp-roleplay-teaching');
+  if (!container) return;
+
+  if (profileId !== 'roleplay_storytelling') {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'block';
+
+  const teachingHtml = `
+    <div class="wp-roleplay-teaching-header">
+      <span class="wp-roleplay-teaching-icon" aria-hidden="true">💬</span>
+      <span class="wp-roleplay-teaching-title">Roleplay workload guidance</span>
+      <span class="wp-roleplay-teaching-subtitle">How this profile shapes context, sampling, formatting, and caching.</span>
+    </div>
+    <div class="wp-roleplay-teaching-grid">
+      <div class="wp-roleplay-teaching-card" data-roleplay-topic="long-context">
+        <div class="wp-roleplay-teaching-card-title">Long-context reserve</div>
+        <div class="wp-roleplay-teaching-card-body">
+          Roleplay conversations grow continuously as the story progresses. This profile targets a larger context window so the model retains earlier plot points, character details, and world rules. When memory is tight, the wizard will recommend a quant or context size that fits one active session instead of splitting resources across multiple concurrent generations.
+        </div>
+      </div>
+      <div class="wp-roleplay-teaching-card" data-roleplay-topic="client-samplers">
+        <div class="wp-roleplay-teaching-card-title">Client-owned samplers and stops</div>
+        <div class="wp-roleplay-teaching-card-body">
+          Creative clients control temperature, top_p, min_p, stop sequences, and repetition settings inside their own UI. The server respects any explicit sampling parameters the client sends; it never overrides them with global defaults. Server-level sampling modes only fill in when the client omits those fields, and they do not block client values from working as shown in the client's settings.
+        </div>
+      </div>
+      <div class="wp-roleplay-teaching-card" data-roleplay-topic="format-owner">
+        <div class="wp-roleplay-teaching-card-title">Chat vs text completion: who builds the prompt?</div>
+        <div class="wp-roleplay-teaching-card-body">
+          Two common integration modes exist:
+          <ul class="wp-roleplay-teaching-list">
+            <li><strong>Client-formatted text completion (Roleplay default):</strong> your client assembles the entire prompt — system instructions, character definition, history, and user input — then sends it as a raw string. The backend chat template is not applied. This prevents duplicated roles or mismatched special tokens.</li>
+            <li><strong>OpenAI-compatible chat completions:</strong> your client sends structured messages and the backend applies the selected or model-default template.</li>
+          </ul>
+          This profile assumes client-formatted text completion as the safer default. If you use chat completions, change the prompt format owner assumption above to "Backend template."
+        </div>
+      </div>
+      <div class="wp-roleplay-teaching-card" data-roleplay-topic="prompt-cache">
+        <div class="wp-roleplay-teaching-card-title">Prompt-cache behavior</div>
+        <div class="wp-roleplay-teaching-card-body">
+          Roleplay sessions often repeat the same system prompt and character definition across every turn, then append conversation history. Prefix caching can speed up each new turn by reusing that stable block. However, because roleplay conversations diverge quickly and rarely replay identical messages, full response caching is off by default — storing past creative responses would waste memory without meaningful reuse.
+        </div>
+      </div>
+    </div>
+    <div class="wp-roleplay-teaching-footer">
+      This guidance explains why the Roleplay profile sets the assumptions shown above. It does not assume a specific client — the same principles apply whether you use SillyTavern, KoboldAI, a custom frontend, or direct API calls.
+    </div>
+  `;
+  container.innerHTML = teachingHtml;
 }
 
 // Edit an individual assumption via prompt-style UI.

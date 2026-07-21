@@ -1075,4 +1075,131 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         expect(result.assumptions.tool_use).toBe(true);
         expect(result.assumptions.streaming).toBe(true);
     });
+
+    // Phase 7B3: Roleplay-specific teaching visibility and content tests
+    test('@in-memory-test roleplay teaching panel renders when roleplay_storytelling profile is selected', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        // Inject the teaching container (normally in HTML) and simulate selecting roleplay profile
+        const result = await page.evaluate(async () => {
+            const { wizardState, _renderWorkloadAssumptions, _renderRoleplayTeaching } = await import('/js/features/spawn-wizard.js');
+
+            // Create the teaching container
+            const container = document.createElement('div');
+            container.id = 'wp-roleplay-teaching';
+            container.className = 'wp-roleplay-teaching';
+            document.body.appendChild(container);
+
+            // Select roleplay profile
+            wizardState.hardware.workloadProfile = {
+                id: 'roleplay_storytelling',
+                assumptions: {
+                    streaming: true,
+                    toolUse: false,
+                    formatOwner: 'client',
+                    formatOwnerDetail: 'Client owns (SillyTavern default)',
+                    stablePrefixLikelihood: 'low',
+                    hotSessions: '1_active',
+                    concurrency: 1,
+                    samplingOwnership: 'client',
+                    responseCacheEligible: false,
+                },
+                modifiedAssumptions: new Set(),
+            };
+
+            _renderRoleplayTeaching('roleplay_storytelling');
+
+            const el = document.getElementById('wp-roleplay-teaching');
+            return {
+                display: el.style.display,
+                hasTeachingHeader: el.querySelector('.wp-roleplay-teaching-title') !== null,
+                hasLongContextCard: el.querySelector('[data-roleplay-topic="long-context"]') !== null,
+                hasClientSamplersCard: el.querySelector('[data-roleplay-topic="client-samplers"]') !== null,
+                hasFormatOwnerCard: el.querySelector('[data-roleplay-topic="format-owner"]') !== null,
+                hasPromptCacheCard: el.querySelector('[data-roleplay-topic="prompt-cache"]') !== null,
+            };
+        });
+
+        expect(result.display).toBe('block');
+        expect(result.hasTeachingHeader).toBe(true);
+        expect(result.hasLongContextCard).toBe(true);
+        expect(result.hasClientSamplersCard).toBe(true);
+        expect(result.hasFormatOwnerCard).toBe(true);
+        expect(result.hasPromptCacheCard).toBe(true);
+    });
+
+    test('@in-memory-test roleplay teaching panel is hidden for non-roleplay profiles', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        const result = await page.evaluate(async () => {
+            const { _renderRoleplayTeaching } = await import('/js/features/spawn-wizard.js');
+
+            const container = document.createElement('div');
+            container.id = 'wp-roleplay-teaching';
+            container.className = 'wp-roleplay-teaching';
+            container.style.display = 'block';
+            document.body.appendChild(container);
+
+            // Test with non-roleplay profiles
+            _renderRoleplayTeaching('interactive_coding_agent');
+            const codingDisplay = document.getElementById('wp-roleplay-teaching').style.display;
+
+            _renderRoleplayTeaching('tool_research_agent');
+            const toolDisplay = document.getElementById('wp-roleplay-teaching').style.display;
+
+            _renderRoleplayTeaching('general_chat');
+            const chatDisplay = document.getElementById('wp-roleplay-teaching').style.display;
+
+            _renderRoleplayTeaching('deterministic_batch_eval');
+            const batchDisplay = document.getElementById('wp-roleplay-teaching').style.display;
+
+            return { codingDisplay, toolDisplay, chatDisplay, batchDisplay };
+        });
+
+        expect(result.codingDisplay).toBe('none');
+        expect(result.toolDisplay).toBe('none');
+        expect(result.chatDisplay).toBe('none');
+        expect(result.batchDisplay).toBe('none');
+    });
+
+    test('@in-memory-test roleplay teaching explains four required areas without SillyTavern-specific server facts', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        const result = await page.evaluate(async () => {
+            const { _renderRoleplayTeaching } = await import('/js/features/spawn-wizard.js');
+
+            // Clean up any leftover from previous tests
+            const existing = document.getElementById('wp-roleplay-teaching');
+            if (existing) existing.remove();
+
+            const container = document.createElement('div');
+            container.id = 'wp-roleplay-teaching';
+            document.body.appendChild(container);
+
+            _renderRoleplayTeaching('roleplay_storytelling');
+
+            // Use DOM queries instead of textContent matching
+            const hasLongContext = container.querySelector('[data-roleplay-topic="long-context"]') !== null;
+            const hasClientSamplers = container.querySelector('[data-roleplay-topic="client-samplers"]') !== null;
+            const hasFormatOwner = container.querySelector('[data-roleplay-topic="format-owner"]') !== null;
+            const hasPromptCache = container.querySelector('[data-roleplay-topic="prompt-cache"]') !== null;
+            const text = container.textContent.toLowerCase();
+            const noSillyTavernServerFact = !container.textContent.includes('SillyTavern will') && !container.textContent.includes('SillyTavern requires');
+            const mentionsGenericClients = text.includes('custom') || text.includes('koboldai') || text.includes('direct api');
+            const mentionsClientValuesWin = text.includes('client') && text.includes('override');
+
+            return { hasLongContext, hasClientSamplers, hasFormatOwner, hasPromptCache, noSillyTavernServerFact, mentionsGenericClients, mentionsClientValuesWin };
+        });
+
+        expect(result.hasLongContext).toBe(true);
+        expect(result.hasClientSamplers).toBe(true);
+        expect(result.hasFormatOwner).toBe(true);
+        expect(result.hasPromptCache).toBe(true);
+        expect(result.noSillyTavernServerFact).toBe(true);
+        expect(result.mentionsGenericClients).toBe(true);
+        expect(result.mentionsClientValuesWin).toBe(true);
+    });
 });

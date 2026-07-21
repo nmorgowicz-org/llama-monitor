@@ -3761,6 +3761,20 @@ async function scenarioSpawnWizardEngines(ctx) {
     await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-workload-roleplay.png') });
     console.log('[CAPTURE] Saved spawn-wizard-workload-roleplay.png');
 
+    // spawn-wizard-roleplay-teaching.png — Roleplay-specific teaching panel (Phase 7B3).
+    // Shows: long-context reserve, client-owned samplers/stops, chat-vs-text format owner, prompt-cache guidance.
+    await page.waitForFunction(
+        () => {
+            const el = document.getElementById('wp-roleplay-teaching');
+            return el && el.style.display === 'block';
+        },
+        { timeout: 3000 }
+    );
+    await scrollToElement('#wp-roleplay-teaching', -30);
+    await sleep(300);
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-roleplay-teaching.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-roleplay-teaching.png');
+
     // spawn-wizard-workload-tool-research.png — Tool/research agent profile (non-default).
     await page.evaluate(() => {
         const card = document.querySelector('.wp-card[data-profile-id="tool_research_agent"]');
