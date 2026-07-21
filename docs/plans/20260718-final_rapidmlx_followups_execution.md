@@ -266,58 +266,45 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 
 **NOTE:** Previous builder mislabeled Part B UI work as "Part A" (commits 3437201, cbf4476). Actual Part A (backend Rust) was never done. Phase 7 is now formally split into 7A and 7B below.
 
-#### Phase 7A — Rust backend (split into 3 parts for context management)
+#### Phase 7A — Rust backend (split into 3 parts for context management) — VERIFIED COMPLETE
 
 Phase 7A = builder brief items 1–5 from `docs/plans/20260718-final_rapidmlx_followups.md` §1850-1854.
-**NOTE:** Previous builder (task ses_07c7c780afferrWKNMedXMjHIx) started Phase 7A but blew context — it reported complete but actual wiring is likely incomplete/broken. Do not trust prior output; validate everything.
+Checkpoint: 774b611 (2026-07-21). 820 tests pass.
 
-##### Phase 7A1 — Semantic catalog + config fields
+##### Phase 7A1 — Semantic catalog + config fields — VERIFIED
 
-- **State:** Not started (prior builder's work must be re-validated)
-- **Budget:** 70k
-- **Depends on:** Phases 2–3 and 5–6
-- **Scope:** builder brief items 1-2 (catalog + wiring types)
-- **Files:** `src/inference/rapid_mlx/settings.rs` (NEW), `src/inference/rapid_mlx/mod.rs` (add Phase 7 fields to RapidMlxConfig), `src/llama/vram_estimator/execution_policy.rs` and `workload_scenarios.rs` (wire in, remove dead_code allows)
+- **State:** Verified complete
+- **Files:** settings.rs (25-setting catalog), mod.rs (Phase 7 fields), execution_policy.rs/workload_scenarios.rs wired
+- **Commit:** 774b611
 
-##### Phase 7A2 — Command builder + launch wiring
+##### Phase 7A2 — Command builder + launch wiring — VERIFIED
 
-- **State:** Not started
-- **Budget:** 70k
-- **Depends on:** 7A1 verified complete
-- **Scope:** builder brief item 2 (end-to-end wiring) + item 3 (eligibility)
-- **Files:** `src/inference/rapid_mlx/command.rs` (Phase 7 setters + build() flags), `src/inference/launch.rs` (wire config to builder), `src/inference/rapid_mlx/capabilities.rs` (register Phase 7 flags)
+- **State:** Verified complete
+- **Files:** command.rs (26 setters, all Phase 7 flags in build()), launch.rs (wire-through), capabilities.rs (register flags)
+- **Commit:** 774b611
 
-##### Phase 7A3 — API endpoint + preset migration
+##### Phase 7A3 — API endpoint + preset migration — VERIFIED
 
-- **State:** Not started
-- **Budget:** 50k
-- **Depends on:** 7A2 verified complete
-- **Scope:** builder brief items 4-5 (command preview + migrations)
-- **Files:** `src/web/api/rapid_mlx_runtime.rs` (POST /api/rapid-mlx/command-preview), `src/presets/mod.rs` (v3 migration per D32), `src/web/api/mod.rs` (route registration)
+- **State:** Verified complete
+- **Files:** rapid_mlx_runtime.rs (POST /api/rapid-mlx/command-preview with auth), presets/mod.rs (v3 migration), api/mod.rs (route)
+- **Commit:** 774b611
 
 #### Phase 7B — Shared Wizard/Editor UI, teaching, captures, tests (split into 4 parts)
 
-Phase 7B = builder brief items 6–13. **Prior UI work exists** (commits 3437201/cbf4476) but must be validated/re-wired to Phase 7A backend catalog. Each part requires screenshot validation before proceeding.
+Phase 7B = builder brief items 6–13. Each part requires screenshot validation before proceeding.
 
-##### Phase 7B1 — Wire existing controls + Web UI/sampling/prompt storage
+##### Phase 7B1 — Wire existing controls + Web UI/sampling/prompt storage — VERIFIED
 
-- **State:** Not started
-- **Budget:** 50k
-- **Depends on:** Phase 7A1-3 verified complete
-- **Scope:** items 6, 11-13 (partially built)
-- **Work:** Wire existing Phase 7 UI controls (KV dtype, turboquant, workload scenario, reasoning mode) to Phase 7A setting catalog; implement Web UI group (D26/A44), shared sampling selector, reusable prompt storage UI; capture.mjs extensions for Phase 7 advanced controls (spawn-wizard-engines advanced step, rapid-preset advanced tab); dark/light captures.
-- **Screenshot gates:** spawn-wizard-rapid-mlx-advanced-controls.png, rapid-mlx-preset-editor-advanced.png, Web UI group, sampling selector
-- **Files:** `static/js/features/spawn-wizard.js`, `static/js/features/presets.js`, `static/js/features/vram-estimate.js`, `static/index.html`, CSS, `tests/ui/capture.mjs`
+- **State:** Verified complete
+- **Commit:** 31af56b (2026-07-21)
+- **Screenshots:** spawn-wizard-rapid-mlx-advanced-controls.png, spawn-wizard-rapid-mlx-webui-group.png, rapid-mlx-preset-editor-advanced.png
 
-##### Phase 7B2 — Workload profiles + confirmation
+##### Phase 7B2 — Workload profiles + confirmation — VERIFIED
 
-- **State:** Not started
-- **Budget:** 50k
-- **Depends on:** 7B1 verified + screenshots approved
-- **Scope:** item 7
-- **Work:** Transparent workload inputs for all 5 profiles; display derived streaming/tool/format/sampling/concurrency/cache assumptions; require confirmation.
-- **Screenshot gates:** each profile display, confirmation step
-- **Files:** `static/js/features/spawn-wizard.js`, presets.js, CSS, capture.mjs
+- **State:** Verified complete
+- **Commit:** 5d00ee0 (2026-07-21)
+- **Screenshots:** spawn-wizard-workload-profiles.png, spawn-wizard-workload-roleplay.png, spawn-wizard-workload-confirmation-required.png
+- **Features:** 5 profiles (Interactive coding agent default, Tool/research, Roleplay, General chat, Deterministic batch/eval advanced); editable assumptions; confirmation checkbox required
 
 ##### Phase 7B3 — Roleplay-specific controls
 
@@ -554,7 +541,7 @@ Return a focused Builder handoff. A fresh verification pass will follow.
 
 Only the Coordinator updates this table after independent verification.
 
-**Last updated:** 2026-07-21 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-4 verified Part 5 pending; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; Phase 7 split into 7A (Rust backend, Not started) and 7B (UI, Builder active but unverified — commits 3437201/cbf4476 mislabeled UI as "Part A"); HEAD pending)
+**Last updated:** 2026-07-21 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-4 verified Part 5 pending; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; Phase 7: 7A1-3 verified (774b611, Rust backend), 7B1 verified (31af56b, UI wiring), 7B2 verified (5d00ee0, workload profiles); HEAD 5d00ee0)
 
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|
@@ -572,7 +559,7 @@ Only the Coordinator updates this table after independent verification.
 | 7A2 | Verified complete | — | PASS (command.rs validated, launch.rs validated, mutual exclusions wired, 817 tests) | HEAD pending | None |
 | 7A3 | Verified complete | — | PASS (command-preview endpoint with auth, preset migration v3, 820 tests) | 774b611 | None |
 | 7B1 | Verified complete | — | PASS (existing controls wired to catalog, Web UI group, sampling selector, prompt storage, screenshots verified) | 31af56b | None |
-| 7B2 | Not started | — | — | — | 7B1 verified + screenshots approved |
+| 7B2 | Verified complete | — | PASS (workload profiles with editable assumptions, confirmation flow, screenshots verified) | 5d00ee0 | None |
 | 7B3 | Not started | — | — | — | 7B2 verified + screenshots approved |
 | 7B4 | Not started | — | — | — | 7B3 verified + screenshots approved |
 | 8 | Not started | — | — | — | Phases 2–5 |
