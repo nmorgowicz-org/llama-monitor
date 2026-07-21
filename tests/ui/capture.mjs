@@ -23,6 +23,40 @@
  *   SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario chat
  *   SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario guided-gen
  *   SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
+ *   SCREENSHOT_PORT=8910 node tests/ui/capture.mjs --scenario rapid-mlx-live
+ *
+ * SCENARIO REQUIREMENTS SUMMARY:
+ *   | Scenario              | llama-server | rapid-mlx | remote-agent | HF internet | Fetch-mocked endpoints           |
+ *   |----------------------|--------------|-----------|--------------|-------------|----------------------------------|
+ *   | welcome               | no           | no        | no           | no          | none                             |
+ *   | free-cache            | no           | no        | no           | no          | none                             |
+ *   | chat                  | yes          | no        | no           | no          | none                             |
+ *   | guided-gen            | yes          | no        | no           | no          | none                             |
+ *   | sidebar               | no           | no        | no           | no          | none                             |
+ *   | chat-history-qa       | yes          | no        | no           | no          | none                             |
+ *   | models-v2             | no           | no        | no           | no          | /api/models, /api/hf/*, import-lab |
+ *   | rapid-preset          | no           | no        | no           | no          | none (seeded presets.json)       |
+ *   | preset-editor         | no           | no        | no           | no          | none                             |
+ *   | settings              | no           | no        | no           | no          | none                             |
+ *   | tls                   | no           | no        | no           | no          | none                             |
+ *   | filebrowser           | no           | no        | no           | no          | none                             |
+ *   | panels                | yes          | no        | no           | no          | none                             |
+ *   | dashboard             | no           | no        | yes          | no          | none                             |
+ *   | dashboard-rapid-mlx   | no           | no        | no           | no          | none (fake via renderRapidMlxCards) |
+ *   | spawn-wizard          | no           | no        | no           | no          | none                             |
+ *   | spawn-wizard-engines  | no           | no        | no           | no          | none                             |
+ *   | spawn-wizard-gif      | no           | no        | no           | no          | none                             |
+ *   | spawn-wizard-hf-dl    | no           | no        | no           | no          | simulated progress only          |
+ *   | tune-panel            | yes          | no        | no           | no          | none                             |
+ *   | benchmark-results     | yes          | no        | no           | no          | none                             |
+ *   | llama-updater         | no           | no        | no           | yes         | none (real GitHub API)           |
+ *   | sparkline             | no           | no        | yes          | no          | none                             |
+ *   | gifs                  | no           | no        | yes          | no          | none                             |
+ *   | smoke                 | no           | no        | no           | no          | none                             |
+ *   | appearance-palette    | no           | no        | no           | no          | none                             |
+ *   | navbar                | no           | no        | no           | no          | none                             |
+ *   | rapid-mlx-runtime     | no           | no        | no           | no          | /api/rapid-mlx/runtime/*         |
+ *   | rapid-mlx-live        | no           | yes       | no           | yes (HF)    | none (REAL runtime)              |
  *
  * Adding a new screenshot flow:
  *   1. Add a `scenario<Name>()` function near the other scenario functions.
@@ -162,6 +196,9 @@ Scenarios:
     gifs             Inference/GPU animated GIF capture
     smoke            Startup smoke test
 
+  Rapid-MLX Runtime (developer only, NOT CI)
+    rapid-mlx-live   Full runtime flow: spawn Qwen3-0.6B-4bit → telemetry → chat → stop
+
   Appearance
     appearance-palette Settings Appearance palette stills plus light-mode dashboard
     navbar           Nav bar close-ups: idle-dark, low-power active, idle-light (requires --close-up)
@@ -186,8 +223,9 @@ Examples:
   SCREENSHOT_PORT=8900 node tests/ui/capture.mjs --scenario tune-panel
   SCREENSHOT_PORT=8901 node tests/ui/capture.mjs --scenario llama-updater
   SCREENSHOT_PORT=8902 node tests/ui/capture.mjs --scenario chat-history-qa
-  RUNNING_PORT=8080 node tests/ui/capture.mjs --scenario dashboard
-  RUNNING_PORT=8080 node tests/ui/capture.mjs --scenario gifs --gpu-only
+   RUNNING_PORT=8080 node tests/ui/capture.mjs --scenario dashboard
+   RUNNING_PORT=8080 node tests/ui/capture.mjs --scenario gifs --gpu-only
+   SCREENSHOT_PORT=8910 node tests/ui/capture.mjs --scenario rapid-mlx-live
 
 Note: RUNNING_PORT connects to an already-running llama-monitor (e.g. your production instance
 with a remote agent reporting GPU data). No binary is spawned; no temp config is seeded.
@@ -967,6 +1005,53 @@ function framesToGif(prefix, output, fps) {
 
 function cleanupFrames() {
     fs.rmSync(FRAME_DIR, { recursive: true, force: true });
+}
+
+/**
+ * Wait for Rapid-MLX real telemetry data to populate.
+ * Polls /api/rapid-mlx/runtime/status until it returns active data with model and version.
+ * Returns the status object or throws on timeout.
+ */
+async function waitForRapidTelemetry(page, timeoutMs = 60000) {
+    const start = Date.now();
+    console.log(`[CAPTURE] waitForRapidTelemetry: waiting for real Rapid-MLX telemetry (${timeoutMs}ms)...`);
+
+    while (Date.now() - start < timeoutMs) {
+        try {
+            const status = await page.evaluate(async () => {
+                const r = await fetch('/api/rapid-mlx/runtime/status');
+                if (!r.ok) return null;
+                return r.json();
+            });
+
+            if (status?.runtime?.active?.model && status?.runtime?.active?.version) {
+                console.log('[CAPTURE] waitForRapidTelemetry: active with model:', status.runtime.active.model);
+                return status;
+            }
+        } catch {
+            // Keep polling
+        }
+        await sleep(2000);
+    }
+
+    throw new Error(`waitForRapidTelemetry: no active telemetry within ${timeoutMs}ms`);
+}
+
+/**
+ * Clean up a Rapid-MLX live test preset by ID.
+ */
+async function deleteRapidLiveTestPreset(page, presetId) {
+    try {
+        await page.evaluate(async (id) => {
+            await fetch(`/api/presets/${encodeURIComponent(id)}`, {
+                method: 'DELETE',
+                headers: { ...(window.authHeaders ? window.authHeaders() : {}) },
+            });
+        }, presetId);
+        console.log(`[CAPTURE] rapid-mlx-live: cleaned up preset ${presetId}`);
+    } catch (e) {
+        console.log(`[CAPTURE] rapid-mlx-live: preset cleanup non-fatal: ${e.message}`);
+    }
 }
 
 async function describePopover(page, toggleSelector, panelSelector) {
@@ -2143,6 +2228,8 @@ async function scenarioDashboard(ctx, options) {
 
 async function scenarioDashboardRapidMlx(ctx) {
     const { page, baseUrl } = ctx;
+    console.log('[CAPTURE] dashboard-rapid-mlx: using DETERMINISTIC FAKE telemetry via renderRapidMlxCards(). ' +
+        'This tests card rendering logic, NOT real runtime behavior.');
     await gotoApp(page, baseUrl);
     await page.evaluate(async () => {
         const { switchView } = await import('/js/features/setup-view.js');
@@ -4170,6 +4257,160 @@ async function scenarioAppearancePalette(ctx, options) {
     console.log('[CAPTURE] Scenario "appearance-palette" complete.');
 }
 
+// ── Rapid-MLX Live Runtime ────────────────────────────────────────────────────
+// Developer-only scenario requiring rapid-mlx on PATH and a cached model.
+// Does NOT run in CI. Validates end-to-end: spawn → health → telemetry → chat → stop.
+
+async function scenarioRapidMlxLive(ctx, options) {
+    const { page, baseUrl } = ctx;
+    const presetId = 'rapid-live-test';
+
+    // Navigate first so relative fetches inside evaluate resolve correctly.
+    await gotoApp(page, baseUrl);
+
+    // Enable Rapid-MLX availability flag (required for mock platform-info endpoint).
+    await page.evaluate(() => { window.__captureRapidMlxAvailable = true; });
+
+    // Skip if not macOS (Rapid-MLX local only on Apple Silicon).
+    const platform = await page.evaluate(async () => {
+        const headers = { ...(window.authHeaders ? window.authHeaders() : {}) };
+        const r = await fetch('/api/llama-binary/platform-info', { headers });
+        if (!r.ok) {
+            throw new Error('platform-info ' + r.status);
+        }
+        const d = await r.json();
+        return { os: d.os, arch: d.arch, rapidAvailable: d.rapid_mlx_local_available };
+    });
+
+    if (!platform.rapidAvailable) {
+        console.log('[CAPTURE] rapid-mlx-live: skipping — platform not supported or rapid-mlx not on PATH (os=' + platform.os + ', arch=' + platform.arch + ')');
+        return;
+    }
+
+    console.log('[CAPTURE] rapid-mlx-live: starting full runtime flow (developer-only)');
+
+    // 1. Seed a Rapid-MLX preset with Qwen3-0.6B-4bit (HuggingFaceRepo typed source).
+    await page.evaluate(async (id) => {
+        const preset = {
+            id,
+            name: 'Qwen3-0.6B-4bit · Live Test',
+            backend: 'rapid_mlx',
+            rapid_mlx: {
+                model_source: {
+                    kind: 'hugging_face_repo',
+                    repo_id: 'mlx-community/Qwen3-0.6B-4bit',
+                    revision: 'main',
+                },
+                served_model_name: 'qwen3-live',
+                host: '127.0.0.1',
+                port: 9321,
+                log_level: 'INFO',
+                workload_scenario: 'interactive_coding_agent',
+            },
+            port: 9321,
+        };
+        await fetch('/api/presets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(window.authHeaders ? window.authHeaders() : {}) },
+            body: JSON.stringify([preset]),
+        });
+    }, presetId);
+    await sleep(500);
+
+    // 2. Set as active preset.
+    await page.evaluate(async (id) => {
+        await fetch('/api/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', ...(window.authHeaders ? window.authHeaders() : {}) },
+            body: JSON.stringify({ preset_id: id }),
+        });
+        const select = document.getElementById('preset-select');
+        if (select) select.dispatchEvent(new Event('change'));
+    }, presetId);
+    await sleep(500);
+
+    // 3. Spawn via doStart().
+    await page.evaluate(async () => {
+        const { doStart } = await import('/js/features/attach-detach.js');
+        await doStart();
+    });
+
+    // 4. Wait for health endpoint (up to 120s for model download + load).
+    console.log('[CAPTURE] rapid-mlx-live: waiting for health (120s timeout)...');
+    const health = await waitForRapidTelemetry(page, 120000).catch((err) => {
+        console.log('[CAPTURE] rapid-mlx-live: health check failed:', err.message);
+        console.log('[CAPTURE] rapid-mlx-live: NOTE — this scenario requires rapid-mlx on PATH + cached mlx-community/Qwen3-0.6B-4bit model');
+        throw err;
+    });
+    console.log('[CAPTURE] rapid-mlx-live: runtime active —', JSON.stringify(health).slice(0, 400));
+
+    await sleep(2000); // Let telemetry initialize.
+
+    // 5. Capture dashboard telemetry cards with real data.
+    await switchTab(page, 'server');
+    await page.waitForSelector('#rapid-mlx-card-grid', { timeout: 15000 });
+    await sleep(3000); // Wait for real telemetry to populate.
+    await captureElementScreenshot(page, '#inference-section', 'rapid-mlx-live-dashboard-telemetry.png', { padding: 24 });
+
+    // Verify cards show real data (not loading/empty states).
+    const telemetryState = await page.evaluate(() => {
+        const runtimeCard = document.querySelector('[data-card-id="runtime"]');
+        const hasVersion = runtimeCard?.textContent?.includes('v');
+        const hasUptime = runtimeCard?.textContent?.includes('uptime') || runtimeCard?.textContent?.includes('Up for');
+        return { hasVersion, hasUptime };
+    });
+    console.log('[CAPTURE] rapid-mlx-live: telemetry state:', telemetryState);
+
+    // 6. Real chat: send prompt and wait for response.
+    await switchTab(page, 'chat');
+    await createFreshChat(page);
+    await sendChatPrompt(page, 'Say hello and stop.');
+    await waitForChatComplete(page, 60000);
+
+    await sleep(1000);
+    await captureShot(page, 'rapid-mlx-live-chat-response.png', { fullPage: true });
+
+    // Verify response is from the model (not empty/error).
+    const assistantText = await page.evaluate(() => {
+        const msg = document.querySelector('#chat-messages .chat-message-assistant .chat-msg-body');
+        return msg?.textContent?.trim()?.slice(0, 100) || null;
+    });
+    console.log('[CAPTURE] rapid-mlx-live: assistant response:', assistantText);
+    if (!assistantText || assistantText.length < 3) {
+        console.log('[CAPTURE] rapid-mlx-live: WARNING — response appears empty');
+    }
+
+    // 7. Stop the model and verify cleanup.
+    await switchTab(page, 'server');
+    await sleep(500);
+
+    // Call doStop() via JS for reliability.
+    await page.evaluate(async () => {
+        const { doStop } = await import('/js/features/attach-detach.js');
+        if (typeof doStop === 'function') await doStop();
+    });
+    await sleep(3000);
+
+    // Verify runtime is no longer active.
+    const stopped = await page.evaluate(async () => {
+        try {
+            const r = await fetch('/api/rapid-mlx/runtime/status');
+            const d = await r.json();
+            return d.runtime?.active === null || d.runtime?.status === 'stopped';
+        } catch {
+            return false;
+        }
+    });
+    console.log('[CAPTURE] rapid-mlx-live: model stopped?', stopped);
+
+    await captureShot(page, 'rapid-mlx-live-stopped.png', { fullPage: true });
+
+    // 8. Cleanup: delete the test preset.
+    await deleteRapidLiveTestPreset(page, presetId);
+
+    console.log('[CAPTURE] rapid-mlx-live: complete');
+}
+
 // ── Rapid-MLX Runtime Manager, Engine Indicator, and Settings Card ──
 // Captures the Rapid-MLX runtime management UI in Settings and the nav bar engine indicator.
 
@@ -4366,6 +4607,7 @@ const SCENARIOS = {
     'chat-history-qa': scenarioChatHistoryQA,
     // Rapid-MLX runtime and engine indicator
     'rapid-mlx-runtime': scenarioRapidMlxRuntime,
+    'rapid-mlx-live': scenarioRapidMlxLive,
     // Validation
     sparkline: scenarioSparkline,
     gifs: scenarioGifs,
