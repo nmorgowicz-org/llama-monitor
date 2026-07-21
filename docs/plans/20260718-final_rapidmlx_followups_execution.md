@@ -375,7 +375,8 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 - **Depends on:** Phases 7–9
 - **Read:** D7–D10/D16; A16/A28/A32–A33/A38/A50; Phase 10; UI matrix and screenshot rules.
 - **Primary output:** the accepted stable seven-category IA rendered from the completed control inventory, sequential captures, user visual review, and approved accessible implementation; retain the documented five-category design only as a fallback if real screenshots invalidate the accepted hierarchy.
-- **Completion proof:** parity precedes reorder; accepted direction and final visual approval are recorded; category order remains stable across backends; both backends and workload profiles pass dark/light/narrow/accessibility review.
+- **Phase 7 carryover (Web UI group wizard/editor parity):** Phase 7 exit gate found Web UI group (Auto/On/Off, config JSON, static path) UI selector only in preset editor, not wizard. Backend wired but wizard lacks frontend control. Wizard/editor parity gap must be closed as part of Phase 10 IA parity checks.
+- **Completion proof:** parity precedes reorder; accepted direction and final visual approval are recorded; category order remains stable across backends; both backends and workload profiles pass dark/light/narrow/accessibility review; Web UI group wizard/editor parity gap from Phase 7 is closed.
 
 ### Phase 11 — Diagnostics, metrics, and storage
 
