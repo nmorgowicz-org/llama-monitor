@@ -6283,6 +6283,196 @@
   }
 }
 
+/* ── MTP/concurrency teaching panel (Phase 7B4, D25) ─────────────────────── */
+
+.wp-mtp-concurrency-teaching {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: var(--radius-card);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  background: rgba(139, 92, 246, 0.03);
+}
+
+.wp-mtp-concurrency-teaching-details {
+  margin: 0;
+}
+
+.wp-mtp-concurrency-teaching-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  padding: 2px 0;
+}
+
+.wp-mtp-concurrency-teaching-summary::-webkit-details-marker {
+  display: none;
+}
+
+.wp-mtp-concurrency-teaching-summary::before {
+  content: '▸';
+  font-size: 9px;
+  color: var(--color-text-muted);
+  transition: transform 0.15s ease;
+}
+
+.wp-mtp-concurrency-teaching-details[open] .wp-mtp-concurrency-teaching-summary::before {
+  transform: rotate(90deg);
+}
+
+.wp-mtp-concurrency-teaching-icon {
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.wp-mtp-concurrency-teaching-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #a78bfa;
+}
+
+.wp-mtp-concurrency-teaching-body {
+  padding-top: 8px;
+}
+
+.wp-mtp-concurrency-teaching-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.wp-mtp-concurrency-teaching-card {
+  padding: 8px 9px;
+  border-radius: 6px;
+  border: 1px solid rgba(139, 92, 246, 0.15);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.wp-mtp-concurrency-teaching-card-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: #a78bfa;
+  margin-bottom: 4px;
+}
+
+.wp-mtp-concurrency-teaching-card-body {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+.wp-mtp-concurrency-teaching-card-body strong {
+  color: var(--color-text);
+}
+
+.wp-mtp-concurrency-teaching-card-body code {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--color-text-secondary);
+}
+
+.wp-mtp-concurrency-teaching-footer {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  font-style: italic;
+}
+
+/* Light theme */
+[data-theme="light"] .wp-mtp-concurrency-teaching {
+  border-color: rgba(139, 92, 246, 0.18);
+  background: rgba(139, 92, 246, 0.02);
+}
+
+[data-theme="light"] .wp-mtp-concurrency-teaching-title {
+  color: #7c3aed;
+}
+
+[data-theme="light"] .wp-mtp-concurrency-teaching-card {
+  border-color: rgba(139, 92, 246, 0.12);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+[data-theme="light"] .wp-mtp-concurrency-teaching-card-title {
+  color: #7c3aed;
+}
+
+/* ── Endpoint compatibility (Phase 7B4) ─────────────────────────────────── */
+
+.wp-endpoint-compat {
+  margin-top: 8px;
+}
+
+.wp-endpoint-compat-details {
+  margin: 0;
+}
+
+.wp-endpoint-compat-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font-size: 10px;
+  padding: 4px 0;
+}
+
+.wp-endpoint-compat-summary::-webkit-details-marker {
+  display: none;
+}
+
+.wp-endpoint-compat-summary::before {
+  content: '▸';
+  font-size: 8px;
+  color: var(--color-text-muted);
+  transition: transform 0.15s ease;
+}
+
+.wp-endpoint-compat-details[open] .wp-endpoint-compat-summary::before {
+  transform: rotate(90deg);
+}
+
+.wp-endpoint-compat-label {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.wp-endpoint-compat-value {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--color-text-muted);
+}
+
+.wp-endpoint-compat-body {
+  padding: 4px 0 0 14px;
+  font-size: 9px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.wp-endpoint-compat-pattern {
+  margin-bottom: 3px;
+}
+
+.wp-endpoint-compat-notes {
+  margin-top: 2px;
+}
+
+/* Responsive for MTP teaching */
+@media (max-width: 600px) {
+  .wp-mtp-concurrency-teaching-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width:700px) {
   .spawn-wizard-modal { width:calc(100vw - 16px); max-height:calc(100vh - 16px); }
   .wizard-body { padding:16px 16px 12px; }

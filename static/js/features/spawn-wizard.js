@@ -61,7 +61,7 @@ function kvBpe(quant) { return KV_BPE[quant] ?? 1.0; }
 // Five transparent profiles; each sets explicit assumptions exposed to the user.
 // No blended preset from 80/20 priority; no silent "agent optimized" defaults.
 
-const WORKLOAD_PROFILES = {
+export const WORKLOAD_PROFILES = {
   interactive_coding_agent: {
     id: 'interactive_coding_agent',
     name: 'Interactive coding agent',
@@ -85,6 +85,12 @@ const WORKLOAD_PROFILES = {
       samplingDetail: 'Backend defaults (Coding mode)',
       responseCacheEligible: false,
       responseCacheDetail: 'Off — tool calls not idempotent',
+    },
+    endpointCompatibility: {
+      primaryEndpoint: '/v1/chat/completions',
+      secondaryEndpoints: ['/v1/completions'],
+      recommendedPattern: 'Chat completions (primary for tools)',
+      notes: 'OpenCode-style agents expect structured tool-call objects in chat completions responses.',
     },
   },
   tool_research_agent: {
@@ -111,6 +117,12 @@ const WORKLOAD_PROFILES = {
       responseCacheEligible: false,
       responseCacheDetail: 'Off — tool calls not idempotent',
     },
+    endpointCompatibility: {
+      primaryEndpoint: '/v1/chat/completions',
+      secondaryEndpoints: ['/v1/messages'],
+      recommendedPattern: 'Chat completions (primary); Anthropic Messages if qualified',
+      notes: 'Hermes/OpenClaw models may use Responses or Anthropic Messages depending on runtime.',
+    },
   },
   roleplay_storytelling: {
     id: 'roleplay_storytelling',
@@ -135,6 +147,12 @@ const WORKLOAD_PROFILES = {
       samplingDetail: 'Client-owned (SillyTavern/request wins)',
       responseCacheEligible: false,
       responseCacheDetail: 'Off — creative responses not replay-safe',
+    },
+    endpointCompatibility: {
+      primaryEndpoint: '/v1/completions',
+      secondaryEndpoints: ['/v1/chat/completions'],
+      recommendedPattern: 'Text completion (client-formatted)',
+      notes: 'SillyTavern Generic/VLLM maps to /v1/completions for client-formatted prompts.',
     },
   },
   general_chat: {
@@ -161,6 +179,12 @@ const WORKLOAD_PROFILES = {
       responseCacheEligible: false,
       responseCacheDetail: 'Off — conversation not deterministic',
     },
+    endpointCompatibility: {
+      primaryEndpoint: '/v1/chat/completions',
+      secondaryEndpoints: [],
+      recommendedPattern: 'Chat completions (primary)',
+      notes: '',
+    },
   },
   deterministic_batch_eval: {
     id: 'deterministic_batch_eval',
@@ -185,6 +209,12 @@ const WORKLOAD_PROFILES = {
       samplingDetail: 'Backend defaults (Precise)',
       responseCacheEligible: true,
       responseCacheDetail: 'Eligible — no tools, deterministic',
+    },
+    endpointCompatibility: {
+      primaryEndpoint: '/v1/completions',
+      secondaryEndpoints: ['/v1/chat/completions'],
+      recommendedPattern: 'Non-streaming completion or chat completions with stream=false',
+      notes: 'Response cache eligible only if tools absent and idempotent.',
     },
   },
 };
@@ -1624,8 +1654,10 @@ function _renderWorkloadAssumptions() {
     { key: 'hotSessions', label: 'Active sessions', value: mod.has('hotSessions') ? (a.hotSessionsDetail || a.hotSessions || '1 active') : (profile.assumptions.hotSessionsDetail || profile.assumptions.hotSessions || '1 active'), hint: 'Number of long-lived conversations revisited during operation.' },
     { key: 'concurrency', label: 'Concurrency', value: `${a.concurrency || 1} active generation${(a.concurrency || 1) > 1 ? 's' : ''}${mod.has('concurrency') ? ' (modified)' : ''}`, hint: 'Simultaneous active generations. One foreground is the normal policy.' },
     { key: 'samplingOwnership', label: 'Sampling ownership', value: mod.has('samplingOwnership') ? (a.samplingDetail || (a.samplingOwnership === 'client' ? 'Client-owned' : 'Backend defaults')) : (profile.assumptions.samplingDetail || (a.samplingOwnership === 'client' ? 'Client-owned' : 'Backend defaults')), hint: 'Who controls sampling parameters. Explicit client values always override.' },
-    { key: 'responseCacheEligible', label: 'Response cache', value: mod.has('responseCacheEligible') ? (a.responseCacheDetail || (a.responseCacheEligible ? 'Eligible' : 'Off')) : (profile.assumptions.responseCacheDetail || (a.responseCacheEligible ? 'Eligible' : 'Off')), hint: 'Eligibility for exact-response caching. Off by default for tool-enabled and non-deterministic workloads.' },
-   ];
+     { key: 'responseCacheEligible', label: 'Response cache', value: mod.has('responseCacheEligible') ? (a.responseCacheDetail || (a.responseCacheEligible ? 'Eligible' : 'Off')) : (profile.assumptions.responseCacheDetail || (a.responseCacheEligible ? 'Eligible' : 'Off')), hint: 'Eligibility for exact-response caching. Off by default for tool-enabled and non-deterministic workloads.' },
+    ];
+
+  const ec = profile.endpointCompatibility || { primaryEndpoint: '', secondaryEndpoints: [], recommendedPattern: '', notes: '' };
 
   const assumptionsHtml = `
     <div class="wp-assumptions-header">
@@ -1644,10 +1676,22 @@ function _renderWorkloadAssumptions() {
         </div>
       `).join('')}
     </div>
-    <div class="wp-assumptions-footer">
-      <div class="field-hint">Review each assumption and edit if your actual usage differs. Changes from the profile default are marked.</div>
-    </div>
-  `;
+     <div class="wp-assumptions-footer">
+       <div class="field-hint">Review each assumption and edit if your actual usage differs. Changes from the profile default are marked.</div>
+     </div>
+     <div class="wp-endpoint-compat">
+       <details class="wp-endpoint-compat-details">
+         <summary class="wp-endpoint-compat-summary">
+           <span class="wp-endpoint-compat-label">Endpoint compatibility</span>
+           <span class="wp-endpoint-compat-value">${ec.primaryEndpoint}${ec.secondaryEndpoints.length > 0 ? ' + ' + ec.secondaryEndpoints.join(', ') : ''}</span>
+         </summary>
+         <div class="wp-endpoint-compat-body">
+           <div class="wp-endpoint-compat-pattern"><strong>Recommended:</strong> ${ec.recommendedPattern}</div>
+           ${ec.notes ? `<div class="wp-endpoint-compat-notes"><strong>Note:</strong> ${ec.notes}</div>` : ''}
+         </div>
+       </details>
+     </div>
+   `;
    // eslint-disable-next-line no-unsanitized/property -- Trusted source: WORKLOAD_PROFILES constant, no user input
    panel.innerHTML = assumptionsHtml;
 
@@ -1664,6 +1708,9 @@ function _renderWorkloadAssumptions() {
 
   // Render roleplay-specific teaching when that profile is selected (Phase 7B3)
   _renderRoleplayTeaching(wp.id);
+
+  // Render MTP/concurrency teaching for Rapid-MLX (Phase 7B4, D25)
+  _renderMtpConcurrencyTeaching(wizardState.engine.selected);
 }
 
 // Render roleplay-specific teaching panel (Phase 7B3, D21).
@@ -1675,9 +1722,11 @@ export function _renderRoleplayTeaching(profileId) {
 
   if (profileId !== 'roleplay_storytelling') {
     container.style.display = 'none';
+    container.setAttribute('hidden', '');
     return;
   }
 
+  container.removeAttribute('hidden');
   container.style.display = 'block';
 
   const teachingHtml = `
@@ -1720,6 +1769,64 @@ export function _renderRoleplayTeaching(profileId) {
     <div class="wp-roleplay-teaching-footer">
       This guidance explains why the Roleplay profile sets the assumptions shown above. It does not assume a specific client — the same principles apply whether you use SillyTavern, KoboldAI, a custom frontend, or direct API calls.
     </div>
+  `;
+  container.innerHTML = teachingHtml;
+}
+
+// Render MTP/concurrency teaching panel (Phase 7B4, D25).
+// Explains: MTP definition, max_num_seqs vs max_concurrent_requests, pool policy, llama.cpp MTP.
+// Claims from audited D25 source; only shown for Rapid-MLX.
+export function _renderMtpConcurrencyTeaching(engine) {
+  const container = document.getElementById('wp-mtp-concurrency-teaching');
+  if (!container) return;
+
+  if (engine !== 'rapid_mlx') {
+    container.style.display = 'none';
+    container.setAttribute('hidden', '');
+    return;
+  }
+
+  container.removeAttribute('hidden');
+  container.style.display = 'block';
+
+  const teachingHtml = `
+    <details class="wp-mtp-concurrency-teaching-details">
+      <summary class="wp-mtp-concurrency-teaching-summary">
+        <span class="wp-mtp-concurrency-teaching-icon" aria-hidden="true">⚡</span>
+        <span class="wp-mtp-concurrency-teaching-title">Concurrency and speculative decoding</span>
+      </summary>
+      <div class="wp-mtp-concurrency-teaching-body">
+        <div class="wp-mtp-concurrency-teaching-grid">
+          <div class="wp-mtp-concurrency-teaching-card" data-mtp-topic="speculative-decoding">
+            <div class="wp-mtp-concurrency-teaching-card-title">Speculative decoding (MTP)</div>
+            <div class="wp-mtp-concurrency-teaching-card-body">
+              MTP (multi-token prediction) speculative decoding has the runtime pre-check a cheap draft before committing tokens. It helps for high-token single-stream generation; it does not help for tool-heavy workflows. The MTP weight source is loaded once per process and remains additive even when a request falls back to autoregressive decoding. Capability detection checks both <code>serve --help</code> AND runtime qualified features, not just flag presence.
+            </div>
+          </div>
+          <div class="wp-mtp-concurrency-teaching-card" data-mtp-topic="concurrency-flags">
+            <div class="wp-mtp-concurrency-teaching-card-title">max_num_seqs vs max_concurrent_requests</div>
+            <div class="wp-mtp-concurrency-teaching-card-body">
+              <strong>max_num_seqs</strong> is the maximum number of concurrent active generation sequences. For a single-user workflow, this is normally 1. <strong>max_concurrent_requests</strong> is the queue capacity, not the number of simultaneous generations. Raising max_concurrent_requests without raising max_num_seqs only affects how many requests can wait in line.
+            </div>
+          </div>
+          <div class="wp-mtp-concurrency-teaching-card" data-mtp-topic="pool-policy">
+            <div class="wp-mtp-concurrency-teaching-card-title">Active generations pool policy</div>
+            <div class="wp-mtp-concurrency-teaching-card-body">
+              <strong>Auto default:</strong> one active generation for near-capacity model/context fit. <strong>Allow overlap:</strong> preserves admission capacity (initially two, Custom only with evidence). The memory-first constraint is the primary reason for the default — a second admitted long request can grow another active KV/state working set and exceed headroom. MTP is not the only reason. The handoff between MTP and plain decode is not called lossless at the audited commit; a bounded duplicate/stale-token risk exists in some transitions.
+            </div>
+          </div>
+          <div class="wp-mtp-concurrency-teaching-card" data-mtp-topic="llama-cpp-mtp">
+            <div class="wp-mtp-concurrency-teaching-card-title">llama.cpp MTP mode</div>
+            <div class="wp-mtp-concurrency-teaching-card-body">
+              For llama.cpp, explicit single-stream mode locks <code>--parallel 1</code>. Multi-agent mode disables MTP. Multi-sequence MTP remains Experimental.
+            </div>
+          </div>
+        </div>
+        <div class="wp-mtp-concurrency-teaching-footer">
+          This guidance explains concurrency and MTP behavior under the audited runtime. Exact MTP eligibility, weight source, and handoff behavior are verified at launch time.
+        </div>
+      </div>
+    </details>
   `;
   container.innerHTML = teachingHtml;
 }

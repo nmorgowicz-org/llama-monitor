@@ -123,6 +123,17 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
                 host: '127.0.0.1',
                 port: 9123,
                 api_key: 'rapid-secret',
+                workload_scenario: 'interactive_coding_agent',
+                workload_assumptions: {
+                    streaming: true,
+                    tool_use: true,
+                    format_owner: 'backend',
+                    stable_prefix_likelihood: 'high',
+                    hot_sessions: '1_active',
+                    concurrency: 1,
+                    sampling_ownership: 'backend',
+                    response_cache_eligible: false,
+                },
             },
         });
         expect(payloads.spawn).not.toHaveProperty('gpu_layers');
@@ -1201,5 +1212,214 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         expect(result.noSillyTavernServerFact).toBe(true);
         expect(result.mentionsGenericClients).toBe(true);
         expect(result.mentionsClientValuesWin).toBe(true);
+    });
+
+    test('@in-memory-test MTP teaching panel renders when Rapid-MLX selected', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        const result = await page.evaluate(async () => {
+            const { _renderMtpConcurrencyTeaching } = await import('/js/features/spawn-wizard.js');
+
+            const existing = document.getElementById('wp-mtp-concurrency-teaching');
+            if (existing) existing.remove();
+
+            const container = document.createElement('div');
+            container.id = 'wp-mtp-concurrency-teaching';
+            document.body.appendChild(container);
+
+            _renderMtpConcurrencyTeaching('rapid_mlx');
+
+            const display = container.style.display;
+            const hasContent = container.innerHTML.length > 0;
+            const hasTitle = container.querySelector('.wp-mtp-concurrency-teaching-title') !== null;
+
+            return { display, hasContent, hasTitle };
+        });
+
+        expect(result.display).toBe('block');
+        expect(result.hasContent).toBe(true);
+        expect(result.hasTitle).toBe(true);
+    });
+
+    test('@in-memory-test MTP teaching hidden for llama.cpp', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        const result = await page.evaluate(async () => {
+            const { _renderMtpConcurrencyTeaching } = await import('/js/features/spawn-wizard.js');
+
+            const existing = document.getElementById('wp-mtp-concurrency-teaching');
+            if (existing) existing.remove();
+
+            const container = document.createElement('div');
+            container.id = 'wp-mtp-concurrency-teaching';
+            container.style.display = 'block';
+            document.body.appendChild(container);
+
+            _renderMtpConcurrencyTeaching('llama_cpp');
+
+            return container.style.display;
+        });
+
+        expect(result).toBe('none');
+    });
+
+    test('@in-memory-test MTP teaching explains all four required areas', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        const result = await page.evaluate(async () => {
+            const { _renderMtpConcurrencyTeaching } = await import('/js/features/spawn-wizard.js');
+
+            const existing = document.getElementById('wp-mtp-concurrency-teaching');
+            if (existing) existing.remove();
+
+            const container = document.createElement('div');
+            container.id = 'wp-mtp-concurrency-teaching';
+            document.body.appendChild(container);
+
+            _renderMtpConcurrencyTeaching('rapid_mlx');
+
+            const hasSpeculativeDecoding = container.querySelector('[data-mtp-topic="speculative-decoding"]') !== null;
+            const hasConcurrencyFlags = container.querySelector('[data-mtp-topic="concurrency-flags"]') !== null;
+            const hasPoolPolicy = container.querySelector('[data-mtp-topic="pool-policy"]') !== null;
+            const hasLlamaCppMtp = container.querySelector('[data-mtp-topic="llama-cpp-mtp"]') !== null;
+            const text = container.textContent.toLowerCase();
+
+            // D25: MTP weight loaded once per process
+            const mentionsWeightOnce = text.includes('loaded once');
+            // D25: max_num_seqs is active generation sequences, max_concurrent_requests is queue capacity
+            const distinguishesFlags = text.includes('max_num_seqs') && text.includes('max_concurrent_requests') && text.includes('queue');
+            // D25: memory-first constraint is primary reason
+            const mentionsMemoryFirst = text.includes('memory-first') || text.includes('memory');
+            // D25: handoff not called lossless
+            const doesNotCallLossless = !text.includes('lossless') || text.includes('not called lossless') || text.includes('is not called lossless');
+            // D25: --parallel 1 for llama.cpp
+            const mentionsParallelOne = text.includes('--parallel 1');
+
+            return {
+                hasSpeculativeDecoding,
+                hasConcurrencyFlags,
+                hasPoolPolicy,
+                hasLlamaCppMtp,
+                mentionsWeightOnce,
+                distinguishesFlags,
+                mentionsMemoryFirst,
+                doesNotCallLossless,
+                mentionsParallelOne,
+            };
+        });
+
+        expect(result.hasSpeculativeDecoding).toBe(true);
+        expect(result.hasConcurrencyFlags).toBe(true);
+        expect(result.hasPoolPolicy).toBe(true);
+        expect(result.hasLlamaCppMtp).toBe(true);
+        expect(result.mentionsWeightOnce).toBe(true);
+        expect(result.distinguishesFlags).toBe(true);
+        expect(result.mentionsMemoryFirst).toBe(true);
+        expect(result.doesNotCallLossless).toBe(true);
+        expect(result.mentionsParallelOne).toBe(true);
+    });
+
+    test('@in-memory-test endpoint compatibility renders per profile with correct values', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        const result = await page.evaluate(async () => {
+            const { WORKLOAD_PROFILES } = await import('/js/features/spawn-wizard.js');
+            if (!WORKLOAD_PROFILES) {
+                return { error: 'WORKLOAD_PROFILES is undefined', profileCount: 0, failingProfiles: [], allHaveEndpointCompat: false };
+            }
+            const profiles = Object.values(WORKLOAD_PROFILES);
+            const failingProfiles = profiles.filter(p => {
+                return !p.endpointCompatibility ||
+                    !p.endpointCompatibility.primaryEndpoint ||
+                    !Array.isArray(p.endpointCompatibility.secondaryEndpoints) ||
+                    typeof p.endpointCompatibility.recommendedPattern !== 'string';
+            }).map(p => ({ id: p.id, ec: p.endpointCompatibility }));
+            const allHaveEndpointCompat = failingProfiles.length === 0;
+
+            return {
+                profileCount: profiles.length,
+                allHaveEndpointCompat,
+                failingProfiles,
+                hasInteractive: !!WORKLOAD_PROFILES.interactive_coding_agent,
+                hasRoleplay: !!WORKLOAD_PROFILES.roleplay_storytelling,
+            };
+        });
+
+        expect(result.error).toBeUndefined();
+        expect(result.profileCount).toBe(5);
+        expect(result.hasInteractive).toBe(true);
+        expect(result.hasRoleplay).toBe(true);
+        expect(result.failingProfiles).toEqual([]);
+        expect(result.allHaveEndpointCompat).toBe(true);
+    });
+
+    test('@in-memory-test endpoint compatibility matches spec and not generic OpenAI-compatible', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        const result = await page.evaluate(async () => {
+            const { WORKLOAD_PROFILES } = await import('/js/features/spawn-wizard.js');
+
+            const interactive = WORKLOAD_PROFILES.interactive_coding_agent?.endpointCompatibility;
+            const roleplay = WORKLOAD_PROFILES.roleplay_storytelling?.endpointCompatibility;
+            const deterministic = WORKLOAD_PROFILES.deterministic_batch_eval?.endpointCompatibility;
+            const toolResearch = WORKLOAD_PROFILES.tool_research_agent?.endpointCompatibility;
+            const generalChat = WORKLOAD_PROFILES.general_chat?.endpointCompatibility;
+
+            // Interactive coding agent: /v1/chat/completions primary, /v1/completions fallback, mentions OpenCode
+            const interactiveCorrect =
+                interactive?.primaryEndpoint === '/v1/chat/completions' &&
+                interactive?.secondaryEndpoints?.includes('/v1/completions') &&
+                interactive?.notes?.toLowerCase().includes('opencode');
+
+            // Roleplay: /v1/completions primary (client-formatted), /v1/chat/completions secondary, mentions SillyTavern Generic/VLLM
+            const roleplayCorrect =
+                roleplay?.primaryEndpoint === '/v1/completions' &&
+                roleplay?.secondaryEndpoints?.includes('/v1/chat/completions') &&
+                roleplay?.notes?.toLowerCase().includes('sillytavern');
+
+            // Deterministic batch: /v1/completions primary, mentions response cache
+            const deterministicCorrect =
+                deterministic?.primaryEndpoint === '/v1/completions' &&
+                deterministic?.notes?.toLowerCase().includes('cache');
+
+            // Tool/research: /v1/chat/completions primary, /v1/messages secondary, mentions Hermes/OpenClaw
+            const toolResearchCorrect =
+                toolResearch?.primaryEndpoint === '/v1/chat/completions' &&
+                toolResearch?.secondaryEndpoints?.includes('/v1/messages') &&
+                toolResearch?.notes?.toLowerCase().includes('hermes');
+
+            // General chat: /v1/chat/completions primary only
+            const generalChatCorrect =
+                generalChat?.primaryEndpoint === '/v1/chat/completions';
+
+            // None should use generic "OpenAI-compatible" as sole description
+            const allProfiles = Object.values(WORKLOAD_PROFILES);
+            const noGenericOpenAI = allProfiles.every(p => {
+                const ec = p.endpointCompatibility || {};
+                const text = (ec.notes || '') + ' ' + (ec.recommendedPattern || '');
+                return !text.toLowerCase().includes('openai-compatible') || text.toLowerCase().includes('/v1/');
+            });
+
+            return {
+                interactiveCorrect,
+                roleplayCorrect,
+                deterministicCorrect,
+                toolResearchCorrect,
+                generalChatCorrect,
+                noGenericOpenAI,
+            };
+        });
+
+        expect(result.interactiveCorrect).toBe(true);
+        expect(result.roleplayCorrect).toBe(true);
+        expect(result.deterministicCorrect).toBe(true);
+        expect(result.toolResearchCorrect).toBe(true);
+        expect(result.generalChatCorrect).toBe(true);
+        expect(result.noGenericOpenAI).toBe(true);
     });
 });

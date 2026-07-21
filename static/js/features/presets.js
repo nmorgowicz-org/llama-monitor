@@ -17,6 +17,7 @@ import {
 } from './chat-template-registry.js';
 import { hfSearch, hfCreateFormatToggle } from './hf-browse.js';
 import { buildEstimateBody } from './vram-estimate.js';
+import { _renderMtpConcurrencyTeaching } from './spawn-wizard.js';
 
 let newPresetSeed = null;
 
@@ -1775,6 +1776,17 @@ function _configureBackendPresetEditor(preset) {
     });
     const prefixCacheRow = document.getElementById('pe-row-rapid-prefix-cache');
     if (prefixCacheRow) prefixCacheRow.style.display = isRapid ? '' : 'none';
+
+    // Phase 7B4: Toggle MTP/concurrency teaching for Rapid-MLX only (D25).
+    const mtpTeaching = document.getElementById('pe-mtp-concurrency-teaching');
+    if (mtpTeaching) {
+        if (isRapid) {
+            mtpTeaching.style.display = '';
+            _renderMtpConcurrencyTeaching('rapid_mlx');
+        } else {
+            mtpTeaching.style.display = 'none';
+        }
+    }
 
     const modelLabel = document.querySelector('label[for="modal-model-path"]');
     const modelInput = document.getElementById('modal-model-path');

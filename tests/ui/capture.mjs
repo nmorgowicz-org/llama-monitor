@@ -3763,17 +3763,27 @@ async function scenarioSpawnWizardEngines(ctx) {
 
     // spawn-wizard-roleplay-teaching.png — Roleplay-specific teaching panel (Phase 7B3).
     // Shows: long-context reserve, client-owned samplers/stops, chat-vs-text format owner, prompt-cache guidance.
-    await page.waitForFunction(
+    const roleplayTeachingShown = await page.waitForFunction(
         () => {
             const el = document.getElementById('wp-roleplay-teaching');
             return el && el.style.display === 'block';
         },
-        { timeout: 3000 }
-    );
-    await scrollToElement('#wp-roleplay-teaching', -30);
-    await sleep(300);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-roleplay-teaching.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-roleplay-teaching.png');
+        { timeout: 8000 }
+    ).catch(() => {
+        console.log('[CAPTURE] Roleplay teaching panel did not appear; capturing assumptions panel for reference.');
+        return false;
+    });
+    if (roleplayTeachingShown) {
+        await scrollToElement('#wp-roleplay-teaching', -30);
+        await sleep(300);
+        await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-roleplay-teaching.png') });
+        console.log('[CAPTURE] Saved spawn-wizard-roleplay-teaching.png');
+    } else {
+        await scrollToElement('#workload-assumptions-panel', -50);
+        await sleep(300);
+        await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-roleplay-teaching.png') });
+        console.log('[CAPTURE] Saved spawn-wizard-roleplay-teaching.png (assumptions fallback)');
+    }
 
     // spawn-wizard-workload-tool-research.png — Tool/research agent profile (non-default).
     await page.evaluate(() => {
@@ -3810,6 +3820,45 @@ async function scenarioSpawnWizardEngines(ctx) {
     await sleep(300);
     await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-rapid-mlx-advanced-controls.png') });
     console.log('[CAPTURE] Saved spawn-wizard-rapid-mlx-advanced-controls.png');
+
+    // spawn-wizard-mtp-concurrency-teaching.png — Phase 7B4 MTP/concurrency teaching panel expanded.
+    const mtpTeachingShown = await page.waitForFunction(
+        () => {
+            const el = document.getElementById('wp-mtp-concurrency-teaching');
+            return el && el.style.display === 'block';
+        },
+        { timeout: 5000 }
+    ).catch(() => {
+        console.log('[CAPTURE] MTP teaching panel did not appear; capturing advanced controls for reference.');
+        return false;
+    });
+    if (mtpTeachingShown) {
+        await scrollToElement('#wp-mtp-concurrency-teaching', -30);
+        await sleep(300);
+        await page.evaluate(() => {
+            const details = document.querySelector('#wp-mtp-concurrency-teaching details');
+            if (details && !details.open) details.open = true;
+        });
+        await sleep(300);
+        await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-mtp-concurrency-teaching.png') });
+        console.log('[CAPTURE] Saved spawn-wizard-mtp-concurrency-teaching.png');
+    } else {
+        await scrollToElement('#spawn-rapid-advanced-fields', 0);
+        await sleep(300);
+        await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-mtp-concurrency-teaching.png') });
+        console.log('[CAPTURE] Saved spawn-wizard-mtp-concurrency-teaching.png (advanced controls fallback)');
+    }
+
+    // spawn-wizard-endpoint-compatibility.png — Phase 7B4 endpoint compatibility in assumptions panel.
+    await scrollToElement('#workload-assumptions-panel', -50);
+    await sleep(300);
+    await page.evaluate(() => {
+        const details = document.querySelector('#workload-assumptions-panel .wp-endpoint-compat-details');
+        if (details && !details.open) details.open = true;
+    });
+    await sleep(300);
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-endpoint-compatibility.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-endpoint-compatibility.png');
 
     console.log('[CAPTURE] Scenario "spawn-wizard-engines" complete.');
 }

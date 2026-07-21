@@ -2320,7 +2320,7 @@
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-row,
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-toggles,
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .preset-memory-warning,
-#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] > .pe-section-body > :not(.pe-row:has(#modal-port)):not(#pe-row-rapid-reasoning):not(#pe-row-rapid-prefix-cache):not(#pe-row-rapid-advanced):not(#pe-row-rapid-workload):not(#pe-row-rapid-webui):not(#pe-row-rapid-webui-expert),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] > .pe-section-body > :not(.pe-row:has(#modal-port)):not(#pe-row-rapid-reasoning):not(#pe-row-rapid-prefix-cache):not(#pe-row-rapid-advanced):not(#pe-row-rapid-workload):not(#pe-row-rapid-webui):not(#pe-row-rapid-webui-expert):not(#pe-mtp-concurrency-teaching),
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] .pe-field:not(:has(#modal-port)):not(:has(#modal-rapid-enable-thinking)):not(:has(#modal-rapid-reasoning-effort)):not(:has(#modal-rapid-prefix-cache-enabled)):not(:has(#modal-rapid-kv-cache-dtype)):not(:has(#modal-rapid-turboquant-mode)):not(:has(#modal-rapid-workload-scenario)):not(:has(#modal-rapid-reasoning-mode)):not(:has(#modal-rapid-sampling-mode)):not(:has(#modal-rapid-webui-availability)):not(:has(#modal-rapid-webui-config-json)):not(:has(#modal-rapid-webui-static-path)),
 #preset-modal.preset-editor--rapid-mlx #preset-browse-model-btn,
 #preset-modal.preset-editor--rapid-mlx #preset-vram-strip {
@@ -2330,6 +2330,17 @@
 @keyframes pe-section-enter {
   0%   { opacity: 0; transform: translateX(8px); }
   100% { opacity: 1; transform: translateX(0); }
+}
+
+/* ── Preset editor MTP/concurrency teaching (Phase 7B4) ────────────────── */
+
+#pe-mtp-concurrency-teaching {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-card);
+  border: 1px solid rgba(139, 92, 246, 0.18);
+  background: rgba(139, 92, 246, 0.025);
+  font-size: 10px;
 }
 
 .pe-section-header {

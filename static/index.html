@@ -3244,8 +3244,11 @@
                                        </div>
                                    </div>
                                </div>
-                               <!-- Web UI group (D26/A44) — Advanced only -->
-                               <div class="pe-row pe-row-rapid-webui" id="pe-row-rapid-webui" style="display:none;">
+                                <!-- MTP/concurrency teaching (Phase 7B4, D25) — Rapid-MLX only -->
+                                <div id="pe-mtp-concurrency-teaching" class="pe-mtp-concurrency-teaching" style="display:none;"></div>
+
+                                <!-- Web UI group (D26/A44) — Advanced only -->
+                                <div class="pe-row pe-row-rapid-webui" id="pe-row-rapid-webui" style="display:none;">
                                    <div class="pe-field">
                                        <label class="pe-label" for="modal-rapid-webui-availability" title="Controls whether the bundled Web UI is served. Auto follows the upstream build default.">Web UI Availability</label>
                                        <select class="pe-select" id="modal-rapid-webui-availability">
@@ -3741,10 +3744,13 @@
                                   <!-- Assumptions panel (progressive disclosure) -->
                                   <div id="workload-assumptions-panel" class="wp-assumptions-panel"></div>
 
-                                  <!-- Roleplay-specific teaching panel (Phase 7B3, D21) -->
-                                  <div id="wp-roleplay-teaching" class="wp-roleplay-teaching" hidden></div>
+                                    <!-- Roleplay-specific teaching panel (Phase 7B3, D21) -->
+                                    <div id="wp-roleplay-teaching" class="wp-roleplay-teaching" hidden></div>
 
-                                  <!-- Confirmation requirement -->
+                                    <!-- MTP/concurrency teaching panel (Phase 7B4, D25) -->
+                                    <div id="wp-mtp-concurrency-teaching" class="wp-mtp-concurrency-teaching" hidden></div>
+
+                                    <!-- Confirmation requirement -->
                                  <div id="workload-confirmation-area" class="wp-confirmation-area"></div>
                              </div>
                              <!-- Hidden select for backward compat with existing bindings -->
