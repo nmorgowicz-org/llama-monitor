@@ -3754,18 +3754,20 @@
                                     </select>
                                     <div class="field-hint">Retained-prefix compression only. Does not save active KV or weights. Coding agents benefit most; Roleplay defaults to Standard.</div>
                                 </div>
-                                <!-- Workload scenario (Phase 7) -->
-                                <div class="hardware-field">
-                                    <label for="spawn-workload-scenario" title="Workload scenario tunes KV cache precision and context defaults for your use case.">Workload scenario</label>
-                                    <select id="spawn-workload-scenario">
-                                        <option value="interactive_chat">Interactive Chat</option>
-                                        <option value="coding_agent">Coding Agent</option>
-                                        <option value="tool_research_agent">Tool Research Agent</option>
-                                        <option value="batch_eval">Batch Evaluation</option>
-                                        <option value="roleplay">Roleplay</option>
-                                    </select>
-                                    <div class="field-hint">Select the workload pattern that best matches your use case. Adjusts VRAM defaults automatically.</div>
-                                </div>
+                                 <!-- Workload profiles (Phase 7B2) -->
+                                 <div class="hardware-field workload-profiles-section">
+                                     <label title="Choose the workload profile that best matches your usage. Each profile sets explicit assumptions about streaming, tools, prompt ownership, caching, and more.">Workload profile</label>
+                                     <div id="workload-profile-cards" class="wp-cards-grid"></div>
+                                     <div class="field-hint">Select a profile to see its derived assumptions. Review and confirm before proceeding.</div>
+
+                                     <!-- Assumptions panel (progressive disclosure) -->
+                                     <div id="workload-assumptions-panel" class="wp-assumptions-panel"></div>
+
+                                     <!-- Confirmation requirement -->
+                                     <div id="workload-confirmation-area" class="wp-confirmation-area"></div>
+                                 </div>
+                                 <!-- Hidden select for backward compat with existing bindings -->
+                                 <select id="spawn-workload-scenario" style="display:none;"></select>
                                 <!-- Sampling mode (D27) -->
                                 <div class="hardware-field">
                                     <label for="spawn-sampling-mode" title="Sampling mode sets server-level defaults for temperature, top_p, etc. Explicit client values always override.">Sampling mode</label>

@@ -57,6 +57,147 @@ function kvBpe(quant) { return KV_BPE[quant] ?? 1.0; }
 // The spawn wizard uses scheduleEstimate from vram-estimate.js to call
 // /api/vram-estimate as the single source of truth. No local VRAM formulas.
 
+// ── Workload profiles (D16) ──────────────────────────────────────────────────
+// Five transparent profiles; each sets explicit assumptions exposed to the user.
+// No blended preset from 80/20 priority; no silent "agent optimized" defaults.
+
+const WORKLOAD_PROFILES = {
+  interactive_coding_agent: {
+    id: 'interactive_coding_agent',
+    name: 'Interactive coding agent',
+    description: 'Agentic coding workflows with MCP tools, file operations, and iterative refinement.',
+    priority: 80,
+    isDefault: true,
+    isAdvanced: false,
+    assumptions: {
+      streaming: true,
+      toolUse: true,
+      toolUseDetail: 'MCP calls enabled',
+      formatOwner: 'backend',
+      formatOwnerDetail: 'Backend template (tool/call structure)',
+      stablePrefixLikelihood: 'high',
+      stablePrefixDetail: 'Agent revisits exact prefixes across turns',
+      hotSessions: '1_active',
+      hotSessionsDetail: 'One active foreground session',
+      concurrency: 1,
+      concurrencyDetail: 'One active generation (foreground)',
+      samplingOwnership: 'backend',
+      samplingDetail: 'Backend defaults (Coding mode)',
+      responseCacheEligible: false,
+      responseCacheDetail: 'Off — tool calls not idempotent',
+    },
+  },
+  tool_research_agent: {
+    id: 'tool_research_agent',
+    name: 'Tool/research agent',
+    description: 'Search, retrieval, and research tasks using external tools and repeated queries.',
+    priority: 20,
+    isDefault: false,
+    isAdvanced: false,
+    assumptions: {
+      streaming: true,
+      toolUse: true,
+      toolUseDetail: 'MCP/search enabled',
+      formatOwner: 'backend',
+      formatOwnerDetail: 'Backend template (query/tool structure)',
+      stablePrefixLikelihood: 'high',
+      stablePrefixDetail: 'Repeated queries reuse identical prefixes',
+      hotSessions: '1_active',
+      hotSessionsDetail: 'One active foreground session',
+      concurrency: 1,
+      concurrencyDetail: 'One active generation (foreground)',
+      samplingOwnership: 'backend',
+      samplingDetail: 'Backend defaults (Coding mode)',
+      responseCacheEligible: false,
+      responseCacheDetail: 'Off — tool calls not idempotent',
+    },
+  },
+  roleplay_storytelling: {
+    id: 'roleplay_storytelling',
+    name: 'Roleplay/storytelling',
+    description: 'Creative conversations, character play, and narrative generation via SillyTavern or custom clients.',
+    priority: null,
+    isDefault: false,
+    isAdvanced: false,
+    assumptions: {
+      streaming: true,
+      toolUse: false,
+      toolUseDetail: 'No tool calls',
+      formatOwner: 'client',
+      formatOwnerDetail: 'Client owns (SillyTavern default)',
+      stablePrefixLikelihood: 'low',
+      stablePrefixDetail: 'One-shot/story diverges; limited prefix reuse',
+      hotSessions: '1_active',
+      hotSessionsDetail: 'One active foreground session',
+      concurrency: 1,
+      concurrencyDetail: 'One active generation (foreground)',
+      samplingOwnership: 'client',
+      samplingDetail: 'Client-owned (SillyTavern/request wins)',
+      responseCacheEligible: false,
+      responseCacheDetail: 'Off — creative responses not replay-safe',
+    },
+  },
+  general_chat: {
+    id: 'general_chat',
+    name: 'General chat',
+    description: 'Standard conversational use with a chat client. Supported but secondary.',
+    priority: null,
+    isDefault: false,
+    isAdvanced: false,
+    assumptions: {
+      streaming: true,
+      toolUse: false,
+      toolUseDetail: 'No tool calls',
+      formatOwner: 'backend',
+      formatOwnerDetail: 'Backend template (standard instruct)',
+      stablePrefixLikelihood: 'medium',
+      stablePrefixDetail: 'Some prefix reuse across conversations',
+      hotSessions: '1_active',
+      hotSessionsDetail: 'One active foreground session',
+      concurrency: 1,
+      concurrencyDetail: 'One active generation (foreground)',
+      samplingOwnership: 'backend',
+      samplingDetail: 'Backend defaults (General)',
+      responseCacheEligible: false,
+      responseCacheDetail: 'Off — conversation not deterministic',
+    },
+  },
+  deterministic_batch_eval: {
+    id: 'deterministic_batch_eval',
+    name: 'Deterministic batch/eval API',
+    description: 'Non-streaming, deterministic evaluation endpoints. Tools absent or replay-safe.',
+    priority: null,
+    isDefault: false,
+    isAdvanced: true,
+    assumptions: {
+      streaming: false,
+      toolUse: false,
+      toolUseDetail: 'No tool calls',
+      formatOwner: 'backend',
+      formatOwnerDetail: 'Backend template (deterministic)',
+      stablePrefixLikelihood: 'high',
+      stablePrefixDetail: 'Identical prompts repeated across runs',
+      hotSessions: 'batch',
+      hotSessionsDetail: 'Batch processing (not interactive)',
+      concurrency: 1,
+      concurrencyDetail: 'One active generation per batch',
+      samplingOwnership: 'backend',
+      samplingDetail: 'Backend defaults (Precise)',
+      responseCacheEligible: true,
+      responseCacheDetail: 'Eligible — no tools, deterministic',
+    },
+  },
+};
+
+// Map old workloadScenario string values to new profile IDs for backward compat.
+const WORKLOAD_SCENARIO_TO_PROFILE = {
+  interactive_chat: 'interactive_coding_agent',
+  coding_agent: 'interactive_coding_agent',
+  tool_research_agent: 'tool_research_agent',
+  batch_eval: 'deterministic_batch_eval',
+  roleplay: 'roleplay_storytelling',
+};
+
 function formatCtx(n) {
   if (!n) return '—';
   if (n >= 1_000_000) return (n / 1e6).toFixed(1) + 'M';
@@ -239,7 +380,22 @@ export const wizardState = {
     reasoningBudgetMessage: null,
     kvCacheDtype: 'int4',
     turboquantMode: 'auto',
-    workloadScenario: 'interactive_chat',
+    workloadScenario: 'interactive_coding_agent',
+    workloadProfile: {
+      id: 'interactive_coding_agent',
+      assumptions: {
+        streaming: true,
+        toolUse: true,
+        formatOwner: 'backend',
+        stablePrefixLikelihood: 'high',
+        hotSessions: '1_active',
+        concurrency: 1,
+        samplingOwnership: 'backend',
+        responseCacheEligible: false,
+      },
+      modifiedAssumptions: new Set(),
+    },
+    workloadProfileConfirmed: false,
     reasoningMode: null,
     // Phase 7: Web UI (D26/A44)
     webUiAvailability: 'auto',
@@ -283,9 +439,10 @@ export function initSpawnWizard() {
   restoreProfile();
   applyProfileVisibility();
   updateProfileHint();
-  refreshEngineAvailability();
+   refreshEngineAvailability();
+   _initWorkloadProfiles();
 
-  // HF discover pills
+   // HF discover pills
   const discoverPillsEl = document.getElementById('hf-discover-pills');
   const quickpicksEl = dom.hfQuickpicks;
 
@@ -579,6 +736,12 @@ function resetWizardState() {
   wizardState.hardware.kvCacheDtype = '';
   wizardState.hardware.turboquantMode = 'auto';
   wizardState.hardware.workloadScenario = '';
+  wizardState.hardware.workloadProfile = {
+    id: '',
+    assumptions: {},
+    modifiedAssumptions: new Set(),
+  };
+  wizardState.hardware.workloadProfileConfirmed = false;
   wizardState.hardware.webUiAvailability = 'auto';
   wizardState.hardware.webUiStaticPath = '';
   wizardState.hardware.webUiConfigJson = '';
@@ -778,13 +941,13 @@ function cacheDom() {
   dom.fitTargetWrap   = document.getElementById('spawn-fit-target-wrap');
   dom.cacheRamInput   = document.getElementById('spawn-cache-ram');
 
-  // Rapid-MLX advanced controls
-  dom.rapidAdvancedFields  = document.getElementById('spawn-rapid-advanced-fields');
-  dom.kvCacheDtypeSelect   = document.getElementById('spawn-kv-cache-dtype');
-  dom.turboquantModeSelect = document.getElementById('spawn-turboquant-mode');
-  dom.workloadScenarioSelect = document.getElementById('spawn-workload-scenario');
-  dom.reasoningModeCheck   = document.getElementById('spawn-rapid-reasoning-mode');
-  dom.samplingModeSelect   = document.getElementById('spawn-sampling-mode');
+   // Rapid-MLX advanced controls
+   dom.rapidAdvancedFields  = document.getElementById('spawn-rapid-advanced-fields');
+   dom.kvCacheDtypeSelect   = document.getElementById('spawn-kv-cache-dtype');
+   dom.turboquantModeSelect = document.getElementById('spawn-turboquant-mode');
+   dom.workloadScenarioSelect = document.getElementById('spawn-workload-scenario'); // hidden select for compat
+   dom.reasoningModeCheck   = document.getElementById('spawn-rapid-reasoning-mode');
+   dom.samplingModeSelect   = document.getElementById('spawn-sampling-mode');
   dom.webUiAvailabilitySelect = document.getElementById('spawn-webui-availability');
   dom.webUiConfigJsonInput  = document.getElementById('spawn-webui-config-json');
   dom.webUiStaticPathInput  = document.getElementById('spawn-webui-static-path');
@@ -1303,7 +1466,7 @@ function _bindRapidMlxAdvancedControls() {
 
    bindSel(dom.kvCacheDtypeSelect, 'kvCacheDtype');
    bindSel(dom.turboquantModeSelect, 'turboquantMode');
-   bindSel(dom.workloadScenarioSelect, 'workloadScenario');
+   // workloadScenarioSelect is hidden; workload profile is managed by _selectWorkloadProfile()
    bindSel(dom.samplingModeSelect, 'samplingMode');
    bindSel(dom.webUiAvailabilitySelect, 'webUiAvailability');
 
@@ -1354,14 +1517,294 @@ function _applyRapidMlxDefaults() {
     h.turboquantMode = 'none';
     if (dom.turboquantModeSelect) dom.turboquantModeSelect.value = 'none';
   }
-  if (!h.workloadScenario) {
-    h.workloadScenario = 'interactive_chat';
-    if (dom.workloadScenarioSelect) dom.workloadScenarioSelect.value = 'interactive_chat';
+  // Initialize workload profile to Interactive Coding Agent if not set
+  if (!h.workloadProfile || !h.workloadProfile.id) {
+    _selectWorkloadProfile('interactive_coding_agent');
   }
-  // reasoningMode defaults to false (unchecked); no explicit sync needed unless user set it
-
   _applyReasoningModeLock();
   window.scheduleVramUpdate?.();
+}
+
+// ── Workload profile UI helpers ──────────────────────────────────────────────
+
+// Select a workload profile and populate assumptions.
+function _selectWorkloadProfile(profileId) {
+  const profile = WORKLOAD_PROFILES[profileId];
+  if (!profile) return;
+
+  const h = wizardState.hardware;
+  h.workloadScenario = profileId;
+  h.workloadProfile = {
+    id: profileId,
+    assumptions: { ...profile.assumptions },
+    modifiedAssumptions: new Set(),
+  };
+  h.workloadProfileConfirmed = false;
+
+  // Update UI
+  _renderWorkloadProfileCards();
+  _renderWorkloadAssumptions();
+  _updateWorkloadConfirmation();
+}
+
+// Initialize workload profile cards and select default.
+function _initWorkloadProfiles() {
+  _renderWorkloadProfileCards();
+  _selectWorkloadProfile('interactive_coding_agent');
+}
+
+// Render the profile cards grid.
+function _renderWorkloadProfileCards() {
+  const container = document.getElementById('workload-profile-cards');
+  if (!container) return;
+
+  const currentId = wizardState.hardware.workloadProfile?.id || '';
+
+  const html = Object.values(WORKLOAD_PROFILES).map(p => {
+    const selected = p.id === currentId ? 'selected' : '';
+    const defaultBadge = p.isDefault ? '<span class="wp-default-badge">DEFAULT</span>' : '';
+    const advancedBadge = p.isAdvanced ? '<span class="wp-advanced-badge">ADVANCED</span>' : '';
+    const priorityLabel = p.priority ? `<span class="wp-priority">${p.priority}% priority</span>` : '';
+    return `
+      <div class="wp-card ${selected}" data-profile-id="${p.id}" role="button" tabindex="0" aria-pressed="${selected === 'selected'}">
+        <div class="wp-card-header">
+          <div class="wp-card-name">${p.name}</div>
+          <div class="wp-card-badges">
+            ${defaultBadge}${advancedBadge}${priorityLabel}
+          </div>
+        </div>
+        <div class="wp-card-desc">${p.description}</div>
+      </div>
+    `;
+  }).join('');
+   // eslint-disable-next-line no-unsanitized/property -- Trusted source: WORKLOAD_PROFILES constant, no user input
+   container.innerHTML = html;
+
+  // Bind click handlers
+  container.querySelectorAll('.wp-card').forEach(card => {
+    const bindCard = () => {
+      card.addEventListener('click', () => {
+        const pid = card.dataset.profileId;
+        if (pid) _selectWorkloadProfile(pid);
+      });
+      card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          const pid = card.dataset.profileId;
+          if (pid) _selectWorkloadProfile(pid);
+        }
+      });
+    };
+    if (!card.dataset.wpBound) {
+      card.dataset.wpBound = '1';
+      bindCard();
+    }
+  });
+}
+
+// Render the assumptions panel for the selected profile.
+function _renderWorkloadAssumptions() {
+  const panel = document.getElementById('workload-assumptions-panel');
+  if (!panel) return;
+
+  const wp = wizardState.hardware.workloadProfile;
+  if (!wp || !wp.id) return;
+
+  const profile = WORKLOAD_PROFILES[wp.id];
+  if (!profile) return;
+
+  const a = wp.assumptions;
+  const mod = wp.modifiedAssumptions;
+
+  const assumptionFields = [
+    { key: 'streaming', label: 'Streaming', value: a.streaming ? 'On' : 'Off', hint: 'Stream tokens as generated instead of waiting for full response.' },
+    { key: 'toolUse', label: 'Tool use', value: mod.has('toolUse') ? (a.toolUseDetail || (a.toolUse ? 'Enabled' : 'Disabled')) : (profile.assumptions.toolUseDetail || (a.toolUse ? 'Enabled' : 'Disabled')), hint: 'Whether the runtime supports tool calls (MCP, search, etc.).' },
+    { key: 'formatOwner', label: 'Prompt format owner', value: mod.has('formatOwner') ? (a.formatOwnerDetail || (a.formatOwner === 'client' ? 'Client owns' : 'Backend template')) : (profile.assumptions.formatOwnerDetail || (a.formatOwner === 'client' ? 'Client owns' : 'Backend template')), hint: 'Who constructs prompt/format tokens: backend template or client (SillyTavern for roleplay).' },
+    { key: 'stablePrefixLikelihood', label: 'Stable-prefix likelihood', value: mod.has('stablePrefixLikelihood') ? (a.stablePrefixLikelihood || 'medium') : (profile.assumptions.stablePrefixLikelihood || 'medium'), hint: 'How often identical prompt prefixes are reused. Affects cache recommendations.' },
+    { key: 'hotSessions', label: 'Active sessions', value: mod.has('hotSessions') ? (a.hotSessionsDetail || a.hotSessions || '1 active') : (profile.assumptions.hotSessionsDetail || profile.assumptions.hotSessions || '1 active'), hint: 'Number of long-lived conversations revisited during operation.' },
+    { key: 'concurrency', label: 'Concurrency', value: `${a.concurrency || 1} active generation${(a.concurrency || 1) > 1 ? 's' : ''}${mod.has('concurrency') ? ' (modified)' : ''}`, hint: 'Simultaneous active generations. One foreground is the normal policy.' },
+    { key: 'samplingOwnership', label: 'Sampling ownership', value: mod.has('samplingOwnership') ? (a.samplingDetail || (a.samplingOwnership === 'client' ? 'Client-owned' : 'Backend defaults')) : (profile.assumptions.samplingDetail || (a.samplingOwnership === 'client' ? 'Client-owned' : 'Backend defaults')), hint: 'Who controls sampling parameters. Explicit client values always override.' },
+    { key: 'responseCacheEligible', label: 'Response cache', value: mod.has('responseCacheEligible') ? (a.responseCacheDetail || (a.responseCacheEligible ? 'Eligible' : 'Off')) : (profile.assumptions.responseCacheDetail || (a.responseCacheEligible ? 'Eligible' : 'Off')), hint: 'Eligibility for exact-response caching. Off by default for tool-enabled and non-deterministic workloads.' },
+   ];
+
+  const assumptionsHtml = `
+    <div class="wp-assumptions-header">
+      <span class="wp-assumptions-title">Derived assumptions for "${profile.name}"</span>
+      ${mod.size > 0 ? `<span class="wp-modified-count">${mod.size} modified from default</span>` : ''}
+    </div>
+    <div class="wp-assumptions-grid">
+      ${assumptionFields.map(f => `
+        <div class="wp-assumption-item ${mod.has(f.key) ? 'wp-modified' : ''}" data-assumption-key="${f.key}">
+          <div class="wp-assumption-label">${f.label}</div>
+          <div class="wp-assumption-value" title="${f.hint}">${f.value}</div>
+          <div class="wp-assumption-hint">${f.hint}</div>
+          <div class="wp-assumption-actions">
+            <button class="wp-edit-btn" type="button" title="Edit this assumption">Edit</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    <div class="wp-assumptions-footer">
+      <div class="field-hint">Review each assumption and edit if your actual usage differs. Changes from the profile default are marked.</div>
+    </div>
+  `;
+   // eslint-disable-next-line no-unsanitized/property -- Trusted source: WORKLOAD_PROFILES constant, no user input
+   panel.innerHTML = assumptionsHtml;
+
+  // Bind edit buttons
+  panel.querySelectorAll('.wp-edit-btn').forEach(btn => {
+    if (btn.dataset.wpBound) return;
+    btn.dataset.wpBound = '1';
+    btn.addEventListener('click', () => {
+      const item = btn.closest('.wp-assumption-item');
+      const key = item.dataset.assumptionKey;
+      _editAssumption(key, item);
+    });
+  });
+}
+
+// Edit an individual assumption via prompt-style UI.
+function _editAssumption(key, itemEl) {
+  const wp = wizardState.hardware.workloadProfile;
+  if (!wp) return;
+
+  const profile = WORKLOAD_PROFILES[wp.id];
+  const currentVal = wp.assumptions[key];
+  const defaultVal = profile.assumptions[key];
+  const mod = wp.modifiedAssumptions;
+
+  // Define editable options per field
+  const fieldOptions = {
+    streaming: [
+      { value: true, label: 'On' },
+      { value: false, label: 'Off' },
+    ],
+    toolUse: [
+      { value: true, label: 'Enabled' },
+      { value: false, label: 'Disabled' },
+    ],
+    formatOwner: [
+      { value: 'backend', label: 'Backend template' },
+      { value: 'client', label: 'Client owns' },
+    ],
+    stablePrefixLikelihood: [
+      { value: 'high', label: 'High' },
+      { value: 'medium', label: 'Medium' },
+      { value: 'low', label: 'Low' },
+    ],
+    hotSessions: [
+      { value: '1_active', label: 'One active' },
+      { value: '1_active_background', label: 'One active + background' },
+      { value: 'batch', label: 'Batch' },
+    ],
+    concurrency: [
+      { value: 1, label: 'One active generation' },
+      { value: 2, label: 'Two (advanced)' },
+    ],
+    samplingOwnership: [
+      { value: 'backend', label: 'Backend defaults' },
+      { value: 'client', label: 'Client-owned' },
+    ],
+    responseCacheEligible: [
+      { value: false, label: 'Off' },
+      { value: true, label: 'Eligible' },
+    ],
+  };
+
+  const options = fieldOptions[key];
+  if (!options) {
+    showToast('This assumption cannot be edited directly.', 'warn');
+    return;
+  }
+
+  // Build edit overlay in-place
+  const valueEl = itemEl.querySelector('.wp-assumption-value');
+  const actionsEl = itemEl.querySelector('.wp-assumption-actions');
+
+  // Store original HTML
+  const originalValueHtml = valueEl.innerHTML;
+  const originalActionsHtml = actionsEl.innerHTML;
+
+  valueEl.textContent = 'Select value…';
+  valueEl.classList.add('wp-editing');
+  const optionsHtml = options.map(o => {
+    const isActive = o.value === currentVal;
+    return `<button class="wp-option-btn ${isActive ? 'wp-option-active' : ''}" data-value="${o.value}">${o.label}</button>`;
+   }).join('') + `<button class="wp-option-btn wp-option-cancel" data-cancel="">Cancel</button>`;
+   // eslint-disable-next-line no-unsanitized/property -- Trusted source: WORKLOAD_PROFILES constant
+   actionsEl.innerHTML = optionsHtml;
+
+  actionsEl.querySelectorAll('.wp-option-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.cancel) {
+        // Revert to original view (stored earlier from safe rendered DOM)
+        // eslint-disable-next-line no-unsanitized/property -- restoring previously rendered safe HTML
+        valueEl.innerHTML = originalValueHtml;
+        valueEl.classList.remove('wp-editing');
+        // eslint-disable-next-line no-unsanitized/property -- restoring previously rendered safe HTML
+        actionsEl.innerHTML = originalActionsHtml;
+        return;
+      }
+
+      const newVal = btn.dataset.value === 'true' ? true : btn.dataset.value === 'false' ? false : Number(btn.dataset.value);
+      wp.assumptions[key] = newVal;
+
+      // Track modified status
+      if (newVal !== defaultVal) {
+        mod.add(key);
+      } else {
+        mod.delete(key);
+      }
+
+      // Re-render panel
+      _renderWorkloadAssumptions();
+
+      // Invalidate confirmation if changed
+      wp.confirmed = false;
+      wizardState.hardware.workloadProfileConfirmed = false;
+      _updateWorkloadConfirmation();
+    });
+  });
+}
+
+// Update the confirmation state and Next button.
+function _updateWorkloadConfirmation() {
+  const wp = wizardState.hardware.workloadProfile;
+  if (!wp || !wp.id) return;
+
+  const confirmEl = document.getElementById('workload-confirmation-area');
+  if (!confirmEl) return;
+
+  const confirmed = wizardState.hardware.workloadProfileConfirmed;
+  const mod = wp.modifiedAssumptions;
+
+  const confirmHtml = `
+    <div class="wp-confirm-row">
+      <label class="wp-confirm-label" for="workload-confirm-check">
+        <input type="checkbox" id="workload-confirm-check" ${confirmed ? 'checked' : ''}>
+        <span>I have reviewed the workload assumptions${mod.size > 0 ? ' (including ' + mod.size + ' modified setting' + (mod.size !== 1 ? 's' : '') + ')' : ''} and confirm they match my intended usage.</span>
+      </label>
+    </div>
+    <div class="wp-confirm-notice">
+      This confirmation ensures the runtime is configured for your actual workload pattern. You can adjust individual assumptions above if needed.
+    </div>
+   `;
+  // eslint-disable-next-line no-unsanitized/property -- Trusted source: fixed confirmation text
+  confirmEl.innerHTML = confirmHtml;
+
+  const check = document.getElementById('workload-confirm-check');
+  if (check && !check.dataset.wpBound) {
+    check.dataset.wpBound = '1';
+    check.addEventListener('change', () => {
+      wizardState.hardware.workloadProfileConfirmed = check.checked;
+    });
+  }
+}
+
+// Check if workload profile is valid and confirmed (for step guardrails).
+export function isWorkloadProfileConfirmed() {
+  const wp = wizardState.hardware.workloadProfile;
+  return wp && wp.id && wizardState.hardware.workloadProfileConfirmed;
 }
 
 async function refreshHfTokenState() {
@@ -1505,6 +1948,14 @@ function getStepGuardState(step = wizardState.currentStep) {
   }
 
   if (step === 2) {
+    // Phase 7B2: Require workload profile confirmation before proceeding
+    const wp = wizardState.hardware.workloadProfile;
+    if (!wp || !wp.id) {
+      return error('Select a workload profile to continue.', document.getElementById('workload-profile-cards'));
+    }
+    if (!wizardState.hardware.workloadProfileConfirmed) {
+      return error('Review the workload assumptions and confirm they match your usage.', document.getElementById('workload-confirm-check'));
+    }
     if (wizardState.engine.selected === 'rapid_mlx') {
       return info('Rapid-MLX backend controls remain isolated from llama.cpp memory and speculation flags.');
     }
@@ -9790,7 +10241,20 @@ export function buildSpawnPayload() {
         // Phase 7: KV/cache policy (D6 catalog IDs)
         ...(h.kvCacheDtype && h.kvCacheDtype !== 'int4' && { kv_cache_dtype: h.kvCacheDtype }),
         ...(h.turboquantMode && h.turboquantMode !== 'none' && h.turboquantMode !== 'auto' && { turboquant_mode: h.turboquantMode }),
-        ...(h.workloadScenario && h.workloadScenario !== 'interactive_chat' && { workload_scenario: h.workloadScenario }),
+        // Phase 7B2: Workload profile with assumptions
+        ...(h.workloadProfile?.id && { workload_scenario: h.workloadProfile.id }),
+        ...(h.workloadProfile?.assumptions && {
+          workload_assumptions: {
+            streaming: h.workloadProfile.assumptions.streaming,
+            tool_use: h.workloadProfile.assumptions.toolUse,
+            format_owner: h.workloadProfile.assumptions.formatOwner,
+            stable_prefix_likelihood: h.workloadProfile.assumptions.stablePrefixLikelihood,
+            hot_sessions: h.workloadProfile.assumptions.hotSessions,
+            concurrency: h.workloadProfile.assumptions.concurrency,
+            sampling_ownership: h.workloadProfile.assumptions.samplingOwnership,
+            response_cache_eligible: h.workloadProfile.assumptions.responseCacheEligible,
+          },
+        }),
         ...(h.reasoningMode && { reasoning_mode: 'on' }),
         // Phase 7: Web UI (D26/A44)
         ...(h.webUiAvailability && h.webUiAvailability !== 'auto' && { web_ui_availability: h.webUiAvailability }),

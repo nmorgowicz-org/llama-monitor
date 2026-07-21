@@ -3669,6 +3669,53 @@ async function scenarioSpawnWizardEngines(ctx) {
     await sleep(200);
     await captureShot(page, 'spawn-wizard-rapid-mlx-webui-group.png', { fullPage: true });
 
+    // Phase 7B2: Workload profiles capture.
+    // Scroll the wizard-main container to show the assumptions panel (not just browser viewport).
+    await page.evaluate(() => {
+        const panel = document.getElementById('workload-assumptions-panel');
+        const wizardMain = document.querySelector('.wizard-main');
+        if (panel && wizardMain) {
+            panel.scrollIntoView({ behavior: 'instant', block: 'start' });
+            // Also scroll the wizard-main itself to ensure it shows
+            wizardMain.scrollTop += 200;
+        }
+    });
+    await sleep(300);
+
+    // Screenshot: profile cards + assumptions panel with Interactive Coding Agent selected (default).
+    await captureShot(page, 'spawn-wizard-workload-profiles.png', { fullPage: true });
+
+    // Screenshot: Roleplay profile selected with its assumptions visible.
+    await page.evaluate(() => {
+        const roleplayCard = document.querySelector('.wp-card[data-profile-id="roleplay_storytelling"]');
+        if (roleplayCard) roleplayCard.click();
+    });
+    await sleep(400);
+    await page.evaluate(() => {
+        const panel = document.getElementById('workload-assumptions-panel');
+        const wizardMain = document.querySelector('.wizard-main');
+        if (panel && wizardMain) {
+            panel.scrollIntoView({ behavior: 'instant', block: 'start' });
+            wizardMain.scrollTop += 200;
+        }
+    });
+    await sleep(200);
+    await captureShot(page, 'spawn-wizard-workload-roleplay.png', { fullPage: true });
+
+    // Screenshot: confirmation required (Next button disabled state).
+    await page.evaluate(() => {
+        const check = document.getElementById('workload-confirm-check');
+        if (check) check.checked = false;
+        const confirmArea = document.getElementById('workload-confirmation-area');
+        const wizardMain = document.querySelector('.wizard-main');
+        if (confirmArea && wizardMain) {
+            confirmArea.scrollIntoView({ behavior: 'instant', block: 'center' });
+            wizardMain.scrollTop += 100;
+        }
+    });
+    await sleep(300);
+    await captureShot(page, 'spawn-wizard-workload-confirmation-required.png', { fullPage: true });
+
     console.log('[CAPTURE] Scenario "spawn-wizard-engines" complete.');
 }
 

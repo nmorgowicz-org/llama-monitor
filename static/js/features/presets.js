@@ -1365,6 +1365,14 @@ export function openPresetModal(mode, section, seedPreset = null) {
         setOpt('modal-rapid-turboquant-mode', p.rapid_mlx?.turboquant_mode || 'auto');
         setOpt('modal-rapid-workload-scenario', p.rapid_mlx?.workload_scenario || '');
         setOpt('modal-rapid-sampling-mode', p.rapid_mlx?.sampling_mode || 'auto');
+        // Phase 7B2: Workload assumptions (for reference display)
+        if (p.rapid_mlx?.workload_assumptions) {
+          // Store assumptions for wizard use via data attribute
+          const selector = document.getElementById('modal-rapid-workload-scenario');
+          if (selector) {
+            selector.dataset.assumptions = JSON.stringify(p.rapid_mlx.workload_assumptions);
+          }
+        }
         setOpt('modal-rapid-webui-availability', p.rapid_mlx?.web_ui_availability || 'auto');
         setVal('modal-rapid-webui-config-json', p.rapid_mlx?.web_ui_config_json || '');
         setVal('modal-rapid-webui-static-path', p.rapid_mlx?.web_ui_static_path || '');
@@ -1821,6 +1829,7 @@ function _buildFormPreset(existing) {
                     const kvDtype = strVal('modal-rapid-kv-cache-dtype');
                     const tqMode = strVal('modal-rapid-turboquant-mode');
                     const wlScenario = strVal('modal-rapid-workload-scenario');
+                    const wlAssumptionsRaw = document.getElementById('modal-rapid-workload-scenario')?.dataset.assumptions;
                     const samplingMode = strVal('modal-rapid-sampling-mode');
                     const webUiAvail = strVal('modal-rapid-webui-availability');
                     const webUiConfig = strVal('modal-rapid-webui-config-json');
@@ -1829,6 +1838,9 @@ function _buildFormPreset(existing) {
                     if (kvDtype) out.kv_cache_dtype = kvDtype;
                     if (tqMode && tqMode !== 'auto') out.turboquant_mode = tqMode;
                     if (wlScenario && wlScenario !== 'interactive_chat') out.workload_scenario = wlScenario;
+                    if (wlAssumptionsRaw) {
+                      try { out.workload_assumptions = JSON.parse(wlAssumptionsRaw); } catch {}
+                    }
                     if (samplingMode && samplingMode !== 'auto') out.sampling_mode = samplingMode;
                     if (rmInput) out.reasoning_mode = rmInput.checked ? 'on' : null;
                     // Web UI (D26/A44)
