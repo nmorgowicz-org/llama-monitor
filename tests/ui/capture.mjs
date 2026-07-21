@@ -1154,9 +1154,7 @@ async function scenarioRapidPreset(ctx) {
     await page.evaluate(() => document.getElementById('preset-modal-close')?.click());
     await page.waitForSelector('#preset-modal.open', { hidden: true });
 
-    // New presets use typed model sources. Capture the card and the modal it
-    // actually opens as a pair: the current product defect can otherwise make
-    // a "typed source" filename silently contain the legacy preset editor.
+    // Open typed-source preset in editor (no redundant "before-edit" card screenshot — welcome-rapid-mlx-preset.png already shows cards).
     const typedCardState = await page.evaluate(() => {
         const card = document.querySelector('.launch-card[data-preset-id="capture-rapid-mlx-typed"]');
         if (!card) return null;
@@ -1168,8 +1166,6 @@ async function scenarioRapidPreset(ctx) {
         };
     });
     if (!typedCardState) throw new Error('rapid-preset: typed source card was not rendered');
-    await sleep(200);
-    await captureShot(page, 'rapid-mlx-typed-source-card-before-edit.png', { fullPage: true });
     await page.evaluate(() => {
         document.querySelector('.launch-card[data-preset-id="capture-rapid-mlx-typed"] .launch-card-btn-edit')?.click();
     });
@@ -3656,20 +3652,13 @@ async function scenarioSpawnWizardEngines(ctx) {
             body.scrollTop = elementTop - viewportCenter + params.offset;
         }, { selector, offset: yOffset });
 
-    // spawn-wizard-rapid-mlx-hardware.png — Rapid-MLX panel header + Rapid-MLX advanced header (first capture, panel top).
-    await scrollToElement('#spawn-rapid-advanced-fields', -150);
-    await sleep(300);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-rapid-mlx-hardware.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-rapid-mlx-hardware.png');
-
-    // Capture workload profiles NEXT while Interactive Coding Agent is selected (default).
     // spawn-wizard-workload-profiles.png — All 5 profile cards with Interactive Coding Agent selected (default).
-    await scrollToElement('#workload-profile-cards', -50);
+    // Also shows Rapid-MLX panel header and memory controls notice (so separate hardware screenshot is redundant).
+    await scrollToElement('#workload-profile-cards', -30);
     await sleep(300);
     await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-workload-profiles.png') });
     console.log('[CAPTURE] Saved spawn-wizard-workload-profiles.png');
 
-    // Then select Roleplay for roleplay screenshot.
     // spawn-wizard-workload-roleplay.png — Roleplay profile selected with its assumptions.
     await page.evaluate(() => {
         const card = document.querySelector('.wp-card[data-profile-id="roleplay_storytelling"]');
@@ -3680,44 +3669,16 @@ async function scenarioSpawnWizardEngines(ctx) {
         { timeout: 3000 }
     );
     await sleep(400);
-    // Scroll to show Roleplay card + assumptions panel.
-    await scrollToElement('#workload-assumptions-panel', -100);
+    await scrollToElement('#workload-assumptions-panel', -50);
     await sleep(300);
     await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-workload-roleplay.png') });
     console.log('[CAPTURE] Saved spawn-wizard-workload-roleplay.png');
 
-    // spawn-wizard-rapid-mlx-advanced-controls.png — KV dtype, Reusable prompt storage, Sampling mode dropdowns.
-    await scrollToElement('#spawn-kv-cache-dtype', -50);
+    // spawn-wizard-rapid-mlx-advanced-controls.png — Phase 7 controls: KV dtype, prompt storage, sampling mode, reasoning.
+    await scrollToElement('#spawn-kv-cache-dtype', 0);
     await sleep(300);
     await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-rapid-mlx-advanced-controls.png') });
     console.log('[CAPTURE] Saved spawn-wizard-rapid-mlx-advanced-controls.png');
-
-    // spawn-wizard-rapid-mlx-webui-group.png — Web UI details expanded.
-    await page.evaluate(() => {
-        const details = document.getElementById('spawn-webui-details');
-        if (details) details.open = true;
-    });
-    await sleep(300);
-    await scrollToElement('#spawn-webui-details', -80);
-    await sleep(300);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-rapid-mlx-webui-group.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-rapid-mlx-webui-group.png');
-
-    // spawn-wizard-workload-confirmation-required.png — Error state when Next clicked without confirming.
-    await page.evaluate(() => {
-        const check = document.getElementById('workload-confirm-check');
-        if (check) {
-            check.checked = false;
-            check.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-    });
-    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
-    await sleep(500);
-    // Scroll to show confirmation checkbox + error message at bottom.
-    await scrollToElement('#workload-confirm-check', 50);
-    await sleep(300);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-workload-confirmation-required.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-workload-confirmation-required.png');
 
     console.log('[CAPTURE] Scenario "spawn-wizard-engines" complete.');
 }
