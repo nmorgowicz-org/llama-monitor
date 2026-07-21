@@ -3649,15 +3649,16 @@ async function scenarioSpawnWizardEngines(ctx) {
     );
     await sleep(500);
 
-    // Helper: scroll wizard-body to center an element in the viewport.
+    // Helper: scroll wizard-body to center an element in the viewport (absolute position).
     const scrollToElement = (selector, yOffset = 0) =>
         page.evaluate((params) => {
             const el = document.querySelector(params.selector);
             const body = document.querySelector('.wizard-body');
             if (!el || !body) return;
             const rect = el.getBoundingClientRect();
+            const elementTop = body.scrollTop + rect.top;
             const viewportCenter = body.clientHeight / 2;
-            body.scrollTop += rect.top - viewportCenter + params.offset;
+            body.scrollTop = elementTop - viewportCenter + params.offset;
         }, { selector, offset: yOffset });
 
     // spawn-wizard-rapid-mlx-hardware.png — Rapid-MLX panel header + Rapid-MLX advanced header (first capture, panel top).
