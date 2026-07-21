@@ -14,8 +14,8 @@ use super::{ApiCtx, ApiReply, ApiRoute, unauthorized_api_token, unauthorized_db_
 use crate::inference::backend::{
     BackendRecommendationInput, RecommendationArtifactKind, recommend_backend,
 };
-use crate::inference::rapid_mlx::RapidMlxConfig;
 use crate::inference::rapid_mlx::changelog;
+use crate::inference::rapid_mlx::command::RapidMlxCommandBuilder;
 use crate::inference::rapid_mlx::compatibility;
 use crate::inference::rapid_mlx::discovery::Discovery;
 use crate::inference::rapid_mlx::info_query;
@@ -26,6 +26,7 @@ use crate::inference::rapid_mlx::updater::{
     ManagedReleaseChannel, ManagedReleaseSelection, ManagedRuntimeStatus, RapidMlxRuntimeManager,
     RuntimeInventoryEntry, RuntimeMutationResult,
 };
+use crate::inference::rapid_mlx::{RapidMlxConfig, check_mutual_exclusions};
 use crate::state::{DoctorFinding, DoctorFindingType, DoctorSeverity, FixAction};
 
 const RELEASES_URL: &str =
@@ -274,6 +275,8 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .or(escape_hatch_route())
         .unify()
+        .or(command_preview_route(ctx.clone()))
+        .unify()
         .or(prefix_cache_guidance_route(ctx.clone()))
         .unify()
         .or(runtime_metadata_route(ctx, state))
@@ -290,6 +293,368 @@ fn escape_hatch_route() -> ApiRoute {
             )) as ApiReply
         })
         .boxed()
+}
+
+fn command_preview_route(ctx: ApiCtx) -> ApiRoute {
+    let config = ctx.config;
+    warp::path!("api" / "rapid-mlx" / "command-preview")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<CommandPreviewRequest>())
+        .and_then(move |auth: Option<String>, req: CommandPreviewRequest| {
+            let config = config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                let reply = build_command_preview(req).await;
+                Ok::<ApiReply, warp::Rejection>(reply)
+            }
+        })
+        .boxed()
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CommandPreviewRequest {
+    #[serde(flatten)]
+    pub config: RapidMlxConfig,
+    /// Path to the Rapid-MLX executable to use for command building.
+    pub executable_path: Option<String>,
+    /// Optional capabilities override for testing without live probing.
+    pub capabilities: Option<Vec<String>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CommandPreviewResponse {
+    pub argv: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub redacted_summary: Option<String>,
+    pub redacted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_policy: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_vs_effective: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reasons: Vec<String>,
+}
+
+async fn build_command_preview(req: CommandPreviewRequest) -> ApiReply {
+    use crate::inference::rapid_mlx::compatibility::ServeCapabilities;
+    use crate::inference::rapid_mlx::model_resolver::{self, RapidMlxResolveContext};
+    use std::path::PathBuf;
+
+    let config = req.config;
+    let binary_path = match req.executable_path {
+        Some(path) => PathBuf::from(path),
+        None => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                "executable_path is required for command preview",
+            );
+        }
+    };
+
+    if !binary_path.exists() {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            format!("Executable not found: {}", binary_path.display()),
+        );
+    }
+
+    let model_source = match &config.model_source {
+        Some(src) => src.clone(),
+        None => match model_resolver::source_from_legacy_model_path(&config.model_path) {
+            Ok(src) => src,
+            Err(e) => {
+                return json_error(
+                    StatusCode::BAD_REQUEST,
+                    format!("Failed to resolve model from legacy path: {}", e),
+                );
+            }
+        },
+    };
+
+    let models_dir = std::path::PathBuf::from("models");
+
+    let model = match model_resolver::resolve(
+        model_source,
+        &RapidMlxResolveContext {
+            models_dir,
+            python_executable: "python3".into(),
+            runtime_version: String::new(),
+            hf_token: None,
+            verified_aliases: Vec::new(),
+            execute_conversion: false,
+        },
+    )
+    .await
+    {
+        Ok(m) => m,
+        Err(e) => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                format!("Failed to resolve model: {}", e),
+            );
+        }
+    };
+
+    let capabilities: ServeCapabilities = match req.capabilities {
+        Some(flags) => ServeCapabilities::from_flags(&flags),
+        None => {
+            match tokio::process::Command::new(&binary_path)
+                .arg("serve")
+                .arg("--help")
+                .output()
+                .await
+            {
+                Ok(output) if output.status.success() => {
+                    let help = String::from_utf8_lossy(&output.stderr).into_owned();
+                    ServeCapabilities::from_help(&help)
+                }
+                _ => ServeCapabilities::verified_baseline(),
+            }
+        }
+    };
+
+    let builder = RapidMlxCommandBuilder::new(model)
+        .host(config.host.clone())
+        .port(config.port)
+        .log_level(config.log_level.clone())
+        .timeout(config.timeout.unwrap_or(60))
+        .api_key(config.api_key.clone().unwrap_or_default())
+        .max_cache_blocks(config.max_cache_blocks.unwrap_or(4096))
+        .trust_remote_code_consent(config.trust_remote_code_consent.clone())
+        .escape_hatch_flags(config.escape_hatch_flags.clone())
+        .tool_call_parser(config.tool_call_parser.clone())
+        .auto_tool_choice(config.auto_tool_choice)
+        .no_thinking(config.no_thinking);
+
+    let builder = apply_phase7_config(builder, &config);
+
+    let launch = match builder.build(binary_path, &capabilities) {
+        Ok(l) => l,
+        Err(e) => {
+            return json_error(
+                StatusCode::BAD_REQUEST,
+                format!("Command build failed: {}", e),
+            );
+        }
+    };
+
+    let argv: Vec<String> = launch
+        .args
+        .iter()
+        .filter_map(|s| s.to_str().map(String::from))
+        .collect();
+
+    let mut reasons = Vec::new();
+    check_setting_warnings(&config, &mut reasons);
+
+    // Build effective_policy snapshot from config fields that were actually applied
+    let effective_policy = build_effective_policy(&config);
+
+    // Build requested_vs_effective diff using the setting catalog
+    let requested_vs_effective = build_requested_vs_effective(&config, &capabilities);
+
+    Box::new(warp::reply::json(&CommandPreviewResponse {
+        argv,
+        redacted_summary: Some(launch.redacted_summary),
+        redacted: true,
+        effective_policy: Some(effective_policy),
+        requested_vs_effective: Some(requested_vs_effective),
+        reasons,
+    })) as ApiReply
+}
+
+fn build_effective_policy(config: &RapidMlxConfig) -> serde_json::Value {
+    serde_json::json!({
+        "kv_cache_dtype": config.kv_cache_dtype,
+        "turboquant_mode": config.turboquant_mode,
+        "prefix_cache_policy": config.prefix_cache_policy,
+        "hybrid_cache_entries": config.hybrid_cache_entries,
+        "pflash_policy": config.pflash_policy,
+        "response_cache_policy": config.response_cache_policy,
+        "disk_checkpoint_policy": config.disk_checkpoint_policy,
+        "max_num_seqs": config.max_num_seqs,
+        "max_concurrent_requests": config.max_concurrent_requests,
+        "prefill_batch_size": config.prefill_batch_size,
+        "completion_batch_size": config.completion_batch_size,
+        "batching_policy": config.batching_policy,
+        "concurrency_policy": config.concurrency_policy,
+        "reasoning_mode": config.reasoning_mode,
+        "speculative_policy": config.speculative_policy,
+        "mllm_vision": config.mllm_vision,
+        "embeddings": config.embeddings,
+        "gpu_memory_utilization": config.gpu_memory_utilization,
+        "web_ui_availability": config.web_ui_availability,
+        "web_ui_static_path": config.web_ui_static_path,
+        "web_ui_config_json": config.web_ui_config_json,
+        "endpoint_compatibility": config.endpoint_compatibility,
+        "request_safety_policy": config.request_safety_policy,
+        "sampling_mode": config.sampling_mode,
+        "parser_policy": config.parser_policy,
+        "security_policy": config.security_policy,
+    })
+}
+
+fn build_requested_vs_effective(
+    config: &RapidMlxConfig,
+    capabilities: &crate::inference::rapid_mlx::compatibility::ServeCapabilities,
+) -> serde_json::Value {
+    let mut diff = serde_json::Map::new();
+
+    // KV cache dtype: may be downgraded if runtime doesn't support requested dtype
+    if let Some(ref dtype) = config.kv_cache_dtype {
+        let requested = dtype.to_string();
+        let _effective = match dtype {
+            crate::inference::rapid_mlx::KvCacheConfig::Auto => "auto".to_string(),
+            crate::inference::rapid_mlx::KvCacheConfig::Fp16 => {
+                if !capabilities.contains("--kv-cache-dtype") {
+                    diff.insert("kv_cache_dtype".to_string(), serde_json::json!({
+                        "requested": requested,
+                        "effective": "auto",
+                        "reason": "KV cache dtype flag not supported by this runtime version; using runtime default"
+                    }));
+                    "auto".to_string()
+                } else {
+                    "fp16".to_string()
+                }
+            }
+            crate::inference::rapid_mlx::KvCacheConfig::Bf16 => {
+                if !capabilities.contains("--kv-cache-dtype") {
+                    diff.insert("kv_cache_dtype".to_string(), serde_json::json!({
+                        "requested": requested,
+                        "effective": "auto",
+                        "reason": "KV cache dtype flag not supported by this runtime version; using runtime default"
+                    }));
+                    "auto".to_string()
+                } else {
+                    "bf16".to_string()
+                }
+            }
+            crate::inference::rapid_mlx::KvCacheConfig::Fp8 => {
+                if !capabilities.contains("--kv-cache-dtype") {
+                    diff.insert("kv_cache_dtype".to_string(), serde_json::json!({
+                        "requested": requested,
+                        "effective": "auto",
+                        "reason": "KV cache dtype flag not supported by this runtime version; using runtime default"
+                    }));
+                    "auto".to_string()
+                } else {
+                    "fp8".to_string()
+                }
+            }
+        };
+    }
+
+    // PFlash: may be unavailable if runtime lacks flag
+    if let Some(ref policy) = config.pflash_policy
+        && policy != "auto"
+        && !capabilities.contains("--pflash")
+    {
+        diff.insert(
+            "pflash_policy".to_string(),
+            serde_json::json!({
+                "requested": policy,
+                "effective": "auto",
+                "reason": "PFlash not supported by this runtime version; using runtime default"
+            }),
+        );
+    }
+
+    // TurboQuant: may be unavailable
+    if let Some(ref mode) = config.turboquant_mode {
+        let mode_str = mode.to_string();
+        if !(mode_str == "auto" || mode_str == "none" || capabilities.contains("--turboquant")) {
+            diff.insert(
+                "turboquant_mode".to_string(),
+                serde_json::json!({
+                    "requested": mode_str,
+                    "effective": "none",
+                    "reason": "TurboQuant not supported by this runtime version; disabled"
+                }),
+            );
+        }
+    }
+
+    // Concurrency policy: overlap mode requires runtime support
+    if let Some(ref policy) = config.concurrency_policy
+        && policy == "allow_overlap"
+    {
+        // If speculative decoding is also set, note MTP incompatibility
+        if let Some(ref spec) = config.speculative_policy
+            && spec != "auto"
+        {
+            diff.insert("concurrency_policy".to_string(), serde_json::json!({
+                "requested": policy,
+                "effective": "single_active",
+                "reason": "Allow overlap with speculative decoding requires MTP support; falling back to single active generation"
+            }));
+        }
+    }
+
+    serde_json::Value::Object(diff)
+}
+
+fn apply_phase7_config(
+    builder: RapidMlxCommandBuilder,
+    config: &RapidMlxConfig,
+) -> RapidMlxCommandBuilder {
+    builder
+        .kv_cache_dtype(config.kv_cache_dtype.as_ref().map(|kv| {
+            use crate::inference::rapid_mlx::command::KvCacheDtypeArg;
+            match kv {
+                crate::inference::rapid_mlx::KvCacheConfig::Auto => KvCacheDtypeArg::Auto,
+                crate::inference::rapid_mlx::KvCacheConfig::Fp16 => {
+                    KvCacheDtypeArg::Explicit("fp16".into())
+                }
+                crate::inference::rapid_mlx::KvCacheConfig::Bf16 => {
+                    KvCacheDtypeArg::Explicit("bf16".into())
+                }
+                crate::inference::rapid_mlx::KvCacheConfig::Fp8 => {
+                    KvCacheDtypeArg::Explicit("fp8".into())
+                }
+            }
+        }))
+        .turboquant_mode(config.turboquant_mode.as_ref().map(|t| t.to_string()))
+        .prefix_cache_policy(config.prefix_cache_policy.clone())
+        .hybrid_cache_entries(config.hybrid_cache_entries)
+        .pflash_policy(config.pflash_policy.clone())
+        .response_cache_policy(config.response_cache_policy.clone())
+        .disk_checkpoint_policy(config.disk_checkpoint_policy.clone())
+        .max_num_seqs(config.max_num_seqs)
+        .max_concurrent_requests(config.max_concurrent_requests)
+        .prefill_batch_size(config.prefill_batch_size)
+        .completion_batch_size(config.completion_batch_size)
+        .batching_policy(config.batching_policy.clone())
+        .concurrency_policy(config.concurrency_policy.clone())
+        .reasoning_mode(config.reasoning_mode.clone())
+        .speculative_policy(config.speculative_policy.clone())
+        .mllm_vision(config.mllm_vision.clone())
+        .embeddings(config.embeddings.clone())
+        .gpu_memory_utilization(config.gpu_memory_utilization)
+        .web_ui_availability(config.web_ui_availability.clone())
+        .web_ui_static_path(config.web_ui_static_path.clone())
+        .web_ui_config_json(config.web_ui_config_json.clone())
+        .endpoint_compatibility(config.endpoint_compatibility.clone())
+        .request_safety_policy(config.request_safety_policy.clone())
+        .sampling_mode(config.sampling_mode.clone())
+        .parser_policy(config.parser_policy.clone())
+        .security_policy(config.security_policy.clone())
+}
+
+fn check_setting_warnings(_config: &RapidMlxConfig, warnings: &mut Vec<String>) {
+    // Check mutual exclusions
+    let mut settings_map = std::collections::BTreeMap::new();
+    if let Some(reasoning) = _config.reasoning_mode.as_deref() {
+        settings_map.insert("reasoning_mode", serde_json::json!(reasoning));
+    }
+    if let Some(sampling) = _config.sampling_mode.as_deref() {
+        settings_map.insert("sampling_mode", serde_json::json!(sampling));
+    }
+    if let Err(e) = check_mutual_exclusions(&settings_map) {
+        warnings.push(e.message);
+    }
 }
 
 fn runtime_metadata_route(ctx: ApiCtx, state: RuntimeApiState) -> ApiRoute {
@@ -1807,6 +2172,32 @@ Run with `--verbose` for details on each check.
             no_thinking: false,
             escape_hatch_flags: Vec::new(),
             model_source_view: None,
+            kv_cache_dtype: None,
+            turboquant_mode: None,
+            prefix_cache_policy: None,
+            hybrid_cache_entries: None,
+            pflash_policy: None,
+            response_cache_policy: None,
+            disk_checkpoint_policy: None,
+            max_num_seqs: None,
+            max_concurrent_requests: None,
+            prefill_batch_size: None,
+            completion_batch_size: None,
+            batching_policy: None,
+            concurrency_policy: None,
+            reasoning_mode: None,
+            speculative_policy: None,
+            mllm_vision: None,
+            embeddings: None,
+            gpu_memory_utilization: None,
+            web_ui_availability: None,
+            web_ui_static_path: None,
+            web_ui_config_json: None,
+            endpoint_compatibility: None,
+            request_safety_policy: None,
+            sampling_mode: None,
+            parser_policy: None,
+            security_policy: None,
         };
 
         let findings = build_flag_advisor_findings(&profile, &config);
@@ -1854,6 +2245,32 @@ Run with `--verbose` for details on each check.
             no_thinking: false,
             escape_hatch_flags: Vec::new(),
             model_source_view: None,
+            kv_cache_dtype: None,
+            turboquant_mode: None,
+            prefix_cache_policy: None,
+            hybrid_cache_entries: None,
+            pflash_policy: None,
+            response_cache_policy: None,
+            disk_checkpoint_policy: None,
+            max_num_seqs: None,
+            max_concurrent_requests: None,
+            prefill_batch_size: None,
+            completion_batch_size: None,
+            batching_policy: None,
+            concurrency_policy: None,
+            reasoning_mode: None,
+            speculative_policy: None,
+            mllm_vision: None,
+            embeddings: None,
+            gpu_memory_utilization: None,
+            web_ui_availability: None,
+            web_ui_static_path: None,
+            web_ui_config_json: None,
+            endpoint_compatibility: None,
+            request_safety_policy: None,
+            sampling_mode: None,
+            parser_policy: None,
+            security_policy: None,
         };
 
         let findings = build_flag_advisor_findings(&profile, &config);
@@ -1889,6 +2306,32 @@ Run with `--verbose` for details on each check.
             no_thinking: false,
             escape_hatch_flags: Vec::new(),
             model_source_view: None,
+            kv_cache_dtype: None,
+            turboquant_mode: None,
+            prefix_cache_policy: None,
+            hybrid_cache_entries: None,
+            pflash_policy: None,
+            response_cache_policy: None,
+            disk_checkpoint_policy: None,
+            max_num_seqs: None,
+            max_concurrent_requests: None,
+            prefill_batch_size: None,
+            completion_batch_size: None,
+            batching_policy: None,
+            concurrency_policy: None,
+            reasoning_mode: None,
+            speculative_policy: None,
+            mllm_vision: None,
+            embeddings: None,
+            gpu_memory_utilization: None,
+            web_ui_availability: None,
+            web_ui_static_path: None,
+            web_ui_config_json: None,
+            endpoint_compatibility: None,
+            request_safety_policy: None,
+            sampling_mode: None,
+            parser_policy: None,
+            security_policy: None,
         };
 
         let findings = build_flag_advisor_findings(&profile, &config);

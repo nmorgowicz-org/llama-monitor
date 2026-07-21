@@ -1028,6 +1028,12 @@ mod tests {
             "/api/rapid-mlx/runtime/jobs/missing",
             None
         ),
+        (
+            route_rapid_mlx_command_preview,
+            "POST",
+            "/api/rapid-mlx/command-preview",
+            Some("{}")
+        ),
     ];
 
     #[tokio::test]

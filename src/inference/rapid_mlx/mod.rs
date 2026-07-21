@@ -9,8 +9,14 @@ pub mod mlx_meta;
 pub mod model_resolver;
 pub mod poller;
 pub mod runtime;
+pub mod settings;
 #[allow(dead_code)]
 pub mod updater;
+
+#[allow(unused_imports)]
+pub use settings::{
+    RapidMlxSetting, ValidationContext, ValidationError, all_settings, check_mutual_exclusions,
+};
 
 use self::command::RapidMlxCommandBuilder;
 use self::compatibility::CompatibilityProfile;
@@ -92,6 +98,91 @@ pub struct RapidMlxConfig {
     /// Never persisted to disk; populated by preset_for_api().
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
     pub model_source_view: Option<RapidMlxModelSourceView>,
+    // ── Phase 7: KV/cache policy ──────────────────────────────────────
+    /// KV cache dtype configuration (D1/D2: effective value after overrides).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kv_cache_dtype: Option<KvCacheConfig>,
+    /// TurboQuant reusable-prompt storage policy (D31).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turboquant_mode: Option<TurboQuantMode>,
+    /// Prefix cache policy (auto/explicit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix_cache_policy: Option<String>,
+    /// Hybrid cache entries limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hybrid_cache_entries: Option<u64>,
+    /// PFlash policy (auto/always/off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pflash_policy: Option<String>,
+    /// Response cache policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_cache_policy: Option<String>,
+    /// Disk checkpoint policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_checkpoint_policy: Option<String>,
+    // ── Phase 7: batching/concurrency ──────────────────────────────────
+    /// Max number of sequences.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_num_seqs: Option<u64>,
+    /// Max concurrent requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_requests: Option<u64>,
+    /// Prefill batch size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefill_batch_size: Option<u64>,
+    /// Completion batch size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_batch_size: Option<u64>,
+    /// Batching policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batching_policy: Option<String>,
+    /// Concurrency policy (single_active/allow_overlap).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub concurrency_policy: Option<String>,
+    // ── Phase 7: reasoning/speculative ─────────────────────────────────
+    /// Reasoning mode (auto/on/off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_mode: Option<String>,
+    /// Speculative decoding policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speculative_policy: Option<String>,
+    // ── Phase 7: MLLM/embeddings ───────────────────────────────────────
+    /// MLLM vision support (auto/on/off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mllm_vision: Option<String>,
+    /// Embeddings support (auto/on/off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embeddings: Option<String>,
+    // ── Phase 7: GPU ───────────────────────────────────────────────────
+    /// GPU memory utilization (0.5–1.0).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_memory_utilization: Option<f64>,
+    // ── Phase 7: Web UI (D26/A44) ──────────────────────────────────────
+    /// Web UI availability (auto/on/off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_ui_availability: Option<String>,
+    /// Expert custom static path for Web UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_ui_static_path: Option<String>,
+    /// Validated Web UI config JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_ui_config_json: Option<String>,
+    // ── Phase 7: endpoint/safety ───────────────────────────────────────
+    /// Endpoint compatibility mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint_compatibility: Option<String>,
+    /// Request safety policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_safety_policy: Option<String>,
+    /// Sampling mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampling_mode: Option<String>,
+    /// Parser policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parser_policy: Option<String>,
+    /// Security policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_policy: Option<String>,
 }
 
 fn default_host() -> String {
@@ -104,6 +195,59 @@ fn default_port() -> u16 {
 
 fn default_log_level() -> String {
     "INFO".into()
+}
+
+/// KV cache dtype configuration (D1/D2).
+/// Represents the effective KV cache dtype after considering all overrides.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KvCacheConfig {
+    /// Use default behavior.
+    Auto,
+    /// Override to FP16 (e.g., `fp16` for `--kv-cache-dtype`).
+    Fp16,
+    /// Override to BF16.
+    Bf16,
+    /// Override to FP8.
+    Fp8,
+}
+
+impl std::fmt::Display for KvCacheConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            KvCacheConfig::Auto => write!(f, "auto"),
+            KvCacheConfig::Fp16 => write!(f, "fp16"),
+            KvCacheConfig::Bf16 => write!(f, "bf16"),
+            KvCacheConfig::Fp8 => write!(f, "fp8"),
+        }
+    }
+}
+
+/// TurboQuant reusable-prompt storage policy (D31).
+/// Values match Rapid-MLX CLI --turboquant flag: v4, k8v4, none.
+/// "auto" is our config sentinel; the builder maps it to omitting --turboquant (runtime default).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurboQuantMode {
+    /// Use runtime default (omit --turboquant flag).
+    Auto,
+    /// V-only TurboQuant (expert legacy/A-B).
+    V4,
+    /// K8V4 asymmetric TurboQuant (Advanced trial recommendation).
+    K8V4,
+    /// Disable TurboQuant (Standard retained-storage policy, normally int4).
+    Off,
+}
+
+impl std::fmt::Display for TurboQuantMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TurboQuantMode::Auto => write!(f, "auto"),
+            TurboQuantMode::V4 => write!(f, "v4"),
+            TurboQuantMode::K8V4 => write!(f, "k8v4"),
+            TurboQuantMode::Off => write!(f, "none"),
+        }
+    }
 }
 
 pub fn ensure_local_platform_supported() -> Result<()> {
@@ -149,6 +293,39 @@ impl Default for RapidMlxConfig {
             no_thinking: false,
             escape_hatch_flags: Vec::new(),
             model_source_view: None,
+            // Phase 7: KV/cache policy
+            kv_cache_dtype: None,
+            turboquant_mode: None,
+            prefix_cache_policy: None,
+            hybrid_cache_entries: None,
+            pflash_policy: None,
+            response_cache_policy: None,
+            disk_checkpoint_policy: None,
+            // Phase 7: batching/concurrency
+            max_num_seqs: None,
+            max_concurrent_requests: None,
+            prefill_batch_size: None,
+            completion_batch_size: None,
+            batching_policy: None,
+            concurrency_policy: None,
+            // Phase 7: reasoning/speculative
+            reasoning_mode: None,
+            speculative_policy: None,
+            // Phase 7: MLLM/embeddings
+            mllm_vision: None,
+            embeddings: None,
+            // Phase 7: GPU
+            gpu_memory_utilization: None,
+            // Phase 7: Web UI
+            web_ui_availability: None,
+            web_ui_static_path: None,
+            web_ui_config_json: None,
+            // Phase 7: endpoint/safety
+            endpoint_compatibility: None,
+            request_safety_policy: None,
+            sampling_mode: None,
+            parser_policy: None,
+            security_policy: None,
         }
     }
 }
@@ -209,6 +386,33 @@ pub struct RapidMlxAdapter {
     pub auto_tool_choice: bool,
     pub no_thinking: bool,
     pub escape_hatch_flags: Vec<(String, serde_json::Value)>,
+    // Phase 7 fields
+    pub kv_cache_dtype: Option<KvCacheConfig>,
+    pub turboquant_mode: Option<TurboQuantMode>,
+    pub prefix_cache_policy: Option<String>,
+    pub hybrid_cache_entries: Option<u64>,
+    pub pflash_policy: Option<String>,
+    pub response_cache_policy: Option<String>,
+    pub disk_checkpoint_policy: Option<String>,
+    pub max_num_seqs: Option<u64>,
+    pub max_concurrent_requests: Option<u64>,
+    pub prefill_batch_size: Option<u64>,
+    pub completion_batch_size: Option<u64>,
+    pub batching_policy: Option<String>,
+    pub concurrency_policy: Option<String>,
+    pub reasoning_mode: Option<String>,
+    pub speculative_policy: Option<String>,
+    pub mllm_vision: Option<String>,
+    pub embeddings: Option<String>,
+    pub gpu_memory_utilization: Option<f64>,
+    pub web_ui_availability: Option<String>,
+    pub web_ui_static_path: Option<String>,
+    pub web_ui_config_json: Option<String>,
+    pub endpoint_compatibility: Option<String>,
+    pub request_safety_policy: Option<String>,
+    pub sampling_mode: Option<String>,
+    pub parser_policy: Option<String>,
+    pub security_policy: Option<String>,
     api_key: Option<String>,
     compatibility: CompatibilityProfile,
     capabilities: CapabilitySet,
@@ -254,6 +458,33 @@ impl RapidMlxAdapter {
             auto_tool_choice: false,
             no_thinking: false,
             escape_hatch_flags: Vec::new(),
+            // Phase 7 defaults
+            kv_cache_dtype: None,
+            turboquant_mode: None,
+            prefix_cache_policy: None,
+            hybrid_cache_entries: None,
+            pflash_policy: None,
+            response_cache_policy: None,
+            disk_checkpoint_policy: None,
+            max_num_seqs: None,
+            max_concurrent_requests: None,
+            prefill_batch_size: None,
+            completion_batch_size: None,
+            batching_policy: None,
+            concurrency_policy: None,
+            reasoning_mode: None,
+            speculative_policy: None,
+            mllm_vision: None,
+            embeddings: None,
+            gpu_memory_utilization: None,
+            web_ui_availability: None,
+            web_ui_static_path: None,
+            web_ui_config_json: None,
+            endpoint_compatibility: None,
+            request_safety_policy: None,
+            sampling_mode: None,
+            parser_policy: None,
+            security_policy: None,
             api_key: None,
             compatibility: CompatibilityProfile::verified_baseline(),
             capabilities: verified_capabilities(),
@@ -344,6 +575,9 @@ impl RapidMlxAdapter {
             .auto_tool_choice(self.auto_tool_choice)
             .no_thinking(self.no_thinking)
             .escape_hatch_flags(self.escape_hatch_flags.clone());
+
+        // Phase 7 config wiring
+        let builder = apply_phase7_adapter_config(builder, self);
 
         let mut launch = builder.build(
             self.runtime.executable_path.clone(),
@@ -470,6 +704,52 @@ impl RapidMlxAdapter {
     }
 }
 
+fn apply_phase7_adapter_config(
+    builder: command::RapidMlxCommandBuilder,
+    adapter: &RapidMlxAdapter,
+) -> command::RapidMlxCommandBuilder {
+    builder
+        .kv_cache_dtype(adapter.kv_cache_dtype.as_ref().map(|kv| {
+            use crate::inference::rapid_mlx::command::KvCacheDtypeArg;
+            match kv {
+                KvCacheConfig::Auto => KvCacheDtypeArg::Auto,
+                KvCacheConfig::Fp16 => KvCacheDtypeArg::Explicit("fp16".into()),
+                KvCacheConfig::Bf16 => KvCacheDtypeArg::Explicit("bf16".into()),
+                KvCacheConfig::Fp8 => KvCacheDtypeArg::Explicit("fp8".into()),
+            }
+        }))
+        .turboquant_mode(adapter.turboquant_mode.as_ref().and_then(|t| match t {
+            TurboQuantMode::Auto => None,
+            TurboQuantMode::V4 => Some("v4".into()),
+            TurboQuantMode::K8V4 => Some("k8v4".into()),
+            TurboQuantMode::Off => Some("none".into()),
+        }))
+        .prefix_cache_policy(adapter.prefix_cache_policy.clone())
+        .hybrid_cache_entries(adapter.hybrid_cache_entries)
+        .pflash_policy(adapter.pflash_policy.clone())
+        .response_cache_policy(adapter.response_cache_policy.clone())
+        .disk_checkpoint_policy(adapter.disk_checkpoint_policy.clone())
+        .max_num_seqs(adapter.max_num_seqs)
+        .max_concurrent_requests(adapter.max_concurrent_requests)
+        .prefill_batch_size(adapter.prefill_batch_size)
+        .completion_batch_size(adapter.completion_batch_size)
+        .batching_policy(adapter.batching_policy.clone())
+        .concurrency_policy(adapter.concurrency_policy.clone())
+        .reasoning_mode(adapter.reasoning_mode.clone())
+        .speculative_policy(adapter.speculative_policy.clone())
+        .mllm_vision(adapter.mllm_vision.clone())
+        .embeddings(adapter.embeddings.clone())
+        .gpu_memory_utilization(adapter.gpu_memory_utilization)
+        .web_ui_availability(adapter.web_ui_availability.clone())
+        .web_ui_static_path(adapter.web_ui_static_path.clone())
+        .web_ui_config_json(adapter.web_ui_config_json.clone())
+        .endpoint_compatibility(adapter.endpoint_compatibility.clone())
+        .request_safety_policy(adapter.request_safety_policy.clone())
+        .sampling_mode(adapter.sampling_mode.clone())
+        .parser_policy(adapter.parser_policy.clone())
+        .security_policy(adapter.security_policy.clone())
+}
+
 pub fn map_provisional_chat_request(body: &[u8]) -> Result<Vec<u8>> {
     map_chat_request_with_fields(body, &provisional_chat_fields())
 }
@@ -562,6 +842,67 @@ fn provisional_chat_fields() -> BTreeSet<&'static str> {
 mod tests {
     use super::*;
     use crate::inference::rapid_mlx::runtime::RuntimeSource;
+
+    #[test]
+    fn phase7_config_serialization_roundtrip() {
+        // Verify RapidMlxConfig with all Phase 7 fields serializes/deserializes without loss.
+        let config = RapidMlxConfig {
+            model_path: "/model".into(),
+            kv_cache_dtype: Some(KvCacheConfig::Fp16),
+            turboquant_mode: Some(TurboQuantMode::K8V4),
+            prefix_cache_policy: Some("auto".into()),
+            hybrid_cache_entries: Some(100),
+            pflash_policy: Some("auto".into()),
+            response_cache_policy: Some("auto".into()),
+            disk_checkpoint_policy: Some("auto".into()),
+            max_num_seqs: Some(8),
+            max_concurrent_requests: Some(32),
+            prefill_batch_size: Some(256),
+            completion_batch_size: Some(64),
+            batching_policy: Some("auto".into()),
+            concurrency_policy: Some("single_active".into()),
+            reasoning_mode: Some("auto".into()),
+            speculative_policy: Some("auto".into()),
+            mllm_vision: Some("auto".into()),
+            embeddings: Some("auto".into()),
+            gpu_memory_utilization: Some(0.85),
+            web_ui_availability: Some("auto".into()),
+            web_ui_static_path: Some("ui/".into()),
+            web_ui_config_json: Some("{}".into()),
+            endpoint_compatibility: Some("openai_v1".into()),
+            request_safety_policy: Some("auto".into()),
+            sampling_mode: Some("auto".into()),
+            parser_policy: Some("auto".into()),
+            security_policy: Some("loopback_only".into()),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&config).unwrap();
+        let restored: RapidMlxConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(restored.kv_cache_dtype, config.kv_cache_dtype);
+        assert_eq!(restored.turboquant_mode, config.turboquant_mode);
+        assert_eq!(restored.max_num_seqs, config.max_num_seqs);
+        assert_eq!(
+            restored.gpu_memory_utilization,
+            config.gpu_memory_utilization
+        );
+        assert_eq!(restored.web_ui_availability, config.web_ui_availability);
+        assert_eq!(restored.security_policy, config.security_policy);
+    }
+
+    #[test]
+    fn phase7_all_settings_iterate_without_panic() {
+        // Verify all_settings() can be fully iterated and each returns valid default.
+        use crate::inference::rapid_mlx::settings::all_settings;
+        for setting in all_settings() {
+            let default = setting.default_value();
+            assert!(
+                default.is_string()
+                    || default.is_number()
+                    || default.is_object()
+                    || default.is_null()
+            );
+        }
+    }
 
     #[test]
     fn adapter_reuses_poller_per_port_and_separates_ports() {

@@ -8,7 +8,9 @@ use std::path::Path;
 ///     is authoritative; legacy model_path is read-migrated but never re-written.
 /// v2: Phase 6 Part B — prefix_cache_enabled and prefix_cache_budget_bytes fields;
 ///     existing presets default to prefix_cache_enabled=false (safe default).
-pub const PRESET_SCHEMA_VERSION: u32 = 2;
+/// v3: Phase 7A — all Phase 7 config fields (KV/cache, batching, GPU, Web UI, safety);
+///     existing presets load with None/defaults (safe degraded mode).
+pub const PRESET_SCHEMA_VERSION: u32 = 3;
 
 /// Forward-migrate a preset from any known version to current.
 /// Returns `true` if migration was applied, `false` if already current.
@@ -39,6 +41,13 @@ pub fn migrate_preset(preset: &mut ModelPreset) -> bool {
         // Fields use #[serde(default)] so they deserialize safely; this migration
         // just bumps the schema_version marker for forward-compatibility tracking.
         preset.schema_version = Some(2);
+        migrated = true;
+    }
+    // v2 → v3: Phase 7A — all Phase 7 config fields.
+    // All fields use #[serde(default, skip_serializing_if = "Option::is_none")] so
+    // existing presets load with None (safe degraded mode). Migration bumps schema marker.
+    if preset.schema_version.unwrap_or(2) < 3 {
+        preset.schema_version = Some(3);
         migrated = true;
     }
     migrated
@@ -815,14 +824,14 @@ mod tests {
         let mut preset: ModelPreset = serde_json::from_value(json).unwrap();
         let migrated = migrate_preset(&mut preset);
         assert!(migrated);
-        assert_eq!(preset.schema_version, Some(2));
+        assert_eq!(preset.schema_version, Some(3));
         // Safe default: prefix_cache_enabled=false
         assert!(!preset.rapid_mlx.as_ref().unwrap().prefix_cache_enabled);
     }
 
     #[test]
     fn test_prefix_cache_migration_v1_to_v2() {
-        // v1 preset with schema_version=1 — should migrate to v2.
+        // v1 preset with schema_version=1 — should migrate to v3 (via v2→v3).
         let json = serde_json::json!({
             "id": "test",
             "name": "Test",
@@ -836,7 +845,7 @@ mod tests {
         let mut preset: ModelPreset = serde_json::from_value(json).unwrap();
         let migrated = migrate_preset(&mut preset);
         assert!(migrated);
-        assert_eq!(preset.schema_version, Some(2));
+        assert_eq!(preset.schema_version, Some(3));
         // Safe default: prefix_cache_enabled=false
         assert!(!preset.rapid_mlx.as_ref().unwrap().prefix_cache_enabled);
     }
@@ -892,5 +901,126 @@ mod tests {
         let meta = crate::inference::rapid_mlx::runtime::RuntimeMetadata::default();
         assert!(!meta.prefix_cache_enabled);
         assert!(meta.prefix_cache_budget_bytes.is_none());
+    }
+
+    // Phase 7A: command-preview and preset migration tests.
+
+    #[test]
+    fn test_phase7_preset_roundtrip_preserves_all_fields() {
+        use crate::inference::rapid_mlx::{KvCacheConfig, TurboQuantMode};
+
+        let mut preset = ModelPreset {
+            id: "test-p7".into(),
+            name: "Phase7 Test".into(),
+            backend: crate::inference::InferenceBackend::RapidMlx,
+            rapid_mlx: Some(crate::inference::rapid_mlx::RapidMlxConfig {
+                model_path: "/path/to/model".into(),
+                kv_cache_dtype: Some(KvCacheConfig::Fp16),
+                turboquant_mode: Some(TurboQuantMode::K8V4),
+                prefix_cache_policy: Some("auto".into()),
+                hybrid_cache_entries: Some(256),
+                pflash_policy: Some("auto".into()),
+                response_cache_policy: Some("on".into()),
+                disk_checkpoint_policy: Some("off".into()),
+                max_num_seqs: Some(128),
+                max_concurrent_requests: Some(64),
+                prefill_batch_size: Some(2048),
+                completion_batch_size: Some(512),
+                batching_policy: Some("auto".into()),
+                concurrency_policy: Some("single_active".into()),
+                reasoning_mode: Some("auto".into()),
+                speculative_policy: Some("auto".into()),
+                mllm_vision: Some("auto".into()),
+                embeddings: Some("off".into()),
+                gpu_memory_utilization: Some(0.85),
+                web_ui_availability: Some("auto".into()),
+                web_ui_static_path: None,
+                web_ui_config_json: None,
+                endpoint_compatibility: Some("openai_v1".into()),
+                request_safety_policy: Some("auto".into()),
+                sampling_mode: Some("auto".into()),
+                parser_policy: Some("auto".into()),
+                security_policy: Some("loopback_only".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        migrate_preset(&mut preset);
+
+        let json = serde_json::to_value(&preset).unwrap();
+        let loaded: ModelPreset = serde_json::from_value(json).unwrap();
+
+        assert_eq!(loaded.schema_version, Some(3));
+        let rapid = loaded.rapid_mlx.unwrap();
+        assert_eq!(rapid.kv_cache_dtype, Some(KvCacheConfig::Fp16));
+        assert_eq!(rapid.turboquant_mode, Some(TurboQuantMode::K8V4));
+        assert_eq!(rapid.prefix_cache_policy, Some("auto".into()));
+        assert_eq!(rapid.hybrid_cache_entries, Some(256));
+        assert_eq!(rapid.pflash_policy, Some("auto".into()));
+        assert_eq!(rapid.response_cache_policy, Some("on".into()));
+        assert_eq!(rapid.disk_checkpoint_policy, Some("off".into()));
+        assert_eq!(rapid.max_num_seqs, Some(128));
+        assert_eq!(rapid.max_concurrent_requests, Some(64));
+        assert_eq!(rapid.prefill_batch_size, Some(2048));
+        assert_eq!(rapid.completion_batch_size, Some(512));
+        assert_eq!(rapid.batching_policy, Some("auto".into()));
+        assert_eq!(rapid.concurrency_policy, Some("single_active".into()));
+        assert_eq!(rapid.reasoning_mode, Some("auto".into()));
+        assert_eq!(rapid.speculative_policy, Some("auto".into()));
+        assert_eq!(rapid.mllm_vision, Some("auto".into()));
+        assert_eq!(rapid.embeddings, Some("off".into()));
+        assert_eq!(rapid.gpu_memory_utilization, Some(0.85));
+        assert_eq!(rapid.web_ui_availability, Some("auto".into()));
+        assert_eq!(rapid.endpoint_compatibility, Some("openai_v1".into()));
+        assert_eq!(rapid.request_safety_policy, Some("auto".into()));
+        assert_eq!(rapid.sampling_mode, Some("auto".into()));
+        assert_eq!(rapid.parser_policy, Some("auto".into()));
+        assert_eq!(rapid.security_policy, Some("loopback_only".into()));
+    }
+
+    #[test]
+    fn test_phase7_legacy_preset_defaults_safe() {
+        // Legacy preset (pre-Phase 7) should load with all Phase 7 fields as None
+        // (safe degraded mode per D32).
+        let json = serde_json::json!({
+            "id": "legacy",
+            "name": "Legacy",
+            "schema_version": 1,
+            "backend": "rapid_mlx",
+            "rapid_mlx": {
+                "model_path": "/path/to/model",
+                "port": 8000
+            }
+        });
+        let mut preset: ModelPreset = serde_json::from_value(json).unwrap();
+        let migrated = migrate_preset(&mut preset);
+        assert!(migrated);
+        assert_eq!(preset.schema_version, Some(3));
+
+        let rapid = preset.rapid_mlx.unwrap();
+        assert!(rapid.kv_cache_dtype.is_none());
+        assert!(rapid.turboquant_mode.is_none());
+        assert!(rapid.prefix_cache_policy.is_none());
+        assert!(rapid.hybrid_cache_entries.is_none());
+        assert!(rapid.pflash_policy.is_none());
+        assert!(rapid.response_cache_policy.is_none());
+        assert!(rapid.disk_checkpoint_policy.is_none());
+        assert!(rapid.max_num_seqs.is_none());
+        assert!(rapid.max_concurrent_requests.is_none());
+        assert!(rapid.prefill_batch_size.is_none());
+        assert!(rapid.completion_batch_size.is_none());
+        assert!(rapid.batching_policy.is_none());
+        assert!(rapid.concurrency_policy.is_none());
+        assert!(rapid.reasoning_mode.is_none());
+        assert!(rapid.speculative_policy.is_none());
+        assert!(rapid.mllm_vision.is_none());
+        assert!(rapid.embeddings.is_none());
+        assert!(rapid.gpu_memory_utilization.is_none());
+        assert!(rapid.web_ui_availability.is_none());
+        assert!(rapid.endpoint_compatibility.is_none());
+        assert!(rapid.request_safety_policy.is_none());
+        assert!(rapid.sampling_mode.is_none());
+        assert!(rapid.parser_policy.is_none());
+        assert!(rapid.security_policy.is_none());
     }
 }

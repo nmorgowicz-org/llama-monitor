@@ -21,6 +21,46 @@ pub struct RapidMlxCommandBuilder {
     no_thinking: bool,
     trust_remote_code_consent: Option<String>,
     escape_hatch_flags: Vec<(String, serde_json::Value)>,
+    // Phase 7: KV/cache policy
+    kv_cache_dtype: Option<KvCacheDtypeArg>,
+    turboquant_mode: Option<String>,
+    prefix_cache_policy: Option<String>,
+    hybrid_cache_entries: Option<u64>,
+    pflash_policy: Option<String>,
+    response_cache_policy: Option<String>,
+    disk_checkpoint_policy: Option<String>,
+    // Phase 7: batching/concurrency
+    max_num_seqs: Option<u64>,
+    max_concurrent_requests: Option<u64>,
+    prefill_batch_size: Option<u64>,
+    completion_batch_size: Option<u64>,
+    batching_policy: Option<String>,
+    concurrency_policy: Option<String>,
+    // Phase 7: reasoning/speculative
+    reasoning_mode: Option<String>,
+    speculative_policy: Option<String>,
+    // Phase 7: MLLM/embeddings
+    mllm_vision: Option<String>,
+    embeddings: Option<String>,
+    // Phase 7: GPU
+    gpu_memory_utilization: Option<f64>,
+    // Phase 7: Web UI
+    web_ui_availability: Option<String>,
+    web_ui_static_path: Option<String>,
+    web_ui_config_json: Option<String>,
+    // Phase 7: endpoint/safety
+    endpoint_compatibility: Option<String>,
+    request_safety_policy: Option<String>,
+    sampling_mode: Option<String>,
+    parser_policy: Option<String>,
+    security_policy: Option<String>,
+}
+
+/// KV cache dtype argument for CLI.
+#[derive(Debug, Clone)]
+pub enum KvCacheDtypeArg {
+    Auto,
+    Explicit(String),
 }
 
 impl RapidMlxCommandBuilder {
@@ -39,6 +79,33 @@ impl RapidMlxCommandBuilder {
             no_thinking: false,
             trust_remote_code_consent: None,
             escape_hatch_flags: Vec::new(),
+            // Phase 7 defaults
+            kv_cache_dtype: None,
+            turboquant_mode: None,
+            prefix_cache_policy: None,
+            hybrid_cache_entries: None,
+            pflash_policy: None,
+            response_cache_policy: None,
+            disk_checkpoint_policy: None,
+            max_num_seqs: None,
+            max_concurrent_requests: None,
+            prefill_batch_size: None,
+            completion_batch_size: None,
+            batching_policy: None,
+            concurrency_policy: None,
+            reasoning_mode: None,
+            speculative_policy: None,
+            mllm_vision: None,
+            embeddings: None,
+            gpu_memory_utilization: None,
+            web_ui_availability: None,
+            web_ui_static_path: None,
+            web_ui_config_json: None,
+            endpoint_compatibility: None,
+            request_safety_policy: None,
+            sampling_mode: None,
+            parser_policy: None,
+            security_policy: None,
         }
     }
 
@@ -99,6 +166,111 @@ impl RapidMlxCommandBuilder {
 
     pub fn escape_hatch_flags(mut self, flags: Vec<(String, serde_json::Value)>) -> Self {
         self.escape_hatch_flags = flags;
+        self
+    }
+    // Phase 7 setters
+    pub fn kv_cache_dtype(mut self, dtype: Option<KvCacheDtypeArg>) -> Self {
+        self.kv_cache_dtype = dtype;
+        self
+    }
+    pub fn turboquant_mode(mut self, mode: Option<String>) -> Self {
+        self.turboquant_mode = mode;
+        self
+    }
+    pub fn prefix_cache_policy(mut self, policy: Option<String>) -> Self {
+        self.prefix_cache_policy = policy;
+        self
+    }
+    pub fn hybrid_cache_entries(mut self, entries: Option<u64>) -> Self {
+        self.hybrid_cache_entries = entries;
+        self
+    }
+    pub fn pflash_policy(mut self, policy: Option<String>) -> Self {
+        self.pflash_policy = policy;
+        self
+    }
+    pub fn response_cache_policy(mut self, policy: Option<String>) -> Self {
+        self.response_cache_policy = policy;
+        self
+    }
+    pub fn disk_checkpoint_policy(mut self, policy: Option<String>) -> Self {
+        self.disk_checkpoint_policy = policy;
+        self
+    }
+    pub fn max_num_seqs(mut self, seqs: Option<u64>) -> Self {
+        self.max_num_seqs = seqs;
+        self
+    }
+    pub fn max_concurrent_requests(mut self, requests: Option<u64>) -> Self {
+        self.max_concurrent_requests = requests;
+        self
+    }
+    pub fn prefill_batch_size(mut self, size: Option<u64>) -> Self {
+        self.prefill_batch_size = size;
+        self
+    }
+    pub fn completion_batch_size(mut self, size: Option<u64>) -> Self {
+        self.completion_batch_size = size;
+        self
+    }
+    pub fn batching_policy(mut self, policy: Option<String>) -> Self {
+        self.batching_policy = policy;
+        self
+    }
+    pub fn concurrency_policy(mut self, policy: Option<String>) -> Self {
+        self.concurrency_policy = policy;
+        self
+    }
+    pub fn reasoning_mode(mut self, mode: Option<String>) -> Self {
+        self.reasoning_mode = mode;
+        self
+    }
+    pub fn speculative_policy(mut self, policy: Option<String>) -> Self {
+        self.speculative_policy = policy;
+        self
+    }
+    pub fn mllm_vision(mut self, vision: Option<String>) -> Self {
+        self.mllm_vision = vision;
+        self
+    }
+    pub fn embeddings(mut self, emb: Option<String>) -> Self {
+        self.embeddings = emb;
+        self
+    }
+    pub fn gpu_memory_utilization(mut self, util: Option<f64>) -> Self {
+        self.gpu_memory_utilization = util;
+        self
+    }
+    pub fn web_ui_availability(mut self, avail: Option<String>) -> Self {
+        self.web_ui_availability = avail;
+        self
+    }
+    pub fn web_ui_static_path(mut self, path: Option<String>) -> Self {
+        self.web_ui_static_path = path;
+        self
+    }
+    pub fn web_ui_config_json(mut self, config: Option<String>) -> Self {
+        self.web_ui_config_json = config;
+        self
+    }
+    pub fn endpoint_compatibility(mut self, compat: Option<String>) -> Self {
+        self.endpoint_compatibility = compat;
+        self
+    }
+    pub fn request_safety_policy(mut self, policy: Option<String>) -> Self {
+        self.request_safety_policy = policy;
+        self
+    }
+    pub fn sampling_mode(mut self, mode: Option<String>) -> Self {
+        self.sampling_mode = mode;
+        self
+    }
+    pub fn parser_policy(mut self, policy: Option<String>) -> Self {
+        self.parser_policy = policy;
+        self
+    }
+    pub fn security_policy(mut self, policy: Option<String>) -> Self {
+        self.security_policy = policy;
         self
     }
 
@@ -170,6 +342,185 @@ impl RapidMlxCommandBuilder {
                     args.push(serde_value_to_flag_arg(value));
                 }
             }
+        }
+        // Phase 7: KV/cache policy flags
+        if let Some(ref dtype) = self.kv_cache_dtype {
+            match dtype {
+                KvCacheDtypeArg::Explicit(effective) => {
+                    capabilities.require("--kv-cache-dtype")?;
+                    args.push("--kv-cache-dtype".to_string());
+                    args.push(format!("{{\"effective\":\"{}\"}}", effective));
+                }
+                KvCacheDtypeArg::Auto => {}
+            }
+        }
+        if let Some(ref mode) = self.turboquant_mode
+            && *mode != "none"
+        {
+            capabilities.require("--turboquant")?;
+            args.push("--turboquant".to_string());
+            args.push(mode.clone());
+        }
+        if let Some(ref policy) = self.prefix_cache_policy
+            && policy != "auto"
+        {
+            capabilities.require("--max-cache-blocks")?;
+            args.push("--max-cache-blocks".to_string());
+            args.push(policy.clone());
+        }
+        if let Some(entries) = self.hybrid_cache_entries {
+            capabilities.require("--hybrid-cache-entries")?;
+            args.push("--hybrid-cache-entries".to_string());
+            args.push(entries.to_string());
+        }
+        if let Some(ref policy) = self.pflash_policy
+            && policy != "auto"
+        {
+            capabilities.require("--pflash")?;
+            args.push("--pflash".to_string());
+            args.push(policy.clone());
+        }
+        if let Some(ref policy) = self.response_cache_policy
+            && policy != "auto"
+        {
+            capabilities.require("--response-cache")?;
+            args.push("--response-cache".to_string());
+            args.push(policy.clone());
+        }
+        if let Some(ref policy) = self.disk_checkpoint_policy
+            && policy != "auto"
+        {
+            capabilities.require("--disk-checkpoint")?;
+            args.push("--disk-checkpoint".to_string());
+            args.push(policy.clone());
+        }
+        // Phase 7: batching/concurrency flags
+        if let Some(seqs) = self.max_num_seqs {
+            capabilities.require("--max-num-seqs")?;
+            args.push("--max-num-seqs".to_string());
+            args.push(seqs.to_string());
+        }
+        if let Some(requests) = self.max_concurrent_requests {
+            capabilities.require("--max-concurrent-requests")?;
+            args.push("--max-concurrent-requests".to_string());
+            args.push(requests.to_string());
+        }
+        if let Some(size) = self.prefill_batch_size {
+            capabilities.require("--prefill-batch-size")?;
+            args.push("--prefill-batch-size".to_string());
+            args.push(size.to_string());
+        }
+        if let Some(size) = self.completion_batch_size {
+            capabilities.require("--completion-batch-size")?;
+            args.push("--completion-batch-size".to_string());
+            args.push(size.to_string());
+        }
+        if let Some(ref policy) = self.batching_policy
+            && policy != "auto"
+        {
+            capabilities.require("--batching-policy")?;
+            args.push("--batching-policy".to_string());
+            args.push(policy.clone());
+        }
+        if let Some(ref policy) = self.concurrency_policy
+            && policy != "single_active"
+        {
+            capabilities.require("--concurrency-policy")?;
+            args.push("--concurrency-policy".to_string());
+            args.push(policy.clone());
+        }
+        // Phase 7: reasoning/speculative flags
+        if let Some(ref mode) = self.reasoning_mode
+            && mode != "auto"
+        {
+            capabilities.require("--reasoning")?;
+            args.push("--reasoning".to_string());
+            args.push(mode.clone());
+        }
+        if let Some(ref policy) = self.speculative_policy {
+            capabilities.require("--speculative")?;
+            args.push("--speculative".to_string());
+            args.push(policy.clone());
+        }
+        // Phase 7: MLLM/embeddings flags
+        if let Some(ref vision) = self.mllm_vision
+            && vision != "auto"
+        {
+            capabilities.require("--vision")?;
+            args.push("--vision".to_string());
+            args.push(vision.clone());
+        }
+        if let Some(ref emb) = self.embeddings
+            && emb != "auto"
+        {
+            capabilities.require("--embeddings")?;
+            args.push("--embeddings".to_string());
+            args.push(emb.clone());
+        }
+        // Phase 7: GPU flags
+        if let Some(util) = self.gpu_memory_utilization {
+            capabilities.require("--gpu-memory-utilization")?;
+            args.push("--gpu-memory-utilization".to_string());
+            args.push(util.to_string());
+        }
+        // Phase 7: Web UI flags (D26/A44)
+        if let Some(ref avail) = self.web_ui_availability
+            && avail != "auto"
+        {
+            if avail == "off" {
+                capabilities.require("--no-ui")?;
+                args.push("--no-ui".to_string());
+            } else {
+                capabilities.require("--ui")?;
+                args.push("--ui".to_string());
+                args.push(avail.clone());
+            }
+        }
+        if let Some(ref path) = self.web_ui_static_path {
+            capabilities.require("--path")?;
+            args.push("--path".to_string());
+            args.push(path.clone());
+        }
+        if let Some(ref config) = self.web_ui_config_json {
+            capabilities.require("--ui-config")?;
+            args.push("--ui-config".to_string());
+            args.push(config.clone());
+        }
+        // Phase 7: endpoint/safety flags
+        if let Some(ref compat) = self.endpoint_compatibility
+            && compat != "openai_v1"
+        {
+            capabilities.require("--endpoint-compatibility")?;
+            args.push("--endpoint-compatibility".to_string());
+            args.push(compat.clone());
+        }
+        if let Some(ref policy) = self.request_safety_policy
+            && policy != "auto"
+        {
+            capabilities.require("--request-safety-policy")?;
+            args.push("--request-safety-policy".to_string());
+            args.push(policy.clone());
+        }
+        if let Some(ref mode) = self.sampling_mode
+            && mode != "auto"
+        {
+            capabilities.require("--sampling-mode")?;
+            args.push("--sampling-mode".to_string());
+            args.push(mode.clone());
+        }
+        if let Some(ref policy) = self.parser_policy
+            && policy != "auto"
+        {
+            capabilities.require("--parser-policy")?;
+            args.push("--parser-policy".to_string());
+            args.push(policy.clone());
+        }
+        if let Some(ref policy) = self.security_policy
+            && policy != "loopback_only"
+        {
+            capabilities.require("--security-policy")?;
+            args.push("--security-policy".to_string());
+            args.push(policy.clone());
         }
 
         let os_args: Vec<OsString> = args.into_iter().map(OsString::from).collect();
@@ -535,5 +886,166 @@ mod tests {
             err.contains("revision-scoped consent"),
             "expected source error, got: {err}"
         );
+    }
+
+    #[test]
+    fn phase7_config_produces_valid_argv() {
+        use crate::inference::rapid_mlx::compatibility::ServeCapabilities;
+        // Phase 7 runtime with all flags present
+        let capabilities = ServeCapabilities::from_help(
+            "--host --port --served-model-name --timeout --max-cache-blocks \
+             --kv-cache-dtype --turboquant --max-num-seqs --max-concurrent-requests \
+             --prefill-batch-size --completion-batch-size --batching-policy --concurrency-policy \
+             --reasoning --speculative --vision --embeddings --gpu-memory-utilization \
+             --ui --no-ui --path --ui-config --pflash --hybrid-cache-entries \
+             --response-cache --disk-checkpoint --endpoint-compatibility \
+             --request-safety-policy --sampling-mode --parser-policy --security-policy",
+        );
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .port(9000)
+        .kv_cache_dtype(Some(KvCacheDtypeArg::Explicit("int8".into())))
+        .turboquant_mode(Some("k8v4".into()))
+        .pflash_policy(Some("always".into()))
+        .hybrid_cache_entries(Some(512))
+        .max_num_seqs(Some(8))
+        .max_concurrent_requests(Some(32))
+        .prefill_batch_size(Some(256))
+        .completion_batch_size(Some(64))
+        .batching_policy(Some("fixed".into()))
+        .concurrency_policy(Some("allow_overlap".into()))
+        .reasoning_mode(Some("on".into()))
+        .speculative_policy(Some("mtp_v1".into()))
+        .mllm_vision(Some("on".into()))
+        .embeddings(Some("on".into()))
+        .gpu_memory_utilization(Some(0.85))
+        .web_ui_availability(Some("on".into()))
+        .web_ui_static_path(Some("custom-ui/".into()))
+        .web_ui_config_json(Some("{\"theme\":\"dark\"}".into()))
+        .endpoint_compatibility(Some("openai_v1,anthropic".into()))
+        .request_safety_policy(Some("strict".into()))
+        .sampling_mode(Some("explicit_client".into()))
+        .parser_policy(Some("native".into()))
+        .security_policy(Some("authenticated".into()))
+        .build("rapid-mlx".into(), &capabilities)
+        .unwrap();
+        let args = args(&launch);
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--kv-cache-dtype", "{\"effective\":\"int8\"}"])
+        );
+        assert!(args.windows(2).any(|p| p == ["--turboquant", "k8v4"]));
+        assert!(args.windows(2).any(|p| p == ["--pflash", "always"]));
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--hybrid-cache-entries", "512"])
+        );
+        assert!(args.windows(2).any(|p| p == ["--max-num-seqs", "8"]));
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--max-concurrent-requests", "32"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--prefill-batch-size", "256"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--completion-batch-size", "64"])
+        );
+        assert!(args.windows(2).any(|p| p == ["--batching-policy", "fixed"]));
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--concurrency-policy", "allow_overlap"])
+        );
+        assert!(args.windows(2).any(|p| p == ["--reasoning", "on"]));
+        assert!(args.windows(2).any(|p| p == ["--speculative", "mtp_v1"]));
+        assert!(args.windows(2).any(|p| p == ["--vision", "on"]));
+        assert!(args.windows(2).any(|p| p == ["--embeddings", "on"]));
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--gpu-memory-utilization", "0.85"])
+        );
+        assert!(args.windows(2).any(|p| p == ["--ui", "on"]));
+        assert!(args.windows(2).any(|p| p == ["--path", "custom-ui/"]));
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--ui-config", "{\"theme\":\"dark\"}"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--endpoint-compatibility", "openai_v1,anthropic"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--request-safety-policy", "strict"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--sampling-mode", "explicit_client"])
+        );
+        assert!(args.windows(2).any(|p| p == ["--parser-policy", "native"]));
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--security-policy", "authenticated"])
+        );
+    }
+
+    #[test]
+    fn phase7_auto_defaults_are_omitted() {
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .kv_cache_dtype(Some(KvCacheDtypeArg::Auto))
+        .turboquant_mode(Some("none".into()))
+        .reasoning_mode(Some("auto".into()))
+        .mllm_vision(Some("auto".into()))
+        .embeddings(Some("auto".into()))
+        .web_ui_availability(Some("auto".into()))
+        .batching_policy(Some("auto".into()))
+        .concurrency_policy(Some("single_active".into()))
+        .endpoint_compatibility(Some("openai_v1".into()))
+        .request_safety_policy(Some("auto".into()))
+        .sampling_mode(Some("auto".into()))
+        .parser_policy(Some("auto".into()))
+        .security_policy(Some("loopback_only".into()))
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .unwrap();
+        let args = args(&launch);
+        assert!(!args.iter().any(|a| a.starts_with("--kv-cache-dtype")));
+        assert!(!args.iter().any(|a| a.starts_with("--turboquant")));
+        assert!(!args.iter().any(|a| a.starts_with("--reasoning")));
+        assert!(!args.iter().any(|a| a.starts_with("--vision")));
+        assert!(!args.iter().any(|a| a.starts_with("--embeddings")));
+        assert!(!args.iter().any(|a| a.starts_with("--ui")));
+        assert!(!args.iter().any(|a| a.starts_with("--no-ui")));
+        assert!(!args.iter().any(|a| a.starts_with("--batching-policy")));
+        assert!(!args.iter().any(|a| a.starts_with("--concurrency-policy")));
+        assert!(
+            !args
+                .iter()
+                .any(|a| a.starts_with("--endpoint-compatibility"))
+        );
+        assert!(
+            !args
+                .iter()
+                .any(|a| a.starts_with("--request-safety-policy"))
+        );
+        assert!(!args.iter().any(|a| a.starts_with("--sampling-mode")));
+        assert!(!args.iter().any(|a| a.starts_with("--parser-policy")));
+        assert!(!args.iter().any(|a| a.starts_with("--security-policy")));
+    }
+
+    #[test]
+    fn phase7_unsupported_flag_fails_closed() {
+        let capabilities = ServeCapabilities::from_help("--host --port --served-model-name");
+        let error = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .turboquant_mode(Some("k8v4".into()))
+        .build("rapid-mlx".into(), &capabilities)
+        .unwrap_err();
+        assert!(error.to_string().contains("--turboquant"));
     }
 }

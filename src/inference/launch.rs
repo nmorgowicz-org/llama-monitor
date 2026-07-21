@@ -455,6 +455,33 @@ pub async fn construct_adapter(
                 );
             }
             adapter.escape_hatch_flags = config.escape_hatch_flags.clone();
+            // Phase 7 config wiring
+            adapter.kv_cache_dtype = config.kv_cache_dtype.clone();
+            adapter.turboquant_mode = config.turboquant_mode.clone();
+            adapter.prefix_cache_policy = config.prefix_cache_policy.clone();
+            adapter.hybrid_cache_entries = config.hybrid_cache_entries;
+            adapter.pflash_policy = config.pflash_policy.clone();
+            adapter.response_cache_policy = config.response_cache_policy.clone();
+            adapter.disk_checkpoint_policy = config.disk_checkpoint_policy.clone();
+            adapter.max_num_seqs = config.max_num_seqs;
+            adapter.max_concurrent_requests = config.max_concurrent_requests;
+            adapter.prefill_batch_size = config.prefill_batch_size;
+            adapter.completion_batch_size = config.completion_batch_size;
+            adapter.batching_policy = config.batching_policy.clone();
+            adapter.concurrency_policy = config.concurrency_policy.clone();
+            adapter.reasoning_mode = config.reasoning_mode.clone();
+            adapter.speculative_policy = config.speculative_policy.clone();
+            adapter.mllm_vision = config.mllm_vision.clone();
+            adapter.embeddings = config.embeddings.clone();
+            adapter.gpu_memory_utilization = config.gpu_memory_utilization;
+            adapter.web_ui_availability = config.web_ui_availability.clone();
+            adapter.web_ui_static_path = config.web_ui_static_path.clone();
+            adapter.web_ui_config_json = config.web_ui_config_json.clone();
+            adapter.endpoint_compatibility = config.endpoint_compatibility.clone();
+            adapter.request_safety_policy = config.request_safety_policy.clone();
+            adapter.sampling_mode = config.sampling_mode.clone();
+            adapter.parser_policy = config.parser_policy.clone();
+            adapter.security_policy = config.security_policy.clone();
             adapter.configure_runtime(profile, config.api_key.clone());
             Ok(BackendAdapter::RapidMlx(Arc::new(adapter)))
         }

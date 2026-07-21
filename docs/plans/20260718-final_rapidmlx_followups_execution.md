@@ -264,13 +264,57 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 
 ### Phase 7 — Critical settings and shared UI
 
-- **State:** Not started
-- **Budget:** 190k
+**NOTE:** Previous builder mislabeled Part B UI work as "Part A" (commits 3437201, cbf4476). Actual Part A (backend Rust) was never done. Phase 7 is now formally split into 7A and 7B below.
+
+#### Phase 7A — Rust backend (split into 3 parts for context management)
+
+Phase 7A = builder brief items 1–5 from `docs/plans/20260718-final_rapidmlx_followups.md` §1850-1854.
+**NOTE:** Previous builder (task ses_07c7c780afferrWKNMedXMjHIx) started Phase 7A but blew context — it reported complete but actual wiring is likely incomplete/broken. Do not trust prior output; validate everything.
+
+##### Phase 7A1 — Semantic catalog + config fields
+
+- **State:** Not started (prior builder's work must be re-validated)
+- **Budget:** 70k
 - **Depends on:** Phases 2–3 and 5–6
-- **Read:** capability priority Section 4; D6–D8/D16/D21–D26/D31; contracts 7.3/7.5; A5/A44/A49 and other relevant A decisions; Phase 7; control/UI/client matrices.
-- **Primary output:** backend-owned semantic setting catalog with frontend-owned teaching/layout/custom interactions; shared wizard/editor controls; truthful capability states; workload profiles; endpoint compatibility; command preview; explicit MTP/concurrency behavior; accepted tiered Reusable prompt storage UI and diagnostics; Advanced llama-server Web UI availability/config/static-path group with proxy/tools security separation; **wired-limit Settings control** (slider/field with recommended/max/actual display, warning when above recommended RAM reserve).
-- **Completion proof:** every control completes the trace; wizard/editor parity; hidden backend values do not leak; workload assumptions remain inspectable; bundled Web UI can be opened/configured without enabling MCP proxy or built-in tools; Network & Access remains the sole authority for bind/auth/TLS/CORS.
-- **Mandatory Builder packets:** 7A (Rust semantic catalog, config/command/API trace, migrations) <=120k; then 7B (shared Wizard/Editor UI, teaching, captures/tests) <=120k. Each packet returns its own handoff/checkpoint; one fresh Verifier evaluates the complete Phase 7 diff and both packets.
+- **Scope:** builder brief items 1-2 (catalog + wiring types)
+- **Files:** `src/inference/rapid_mlx/settings.rs` (NEW), `src/inference/rapid_mlx/mod.rs` (add Phase 7 fields to RapidMlxConfig), `src/llama/vram_estimator/execution_policy.rs` and `workload_scenarios.rs` (wire in, remove dead_code allows)
+
+##### Phase 7A2 — Command builder + launch wiring
+
+- **State:** Not started
+- **Budget:** 70k
+- **Depends on:** 7A1 verified complete
+- **Scope:** builder brief item 2 (end-to-end wiring) + item 3 (eligibility)
+- **Files:** `src/inference/rapid_mlx/command.rs` (Phase 7 setters + build() flags), `src/inference/launch.rs` (wire config to builder), `src/inference/rapid_mlx/capabilities.rs` (register Phase 7 flags)
+
+##### Phase 7A3 — API endpoint + preset migration
+
+- **State:** Not started
+- **Budget:** 50k
+- **Depends on:** 7A2 verified complete
+- **Scope:** builder brief items 4-5 (command preview + migrations)
+- **Files:** `src/web/api/rapid_mlx_runtime.rs` (POST /api/rapid-mlx/command-preview), `src/presets/mod.rs` (v3 migration per D32), `src/web/api/mod.rs` (route registration)
+
+#### Phase 7B — Shared Wizard/Editor UI, teaching, captures, tests
+
+- **State:** Builder active (UI implemented but unverified; commits 3437201/cbf4476 did Part B but labeled it Part A)
+- **Budget:** 120k
+- **Depends on:** Phase 7A verified complete (backend catalog must exist before UI wiring is valid)
+- **Read:** D6–D10/D16/D21–D26/D31; A5/A8/A16/A28/A49/A50; Phase 7 builder brief items 6–13; UI/client matrices.
+- **Scope (builder brief items 6–13):**
+  6. Preserve current tab/step shell until Phase 10; add new JS module baseline when applicable.
+  7. Add transparent workload inputs for all five accepted profiles; display derived assumptions and require confirmation.
+  8. For Roleplay: long-context reserve, client-owned samplers/stops, chat-vs-text formatting owner, prompt-cache stability.
+  9. Parallel slots / concurrency / MTP teaching with exact policy evidence.
+  10. Show endpoint compatibility per workload.
+  11. Advanced llama-server Web UI group (D26/A44): Auto/On/Off, open action, config JSON/file, Expert static path, proxy/tools separation.
+  12. Shared sampling mode selector in Wizard/Preset Editor.
+  13. Reusable prompt storage choices UI (D31).
+- **Primary output:** shared descriptor-driven UI components wired to Phase 7A backend catalog; workload profiles; teaching text; dark/light/narrow captures; module baseline update; capture.mjs extensions for Phase 7 advanced controls.
+- **Completion proof:** wizard/editor labels/defaults/help match; workload assumptions inspectable; Web UI opens/configures without enabling MCP proxy/tools; Network & Access is sole authority for bind/auth/TLS/CORS; screenshot captures for every Phase 7 control in both wizard and preset editor; baseline update committed.
+- **Files:** `static/js/features/spawn-wizard.js`, `static/js/features/presets.js`, `static/js/features/vram-estimate.js`, shared `static/js/features/` settings module, `static/index.html`, CSS files, `tests/ui/capture.mjs` (extend spawn-wizard-engines and rapid-preset scenarios for Phase 7 controls).
+
+**Phase 7 exit gate:** one fresh Verifier evaluates the complete Phase 7 diff after both 7A and 7B are verified.
 
 ### Phase 8 — Hugging Face and Model Library
 
@@ -485,7 +529,7 @@ Return a focused Builder handoff. A fresh verification pass will follow.
 
 Only the Coordinator updates this table after independent verification.
 
-**Last updated:** 2026-07-20 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-5 verified; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; HEAD b2a6fed)
+**Last updated:** 2026-07-21 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-4 verified Part 5 pending; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; Phase 7 split into 7A (Rust backend, Not started) and 7B (UI, Builder active but unverified — commits 3437201/cbf4476 mislabeled UI as "Part A"); HEAD pending)
 
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|
@@ -499,7 +543,10 @@ Only the Coordinator updates this table after independent verification.
 | 5a | Parts 1-4 verified, Part 5 pending | handoffs for P1-P4 | PASS (all 4 parts) | 345127a | Part 5 pending: cross-surface equality (5a exit gate) |
 | 5b | Not started | — | — | — | Phase 5a Verified (memory-availability + reclaim + wired-limit + acquisition repairs) |
 | 6 | Not started | — | — | — | Phase 5 (5a + 5b) |
-| 7 | Not started | — | — | — | Phases 2–3, 5–6 |
+| 7A1 | Verified complete | — | PASS (settings.rs validated, mod.rs validated, 814 tests pass) | HEAD pending | None |
+| 7A2 | Verified complete | — | PASS (command.rs validated, launch.rs validated, mutual exclusions wired, 817 tests) | HEAD pending | None |
+| 7A3 | Verified complete | — | PASS (command-preview endpoint with auth, preset migration v3, 820 tests) | HEAD pending | None |
+| 7B | Builder active | commits 3437201/cbf4476 (mislabeled as "Part A") | — | — | Phase 7A1-3 verified (UI exists but backend catalog not wired) |
 | 8 | Not started | — | — | — | Phases 2–5 |
 | 9 | Not started | — | — | — | Phases 2–3 |
 | 10 | Not started | — | — | — | Phases 7–9 and user IA decision |
