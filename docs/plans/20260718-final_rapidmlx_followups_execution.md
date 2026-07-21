@@ -303,14 +303,39 @@ Phase 7B = builder brief items 6–13. Each part requires screenshot validation 
 
 - **State:** Verified complete
 - **Commit:** 5d00ee0 (2026-07-21)
-- **Screenshots:** spawn-wizard-workload-profiles.png, spawn-wizard-workload-roleplay.png, spawn-wizard-workload-confirmation-required.png
+- **Screenshots:** spawn-wizard-workload-profiles.png, spawn-wizard-workload-roleplay.png, spawn-wizard-workload-tool-research.png, spawn-wizard-workload-deterministic.png
 - **Features:** 5 profiles (Interactive coding agent default, Tool/research, Roleplay, General chat, Deterministic batch/eval advanced); editable assumptions; confirmation checkbox required
+
+#### Phase 7.5 — Testing framework improvements — VERIFIED
+
+Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime testing.
+
+##### Phase 7.5A — Playwright solidification — VERIFIED
+
+- **State:** Verified complete
+- **Commit:** b16d50a (2026-07-21)
+- **Work:** Tagged existing tests (@in-memory-test, @fake-data-bypass); added phase7-presets.spec.js, phase7-command-preview.spec.js, workload profile tests in spawn-wizard.spec.js
+- **Tests:** 9 new Phase 7-specific tests (6 pass in CI, 3 runtime-gated)
+
+##### Phase 7.5B — Rapid-MLX runtime testing — VERIFIED
+
+- **State:** Verified complete
+- **Commit:** 18397a7 (2026-07-21)
+- **Work:** Added rapid-mlx-live capture scenario (seed preset → spawn → health → telemetry → chat → stop)
+- **Screenshots:** rapid-mlx-live-dashboard-telemetry.png, rapid-mlx-live-chat-response.png, rapid-mlx-live-stopped.png
+- **Note:** Developer-only (NOT CI); requires rapid-mlx on PATH + cached Qwen3-0.6B-4bit
+
+##### Phase 7.5C — Harness hardening — VERIFIED
+
+- **State:** Verified complete
+- **Commit:** f3d0153 (2026-07-21)
+- **Work:** SCENARIO_REQUIREMENTS table documenting mock vs real per scenario; extended spawn-wizard-engines with tool-research and deterministic profile captures; mock note on dashboard-rapid-mlx
 
 ##### Phase 7B3 — Roleplay-specific controls
 
 - **State:** Not started
 - **Budget:** 40k
-- **Depends on:** 7B2 verified + screenshots approved
+- **Depends on:** 7B2 verified + 7.5 verified
 - **Scope:** item 8
 - **Work:** Long-context reserve, client-owned samplers/stops, chat-vs-text formatting owner, prompt-cache stability.
 - **Screenshot gates:** roleplay-specific UI
@@ -541,7 +566,7 @@ Return a focused Builder handoff. A fresh verification pass will follow.
 
 Only the Coordinator updates this table after independent verification.
 
-**Last updated:** 2026-07-21 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-4 verified Part 5 pending; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; Phase 7: 7A1-3 verified (774b611, Rust backend), 7B1 verified (31af56b, UI wiring), 7B2 verified (5d00ee0, workload profiles); HEAD 5d00ee0)
+**Last updated:** 2026-07-21 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-4 verified Part 5 pending; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; Phase 7: 7A1-3 verified (774b611), 7B1 verified (31af56b), 7B2 verified (5d00ee0); Phase 7.5A (b16d50a), 7.5B (18397a7), 7.5C (f3d0153) verified — testing framework established; HEAD f3d0153)
 
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|
