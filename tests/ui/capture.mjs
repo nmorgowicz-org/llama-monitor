@@ -3761,6 +3761,36 @@ async function scenarioSpawnWizardEngines(ctx) {
     await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-workload-roleplay.png') });
     console.log('[CAPTURE] Saved spawn-wizard-workload-roleplay.png');
 
+    // spawn-wizard-workload-tool-research.png — Tool/research agent profile (non-default).
+    await page.evaluate(() => {
+        const card = document.querySelector('.wp-card[data-profile-id="tool_research_agent"]');
+        if (card) card.click();
+    });
+    await page.waitForFunction(
+        () => document.querySelector('.wp-card.selected[data-profile-id="tool_research_agent"]') !== null,
+        { timeout: 3000 }
+    );
+    await sleep(400);
+    await scrollToElement('#workload-assumptions-panel', -50);
+    await sleep(300);
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-workload-tool-research.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-workload-tool-research.png');
+
+    // spawn-wizard-workload-deterministic.png — Deterministic batch/eval ADVANCED profile.
+    await page.evaluate(() => {
+        const card = document.querySelector('.wp-card[data-profile-id="deterministic_batch_eval"]');
+        if (card) card.click();
+    });
+    await page.waitForFunction(
+        () => document.querySelector('.wp-card.selected[data-profile-id="deterministic_batch_eval"]') !== null,
+        { timeout: 3000 }
+    );
+    await sleep(400);
+    await scrollToElement('#workload-assumptions-panel', -50);
+    await sleep(300);
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-workload-deterministic.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-workload-deterministic.png');
+
     // spawn-wizard-rapid-mlx-advanced-controls.png — Phase 7 controls: KV dtype, prompt storage, sampling mode, reasoning.
     await scrollToElement('#spawn-kv-cache-dtype', 0);
     await sleep(300);
