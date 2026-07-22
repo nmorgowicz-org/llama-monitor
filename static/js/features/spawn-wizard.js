@@ -10574,8 +10574,9 @@ function clearStatusMessages() { if (dom.errorText) dom.errorText.textContent = 
 function resetSpawnStatus() { wizardState.spawn = { inFlight:false, error:'' }; setStatusText('Ready to spawn.'); setProgress(0); clearStatusMessages(); }
 
 // ── Model card panel ──────────────────────────────────────────────────────────
+// Exported for use by models.js HF search panel
 
-async function openCardPanel(repoId) {
+export async function openCardPanel(repoId) {
   if (!dom.cardPanel) return;
 
   // Show panel in loading state
@@ -10651,11 +10652,6 @@ function _closeCardPanel() {
   const wasFocused = document.activeElement;
   if (dom.cardPanel.contains(wasFocused)) {
     wasFocused.blur();
-    // Restore focus to a neutral ancestor (hardware step)
-    const step = document.getElementById('wizard-step-2');
-    if (step && step.focus) {
-      step.focus({ preventScroll: true });
-    }
   }
 
   dom.cardPanel.classList.remove('open');

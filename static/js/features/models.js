@@ -7,6 +7,7 @@ import { getPlatformInfo } from '../core/platform-info.js';
 import { showToast, showToastWithActions } from './toast.js';
 import Router from './router.js';
 import { _showConfirm } from './presets.js';
+import { openCardPanel } from './spawn-wizard.js';
 import { buildEstimateBody } from './vram-estimate.js';
 import {
     hfSearch,
@@ -1915,6 +1916,7 @@ async function initHfDownloadTab() {
                 filelistContainer,
                 quickpicksContainer: quickpicks,
                 discoverPillsContainerId: 'mm-hf-discover-pills',
+                onOpenCardPanel: openCardPanel,
                 onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
                 workloadProfile: sessionState.workloadProfile?.id || null,
             });
@@ -1940,6 +1942,7 @@ async function initHfDownloadTab() {
                 filelistContainer,
                 quickpicksContainer: quickpicks,
                 discoverPillsContainerId: 'mm-hf-discover-pills',
+                onOpenCardPanel: openCardPanel,
                 onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
                 workloadProfile: sessionState.workloadProfile?.id || null,
             });
@@ -1961,6 +1964,7 @@ async function initHfDownloadTab() {
             filelistContainer,
             quickpicksContainer: quickpicks,
             discoverPillsContainerId: 'mm-hf-discover-pills',
+            onOpenCardPanel: openCardPanel,
             onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
             workloadProfile,
         });
@@ -1998,6 +2002,7 @@ async function initHfDownloadTab() {
                     filelistContainer,
                     quickpicksContainer: quickpicks,
                     discoverPillsContainerId: 'mm-hf-discover-pills',
+                    onOpenCardPanel: openCardPanel,
                     onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
                     workloadProfile,
                 });
@@ -2021,11 +2026,11 @@ async function initHfDownloadTab() {
                         filelistContainer,
                         quickpicksContainer: quickpicks,
                         discoverPillsContainerId: 'mm-hf-discover-pills',
+                        onOpenCardPanel: openCardPanel,
                         onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
                         workloadProfile,
                     });
                 }, 200);
-                return;
             }
         }
 
