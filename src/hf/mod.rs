@@ -235,6 +235,8 @@ pub struct SimpleModelInfo {
     pub param_b: f64,
     /// Base model the quantization derives from (from model card metadata).
     pub base_model: String,
+    /// Model format from HF filter used during search: "mlx" or "gguf".
+    pub format: String,
 }
 
 /// A GGUF file in an HF repo, with real file size and quant classification.
@@ -890,7 +892,7 @@ async fn hf_search_single(
         .await
         .map_err(|e| format!("Failed to parse HF response: {e}"))?;
 
-    let models: Vec<SimpleModelInfo> = items.into_iter().filter_map(parse_model_item).collect();
+    let models: Vec<SimpleModelInfo> = items.into_iter().filter_map(|item| parse_model_item(item, &params.format)).collect();
 
     Ok((models, next_cursor))
 }
@@ -937,7 +939,7 @@ async fn hf_search_both(params: &HfSearchParams) -> Result<(Vec<SimpleModelInfo>
 
 /// Browse all GGUF models from a specific HF author/org (convenience wrapper).
 /// Parse a single model JSON object from the HF API into SimpleModelInfo.
-fn parse_model_item(item: serde_json::Value) -> Option<SimpleModelInfo> {
+fn parse_model_item(item: serde_json::Value, format: &HfModelFormat) -> Option<SimpleModelInfo> {
     let id = item
         .get("id")
         .and_then(|v| v.as_str())
@@ -993,6 +995,11 @@ fn parse_model_item(item: serde_json::Value) -> Option<SimpleModelInfo> {
         has_imatrix,
         param_b,
         base_model,
+        format: match format {
+            HfModelFormat::Mlx => "mlx".into(),
+            HfModelFormat::Gguf => "gguf".into(),
+            HfModelFormat::Both => "both".into(),
+        },
     })
 }
 
@@ -2719,7 +2726,7 @@ mod tests {
             "downloads": 1000,
             "likes": 50,
         });
-        let info = parse_model_item(item).unwrap();
+        let info = parse_model_item(item, &HfModelFormat::Gguf).unwrap();
         assert!(
             info.has_imatrix,
             "mradermacher repo should be flagged as imatrix"

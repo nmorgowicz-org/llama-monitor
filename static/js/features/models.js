@@ -2032,10 +2032,12 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
     // Handle both raw model objects and selection payloads
     const repoId = model.repoId || model.id || '';
     const paramB = model.param_b || model._raw?.param_b || 0;
+    const modelFormat = model.format || model._raw?.format || 'unknown';
 
     hfState.selectedRepoId = repoId;
     hfState.selectedFile = null;
     hfState.paramB = paramB;
+    hfState.modelFormat = modelFormat; // track format for MLX vs GGUF handling
     hfState.mmprojFiles = [];
     hfState.mmprojPath = '';
     hfState.mmprojRepoId = '';
@@ -2059,8 +2061,8 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
         onSelectFile: (file, repoId) => onHfFileSelected(file, repoId, downloadPanel),
     });
 
-    // Trigger quant advisor if we have param count
-    if (hfState.paramB > 0) {
+    // Only show quant advisor for GGUF models (MLX models are pre-quantized, no choices)
+    if (hfState.paramB > 0 && modelFormat === 'gguf') {
         triggerQuantAdvisor();
     }
 }
