@@ -338,6 +338,7 @@ export async function hfSearch({
   onOpenCardPanel,
   onSelectModel,
   workloadProfile,
+  quantsOnly = false,
 }) {
   if (!container) return;
 
@@ -391,6 +392,7 @@ export async function hfSearch({
       format: resolvedScope.format,
       includeUnsupported: resolvedScope.includeUnsupported,
       workload_profile: workloadProfile || null,
+      quantsOnly: quantsOnly,
     };
 
     const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };

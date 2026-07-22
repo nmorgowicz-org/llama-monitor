@@ -99,6 +99,7 @@ let hfState = {
     discoveryScopeMlx: false,
     discoveryScopeGguf: true, // default: GGUF always active; macOS will also activate MLX below
     discoverySort: HF_SORT.DOWNLOADS,
+    discoveryQuantsOnly: false, // filter to show only quantized variants
 };
 
 // Cached hardware
@@ -1915,6 +1916,7 @@ async function initHfDownloadTab() {
                 onOpenCardPanel: openCardPanel,
                 onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
                 workloadProfile: sessionState.workloadProfile?.id || null,
+                quantsOnly: hfState.discoveryQuantsOnly,
             });
         },
     });
@@ -1940,6 +1942,7 @@ async function initHfDownloadTab() {
                 onOpenCardPanel: openCardPanel,
                 onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
                 workloadProfile: sessionState.workloadProfile?.id || null,
+                quantsOnly: hfState.discoveryQuantsOnly,
             });
         },
     });
@@ -1963,6 +1966,7 @@ async function initHfDownloadTab() {
             onOpenCardPanel: openCardPanel,
             onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
             workloadProfile,
+            quantsOnly: hfState.discoveryQuantsOnly,
         });
     };
 
@@ -2016,6 +2020,15 @@ async function initHfDownloadTab() {
                 clearTimeout(searchTimer);
                 searchTimer = setTimeout(doSearch, 200);
             },
+        });
+    }
+
+    const quantsOnlyCheckbox = document.getElementById('mm-hf-quants-only');
+    if (quantsOnlyCheckbox) {
+        quantsOnlyCheckbox.addEventListener('change', () => {
+            hfState.discoveryQuantsOnly = quantsOnlyCheckbox.checked;
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(doSearch, 200);
         });
     }
 

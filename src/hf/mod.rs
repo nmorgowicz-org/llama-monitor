@@ -378,6 +378,13 @@ pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
             note: None,
         },
         KnownQuantizer {
+            username: "nightmedia".into(),
+            display_name: "Night Media".into(),
+            description: "MLX model conversions, high-quality MLX quantizations.".into(),
+            quant_style: "mlx",
+            note: None,
+        },
+        KnownQuantizer {
             username: "llmfan46".into(),
             display_name: "llmfan46".into(),
             description: "Community GGUF releases, wide model coverage.".into(),
@@ -800,6 +807,8 @@ pub struct HfSearchParams {
     pub cursor: Option<String>,
     /// Model format filter (GGUF default for backward compatibility).
     pub format: HfModelFormat,
+    /// Filter to show only quantized variants (excludes base models).
+    pub quants_only: bool,
 }
 
 /// Parse the `cursor=` value out of a HF API `Link: <url>; rel="next"` header.
@@ -1813,6 +1822,7 @@ pub async fn hf_resolve_origin(filename: &str, size_bytes: u64) -> Result<HfReso
             limit: 15,
             cursor: None,
             format: HfModelFormat::Gguf,
+            quants_only: false,
         };
         let result = hf_search_models(&params).await;
         match result {
@@ -2953,6 +2963,7 @@ pub async fn hf_discover_mlx_derivatives(repo_id: &str) -> Result<MlxDiscoveryRe
         limit: 15,
         cursor: None,
         format: HfModelFormat::Mlx,
+        quants_only: true,
     })
     .await
     {

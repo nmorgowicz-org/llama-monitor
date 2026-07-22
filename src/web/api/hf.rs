@@ -151,7 +151,8 @@ fn api_hf_search(
 
                 let cursor = body["cursor"].as_str().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
                 let format = parse_hf_format_param(body["format"].as_str().unwrap_or("gguf"));
-                let params = crate::hf::HfSearchParams { query, author, sort, limit: limit as usize, cursor, format };
+                let quants_only = body["quantsOnly"].as_bool().unwrap_or(false);
+                let params = crate::hf::HfSearchParams { query, author, sort, limit: limit as usize, cursor, format, quants_only };
 
                 match crate::hf::hf_search_models(&params).await {
                     Ok((models, next_cursor)) => {
