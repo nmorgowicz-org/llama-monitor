@@ -630,11 +630,16 @@ export async function hfSearch({
         variantName.textContent = m.id;
         variantRow.appendChild(variantName);
 
-        // Format badge
-        const lowerTags = (m.tags || []).map(t => t.toLowerCase());
-        const isMlx = lowerTags.some(t => t.includes('mlx'));
-        const isGguf = lowerTags.some(t => t.includes('gguf'));
-        const format = isMlx ? 'mlx' : isGguf ? 'gguf' : 'unknown';
+        // Format badge — detect from repo name/ID (never trust HF tags)
+        const repoIdLower = (m.id || '').toLowerCase();
+        const isMlx = repoIdLower.includes('.mlx') ||
+          repoIdLower.includes('/mlx/') ||
+          repoIdLower.includes('-mlx-') ||
+          repoIdLower.endsWith('-mlx') ||
+          repoIdLower.includes('.safetensors');
+        const isGguf = repoIdLower.includes('.gguf') || repoIdLower.includes('-gguf') || repoIdLower.includes('/gguf/');
+        // GGUF repo name takes priority over safetensors (many MLX repos host GGUF versions with -GGUF suffix)
+        const format = isGguf ? 'gguf' : isMlx ? 'mlx' : 'unknown';
         const formatBadge = document.createElement('span');
         formatBadge.className = `hf-sg-format-badge hf-sg-format-badge--${format}`;
         formatBadge.textContent = format.toUpperCase();
@@ -1443,6 +1448,11 @@ export function hfCreateScopeSelector({ container, onChange }) {
   const initialMlx = container.dataset.hfScopeMlx === '1';
   const initialGguf = container.dataset.hfScopeGguf === '1';
   const initialAll = container.dataset.hfScopeAll === '1';
+
+  // Initialize wrap.dataset to match initial state (required for correct toggle behavior)
+  wrap.dataset.hfScopeMlx = initialMlx ? '1' : '';
+  wrap.dataset.hfScopeGguf = initialGguf ? '1' : '';
+  wrap.dataset.hfScopeAll = initialAll ? '1' : '';
 
   for (const s of scopes) {
     const btn = document.createElement('button');

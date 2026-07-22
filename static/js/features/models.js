@@ -1873,7 +1873,6 @@ async function initHfDownloadTab() {
     hfState.initialized = true;
 
     const searchInput = document.getElementById('mm-hf-search-input');
-    const sortSelect = document.getElementById('mm-hf-sort');
     const discoverPills = document.getElementById('mm-hf-discover-pills');
     const quickpicks = document.getElementById('mm-hf-quickpicks');
     const resultsContainer = document.getElementById('mm-hf-search-results');
@@ -1888,12 +1887,11 @@ async function initHfDownloadTab() {
 
     // Helpers to build search params while preserving active filters
     const buildSearchParams = () => {
-        const sort = sortSelect?.value || 'downloads';
         const typedQuery = (searchInput.value || '').trim();
         const query = typedQuery || hfState.activeDiscoverQuery || '';
         const author = (typedQuery ? hfState.activeAuthor : (hfState.activeAuthor || null));
         const workloadProfile = sessionState.workloadProfile?.id || null;
-        return { query: query || undefined, author: author || undefined, sort, workloadProfile };
+        return { query: query || undefined, author: author || undefined, workloadProfile };
     };
 
     // Render discover pills
@@ -1901,17 +1899,13 @@ async function initHfDownloadTab() {
         container: discoverPills,
         quickpicksContainer: quickpicks,
         onPillClick: (cat) => {
-            const sort = cat.params.query
-                ? (sortSelect?.value || cat.params.sort)
-                : cat.params.sort;
             // Track active discover query so sort changes still work
             hfState.activeDiscoverQuery = cat.params.query || null;
             hfState.activeAuthor = null;
             hfSearch({
                 query: cat.params.query,
-                sort,
                 mlxActive: hfState.discoveryScopeMlx,
-            ggufActive: hfState.discoveryScopeGguf,
+                ggufActive: hfState.discoveryScopeGguf,
                 hfSort: hfState.discoverySort,
                 limit: cat.params.limit || 20,
                 container: resultsContainer,
@@ -1930,15 +1924,13 @@ async function initHfDownloadTab() {
         container: quickpicks,
         discoverPillsContainerId: 'mm-hf-discover-pills',
         onAuthorClick: (author) => {
-            const sort = sortSelect?.value || 'downloads';
             hfState.activeAuthor = author;
             hfState.activeDiscoverQuery = null;
             hfSearch({
                 query: '',
                 author,
-                sort,
                 mlxActive: hfState.discoveryScopeMlx,
-            ggufActive: hfState.discoveryScopeGguf,
+                ggufActive: hfState.discoveryScopeGguf,
                 hfSort: hfState.discoverySort,
                 limit: 20,
                 container: resultsContainer,
@@ -1984,64 +1976,6 @@ async function initHfDownloadTab() {
             clearTimeout(searchTimer);
             doSearch();
         }
-    });
-
-    sortSelect?.addEventListener('change', () => {
-        clearTimeout(searchTimer);
-        const sort = sortSelect.value;
-        const workloadProfile = sessionState.workloadProfile?.id || null;
-
-        // If browsing a specific author, re-run with new sort (like Quick Start)
-        if (hfState.activeAuthor) {
-            hfState.activeAuthor = hfState.activeAuthor;
-            searchTimer = setTimeout(() => {
-                hfSearch({
-                    query: '',
-                    author: hfState.activeAuthor,
-                    sort,
-                    mlxActive: hfState.discoveryScopeMlx,
-            ggufActive: hfState.discoveryScopeGguf,
-                    hfSort: hfState.discoverySort,
-                    limit: 20,
-                    container: resultsContainer,
-                    filelistContainer,
-                    quickpicksContainer: quickpicks,
-                    discoverPillsContainerId: 'mm-hf-discover-pills',
-                    onOpenCardPanel: openCardPanel,
-                    onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
-                    workloadProfile,
-                });
-            }, 200);
-            return;
-        }
-
-        // If active discover pill, re-fire with new sort
-        const activePill = document.querySelector('#mm-hf-discover-pills .hf-discover-pill.active');
-        if (activePill) {
-            const cat = window.HF_DISCOVER_CATEGORIES?.find(c => c.id === activePill.dataset.catId);
-            if (cat) {
-                searchTimer = setTimeout(() => {
-                    hfSearch({
-                        query: cat.params.query,
-                        sort,
-                        mlxActive: hfState.discoveryScopeMlx,
-            ggufActive: hfState.discoveryScopeGguf,
-                        hfSort: hfState.discoverySort,
-                        limit: cat.params.limit || 20,
-                        container: resultsContainer,
-                        filelistContainer,
-                        quickpicksContainer: quickpicks,
-                        discoverPillsContainerId: 'mm-hf-discover-pills',
-                        onOpenCardPanel: openCardPanel,
-                        onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
-                        workloadProfile,
-                    });
-                }, 200);
-            }
-        }
-
-        // Fallback: use typed query (if any) + new sort
-        searchTimer = setTimeout(doSearch, 200);
     });
 
     // Phase 8B1: create discovery scope selector and sort selector

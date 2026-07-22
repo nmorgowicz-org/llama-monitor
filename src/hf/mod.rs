@@ -771,6 +771,7 @@ pub enum HfModelFormat {
     #[default]
     Gguf,
     Mlx,
+    Both,
 }
 
 impl HfModelFormat {
@@ -778,6 +779,7 @@ impl HfModelFormat {
         match self {
             HfModelFormat::Gguf => "gguf",
             HfModelFormat::Mlx => "mlx",
+            HfModelFormat::Both => "gguf", // never used directly
         }
     }
 }
@@ -822,6 +824,18 @@ fn parse_cursor_from_link(link: &str) -> Option<String> {
 pub async fn hf_search_models(
     params: &HfSearchParams,
 ) -> Result<(Vec<SimpleModelInfo>, Option<String>), String> {
+    // Both format: do two separate searches and merge
+    if matches!(params.format, HfModelFormat::Both) {
+        return hf_search_both(params).await;
+    }
+
+    hf_search_single(params).await
+}
+
+/// Search for a single format (GGUF or MLX) — the core HF API call.
+async fn hf_search_single(
+    params: &HfSearchParams,
+) -> Result<(Vec<SimpleModelInfo>, Option<String>), String> {
     let limit = params.limit.clamp(1, 100);
     let token = hf_load_token();
 
@@ -858,7 +872,6 @@ pub async fn hf_search_models(
         return Err(format!("HF search failed: HTTP {}", resp.status()));
     }
 
-    // Read the Link header BEFORE consuming the body.
     let next_cursor = resp
         .headers()
         .get("link")
@@ -870,10 +883,49 @@ pub async fn hf_search_models(
         .await
         .map_err(|e| format!("Failed to parse HF response: {e}"))?;
 
-    Ok((
-        items.into_iter().filter_map(parse_model_item).collect(),
-        next_cursor,
-    ))
+    let models: Vec<SimpleModelInfo> = items.into_iter().filter_map(parse_model_item).collect();
+
+    Ok((models, next_cursor))
+}
+
+/// For Both format, do two separate searches (GGUF + MLX) and merge.
+async fn hf_search_both(params: &HfSearchParams) -> Result<(Vec<SimpleModelInfo>, Option<String>), String> {
+    let gguf_params = HfSearchParams {
+        format: HfModelFormat::Gguf,
+        ..params.clone()
+    };
+    let mlx_params = HfSearchParams {
+        format: HfModelFormat::Mlx,
+        ..params.clone()
+    };
+
+    let (mut gguf_results, gguf_cursor) = hf_search_single(&gguf_params).await?;
+    let (mut mlx_results, mlx_cursor) = hf_search_single(&mlx_params).await?;
+
+    // Deduplicate by id
+    let mut seen = std::collections::HashSet::new();
+    gguf_results.retain(|m| seen.insert(m.id.clone()));
+    mlx_results.retain(|m| seen.insert(m.id.clone()));
+
+    // Merge: combine and sort by downloads (primary) then likes
+    let mut all = gguf_results;
+    all.extend(mlx_results);
+    all.sort_by(|a, b| {
+        b.downloads.cmp(&a.downloads)
+            .then_with(|| b.likes.cmp(&a.likes))
+    });
+
+    // Trim to requested limit
+    all.truncate(params.limit);
+
+    // Return cursor from whichever list has more results
+    let cursor = if gguf_cursor.is_some() && mlx_cursor.is_some() {
+        Some(format!("both:{}:{}", gguf_cursor.as_deref().unwrap_or(""), mlx_cursor.as_deref().unwrap_or("")))
+    } else {
+        gguf_cursor.or(mlx_cursor)
+    };
+
+    Ok((all, cursor))
 }
 
 /// Browse all GGUF models from a specific HF author/org (convenience wrapper).

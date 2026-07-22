@@ -25,6 +25,7 @@ fn validate_hf_repo_id(repo_id: &str) -> bool {
 pub(crate) fn parse_hf_format_param(raw: &str) -> crate::hf::HfModelFormat {
     match raw.to_lowercase().as_str() {
         "mlx" => crate::hf::HfModelFormat::Mlx,
+        "both" | "all" => crate::hf::HfModelFormat::Both,
         _ => crate::hf::HfModelFormat::Gguf,
     }
 }
@@ -983,6 +984,14 @@ mod tests {
         assert!(matches!(
             parse_hf_format_param("gguf"),
             crate::hf::HfModelFormat::Gguf
+        ));
+        assert!(matches!(
+            parse_hf_format_param("both"),
+            crate::hf::HfModelFormat::Both
+        ));
+        assert!(matches!(
+            parse_hf_format_param("ALL"),
+            crate::hf::HfModelFormat::Both
         ));
         // Unrecognized / absent format falls back to Gguf (backward compat).
         assert!(matches!(
