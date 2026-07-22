@@ -2627,6 +2627,9 @@
 .hf-qp-btn.hf-qp-ud { border-color: color-mix(in srgb, var(--color-warning) 25%, transparent); }
 .hf-qp-btn.hf-qp-ud:hover,
 .hf-qp-btn.hf-qp-ud.active { border-color: color-mix(in srgb, var(--color-warning) 25%, transparent); background: color-mix(in srgb, var(--color-warning) 8%, transparent); color:var(--color-warning); }
+.hf-qp-btn.hf-qp-mlx { border-color: rgba(99,102,241,0.35); }
+.hf-qp-btn.hf-qp-mlx:hover,
+.hf-qp-btn.hf-qp-mlx.active { border-color: rgba(99,102,241,0.7); background: rgba(99,102,241,0.12); color: #a5b4fc; }
 
 /* Gear / edit button on quantizer row */
 .hf-qp-edit-btn {

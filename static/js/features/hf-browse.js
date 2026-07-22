@@ -1377,6 +1377,7 @@ export async function hfLoadQuickPicks({ container, discoverPillsContainerId, on
       btn.className = 'hf-qp-btn';
       if (q.quant_style === 'imatrix') btn.classList.add('hf-qp-imatrix');
       if (q.quant_style === 'ud') btn.classList.add('hf-qp-ud');
+      if (q.quant_style === 'mlx') btn.classList.add('hf-qp-mlx');
       btn.textContent = q.display_name;
       btn.title = q.description + (q.note ? `\n\n${q.note}` : '');
       btn.dataset.author = q.username;

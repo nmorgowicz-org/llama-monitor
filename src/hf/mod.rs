@@ -362,10 +362,17 @@ pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
             note: Some("UD-* files are dynamic quants; projector recommendations depend on the model family".into()),
         },
         KnownQuantizer {
+            username: "mlx-community".into(),
+            display_name: "MLX Community".into(),
+            description: "Official MLX community org — native MLX models (parakeet TTS, gpt-oss, Kimi-K2.5) plus optimized MLX conversions.".into(),
+            quant_style: "mlx",
+            note: None,
+        },
+        KnownQuantizer {
             username: "lmstudio-community".into(),
             display_name: "LM Studio".into(),
-            description: "LM Studio community quants.".into(),
-            quant_style: "standard",
+            description: "Primary MLX quant provider (all major models in MLX format) plus GGUF conversions.".into(),
+            quant_style: "mlx",
             note: None,
         },
         KnownQuantizer {
