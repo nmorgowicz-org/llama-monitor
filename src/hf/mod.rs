@@ -873,8 +873,9 @@ async fn hf_search_single(
             HfModelFormat::Mlx => p.append_pair("apps", "mlx-lm"),
             HfModelFormat::Both => unreachable!(), // handled in hf_search_both
         };
-        // Only show quantized variants, not base models
-        p.append_pair("base_model_relation", "quantized");
+        if params.quants_only {
+            p.append_pair("base_model_relation", "quantized");
+        }
     }
 
     let mut req = HF_HTTP_CLIENT.get(url);
@@ -929,7 +930,9 @@ async fn hf_search_both(params: &HfSearchParams) -> Result<(Vec<SimpleModelInfo>
             p.append_pair("cursor", cursor);
         }
         p.append_pair("apps", "llama.cpp,mlx-lm");
-        p.append_pair("base_model_relation", "quantized");
+        if params.quants_only {
+            p.append_pair("base_model_relation", "quantized");
+        }
     }
 
     let mut req = HF_HTTP_CLIENT.get(url);
