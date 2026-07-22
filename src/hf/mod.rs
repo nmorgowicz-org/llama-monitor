@@ -784,13 +784,7 @@ pub enum HfModelFormat {
 }
 
 impl HfModelFormat {
-    fn as_api_filter(self) -> &'static str {
-        match self {
-            HfModelFormat::Gguf => "gguf",
-            HfModelFormat::Mlx => "mlx",
-            HfModelFormat::Both => "gguf", // never used directly
-        }
-    }
+    // No-op: filter applied inline in hf_search_single
 }
 
 /// Full search request parameters.
@@ -865,7 +859,13 @@ async fn hf_search_single(
         if let Some(ref cursor) = params.cursor {
             p.append_pair("cursor", cursor);
         }
-        p.append_pair("filter", params.format.as_api_filter());
+        match params.format {
+            HfModelFormat::Gguf => p.append_pair("apps", "llama.cpp"),
+            HfModelFormat::Mlx => p.append_pair("apps", "mlx-lm"),
+            HfModelFormat::Both => unreachable!(), // handled in hf_search_both
+        };
+        // Only show quantized variants, not base models
+        p.append_pair("base_model_relation", "quantized");
     }
 
     let mut req = HF_HTTP_CLIENT.get(url);
@@ -899,42 +899,60 @@ async fn hf_search_single(
 
 /// For Both format, do two separate searches (GGUF + MLX) and merge.
 async fn hf_search_both(params: &HfSearchParams) -> Result<(Vec<SimpleModelInfo>, Option<String>), String> {
-    let gguf_params = HfSearchParams {
-        format: HfModelFormat::Gguf,
-        ..params.clone()
-    };
-    let mlx_params = HfSearchParams {
-        format: HfModelFormat::Mlx,
-        ..params.clone()
-    };
+    let limit = params.limit.clamp(1, 100);
+    let token = hf_load_token();
 
-    let (mut gguf_results, gguf_cursor) = hf_search_single(&gguf_params).await?;
-    let (mut mlx_results, mlx_cursor) = hf_search_single(&mlx_params).await?;
+    let mut url = reqwest::Url::parse("https://huggingface.co/api/models")
+        .map_err(|e| format!("Invalid HF API URL: {e}"))?;
 
-    // Deduplicate by id
-    let mut seen = std::collections::HashSet::new();
-    gguf_results.retain(|m| seen.insert(m.id.clone()));
-    mlx_results.retain(|m| seen.insert(m.id.clone()));
+    {
+        let mut p = url.query_pairs_mut();
+        if !params.query.is_empty() {
+            p.append_pair("search", &params.query);
+        }
+        if let Some(ref author) = params.author {
+            p.append_pair("author", author);
+        }
+        p.append_pair("limit", &limit.to_string());
+        p.append_pair("sort", params.sort.as_api_str());
+        p.append_pair("direction", "-1");
+        if let Some(ref cursor) = params.cursor {
+            p.append_pair("cursor", cursor);
+        }
+        p.append_pair("apps", "llama.cpp,mlx-lm");
+        p.append_pair("base_model_relation", "quantized");
+    }
 
-    // Merge: combine and sort by downloads (primary) then likes
-    let mut all = gguf_results;
-    all.extend(mlx_results);
-    all.sort_by(|a, b| {
-        b.downloads.cmp(&a.downloads)
-            .then_with(|| b.likes.cmp(&a.likes))
-    });
+    let mut req = HF_HTTP_CLIENT.get(url);
+    if let Some(ref tok) = token {
+        req = req.bearer_auth(tok);
+    }
 
-    // Trim to requested limit
-    all.truncate(params.limit);
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HF search request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HF search failed: HTTP {}", resp.status()));
+    }
 
-    // Return cursor from whichever list has more results
-    let cursor = if gguf_cursor.is_some() && mlx_cursor.is_some() {
-        Some(format!("both:{}:{}", gguf_cursor.as_deref().unwrap_or(""), mlx_cursor.as_deref().unwrap_or("")))
-    } else {
-        gguf_cursor.or(mlx_cursor)
-    };
+    let next_cursor = resp
+        .headers()
+        .get("link")
+        .and_then(|v| v.to_str().ok())
+        .and_then(parse_cursor_from_link);
 
-    Ok((all, cursor))
+    let items: Vec<serde_json::Value> = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse HF response: {e}"))?;
+
+    let models: Vec<SimpleModelInfo> = items
+        .into_iter()
+        .filter_map(|item| parse_model_item(item, &HfModelFormat::Both))
+        .collect();
+
+    Ok((models, next_cursor))
 }
 
 /// Browse all GGUF models from a specific HF author/org (convenience wrapper).
@@ -2595,14 +2613,6 @@ mod tests {
     #[tokio::test]
     async fn test_hf_get_model_info_smoke() {
         let _ = hf_get_model_info("gpt2").await;
-    }
-
-    #[test]
-    fn hf_model_format_as_api_filter_threads_mlx_vs_gguf() {
-        assert_eq!(HfModelFormat::Gguf.as_api_filter(), "gguf");
-        assert_eq!(HfModelFormat::Mlx.as_api_filter(), "mlx");
-        // Default (backward-compat) must remain Gguf.
-        assert_eq!(HfModelFormat::default().as_api_filter(), "gguf");
     }
 
     #[test]
