@@ -351,13 +351,22 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 
 ### Phase 8 — Hugging Face and Model Library
 
-- **State:** Not started
 - **Budget:** 190k
 - **Depends on:** Phases 2–5
 - **Read:** gaps 3.2/3.7/3.8; accepted D9/D10/D29; A15/A17/A25/A29/A45–A46/A51–A57; Phase 8; existing sorting/creator/Community Picks/quant-swap code; HF/library and workload matrices.
 - **Primary output:** Auto/GGUF/MLX/All plus preserved explicit sorting/category/curated-author discovery; revision-bound qualification; user-editable community-source roles; first-class heretic/uncensored and updated finetune/distillation paths; native/converted MLX lineage; local MLX introspection; context/KV/concurrency-driven artifact switching; canonical association; fit/template/tool/roleplay evidence; clear card hierarchy.
 - **Completion proof:** search is not qualification; every mature GGUF discovery/quant/mmproj behavior has a regression gate; original author and converter stay distinct; community finetunes reach Rapid through qualified native MLX or conversion; repo/revision/variant survives end to end; context/KV changes recompute but never silently switch model quant; Recommended means workload fit; public search remains tokenless.
 - **Mandatory Builder packets:** 8A (qualification/identity/lineage/fit APIs and fixtures) <=120k; then 8B (HF/Library discovery, cards, quant-switch UX and captures) <=120k. Each packet returns its own handoff/checkpoint; one fresh Verifier evaluates the complete Phase 8 diff and both packets.
+
+#### Phase 8A — Backend APIs and fixtures — VERIFIED COMPLETE
+
+- **State:** Verified complete
+- **Commit:** 0fe6105 (2026-07-21)
+- **Parts:** 8A1 + 8A2 + 8A3 (split for context management)
+- **8A1 — CommunitySourceCatalog:** role-based catalog (OriginalAuthor, GgufQuantizer, MlxConverter, DatasetAuthor, Curator, MergerDistiller, Custom), user-editable, bundled creators (bartowski, mlx-community, DavidAU heretic/uncensored, etc.), KnownQuantizer migration, heretic/uncensored/updated-finetune preferences
+- **8A2 — HF qualification/identity APIs:** POST /api/hf/qualify (revision-pinned, config/tokenizer/template/index evidence), POST /api/hf/identity (authorship/lineage with catalog role matching)
+- **8A3 — MLX discovery/introspection:** POST /api/hf/mlx-derivatives (native MLX repos + conversion recipes), POST /api/models/mlx-introspect (recursive size, config, vision adapter), MLX local introspection in info_query.rs
+- **Tests:** 825 pass, clippy clean, release build passes
 
 ### Phase 9 — Formatting, endpoints, and revision-pinned template substitution
 
@@ -563,7 +572,7 @@ Return a focused Builder handoff. A fresh verification pass will follow.
 
 Only the Coordinator updates this table after independent verification.
 
-**Last updated:** 2026-07-21 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-4 verified Part 5 pending; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; Phase 7: ALL PARTS VERIFIED — 7A1-3 (774b611), 7B1 (31af56b), 7B2 (5d00ee0), 7B3 (91468fb), 7B4 (3b96564), 7.5 (b16d50a/18397a7/f3d0153); Phase 7 exit gate PENDING fresh verifier; HEAD 3b96564)
+**Last updated:** 2026-07-21 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-4 verified Part 5 pending; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; Phase 7: ALL PARTS VERIFIED (exit gate PASS WITH NOTES); Phase 8A: Verified (0fe6105, CommunitySourceCatalog + HF qualify/identity + MLX discovery/introspection); HEAD 0fe6105)
 
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|
@@ -584,7 +593,8 @@ Only the Coordinator updates this table after independent verification.
 | 7B2 | Verified complete | — | PASS (workload profiles with editable assumptions, confirmation flow, screenshots verified) | 5d00ee0 | None |
 | 7B3 | Verified complete | — | PASS (roleplay teaching panel, 3 tests) | 91468fb | None |
 | 7B4 | Verified complete | — | PASS (MTP/concurrency teaching, endpoint compatibility, 5 tests, screenshots verified) | 3b96564 | None |
-| 8 | Not started | — | — | — | Phases 2–5 |
+| 8A | Verified complete | — | PASS (CommunitySourceCatalog, HF qualify/identity APIs, MLX discovery/introspection, 825 tests) | 0fe6105 | None |
+| 8B | Not started | — | — | — | Phase 8A verified |
 | 9 | Not started | — | — | — | Phases 2–3 |
 | 10 | Not started | — | — | — | Phases 7–9 and user IA decision |
 | 11 | Not started | — | — | — | Phases 3, 5–7 |
