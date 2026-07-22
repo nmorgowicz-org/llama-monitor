@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+pub mod community_source_catalog;
 pub mod gguf_import;
 pub mod import_lab;
 // Phase 5.5 R2 is a compiled, testable research adapter with no production caller.

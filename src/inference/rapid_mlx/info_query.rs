@@ -558,6 +558,73 @@ fn parse_list_line(line: &str) -> Option<(String, String)> {
     Some((name, display))
 }
 
+// ── Local MLX Introspection (Phase 8A3) ───────────────────────────────────────────────────
+
+#[allow(dead_code)]
+/// Resolve the recursive disk size for an MLX model directory.
+pub fn resolve_mlx_recursive_size(model_path: &Path) -> Result<u64> {
+    let mut total = 0u64;
+    fn walk_dir(dir: &Path, acc: &mut u64) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                walk_dir(&entry.path(), acc)?;
+            } else {
+                *acc += entry.metadata()?.len();
+            }
+        }
+        Ok(())
+    }
+    walk_dir(model_path, &mut total).context("walk model path")?;
+    Ok(total)
+}
+
+#[allow(dead_code)]
+/// Read local config.json from an MLX model directory.
+pub fn read_mlx_local_config(
+    model_path: &Path,
+) -> Result<Option<crate::inference::rapid_mlx::mlx_meta::MlxConfig>> {
+    let config_path = model_path.join("config.json");
+    if !config_path.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&config_path).context("read config.json")?;
+    let config: crate::inference::rapid_mlx::mlx_meta::MlxConfig =
+        serde_json::from_str(&text).context("parse config.json")?;
+    Ok(Some(config))
+}
+
+#[allow(dead_code)]
+/// Check whether an MLX model directory has an index.json with mmproj-like vision adapter files listed.
+///
+/// Rapid-MLX has no fake mmproj equivalent; only show real integrated/qualified
+/// MLX-VLM components. This checks the safetensors index for actual vision tower
+/// projector tensors (mmproj, vision_proj, modality_projection, etc.) rather than
+/// a naive string match.
+pub fn has_mmproj_in_index(model_path: &Path) -> Result<bool> {
+    let index_path = model_path.join("model.safetensors.index.json");
+    if !index_path.exists() {
+        return Ok(false);
+    }
+    let text = std::fs::read_to_string(&index_path).context("read model.safetensors.index.json")?;
+    let index: serde_json::Value =
+        serde_json::from_str(&text).context("parse model.safetensors.index.json")?;
+    let weight_map = index.get("weight_map").and_then(|v| v.as_object());
+    if let Some(map) = weight_map {
+        for tensor_name in map.keys() {
+            let lower = tensor_name.to_ascii_lowercase();
+            if lower.contains("mmproj")
+                || lower.contains("vision_proj")
+                || lower.contains("modality_projection")
+                || lower.contains("vision.tower")
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

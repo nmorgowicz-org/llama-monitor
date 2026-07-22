@@ -792,6 +792,58 @@ fn api_hf_download(
         })
 }
 
+/// POST /api/hf/mlx-derivatives — discover MLX derivatives for a source repo.
+/// Input: repoId (string), revision (string, optional).
+/// Output: native_mlx_derivatives, conversion_recipes, original_author_preserved, etc.
+fn api_hf_mlx_derivatives(
+    config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "mlx-derivatives")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(
+            warp::body::content_length_limit(64 * 1024)
+                .and(warp::body::json::<serde_json::Value>()),
+        )
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let repo_id = body
+                    .get("repoId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                // revision is accepted for future use (pinned source revision tracking)
+                let _revision = body
+                    .get("revision")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("main")
+                    .to_string();
+
+                if !crate::hf::validate_hf_repo_id(&repo_id) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "error": "Invalid repoId" })),
+                    ));
+                }
+
+                match crate::hf::hf_discover_mlx_derivatives(&repo_id).await {
+                    Ok(result) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&result),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": e })),
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                        ),
+                    )),
+                }
+            }
+        })
+}
+
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let state = ctx.state.clone();
     let config = ctx.config.clone();
@@ -826,6 +878,7 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .or(api_hf_download(state.clone(), config.clone()))
         .unify()
         .boxed();
+    r = r.or(api_hf_mlx_derivatives(config.clone())).unify().boxed();
     r
 }
 

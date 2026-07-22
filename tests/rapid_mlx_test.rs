@@ -28,6 +28,8 @@ async fn test_rapid_mlx_platform_validation() {
         capability_snapshot: None,
         resolved_receipt: None,
         last_probe_result: None,
+        prefix_cache_budget_bytes: None,
+        prefix_cache_enabled: false,
     };
     let adapter = RapidMlxAdapter::from_resolved(
         runtime,
@@ -119,6 +121,8 @@ async fn test_rapid_mlx_await_ready_success() {
         capability_snapshot: None,
         resolved_receipt: None,
         last_probe_result: None,
+        prefix_cache_budget_bytes: None,
+        prefix_cache_enabled: false,
     };
     let mut adapter = RapidMlxAdapter::from_resolved(
         runtime,
@@ -153,6 +157,8 @@ async fn test_rapid_mlx_await_ready_failure() {
         capability_snapshot: None,
         resolved_receipt: None,
         last_probe_result: None,
+        prefix_cache_budget_bytes: None,
+        prefix_cache_enabled: false,
     };
     let mut adapter = RapidMlxAdapter::from_resolved(
         runtime,
@@ -252,6 +258,8 @@ async fn rapid_native_cancellation_degrades_without_a_public_request_id_contract
         capability_snapshot: None,
         resolved_receipt: None,
         last_probe_result: None,
+        prefix_cache_budget_bytes: None,
+        prefix_cache_enabled: false,
     };
     let mut supported = RapidMlxAdapter::from_resolved(
         runtime,
@@ -373,6 +381,8 @@ async fn fixture_lifecycle_discovers_loads_becomes_ready_and_stops() {
             capability_snapshot: None,
             resolved_receipt: None,
             last_probe_result: None,
+            prefix_cache_budget_bytes: None,
+            prefix_cache_enabled: false,
         },
         ResolvedRapidMlxLaunchModel::validated_alias("fixture-model").unwrap(),
     );
@@ -426,6 +436,8 @@ async fn fixture_early_exit_propagates_actionable_tail() {
             capability_snapshot: None,
             resolved_receipt: None,
             last_probe_result: None,
+            prefix_cache_budget_bytes: None,
+            prefix_cache_enabled: false,
         },
         ResolvedRapidMlxLaunchModel::validated_alias("fixture-model").unwrap(),
     );

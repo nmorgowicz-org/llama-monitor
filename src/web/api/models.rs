@@ -997,6 +997,209 @@ fn api_models_gguf_meta(
         })
 }
 
+// ── POST /api/models/mlx-introspect (Phase 8A3) ──────────────────────────────────────────────
+
+fn api_models_mlx_introspect(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "mlx-introspect")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            let state = state.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let model_path = body["model_path"].as_str().unwrap_or("").trim().to_string();
+                if model_path.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Missing 'model_path' field"
+                        })),
+                    ));
+                }
+
+                // Security: canonicalize and validate
+                let canon = match std::path::Path::new(&model_path).canonicalize() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Model path not found or invalid"
+                            })),
+                        ));
+                    }
+                };
+
+                // Ensure path is inside allowed directories
+                let models_dir = get_effective_models_dir(&state)
+                    .unwrap_or_else(|| cfg.default_models_dir.clone());
+                let in_models_dir = models_dir
+                    .canonicalize()
+                    .map(|d| canon.starts_with(&d))
+                    .unwrap_or(false);
+                let in_home = dirs::home_dir()
+                    .and_then(|h| h.canonicalize().ok())
+                    .map(|h| canon.starts_with(&h))
+                    .unwrap_or(false);
+                let in_extra = state
+                    .ui_settings
+                    .lock()
+                    .map(|s| {
+                        s.extra_models_dirs.iter().any(|d| {
+                            std::path::Path::new(d)
+                                .canonicalize()
+                                .map(|cd| canon.starts_with(&cd))
+                                .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false);
+
+                if !in_models_dir && !in_home && !in_extra {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "model_path is outside allowed directories"
+                        })),
+                    ));
+                }
+
+                // Introspect using blocking task with timeout
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    tokio::task::spawn_blocking(move || {
+                        let mut errors = Vec::new();
+                        let mut response = serde_json::Map::new();
+
+                        // Recursive size
+                        let recursive_size = match crate::inference::rapid_mlx::info_query::resolve_mlx_recursive_size(&canon) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                errors.push(format!("recursive_size: {e}"));
+                                0
+                            }
+                        };
+                        response.insert("recursive_size_bytes".into(), serde_json::json!(recursive_size));
+
+                        // Local config
+                        match crate::inference::rapid_mlx::info_query::read_mlx_local_config(&canon) {
+                            Ok(Some(config)) => {
+                                let mut config_obj = serde_json::Map::new();
+                                if let Some(model_type) = config.model_type {
+                                    config_obj.insert("model_type".into(), serde_json::json!(model_type));
+                                }
+                                if let Some(hidden_size) = config.hidden_size {
+                                    config_obj.insert("hidden_size".into(), serde_json::json!(hidden_size));
+                                }
+                                if let Some(num_layers) = config.num_layers {
+                                    config_obj.insert("num_layers".into(), serde_json::json!(num_layers));
+                                }
+                                if let Some(num_attention_heads) = config.num_attention_heads {
+                                    config_obj.insert("num_attention_heads".into(), serde_json::json!(num_attention_heads));
+                                }
+                                if let Some(num_key_value_heads) = config.num_key_value_heads {
+                                    config_obj.insert("num_key_value_heads".into(), serde_json::json!(num_key_value_heads));
+                                }
+                                if let Some(head_dim) = config.head_dim {
+                                    config_obj.insert("head_dim".into(), serde_json::json!(head_dim));
+                                }
+                                if let Some(n_ff) = config.n_ff {
+                                    config_obj.insert("n_ff".into(), serde_json::json!(n_ff));
+                                }
+                                if let Some(num_experts) = config.num_experts {
+                                    config_obj.insert("num_experts".into(), serde_json::json!(num_experts));
+                                }
+                                if let Some(num_experts_per_tok) = config.num_experts_per_tok {
+                                    config_obj.insert("num_experts_per_tok".into(), serde_json::json!(num_experts_per_tok));
+                                }
+                                if let Some(sliding_window) = config.sliding_window {
+                                    config_obj.insert("sliding_window".into(), serde_json::json!(sliding_window));
+                                }
+                                if let Some(max_position_embeddings) = config.max_position_embeddings {
+                                    config_obj.insert("max_position_embeddings".into(), serde_json::json!(max_position_embeddings));
+                                }
+                                if config.vision_config.is_some() {
+                                    config_obj.insert("has_vision_config".into(), serde_json::json!(true));
+                                }
+                                if let Some(quant) = config.quantization {
+                                    let mut qobj = serde_json::Map::new();
+                                    if let Some(bits) = quant.bits {
+                                        qobj.insert("bits".into(), serde_json::json!(bits));
+                                    }
+                                    if let Some(group_size) = quant.group_size {
+                                        qobj.insert("group_size".into(), serde_json::json!(group_size));
+                                    }
+                                    if !qobj.is_empty() {
+                                        config_obj.insert("quantization".into(), serde_json::Value::Object(qobj));
+                                    }
+                                }
+                                response.insert("config".into(), serde_json::Value::Object(config_obj));
+                            }
+                            Ok(None) => {
+                                errors.push("no config.json found".into());
+                            }
+                            Err(e) => {
+                                errors.push(format!("read config: {e}"));
+                            }
+                        }
+
+                        // mmproj in index (only real MLX-VLM components, per builder item 13)
+                        let has_mmproj = match crate::inference::rapid_mlx::info_query::has_mmproj_in_index(&canon) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                errors.push(format!("check mmproj: {e}"));
+                                false
+                            }
+                        };
+                        response.insert("has_vision_adapter_in_index".into(), serde_json::json!(has_mmproj));
+
+                        (response, errors)
+                    }),
+                )
+                .await;
+
+                let (mut response, errors) = match result {
+                    Ok(Ok((resp, errs))) => (resp, errs),
+                    Ok(Err(e)) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Introspection failed: {e}")
+                            })),
+                        ));
+                    }
+                    Err(_) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "MLX introspection timed out (10s)"
+                            })),
+                        ));
+                    }
+                };
+
+                if !errors.is_empty() {
+                    response.insert("errors".into(), serde_json::json!(errors));
+                }
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "model_path": model_path,
+                        "data": response
+                    }),
+                )))
+            }
+        })
+}
+
 // ── GET /api/models ───────────────────────────────────────────────────────────
 
 fn api_get_models(
@@ -1564,6 +1767,10 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .boxed();
     r = r.or(api_models_gguf_meta(config.clone())).unify().boxed();
+    r = r
+        .or(api_models_mlx_introspect(state.clone(), config.clone()))
+        .unify()
+        .boxed();
     r = r
         .or(api_get_models(state.clone(), config.clone()))
         .unify()
