@@ -1648,6 +1648,36 @@ button:disabled {
   background: linear-gradient(90deg, var(--color-warning), var(--color-error));
 }
 
+/* ── Card lineage (Phase 8B2) ── */
+.mm-card-lineage {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+  line-height: 1.4;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+}
+
+.mm-card-lineage .mm-lineage-rev {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(59,130,246,0.15);
+  color: rgba(96,165,250,0.9);
+  font-weight: 500;
+  font-size: 9px;
+}
+
+.mm-card-lineage .mm-lineage-author {
+  color: var(--color-text-secondary);
+}
+
+.mm-card-lineage .mm-lineage-converter {
+  color: var(--color-text-muted);
+  opacity: 0.8;
+}
+
 /* ── Card actions ── */
 .mm-card-actions {
   display: flex;
@@ -1899,6 +1929,16 @@ button:disabled {
 /* VRAM bar track is rgba(255,255,255,0.06) — invisible on light backgrounds */
 [data-theme="light"] .mm-vram-bar {
   background: rgba(15, 23, 42, 0.1);
+}
+
+/* Lineage: adjust for light theme */
+[data-theme="light"] .mm-card-lineage {
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .mm-card-lineage .mm-lineage-rev {
+  background: rgba(59,130,246,0.1);
+  color: rgba(37,99,235,0.9);
 }
 
 [data-theme="light"] .models-manager-footer {

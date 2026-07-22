@@ -844,6 +844,83 @@ fn api_hf_mlx_derivatives(
         })
 }
 
+/// POST /api/hf/qualify — authoritative qualification for a repo+revision.
+/// Input: repoId (string), revision (string, optional), backend (string, optional).
+/// Output: HfQualification with backend_hint, qualification_state, etc.
+fn api_hf_qualify(
+    config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "qualify")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(
+            warp::body::content_length_limit(64 * 1024)
+                .and(warp::body::json::<crate::hf::QualifyRequest>()),
+        )
+        .and_then(move |auth: Option<String>, req: crate::hf::QualifyRequest| {
+            let cfg = config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                match crate::hf::qualify::hf_qualify_repo(req).await {
+                    Ok(result) => {
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&result),
+                        ))
+                    }
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": e })),
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                        ),
+                    )),
+                }
+            }
+        })
+}
+
+/// POST /api/hf/identity — authorship and lineage resolution.
+/// Input: repoId (string), revision (string, optional), configDir (string, optional).
+/// Output: HfIdentity with original_author, converter_role, roles, etc.
+fn api_hf_identity(
+    config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "identity")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(
+            warp::body::content_length_limit(64 * 1024)
+                .and(warp::body::json::<crate::hf::IdentityRequest>()),
+        )
+        .and_then(move |auth: Option<String>, req: crate::hf::IdentityRequest| {
+            let cfg = config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let explicit_config_dir = req.config_dir.clone();
+                let config_dir = explicit_config_dir
+                    .as_ref()
+                    .map(std::path::Path::new)
+                    .unwrap_or_else(|| cfg.config_dir.as_ref());
+                match crate::hf::qualify::hf_resolve_identity(req, config_dir).await {
+                    Ok(result) => {
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&result),
+                        ))
+                    }
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": e })),
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                        ),
+                    )),
+                }
+            }
+        })
+}
+
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let state = ctx.state.clone();
     let config = ctx.config.clone();
@@ -879,6 +956,8 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .boxed();
     r = r.or(api_hf_mlx_derivatives(config.clone())).unify().boxed();
+    r = r.or(api_hf_qualify(config.clone())).unify().boxed();
+    r = r.or(api_hf_identity(config.clone())).unify().boxed();
     r
 }
 

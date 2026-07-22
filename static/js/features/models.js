@@ -499,6 +499,58 @@ function buildModelCard(m) {
         card.appendChild(barWrap);
     }
 
+    // Phase 8B2: Lineage info for HF-sourced models (repo/revision/original author/converter)
+    const hfRepoId = m.hf_repo_id || m.originRepo || m.repo_id || '';
+    const hfRevision = m.hf_revision || m.revision || '';
+    const hfOriginalAuthor = m.original_author || m.hf_source_info?.original_author || '';
+    const hfConverter = m.converter || m.hf_source_info?.converter || '';
+    if (hfRepoId) {
+        const lineageEl = document.createElement('div');
+        lineageEl.className = 'mm-card-lineage';
+
+        // Repo name
+        const repoSpan = document.createElement('span');
+        repoSpan.textContent = hfRepoId;
+        lineageEl.appendChild(repoSpan);
+
+        // Revision badge
+        if (hfRevision && hfRevision !== 'main') {
+            const revPrefix = hfRevision.length > 7 ? hfRevision.substring(0, 7) : hfRevision;
+            const dot = document.createElement('span');
+            dot.textContent = ' · ';
+            lineageEl.appendChild(dot);
+            const revSpan = document.createElement('span');
+            revSpan.className = 'mm-lineage-rev';
+            revSpan.textContent = hfRevision === revPrefix ? revPrefix : revPrefix + '…';
+            lineageEl.appendChild(revSpan);
+        }
+
+        // Original author (distinct from converter)
+        if (hfOriginalAuthor && hfOriginalAuthor !== hfConverter) {
+            const authDot = document.createElement('span');
+            authDot.textContent = ' · ';
+            lineageEl.appendChild(authDot);
+            const authSpan = document.createElement('span');
+            authSpan.className = 'mm-lineage-author';
+            authSpan.textContent = 'by ' + hfOriginalAuthor;
+            lineageEl.appendChild(authSpan);
+        }
+
+        // Converter
+        if (hfConverter) {
+            const convDot = document.createElement('span');
+            convDot.textContent = ' · ';
+            lineageEl.appendChild(convDot);
+            const convSpan = document.createElement('span');
+            convSpan.className = 'mm-lineage-converter';
+            const convLabel = m.format === 'mlx' ? 'MLX by' : 'via';
+            convSpan.textContent = convLabel + ' ' + hfConverter;
+            lineageEl.appendChild(convSpan);
+        }
+
+        card.appendChild(lineageEl);
+    }
+
     if (relatedPresets.length) {
         const presetMeta = document.createElement('div');
         presetMeta.className = 'mm-card-meta';

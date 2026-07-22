@@ -164,6 +164,138 @@ function getAuthHeaders() {
   return window.authHeaders ? window.authHeaders() : {};
 }
 
+// ── Phase 8B2: Base model name extraction ────────────────────────────────────
+// Extract canonical base model name from repo_id for grouping.
+// E.g., "bartowski/Qwen3-32B-GGUF" -> "Qwen3-32B"
+// E.g., "mlx-community/Qwen3-30B-A3B-4bit" -> "Qwen3-30B-A3B"
+// E.g., "unsloth/Qwen3.6-32B-heretic" -> "Qwen3.6-32B-heretic"
+
+function extractBaseModelName(repoId) {
+  const parts = (repoId || '').split('/');
+  const name = (parts[1] || '').toLowerCase();
+  if (!name) return repoId;
+
+  // Remove GGUF suffix
+  let base = name.replace(/-gguf$/, '');
+
+  // Remove known quant suffixes from MLX repos (e.g., "-4bit", "-8bit")
+  base = base.replace(/-(?:4bit|8bit|fp16|q4|q8)$/, '');
+
+  // Remove known converter prefixes from repo name
+  base = base.replace(/^(?:mlx-|gguf-)/, '');
+
+  // Capitalize sensibly: preserve known brand casing
+  const lower = base;
+  let result = '';
+  let i = 0;
+  while (i < lower.length) {
+    const c = lower[i];
+    if (c === '-' || c === '.') {
+      result += c;
+      i++;
+    } else if (result.length === 0 || (result[result.length - 1] === '-' || result[result.length - 1] === '.')) {
+      result += c.toUpperCase();
+      i++;
+    } else {
+      result += c;
+      i++;
+    }
+  }
+
+  return result || repoId;
+}
+
+// ── Phase 8B2: Qualification cache and badge resolution ──────────────────────
+// Cache for /api/hf/qualify calls (repoId+revision+backend keyed).
+const _qualCache = new Map();
+
+async function resolveQualification(repoId, revision, backend) {
+  const key = `${repoId}:${revision || 'main'}:${backend || 'any'}`;
+  if (_qualCache.has(key)) return _qualCache.get(key);
+
+  try {
+    const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
+    const resp = await fetch('/api/hf/qualify', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ repoId, revision: revision || 'main', backend: backend || undefined }),
+    });
+    if (!resp.ok) {
+      _qualCache.set(key, null);
+      return null;
+    }
+    const data = await resp.json();
+    _qualCache.set(key, data);
+    return data;
+  } catch {
+    _qualCache.set(key, null);
+    return null;
+  }
+}
+
+function getQualificationState(qual) {
+  if (!qual) return { state: 'not-checked', label: 'Not checked', colorClass: 'qual-gray' };
+
+  // backend_qualified is the primary signal from Phase 8A2
+  if (qual.backend_qualified) {
+    return { state: 'qualified', label: 'Qualified', colorClass: 'qual-green' };
+  }
+
+  // Provisional: has some evidence but not fully qualified
+  if (qual.config || qual.tokenizer || qual.chat_template) {
+    return { state: 'provisional', label: 'Provisional', colorClass: 'qual-yellow' };
+  }
+
+  return { state: 'not-checked', label: 'Not checked', colorClass: 'qual-gray' };
+}
+
+function getBackendHintLabel(qual) {
+  if (!qual) return '';
+  const hint = (qual.backend_hint || '').toLowerCase();
+  if (hint.includes('rapid') || hint.includes('mlx')) return 'Rapid-MLX';
+  if (hint.includes('llama') || hint.includes('gguf')) return 'llama.cpp';
+  if (hint.includes('both')) return 'Both backends';
+  return qual.backend_hint || '';
+}
+
+// ── Phase 8B2: MLX lineage discovery ──────────────────────────────────────────
+// Fetch MLX derivatives and conversion recipes for a source repo.
+
+async function fetchMlxLineage(repoId) {
+  try {
+    const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
+    const resp = await fetch('/api/hf/mlx-derivatives', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ repoId }),
+    });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch {
+    return null;
+  }
+}
+
+// ── Phase 8B2: Selection payload builder ──────────────────────────────────────
+// Build structured selection payload with repoId/revision/variant/lineage.
+// This survives through: selection → estimate → download → library → launch.
+
+export function buildSelectionPayload(model, variantInfo) {
+  return {
+    repoId: model.id || '',
+    revision: model.revision || variantInfo?.revision || null,
+    variant: variantInfo?.variant || '',
+    originalAuthor: model.original_author || variantInfo?.originalAuthor || null,
+    converter: model.converter || variantInfo?.converter || null,
+    format: variantInfo?.format || model.format || 'gguf',
+    backendHint: variantInfo?.backendHint || null,
+    hfFilePath: model.hf_file_path || variantInfo?.hfFilePath || null,
+    modelSizeBytes: model.model_size_bytes || variantInfo?.modelSizeBytes || null,
+    // Preserve raw model object for backward compatibility
+    _raw: model,
+  };
+}
+
 // ── Scope resolution (Phase 8B1) ──────────────────────────────────────────────
 // Resolves discovery scope to the format param for the backend API.
 // Auto = matches platform backend; ALL = both formats.
@@ -354,135 +486,397 @@ export async function hfSearch({
       return;
     }
 
-    for (const m of models) {
-      const row = document.createElement('div');
-      row.className = 'hf-search-result';
-      row.setAttribute('tabindex', '0');
-      row.setAttribute('role', 'button');
+    // ── Phase 8B2: Two-level card hierarchy (group + variants) ─────────────────
+    // Group models by base model name, render group header + variant rows.
 
-      // Categories rail (Phase 8B1: descriptive, not filterable)
-      const categories = resolveCategories(m.tags);
-      if (categories.length > 0) {
+    const groups = new Map();
+    for (const m of models) {
+      const baseName = extractBaseModelName(m.id);
+      if (!groups.has(baseName)) {
+        groups.set(baseName, { baseName, models: [], tags: new Set(), author: null });
+      }
+      const g = groups.get(baseName);
+      g.models.push(m);
+      (m.tags || []).forEach(t => g.tags.add(t));
+      // Use original-author role as group author if present
+      if (!g.author && m.id.split('/')[0]) {
+        const role = resolveAuthorRole(m.id, m.tags);
+        if (role && role.role === 'original-author') {
+          g.author = m.id.split('/')[0];
+        }
+      }
+    }
+
+    // Sort groups: Community Picks first, then by first model's downloads
+    const sortedGroups = [...groups.values()].sort((a, b) => {
+      const aHasPick = a.models.some(m => m.is_community_pick || (m.community_picks || []).length > 0);
+      const bHasPick = b.models.some(m => m.is_community_pick || (m.community_picks || []).length > 0);
+      if (aHasPick !== bHasPick) return aHasPick ? -1 : 1;
+      const aDl = (a.models[0]?.downloads || 0);
+      const bDl = (b.models[0]?.downloads || 0);
+      return bDl - aDl;
+    });
+
+    // Show loading indicator for lineage/enrichment
+    const enrichingEl = document.createElement('div');
+    enrichingEl.className = 'hf-search-loading';
+    enrichingEl.textContent = 'Checking model lineage and qualification…';
+    container.appendChild(enrichingEl);
+
+    // Fetch identity for each group to get original author (concurrent, bounded)
+    const identityTasks = [];
+    for (const g of sortedGroups) {
+      if (g.models.length > 0) {
+        identityTasks.push(
+          (async (group) => {
+            const firstModel = group.models[0];
+            try {
+              const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
+              const resp = await fetch('/api/hf/identity', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ repoId: firstModel.id }),
+              });
+              if (resp.ok) {
+                const data = await resp.json();
+                group.originalAuthor = data.original_author?.username || data.original_author?.display_name || null;
+                group.isFinetune = !!data.is_finetune;
+              }
+            } catch {
+              // Non-fatal: fall back to heuristic author from Phase 8B1
+            }
+            group.author = group.originalAuthor || group.author || firstModel.id.split('/')[0];
+          })(g)
+        );
+      }
+    }
+
+    // Fetch MLX lineage for groups when scope is MLX or All (bounded concurrency)
+    const mlxTasks = [];
+    if (scope === HF_SCOPE.MLX || scope === HF_SCOPE.ALL) {
+      for (let i = 0; i < sortedGroups.length; i++) {
+        const g = sortedGroups[i];
+        // Only fetch MLX lineage for finetunes or models with >5 downloads (signal of maturity)
+        if (g.isFinetune || (g.models[0]?.downloads || 0) > 5) {
+          mlxTasks.push(
+            (async (group) => {
+              group.mlxLineage = await fetchMlxLineage(g.models[0].id);
+            })(g)
+          );
+        }
+      }
+    }
+
+    // Wait for enrichment with timeout (don't block too long)
+    try {
+      await Promise.race([
+        Promise.all([...identityTasks, ...mlxTasks]),
+        new Promise(r => setTimeout(r, 4000)),
+      ]);
+    } catch {
+      // Non-fatal: proceed with partial data
+    }
+
+    // Remove enriching indicator
+    enrichingEl.remove();
+
+    // Render each group
+    for (const g of sortedGroups) {
+      const groupEl = document.createElement('div');
+      groupEl.className = 'hf-search-group';
+      groupEl.dataset.baseName = g.baseName;
+
+      // ── Group header ───────────────────────────────────────────────────────
+      const header = document.createElement('div');
+      header.className = 'hf-sg-header';
+
+      // Base model name + original author
+      const headerNameLine = document.createElement('div');
+      headerNameLine.className = 'hf-sg-header-name';
+
+      const baseNameEl = document.createElement('span');
+      baseNameEl.className = 'hf-sg-base-name';
+      baseNameEl.textContent = g.baseName;
+      headerNameLine.appendChild(baseNameEl);
+
+      // Original author badge
+      if (g.originalAuthor && g.originalAuthor !== g.author) {
+        const origBadge = document.createElement('span');
+        origBadge.className = 'hf-sg-role-badge hf-sg-role-badge--original-author';
+        origBadge.textContent = 'by ' + escHtml(g.originalAuthor);
+        origBadge.title = 'Original author';
+        headerNameLine.appendChild(origBadge);
+      } else if (g.author) {
+        const origBadge = document.createElement('span');
+        origBadge.className = 'hf-sg-role-badge hf-sg-role-badge--original-author';
+        origBadge.textContent = 'by ' + escHtml(g.author);
+        origBadge.title = 'Original author';
+        headerNameLine.appendChild(origBadge);
+      }
+
+      // Community Picks badge if any variant is a pick
+      const hasPick = g.models.some(m => m.is_community_pick || (m.community_picks || []).length > 0);
+      if (hasPick) {
+        const cpBadge = document.createElement('span');
+        cpBadge.className = 'hf-sg-role-badge hf-sg-role-badge--community-pick';
+        cpBadge.textContent = '★ Community Pick';
+        cpBadge.title = 'High-quality repo selected by the community';
+        headerNameLine.appendChild(cpBadge);
+      }
+
+      header.appendChild(headerNameLine);
+
+      // Categories
+      const groupCategories = resolveCategories([...g.tags]);
+      if (groupCategories.length > 0) {
         const catRail = document.createElement('div');
-        catRail.className = 'hf-sr-categories';
-        categories.forEach(cat => {
+        catRail.className = 'hf-sg-categories';
+        groupCategories.forEach(cat => {
           const pill = document.createElement('span');
           pill.className = `hf-sr-category hf-sr-category--${cat}`;
           pill.textContent = cat.charAt(0).toUpperCase() + cat.slice(1);
           catRail.appendChild(pill);
         });
-        row.appendChild(catRail);
+        header.appendChild(catRail);
       }
 
-      // Name + author role line
-      const nameLine = document.createElement('div');
-      nameLine.className = 'hf-sr-name-line';
-
-      const nameEl = document.createElement('span');
-      nameEl.className = 'hf-sr-name';
-      nameEl.textContent = m.id || '';
-      nameLine.appendChild(nameEl);
-
-      // Author/converter role badge (Phase 8B1: distinct roles)
-      const authorRole = resolveAuthorRole(m.id, m.tags);
-      if (authorRole) {
-        const roleBadge = document.createElement('span');
-        roleBadge.className = `hf-sr-role-badge hf-sr-role-badge--${authorRole.role}`;
-        roleBadge.textContent = authorRole.label;
-        roleBadge.title = authorRole.label + ' — ' + m.id.split('/')[0];
-        nameLine.appendChild(roleBadge);
-      }
-
-      // Community Picks badge (Phase 8B1)
-      if (m.is_community_pick || (m.community_picks || []).length > 0) {
-        const cpBadge = document.createElement('span');
-        cpBadge.className = 'hf-sr-role-badge hf-sr-role-badge--community-pick';
-        cpBadge.textContent = '★ Community Pick';
-        cpBadge.title = 'High-quality repo selected by the community';
-        nameLine.appendChild(cpBadge);
-      }
-
-      row.appendChild(nameLine);
-
-      // Meta line: downloads, age, quant badges
-      const meta = document.createElement('div');
-      meta.className = 'hf-sr-meta';
-
-      if (m.downloads > 0) {
-        const dl = document.createElement('span');
-        dl.textContent = m.downloads >= 1000 ? `${(m.downloads / 1000).toFixed(0)}k\u2193` : `${m.downloads}\u2193`;
-        meta.appendChild(dl);
-      }
-
-      const ageStr = hfRelativeAge(m.last_modified || m.created_at || '');
-      if (ageStr) {
-        const age = document.createElement('span');
-        age.className = 'hf-sr-age';
-        age.textContent = ageStr;
-        age.title = m.last_modified || m.created_at || '';
-        meta.appendChild(age);
-      }
-
-      // Size badge (Phase 8B1: sort by size needs visible signal)
-      if (m.model_size_bytes && m.model_size_bytes > 0) {
-        const size = document.createElement('span');
-        size.className = 'hf-sr-size';
-        size.textContent = formatBytes(m.model_size_bytes);
-        meta.appendChild(size);
-      }
-
-      if (m.has_imatrix) {
-        const b = document.createElement('span');
-        b.className = 'hf-sr-badge hf-sr-badge-imatrix';
-        b.textContent = 'imatrix';
-        meta.appendChild(b);
-      } else if ((m.quant_provider || '').toLowerCase() === 'unsloth') {
-        const b = document.createElement('span');
-        b.className = 'hf-sr-badge hf-sr-badge-ud';
-        b.textContent = 'UD';
-        meta.appendChild(b);
-      }
-      if (m.gated) {
-        const b = document.createElement('span');
-        b.className = 'hf-sr-badge hf-sr-badge-gated';
-        b.textContent = 'gated';
-        meta.appendChild(b);
-      }
-      const lowerTags = (m.tags || []).map(t => t.toLowerCase());
-      if (lowerTags.some(t => t.includes('moe'))) {
-        const b = document.createElement('span');
-        b.className = 'hf-sr-badge hf-sr-badge-moe';
-        b.textContent = 'MoE';
-        meta.appendChild(b);
-      }
-
-      row.appendChild(meta);
-
-      // Card link button
-      const cardLink = document.createElement('button');
-      cardLink.type = 'button';
-      cardLink.className = 'hf-sr-card-link';
-      cardLink.title = 'View model card';
-      cardLink.setAttribute('aria-label', `View model card for ${escHtml(m.id)}`);
-      cardLink.innerHTML =
-        '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>';
-      cardLink.addEventListener('click', e => {
-        e.stopPropagation();
-        if (onOpenCardPanel) onOpenCardPanel(m.id);
-        else window.open(`https://huggingface.co/${escHtml(m.id)}`, '_blank', 'noopener');
+      // Expand/collapse toggle
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'hf-sg-toggle';
+      toggle.textContent = '▾';
+      toggle.setAttribute('aria-label', 'Toggle variants');
+      toggle.addEventListener('click', () => {
+        const body = groupEl.querySelector('.hf-sg-body');
+        if (body.style.display === 'none') {
+          body.style.display = '';
+          toggle.textContent = '▾';
+        } else {
+          body.style.display = 'none';
+          toggle.textContent = '▸';
+        }
       });
+      header.appendChild(toggle);
 
-      row.appendChild(cardLink);
+      groupEl.appendChild(header);
 
-      const selectRepo = () => {
-        if (onSelectModel) onSelectModel(m);
-      };
-      row.addEventListener('click', selectRepo);
-      row.addEventListener('keydown', e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectRepo(); }
-      });
+      // ── Group body (variants list) ─────────────────────────────────────────
+      const body = document.createElement('div');
+      body.className = 'hf-sg-body';
 
-      container.appendChild(row);
+      // Variant rows for each model in the group
+      for (const m of g.models) {
+        const variantRow = document.createElement('div');
+        variantRow.className = 'hf-sg-variant';
+        variantRow.setAttribute('tabindex', '0');
+        variantRow.setAttribute('role', 'button');
+
+        // Variant name (repo id with converter prefix)
+        const variantName = document.createElement('span');
+        variantName.className = 'hf-sg-variant-name';
+        variantName.textContent = m.id;
+        variantRow.appendChild(variantName);
+
+        // Format badge
+        const lowerTags = (m.tags || []).map(t => t.toLowerCase());
+        const isMlx = lowerTags.some(t => t.includes('mlx'));
+        const isGguf = lowerTags.some(t => t.includes('gguf'));
+        const format = isMlx ? 'mlx' : isGguf ? 'gguf' : 'unknown';
+        const formatBadge = document.createElement('span');
+        formatBadge.className = `hf-sg-format-badge hf-sg-format-badge--${format}`;
+        formatBadge.textContent = format.toUpperCase();
+        formatBadge.title = `Format: ${format.toUpperCase()}`;
+        variantRow.appendChild(formatBadge);
+
+        // Quant label / size
+        const variantMeta = document.createElement('span');
+        variantMeta.className = 'hf-sg-variant-meta';
+        const metaParts = [];
+        if (m.quant_label) metaParts.push(m.quant_label);
+        if (m.model_size_bytes) metaParts.push(formatBytes(m.model_size_bytes));
+        if (m.downloads > 0) metaParts.push(m.downloads >= 1000 ? `${(m.downloads / 1000).toFixed(0)}k↓` : `${m.downloads}↓`);
+        variantMeta.textContent = metaParts.join(' · ');
+        variantRow.appendChild(variantMeta);
+
+        // Converter role badge
+        const converterRole = resolveAuthorRole(m.id, m.tags);
+        if (converterRole && converterRole.role !== 'original-author') {
+          const roleBadge = document.createElement('span');
+          roleBadge.className = `hf-sg-role-badge hf-sg-role-badge--${converterRole.role}`;
+          roleBadge.textContent = escHtml(m.id.split('/')[0]);
+          roleBadge.title = converterRole.label + ' — ' + m.id.split('/')[0];
+          variantRow.appendChild(roleBadge);
+        }
+
+        // Qualification badge (Phase 8B2: revision-bound)
+        const qualBadge = document.createElement('span');
+        qualBadge.className = 'hf-sg-qual-badge loading';
+        qualBadge.textContent = '…';
+        qualBadge.title = 'Checking qualification…';
+        variantRow.appendChild(qualBadge);
+
+        // Resolve qualification async (lazy)
+        const qualTarget = qualBadge;
+        resolveQualification(m.id, m.revision, format === 'mlx' ? 'rapid_mlx' : 'llama_cpp').then(qual => {
+          const qs = getQualificationState(qual);
+          qualTarget.className = `hf-sg-qual-badge hf-sg-qual-badge--${qs.colorClass}`;
+          qualTarget.textContent = qs.label;
+          const hint = getBackendHintLabel(qual);
+          qualTarget.title = `${qs.label}${hint ? ' — ' + hint : ''}. Search is not qualification; this is revision-pinned evidence.`;
+        });
+
+        // Card link button
+        const cardLink = document.createElement('button');
+        cardLink.type = 'button';
+        cardLink.className = 'hf-sg-card-link';
+        cardLink.title = 'View model card';
+        cardLink.setAttribute('aria-label', `View model card for ${escHtml(m.id)}`);
+        cardLink.innerHTML =
+          '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>';
+        cardLink.addEventListener('click', e => {
+          e.stopPropagation();
+          if (onOpenCardPanel) onOpenCardPanel(m.id);
+          else window.open(`https://huggingface.co/${escHtml(m.id)}`, '_blank', 'noopener');
+        });
+        variantRow.appendChild(cardLink);
+
+        // Selection handler with enriched payload
+        const selectVariant = () => {
+          if (onSelectModel) {
+            const payload = buildSelectionPayload(m, {
+              format,
+              converter: converterRole ? m.id.split('/')[0] : null,
+              originalAuthor: g.originalAuthor || g.author || null,
+            });
+            onSelectModel(payload);
+          }
+        };
+        variantRow.addEventListener('click', selectVariant);
+        variantRow.addEventListener('keydown', e => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectVariant(); }
+        });
+
+        body.appendChild(variantRow);
+      }
+
+      // ── MLX lineage section (Phase 8B2: native + converted) ───────────────
+      if (g.mlxLineage && (scope === HF_SCOPE.MLX || scope === HF_SCOPE.ALL)) {
+        const lineageSection = document.createElement('div');
+        lineageSection.className = 'hf-sg-mlx-lineage';
+
+        // Native MLX derivatives
+        const nativeDerivs = (g.mlxLineage.native_mlx_derivatives || []).slice(0, 3);
+        if (nativeDerivs.length > 0) {
+          const nativeHeader = document.createElement('div');
+          nativeHeader.className = 'hf-sg-mlx-section-label';
+          nativeHeader.textContent = 'MLX variants';
+          lineageSection.appendChild(nativeHeader);
+
+          for (const d of nativeDerivs) {
+            const mlxRow = document.createElement('div');
+            mlxRow.className = 'hf-sg-mlx-variant';
+            mlxRow.setAttribute('tabindex', '0');
+            mlxRow.setAttribute('role', 'button');
+
+            const mlxName = document.createElement('span');
+            mlxName.className = 'hf-sg-mlx-variant-name';
+            mlxName.textContent = d.repo_id;
+            mlxRow.appendChild(mlxName);
+
+            // Native vs converted label
+            const isKnownPublisher = ['mlx-community', 'ml-explore'].includes(d.converter);
+            const mlxLabel = document.createElement('span');
+            mlxLabel.className = `hf-sg-mlx-label ${isKnownPublisher ? 'hf-sg-mlx-label--native' : 'hf-sg-mlx-label--converted'}`;
+            mlxLabel.textContent = isKnownPublisher
+              ? `Native MLX by ${escHtml(d.converter)}`
+              : `Converted by ${escHtml(d.converter)}`;
+            mlxRow.appendChild(mlxLabel);
+
+            // Size
+            if (d.size > 0) {
+              const mlxSize = document.createElement('span');
+              mlxSize.className = 'hf-sg-mlx-variant-meta';
+              mlxSize.textContent = formatBytes(d.size);
+              mlxRow.appendChild(mlxSize);
+            }
+
+            // Qualification if known
+            if (d.is_qualified) {
+              const qBadge = document.createElement('span');
+              qBadge.className = 'hf-sg-qual-badge hf-sg-qual-badge--qual-green';
+              qBadge.textContent = 'Qualified';
+              qBadge.title = 'Qualified for Rapid-MLX';
+              mlxRow.appendChild(qBadge);
+            }
+
+            const selectMlx = () => {
+              if (onSelectModel) {
+                const payload = buildSelectionPayload(
+                  { id: d.repo_id, revision: d.revision, model_size_bytes: d.size },
+                  {
+                    format: 'mlx',
+                    converter: d.converter,
+                    originalAuthor: g.originalAuthor || g.author || g.mlxLineage.original_author || null,
+                    backendHint: 'rapid_mlx',
+                  }
+                );
+                onSelectModel(payload);
+              }
+            };
+            mlxRow.addEventListener('click', selectMlx);
+            mlxRow.addEventListener('keydown', e => {
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectMlx(); }
+            });
+
+            lineageSection.appendChild(mlxRow);
+          }
+        }
+
+        // Conversion candidates
+        const recipes = (g.mlxLineage.conversion_recipes || []).slice(0, 2);
+        if (recipes.length > 0) {
+          const convHeader = document.createElement('div');
+          convHeader.className = 'hf-sg-mlx-section-label';
+          convHeader.textContent = 'Conversion options';
+          lineageSection.appendChild(convHeader);
+
+          for (const r of recipes) {
+            const convRow = document.createElement('div');
+            convRow.className = 'hf-sg-mlx-recipe';
+            const convName = document.createElement('span');
+            convName.className = 'hf-sg-mlx-recipe-name';
+            convName.textContent = r.recipe;
+            convRow.appendChild(convName);
+            const convMeta = document.createElement('span');
+            convMeta.className = 'hf-sg-mlx-recipe-meta';
+            const parts = [];
+            if (r.input_format) parts.push(r.input_format);
+            if (r.estimated_time) parts.push(r.estimated_time);
+            convMeta.textContent = parts.join(' · ');
+            convRow.appendChild(convMeta);
+            convRow.title = r.description || '';
+
+            // Conversion candidates show recipe info; clicking opens info (not auto-select)
+            const convLink = document.createElement('button');
+            convLink.type = 'button';
+            convLink.className = 'hf-sg-card-link';
+            convLink.title = r.description || 'View conversion details';
+            convLink.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>';
+            convLink.addEventListener('click', e => {
+              e.stopPropagation();
+              showToast(`Conversion: ${r.recipe} — ${r.description}`, 'info');
+            });
+            convRow.appendChild(convLink);
+
+            lineageSection.appendChild(convRow);
+          }
+        }
+
+        body.appendChild(lineageSection);
+      }
+
+      groupEl.appendChild(body);
+      container.appendChild(groupEl);
     }
 
     if (hasMore) {

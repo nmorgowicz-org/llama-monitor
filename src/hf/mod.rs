@@ -9,13 +9,12 @@
 //! - Streaming download with resume support
 //! - HF token management
 
-// NOTE: qualify module from Phase 8A2 exists as src/hf/qualify.rs but has unresolved
-// dependencies (community_source_catalog). Re-enable when Phase 8A2 is complete.
-// pub mod qualify;
-// pub use qualify::{
-//     HfConfigEvidence, HfIdentity, HfIdentityConverter, HfIdentityEntity, HfIdentityRole,
-//     HfQualification, HfRuntimeSnapshot, IdentityRequest, QualifyRequest,
-// };
+pub mod qualify;
+#[allow(unused_imports)]
+pub use qualify::{
+    HfConfigEvidence, HfIdentity, HfIdentityConverter, HfIdentityEntity, HfIdentityRole,
+    HfQualification, HfRuntimeSnapshot, IdentityRequest, QualifyRequest,
+};
 
 use anyhow::{Context, Result};
 use hf_hub::{HFClient, HFClientSync};

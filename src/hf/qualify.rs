@@ -2,6 +2,13 @@
 //!
 //! Authoritative post-selection qualification and authorship resolution.
 //! Search is candidate discovery only; this module is the truth step.
+#![allow(
+    clippy::manual_unwrap_or_default,
+    clippy::type_complexity,
+    clippy::too_many_arguments,
+    clippy::collapsible_if,
+    clippy::if_same_then_else
+)]
 
 use crate::hf::{
     fetch_raw_bytes_at, hf_get_model_info, hf_load_token, list_repo_siblings,
@@ -68,6 +75,7 @@ pub struct HfQualification {
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub struct HfConfigEvidence {
     pub source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -261,7 +269,7 @@ async fn collect_config_evidence(
     repo_id: &str,
     revision: &str,
     siblings: &[String],
-    errors: &mut Vec<String>,
+    _errors: &mut Vec<String>,
 ) -> Option<HfConfigEvidence> {
     // Prefer config.json for MLX/safetensors repos
     if siblings.iter().any(|p| p == "config.json") {
@@ -427,7 +435,7 @@ async fn collect_template_evidence(
     repo_id: &str,
     revision: &str,
     siblings: &[String],
-    errors: &mut Vec<String>,
+    _errors: &mut Vec<String>,
 ) -> Option<HfTemplateEvidence> {
     // Check for standalone template file
     let standalone_template = siblings.iter().any(|p| {
@@ -449,11 +457,11 @@ async fn collect_template_evidence(
     }
 
     // Check README for chat template or template family hints
-    if template_family.is_none() {
-        if let Ok(readme) = fetch_readme_text(repo_id).await {
-            template_family = detect_template_family_from_text(&readme)
-                .or_else(|| detect_template_family_from_name(repo_id));
-        }
+    if template_family.is_none()
+        && let Ok(readme) = fetch_readme_text(repo_id).await
+    {
+        template_family = detect_template_family_from_text(&readme)
+            .or_else(|| detect_template_family_from_name(repo_id));
     }
 
     let has_template = template_source.is_some();
@@ -539,7 +547,7 @@ async fn collect_weight_evidence(
     })
 }
 
-async fn fetch_weight_total_bytes(repo_id: &str, siblings: &[String]) -> Result<u64, String> {
+async fn fetch_weight_total_bytes(repo_id: &str, _siblings: &[String]) -> Result<u64, String> {
     let url = format!("https://huggingface.co/api/models/{repo_id}/tree/main");
     let mut req = crate::hf::HF_HTTP_CLIENT.get(&url);
     if let Some(tok) = hf_load_token() {
@@ -576,7 +584,7 @@ async fn collect_extras_evidence(
     repo_id: &str,
     siblings: &[String],
     runtime: &HfRuntimeSnapshot,
-    errors: &mut Vec<String>,
+    _errors: &mut Vec<String>,
 ) -> Option<HfExtrasEvidence> {
     let name_lower = repo_id.to_ascii_lowercase();
     let tags_lower: Vec<String> = runtime.tags.iter()
@@ -719,7 +727,7 @@ fn determine_backend_hint(format: &str, config: Option<&HfConfigEvidence>, _extr
 }
 
 /// Determine if repo is provisionally qualified for the requested backend.
-fn determine_qualification(format: &str, target: &str, config: Option<&HfConfigEvidence>, siblings: &[String]) -> bool {
+fn determine_qualification(format: &str, target: &str, config: Option<&HfConfigEvidence>, _siblings: &[String]) -> bool {
     let target = target.trim();
 
     if target == "llama.cpp" {
@@ -784,7 +792,7 @@ fn build_qualification_reason(
 }
 
 /// Error qualification result when critical steps fail.
-fn qualification_error(repo_id: &str, revision: String, backend: String, mut errors: Vec<String>) -> HfQualification {
+fn qualification_error(repo_id: &str, revision: String, _backend: String, mut errors: Vec<String>) -> HfQualification {
     if errors.is_empty() {
         errors.push("Failed to inspect repo files".into());
     }
@@ -805,25 +813,26 @@ fn qualification_error(repo_id: &str, revision: String, backend: String, mut err
             private: false,
             author: repo_id.split('/').next().unwrap_or("").to_string(),
         },
-        errors,
         backend_qualified: false,
         qualification_reason: format!("Failed: {}", errors.join("; ")),
+        errors,
     }
 }
 
 /// Infer model type from name.
 fn infer_model_type_from_name(name: &str) -> String {
-    if name.contains("qwen3.6") || name.contains("qwen36") { "qwen3.6".into() }
-    else if name.contains("qwen3.5") || name.contains("qwen35") { "qwen3.5".into() }
-    else if name.contains("qwen3") { "qwen3".into() }
-    else if name.contains("qwen") { "qwen".into() }
-    else if name.contains("llama-3.3") || name.contains("llama33") { "llama3.3".into() }
-    else if name.contains("llama-3") || name.contains("llama3") { "llama3".into() }
-    else if name.contains("llama") { "llama".into() }
-    else if name.contains("gemma-4") || name.contains("gemma4") { "gemma4".into() }
-    else if name.contains("gemma") { "gemma".into() }
-    else if name.contains("mistral") { "mistral".into() }
-    else if name.contains("phi") { "phi".into() }
+    let name_lower = name.to_lowercase();
+    if name_lower.contains("qwen3.6") || name_lower.contains("qwen36") { "qwen3.6".into() }
+    else if name_lower.contains("qwen3.5") || name_lower.contains("qwen35") { "qwen3.5".into() }
+    else if name_lower.contains("qwen3") { "qwen3".into() }
+    else if name_lower.contains("qwen") { "qwen".into() }
+    else if name_lower.contains("llama-3.3") || name_lower.contains("llama33") { "llama3.3".into() }
+    else if name_lower.contains("llama-3") || name_lower.contains("llama3") { "llama3".into() }
+    else if name_lower.contains("llama") { "llama".into() }
+    else if name_lower.contains("gemma-4") || name_lower.contains("gemma4") { "gemma4".into() }
+    else if name_lower.contains("gemma") { "gemma".into() }
+    else if name_lower.contains("mistral") { "mistral".into() }
+    else if name_lower.contains("phi") { "phi".into() }
     else { "unknown".into() }
 }
 
@@ -960,7 +969,8 @@ pub async fn hf_resolve_identity(
         resolve_identity_roles(&repo_owner, &owner_lower, &name_lower, &siblings, &format, &info.tags, &base_models, &readme, &catalog);
 
     // Artifact publisher is always the repo owner
-    let catalog_entry = entries_for_username(&catalog, &repo_owner).first();
+    let catalog_entries = entries_for_username(&catalog, &repo_owner);
+    let catalog_entry = catalog_entries.first();
     let artifact_publisher = HfIdentityEntity {
         username: repo_owner.clone(),
         display_name: catalog_entry.map(|e| e.display_name.clone()).unwrap_or_else(|| repo_owner.clone()),
@@ -1011,7 +1021,6 @@ fn resolve_identity_roles(
     catalog: &crate::models::community_source_catalog::CommunitySourceCatalog,
 ) -> (Option<HfIdentityEntity>, bool, bool, Option<Vec<String>>, Option<HfIdentityConverter>, Vec<HfIdentityRole>) {
     let mut roles = Vec::new();
-    let mut original_author: Option<HfIdentityEntity> = None;
     let mut converter_role: Option<HfIdentityConverter> = None;
     let mut is_finetune = false;
     let mut is_merge_distill = false;
@@ -1022,14 +1031,15 @@ fn resolve_identity_roles(
     // 1. Converter role
     if is_gguf || is_mlx {
         let role_name = if is_gguf { "GgufQuantizer" } else { "MlxConverter" };
-        let catalog_entry = entries_for_username(catalog, repo_owner).first();
+        let catalog_entries = entries_for_username(catalog, repo_owner);
+        let catalog_entry = catalog_entries.first();
 
         converter_role = Some(HfIdentityConverter {
             username: repo_owner.to_string(),
             role: role_name.to_string(),
             format: format.to_string(),
             original_source: detect_original_source_from_readme(readme, tags),
-            confidence: if catalog_entry.is_some() { "high" } else { "medium" },
+            confidence: if catalog_entry.is_some() { "high".into() } else { "medium".into() },
         });
 
         roles.push(HfIdentityRole {
@@ -1040,7 +1050,7 @@ fn resolve_identity_roles(
     }
 
     // 2. Original author — distinct from converter
-    original_author = detect_first_party_author(owner_lower, name_lower, tags, siblings);
+    let mut original_author = detect_first_party_author(owner_lower, name_lower, tags, siblings);
 
     if original_author.is_none() {
         original_author = detect_community_author(owner_lower, name_lower, tags, readme);
@@ -1246,9 +1256,9 @@ fn determine_resolution_confidence(
 
     let author_confidence = original_author.as_ref().map(|a| a.confidence.as_str()).unwrap_or("");
 
-    if author_confidence == "high" && base_models.is_empty() && !is_finetune {
+    if author_confidence == "high" && base_models.is_empty() && !*is_finetune {
         "high".into()
-    } else if author_confidence == "high" && (!base_models.is_empty() || is_finetune) {
+    } else if author_confidence == "high" && (!base_models.is_empty() || *is_finetune) {
         "high".into()
     } else if author_confidence == "medium" || converter_role.is_some() {
         "medium".into()

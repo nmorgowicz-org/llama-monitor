@@ -4676,31 +4676,32 @@ async function scenarioModelLibrary(ctx, options) {
     await page.evaluate(() => {
         window.__captureRapidMlxAvailable = true;
         const originalFetch = window.fetch.bind(window);
-        window.fetch = (input, init) => {
-            const url = new URL(typeof input === 'string' ? input : input.url, location.href);
-            if (url.pathname === '/api/hf/download-dir') {
-                return Promise.resolve(new Response(JSON.stringify({ dir: '/models', configured: true }), {
-                    status: 200, headers: { 'Content-Type': 'application/json' },
-                }));
-            }
-            if (url.pathname === '/api/llama-binary/platform-info') {
-                return Promise.resolve(new Response(JSON.stringify({
-                    os: 'macos', arch: 'aarch64',
-                    rapid_mlx_local_available: true,
-                    rapid_mlx_local_requirement: 'Rapid-MLX local execution requires macOS on Apple Silicon',
-                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-            }
-            if (url.pathname === '/api/hf/quantizers') {
-                return Promise.resolve(new Response(JSON.stringify({
-                    ok: true,
-                    quantizers: [
-                        { username: 'bartowski', display_name: 'bartowski', description: 'High-quality GGUF quantizations', quant_style: 'imatrix' },
-                        { username: 'mlx-community', display_name: 'MLX Community', description: 'MLX format conversions', quant_style: '' },
-                    ],
-                    is_custom: false,
-                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
-            }
-            if (url.pathname === '/api/hf/search') {
+            window.fetch = (input, init) => {
+                const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+                const isPost = (init && init.method && init.method.toUpperCase() === 'POST');
+                if (url.pathname === '/api/hf/download-dir') {
+                    return Promise.resolve(new Response(JSON.stringify({ dir: '/models', configured: true }), {
+                        status: 200, headers: { 'Content-Type': 'application/json' },
+                    }));
+                }
+                if (url.pathname === '/api/llama-binary/platform-info') {
+                    return Promise.resolve(new Response(JSON.stringify({
+                        os: 'macos', arch: 'aarch64',
+                        rapid_mlx_local_available: true,
+                        rapid_mlx_local_requirement: 'Rapid-MLX local execution requires macOS on Apple Silicon',
+                    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+                }
+                if (url.pathname === '/api/hf/quantizers') {
+                    return Promise.resolve(new Response(JSON.stringify({
+                        ok: true,
+                        quantizers: [
+                            { username: 'bartowski', display_name: 'bartowski', description: 'High-quality GGUF quantizations', quant_style: 'imatrix' },
+                            { username: 'mlx-community', display_name: 'MLX Community', description: 'MLX format conversions', quant_style: '' },
+                        ],
+                        is_custom: false,
+                    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+                }
+                if (url.pathname === '/api/hf/search' && isPost) {
                 return Promise.resolve(new Response(JSON.stringify({
                     ok: true,
                     models: [
@@ -4753,6 +4754,70 @@ async function scenarioModelLibrary(ctx, options) {
                     next_cursor: null,
                 }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
             }
+            // Phase 8B2: Identity API
+            if (url.pathname === '/api/hf/identity' && isPost) {
+                return Promise.resolve(new Response(JSON.stringify({
+                    repo_id: 'Qwen/Qwen3-8B',
+                    revision: 'main',
+                    original_author: { username: 'Qwen', display_name: 'Qwen Team', confidence: 'high' },
+                    is_finetune: false,
+                    artifact_publisher: { username: 'Qwen', display_name: 'Qwen Team', confidence: 'high' },
+                    resolution_confidence: 'high',
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            // Phase 8B2: Qualification API
+            if (url.pathname === '/api/hf/qualify' && isPost) {
+                return Promise.resolve(new Response(JSON.stringify({
+                    repo_id: 'bartowski/Qwen3-8B-GGUF',
+                    revision: 'main',
+                    backend_hint: 'llama.cpp',
+                    format: 'gguf',
+                    backend_qualified: true,
+                    qualification_reason: 'GGUF with config.json and tokenizer',
+                    qualified_at: Date.now(),
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            // Phase 8B2: MLX derivatives API
+            if (url.pathname === '/api/hf/mlx-derivatives' && isPost) {
+                return Promise.resolve(new Response(JSON.stringify({
+                    source_repo_id: 'Qwen/Qwen3-8B',
+                    source_is_finetune: false,
+                    original_author: 'Qwen',
+                    original_author_preserved: true,
+                    native_mlx_derivatives: [
+                        {
+                            repo_id: 'mlx-community/Qwen3-8B-4bit',
+                            revision: 'main',
+                            converter: 'mlx-community',
+                            format: 'mlx',
+                            is_qualified: true,
+                            size: 4_800_000_000,
+                        },
+                        {
+                            repo_id: 'mlx-community/Qwen3-8B-FP16',
+                            revision: 'main',
+                            converter: 'mlx-community',
+                            format: 'mlx',
+                            is_qualified: true,
+                            size: 16_000_000_000,
+                        },
+                    ],
+                    conversion_recipes: [
+                        {
+                            recipe_id: 'mlx_lm_load_original_f16',
+                            recipe: 'MLX-LM F16',
+                            description: 'Convert safetensors to MLX F16 format',
+                            input_format: 'transformers (safetensors)',
+                            output_format: 'mlx (F16)',
+                            estimated_disk: 16_000_000_000,
+                            estimated_time: 'moderate',
+                            quant_options: ['fp16'],
+                            provenance: 'mlx-community / mlx-lm load-original',
+                        },
+                    ],
+                    errors: [],
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
             if (url.pathname === '/api/gpu/vram') {
                 return Promise.resolve(new Response(JSON.stringify({ total_bytes: 48 * 1024 ** 3, free_bytes: 32 * 1024 ** 3 }), {
                     status: 200, headers: { 'Content-Type': 'application/json' },
@@ -4769,6 +4834,163 @@ async function scenarioModelLibrary(ctx, options) {
 
     await page.reload({ waitUntil: 'networkidle0' });
     await page.waitForSelector('html.modules-ready', { timeout: 15000 });
+
+    // Re-apply fetch interceptor after reload (it was lost during reload)
+    await page.evaluate(() => {
+        window.__captureRapidMlxAvailable = true;
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (input, init) => {
+            const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+            const isPost = (init && init.method && init.method.toUpperCase() === 'POST');
+            if (url.pathname === '/api/hf/download-dir') {
+                return Promise.resolve(new Response(JSON.stringify({ dir: '/models', configured: true }), {
+                    status: 200, headers: { 'Content-Type': 'application/json' },
+                }));
+            }
+            if (url.pathname === '/api/llama-binary/platform-info') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    os: 'macos', arch: 'aarch64',
+                    rapid_mlx_local_available: true,
+                    rapid_mlx_local_requirement: 'Rapid-MLX local execution requires macOS on Apple Silicon',
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/hf/quantizers') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    ok: true,
+                    quantizers: [
+                        { username: 'bartowski', display_name: 'bartowski', description: 'High-quality GGUF quantizations', quant_style: 'imatrix' },
+                        { username: 'mlx-community', display_name: 'MLX Community', description: 'MLX format conversions', quant_style: '' },
+                    ],
+                    is_custom: false,
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/hf/search' && isPost) {
+                return Promise.resolve(new Response(JSON.stringify({
+                    ok: true,
+                    models: [
+                        {
+                            id: 'Qwen/Qwen3-8B',
+                            downloads: 145000,
+                            likes: 890,
+                            last_modified: '2025-06-15T00:00:00Z',
+                            tags: ['text-generation-inference', 'conversational', 'instruct'],
+                            model_size_bytes: 5_368_709_120,
+                            param_b: 8,
+                        },
+                        {
+                            id: 'bartowski/Qwen3-8B-GGUF',
+                            downloads: 42000,
+                            likes: 310,
+                            last_modified: '2025-06-16T00:00:00Z',
+                            tags: ['gguf', 'text-generation-inference'],
+                            has_imatrix: true,
+                            model_size_bytes: 5_100_000_000,
+                        },
+                        {
+                            id: 'mlx-community/Qwen3-8B-4bit',
+                            downloads: 8900,
+                            likes: 120,
+                            last_modified: '2025-06-17T00:00:00Z',
+                            tags: ['mlx', 'text-generation-inference'],
+                            model_size_bytes: 4_800_000_000,
+                        },
+                        {
+                            id: 'unsloth/Qwen3-8B-Instruct-UD',
+                            downloads: 23000,
+                            likes: 410,
+                            last_modified: '2025-06-14T00:00:00Z',
+                            tags: ['code-generation', 'function-calling'],
+                            quant_provider: 'Unsloth',
+                            is_community_pick: true,
+                            model_size_bytes: 3_900_000_000,
+                        },
+                        {
+                            id: 'meta-llama/Llama-3.3-70B-Instruct',
+                            downloads: 520000,
+                            likes: 2100,
+                            last_modified: '2025-05-01T00:00:00Z',
+                            tags: ['text-generation-inference', 'conversational', 'roleplay'],
+                            gated: true,
+                            model_size_bytes: 38_000_000_000,
+                        },
+                    ],
+                    next_cursor: null,
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/hf/identity' && isPost) {
+                return Promise.resolve(new Response(JSON.stringify({
+                    repo_id: 'Qwen/Qwen3-8B',
+                    revision: 'main',
+                    original_author: { username: 'Qwen', display_name: 'Qwen Team', confidence: 'high' },
+                    is_finetune: false,
+                    artifact_publisher: { username: 'Qwen', display_name: 'Qwen Team', confidence: 'high' },
+                    resolution_confidence: 'high',
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/hf/qualify' && isPost) {
+                return Promise.resolve(new Response(JSON.stringify({
+                    repo_id: 'bartowski/Qwen3-8B-GGUF',
+                    revision: 'main',
+                    backend_hint: 'llama.cpp',
+                    format: 'gguf',
+                    backend_qualified: true,
+                    qualification_reason: 'GGUF with config.json and tokenizer',
+                    qualified_at: Date.now(),
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/hf/mlx-derivatives' && isPost) {
+                return Promise.resolve(new Response(JSON.stringify({
+                    source_repo_id: 'Qwen/Qwen3-8B',
+                    source_is_finetune: false,
+                    original_author: 'Qwen',
+                    original_author_preserved: true,
+                    native_mlx_derivatives: [
+                        {
+                            repo_id: 'mlx-community/Qwen3-8B-4bit',
+                            revision: 'main',
+                            converter: 'mlx-community',
+                            format: 'mlx',
+                            is_qualified: true,
+                            size: 4_800_000_000,
+                        },
+                        {
+                            repo_id: 'mlx-community/Qwen3-8B-FP16',
+                            revision: 'main',
+                            converter: 'mlx-community',
+                            format: 'mlx',
+                            is_qualified: true,
+                            size: 16_000_000_000,
+                        },
+                    ],
+                    conversion_recipes: [
+                        {
+                            recipe_id: 'mlx_lm_load_original_f16',
+                            recipe: 'MLX-LM F16',
+                            description: 'Convert safetensors to MLX F16 format',
+                            input_format: 'transformers (safetensors)',
+                            output_format: 'mlx (F16)',
+                            estimated_disk: 16_000_000_000,
+                            estimated_time: 'moderate',
+                            quant_options: ['fp16'],
+                            provenance: 'mlx-community / mlx-lm load-original',
+                        },
+                    ],
+                    errors: [],
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/gpu/vram') {
+                return Promise.resolve(new Response(JSON.stringify({ total_bytes: 48 * 1024 ** 3, free_bytes: 32 * 1024 ** 3 }), {
+                    status: 200, headers: { 'Content-Type': 'application/json' },
+                }));
+            }
+            if (url.pathname === '/api/llama-binary/system-ram') {
+                return Promise.resolve(new Response(JSON.stringify({ total_bytes: 64 * 1024 ** 3 }), {
+                    status: 200, headers: { 'Content-Type': 'application/json' },
+                }));
+            }
+            return originalFetch(input, init);
+        };
+    });
 
     // Open models modal and switch to Download tab
     await page.evaluate(() => window.openModelsModal?.());
@@ -4791,9 +5013,35 @@ async function scenarioModelLibrary(ctx, options) {
     // Trigger a search to show results with category badges and author roles
     await page.type('#mm-hf-search-input', 'Qwen');
     await sleep(1200);
-    await page.waitForSelector('.hf-search-result', { timeout: 8000 });
+    // Phase 8B2: wait for group hierarchy (hf-search-group) instead of flat search results
+    await page.waitForSelector('.hf-search-group', { timeout: 8000 });
 
+    // Phase 8B2: Capture baseline discovery view (Phase 8B1 controls + Phase 8B2 group hierarchy)
     await captureShot(page, 'panels-model-library-discovery.png', { fullPage: true });
+
+    // Phase 8B2: Wait for qualification badges and MLX lineage to render
+    await sleep(1500);
+
+    // Expand group to show variants with qualification badges
+    const expandBtn = await page.$('.hf-sg-toggle');
+    if (expandBtn) {
+        await expandBtn.click();
+        await sleep(800);
+    }
+
+    // Phase 8B2: Capture qualification badges on variants
+    await captureShot(page, 'panels-model-library-qualification-badges.png', { fullPage: true });
+
+    // Phase 8B2: Capture MLX lineage section (native variants + conversion recipes)
+    await captureShot(page, 'panels-model-library-mlx-lineage.png', { fullPage: true });
+
+    // Phase 8B2: Switch to MLX scope to show MLX-native-only view
+    const mlxScopeBtn = await page.$('.hf-scope-btn[data-scope="mlx"]');
+    if (mlxScopeBtn) {
+        await mlxScopeBtn.click();
+        await sleep(1000);
+        await captureShot(page, 'panels-model-library-mlx-scope.png', { fullPage: true });
+    }
 
     console.log('[CAPTURE] Scenario "model-library" complete.');
 }

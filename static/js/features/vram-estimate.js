@@ -45,6 +45,8 @@ let currentRequestId = 0;
 // @param {string|null} params.concurrency_policy — 'single_active' or 'allow_overlap'
 // @param {Object|null} params.mtp_config — MTP configuration object
 // @param {number|null} params.max_cache_blocks — Rapid-MLX max_cache_blocks from preset
+// @param {string|null} params.hf_repo_revision — pinned revision (Phase 8B2)
+// @param {string|null} params.hf_quant_label — quant label/variant name (Phase 8B2)
 // @returns {Object} request body ready for JSON.stringify
 export function buildEstimateBody(params) {
   const body = {
@@ -69,15 +71,15 @@ export function buildEstimateBody(params) {
   }
 
   // HF coordinates (pre-download introspection / Rapid alias resolution).
-  if (!body.model_path && params.hf_repo_id && params.hf_file_path) {
-    body.hf_repo_id = params.hf_repo_id;
-    body.hf_file_path = params.hf_file_path;
-    body.model_size_bytes = params.model_size_bytes || 0;
-  } else if (params.hf_repo_id && params.hf_file_path) {
+  if (params.hf_repo_id && params.hf_file_path) {
     body.hf_repo_id = params.hf_repo_id;
     body.hf_file_path = params.hf_file_path;
     body.model_size_bytes = params.model_size_bytes || 0;
   }
+
+  // Phase 8B2: revision pin and quant label preservation.
+  if (params.hf_repo_revision) body.hf_repo_revision = params.hf_repo_revision;
+  if (params.hf_quant_label) body.hf_quant_label = params.hf_quant_label;
 
   // Rapid-MLX execution policy (Phase 5a Part 5: requested/effective distinction).
   if (params.backend === 'rapid_mlx') {
