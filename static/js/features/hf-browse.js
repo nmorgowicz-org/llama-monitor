@@ -5,37 +5,44 @@
 import { showToast } from './toast.js';
 
 // ── Discovery scopes (Phase 8B1) ──────────────────────────────────────────────
+// Additive toggles: MLX and GGUF can both be active. All = everything (including NVFP4/unsupported).
+// Platform defaults: macOS → MLX+GGUF; Win/Linux → GGUF
 
 export const HF_SCOPE = {
-  AUTO: 'auto',
   GGUF: 'gguf',
   MLX: 'mlx',
   ALL: 'all',
 };
 
 export const HF_SCOPE_LABELS = {
-  [HF_SCOPE.AUTO]: 'Auto',
   [HF_SCOPE.GGUF]: 'GGUF',
   [HF_SCOPE.MLX]: 'MLX',
   [HF_SCOPE.ALL]: 'All',
 };
 
+// Guide tooltips for scope buttons
+export const HF_SCOPE_TOOLTIPS = {
+  [HF_SCOPE.MLX]: 'Rapid-MLX native format. Faster inference on Apple Silicon. macOS only.',
+  [HF_SCOPE.GGUF]: 'GGUF format. Works everywhere via llama.cpp. Widely available.',
+  [HF_SCOPE.ALL]: 'Show everything, including formats not yet supported (NVFP4, etc.).',
+};
+
 // ── Sorting modes (Phase 8B1) ─────────────────────────────────────────────────
 
 export const HF_SORT = {
-  AUTO: 'auto',
   RELEVANCE: 'relevance',
   NAME: 'name',
   SIZE: 'size',
   LAST_UPDATED: 'last_updated',
+  DOWNLOADS: 'downloads',
 };
 
 export const HF_SORT_LABELS = {
-  [HF_SORT.AUTO]: 'Auto (workload fit)',
   [HF_SORT.RELEVANCE]: 'Relevance',
   [HF_SORT.NAME]: 'Name',
   [HF_SORT.SIZE]: 'Size',
   [HF_SORT.LAST_UPDATED]: 'Last updated',
+  [HF_SORT.DOWNLOADS]: 'Most downloaded',
 };
 
 // ── Category mapping from HF tags (Phase 8B1) ─────────────────────────────────
@@ -205,59 +212,6 @@ function extractBaseModelName(repoId) {
   return result || repoId;
 }
 
-// ── Phase 8B2: Qualification cache and badge resolution ──────────────────────
-// Cache for /api/hf/qualify calls (repoId+revision+backend keyed).
-const _qualCache = new Map();
-
-async function resolveQualification(repoId, revision, backend) {
-  const key = `${repoId}:${revision || 'main'}:${backend || 'any'}`;
-  if (_qualCache.has(key)) return _qualCache.get(key);
-
-  try {
-    const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
-    const resp = await fetch('/api/hf/qualify', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ repoId, revision: revision || 'main', backend: backend || undefined }),
-    });
-    if (!resp.ok) {
-      _qualCache.set(key, null);
-      return null;
-    }
-    const data = await resp.json();
-    _qualCache.set(key, data);
-    return data;
-  } catch {
-    _qualCache.set(key, null);
-    return null;
-  }
-}
-
-function getQualificationState(qual) {
-  if (!qual) return { state: 'not-checked', label: 'Not checked', colorClass: 'qual-gray' };
-
-  // backend_qualified is the primary signal from Phase 8A2
-  if (qual.backend_qualified) {
-    return { state: 'qualified', label: 'Qualified', colorClass: 'qual-green' };
-  }
-
-  // Provisional: has some evidence but not fully qualified
-  if (qual.config || qual.tokenizer || qual.chat_template) {
-    return { state: 'provisional', label: 'Provisional', colorClass: 'qual-yellow' };
-  }
-
-  return { state: 'not-checked', label: 'Not checked', colorClass: 'qual-gray' };
-}
-
-function getBackendHintLabel(qual) {
-  if (!qual) return '';
-  const hint = (qual.backend_hint || '').toLowerCase();
-  if (hint.includes('rapid') || hint.includes('mlx')) return 'Rapid-MLX';
-  if (hint.includes('llama') || hint.includes('gguf')) return 'llama.cpp';
-  if (hint.includes('both')) return 'Both backends';
-  return qual.backend_hint || '';
-}
-
 // ── Phase 8B2: MLX lineage discovery ──────────────────────────────────────────
 // Fetch MLX derivatives and conversion recipes for a source repo.
 
@@ -297,23 +251,20 @@ export function buildSelectionPayload(model, variantInfo) {
 }
 
 // ── Scope resolution (Phase 8B1) ──────────────────────────────────────────────
-// Resolves discovery scope to the format param for the backend API.
-// Auto = matches platform backend; ALL = both formats.
+// Additive toggles: MLX and GGUF can both be active. All = everything (including NVFP4/unsupported).
 
-async function resolveScope(scope) {
-  if (scope === HF_SCOPE.GGUF) return { format: 'gguf', scope: HF_SCOPE.GGUF };
-  if (scope === HF_SCOPE.MLX) return { format: 'mlx', scope: HF_SCOPE.MLX };
-
-  if (scope === HF_SCOPE.ALL) {
-    return { format: 'all', scope: HF_SCOPE.ALL };
+async function resolveScope({ mlxActive, ggufActive, allActive }) {
+  if (allActive) {
+    return { format: 'all', includeUnsupported: true };
   }
-
-  // AUTO: match platform backend
-  const platform = await detectPlatformBackend();
-  if (platform === 'rapid_mlx') {
-    return { format: 'mlx', scope: HF_SCOPE.AUTO };
+  if (mlxActive && ggufActive) {
+    return { format: 'both', includeUnsupported: false };
   }
-  return { format: 'gguf', scope: HF_SCOPE.AUTO };
+  if (mlxActive) {
+    return { format: 'mlx', includeUnsupported: false };
+  }
+  // Default to GGUF if neither explicitly active
+  return { format: 'gguf', includeUnsupported: false };
 }
 
 let _cachedPlatformBackend = null;
@@ -372,8 +323,10 @@ export async function hfSearch({
   author,
   sort,
   limit,
-  scope = HF_SCOPE.AUTO,
-  hfSort = HF_SORT.AUTO,
+  mlxActive = true,
+  ggufActive = true,
+  allActive = false,
+  hfSort = HF_SORT.DOWNLOADS,
   minParamB = 0,
   cursor = null,
   append = false,
@@ -427,8 +380,8 @@ export async function hfSearch({
 
   try {
     // Map discovery scope to backend format param.
-    // Auto resolves based on platform backend; ALL fetches both formats.
-    const resolvedScope = await resolveScope(scope);
+    // MLX+GGUF both active = both formats; All = everything including NVFP4/unsupported.
+    const resolvedScope = await resolveScope({ mlxActive, ggufActive, allActive });
     const body = {
       query: query || '',
       author: author || undefined,
@@ -436,7 +389,7 @@ export async function hfSearch({
       limit: limit || 20,
       cursor: cursor || undefined,
       format: resolvedScope.format,
-      scope: resolvedScope.scope,
+      includeUnsupported: resolvedScope.includeUnsupported,
       workload_profile: workloadProfile || null,
     };
 
@@ -475,7 +428,7 @@ export async function hfSearch({
       container.replaceChildren(empty);
       if (hasMore) {
         const moreBtn = _makeLoadMoreBtn(() => hfSearch({
-          query, author, sort, limit, scope, hfSort, minParamB, cursor: nextCursor, append: true,
+          query, author, sort, limit, mlxActive, ggufActive, allActive, hfSort, minParamB, cursor: nextCursor, append: true,
           container, filelistContainer, quickpicksContainer,
           discoverPillsContainerId, onOpenCardPanel, onSelectModel,
           workloadProfile,
@@ -520,7 +473,7 @@ export async function hfSearch({
     // Show loading indicator for lineage/enrichment
     const enrichingEl = document.createElement('div');
     enrichingEl.className = 'hf-search-loading';
-    enrichingEl.textContent = 'Checking model lineage and qualification…';
+    enrichingEl.textContent = 'Checking model lineage…';
     container.appendChild(enrichingEl);
 
     // Fetch identity for each group to get original author (concurrent, bounded)
@@ -551,9 +504,9 @@ export async function hfSearch({
       }
     }
 
-    // Fetch MLX lineage for groups when scope is MLX or All (bounded concurrency)
+    // Fetch MLX lineage for groups when MLX is active or All is active (bounded concurrency)
     const mlxTasks = [];
-    if (scope === HF_SCOPE.MLX || scope === HF_SCOPE.ALL) {
+    if (mlxActive || allActive) {
       for (let i = 0; i < sortedGroups.length; i++) {
         const g = sortedGroups[i];
         // Only fetch MLX lineage for finetunes or models with >5 downloads (signal of maturity)
@@ -708,23 +661,6 @@ export async function hfSearch({
           variantRow.appendChild(roleBadge);
         }
 
-        // Qualification badge (Phase 8B2: revision-bound)
-        const qualBadge = document.createElement('span');
-        qualBadge.className = 'hf-sg-qual-badge loading';
-        qualBadge.textContent = '…';
-        qualBadge.title = 'Checking qualification…';
-        variantRow.appendChild(qualBadge);
-
-        // Resolve qualification async (lazy)
-        const qualTarget = qualBadge;
-        resolveQualification(m.id, m.revision, format === 'mlx' ? 'rapid_mlx' : 'llama_cpp').then(qual => {
-          const qs = getQualificationState(qual);
-          qualTarget.className = `hf-sg-qual-badge hf-sg-qual-badge--${qs.colorClass}`;
-          qualTarget.textContent = qs.label;
-          const hint = getBackendHintLabel(qual);
-          qualTarget.title = `${qs.label}${hint ? ' — ' + hint : ''}. Search is not qualification; this is revision-pinned evidence.`;
-        });
-
         // Card link button
         const cardLink = document.createElement('button');
         cardLink.type = 'button';
@@ -760,7 +696,7 @@ export async function hfSearch({
       }
 
       // ── MLX lineage section (Phase 8B2: native + converted) ───────────────
-      if (g.mlxLineage && (scope === HF_SCOPE.MLX || scope === HF_SCOPE.ALL)) {
+      if (g.mlxLineage && (mlxActive || allActive)) {
         const lineageSection = document.createElement('div');
         lineageSection.className = 'hf-sg-mlx-lineage';
 
@@ -798,15 +734,6 @@ export async function hfSearch({
               mlxSize.className = 'hf-sg-mlx-variant-meta';
               mlxSize.textContent = formatBytes(d.size);
               mlxRow.appendChild(mlxSize);
-            }
-
-            // Qualification if known
-            if (d.is_qualified) {
-              const qBadge = document.createElement('span');
-              qBadge.className = 'hf-sg-qual-badge hf-sg-qual-badge--qual-green';
-              qBadge.textContent = 'Qualified';
-              qBadge.title = 'Qualified for Rapid-MLX';
-              mlxRow.appendChild(qBadge);
             }
 
             const selectMlx = () => {
@@ -881,7 +808,7 @@ export async function hfSearch({
 
     if (hasMore) {
       const moreBtn = _makeLoadMoreBtn(() => hfSearch({
-        query, author, sort, limit, scope, hfSort, minParamB, cursor: nextCursor, append: true,
+        query, author, sort, limit, mlxActive, ggufActive, allActive, hfSort, minParamB, cursor: nextCursor, append: true,
         _cascadeDepth: 0,
         container, filelistContainer, quickpicksContainer,
         discoverPillsContainerId, onOpenCardPanel, onSelectModel,
@@ -897,7 +824,7 @@ export async function hfSearch({
     const visibleCount = container.querySelectorAll('.hf-search-result').length;
     if (hasMore && visibleCount < 10 && _cascadeDepth < 3) {
       hfSearch({
-        query, author, sort, limit, scope, hfSort, minParamB, cursor: nextCursor, append: true,
+        query, author, sort, limit, mlxActive, ggufActive, allActive, hfSort, minParamB, cursor: nextCursor, append: true,
         _cascadeDepth: _cascadeDepth + 1,
         container, filelistContainer, quickpicksContainer,
         discoverPillsContainerId, onOpenCardPanel, onSelectModel,
@@ -1103,7 +1030,7 @@ export async function hfStartDownload({
   }
   if (!panelEl) return;
 
-  const btn = panelEl.querySelector('#hf-dlp-download-btn');
+  const btn = panelEl.querySelector('#hf-dlp-download-btn, #mm-hf-dlp-download-btn');
   const shortName = filePath.split('/').pop() || filePath;
   if (btn) {
     btn.disabled = true;
@@ -1134,7 +1061,7 @@ export async function hfStartDownload({
 
     const downloadId = data.download_id;
 
-    const fileEl = panelEl.querySelector('#hf-dlp-progress-file');
+    const fileEl = panelEl.querySelector('#hf-dlp-progress-file, #mm-hf-dlp-progress-file');
     if (fileEl) fileEl.textContent = shortName;
     _dlSetState(panelEl, 'progress');
     hfPollDownload(downloadId, panelEl, { onComplete, onValidationError, onClearValidationError, companionId });
@@ -1283,13 +1210,13 @@ export function hfPollDownload(downloadId, panelEl, { onComplete, onValidationEr
       const { status, bytes_downloaded = 0, total_bytes = 0, speed = 0, eta = 0 } = s;
       const pct = total_bytes > 0 ? Math.round(bytes_downloaded / total_bytes * 100) : 0;
 
-      const bar = panelEl.querySelector('#hf-dlp-bar');
+      const bar = panelEl.querySelector('#hf-dlp-bar, #mm-hf-dlp-bar');
       if (bar) bar.style.width = pct + '%';
 
-      const pctEl = panelEl.querySelector('#hf-dlp-progress-pct');
+      const pctEl = panelEl.querySelector('#hf-dlp-progress-pct, #mm-hf-dlp-progress-pct');
       if (pctEl) pctEl.textContent = total_bytes > 0 ? `${pct}%` : '';
 
-      const statsEl = panelEl.querySelector('#hf-dlp-stats');
+      const statsEl = panelEl.querySelector('#hf-dlp-stats, #mm-hf-dlp-stats');
       if (statsEl) {
         const mb = (bytes_downloaded / 1_048_576).toFixed(1);
         const tot = total_bytes > 0 ? ` / ${(total_bytes / 1_048_576).toFixed(0)} MB` : '';
@@ -1377,10 +1304,10 @@ export async function hfShowDownloadPanel(panelEl, fname) {
     const configured = data?.configured ?? false;
     const destPath = dir.replace(/\/$/, '') + '/' + (fname || '').split('/').pop();
 
-    const destEl = panelEl.querySelector('#hf-dlp-dest-path');
+    const destEl = panelEl.querySelector('.hf-dlp-dest-path');
     if (destEl) { destEl.textContent = destPath; destEl.title = destPath; }
 
-    const warnEl = panelEl.querySelector('#hf-dlp-no-dir-warn');
+    const warnEl = panelEl.querySelector('.hf-dlp-warn');
     if (warnEl) warnEl.style.display = configured ? 'none' : '';
   } catch { /* ignore */ }
 }
@@ -1466,11 +1393,11 @@ export async function hfLoadQuickPicks({ container, discoverPillsContainerId, on
 
 function _dlSetState(panelEl, state) {
   ['idle', 'progress', 'complete'].forEach(s => {
-    const el = panelEl.querySelector(`#hf-dlp-${s}`);
+    const el = panelEl.querySelector(`#hf-dlp-${s}, #mm-hf-dlp-${s}`);
     if (el) el.style.display = s === state ? '' : 'none';
   });
   if (state === 'idle') {
-    const btn = panelEl.querySelector('#hf-dlp-download-btn');
+    const btn = panelEl.querySelector('#hf-dlp-download-btn, #mm-hf-dlp-download-btn');
     if (btn) {
       btn.disabled = false;
       btn.textContent = 'Download to models folder';
@@ -1492,15 +1419,14 @@ function _dlCancelPoll(panelEl) {
 }
 
 // ── Discovery scope selector (Phase 8B1) ──────────────────────────────────────
-// Create a scope selector (Auto/GGUF/MLX/All) for discovery views.
-// Returns the selector element. Caller should read container.dataset.hfSearchScope.
+// Additive toggles: MLX and GGUF can both be active. All = everything (including NVFP4/unsupported).
+// Returns the selector element. Caller sets initial state via container.dataset.
 //
 // params:
-//   container            – DOM element to append the selector into
-//   defaultScope         – HF_SCOPE value (default HF_SCOPE.AUTO)
-//   onChange             – (scope) => void  called when scope changes
+//   container            – DOM element to append into. Set dataset.hfScopeMlx="1" and/or dataset.hfScopeGguf="1" for initial active scopes.
+//   onChange             – (mlxActive, ggufActive, allActive) => void called when scope changes
 
-export function hfCreateScopeSelector({ container, defaultScope = HF_SCOPE.AUTO, onChange }) {
+export function hfCreateScopeSelector({ container, onChange }) {
   if (!container) return null;
 
   const wrap = document.createElement('div');
@@ -1508,48 +1434,86 @@ export function hfCreateScopeSelector({ container, defaultScope = HF_SCOPE.AUTO,
   wrap.style.cssText = 'display:flex;gap:0;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);';
 
   const scopes = [
-    { value: HF_SCOPE.AUTO, label: 'Auto', title: 'Matches your platform backend' },
-    { value: HF_SCOPE.GGUF, label: 'GGUF', title: 'GGUF artifacts (llama.cpp)' },
-    { value: HF_SCOPE.MLX, label: 'MLX', title: 'MLX artifacts (Rapid-MLX)' },
-    { value: HF_SCOPE.ALL, label: 'All', title: 'Both GGUF and MLX' },
+    { key: 'mlx', label: 'MLX', tooltip: HF_SCOPE_TOOLTIPS[HF_SCOPE.MLX] },
+    { key: 'gguf', label: 'GGUF', tooltip: HF_SCOPE_TOOLTIPS[HF_SCOPE.GGUF] },
+    { key: 'all', label: 'All', tooltip: HF_SCOPE_TOOLTIPS[HF_SCOPE.ALL] },
   ];
+
+  // Read initial state from container dataset
+  const initialMlx = container.dataset.hfScopeMlx === '1';
+  const initialGguf = container.dataset.hfScopeGguf === '1';
+  const initialAll = container.dataset.hfScopeAll === '1';
 
   for (const s of scopes) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = `hf-scope-btn${s.value === defaultScope ? ' hf-scope-btn--active' : ''}`;
-    btn.dataset.scope = s.value;
+    btn.className = 'hf-scope-btn';
+    btn.dataset.scopeKey = s.key;
     btn.textContent = s.label;
-    btn.title = s.title;
+    btn.title = s.tooltip;
     btn.style.cssText =
       'padding:2px 8px;font-size:10px;font-weight:600;border:none;cursor:pointer;' +
       'color:rgba(255,255,255,0.5);background:transparent;transition:all 0.15s ease;';
+
     btn.addEventListener('click', () => {
+      // Read current state
+      let mlxActive = wrap.dataset.hfScopeMlx === '1';
+      let ggufActive = wrap.dataset.hfScopeGguf === '1';
+      let allActive = wrap.dataset.hfScopeAll === '1';
+
+      if (s.key === 'all') {
+        // All: toggle everything on/off (exclusive with individual toggles)
+        allActive = !allActive;
+        mlxActive = allActive;
+        ggufActive = allActive;
+      } else if (s.key === 'mlx') {
+        // MLX: toggle independently
+        mlxActive = !mlxActive;
+        allActive = false; // deselect All if user modifies individual toggles
+      } else if (s.key === 'gguf') {
+        // GGUF: toggle independently
+        ggufActive = !ggufActive;
+        allActive = false; // deselect All if user modifies individual toggles
+      }
+
+      // Update datasets
+      wrap.dataset.hfScopeMlx = mlxActive ? '1' : '';
+      wrap.dataset.hfScopeGguf = ggufActive ? '1' : '';
+      wrap.dataset.hfScopeAll = allActive ? '1' : '';
+      container.dataset.hfScopeMlx = mlxActive ? '1' : '';
+      container.dataset.hfScopeGguf = ggufActive ? '1' : '';
+      container.dataset.hfScopeAll = allActive ? '1' : '';
+
+      // Update button visuals
       wrap.querySelectorAll('.hf-scope-btn').forEach(b => {
-        b.classList.remove('hf-scope-btn--active');
-        b.style.cssText =
-          b.style.cssText.replace(/color:[^;]+;|background:[^;]+;/g, '') +
-          'color:rgba(255,255,255,0.5);background:transparent;';
+        const isActive = b.dataset.scopeKey === 'mlx' ? mlxActive
+          : b.dataset.scopeKey === 'gguf' ? ggufActive
+          : b.dataset.scopeKey === 'all' ? allActive
+          : false;
+        setScopeBtnState(b, isActive);
       });
-      btn.classList.add('hf-scope-btn--active');
-      btn.style.cssText =
-        btn.style.cssText.replace(/color:[^;]+;|background:[^;]+;/g, '') +
-        'color:#fff;background:rgba(99,102,241,0.85);';
-      container.dataset.hfSearchScope = s.value;
-      if (onChange) onChange(s.value);
+
+      // Notify caller
+      if (onChange) onChange(mlxActive, ggufActive, allActive);
     });
-    if (s.value === defaultScope) {
-      btn.style.cssText =
-        btn.style.cssText.replace(/color:[^;]+;|background:[^;]+;/g, '') +
-        'color:#fff;background:rgba(99,102,241,0.85);';
-    }
+
+    // Set initial state
+    const active = s.key === 'all' ? initialAll
+      : s.key === 'mlx' ? initialMlx
+      : s.key === 'gguf' ? initialGguf
+      : false;
+    setScopeBtnState(btn, active);
     wrap.appendChild(btn);
   }
 
-  container.dataset.hfSearchScope = defaultScope;
   container.appendChild(wrap);
-
   return wrap;
+}
+
+function setScopeBtnState(btn, active) {
+  btn.classList.toggle('hf-scope-btn--active', active);
+  btn.style.color = active ? '#fff' : 'rgba(255,255,255,0.5)';
+  btn.style.background = active ? 'rgba(99,102,241,0.85)' : 'transparent';
 }
 
 // ── Sort selector (Phase 8B1) ─────────────────────────────────────────────────
@@ -1561,7 +1525,7 @@ export function hfCreateScopeSelector({ container, defaultScope = HF_SCOPE.AUTO,
 //   defaultSort          – HF_SORT value (default HF_SORT.AUTO)
 //   onChange             – (sort) => void  called when sort changes
 
-export function hfCreateSortSelector({ container, defaultSort = HF_SORT.AUTO, onChange }) {
+export function hfCreateSortSelector({ container, defaultSort = HF_SORT.DOWNLOADS, onChange }) {
   if (!container) return null;
 
   const wrap = document.createElement('div');

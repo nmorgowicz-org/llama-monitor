@@ -4845,15 +4845,14 @@
 
 /* ── Model card panel ───────────────────────────────────────────────────────── */
 .wizard-card-panel {
-  position: absolute;
+  position: fixed;
   inset: 0;
   background: var(--bg-modal, #0f172a);
-  border-radius: inherit;
   display: flex;
   flex-direction: column;
   transform: translateX(100%);
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  z-index: 10;
+  z-index: 1600;
   overflow: hidden;
 }
 

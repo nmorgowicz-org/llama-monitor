@@ -4611,33 +4611,34 @@
             </div>
         </div>
 
-        <!-- Model card panel — slides over the wizard body when a card link is clicked -->
-        <div class="wizard-card-panel" id="wizard-card-panel" aria-hidden="true">
-            <div class="wizard-card-panel-header">
-                <div class="wizard-card-panel-title" id="wizard-card-panel-title">Model Card</div>
-                <div class="wizard-card-panel-actions">
-                    <a class="wizard-card-panel-hf-link" id="wizard-card-panel-hf-link"
-                       target="_blank" rel="noopener noreferrer" title="Open on HuggingFace">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                        huggingface.co
-                    </a>
-                    <button type="button" class="wizard-card-panel-close" id="wizard-card-panel-close" aria-label="Close model card">&times;</button>
-                </div>
-            </div>
-            <div class="wizard-card-panel-body">
-                <div class="wizard-card-loading" id="wizard-card-loading">
-                    <div class="wizard-card-spinner"></div>
-                    Loading model card…
-                </div>
-                <div class="wizard-card-error" id="wizard-card-error" style="display:none;"></div>
-                <!-- YAML front-matter collapsible block -->
-                <details class="wizard-card-frontmatter" id="wizard-card-frontmatter" style="display:none;">
-                    <summary>Model metadata (YAML)</summary>
-                    <pre id="wizard-card-frontmatter-content"></pre>
-                </details>
-                <div class="wizard-card-content markdown-body" id="wizard-card-content" style="display:none;"></div>
-            </div>
+    </div>
+</div>
+
+<!-- Global model card panel — used by both spawn wizard and models library -->
+<div class="wizard-card-panel" id="wizard-card-panel" aria-hidden="true">
+    <div class="wizard-card-panel-header">
+        <div class="wizard-card-panel-title" id="wizard-card-panel-title">Model Card</div>
+        <div class="wizard-card-panel-actions">
+            <a class="wizard-card-panel-hf-link" id="wizard-card-panel-hf-link"
+               target="_blank" rel="noopener noreferrer" title="Open on HuggingFace">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                huggingface.co
+            </a>
+            <button type="button" class="wizard-card-panel-close" id="wizard-card-panel-close" aria-label="Close model card">&times;</button>
         </div>
+    </div>
+    <div class="wizard-card-panel-body">
+        <div class="wizard-card-loading" id="wizard-card-loading">
+            <div class="wizard-card-spinner"></div>
+            Loading model card…
+        </div>
+        <div class="wizard-card-error" id="wizard-card-error" style="display:none;"></div>
+        <!-- YAML front-matter collapsible block -->
+        <details class="wizard-card-frontmatter" id="wizard-card-frontmatter" style="display:none;">
+            <summary>Model metadata (YAML)</summary>
+            <pre id="wizard-card-frontmatter-content"></pre>
+        </details>
+        <div class="wizard-card-content markdown-body" id="wizard-card-content" style="display:none;"></div>
     </div>
 </div>
 
@@ -4787,22 +4788,6 @@
                         </div>
                     </div>
 
-                    <!-- Quant advisor (wizard-style) -->
-                    <div class="quant-advisor" id="mm-quant-advisor" style="display:none;">
-                        <div class="quant-advisor-header">
-                            <span class="quant-advisor-title">Quant advisor</span>
-                            <span class="quant-advisor-subtitle" id="mm-quant-advisor-subtitle">Compare quants — VRAM, size, context per quantization</span>
-                        </div>
-                        <div class="quant-advisor-table" id="mm-quant-advisor-table">
-                            <!-- populated by JS -->
-                        </div>
-                        <div class="quant-advisor-legend">
-                            <span class="legend-item"><span class="legend-dot legend-fit"></span>Fits in memory</span>
-                            <span class="legend-item"><span class="legend-dot legend-nofit"></span>Requires CPU offload</span>
-                            <span class="legend-item"><span class="legend-dot legend-rec"></span>Recommended</span>
-                        </div>
-                    </div>
-
                     <!-- mmproj companion section (wizard-style) -->
                     <div class="hw-mmproj-section" id="mm-mmproj-section" style="display:none;">
                         <div class="hw-section-header">
@@ -4842,6 +4827,22 @@
 
                     <!-- Context train warning -->
                     <div class="ctx-fit-warning" id="mm-ctx-train-warning" style="display:none;"></div>
+
+                    <!-- Quant advisor (wizard-style, model-selected state) -->
+                    <div class="quant-advisor" id="mm-quant-advisor" style="display:none;">
+                        <div class="quant-advisor-header">
+                            <span class="quant-advisor-title">Quant advisor</span>
+                            <span class="quant-advisor-subtitle" id="mm-quant-advisor-subtitle">Compare quants — VRAM, size, context per quantization</span>
+                        </div>
+                        <div class="quant-advisor-table" id="mm-quant-advisor-table">
+                            <!-- populated by JS -->
+                        </div>
+                        <div class="quant-advisor-legend">
+                            <span class="legend-item"><span class="legend-dot legend-fit"></span>Fits in memory</span>
+                            <span class="legend-item"><span class="legend-dot legend-nofit"></span>Requires CPU offload</span>
+                            <span class="legend-item"><span class="legend-dot legend-rec"></span>Recommended</span>
+                        </div>
+                    </div>
 
                     <!-- Hardware info card -->
                     <div class="mm-hw-info" id="mm-hw-info">

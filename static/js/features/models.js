@@ -95,9 +95,10 @@ let hfState = {
     // Active filters (mirrors Quick Start behavior)
     activeAuthor: null,          // e.g. "bartowski"
     activeDiscoverQuery: null,   // e.g. "qwen3" from a discover pill
-    // Discovery scope + sort (Phase 8B1)
-    discoveryScope: HF_SCOPE.AUTO,
-    discoverySort: HF_SORT.AUTO,
+    // Discovery scope + sort (Phase 8B1) — additive toggles: MLX and GGUF can both be active
+    discoveryScopeMlx: false,
+    discoveryScopeGguf: true, // default: GGUF always active; macOS will also activate MLX below
+    discoverySort: HF_SORT.DOWNLOADS,
 };
 
 // Cached hardware
@@ -1909,7 +1910,8 @@ async function initHfDownloadTab() {
             hfSearch({
                 query: cat.params.query,
                 sort,
-                scope: hfState.discoveryScope,
+                mlxActive: hfState.discoveryScopeMlx,
+            ggufActive: hfState.discoveryScopeGguf,
                 hfSort: hfState.discoverySort,
                 limit: cat.params.limit || 20,
                 container: resultsContainer,
@@ -1935,7 +1937,8 @@ async function initHfDownloadTab() {
                 query: '',
                 author,
                 sort,
-                scope: hfState.discoveryScope,
+                mlxActive: hfState.discoveryScopeMlx,
+            ggufActive: hfState.discoveryScopeGguf,
                 hfSort: hfState.discoverySort,
                 limit: 20,
                 container: resultsContainer,
@@ -1957,7 +1960,8 @@ async function initHfDownloadTab() {
             query,
             author,
             sort,
-            scope: hfState.discoveryScope,
+            mlxActive: hfState.discoveryScopeMlx,
+            ggufActive: hfState.discoveryScopeGguf,
             hfSort: hfState.discoverySort,
             limit: 20,
             container: resultsContainer,
@@ -1972,7 +1976,7 @@ async function initHfDownloadTab() {
 
     searchInput.addEventListener('input', () => {
         clearTimeout(searchTimer);
-        searchTimer = setTimeout(doSearch, 350);
+        searchTimer = setTimeout(doSearch, 3000);
     });
 
     searchInput.addEventListener('keydown', (e) => {
@@ -1995,7 +1999,8 @@ async function initHfDownloadTab() {
                     query: '',
                     author: hfState.activeAuthor,
                     sort,
-                    scope: hfState.discoveryScope,
+                    mlxActive: hfState.discoveryScopeMlx,
+            ggufActive: hfState.discoveryScopeGguf,
                     hfSort: hfState.discoverySort,
                     limit: 20,
                     container: resultsContainer,
@@ -2019,7 +2024,8 @@ async function initHfDownloadTab() {
                     hfSearch({
                         query: cat.params.query,
                         sort,
-                        scope: hfState.discoveryScope,
+                        mlxActive: hfState.discoveryScopeMlx,
+            ggufActive: hfState.discoveryScopeGguf,
                         hfSort: hfState.discoverySort,
                         limit: cat.params.limit || 20,
                         container: resultsContainer,
@@ -2039,15 +2045,28 @@ async function initHfDownloadTab() {
     });
 
     // Phase 8B1: create discovery scope selector and sort selector
+    // Platform-smart defaults: macOS → MLX+GGUF; Win/Linux → GGUF
+    const isMac = typeof navigator !== 'undefined' && navigator.platform?.includes('Mac');
+    const defaultMlx = isMac;
+    const defaultGguf = true;
+
+    hfState.discoveryScopeMlx = defaultMlx;
+    hfState.discoveryScopeGguf = defaultGguf;
+
     const scopeContainer = document.getElementById('mm-hf-scope-container');
     const sortContainer = document.getElementById('mm-hf-sort-container');
 
     if (scopeContainer) {
+        // Set initial state via dataset for additive toggles
+        scopeContainer.dataset.hfScopeMlx = defaultMlx ? '1' : '';
+        scopeContainer.dataset.hfScopeGguf = '1';
+        scopeContainer.dataset.hfScopeAll = '';
+
         hfCreateScopeSelector({
             container: scopeContainer,
-            defaultScope: HF_SCOPE.AUTO,
-            onChange: (scope) => {
-                hfState.discoveryScope = scope;
+            onChange: (mlxActive, ggufActive, allActive) => {
+                hfState.discoveryScopeMlx = mlxActive || allActive;
+                hfState.discoveryScopeGguf = ggufActive || allActive;
                 clearTimeout(searchTimer);
                 searchTimer = setTimeout(doSearch, 200);
             },
@@ -2057,7 +2076,7 @@ async function initHfDownloadTab() {
     if (sortContainer) {
         hfCreateSortSelector({
             container: sortContainer,
-            defaultSort: HF_SORT.AUTO,
+            defaultSort: HF_SORT.DOWNLOADS,
             onChange: (sort) => {
                 hfState.discoverySort = sort;
                 clearTimeout(searchTimer);
@@ -2088,6 +2107,9 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
     hideMmprojSection();
     hideVramPanel();
     hideCtxTrainWarning();
+
+    // Hide the generic hardware info card — we'll show real estimates below
+    hideHardwareInfoCard();
 
     // Show selected model info
     showSelectedModel(model.id, model);
@@ -2120,6 +2142,9 @@ async function onHfFileSelected(file, repoId, downloadPanel) {
         if (file.label) parts.push(file.label);
         metaEl.textContent = parts.join(' · ');
     }
+
+    // Hide quant advisor — VRAM panel will show the precise estimate
+    hideQuantAdvisor();
 
     // Show download panel
     await hfShowDownloadPanel(downloadPanel, file.path || file.name || '');
@@ -2238,11 +2263,23 @@ function hideQuantAdvisor() {
     if (el) el.style.display = 'none';
 }
 
+function hideHardwareInfoCard() {
+    const el = document.getElementById('mm-hw-info');
+    if (el) el.style.display = 'none';
+}
+
 async function loadQuantAdvisor() {
     const paramB = hfState.paramB;
     if (!paramB || paramB <= 0) return;
 
-    const availVram = cachedVram || 0;
+    // Unified memory handling: use current_safe_availability_bytes instead of total
+    let availVram = cachedVram || 0;
+    if (cachedUnified) {
+        const snapshot = await fetchMemoryAvailability();
+        if (snapshot && snapshot.current_safe_availability_bytes > 0) {
+            availVram = snapshot.current_safe_availability_bytes;
+        }
+    }
     if (!availVram) return;
 
     try {

@@ -4746,18 +4746,18 @@ async function scenarioModelLibrary(ctx, options) {
     // Phase 8B2: Capture expanded group with qualification badges on variants
     await captureShot(page, 'panels-model-library-qualification-badges.png', { fullPage: true });
 
-    // Phase 8B2: Switch to MLX scope to show MLX-native-only view (real HF filter)
-    const mlxScopeBtn = await page.$('.hf-scope-btn[data-scope="mlx"]');
+    // Phase 8B3: Switch to MLX-only to show MLX-native view (additive toggle test)
+    const mlxScopeBtn = await page.$('.hf-scope-btn[data-scope-key="mlx"]');
     if (mlxScopeBtn) {
+        // Click MLX to toggle — on macOS default is MLX+GGUF, so this shows both active
         await mlxScopeBtn.click();
-        await sleep(3000); // Wait for refilter with real MLX results
-        // Wait for results (group hierarchy or empty state)
+        await sleep(3000); // Wait for refilter with real results
         try {
             await page.waitForSelector('.hf-search-group', { timeout: 8000 });
         } catch {
-            // No MLX results for this query — acceptable
+            // No MLX-only results for this query — acceptable
         }
-        await captureShot(page, 'panels-model-library-mlx-scope.png', { fullPage: true });
+        await captureShot(page, 'panels-model-library-mlx-only.png', { fullPage: true });
     }
 
     console.log('[CAPTURE] Scenario "model-library" complete.');
