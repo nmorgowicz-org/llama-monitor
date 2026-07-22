@@ -356,7 +356,7 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 - **Read:** gaps 3.2/3.7/3.8; accepted D9/D10/D29; A15/A17/A25/A29/A45–A46/A51–A57; Phase 8; existing sorting/creator/Community Picks/quant-swap code; HF/library and workload matrices.
 - **Primary output:** Auto/GGUF/MLX/All plus preserved explicit sorting/category/curated-author discovery; revision-bound qualification; user-editable community-source roles; first-class heretic/uncensored and updated finetune/distillation paths; native/converted MLX lineage; local MLX introspection; context/KV/concurrency-driven artifact switching; canonical association; fit/template/tool/roleplay evidence; clear card hierarchy.
 - **Completion proof:** search is not qualification; every mature GGUF discovery/quant/mmproj behavior has a regression gate; original author and converter stay distinct; community finetunes reach Rapid through qualified native MLX or conversion; repo/revision/variant survives end to end; context/KV changes recompute but never silently switch model quant; Recommended means workload fit; public search remains tokenless.
-- **Mandatory Builder packets:** 8A (qualification/identity/lineage/fit APIs and fixtures) <=120k; then 8B (HF/Library discovery, cards, quant-switch UX and captures) <=120k. Each packet returns its own handoff/checkpoint; one fresh Verifier evaluates the complete Phase 8 diff and both packets.
+- **Mandatory Builder packets:** 8A (qualification/identity/lineage/fit APIs and fixtures) <=120k; then 8B split into 8B1 + 8B2 + 8B3 for context management. Each part returns its own handoff/checkpoint; one fresh Verifier evaluates the complete Phase 8 diff after all parts.
 
 #### Phase 8A — Backend APIs and fixtures — VERIFIED COMPLETE
 
@@ -367,6 +367,40 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 - **8A2 — HF qualification/identity APIs:** POST /api/hf/qualify (revision-pinned, config/tokenizer/template/index evidence), POST /api/hf/identity (authorship/lineage with catalog role matching)
 - **8A3 — MLX discovery/introspection:** POST /api/hf/mlx-derivatives (native MLX repos + conversion recipes), POST /api/models/mlx-introspect (recursive size, config, vision adapter), MLX local introspection in info_query.rs
 - **Tests:** 825 pass, clippy clean, release build passes
+
+#### Phase 8B — HF/Library discovery, cards, quant-switch UX (split into 3 parts)
+
+##### Phase 8B1 — Discovery scopes, sorting, categories, curated authors, workload-start
+
+- **State:** Not started
+- **Budget:** 60k
+- **Depends on:** Phase 8A verified complete
+- **Scope:** builder brief items 1, 3, 8
+- **Work:** Auto/GGUF/MLX/All discovery scopes in HF browse UI; workload/device-derived copy/ranking; preserved Downloads/Likes/Newest/Trending, categories, author quick picks/customization, Community Picks, pagination; public tokenless search; start discovery from selected workload (Coding agent default); model tags/fit/template/tool evidence as separate dimensions. No card redesign yet — use existing card format wired to new scopes.
+- **Screenshot gates:** Auto/GGUF/MLX/All toggle, workload-start discovery, curated authors
+- **Files:** `static/js/features/hf-browse.js`, `static/js/features/spawn-wizard.js` (HF selection step), `static/index.html`, CSS
+
+##### Phase 8B2 — Cards with lineage/qualification display
+
+- **State:** Not started
+- **Budget:** 50k
+- **Depends on:** 8B1 verified + screenshots approved
+- **Scope:** builder brief items 4, 5, 6, 7, 11
+- **Work:** Two-level card data hierarchy (group + variant); original author and converter distinct (CommunitySourceCatalog role matching); MLX lineage (native + converted); revision-bound qualification display; repo/revision preservation through selection→estimate→download→library→launch; native MLX artifacts + conversion candidates discoverable from original finetune.
+- **Screenshot gates:** card with author/converter distinct, MLX lineage display, qualification badges
+- **Files:** `static/js/features/hf-browse.js`, `static/js/features/models.js`, `static/js/features/vram-estimate.js`, CSS
+
+##### Phase 8B3 — Quant-switch UX, context/KV artifact switching, MLX fixes, captures
+
+- **State:** Not started
+- **Budget:** 50k
+- **Depends on:** 8B2 verified + screenshots approved
+- **Scope:** builder brief items 9, 12, 13, 14
+- **Work:** Quant comparison uses workload/backend/context/concurrency/memory topology; no generic Recommended from 8k quality score; preserve complete pre-download quant workflow; enumerate real GGUF files + MLX variants + conversion recipes; recompute on workload/context/KV/concurrency changes; llama.cpp mmproj backend-gated; Rapid hides mmproj, shows only actual MLX-VLM components; repair hidden gaps (MLX uses MLX files endpoint, not GGUF; Models-modal estimates not hard-coded llama/16k/q8; Rapid quant advice not llama math).
+- **Screenshot gates:** quant comparison with workload/context, MLX-only quant view, mmproj backend-gated, context/KV requantization
+- **Files:** `static/js/features/hf-browse.js`, `static/js/features/vram-estimate.js`, `static/js/features/models.js`, CSS, `tests/ui/capture.mjs`
+
+**Phase 8 exit gate:** one fresh Verifier evaluates the complete Phase 8 diff after all of 8A and 8B are verified.
 
 ### Phase 9 — Formatting, endpoints, and revision-pinned template substitution
 
@@ -572,7 +606,7 @@ Return a focused Builder handoff. A fresh verification pass will follow.
 
 Only the Coordinator updates this table after independent verification.
 
-**Last updated:** 2026-07-21 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-4 verified Part 5 pending; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; Phase 7: ALL PARTS VERIFIED (exit gate PASS WITH NOTES); Phase 8A: Verified (0fe6105, CommunitySourceCatalog + HF qualify/identity + MLX discovery/introspection); HEAD 0fe6105)
+**Last updated:** 2026-07-21 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-4 verified Part 5 pending; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; Phase 7: ALL PARTS VERIFIED (exit gate PASS WITH NOTES); Phase 8A: Verified (0fe6105); Phase 8B: Split into 8B1/8B2/8B3; HEAD 0fe6105)
 
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|
@@ -594,7 +628,9 @@ Only the Coordinator updates this table after independent verification.
 | 7B3 | Verified complete | — | PASS (roleplay teaching panel, 3 tests) | 91468fb | None |
 | 7B4 | Verified complete | — | PASS (MTP/concurrency teaching, endpoint compatibility, 5 tests, screenshots verified) | 3b96564 | None |
 | 8A | Verified complete | — | PASS (CommunitySourceCatalog, HF qualify/identity APIs, MLX discovery/introspection, 825 tests) | 0fe6105 | None |
-| 8B | Not started | — | — | — | Phase 8A verified |
+| 8B1 | Not started | — | — | — | Phase 8A verified |
+| 8B2 | Not started | — | — | — | 8B1 verified + screenshots approved |
+| 8B3 | Not started | — | — | — | 8B2 verified + screenshots approved |
 | 9 | Not started | — | — | — | Phases 2–3 |
 | 10 | Not started | — | — | — | Phases 7–9 and user IA decision |
 | 11 | Not started | — | — | — | Phases 3, 5–7 |
