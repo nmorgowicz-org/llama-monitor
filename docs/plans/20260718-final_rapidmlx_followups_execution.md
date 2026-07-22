@@ -381,19 +381,21 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 ##### Phase 8B2 — Cards with lineage/qualification display — VERIFIED
 
 - **State:** Verified complete
-- **Commit:** 7011f5c (2026-07-22)
+- **Commits:** 7011f5c + 0f0b575 (screenshot/model card fixes)
 - **Scope:** builder brief items 4, 5, 6, 7, 11
-- **Screenshots:** panels-model-library-discovery.png, panels-model-library-qualification-badges.png, panels-model-library-mlx-lineage.png, panels-model-library-mlx-scope.png
+- **Screenshots:** panels-model-library-discovery.png, panels-model-library-qualification-badges.png, panels-model-library-mlx-scope.png (mlx-lineage removed as duplicate)
+- **Deliverables:** Two-level card hierarchy (group/variants), MLX lineage display, revision-bound qualification badges, repo/revision preservation through selection→estimate→library→launch, model card button wired to spawn-wizard panel (in-app, not new tab), real HF data in capture.mjs screenshots
 - **Deliverables:** Two-level card hierarchy (group + variants), original author/converter distinct, MLX native/converted lineage, revision-bound qualification badges, repo/revision preservation, lineage on library cards
 
-##### Phase 8B3 — Quant-switch UX, context/KV artifact switching, MLX fixes, captures
+##### Phase 8B3 — Quant-switch UX, context/KV artifact switching, MLX fixes, scope UX fix, captures
 
 - **State:** Not started
-- **Budget:** 50k
+- **Budget:** 60k
 - **Depends on:** 8B2 verified + screenshots approved
-- **Scope:** builder brief items 9, 12, 13, 14
+- **Scope:** builder brief items 9, 12, 13, 14 + scope UX fix
 - **Work:** Quant comparison uses workload/backend/context/concurrency/memory topology; no generic Recommended from 8k quality score; preserve complete pre-download quant workflow; enumerate real GGUF files + MLX variants + conversion recipes; recompute on workload/context/KV/concurrency changes; llama.cpp mmproj backend-gated; Rapid hides mmproj, shows only actual MLX-VLM components; repair hidden gaps (MLX uses MLX files endpoint, not GGUF; Models-modal estimates not hard-coded llama/16k/q8; Rapid quant advice not llama math).
-- **Screenshot gates:** quant comparison with workload/context, MLX-only quant view, mmproj backend-gated, context/KV requantization
+- **Scope UX fix (Phase 8B2 carryover):** Change HF_SCOPE from single-value radio to additive toggles (MLX+GGUF selectable together). Auto = platform default (macOS: MLX+GGUF, Win/Lin: GGUF). "All" button shows everything including NVFP4/unsupported. MLX tooltip: "Rapid-MLX native format. Faster on Apple Silicon. macOS only." On Windows, MLX-only models shown with macOS-only warning. Sort independent of scope.
+- **Screenshot gates:** quant comparison with workload/context, MLX-only quant view, mmproj backend-gated, context/KV requantization, scope UX additive toggles (MLX+GGUF on macOS, GGUF on Windows, MLX-on-Windows warning)
 - **Files:** `static/js/features/hf-browse.js`, `static/js/features/vram-estimate.js`, `static/js/features/models.js`, CSS, `tests/ui/capture.mjs`
 
 **Phase 8 exit gate:** one fresh Verifier evaluates the complete Phase 8 diff after all of 8A and 8B are verified.
@@ -602,7 +604,7 @@ Return a focused Builder handoff. A fresh verification pass will follow.
 
 Only the Coordinator updates this table after independent verification.
 
-**Last updated:** 2026-07-21 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-4 verified Part 5 pending; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; Phase 7: ALL PARTS VERIFIED (exit gate PASS WITH NOTES); Phase 8A: Verified (0fe6105); Phase 8B: Split into 8B1/8B2/8B3; HEAD 0fe6105)
+**Last updated:** 2026-07-22 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-4 verified Part 5 pending; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; Phase 7: ALL PARTS VERIFIED — exit gate PASS WITH NOTES (Web UI wizard/editor parity gap documented for Phase 10 IA); Phase 8: 8A verified (0fe6105), 8B1 (f290273), 8B2 (7011f5c+0f0b575 fixes) verified; Phase 8B3 pending (includes scope UX fix: additive MLX+GGUF+All toggles); HEAD 0f0b575)
 
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|
@@ -624,9 +626,9 @@ Only the Coordinator updates this table after independent verification.
 | 7B3 | Verified complete | — | PASS (roleplay teaching panel, 3 tests) | 91468fb | None |
 | 7B4 | Verified complete | — | PASS (MTP/concurrency teaching, endpoint compatibility, 5 tests, screenshots verified) | 3b96564 | None |
 | 8A | Verified complete | — | PASS (CommunitySourceCatalog, HF qualify/identity APIs, MLX discovery/introspection, 825 tests) | 0fe6105 | None |
-| 8B1 | Not started | — | — | — | Phase 8A verified |
-| 8B2 | Not started | — | — | — | 8B1 verified + screenshots approved |
-| 8B3 | Not started | — | — | — | 8B2 verified + screenshots approved |
+| 8B1 | Verified complete | — | PASS (discovery scopes, sorting, categories, author roles, workload-start) | f290273 | None |
+| 8B2 | Verified complete | — | PASS (cards with lineage, MLX lineage, qualification badges, model card wiring, real HF screenshots) | 7011f5c+0f0b575 | None |
+| 8B3 | Not started | — | — | — | 8B2 verified + screenshots approved (includes scope UX fix: additive MLX+GGUF+All toggles, platform-smart defaults) |
 | 9 | Not started | — | — | — | Phases 2–3 |
 | 10 | Not started | — | — | — | Phases 7–9 and user IA decision |
 | 11 | Not started | — | — | — | Phases 3, 5–7 |
