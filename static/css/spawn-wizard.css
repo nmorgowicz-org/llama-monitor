@@ -4849,7 +4849,11 @@
 /* ── Model card panel ───────────────────────────────────────────────────────── */
 .wizard-card-panel {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 70%;
+  max-width: 800px;
   background: var(--bg-modal, #0f172a);
   display: flex;
   flex-direction: column;
@@ -4857,10 +4861,28 @@
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 1600;
   overflow: hidden;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.5);
 }
 
 .wizard-card-panel.open {
   transform: translateX(0);
+}
+
+/* Backdrop overlay when card panel is open */
+.wizard-card-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1599;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.wizard-card-panel.open ~ .wizard-card-backdrop,
+.wizard-card-backdrop.visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .wizard-card-panel-header {

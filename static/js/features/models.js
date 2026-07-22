@@ -2356,7 +2356,7 @@ async function fetchGpuVram() {
             const t = g.vram_total_mb || g.total_mb || g.total_memory_mb || g.vram_total || 0;
             totalVram += t * 1024 * 1024;
             const id = `${g.name || ''} ${g.vendor || ''} ${g.backend || ''}`;
-            if (/apple|metal/i.test(id)) cachedUnified = true;
+            if (/apple|metal/i.test(id) || g.metal_gpu_limit_mb != null) cachedUnified = true;
         }
         if (totalVram > 0 && !cachedUnified) cachedVram = totalVram;
     } catch {

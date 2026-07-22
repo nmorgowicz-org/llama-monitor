@@ -1022,6 +1022,7 @@ function cacheDom() {
   dom.prereqSuccessText   = document.getElementById('wizard-prereq-success-text');
 
   // Model card panel
+  dom.cardBackdrop        = document.getElementById('wizard-card-backdrop');
   dom.cardPanel           = document.getElementById('wizard-card-panel');
   dom.cardPanelTitle      = document.getElementById('wizard-card-panel-title');
   dom.cardPanelHfLink     = document.getElementById('wizard-card-panel-hf-link');
@@ -1464,6 +1465,7 @@ function bindEvents() {
 
   // Model card panel
   dom.cardPanelClose?.addEventListener('click', _closeCardPanel);
+  dom.cardBackdrop?.addEventListener('click', _closeCardPanel);
 
   // "Settings → Models" link inside the Import card description
   document.querySelector('.wizard-settings-link[data-open-settings="models"]')?.addEventListener('click', e => {
@@ -10579,8 +10581,9 @@ function resetSpawnStatus() { wizardState.spawn = { inFlight:false, error:'' }; 
 export async function openCardPanel(repoId) {
   if (!dom.cardPanel) return;
 
-  // Show panel in loading state
+  // Show panel + backdrop in loading state
   dom.cardPanel.classList.add('open');
+  if (dom.cardBackdrop) dom.cardBackdrop.classList.add('visible');
   dom.cardPanel.setAttribute('aria-hidden', 'false');
   if (dom.cardPanelTitle) dom.cardPanelTitle.textContent = repoId;
   if (dom.cardPanelHfLink) {
@@ -10656,6 +10659,7 @@ function _closeCardPanel() {
 
   dom.cardPanel.classList.remove('open');
   dom.cardPanel.setAttribute('aria-hidden', 'true');
+  if (dom.cardBackdrop) dom.cardBackdrop.classList.remove('visible');
 }
 
 // ── Binary prerequisite check & download ─────────────────────────────────────

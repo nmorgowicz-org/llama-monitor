@@ -550,6 +550,7 @@ export async function hfSearch({
       const baseNameEl = document.createElement('span');
       baseNameEl.className = 'hf-sg-base-name';
       baseNameEl.textContent = g.baseName;
+      baseNameEl.title = g.baseName; // tooltip for full name on hover
       headerNameLine.appendChild(baseNameEl);
 
       // Original author badge
@@ -628,6 +629,7 @@ export async function hfSearch({
         const variantName = document.createElement('span');
         variantName.className = 'hf-sg-variant-name';
         variantName.textContent = m.id;
+        variantName.title = m.id; // tooltip for full name on hover
         variantRow.appendChild(variantName);
 
         // Format badge — detect from repo name/ID (never trust HF tags)
