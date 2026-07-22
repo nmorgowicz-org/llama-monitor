@@ -370,15 +370,13 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 
 #### Phase 8B — HF/Library discovery, cards, quant-switch UX (split into 3 parts)
 
-##### Phase 8B1 — Discovery scopes, sorting, categories, curated authors, workload-start
+##### Phase 8B1 — Discovery scopes, sorting, categories, curated authors, workload-start — VERIFIED
 
-- **State:** Not started
-- **Budget:** 60k
-- **Depends on:** Phase 8A verified complete
+- **State:** Verified complete
+- **Commit:** f290273 (2026-07-22)
 - **Scope:** builder brief items 1, 3, 8
-- **Work:** Auto/GGUF/MLX/All discovery scopes in HF browse UI; workload/device-derived copy/ranking; preserved Downloads/Likes/Newest/Trending, categories, author quick picks/customization, Community Picks, pagination; public tokenless search; start discovery from selected workload (Coding agent default); model tags/fit/template/tool evidence as separate dimensions. No card redesign yet — use existing card format wired to new scopes.
-- **Screenshot gates:** Auto/GGUF/MLX/All toggle, workload-start discovery, curated authors
-- **Files:** `static/js/features/hf-browse.js`, `static/js/features/spawn-wizard.js` (HF selection step), `static/index.html`, CSS
+- **Screenshot gates:** panels-model-library-discovery.png (Auto/GGUF/MLX/All toggle, workload-start discovery, curated authors)
+- **Deliverables:** Auto/GGUF/MLX/All scopes, Auto/Relevance/Name/Size/Last updated sort (workload-aware), category badges (descriptive), author/converter role badges, workload-profile-aware defaults
 
 ##### Phase 8B2 — Cards with lineage/qualification display
 
