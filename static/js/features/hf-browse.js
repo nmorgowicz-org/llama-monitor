@@ -4,6 +4,109 @@
 
 import { showToast } from './toast.js';
 
+// ── Discovery scopes (Phase 8B1) ──────────────────────────────────────────────
+
+export const HF_SCOPE = {
+  AUTO: 'auto',
+  GGUF: 'gguf',
+  MLX: 'mlx',
+  ALL: 'all',
+};
+
+export const HF_SCOPE_LABELS = {
+  [HF_SCOPE.AUTO]: 'Auto',
+  [HF_SCOPE.GGUF]: 'GGUF',
+  [HF_SCOPE.MLX]: 'MLX',
+  [HF_SCOPE.ALL]: 'All',
+};
+
+// ── Sorting modes (Phase 8B1) ─────────────────────────────────────────────────
+
+export const HF_SORT = {
+  AUTO: 'auto',
+  RELEVANCE: 'relevance',
+  NAME: 'name',
+  SIZE: 'size',
+  LAST_UPDATED: 'last_updated',
+};
+
+export const HF_SORT_LABELS = {
+  [HF_SORT.AUTO]: 'Auto (workload fit)',
+  [HF_SORT.RELEVANCE]: 'Relevance',
+  [HF_SORT.NAME]: 'Name',
+  [HF_SORT.SIZE]: 'Size',
+  [HF_SORT.LAST_UPDATED]: 'Last updated',
+};
+
+// ── Category mapping from HF tags (Phase 8B1) ─────────────────────────────────
+
+const HF_TAG_TO_CATEGORY = {
+  'text-generation-inference': 'chat',
+  'conversational': 'chat',
+  'code-generation': 'coding',
+  'code': 'coding',
+  'instruct': 'chat',
+  'chat': 'chat',
+  'roleplay': 'roleplay',
+  'creative-writing': 'roleplay',
+  'story': 'roleplay',
+  'role-playing': 'roleplay',
+  'function-calling': 'tool-use',
+  'tool-use': 'tool-use',
+  'mcp': 'tool-use',
+  'agentic': 'tool-use',
+  'image-to-text': 'vision',
+  'multimodal': 'vision',
+  'document-question-answering': 'vision',
+  'image-text-to-text': 'vision',
+};
+
+function resolveCategories(tags) {
+  if (!Array.isArray(tags)) return [];
+  const cats = new Set();
+  for (const tag of tags) {
+    const lower = tag.toLowerCase();
+    const mapped = HF_TAG_TO_CATEGORY[lower];
+    if (mapped) cats.add(mapped);
+  }
+  return [...cats];
+}
+
+// ── Author/converter role (Phase 8B1) ─────────────────────────────────────────
+
+const KNOWN_CONVERTER_PATTERNS = [
+  /^bartowski\//, /^mlx-community\//, /^Undi95\//, /^TheBloke\//,
+  /^Mradermacher\//, /^cjpais\//, /^lmstudio-community\//,
+  /^mrm8488\//, /^runpod\//, /^TuringEnterprises\//, /^Qwen\//,
+];
+
+function isLikelyConverter(repoId) {
+  return KNOWN_CONVERTER_PATTERNS.some(p => p.test(repoId));
+}
+
+function resolveAuthorRole(repoId, tags) {
+  const lowerTags = (tags || []).map(t => t.toLowerCase());
+  const hasMlxTag = lowerTags.some(t => t.includes('mlx'));
+  const hasGgufTag = lowerTags.some(t => t.includes('gguf') || t.includes('gguf-file'));
+  const isConverter = isLikelyConverter(repoId);
+
+  if (isConverter) {
+    if (hasMlxTag) return { role: 'mlx-converter', label: 'MLX converter' };
+    if (hasGgufTag) return { role: 'gguf-quantizer', label: 'GGUF quantizer' };
+    return { role: 'converter', label: 'Converter' };
+  }
+
+  const parts = (repoId || '').split('/');
+  const owner = parts[0] || '';
+  const repoName = (parts[1] || '').toLowerCase();
+
+  if (owner && repoName && !repoName.includes('-gguf') && !repoName.includes('-mlx') && !repoName.includes('quant')) {
+    return { role: 'original-author', label: 'Original author' };
+  }
+
+  return null;
+}
+
 // ── Discover categories ───────────────────────────────────────────────────────
 
 export const HF_DISCOVER_CATEGORIES = [
@@ -61,25 +164,84 @@ function getAuthHeaders() {
   return window.authHeaders ? window.authHeaders() : {};
 }
 
+// ── Scope resolution (Phase 8B1) ──────────────────────────────────────────────
+// Resolves discovery scope to the format param for the backend API.
+// Auto = matches platform backend; ALL = both formats.
+
+async function resolveScope(scope) {
+  if (scope === HF_SCOPE.GGUF) return { format: 'gguf', scope: HF_SCOPE.GGUF };
+  if (scope === HF_SCOPE.MLX) return { format: 'mlx', scope: HF_SCOPE.MLX };
+
+  if (scope === HF_SCOPE.ALL) {
+    return { format: 'all', scope: HF_SCOPE.ALL };
+  }
+
+  // AUTO: match platform backend
+  const platform = await detectPlatformBackend();
+  if (platform === 'rapid_mlx') {
+    return { format: 'mlx', scope: HF_SCOPE.AUTO };
+  }
+  return { format: 'gguf', scope: HF_SCOPE.AUTO };
+}
+
+let _cachedPlatformBackend = null;
+
+async function detectPlatformBackend() {
+  if (_cachedPlatformBackend !== null) return _cachedPlatformBackend;
+
+  try {
+    const headers = getAuthHeaders();
+    const resp = await fetch('/api/llama-binary/platform-info', { headers });
+    if (resp.ok) {
+      const data = await resp.json();
+      _cachedPlatformBackend = data.rapid_mlx_local_available ? 'rapid_mlx' : 'llama_cpp';
+      return _cachedPlatformBackend;
+    }
+  } catch {
+    // non-fatal; default to llama_cpp
+  }
+
+  _cachedPlatformBackend = 'llama_cpp';
+  return 'llama_cpp';
+}
+
+// ── Sort resolution (Phase 8B1) ──────────────────────────────────────────────
+// Maps our sort modes to backend params. Auto = workload-profile-aware relevance.
+
+function resolveSortParam(legacySort, hfSort) {
+  if (hfSort === HF_SORT.NAME) return 'createdAt';
+  if (hfSort === HF_SORT.SIZE) return 'downloads';
+  if (hfSort === HF_SORT.LAST_UPDATED) return 'createdAt';
+  if (hfSort === HF_SORT.RELEVANCE) return 'downloads';
+  if (hfSort === HF_SORT.AUTO) return 'downloads';
+  return legacySort || 'downloads';
+}
+
 // ── hfSearch ──────────────────────────────────────────────────────────────────
 // Search HuggingFace models and render results into container.
 //
 // params:
 //   query, author, sort, limit          – search params
-//   format                              – 'gguf' | 'mlx' (default 'gguf')
+//   scope                               – discovery scope (HF_SCOPE.AUTO/GGUF/MLX/ALL)
+//   hfSort                              – sorting mode (HF_SORT.AUTO/RELEVANCE/NAME/SIZE/LAST_UPDATED)
+//   minParamB                           – minimum parameter count filter
+//   cursor                              – pagination cursor
+//   append                              – append results instead of replacing
 //   container                           – DOM element to render into
 //   filelistContainer                   – optional element to hide when showing results
 //   quickpicksContainer                 – optional element holding quick-pick buttons (for loading/active state)
 //   discoverPillsContainerId            – optional id of discover-pills container (for loading/active state)
 //   onOpenCardPanel                     – (repoId) => void
 //   onSelectModel                       – (model) => void  (called when user clicks a result row)
+//   workloadProfile                     – current workload profile ID (for Auto sorting)
 
 export async function hfSearch({
   query,
   author,
   sort,
   limit,
-  format = 'gguf',
+  scope = HF_SCOPE.AUTO,
+  hfSort = HF_SORT.AUTO,
   minParamB = 0,
   cursor = null,
   append = false,
@@ -90,6 +252,7 @@ export async function hfSearch({
   discoverPillsContainerId,
   onOpenCardPanel,
   onSelectModel,
+  workloadProfile,
 }) {
   if (!container) return;
 
@@ -131,13 +294,18 @@ export async function hfSearch({
   };
 
   try {
+    // Map discovery scope to backend format param.
+    // Auto resolves based on platform backend; ALL fetches both formats.
+    const resolvedScope = await resolveScope(scope);
     const body = {
       query: query || '',
       author: author || undefined,
-      sort: sort || 'downloads',
+      sort: resolveSortParam(sort, hfSort),
       limit: limit || 20,
       cursor: cursor || undefined,
-      format,
+      format: resolvedScope.format,
+      scope: resolvedScope.scope,
+      workload_profile: workloadProfile || null,
     };
 
     const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
@@ -175,9 +343,10 @@ export async function hfSearch({
       container.replaceChildren(empty);
       if (hasMore) {
         const moreBtn = _makeLoadMoreBtn(() => hfSearch({
-          query, author, sort, limit, format, minParamB, cursor: nextCursor, append: true,
+          query, author, sort, limit, scope, hfSort, minParamB, cursor: nextCursor, append: true,
           container, filelistContainer, quickpicksContainer,
           discoverPillsContainerId, onOpenCardPanel, onSelectModel,
+          workloadProfile,
         }));
         container.appendChild(moreBtn);
       }
@@ -191,11 +360,52 @@ export async function hfSearch({
       row.setAttribute('tabindex', '0');
       row.setAttribute('role', 'button');
 
+      // Categories rail (Phase 8B1: descriptive, not filterable)
+      const categories = resolveCategories(m.tags);
+      if (categories.length > 0) {
+        const catRail = document.createElement('div');
+        catRail.className = 'hf-sr-categories';
+        categories.forEach(cat => {
+          const pill = document.createElement('span');
+          pill.className = `hf-sr-category hf-sr-category--${cat}`;
+          pill.textContent = cat.charAt(0).toUpperCase() + cat.slice(1);
+          catRail.appendChild(pill);
+        });
+        row.appendChild(catRail);
+      }
+
+      // Name + author role line
+      const nameLine = document.createElement('div');
+      nameLine.className = 'hf-sr-name-line';
+
       const nameEl = document.createElement('span');
       nameEl.className = 'hf-sr-name';
       nameEl.textContent = m.id || '';
+      nameLine.appendChild(nameEl);
 
-      const meta = document.createElement('span');
+      // Author/converter role badge (Phase 8B1: distinct roles)
+      const authorRole = resolveAuthorRole(m.id, m.tags);
+      if (authorRole) {
+        const roleBadge = document.createElement('span');
+        roleBadge.className = `hf-sr-role-badge hf-sr-role-badge--${authorRole.role}`;
+        roleBadge.textContent = authorRole.label;
+        roleBadge.title = authorRole.label + ' — ' + m.id.split('/')[0];
+        nameLine.appendChild(roleBadge);
+      }
+
+      // Community Picks badge (Phase 8B1)
+      if (m.is_community_pick || (m.community_picks || []).length > 0) {
+        const cpBadge = document.createElement('span');
+        cpBadge.className = 'hf-sr-role-badge hf-sr-role-badge--community-pick';
+        cpBadge.textContent = '★ Community Pick';
+        cpBadge.title = 'High-quality repo selected by the community';
+        nameLine.appendChild(cpBadge);
+      }
+
+      row.appendChild(nameLine);
+
+      // Meta line: downloads, age, quant badges
+      const meta = document.createElement('div');
       meta.className = 'hf-sr-meta';
 
       if (m.downloads > 0) {
@@ -211,6 +421,14 @@ export async function hfSearch({
         age.textContent = ageStr;
         age.title = m.last_modified || m.created_at || '';
         meta.appendChild(age);
+      }
+
+      // Size badge (Phase 8B1: sort by size needs visible signal)
+      if (m.model_size_bytes && m.model_size_bytes > 0) {
+        const size = document.createElement('span');
+        size.className = 'hf-sr-size';
+        size.textContent = formatBytes(m.model_size_bytes);
+        meta.appendChild(size);
       }
 
       if (m.has_imatrix) {
@@ -238,6 +456,9 @@ export async function hfSearch({
         meta.appendChild(b);
       }
 
+      row.appendChild(meta);
+
+      // Card link button
       const cardLink = document.createElement('button');
       cardLink.type = 'button';
       cardLink.className = 'hf-sr-card-link';
@@ -251,8 +472,6 @@ export async function hfSearch({
         else window.open(`https://huggingface.co/${escHtml(m.id)}`, '_blank', 'noopener');
       });
 
-      row.appendChild(nameEl);
-      row.appendChild(meta);
       row.appendChild(cardLink);
 
       const selectRepo = () => {
@@ -268,10 +487,11 @@ export async function hfSearch({
 
     if (hasMore) {
       const moreBtn = _makeLoadMoreBtn(() => hfSearch({
-        query, author, sort, limit, format, minParamB, cursor: nextCursor, append: true,
+        query, author, sort, limit, scope, hfSort, minParamB, cursor: nextCursor, append: true,
         _cascadeDepth: 0,
         container, filelistContainer, quickpicksContainer,
         discoverPillsContainerId, onOpenCardPanel, onSelectModel,
+        workloadProfile,
       }));
       container.appendChild(moreBtn);
     }
@@ -283,10 +503,11 @@ export async function hfSearch({
     const visibleCount = container.querySelectorAll('.hf-search-result').length;
     if (hasMore && visibleCount < 10 && _cascadeDepth < 3) {
       hfSearch({
-        query, author, sort, limit, format, minParamB, cursor: nextCursor, append: true,
+        query, author, sort, limit, scope, hfSort, minParamB, cursor: nextCursor, append: true,
         _cascadeDepth: _cascadeDepth + 1,
         container, filelistContainer, quickpicksContainer,
         discoverPillsContainerId, onOpenCardPanel, onSelectModel,
+        workloadProfile,
       });
     }
   } catch (err) {
@@ -876,16 +1097,123 @@ function _dlCancelPoll(panelEl) {
   }
 }
 
-// ── Format toggle chip ────────────────────────────────────────────────────────
-// Create a GGUF/MLX toggle chip that callers can attach to their search controls.
-// Returns the toggle container element. Caller is responsible for passing the
-// current format into hfSearch() via container.dataset.hfSearchFormat or by
-// listening for the 'change' event.
+// ── Discovery scope selector (Phase 8B1) ──────────────────────────────────────
+// Create a scope selector (Auto/GGUF/MLX/All) for discovery views.
+// Returns the selector element. Caller should read container.dataset.hfSearchScope.
 //
 // params:
-//   container            – DOM element to append the toggle into
-//   defaultFormat        – 'gguf' | 'mlx' (default 'gguf')
-//   onChange             – (format) => void  called when toggle switches
+//   container            – DOM element to append the selector into
+//   defaultScope         – HF_SCOPE value (default HF_SCOPE.AUTO)
+//   onChange             – (scope) => void  called when scope changes
+
+export function hfCreateScopeSelector({ container, defaultScope = HF_SCOPE.AUTO, onChange }) {
+  if (!container) return null;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'hf-scope-selector';
+  wrap.style.cssText = 'display:flex;gap:0;border-radius:6px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);';
+
+  const scopes = [
+    { value: HF_SCOPE.AUTO, label: 'Auto', title: 'Matches your platform backend' },
+    { value: HF_SCOPE.GGUF, label: 'GGUF', title: 'GGUF artifacts (llama.cpp)' },
+    { value: HF_SCOPE.MLX, label: 'MLX', title: 'MLX artifacts (Rapid-MLX)' },
+    { value: HF_SCOPE.ALL, label: 'All', title: 'Both GGUF and MLX' },
+  ];
+
+  for (const s of scopes) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `hf-scope-btn${s.value === defaultScope ? ' hf-scope-btn--active' : ''}`;
+    btn.dataset.scope = s.value;
+    btn.textContent = s.label;
+    btn.title = s.title;
+    btn.style.cssText =
+      'padding:2px 8px;font-size:10px;font-weight:600;border:none;cursor:pointer;' +
+      'color:rgba(255,255,255,0.5);background:transparent;transition:all 0.15s ease;';
+    btn.addEventListener('click', () => {
+      wrap.querySelectorAll('.hf-scope-btn').forEach(b => {
+        b.classList.remove('hf-scope-btn--active');
+        b.style.cssText =
+          b.style.cssText.replace(/color:[^;]+;|background:[^;]+;/g, '') +
+          'color:rgba(255,255,255,0.5);background:transparent;';
+      });
+      btn.classList.add('hf-scope-btn--active');
+      btn.style.cssText =
+        btn.style.cssText.replace(/color:[^;]+;|background:[^;]+;/g, '') +
+        'color:#fff;background:rgba(99,102,241,0.85);';
+      container.dataset.hfSearchScope = s.value;
+      if (onChange) onChange(s.value);
+    });
+    if (s.value === defaultScope) {
+      btn.style.cssText =
+        btn.style.cssText.replace(/color:[^;]+;|background:[^;]+;/g, '') +
+        'color:#fff;background:rgba(99,102,241,0.85);';
+    }
+    wrap.appendChild(btn);
+  }
+
+  container.dataset.hfSearchScope = defaultScope;
+  container.appendChild(wrap);
+
+  return wrap;
+}
+
+// ── Sort selector (Phase 8B1) ─────────────────────────────────────────────────
+// Create a sort mode selector for discovery views.
+// Returns the selector element. Caller should read container.dataset.hfSearchSort.
+//
+// params:
+//   container            – DOM element to append the selector into
+//   defaultSort          – HF_SORT value (default HF_SORT.AUTO)
+//   onChange             – (sort) => void  called when sort changes
+
+export function hfCreateSortSelector({ container, defaultSort = HF_SORT.AUTO, onChange }) {
+  if (!container) return null;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'hf-sort-selector';
+  wrap.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:10px;color:rgba(255,255,255,0.5);';
+
+  const label = document.createElement('span');
+  label.textContent = 'Sort:';
+  wrap.appendChild(label);
+
+  const select = document.createElement('select');
+  select.className = 'hf-sort-select';
+  select.style.cssText =
+    'font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid rgba(255,255,255,0.1);' +
+    'background:rgba(0,0,0,0.3);color:rgba(255,255,255,0.8);cursor:pointer;';
+
+  const sorts = [
+    { value: HF_SORT.AUTO, label: 'Auto (workload fit)' },
+    { value: HF_SORT.RELEVANCE, label: 'Relevance' },
+    { value: HF_SORT.NAME, label: 'Name' },
+    { value: HF_SORT.SIZE, label: 'Size' },
+    { value: HF_SORT.LAST_UPDATED, label: 'Last updated' },
+  ];
+
+  for (const s of sorts) {
+    const opt = document.createElement('option');
+    opt.value = s.value;
+    opt.textContent = s.label;
+    select.appendChild(opt);
+  }
+
+  select.value = defaultSort;
+  select.addEventListener('change', () => {
+    container.dataset.hfSearchSort = select.value;
+    if (onChange) onChange(select.value);
+  });
+
+  container.dataset.hfSearchSort = defaultSort;
+  wrap.appendChild(select);
+  container.appendChild(wrap);
+
+  return wrap;
+}
+
+// ── Format toggle chip (deprecated: use hfCreateScopeSelector) ────────────────
+// Kept for backward compatibility with existing callers.
 
 export function hfCreateFormatToggle({ container, defaultFormat = 'gguf', onChange }) {
   if (!container) return null;

@@ -20,6 +20,10 @@ import {
     hfRenderDiscoverPills,
     hfLoadQuickPicks,
     getRecommendedMmproj,
+    hfCreateScopeSelector,
+    hfCreateSortSelector,
+    HF_SCOPE,
+    HF_SORT,
 } from './hf-browse.js';
 
 const PREFS_KEY = 'llama-monitor-models-prefs';
@@ -90,6 +94,9 @@ let hfState = {
     // Active filters (mirrors Quick Start behavior)
     activeAuthor: null,          // e.g. "bartowski"
     activeDiscoverQuery: null,   // e.g. "qwen3" from a discover pill
+    // Discovery scope + sort (Phase 8B1)
+    discoveryScope: HF_SCOPE.AUTO,
+    discoverySort: HF_SORT.AUTO,
 };
 
 // Cached hardware
@@ -1831,7 +1838,8 @@ async function initHfDownloadTab() {
         const typedQuery = (searchInput.value || '').trim();
         const query = typedQuery || hfState.activeDiscoverQuery || '';
         const author = (typedQuery ? hfState.activeAuthor : (hfState.activeAuthor || null));
-        return { query: query || undefined, author: author || undefined, sort };
+        const workloadProfile = sessionState.workloadProfile?.id || null;
+        return { query: query || undefined, author: author || undefined, sort, workloadProfile };
     };
 
     // Render discover pills
@@ -1848,12 +1856,15 @@ async function initHfDownloadTab() {
             hfSearch({
                 query: cat.params.query,
                 sort,
+                scope: hfState.discoveryScope,
+                hfSort: hfState.discoverySort,
                 limit: cat.params.limit || 20,
                 container: resultsContainer,
                 filelistContainer,
                 quickpicksContainer: quickpicks,
                 discoverPillsContainerId: 'mm-hf-discover-pills',
                 onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
+                workloadProfile: sessionState.workloadProfile?.id || null,
             });
         },
     });
@@ -1870,12 +1881,15 @@ async function initHfDownloadTab() {
                 query: '',
                 author,
                 sort,
+                scope: hfState.discoveryScope,
+                hfSort: hfState.discoverySort,
                 limit: 20,
                 container: resultsContainer,
                 filelistContainer,
                 quickpicksContainer: quickpicks,
                 discoverPillsContainerId: 'mm-hf-discover-pills',
                 onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
+                workloadProfile: sessionState.workloadProfile?.id || null,
             });
         },
     });
@@ -1883,17 +1897,20 @@ async function initHfDownloadTab() {
     // Search on input (debounced)
     let searchTimer = null;
     const doSearch = () => {
-        const { query, author, sort } = buildSearchParams();
+        const { query, author, sort, workloadProfile } = buildSearchParams();
         hfSearch({
             query,
             author,
             sort,
+            scope: hfState.discoveryScope,
+            hfSort: hfState.discoverySort,
             limit: 20,
             container: resultsContainer,
             filelistContainer,
             quickpicksContainer: quickpicks,
             discoverPillsContainerId: 'mm-hf-discover-pills',
             onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
+            workloadProfile,
         });
     };
 
@@ -1912,6 +1929,7 @@ async function initHfDownloadTab() {
     sortSelect?.addEventListener('change', () => {
         clearTimeout(searchTimer);
         const sort = sortSelect.value;
+        const workloadProfile = sessionState.workloadProfile?.id || null;
 
         // If browsing a specific author, re-run with new sort (like Quick Start)
         if (hfState.activeAuthor) {
@@ -1921,12 +1939,15 @@ async function initHfDownloadTab() {
                     query: '',
                     author: hfState.activeAuthor,
                     sort,
+                    scope: hfState.discoveryScope,
+                    hfSort: hfState.discoverySort,
                     limit: 20,
                     container: resultsContainer,
                     filelistContainer,
                     quickpicksContainer: quickpicks,
                     discoverPillsContainerId: 'mm-hf-discover-pills',
                     onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
+                    workloadProfile,
                 });
             }, 200);
             return;
@@ -1941,12 +1962,15 @@ async function initHfDownloadTab() {
                     hfSearch({
                         query: cat.params.query,
                         sort,
+                        scope: hfState.discoveryScope,
+                        hfSort: hfState.discoverySort,
                         limit: cat.params.limit || 20,
                         container: resultsContainer,
                         filelistContainer,
                         quickpicksContainer: quickpicks,
                         discoverPillsContainerId: 'mm-hf-discover-pills',
                         onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
+                        workloadProfile,
                     });
                 }, 200);
                 return;
@@ -1956,6 +1980,34 @@ async function initHfDownloadTab() {
         // Fallback: use typed query (if any) + new sort
         searchTimer = setTimeout(doSearch, 200);
     });
+
+    // Phase 8B1: create discovery scope selector and sort selector
+    const scopeContainer = document.getElementById('mm-hf-scope-container');
+    const sortContainer = document.getElementById('mm-hf-sort-container');
+
+    if (scopeContainer) {
+        hfCreateScopeSelector({
+            container: scopeContainer,
+            defaultScope: HF_SCOPE.AUTO,
+            onChange: (scope) => {
+                hfState.discoveryScope = scope;
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(doSearch, 200);
+            },
+        });
+    }
+
+    if (sortContainer) {
+        hfCreateSortSelector({
+            container: sortContainer,
+            defaultSort: HF_SORT.AUTO,
+            onChange: (sort) => {
+                hfState.discoverySort = sort;
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(doSearch, 200);
+            },
+        });
+    }
 
     // Settings link from warning
     const settingsBtn = document.getElementById('mm-hf-dlp-open-settings');

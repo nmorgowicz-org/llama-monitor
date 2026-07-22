@@ -4667,6 +4667,137 @@ async function scenarioRapidMlxRuntime(ctx, options) {
     console.log('[CAPTURE] Scenario "rapid-mlx-runtime" complete.');
 }
 
+// model-library captures the HF Download tab with Phase 8B1 discovery controls:
+// scope selector (Auto/GGUF/MLX/All), sort control, category badges, author roles.
+async function scenarioModelLibrary(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+
+    await page.evaluate(() => {
+        window.__captureRapidMlxAvailable = true;
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (input, init) => {
+            const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+            if (url.pathname === '/api/hf/download-dir') {
+                return Promise.resolve(new Response(JSON.stringify({ dir: '/models', configured: true }), {
+                    status: 200, headers: { 'Content-Type': 'application/json' },
+                }));
+            }
+            if (url.pathname === '/api/llama-binary/platform-info') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    os: 'macos', arch: 'aarch64',
+                    rapid_mlx_local_available: true,
+                    rapid_mlx_local_requirement: 'Rapid-MLX local execution requires macOS on Apple Silicon',
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/hf/quantizers') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    ok: true,
+                    quantizers: [
+                        { username: 'bartowski', display_name: 'bartowski', description: 'High-quality GGUF quantizations', quant_style: 'imatrix' },
+                        { username: 'mlx-community', display_name: 'MLX Community', description: 'MLX format conversions', quant_style: '' },
+                    ],
+                    is_custom: false,
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/hf/search') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    ok: true,
+                    models: [
+                        {
+                            id: 'Qwen/Qwen3-8B',
+                            downloads: 145000,
+                            likes: 890,
+                            last_modified: '2025-06-15T00:00:00Z',
+                            tags: ['text-generation-inference', 'conversational', 'instruct'],
+                            model_size_bytes: 5_368_709_120,
+                            param_b: 8,
+                        },
+                        {
+                            id: 'bartowski/Qwen3-8B-GGUF',
+                            downloads: 42000,
+                            likes: 310,
+                            last_modified: '2025-06-16T00:00:00Z',
+                            tags: ['gguf', 'text-generation-inference'],
+                            has_imatrix: true,
+                            model_size_bytes: 5_100_000_000,
+                        },
+                        {
+                            id: 'mlx-community/Qwen3-8B-4bit',
+                            downloads: 8900,
+                            likes: 120,
+                            last_modified: '2025-06-17T00:00:00Z',
+                            tags: ['mlx', 'text-generation-inference'],
+                            model_size_bytes: 4_800_000_000,
+                        },
+                        {
+                            id: 'unsloth/Qwen3-8B-Instruct-UD',
+                            downloads: 23000,
+                            likes: 410,
+                            last_modified: '2025-06-14T00:00:00Z',
+                            tags: ['code-generation', 'function-calling'],
+                            quant_provider: 'Unsloth',
+                            is_community_pick: true,
+                            model_size_bytes: 3_900_000_000,
+                        },
+                        {
+                            id: 'meta-llama/Llama-3.3-70B-Instruct',
+                            downloads: 520000,
+                            likes: 2100,
+                            last_modified: '2025-05-01T00:00:00Z',
+                            tags: ['text-generation-inference', 'conversational', 'roleplay'],
+                            gated: true,
+                            model_size_bytes: 38_000_000_000,
+                        },
+                    ],
+                    next_cursor: null,
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/gpu/vram') {
+                return Promise.resolve(new Response(JSON.stringify({ total_bytes: 48 * 1024 ** 3, free_bytes: 32 * 1024 ** 3 }), {
+                    status: 200, headers: { 'Content-Type': 'application/json' },
+                }));
+            }
+            if (url.pathname === '/api/llama-binary/system-ram') {
+                return Promise.resolve(new Response(JSON.stringify({ total_bytes: 64 * 1024 ** 3 }), {
+                    status: 200, headers: { 'Content-Type': 'application/json' },
+                }));
+            }
+            return originalFetch(input, init);
+        };
+    });
+
+    await page.reload({ waitUntil: 'networkidle0' });
+    await page.waitForSelector('html.modules-ready', { timeout: 15000 });
+
+    // Open models modal and switch to Download tab
+    await page.evaluate(() => window.openModelsModal?.());
+    await page.waitForSelector('#models-modal.open', { timeout: 8000 });
+    await sleep(800);
+
+    const downloadTab = await page.$('.mm-tab[data-tab="download"]');
+    if (downloadTab) {
+        await downloadTab.click();
+        await sleep(600);
+    }
+
+    // Ensure download tab content is visible
+    await page.waitForSelector('.mm-tab-panel--download', { timeout: 5000 });
+    await sleep(1000);
+
+    // Wait for scope/sort controls to render
+    await page.waitForSelector('.hf-scope-selector', { timeout: 8000 });
+
+    // Trigger a search to show results with category badges and author roles
+    await page.type('#mm-hf-search-input', 'Qwen');
+    await sleep(1200);
+    await page.waitForSelector('.hf-search-result', { timeout: 8000 });
+
+    await captureShot(page, 'panels-model-library-discovery.png', { fullPage: true });
+
+    console.log('[CAPTURE] Scenario "model-library" complete.');
+}
+
 const SCENARIOS = {
     // Core
     welcome: scenarioWelcome,
@@ -4678,6 +4809,7 @@ const SCENARIOS = {
     sidebar: scenarioSidebar,
     // Models and presets
     'models-v2': scenarioModelsV2,
+    'model-library': scenarioModelLibrary,
     'preset-editor': scenarioPresetEditor,
     // Configuration
     settings: scenarioSettings,

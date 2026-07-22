@@ -2764,8 +2764,8 @@
 }
 .hf-search-result {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 4px;
   padding: 9px 12px;
   cursor: pointer;
   border-bottom: 1px solid rgba(255,255,255,0.04);
@@ -2788,7 +2788,7 @@
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-muted, #94a3b8);
 }
 .hf-sr-badge {
@@ -2829,6 +2829,166 @@
 .hf-sr-card-link:hover {
   background: color-mix(in srgb, var(--color-accent) 15%, transparent);
   color: var(--color-accent);
+}
+
+/* ── Phase 8B1: HF discovery scopes, sorting, categories, author roles ──────── */
+
+/* Search controls row */
+.hf-search-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+
+/* Scope selector */
+.hf-scope-selector {
+  display: flex;
+  gap: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.hf-scope-btn {
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  color: rgba(255,255,255,0.5);
+  background: transparent;
+  transition: all 0.15s ease;
+}
+.hf-scope-btn--active {
+  color: #fff;
+  background: rgba(99,102,241,0.85);
+}
+.hf-scope-btn:hover:not(.hf-scope-btn--active) {
+  background: rgba(255,255,255,0.06);
+}
+
+/* Sort selector */
+.hf-sort-selector {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: rgba(255,255,255,0.5);
+}
+.hf-sort-select {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(0,0,0,0.3);
+  color: rgba(255,255,255,0.8);
+  cursor: pointer;
+}
+
+/* Category badges on results */
+.hf-sr-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  width: 100%;
+}
+.hf-sr-category {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.4);
+}
+.hf-sr-category--chat     { background: rgba(59,130,246,0.15); color: rgba(96,165,250,0.9); }
+.hf-sr-category--coding   { background: rgba(34,197,94,0.15); color: rgba(74,222,128,0.9); }
+.hf-sr-category--roleplay { background: rgba(236,72,153,0.15); color: rgba(244,114,182,0.9); }
+.hf-sr-category--tool-use { background: rgba(245,158,11,0.15); color: rgba(251,191,36,0.9); }
+.hf-sr-category--vision   { background: rgba(139,92,246,0.15); color: rgba(167,139,250,0.9); }
+
+/* Name + role line */
+.hf-sr-name-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Author/converter role badges */
+.hf-sr-role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.hf-sr-role-badge--original-author {
+  background: rgba(234,179,8,0.15);
+  color: rgba(250,204,21,0.9);
+}
+.hf-sr-role-badge--mlx-converter {
+  background: rgba(99,102,241,0.15);
+  color: rgba(129,140,248,0.9);
+}
+.hf-sr-role-badge--gguf-quantizer {
+  background: rgba(59,130,246,0.15);
+  color: rgba(96,165,250,0.9);
+}
+.hf-sr-role-badge--converter {
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.6);
+}
+.hf-sr-role-badge--community-pick {
+  background: rgba(245,158,11,0.2);
+  color: rgba(251,191,36,0.95);
+}
+
+/* Size badge on results */
+.hf-sr-size {
+  font-size: 10px;
+  color: var(--text-muted, #64748b);
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+/* Light theme overrides */
+[data-theme="light"] .hf-scope-selector {
+  border-color: rgba(0,0,0,0.1);
+}
+[data-theme="light"] .hf-scope-btn {
+  color: rgba(0,0,0,0.4);
+}
+[data-theme="light"] .hf-scope-btn--active {
+  color: #fff;
+}
+[data-theme="light"] .hf-scope-btn:hover:not(.hf-scope-btn--active) {
+  background: rgba(0,0,0,0.04);
+}
+[data-theme="light"] .hf-sort-selector {
+  color: rgba(0,0,0,0.4);
+}
+[data-theme="light"] .hf-sort-select {
+  border-color: rgba(0,0,0,0.1);
+  background: rgba(255,255,255,0.8);
+  color: rgba(0,0,0,0.8);
+}
+[data-theme="light"] .hf-sr-category {
+  background: rgba(0,0,0,0.05);
+  color: rgba(0,0,0,0.4);
+}
+[data-theme="light"] .hf-sr-role-badge--original-author {
+  background: rgba(202,138,4,0.1);
+}
+[data-theme="light"] .hf-sr-role-badge--community-pick {
+  background: rgba(217,119,6,0.1);
 }
 
 .wizard-prereq-backend-picker {
