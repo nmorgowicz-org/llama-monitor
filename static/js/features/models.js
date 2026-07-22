@@ -2029,9 +2029,13 @@ async function initHfDownloadTab() {
 }
 
 async function onHfModelSelected(model, filelistContainer, downloadPanel) {
-    hfState.selectedRepoId = model.id;
+    // Handle both raw model objects and selection payloads
+    const repoId = model.repoId || model.id || '';
+    const paramB = model.param_b || model._raw?.param_b || 0;
+
+    hfState.selectedRepoId = repoId;
     hfState.selectedFile = null;
-    hfState.paramB = model.param_b || 0;
+    hfState.paramB = paramB;
     hfState.mmprojFiles = [];
     hfState.mmprojPath = '';
     hfState.mmprojRepoId = '';
@@ -2046,10 +2050,10 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
     hideHardwareInfoCard();
 
     // Show selected model info
-    showSelectedModel(model.id, model);
+    showSelectedModel(repoId, model);
 
     await hfListFiles({
-        repoId: model.id,
+        repoId,
         container: filelistContainer,
         vramGb: cachedVram > 0 ? cachedVram / (1024 * 1024 * 1024) : 0,
         onSelectFile: (file, repoId) => onHfFileSelected(file, repoId, downloadPanel),
