@@ -378,15 +378,13 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 - **Screenshot gates:** panels-model-library-discovery.png (Auto/GGUF/MLX/All toggle, workload-start discovery, curated authors)
 - **Deliverables:** Auto/GGUF/MLX/All scopes, Auto/Relevance/Name/Size/Last updated sort (workload-aware), category badges (descriptive), author/converter role badges, workload-profile-aware defaults
 
-##### Phase 8B2 — Cards with lineage/qualification display
+##### Phase 8B2 — Cards with lineage/qualification display — VERIFIED
 
-- **State:** Not started
-- **Budget:** 50k
-- **Depends on:** 8B1 verified + screenshots approved
+- **State:** Verified complete
+- **Commit:** 7011f5c (2026-07-22)
 - **Scope:** builder brief items 4, 5, 6, 7, 11
-- **Work:** Two-level card data hierarchy (group + variant); original author and converter distinct (CommunitySourceCatalog role matching); MLX lineage (native + converted); revision-bound qualification display; repo/revision preservation through selection→estimate→download→library→launch; native MLX artifacts + conversion candidates discoverable from original finetune.
-- **Screenshot gates:** card with author/converter distinct, MLX lineage display, qualification badges
-- **Files:** `static/js/features/hf-browse.js`, `static/js/features/models.js`, `static/js/features/vram-estimate.js`, CSS
+- **Screenshots:** panels-model-library-discovery.png, panels-model-library-qualification-badges.png, panels-model-library-mlx-lineage.png, panels-model-library-mlx-scope.png
+- **Deliverables:** Two-level card hierarchy (group + variants), original author/converter distinct, MLX native/converted lineage, revision-bound qualification badges, repo/revision preservation, lineage on library cards
 
 ##### Phase 8B3 — Quant-switch UX, context/KV artifact switching, MLX fixes, captures
 
