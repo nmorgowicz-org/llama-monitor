@@ -2041,12 +2041,23 @@ async function initHfDownloadTab() {
             if (!pill) return;
             ctxPills.querySelectorAll('.vram-ctx-pill').forEach(p => p.classList.remove('active'));
             pill.classList.add('active');
-            hfState.previewCtx = parseInt(pill.dataset.ctx, 10);
+            const newCtx = parseInt(pill.dataset.ctx, 10);
+            hfState.previewCtx = newCtx;
             // Update VRAM for both GGUF files and MLX models
+            const isMlx = hfState.modelFormat === 'mlx';
             if (hfState.selectedFile) {
                 scheduleVramUpdate(hfState.selectedFile);
-            } else if (hfState.mlxModelBytes) {
-                scheduleVramUpdate({ size: hfState.mlxModelBytes });
+            } else if (isMlx && hfState.modelBytes > 0) {
+                // MLX models: recalculate VRAM with new context size
+                // Show brief loading state since MLX needs to fetch config.json from HF
+                const panel = document.getElementById('mm-vram-panel');
+                if (panel) panel.classList.add('vram-panel-loading');
+                scheduleVramUpdate({ size: hfState.modelBytes });
+            } else if (isMlx && hfState.paramB > 0) {
+                // MLX models without size: estimate from param count
+                const bpw = 4.85; // default 4-bit
+                const estBytes = Math.round(hfState.paramB * 1e9 * bpw / 8);
+                scheduleVramUpdate({ size: estBytes });
             }
         });
     }
@@ -2609,8 +2620,9 @@ async function updateVramDisplay(file) {
     const total = data.total_bytes || (weightsBytes + kvEstimate + overhead + mmprojBytes);
     const free = availVram - total;
 
-    // Show panel
+    // Show panel (remove loading state)
     panel.style.display = '';
+    panel.classList.remove('vram-panel-loading');
 
     // Update header — show needed vs available, plus max possible (metal limit)
     const labelEl = document.getElementById('mm-vram-panel-label');
