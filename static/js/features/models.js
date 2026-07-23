@@ -2042,8 +2042,11 @@ async function initHfDownloadTab() {
             ctxPills.querySelectorAll('.vram-ctx-pill').forEach(p => p.classList.remove('active'));
             pill.classList.add('active');
             hfState.previewCtx = parseInt(pill.dataset.ctx, 10);
+            // Update VRAM for both GGUF files and MLX models
             if (hfState.selectedFile) {
                 scheduleVramUpdate(hfState.selectedFile);
+            } else if (hfState.mlxModelBytes) {
+                scheduleVramUpdate({ size: hfState.mlxModelBytes });
             }
         });
     }
@@ -2120,6 +2123,7 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
                         // Sum file sizes from tree API response
                         modelBytes = data.files.reduce((sum, f) => sum + (f.size || f.bytes || 0), 0);
                         hfState.modelBytes = modelBytes;
+                        hfState.mlxModelBytes = modelBytes;
                         if (metaEl) {
                             const parts = [];
                             if (model.param_b > 0) parts.push(formatParams(model.param_b));
@@ -2132,8 +2136,9 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
             } catch { /* non-fatal */ }
         }
         // Show download panel with MLX-specific info
-        if (modelBytes > 0) {
+         if (modelBytes > 0) {
             hfState.modelBytes = modelBytes;
+            hfState.mlxModelBytes = modelBytes;
             await hfShowDownloadPanel(downloadPanel, repoId);
 
             // Update file name display for MLX
@@ -2603,11 +2608,19 @@ async function updateVramDisplay(file) {
     // Show panel
     panel.style.display = '';
 
-    // Update header
+    // Update header — show needed vs available clearly
     const labelEl = document.getElementById('mm-vram-panel-label');
     const totalEl = document.getElementById('mm-vram-panel-total');
-    if (labelEl) labelEl.textContent = `VRAM @ ${Math.round(previewCtx / 1024)}K ctx`;
-    if (totalEl) totalEl.textContent = formatVramTotal(availVram) + ' total';
+    if (labelEl) labelEl.textContent = formatGB(total) + ' needed · ' + formatGB(availVram) + ' available';
+    if (totalEl) {
+        if (free < 0) {
+            totalEl.textContent = 'Won\'t fit · need ' + formatGB(Math.abs(free)) + ' more';
+            totalEl.style.color = 'var(--color-error, #f44336)';
+        } else {
+            totalEl.textContent = 'Fits · ' + formatGB(free) + ' remaining';
+            totalEl.style.color = 'var(--color-success, #4ade80)';
+        }
+    }
 
     // Update bar
     const denom = availVram > 0 ? availVram : total;
@@ -2655,8 +2668,8 @@ async function updateVramDisplay(file) {
     if (overheadLabel) overheadLabel.textContent = 'Overhead ' + formatGB(overhead);
 
     if (freeLabel) {
-        const freeAbs = Math.abs(free);
-        freeLabel.textContent = free >= 0 ? 'Free ' + formatGB(free) : 'Over ' + formatGB(freeAbs);
+        // Hide free label in legend — fit status is in header
+        freeLabel.textContent = '';
     }
     if (freeDot) freeDot.style.background = free >= 0 ? '' : 'var(--color-error)';
 

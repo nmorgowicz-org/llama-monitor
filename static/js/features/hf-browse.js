@@ -475,30 +475,40 @@ export async function hfSearch({
       formatBadge.textContent = format.toUpperCase();
       header.appendChild(formatBadge);
 
+      // Card link button (right of format badge)
+      const cardLink = document.createElement('button');
+      cardLink.type = 'button';
+      cardLink.className = 'hf-sr-card-link';
+      cardLink.title = 'View model card';
+      cardLink.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>';
+       cardLink.addEventListener('click', e => {
+        e.stopPropagation();
+        if (onOpenCardPanel) onOpenCardPanel(m.id);
+        else window.open(`https://huggingface.co/${escHtml(m.id)}`, '_blank', 'noopener');
+      });
+      header.appendChild(cardLink);
+
+      // Meta pills (quant first for MLX since it's the only one in repo)
       const metaEl = document.createElement('span');
       metaEl.className = 'hf-sr-meta';
-      // Param size pill
-      if (m.param_b > 0) {
-        const pill = document.createElement('span');
-        pill.className = 'hf-sr-pill hf-sr-pill--params';
-        pill.textContent = `${m.param_b}B`;
-        metaEl.appendChild(pill);
-      }
-      // Quant pill (MLX)
       if (format === 'mlx' && m.quant_label) {
         const pill = document.createElement('span');
         pill.className = 'hf-sr-pill hf-sr-pill--quant';
         pill.textContent = m.quant_label;
         metaEl.appendChild(pill);
       }
-      // Size pill (MLX)
+      if (m.param_b > 0) {
+        const pill = document.createElement('span');
+        pill.className = 'hf-sr-pill hf-sr-pill--params';
+        pill.textContent = `${m.param_b}B`;
+        metaEl.appendChild(pill);
+      }
       if (format === 'mlx' && m.model_size_bytes) {
         const pill = document.createElement('span');
         pill.className = 'hf-sr-pill hf-sr-pill--size';
         pill.textContent = formatBytes(m.model_size_bytes);
         metaEl.appendChild(pill);
       }
-      // Downloads pill
       if (m.downloads > 0) {
         const pill = document.createElement('span');
         pill.className = 'hf-sr-pill hf-sr-pill--downloads';
@@ -506,20 +516,7 @@ export async function hfSearch({
         pill.title = `${m.downloads.toLocaleString()} downloads`;
         metaEl.appendChild(pill);
       }
-      header.appendChild(metaEl);
-
-      // Card link button
-      const cardLink = document.createElement('button');
-      cardLink.type = 'button';
-      cardLink.className = 'hf-sr-card-link';
-      cardLink.title = 'View model card';
-      cardLink.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>';
-      cardLink.addEventListener('click', e => {
-        e.stopPropagation();
-        if (onOpenCardPanel) onOpenCardPanel(m.id);
-        else window.open(`https://huggingface.co/${escHtml(m.id)}`, '_blank', 'noopener');
-      });
-      header.appendChild(cardLink);
+      if (metaEl.children.length > 0) header.appendChild(metaEl);
 
       card.appendChild(header);
 
