@@ -2615,8 +2615,55 @@ async function updateVramDisplay(file) {
     // Update header — show needed vs available, plus max possible (metal limit)
     const labelEl = document.getElementById('mm-vram-panel-label');
     const totalEl = document.getElementById('mm-vram-panel-total');
-    const availLabel = metalLimit > 0 ? formatGB(availVram) + ' available · ' + formatGB(metalLimit) + ' max' : formatGB(availVram) + ' available';
-    if (labelEl) labelEl.textContent = formatGB(total) + ' needed · ' + availLabel;
+    if (labelEl) {
+        // Clear existing content
+        labelEl.textContent = '';
+        const neededSpan = document.createElement('span');
+        neededSpan.textContent = formatGB(total) + ' needed';
+        labelEl.appendChild(neededSpan);
+        const sep = document.createElement('span');
+        sep.textContent = ' · ';
+        labelEl.appendChild(sep);
+        const availSpan = document.createElement('span');
+        availSpan.textContent = formatGB(availVram) + ' available';
+        labelEl.appendChild(availSpan);
+        if (cachedUnified && metalLimit > 0) {
+            const maxSep = document.createElement('span');
+            maxSep.textContent = ' · ';
+            labelEl.appendChild(maxSep);
+            const maxSpan = document.createElement('span');
+            maxSpan.textContent = formatGB(metalLimit) + ' max';
+            labelEl.appendChild(maxSpan);
+            const fixBtn = document.createElement('span');
+            fixBtn.className = 'vram-metal-fix';
+            fixBtn.textContent = '⚙';
+            fixBtn.title = 'Set to recommended default (RAM minus 8GB reserve)';
+            fixBtn.style.cssText = 'cursor:pointer;font-size:11px;opacity:0.6;margin-left:2px;vertical-align:middle;';
+            labelEl.appendChild(fixBtn);
+            if (!fixBtn.dataset.wired) {
+                fixBtn.dataset.wired = '1';
+                fixBtn.addEventListener('click', async () => {
+                    try {
+                        const headers = window.authHeaders ? window.authHeaders() : {};
+                        const resp = await fetch('/api/system/wired-limit', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', ...headers },
+                            body: JSON.stringify({ value_mb: 0, confirm: 'set-wired-limit' }),
+                        });
+                        const data = await resp.json();
+                        if (data.success) {
+                            showToast('Metal limit updated to ' + formatGB(data.actual_mb * 1024 * 1024), 'success');
+                            scheduleVramUpdate(hfState.selectedFile || { size: hfState.mlxModelBytes });
+                        } else {
+                            showToast('Failed: ' + (data.error?.reason || 'unknown'), 'error');
+                        }
+                    } catch {
+                        showToast('Error updating metal limit', 'error');
+                    }
+                });
+            }
+        }
+    }
     if (totalEl) {
         // Metal limit check: model exceeds the hard cap even if RAM were free
         if (metalLimit > 0 && total > metalLimit) {
