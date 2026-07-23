@@ -64,16 +64,23 @@ export function buildEstimateBody(params) {
     mmproj_bytes: params.mmproj_bytes || 0,
   };
 
+  const isMlxBackend = params.backend === 'mlx' || params.backend === 'rapid_mlx';
+
   // llama.cpp KV quant (ignored by Rapid path; kept for backward compatibility).
-  if (params.backend !== 'rapid_mlx') {
+  if (!isMlxBackend) {
     body.ctk = params.ctk || 'q8_0';
     body.ctv = params.ctv || 'q8_0';
   }
 
   // HF coordinates (pre-download introspection / Rapid alias resolution).
+  // llama.cpp requires both repo_id and file_path.
+  // MLX backend only needs repo_id (repo IS the model, no specific file_path).
   if (params.hf_repo_id && params.hf_file_path) {
     body.hf_repo_id = params.hf_repo_id;
     body.hf_file_path = params.hf_file_path;
+    body.model_size_bytes = params.model_size_bytes || 0;
+  } else if (isMlxBackend && params.hf_repo_id) {
+    body.hf_repo_id = params.hf_repo_id;
     body.model_size_bytes = params.model_size_bytes || 0;
   }
 
@@ -107,7 +114,10 @@ export function buildEstimateBody(params) {
 //
 // All surfaces use this to ensure identical API consumption.
 async function fetchEstimate(body) {
-  if (!body.model_path && !(body.hf_repo_id && body.hf_file_path)) return null;
+  const isMlxBackend = body.backend === 'mlx' || body.backend === 'rapid_mlx';
+  const hasMlxInput = isMlxBackend && body.hf_repo_id;
+  const hasLlamaInput = body.hf_repo_id && body.hf_file_path;
+  if (!body.model_path && !hasLlamaInput && !hasMlxInput) return null;
   try {
     const headers = (window.authHeaders ? window.authHeaders() : {}) ;
     const res = await fetch('/api/vram-estimate', {

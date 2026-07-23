@@ -2131,13 +2131,42 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
                 }
             } catch { /* non-fatal */ }
         }
-        // Show download panel
+        // Show download panel with MLX-specific info
         if (modelBytes > 0) {
             hfState.modelBytes = modelBytes;
             await hfShowDownloadPanel(downloadPanel, repoId);
+
+            // Update file name display for MLX
+            const fileEl = document.getElementById('mm-hf-dlp-file-name');
+            if (fileEl) fileEl.textContent = repoId;
+
+            // Enable download button (opens spawn wizard for MLX models)
+            const btn = document.getElementById('mm-hf-dlp-download-btn');
+            if (btn) {
+                btn.disabled = false;
+                if (!btn.dataset.mlxHandler) {
+                    btn.dataset.mlxHandler = '1';
+                    // Replace button to remove existing listeners
+                    const newBtn = btn.cloneNode(true);
+                    btn.parentNode.replaceChild(newBtn, btn);
+                    newBtn.addEventListener('click', () => {
+                        // Open spawn wizard pre-loaded with this MLX repo + Rapid-MLX backend
+                        if (typeof openSpawnWizard === 'function') {
+                            openSpawnWizard({
+                                templatePreset: {
+                                    backend: 'rapid_mlx',
+                                    rapid_mlx: { model_source: { kind: 'hugging_face_repo', repo_id: repoId } }
+                                }
+                            });
+                        } else {
+                            showToast('MLX models require Rapid-MLX — open Spawn Wizard to configure.', 'info');
+                        }
+                    });
+                }
+            }
         }
         // Show VRAM estimate
-        if (paramB > 0) scheduleVramUpdate({ size: modelBytes });
+        if (paramB > 0 || modelBytes > 0) scheduleVramUpdate({ size: modelBytes });
         return;
     }
 
@@ -2535,8 +2564,10 @@ async function updateVramDisplay(file) {
     let data;
     try {
         // Builder item 6: canonical body builder for cross-surface equality.
+        // MLX models use mlx backend (hf_repo_id alone, no file_path needed).
+        const isMlx = hfState.modelFormat === 'mlx';
         const body = buildEstimateBody({
-            backend: 'llama_cpp',
+            backend: isMlx ? 'mlx' : 'llama_cpp',
             hf_repo_id: hfState.selectedRepoId || null,
             hf_file_path: file?.path || file?.name || null,
             model_size_bytes: modelBytes,
@@ -2546,7 +2577,7 @@ async function updateVramDisplay(file) {
             ctk: 'q8_0',
             ctv: 'q8_0',
             available_vram_bytes: availVram,
-            is_unified_memory: cachedUnified,
+            is_unified_memory: isMlx || cachedUnified,
             mmproj_bytes: mmprojBytes,
         });
         const headers = window.authHeaders
