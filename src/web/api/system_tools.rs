@@ -19,8 +19,6 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .or(wired_limit_get(ctx.clone()))
         .unify()
-        .or(wired_limit_set(ctx.clone()))
-        .unify()
         .boxed()
 }
 
@@ -300,14 +298,6 @@ struct WiredLimitGetResult {
     behavior_notes: String,
 }
 
-#[derive(Deserialize)]
-struct WiredLimitSetRequest {
-    /// Requested wired limit in MiB. 0 clears to macOS default.
-    value_mb: u64,
-    /// Confirmation required: must be "set-wired-limit".
-    confirm: String,
-}
-
 fn wired_limit_get(ctx: ApiCtx) -> ApiRoute {
     let config = ctx.config;
     warp::path!("api" / "system" / "wired-limit")
@@ -350,57 +340,6 @@ fn wired_limit_get(ctx: ApiCtx) -> ApiRoute {
                         total_ram_bytes: 0,
                         behavior_notes:
                             "Wired limit is only applicable on macOS with Apple Silicon.".into(),
-                    };
-                    Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(&result)))
-                }
-            }
-        })
-        .boxed()
-}
-
-fn wired_limit_set(ctx: ApiCtx) -> ApiRoute {
-    let config = ctx.config;
-    warp::path!("api" / "system" / "wired-limit")
-        .and(warp::post())
-        .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json())
-        .and_then(move |auth: Option<String>, body: WiredLimitSetRequest| {
-            let config = config.clone();
-            async move {
-                if !check_db_admin_token(&auth, &config) {
-                    return Ok(unauthorized_db_admin_token());
-                }
-                if body.confirm != "set-wired-limit" {
-                    return Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(
-                        &crate::gpu::apple::WiredLimitSetResult {
-                            success: false,
-                            actual_mb: 0,
-                            previous_mb: 0,
-                            error: Some(crate::gpu::apple::WiredLimitError::SysctlFailed {
-                                reason: "Missing confirmation: confirm must be 'set-wired-limit'"
-                                    .into(),
-                            }),
-                        },
-                    )));
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    let sys_info = crate::system::get_system_metrics();
-                    let total_ram_bytes = (sys_info.ram_total_gb * 1024.0 * 1024.0 * 1024.0) as u64;
-                    let result =
-                        crate::gpu::apple::set_iogpu_wired_limit_mb(body.value_mb, total_ram_bytes);
-                    Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(&result)))
-                }
-                #[cfg(not(target_os = "macos"))]
-                {
-                    let result = crate::gpu::apple::WiredLimitSetResult {
-                        success: false,
-                        actual_mb: 0,
-                        previous_mb: 0,
-                        error: Some(crate::gpu::apple::WiredLimitError::SysctlFailed {
-                            reason: "Wired limit is only supported on macOS with Apple Silicon."
-                                .into(),
-                        }),
                     };
                     Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(&result)))
                 }

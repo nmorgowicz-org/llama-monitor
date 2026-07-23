@@ -484,10 +484,10 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
                         'Content-Type': 'application/json',
                         ...(adminToken ? { 'Authorization': `Bearer ${adminToken}` } : {}),
                     };
-                    const resp = await fetch('/api/system/wired-limit', {
+                    const resp = await fetch('/api/system/set-metal-gpu-limit', {
                         method: 'POST',
                         headers,
-                        body: JSON.stringify({ value_mb: recommendedMb, confirm: 'set-wired-limit' }),
+                        body: JSON.stringify({ limit_mb: recommendedMb, confirm: 'set-metal-gpu-limit' }),
                     });
                     if (!resp.ok) {
                         const data = await resp.json().catch(() => ({}));
@@ -497,11 +497,11 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
                         return;
                     }
                     const data = await resp.json();
-                    if (data.success) {
-                        showToast('Metal GPU cap updated to ' + Math.round(data.actual_mb / 1024) + ' GB', 'success');
+                    if (data.ok) {
+                        showToast('Metal GPU cap updated to ' + Math.round(data.limit_mb / 1024) + ' GB — persists across reboots', 'success');
                         row?.remove();
                     } else {
-                        showToast('Failed: ' + (data.error?.reason || 'unknown'), 'error');
+                        showToast('Failed: ' + (data.error || 'unknown'), 'error');
                         btn.disabled = false;
                         btn.textContent = 'Increase to ' + recGb + ' GB';
                     }
