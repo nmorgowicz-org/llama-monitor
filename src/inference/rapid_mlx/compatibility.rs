@@ -1,6 +1,6 @@
 #![allow(clippy::collapsible_if)]
 
-use crate::inference::rapid_mlx::capabilities::{self as cap, CapabilitySnapshot};
+use crate::inference::rapid_mlx::capabilities as cap;
 use crate::inference::rapid_mlx::runtime::RuntimeSource;
 use anyhow::{Context, Result, anyhow};
 use std::collections::BTreeSet;
@@ -11,7 +11,10 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 pub const MINIMUM_VERIFIED_VERSION: (u64, u64, u64) = (0, 10, 9);
-pub const LATEST_QUALIFIED_VERSION_TEXT: &str = "0.10.10";
+/// Latest published Rapid-MLX release selected as this repository's baseline.
+/// Every installed runtime still receives the bounded live capability probe; this
+/// is release metadata, not a version allowlist.
+pub const LATEST_QUALIFIED_VERSION_TEXT: &str = "0.10.17";
 pub const QUALIFIED_ROLLBACK_VERSION_TEXT: &str = "0.10.9";
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_PROBE_OUTPUT_BYTES: usize = 256 * 1024;
@@ -22,14 +25,12 @@ pub enum CompatibilityState {
     /// This does not authenticate the artifact or qualify it for pointer activation;
     /// the Phase 6 installer owns provenance and staged runtime gates.
     Verified,
-    Provisional,
 }
 
 impl CompatibilityState {
     pub fn label(self) -> &'static str {
         match self {
             Self::Verified => "verified",
-            Self::Provisional => "provisional",
         }
     }
 }
@@ -97,25 +98,6 @@ impl CompatibilityProfile {
             capabilities: ServeCapabilities::verified_baseline(),
         }
     }
-
-    /// Build a profile from an already-successful capability snapshot.
-    /// The runtime source must not turn a healthy externally managed
-    /// environment into a global provisional state.
-    pub fn from_snapshot(snapshot: &CapabilitySnapshot) -> Self {
-        Self {
-            state: CompatibilityState::Verified,
-            version: snapshot.rapid_mlx_version.clone(),
-            capabilities: ServeCapabilities::from_flags(&snapshot.serve_flags),
-        }
-    }
-}
-
-/// Construct a CompatibilityProfile from a capability snapshot.
-fn profile_from_snapshot(
-    snapshot: &CapabilitySnapshot,
-    _source: RuntimeSource,
-) -> CompatibilityProfile {
-    CompatibilityProfile::from_snapshot(snapshot)
 }
 
 pub async fn probe(binary: &Path, source: RuntimeSource) -> Result<CompatibilityProfile> {
@@ -581,8 +563,8 @@ mod tests {
     #[test]
     fn qualified_versions_are_metadata_not_a_future_release_allowlist() {
         let current = CompatibilityProfile::verified_baseline();
-        assert_eq!(current.version, "0.10.10");
-        assert_eq!(LATEST_QUALIFIED_VERSION_TEXT, "0.10.10");
+        assert_eq!(current.version, "0.10.17");
+        assert_eq!(LATEST_QUALIFIED_VERSION_TEXT, "0.10.17");
         assert_eq!(QUALIFIED_ROLLBACK_VERSION_TEXT, "0.10.9");
     }
 
@@ -621,7 +603,7 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let error = probe_with_limits(&binary, RuntimeSource::Custom, Duration::from_secs(1), 1024)
+        let error = probe_with_limits(&binary, RuntimeSource::Custom, Duration::from_secs(5), 1024)
             .await
             .unwrap_err();
         assert!(format!("{error:#}").contains("exceeded the 1024 byte safety limit"));

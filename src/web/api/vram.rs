@@ -46,6 +46,7 @@ fn api_vram_estimate_breakdown(
                 // estimate uses the model's real architecture instead of name-based guesses.
                 let hf_repo_id = body["hf_repo_id"].as_str().unwrap_or("").to_string();
                 let hf_file_path = body["hf_file_path"].as_str().unwrap_or("").to_string();
+                let hf_repo_revision = body["hf_repo_revision"].as_str().unwrap_or("main").to_string();
                 let model_size_override = body["model_size_bytes"].as_u64();
 
                 // Backend discriminator: `backend` (preferred) or legacy `engine` alias.
@@ -118,7 +119,7 @@ fn api_vram_estimate_breakdown(
                                 })),
                             ));
                         }
-                        crate::inference::rapid_mlx::mlx_meta::read_mlx_metadata(
+                        crate::inference::rapid_mlx::mlx_meta::read_mlx_model_profile(
                             std::path::Path::new(&model_path),
                         )
                         .ok() // not a local dir → maybe alias
@@ -127,12 +128,11 @@ fn api_vram_estimate_breakdown(
                     };
 
                     // If we have a valid local directory, use it.
-                    if let Some(meta) = local_meta {
+                    if let Some(profile) = local_meta {
                         let dir = std::path::Path::new(&model_path);
-                        let size = crate::inference::rapid_mlx::mlx_meta::resolve_local_weight_bytes(
-                            dir,
-                            &meta.weight_index,
-                        )
+                        let size = crate::inference::rapid_mlx::mlx_meta::read_mlx_weight_index(dir)
+                        .ok()
+                        .and_then(|index| crate::inference::rapid_mlx::mlx_meta::resolve_local_weight_bytes(dir, &index))
                         .or(model_size_override)
                         .unwrap_or(0);
                         if size == 0 {
@@ -144,13 +144,17 @@ fn api_vram_estimate_breakdown(
                             ));
                         }
                         let param_b = crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85);
-                        let arch = meta.to_arch(size, param_b, &model_path);
-                        let ev = if meta.evidence
-                            == crate::inference::rapid_mlx::mlx_meta::MlxMetaEvidence::Degraded
-                        {
-                            crate::llama::vram_estimator::EstimateEvidence::Degraded
+                        let mut arch = crate::llama::vram_estimator::ModelArch::from(&profile);
+                        arch.param_b = param_b;
+                        arch.bytes_per_layer = if arch.n_layers > 0 {
+                            size / arch.n_layers as u64
                         } else {
+                            0
+                        };
+                        let ev = if profile.is_substantive() {
                             crate::llama::vram_estimator::EstimateEvidence::Approximate
+                        } else {
+                            crate::llama::vram_estimator::EstimateEvidence::Degraded
                         };
                         (size, arch, ev)
                     } else if is_mlx_hf_repo_alias(&model_path) {
@@ -163,7 +167,7 @@ fn api_vram_estimate_breakdown(
                         ).await;
                         let (size, arch, ev) = match mlx_hf_estimate_from_repo(
                             &effective_repo,
-                            &hf_file_path,
+                            &hf_repo_revision,
                             size,
                         ).await {
                             Ok(res) => res,
@@ -182,7 +186,7 @@ fn api_vram_estimate_breakdown(
                         let size = resolve_mlx_hf_size(&hf_repo_id, model_size_override).await;
                         let (size, arch, ev) = match mlx_hf_estimate_from_repo(
                             &hf_repo_id,
-                            &hf_file_path,
+                            &hf_repo_revision,
                             size,
                         ).await {
                             Ok(res) => res,
@@ -1228,7 +1232,7 @@ async fn resolve_mlx_hf_size(repo_id: &str, model_size_override: Option<u64>) ->
 /// Returns (size, arch, evidence) or an error string.
 async fn mlx_hf_estimate_from_repo(
     repo_id: &str,
-    _hf_file_path: &str,
+    revision: &str,
     size: u64,
 ) -> Result<
     (
@@ -1246,18 +1250,21 @@ async fn mlx_hf_estimate_from_repo(
     // CRITICAL: Always use config.json for MLX — never hf_file_path.
     // hf_file_path is the model weight file (e.g. model.safetensors), not the config.
     // This prevents the gap 3.7 defect where hf_file_path was misused as a config name.
-    match crate::hf::fetch_mlx_config(repo_id, "config.json").await {
-        Ok(config) => {
-            let meta = crate::inference::rapid_mlx::mlx_meta::metadata_from_config(config);
+    match crate::hf::fetch_mlx_model_profile_revision_aware(repo_id, revision).await {
+        Ok(profile) => {
             let param_b = crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85);
-            let ev = if meta.evidence
-                == crate::inference::rapid_mlx::mlx_meta::MlxMetaEvidence::Degraded
-            {
-                crate::llama::vram_estimator::EstimateEvidence::Degraded
-            } else {
+            let ev = if profile.is_substantive() {
                 crate::llama::vram_estimator::EstimateEvidence::Approximate
+            } else {
+                crate::llama::vram_estimator::EstimateEvidence::Degraded
             };
-            let arch = meta.to_arch(size, param_b, repo_id);
+            let mut arch = crate::llama::vram_estimator::ModelArch::from(&profile);
+            arch.param_b = param_b;
+            arch.bytes_per_layer = if arch.n_layers > 0 {
+                size / arch.n_layers as u64
+            } else {
+                0
+            };
             Ok((size, arch, ev))
         }
         Err(_) => {
@@ -1389,6 +1396,59 @@ mod mlx_estimate_tests {
         assert_eq!(json["mlx_prefix_cache_bytes"], serde_json::json!(0));
         assert_eq!(json["evidence"], serde_json::json!("approximate"));
         assert!(json["weights_bytes"].as_u64().unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn vram_estimate_uses_nested_mlx_profile_geometry() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.json"),
+            r#"{
+                "model_type":"wrapper",
+                "num_hidden_layers": 99,
+                "text_config": {
+                    "model_type":"qwen3_6",
+                    "hidden_size":1024,
+                    "num_hidden_layers":8,
+                    "num_attention_heads":8,
+                    "num_key_value_heads":2,
+                    "head_dim":128,
+                    "full_attention_interval":4,
+                    "layer_types":["full_attention","linear_attention","linear_attention","linear_attention","full_attention","linear_attention","linear_attention","linear_attention"],
+                    "linear_key_head_dim":64,
+                    "linear_num_key_heads":2
+                }
+            }"#,
+        )
+        .unwrap();
+        let body = serde_json::json!({
+            "backend": "rapid_mlx",
+            "model_path": dir.path().to_string_lossy(),
+            "model_size_bytes": 400_000_000u64,
+            "n_ctx": 8192,
+            "available_vram_bytes": 32u64 * 1024 * 1024 * 1024,
+        });
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/vram-estimate")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body(body.to_string())
+            .reply(&test_routes())
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(response.body()).unwrap();
+        assert_eq!(json["ok"], serde_json::json!(true), "{json}");
+        assert!(
+            json["linear_attn_state_bytes"].as_u64().unwrap() > 0,
+            "{json}"
+        );
+        // Two full-attention layers at 8k must not be calculated as all eight
+        // wrapper layers. This is the production-path Qwen3.6 hard gate.
+        assert!(
+            json["kv_cache_bytes"].as_u64().unwrap() < 2_000_000_000,
+            "{json}"
+        );
     }
 
     /// HF-source MLX estimation no longer requires an explicit model_size_bytes: when it is

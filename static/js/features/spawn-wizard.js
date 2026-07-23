@@ -656,6 +656,7 @@ export function openSpawnWizard(opts = {}) {
       wizardState.access.port = rapid.port || t.port || 8001;
       wizardState.access.bindHost = rapid.host || t.bind_host || '127.0.0.1';
       wizardState.hardware.alias = rapid.served_model_name || '';
+      wizardState.model.rapidMlxMllm = rapid.mllm_vision !== 'off';
       if (Array.isArray(rapid.escape_hatch_flags)) {
         wizardState.hardware.escapeHatchFlags = Object.fromEntries(rapid.escape_hatch_flags);
       }
@@ -2002,6 +2003,7 @@ function _updateWorkloadConfirmation() {
     check.dataset.wpBound = '1';
     check.addEventListener('change', () => {
       wizardState.hardware.workloadProfileConfirmed = check.checked;
+      refreshStepGuardrails();
     });
   }
 }
@@ -5299,13 +5301,14 @@ function _renderRapidMlxProfileHints() {
     hintsEl.appendChild(row);
   }
 
-  // Vision toggle (--mllm / --no-mllm) — shown only when vision extra present
-  if (hasVision) {
+    // Auto leaves Rapid's model-specific MLLM detection in control. The user
+    // can only force the safe text lane here; force-on needs model evidence.
+    if (hasVision) {
     const configRow = document.createElement('div');
     configRow.className = 'rapid-mlx-config-row';
     const configLabel = document.createElement('span');
     configLabel.className = 'rapid-mlx-config-label';
-    configLabel.textContent = '--mllm';
+    configLabel.textContent = 'Vision mode';
     configRow.appendChild(configLabel);
     const toggleLabel = document.createElement('label');
     toggleLabel.className = 'rapid-mlx-config-toggle';
@@ -5317,7 +5320,7 @@ function _renderRapidMlxProfileHints() {
     });
     toggleLabel.appendChild(checkbox);
     const toggleText = document.createElement('span');
-    toggleText.textContent = 'Enable vision (multimodal)';
+    toggleText.textContent = 'Use model vision when qualified';
     toggleLabel.appendChild(toggleText);
     configRow.appendChild(toggleLabel);
     hintsEl.appendChild(configRow);
@@ -10489,6 +10492,9 @@ export function buildSpawnPayload() {
           },
         }),
         ...(h.reasoningMode && { reasoning_mode: 'on' }),
+        // Auto deliberately omits a flag; Off maps to Rapid's real
+        // --no-mllm escape hatch for incomplete vision-tower checkpoints.
+        ...(m.rapidMlxMllm === false && { mllm_vision: 'off' }),
         // Phase 7: Web UI (D26/A44)
         ...(h.webUiAvailability && h.webUiAvailability !== 'auto' && { web_ui_availability: h.webUiAvailability }),
         ...(h.webUiStaticPath && { web_ui_static_path: h.webUiStaticPath }),

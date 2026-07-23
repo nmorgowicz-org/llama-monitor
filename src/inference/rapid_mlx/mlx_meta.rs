@@ -263,6 +263,12 @@ pub fn parse_mlx_config_to_profile(config_path: &Path) -> Result<ModelMemoryProf
     parse_mlx_config_bytes_to_profile(&bytes)
 }
 
+/// Read a local MLX directory through the normalized geometry path used by
+/// Rapid estimates. GGUF metadata deliberately has no dependency on this.
+pub fn read_mlx_model_profile(dir: &Path) -> Result<ModelMemoryProfile, String> {
+    parse_mlx_config_to_profile(&dir.join("config.json"))
+}
+
 /// Parse MLX config bytes into a normalized [`ModelMemoryProfile`].
 pub fn parse_mlx_config_bytes_to_profile(bytes: &[u8]) -> Result<ModelMemoryProfile, String> {
     let raw: serde_json::Value =

@@ -295,23 +295,6 @@ async fn rapid_native_cancellation_degrades_without_a_public_request_id_contract
             .to_string()
             .contains("invalid request ID")
     );
-
-    supported.configure_runtime(
-        compatibility::CompatibilityProfile {
-            state: compatibility::CompatibilityState::Provisional,
-            version: "0.10.9+nightly".into(),
-            capabilities: compatibility::ServeCapabilities::verified_baseline(),
-        },
-        Some("cancel-secret".into()),
-    );
-    assert!(
-        supported
-            .cancel_request(port, "chatcmpl-fixture")
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("unavailable")
-    );
 }
 
 #[cfg(all(unix, target_os = "macos", target_arch = "aarch64"))]

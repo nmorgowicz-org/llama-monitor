@@ -3658,6 +3658,7 @@ async function scenarioSpawnWizard(ctx, options) {
 
 async function scenarioSpawnWizardEngines(ctx) {
     const { page, baseUrl } = ctx;
+    const rapidFixture = join(TEMP_APP_CONFIG_DIR, 'models', 'capture-nested-mlx');
     await loadAppDocument(page, baseUrl);
 
     await page.evaluate(() => {
@@ -3676,25 +3677,30 @@ async function scenarioSpawnWizardEngines(ctx) {
                     reason: 'This source is native to the verified Rapid-MLX resolution path.',
                 }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
             }
+            if (url.pathname.startsWith('/api/rapid-mlx/models/') && url.pathname.endsWith('/profile')) {
+                return Promise.resolve(new Response(JSON.stringify({
+                    profile: { extras: { vision: true, has_vision_tower: true } },
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
             return originalFetch(input, init);
         };
     });
 
-    await page.evaluate(async () => {
+    await page.evaluate(async (rapidFixturePath) => {
         const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
         openSpawnWizard({
-            localPath: '/models/mlx-community/Qwen3.5-9B-MLX-4bit',
+            localPath: rapidFixturePath,
             localModel: {
-                path: '/models/mlx-community/Qwen3.5-9B-MLX-4bit',
-                size_bytes: 6_450_000_000,
+                path: rapidFixturePath,
+                size_bytes: 400_000_000,
                 source_kind: 'mlx_directory',
                 model_source: {
                     kind: 'mlx_directory',
-                    path: '/models/mlx-community/Qwen3.5-9B-MLX-4bit',
+                    path: rapidFixturePath,
                 },
             },
         });
-    });
+    }, rapidFixture);
     await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 10000 });
     await page.waitForFunction(
         () => document.getElementById('wizard-step-1')?.classList.contains('active'),
@@ -3725,6 +3731,24 @@ async function scenarioSpawnWizardEngines(ctx) {
         () => document.getElementById('wizard-step-2')?.classList.contains('active'),
         { timeout: 5000 }
     );
+    // Re-select Rapid now that the local fixture is fully loaded, which triggers
+    // the live profile fetch used to conditionally render the vision control.
+    await page.evaluate(() => document.querySelector('.wizard-engine-card[data-engine="rapid_mlx"]')?.click());
+    await page.waitForSelector('#rapid-mlx-profile-hints input[type="checkbox"]', { timeout: 5000 });
+    await page.evaluate(() => document.querySelector('#rapid-mlx-profile-hints input[type="checkbox"]')?.click());
+    const textOnlyPayload = await page.evaluate(async () => {
+        const { buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js');
+        return {
+            selectedEngine: wizardState.engine.selected,
+            toggleState: wizardState.model.rapidMlxMllm,
+            serialized: buildSpawnPayload().rapid_mlx?.mllm_vision,
+        };
+    });
+    if (textOnlyPayload.serialized !== 'off') {
+        throw new Error(`Rapid-MLX vision toggle did not serialize text-only mode: ${JSON.stringify(textOnlyPayload)}`);
+    }
+    // Restore the normal Auto path for the visual workload captures below.
+    await page.evaluate(() => document.querySelector('#rapid-mlx-profile-hints input[type="checkbox"]')?.click());
     await sleep(500);
 
     // Helper: scroll wizard-body to center an element in the viewport (absolute position).
@@ -3859,6 +3883,40 @@ async function scenarioSpawnWizardEngines(ctx) {
     await sleep(300);
     await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-endpoint-compatibility.png') });
     console.log('[CAPTURE] Saved spawn-wizard-endpoint-compatibility.png');
+
+    // Deterministic Rapid end-to-end path: use the nested MLX fixture served by
+    // the real estimate endpoint, then pass the workload confirmation guardrail.
+    await page.evaluate(() => {
+        document.querySelector('.wp-card[data-profile-id="interactive_coding_agent"]')?.click();
+    });
+    await page.waitForFunction(
+        () => document.querySelector('.wp-card.selected[data-profile-id="interactive_coding_agent"]') !== null,
+        { timeout: 3000 }
+    );
+    await page.evaluate(() => document.getElementById('workload-confirm-check')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('workload-confirm-check')?.checked === true,
+        { timeout: 3000 }
+    );
+    await page.waitForFunction(
+        () => document.getElementById('wizard-next-btn')?.disabled === false,
+        { timeout: 3000 }
+    );
+    await sleep(500);
+    await captureShot(page, 'spawn-wizard-rapid-mlx-fit.png', { fullPage: true });
+
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-3')?.classList.contains('active'),
+        { timeout: 8000 }
+    );
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-4')?.classList.contains('active'),
+        { timeout: 8000 }
+    );
+    await sleep(500);
+    await captureShot(page, 'spawn-wizard-rapid-mlx-review.png', { fullPage: true });
 
     console.log('[CAPTURE] Scenario "spawn-wizard-engines" complete.');
 }
@@ -4836,6 +4894,30 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
         seedConfig();
         if (scenarioName === 'rapid-preset') {
             seedRapidMlxCapturePreset();
+        }
+        if (scenarioName === 'spawn-wizard-engines') {
+            const fixtureDir = join(TEMP_APP_CONFIG_DIR, 'models', 'capture-nested-mlx');
+            fs.mkdirSync(fixtureDir, { recursive: true });
+            fs.writeFileSync(join(fixtureDir, 'config.json'), JSON.stringify({
+                model_type: 'capture-wrapper',
+                num_hidden_layers: 99,
+                text_config: {
+                    model_type: 'qwen3_6',
+                    hidden_size: 1024,
+                    num_hidden_layers: 8,
+                    num_attention_heads: 8,
+                    num_key_value_heads: 2,
+                    head_dim: 128,
+                    full_attention_interval: 4,
+                    layer_types: ['full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention'],
+                    linear_key_head_dim: 64,
+                    linear_num_key_heads: 2,
+                },
+            }));
+            fs.writeFileSync(join(fixtureDir, 'model.safetensors.index.json'), JSON.stringify({
+                metadata: { total_size: 400_000_000 },
+                weight_map: {},
+            }));
         }
         const port = await findAvailablePort();
         const extraArgs = [];

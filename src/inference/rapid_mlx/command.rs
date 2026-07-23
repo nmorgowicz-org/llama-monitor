@@ -442,20 +442,27 @@ impl RapidMlxCommandBuilder {
             args.push("--speculative".to_string());
             args.push(policy.clone());
         }
-        // Phase 7: MLLM/embeddings flags
-        if let Some(ref vision) = self.mllm_vision
-            && vision != "auto"
-        {
-            capabilities.require("--vision")?;
-            args.push("--vision".to_string());
-            args.push(vision.clone());
+        // Vision has only the real Rapid-MLX tri-state: Auto omits a flag,
+        // On forces MLLM, and Off forces the text lane. A model-specific smoke
+        // test still owns whether Auto is actually qualified.
+        match self.mllm_vision.as_deref() {
+            None | Some("auto") => {}
+            Some("on") => {
+                capabilities.require("--mllm")?;
+                args.push("--mllm".to_string());
+            }
+            Some("off") => {
+                capabilities.require("--no-mllm")?;
+                args.push("--no-mllm".to_string());
+            }
+            Some(value) => anyhow::bail!("mllm_vision must be auto, on, or off; got {value:?}"),
         }
         if let Some(ref emb) = self.embeddings
             && emb != "auto"
         {
-            capabilities.require("--embeddings")?;
-            args.push("--embeddings".to_string());
-            args.push(emb.clone());
+            anyhow::bail!(
+                "embeddings is not a Rapid-MLX on/off launch setting; configure a qualified embedding model before enabling it"
+            );
         }
         // Phase 7: GPU flags
         if let Some(util) = self.gpu_memory_utilization {
@@ -894,7 +901,7 @@ mod tests {
             "--host --port --served-model-name --timeout --max-cache-blocks \
              --kv-cache-dtype --turboquant --max-num-seqs --max-concurrent-requests \
              --prefill-batch-size --completion-batch-size --batching-policy --concurrency-policy \
-             --reasoning --speculative --vision --embeddings --gpu-memory-utilization \
+             --reasoning --speculative --mllm --no-mllm --gpu-memory-utilization \
              --ui --no-ui --path --ui-config --pflash --hybrid-cache-entries \
              --response-cache --disk-checkpoint --endpoint-compatibility \
              --request-safety-policy --sampling-mode --parser-policy --security-policy",
@@ -916,7 +923,6 @@ mod tests {
         .reasoning_mode(Some("on".into()))
         .speculative_policy(Some("mtp_v1".into()))
         .mllm_vision(Some("on".into()))
-        .embeddings(Some("on".into()))
         .gpu_memory_utilization(Some(0.85))
         .web_ui_availability(Some("on".into()))
         .web_ui_static_path(Some("custom-ui/".into()))
@@ -959,8 +965,9 @@ mod tests {
         );
         assert!(args.windows(2).any(|p| p == ["--reasoning", "on"]));
         assert!(args.windows(2).any(|p| p == ["--speculative", "mtp_v1"]));
-        assert!(args.windows(2).any(|p| p == ["--vision", "on"]));
-        assert!(args.windows(2).any(|p| p == ["--embeddings", "on"]));
+        assert!(args.iter().any(|arg| arg == "--mllm"));
+        assert!(!args.iter().any(|arg| arg == "--vision"));
+        assert!(!args.iter().any(|arg| arg == "--embeddings"));
         assert!(
             args.windows(2)
                 .any(|p| p == ["--gpu-memory-utilization", "0.85"])
@@ -1011,7 +1018,8 @@ mod tests {
         assert!(!args.iter().any(|a| a.starts_with("--kv-cache-dtype")));
         assert!(!args.iter().any(|a| a.starts_with("--turboquant")));
         assert!(!args.iter().any(|a| a.starts_with("--reasoning")));
-        assert!(!args.iter().any(|a| a.starts_with("--vision")));
+        assert!(!args.iter().any(|a| a.starts_with("--mllm")));
+        assert!(!args.iter().any(|a| a.starts_with("--no-mllm")));
         assert!(!args.iter().any(|a| a.starts_with("--embeddings")));
         assert!(!args.iter().any(|a| a.starts_with("--ui")));
         assert!(!args.iter().any(|a| a.starts_with("--no-ui")));
@@ -1030,6 +1038,31 @@ mod tests {
         assert!(!args.iter().any(|a| a.starts_with("--sampling-mode")));
         assert!(!args.iter().any(|a| a.starts_with("--parser-policy")));
         assert!(!args.iter().any(|a| a.starts_with("--security-policy")));
+    }
+
+    #[test]
+    fn mllm_off_uses_the_real_text_only_flag() {
+        let capabilities = ServeCapabilities::from_help("--host --port --no-mllm");
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .mllm_vision(Some("off".into()))
+        .build("rapid-mlx".into(), &capabilities)
+        .unwrap();
+        let args = args(&launch);
+        assert!(args.iter().any(|arg| arg == "--no-mllm"));
+        assert!(!args.iter().any(|arg| arg == "--mllm"));
+    }
+
+    #[test]
+    fn mllm_rejects_legacy_or_unknown_values() {
+        let error = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .mllm_vision(Some("enabled".into()))
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .unwrap_err();
+        assert!(error.to_string().contains("auto, on, or off"));
     }
 
     #[test]

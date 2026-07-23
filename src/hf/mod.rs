@@ -44,6 +44,18 @@ pub fn hf_resolve_download_url_at(repo_id: &str, file_path: &str, revision: &str
     format!("https://huggingface.co/{repo_id}/resolve/{revision}/{encoded_path}")
 }
 
+fn validate_hf_revision(revision: &str) -> Result<(), String> {
+    if revision.is_empty()
+        || revision.len() > 128
+        || !revision
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return Err("Hugging Face revision must contain only safe revision characters".into());
+    }
+    Ok(())
+}
+
 static HF_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -640,10 +652,34 @@ pub async fn fetch_mlx_config_revision_aware(
     revision: &str,
     _hf_file_path: &str,
 ) -> Result<crate::inference::rapid_mlx::mlx_meta::MlxConfig, String> {
+    validate_hf_revision(revision)?;
     // CRITICAL: Always use config.json for MLX config — never hf_file_path.
     // hf_file_path is the model weight file (e.g. "model.safetensors"), not the config.
     let config_path = "config.json";
     fetch_mlx_config_bytes_at(repo_id, revision, config_path).await
+}
+
+/// Fetch an MLX config at its selected revision and convert its inline
+/// `text_config` geometry into the normalized profile used by Rapid estimates.
+/// `hf_file_path` is intentionally not accepted: a weight filename can never
+/// select the architecture config.
+pub async fn fetch_mlx_model_profile_revision_aware(
+    repo_id: &str,
+    revision: &str,
+) -> Result<crate::llama::model_memory_profile::ModelMemoryProfile, String> {
+    let config = fetch_mlx_config_with_text_config(repo_id, revision).await?;
+    let mut raw = serde_json::to_value(&config)
+        .map_err(|error| format!("serializing MLX config for profile parsing: {error}"))?;
+    if let Some(inner) = config.text_config_inner.as_deref() {
+        raw["text_config"] = serde_json::to_value(inner)
+            .map_err(|error| format!("serializing nested MLX text config: {error}"))?;
+    }
+    let bytes = serde_json::to_vec(&raw)
+        .map_err(|error| format!("serializing MLX profile config: {error}"))?;
+    let mut profile =
+        crate::inference::rapid_mlx::mlx_meta::parse_mlx_config_bytes_to_profile(&bytes)?;
+    profile.source_revision = Some(revision.to_string());
+    Ok(profile)
 }
 
 /// Fetch config bytes from HF with bounds enforcement.
@@ -704,41 +740,54 @@ async fn fetch_mlx_config_bytes_at(
 /// - size limit: each file bounded by MAX_CONFIG_BYTES
 ///
 /// This ensures reliable config fetching even for deeply nested or large MLX repos.
-#[allow(dead_code)]
 pub async fn fetch_mlx_config_with_text_config(
     repo_id: &str,
     revision: &str,
 ) -> Result<crate::inference::rapid_mlx::mlx_meta::MlxConfig, String> {
-    let max_depth = 3;
-    let mut merged_config = fetch_mlx_config_bytes_at(repo_id, revision, "config.json").await?;
+    const MAX_DEPTH: usize = 3;
+    let mut root = fetch_mlx_config_bytes_at(repo_id, revision, "config.json").await?;
+    let mut seen = std::collections::BTreeSet::from([String::from("config.json")]);
+    let mut current = &mut root;
 
-    for depth in 0..max_depth {
-        let tc_ref = merged_config.text_config_ref.clone();
-        if let Some(ref tc_ref_str) = tc_ref {
-            if tc_ref_str.contains('/') || tc_ref_str.ends_with(".json") {
-                let inner = fetch_mlx_config_bytes_at(repo_id, revision, tc_ref_str)
-                    .await
-                    .map_err(|e| format!("Failed to fetch text_config at depth {depth}: {e}"))?;
-                merged_config.text_config_inner = Some(Box::new(inner));
-            }
-        } else {
-            break;
+    for depth in 0..MAX_DEPTH {
+        let Some(reference) = current.text_config_ref.clone() else {
+            return Ok(root);
+        };
+        validate_mlx_config_reference(&reference)?;
+        if !seen.insert(reference.clone()) {
+            return Err(format!("MLX text_config reference cycle at {reference}"));
         }
+        let inner = fetch_mlx_config_bytes_at(repo_id, revision, &reference)
+            .await
+            .map_err(|error| format!("Failed to fetch text_config at depth {depth}: {error}"))?;
+        current.text_config_inner = Some(Box::new(inner));
+        current = current
+            .text_config_inner
+            .as_deref_mut()
+            .expect("nested config inserted above");
     }
 
-    // Check if we exceeded depth.
-    if merged_config.text_config_ref.is_some()
-        && merged_config
-            .text_config_ref
-            .as_ref()
-            .is_some_and(|r| r.contains('/') || r.ends_with(".json"))
-    {
+    if current.text_config_ref.is_some() {
         return Err(format!(
-            "Config recursion exceeded max depth {max_depth} for {repo_id}"
+            "Config recursion exceeded max depth {MAX_DEPTH} for {repo_id}"
         ));
     }
+    Ok(root)
+}
 
-    Ok(merged_config)
+fn validate_mlx_config_reference(reference: &str) -> Result<(), String> {
+    let path = Path::new(reference);
+    if reference.is_empty()
+        || reference.len() > 512
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+        || !reference.ends_with(".json")
+    {
+        return Err("MLX text_config reference must be a safe relative JSON path".into());
+    }
+    Ok(())
 }
 
 /// Stream-download a file from HF with optional resume.
@@ -2831,6 +2880,44 @@ pub async fn list_repo_siblings(repo_id: &str) -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mlx_revision_and_text_config_references_are_bounded_and_safe() {
+        for revision in [
+            "main",
+            "a4c7561cc890307b95b473f8564634c3d598734a",
+            "v0.10.17",
+        ] {
+            assert!(validate_hf_revision(revision).is_ok(), "{revision}");
+        }
+        for revision in ["", "main/next", "../main", "main?ref=x"] {
+            assert!(validate_hf_revision(revision).is_err(), "{revision}");
+        }
+        assert!(validate_hf_revision(&"a".repeat(129)).is_err());
+
+        for reference in [
+            "text_config.json",
+            "configs/text.json",
+            "nested/config.json",
+        ] {
+            assert!(
+                validate_mlx_config_reference(reference).is_ok(),
+                "{reference}"
+            );
+        }
+        for reference in [
+            "",
+            "/config.json",
+            "../config.json",
+            "configs/../../text.json",
+            "config.yaml",
+        ] {
+            assert!(
+                validate_mlx_config_reference(reference).is_err(),
+                "{reference}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn test_hf_get_model_info_smoke() {

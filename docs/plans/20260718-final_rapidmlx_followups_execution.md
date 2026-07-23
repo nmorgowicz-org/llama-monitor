@@ -208,7 +208,7 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 
 ### Phase 3 — Runtime and dependency qualification
 
-- **State:** Not started (splits into Parts A/B/C per §4.1)
+- **State:** Previously implemented; VLM capability/argv remediation validated, commit pending. Do not treat model-specific vision support as qualified until the Phase 7 real-model smoke lane passes.
 - **Budget:** 140k total (~60k A + ~60k B + ~50k C)
 - **Depends on:** Phases 1–2
 - **Read:** gaps 3.4/3.8–3.10; D13/D24/D25/D27; contract 7.5; A2/A14/A15/A17–A19/A26/A29/A48/A51–A52; Phase 3; runtime/client matrices; evidence ledger.
@@ -218,9 +218,15 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 - **Part B (~60k):** on-device probe — builder item 6 (~line 1725-1727), hard gates (~1734-1738), gap 3.10 (~376-390); files: rapid_mlx/{runtime.rs, updater.rs}
 - **Part C (~50k):** endpoint matrix + MTP + sampling — builder items 8-12 (~line 1727-1738), hard gates (~1734-1738), D25 (~731-742), D26 (~743-759), D27 (~760-769); files: capabilities.rs (llama), rapid_mlx/{compatibility.rs, discovery.rs}, rapid_mlx_runtime.rs
 
+#### Upstream release watch — 2026-07-23
+
+- **Supported published baseline:** Rapid-MLX `v0.10.17` (`69b1fcf81c6a1dada4ea6103f71f358796c01c7e`), selected as release metadata and still subject to the bounded on-device capability probe. It includes the hybrid-VLM/base-wheel installation repair from `bf15f02f27`.
+- **Do not claim yet:** `v0.10.17` predates main commit `9a5151e147` (`fix(mllm): auto-degrade to text lane for vision-config checkpoints with no vision tower`). Until that commit is included in a published release and passes the on-device probe, a vision-declared model without a verified vision tower must be diagnosed as unavailable rather than promised a text fallback.
+- **Required next-release validation:** test (1) a real vision-tower model with MLX-VLM available and an image request, (2) MLX-VLM missing/incompatible remediation, (3) a vision-config/weightless-tower checkpoint in Auto mode falls back to text and reports post-degrade modality, and (4) explicit `--mllm` fails clearly for that checkpoint. Add dark/light/narrow capture coverage once Phase 7 wires MLLM through launch and review.
+
 ### Phase 4 — Normalized MLX architecture metadata
 
-- **State:** Verified complete
+- **State:** Remediation validated; commit pending. Do not advance Phase 5 from this ledger until the normalized-profile integration is committed.
 - **Budget:** 170k total (~55k A + ~55k B + ~60k C)
 - **Parts:** A (ModelMemoryProfile + config parsing), B (Qwen3.6/Gemma4/MoE/MTP geometry), C (context/*8/HF lookup/estimator integration)
 - **Depends on:** Phase 0 fixtures and Phase 2 identity; A25

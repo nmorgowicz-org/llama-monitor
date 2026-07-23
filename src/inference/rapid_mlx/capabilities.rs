@@ -747,6 +747,8 @@ fn derive_qualified_features(
     let has_tool_parser = flags.iter().any(|f| f == "--tool-call-parser");
     let has_auto_tool_choice = flags.iter().any(|f| f == "--enable-auto-tool-choice");
     let has_reasoning = flags.iter().any(|f| f == "--reasoning");
+    let has_mllm = flags.iter().any(|f| f == "--mllm");
+    let has_no_mllm = flags.iter().any(|f| f == "--no-mllm");
     let has_thinking = flags
         .iter()
         .any(|f| *f == "--enable-thinking" || *f == "--reasoning-effort");
@@ -798,7 +800,11 @@ fn derive_qualified_features(
     let vision = match extras.vision {
         ExtraState::Installed => {
             // An import is necessary but does not qualify a model path.
-            if is_broken_vision_version(package_versions) {
+            if !has_mllm || !has_no_mllm {
+                FeatureQualification::Unavailable(
+                    "Rapid-MLX is missing the --mllm/--no-mllm vision controls".into(),
+                )
+            } else if is_broken_vision_version(package_versions) {
                 FeatureQualification::Indeterminate(
                     "mlx-vlm 0.6.4 is known broken for affected Qwen/Gemma paths".into(),
                 )
@@ -1729,6 +1735,38 @@ Options:
     }
 
     #[test]
+    fn vision_requires_both_real_mllm_controls() {
+        let extras = InstalledExtras {
+            guided: ExtraState::Installed,
+            vision: ExtraState::Installed,
+            embeddings: ExtraState::Missing,
+        };
+        let incomplete = derive_qualified_features(
+            &["--mllm".into()],
+            &extras,
+            &[],
+            "0.10.17",
+            RuntimeSource::Managed,
+        );
+        assert!(matches!(
+            incomplete.vision,
+            FeatureQualification::Unavailable(ref reason) if reason.contains("--mllm/--no-mllm")
+        ));
+
+        let complete = derive_qualified_features(
+            &["--mllm".into(), "--no-mllm".into()],
+            &extras,
+            &[],
+            "0.10.17",
+            RuntimeSource::Managed,
+        );
+        assert!(matches!(
+            complete.vision,
+            FeatureQualification::Indeterminate(_)
+        ));
+    }
+
+    #[test]
     fn upstream_constrained_env_has_no_global_provisional() {
         // A managed install that passes all probes gets Available features,
         // not a blanket indeterminate state.
@@ -1736,6 +1774,8 @@ Options:
             "--tool-call-parser".into(),
             "--enable-auto-tool-choice".into(),
             "--reasoning".into(),
+            "--mllm".into(),
+            "--no-mllm".into(),
         ];
         let extras = InstalledExtras {
             guided: ExtraState::Installed,

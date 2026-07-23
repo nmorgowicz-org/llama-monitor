@@ -250,8 +250,6 @@ mod tests {
     const RAM_8GB_BYTES: u64 = 8 * 1024 * 1024 * 1024;
     /// 16 GiB RAM system (common config)
     const RAM_16GB_BYTES: u64 = 16 * 1024 * 1024 * 1024;
-    /// 32 GiB RAM system
-    const RAM_32GB_BYTES: u64 = 32 * 1024 * 1024 * 1024;
     /// 64 GiB RAM system (M5 Max class)
     const RAM_64GB_BYTES: u64 = 64 * 1024 * 1024 * 1024;
     /// 128 GiB RAM system (M1 Ultra / M4 Max class)

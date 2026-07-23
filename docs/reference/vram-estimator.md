@@ -664,11 +664,10 @@ Architecture-aware, backend-aware VRAM breakdown endpoint.
   - **HuggingFace (no local file yet)**: `crate::hf::fetch_gguf_header_metadata()` issues an HTTP **Range** request for the first few MB of the `.gguf` (the KV header sits at the file start), parses it with `read_gguf_metadata_from_bytes()`, and uses the caller-supplied `model_size_bytes` (from the HF file listing) for weights. This gives the model's **real** architecture before downloading 16 GB. Requires HTTP 206 (partial content); on any failure (gated repo, offline, no range support) it falls back to the name heuristic so the caller still gets a rough estimate.
 - Rapid-MLX behavior:
   - `is_unified_memory` is forced to `true` server-side (no discrete-GPU/CPU-spill path).
-  - **Local path**: `model_path` is interpreted as an MLX model directory; `src/inference/rapid_mlx/mlx_meta.rs` reads:
-    - `config.json` (HF-transformers-style architecture fields, MoE fields, sliding-window fields, `quantization` block, draft/speculative sidecar).
+  - **Local path**: `model_path` is interpreted as an MLX model directory. Its `config.json` is parsed into the normalized `ModelMemoryProfile`, including authoritative nested `text_config` geometry, full/local/linear layer groups, recurrent state, Gemma global/local heads, MoE topology, and MTP/companion evidence.
     - `model.safetensors.index.json` for exact weight-byte accounting (`metadata.total_size` when present, otherwise the real on-disk shard file sizes).
   - **HF-repo-style alias**: if `model_path` is not a local directory but matches `"org/repo"` (e.g. `"mlx-community/Qwen3-30B-A3B-4bit"`), it is treated as an `hf_repo_id`; the server fetches `config.json` from HuggingFace.
-  - **Explicit `hf_repo_id`**: for Rapid-MLX, `hf_repo_id` (+ optional `hf_file_path`, defaults to `config.json`) fetches `config.json` directly (`crate::hf::fetch_mlx_config` — a plain GET, no range-fetch needed since the file is small). `model_size_bytes` is required.
+  - **Explicit `hf_repo_id`**: for Rapid-MLX, `hf_repo_id` plus optional immutable `hf_repo_revision` fetches `config.json` directly. `hf_file_path` is never treated as a config filename. Referenced text configs are revision-pinned, bounded, cycle-checked, and limited to safe relative JSON paths. `model_size_bytes` is required when the tree lookup cannot determine the weight size.
   - **Degraded**: if required config fields (`hidden_size`, `num_hidden_layers`, `num_attention_heads`) are missing or unrecognized, the architecture is built via `ModelArch::from_name_and_params()` and `evidence` is set to `"degraded"`. This never silently presents a heuristic guess as authoritative.
   - Optional `mlx_prefix_cache_tokens` + `mlx_prefix_cache_bits` (4 or 8, default 8) reserve a **separate** stored budget for Rapid-MLX's compressed prefix cache. This is intentionally NOT a reduction of `kv_cache_bytes`: cached entries are decompressed back to the active compute dtype before reuse, so active-request KV is unaffected by how much prefix cache exists.
 - Output fields: `weights_bytes`, `kv_cache_bytes`, `linear_attn_state_bytes`, `mmproj_bytes`, `mtp_bytes`, `overhead_bytes`, `total_bytes`, `available_bytes`, `headroom_bytes`, `ram_bytes`, `available_ram_bytes`, `ram_headroom_bytes`, `recommendation`, `note`
@@ -841,17 +840,14 @@ instead of a GGUF header. See `src/inference/rapid_mlx/mlx_meta.rs`.
     - `metadata.total_size` when present (HF-exported indexes).
     - Otherwise, on-disk shard file sizes are summed.
   - Shard names are validated: no absolute paths, no `..` traversal, `.safetensors` only.
-- **Evidence**:
-  - `MlxMetaEvidence::Exact`: required fields are present → architecture is built directly from config.
-  - `MlxMetaEvidence::Degraded`: one or more required fields missing → architecture falls back to `ModelArch::from_name_and_params()` and is then overridden with any real fields present.
-- **Mapping to `ModelArch`**:
-  - `MlxMetadata::to_arch()` mirrors `ModelMetadata::to_arch()`: it maps MLX fields into
-    the shared `ModelArch` (layers, heads, KV heads, head_dim, MoE, sliding-window, etc.).
+- **Evidence and mapping**:
+  - `ModelMemoryProfile` is the authoritative MLX geometry input. It preserves field evidence and uses nested `text_config` rather than wrapper fields when present.
+  - Incomplete/unreadable config falls back to a name heuristic only with `evidence = "degraded"`; it is never presented as exact metadata.
+  - The profile maps into shared `ModelArch` geometry (layers, heads, KV heads, head dimensions, full/local/linear groups, MoE, recurrent state, and companions) without importing llama.cpp runtime vocabulary.
   - Exact per-layer byte size is computed from real on-disk/HF-listed size:
     `bytes_per_layer = model_size_bytes / n_layers`.
 - **HuggingFace pre-download**:
-  - For Rapid-MLX, the VRAM estimator can fetch `config.json` from an HF repo without range-fetching:
-    `crate::hf::fetch_mlx_config(repo_id, config_file)`.
+  - For Rapid-MLX, the VRAM estimator fetches `config.json` at the selected revision without range-fetching and preserves that revision in the profile evidence.
   - Weight size is resolved from the HF tree API (`crate::hf::resolve_mlx_repo_size_bytes`).
   - If `config.json` fetch fails or is missing required fields, the model is still estimable
     via the name heuristic with `evidence = "degraded"`.
