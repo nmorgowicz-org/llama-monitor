@@ -437,6 +437,58 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
     }
     bar.style.display = '';
 
+    // Metal limit teaching: if current cap is below recommended, show increase button
+    const recommendedMb = Math.round(ramTotalBytes / (1024 * 1024)) - 8192; // total_MB - 8GB
+    if (metalGpuLimitMb > 0 && metalGpuLimitMb < recommendedMb) {
+        const currentGb = Math.round(metalGpuLimitMb / 1024);
+        const recGb = Math.round(recommendedMb / 1024);
+        const totalGb = Math.round(ramTotalBytes / (1024 ** 3));
+        const existingRow = document.getElementById('setup-metal-limit-row');
+        if (!existingRow) {
+            const row = document.createElement('div');
+            row.id = 'setup-metal-limit-row';
+            row.style.cssText = 'margin-top:8px;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#94a3b8;';
+            const labelSpan = document.createElement('span');
+            labelSpan.textContent = 'Metal GPU cap: ' + currentGb + ' GB (of ' + totalGb + ' GB total)';
+            row.appendChild(labelSpan);
+            const btn = document.createElement('button');
+            btn.id = 'setup-metal-limit-btn';
+            btn.style.cssText = 'background:none;border:1px solid #64748b;color:#94a3b8;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:10px;';
+            btn.textContent = 'Increase to ' + recGb + ' GB';
+            row.appendChild(btn);
+            bar.parentNode.insertBefore(row, bar.nextSibling);
+        }
+        const btn = document.getElementById('setup-metal-limit-btn');
+        if (btn && !btn.dataset.wired) {
+            btn.dataset.wired = '1';
+            btn.addEventListener('click', async () => {
+                btn.disabled = true;
+                btn.textContent = 'Updating…';
+                try {
+                    const headers = window.authHeaders ? window.authHeaders() : {};
+                    const resp = await fetch('/api/system/wired-limit', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ...headers },
+                        body: JSON.stringify({ value_mb: recommendedMb, confirm: 'set-wired-limit' }),
+                    });
+                    const data = await resp.json();
+                    if (data.success) {
+                        showToast('Metal GPU cap updated to ' + Math.round(data.actual_mb / 1024) + ' GB', 'success');
+                        document.getElementById('setup-metal-limit-row')?.remove();
+                    } else {
+                        showToast('Failed: ' + (data.error?.reason || 'unknown'), 'error');
+                        btn.disabled = false;
+                        btn.textContent = 'Increase to ' + recGb + ' GB';
+                    }
+                } catch {
+                    showToast('Error updating Metal GPU cap', 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Increase to ' + recGb + ' GB';
+                }
+            });
+        }
+    }
+
     // Wire "Free cache" button (macOS only)
     if (purgeBtn && reclaimableBytes >= 3 * 1024 ** 3) {
         purgeBtn.onclick = async () => {
