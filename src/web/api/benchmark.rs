@@ -547,16 +547,21 @@ fn api_model_defaults(
                     ));
                 }
 
-                let presets = crate::llama::sampling_catalog::SamplingCatalog::modes_as_presets(
+                let backend = body["backend"]
+                    .as_str()
+                    .and_then(|value| serde_json::from_value(serde_json::json!(value)).ok())
+                    .unwrap_or(InferenceBackend::LlamaCpp);
+                let modes = crate::llama::sampling_catalog::SamplingCatalog::modes_for_model(
                     &name_or_repo,
                     size_bytes,
                     &tags,
                     &gguf_arch,
                     &arch_family,
+                    backend,
                 );
-                let defaults = presets
+                let defaults = modes
                     .first()
-                    .map(|p| p.defaults.clone())
+                    .map(|mode| mode.defaults.clone())
                     .unwrap_or_default();
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
@@ -575,7 +580,7 @@ fn api_model_defaults(
                         "reasoning": defaults.reasoning,
                         "reasoning_budget": defaults.reasoning_budget,
                         "reasoning_budget_message": defaults.reasoning_budget_message,
-                        "presets": presets,
+                        "modes": modes,
                     }),
                 )))
             }

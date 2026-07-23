@@ -872,8 +872,7 @@ function findPresetsForModel(model) {
         const rapidMlx = preset.rapid_mlx;
         if (!rapidMlx) return false;
         const candidate = rapidMlx.model_source_view?.canonical_identity
-            || rapidMlx.model_source_view?.display_name
-            || rapidMlx.model_path;
+            || rapidMlx.model_source_view?.display_name;
         return candidate ? paths.has(candidate) : false;
     });
 }

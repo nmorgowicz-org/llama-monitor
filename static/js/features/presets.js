@@ -77,8 +77,7 @@ export function presetModelSource(preset) {
             return ms.value || '';
         }
         return rapidMlx?.model_source_view?.canonical_identity
-            || rapidMlx?.model_source_view?.display_name
-            || rapidMlx?.model_path || '';
+            || rapidMlx?.model_source_view?.display_name || '';
     }
     return preset?.model_path || preset?.hf_repo || '';
 }
@@ -1461,8 +1460,7 @@ function _renderPresetsPanel() {
         const rapidMlx = preset.rapid_mlx;
         if (preset.backend === 'rapid_mlx') {
             const modelIdentity = rapidMlx?.model_source_view?.canonical_identity
-                || rapidMlx?.model_source_view?.display_name
-                || rapidMlx?.model_path;
+                || rapidMlx?.model_source_view?.display_name;
             if (modelIdentity) {
                 metaParts.push(modelIdentity.split(/[/\\]/).pop() || modelIdentity);
                 metaParts.push('Rapid-MLX');
@@ -1948,7 +1946,7 @@ export async function savePreset(event) {
     }
     const rapidMlx = preset.rapid_mlx;
     const hasModelSource = preset.backend === 'rapid_mlx'
-        ? !!(rapidMlx?.model_source_view || rapidMlx?.model_path)
+        ? !!rapidMlx?.model_source_view
         : !!(preset.model_path || preset.hf_repo);
     if (!hasModelSource) {
         markFieldError('modal-model-path', 'Model path or HuggingFace repo is required.');
@@ -2202,6 +2200,7 @@ function initPresetEditorNav() {
 // fillEmpty=false: only render the preset pill switchers, don't overwrite existing values.
 async function _suggestGenerationDefaults(modelPath, fillEmpty = true) {
     const modelName = modelPath.split(/[/\\]/).pop() || modelPath;
+    const backend = _currentModalPreset()?.backend || 'llama_cpp';
     try {
         const headers = window.authHeaders
             ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
@@ -2225,14 +2224,18 @@ async function _suggestGenerationDefaults(modelPath, fillEmpty = true) {
         const resp = await fetch('/api/model-defaults', {
             method: 'POST',
             headers,
-            body: JSON.stringify({ model_name_or_repo: modelName, size_bytes: 0, tags: [], gguf_arch: ggufArch }),
+            body: JSON.stringify({ model_name_or_repo: modelName, size_bytes: 0, tags: [], gguf_arch: ggufArch, backend }),
         });
         if (!resp.ok) return;
         const d = await resp.json();
         if (d.error) return;
         const defaults = d.defaults || d;
+        const coverage = backend === 'rapid_mlx'
+            ? (d.modes?.[0]?.rapid_mlx_coverage || {})
+            : (d.modes?.[0]?.llama_cpp_coverage || {});
+        const canApplyDefaults = Object.values(coverage).some(Boolean);
 
-        if (fillEmpty) {
+        if (fillEmpty && canApplyDefaults) {
             // Only fill fields the user hasn't already set
             const fill = (id, val) => {
                 const el = document.getElementById(id);
@@ -2257,7 +2260,7 @@ async function _suggestGenerationDefaults(modelPath, fillEmpty = true) {
                 msgEl.value = defaults.reasoning_budget_message.replace(/\n/g, '\\n');
             }
         }
-        _renderGenerationPresetPills(d.presets || []);
+        _renderGenerationPresetPills(d.modes || []);
     } catch (_) {
         // Silent — best-effort only
     }
@@ -2292,7 +2295,10 @@ function _renderGenerationPresetPills(presets) {
         btn.type = 'button';
         btn.className = 'sampling-preset-pill' + (index === 0 ? ' active' : '');
         btn.textContent = preset.name;
-        if (preset.description) btn.title = preset.description;
+        const provenance = preset.provenance?.unsloth?.url || preset.provenance?.model_author?.source;
+        const badges = (preset.workload_badges || []).join(', ');
+        btn.title = [preset.description, badges && `Best for: ${badges}`, provenance && `Source: ${provenance}`]
+            .filter(Boolean).join('\n');
         btn.addEventListener('click', () => {
             container.querySelectorAll('.sampling-preset-pill').forEach(p => p.classList.remove('active'));
             btn.classList.add('active');
@@ -2303,6 +2309,15 @@ function _renderGenerationPresetPills(presets) {
 }
 
 function _applyGenerationPreset(preset) {
+    if (preset.id === 'model_default') {
+        ['modal-temperature', 'modal-top-p', 'modal-top-k', 'modal-min-p', 'modal-repeat-penalty', 'modal-presence-penalty', 'modal-max-tokens', 'modal-reasoning-budget']
+            .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        ['modal-enable-thinking', 'modal-preserve-thinking', 'modal-tool-call-format', 'modal-reasoning']
+            .forEach(id => setOpt(id, ''));
+        setVal('modal-reasoning-budget-message', '');
+        return;
+    }
+    if (preset.id === 'custom') return;
     numOrEmpty('modal-temperature', preset.temperature);
     numOrEmpty('modal-top-p', preset.top_p);
     numOrEmpty('modal-top-k', preset.top_k);
@@ -2316,6 +2331,8 @@ function _applyGenerationPreset(preset) {
     setOpt('modal-reasoning', preset.reasoning ? 'on' : 'off');
     numOrEmpty('modal-reasoning-budget', preset.reasoning_budget);
     setVal('modal-reasoning-budget-message', (preset.reasoning_budget_message || '').replace(/\n/g, '\\n'));
+    const samplingMode = document.getElementById('modal-rapid-sampling-mode');
+    if (samplingMode && preset.id) samplingMode.value = preset.id;
 }
 
 // ── Restart after preset save ──────────────────────────────────────────────────
@@ -2509,8 +2526,7 @@ function _schedulePresetRapidMlxProfile() {
         }
         const rapidMlx = preset.rapid_mlx;
         const modelId = rapidMlx?.model_source_view?.canonical_identity
-            || rapidMlx?.model_source_view?.display_name
-            || rapidMlx?.model_path || '';
+            || rapidMlx?.model_source_view?.display_name || '';
         if (!modelId || modelId.trim().length < 2) {
             _presetRapidMlxProfile = null;
             return;

@@ -9275,13 +9275,30 @@ async function _loadModelDirSwitcher() {
 
 function _applyPresetToHardware(preset) {
   const h = wizardState.hardware;
+  if (preset.id === 'model_default') {
+    h.temperature = null;
+    h.topP = null;
+    h.topK = null;
+    h.minP = null;
+    h.repeatPenalty = null;
+    h.presencePenalty = null;
+    h.maxTokens = null;
+    h.enableThinking = null;
+    h.preserveThinking = null;
+    h.toolCallFormat = null;
+    h.reasoningBudget = null;
+    h.reasoningMode = null;
+    h.reasoningBudgetMessage = null;
+    _syncThinkingFields();
+    return;
+  }
+  if (preset.id === 'custom') return;
   if (preset.temperature != null) h.temperature = preset.temperature;
   if (preset.top_p != null) h.topP = preset.top_p;
-  if (preset.top_k != null) h.topK = preset.top_k > 0 ? preset.top_k : null;
+  if (preset.top_k != null) h.topK = preset.top_k;
   if (preset.min_p != null) h.minP = preset.min_p;
   if (preset.repeat_penalty != null) h.repeatPenalty = preset.repeat_penalty;
-  h.presencePenalty = (preset.presence_penalty != null && preset.presence_penalty > 0)
-    ? preset.presence_penalty : null;
+  h.presencePenalty = preset.presence_penalty ?? null;
   h.maxTokens = preset.max_tokens != null ? preset.max_tokens : null;
   h.enableThinking   = preset.enable_thinking   ?? null;
    h.preserveThinking = preset.preserve_thinking ?? null;
@@ -9318,12 +9335,22 @@ function _renderSamplingPresetPills(presets) {
     btn.type = 'button';
     btn.className = 'sampling-preset-pill' + (i === 0 ? ' active' : '');
     btn.textContent = preset.name;
-    if (preset.description) btn.title = preset.description;
+    const provenance = preset.provenance?.unsloth?.url || preset.provenance?.model_author?.source;
+    const badges = (preset.workload_badges || []).join(', ');
+    const rapidCoverage = preset.rapid_mlx_coverage || {};
+    const rapidUnqualified = wizardState.engine.selected === 'rapid_mlx'
+      && !Object.values(rapidCoverage).some(Boolean);
+    btn.title = [preset.description, badges && `Best for: ${badges}`, provenance && `Source: ${provenance}`,
+      rapidUnqualified && 'Rapid-MLX sampler defaults are pending runtime qualification; this mode is informational.']
+      .filter(Boolean).join('\n');
+    btn.disabled = rapidUnqualified && preset.id !== 'model_default' && preset.id !== 'custom';
     btn.dataset.presetIndex = String(i);
     btn.addEventListener('click', () => {
       container.querySelectorAll('.sampling-preset-pill').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
       _applyPresetToHardware(preset);
+      wizardState.hardware.samplingMode = preset.id || 'custom';
+      if (dom.samplingModeSelect) dom.samplingModeSelect.value = wizardState.hardware.samplingMode;
       _syncSamplingFields();
     });
     container.appendChild(btn);
@@ -9349,57 +9376,45 @@ async function _fetchAndApplyModelSamplingDefaults() {
         size_bytes: m.modelBytes || 0,
         tags: [],
         gguf_arch: wizardState.arch.ggufArch || '',
-        arch_family: wizardState.model.family || '',
+      arch_family: wizardState.model.family || '',
+      backend: wizardState.engine.selected || 'llama_cpp',
       }),
     });
     if (!res.ok) return;
     const data = await res.json();
     const defaults = data.defaults || data;
     const h = wizardState.hardware;
+    const effectiveCoverage = wizardState.engine.selected === 'rapid_mlx'
+      ? (data.modes?.[0]?.rapid_mlx_coverage || {})
+      : (data.modes?.[0]?.llama_cpp_coverage || {});
+    const canApplyDefaults = Object.values(effectiveCoverage).some(Boolean);
 
     // Apply first preset values (only overwrite fields not yet explicitly set)
-    if (h.temperature == null && defaults.temperature != null) h.temperature = defaults.temperature;
-    if (h.topP == null && defaults.top_p != null) h.topP = defaults.top_p;
-    if (h.topK == null && defaults.top_k != null && defaults.top_k > 0) h.topK = defaults.top_k;
-    if (h.minP == null && defaults.min_p != null) h.minP = defaults.min_p;
-    if (h.repeatPenalty == null && defaults.repeat_penalty != null) h.repeatPenalty = defaults.repeat_penalty;
-    if (h.presencePenalty == null && defaults.presence_penalty != null && defaults.presence_penalty > 0) {
-      h.presencePenalty = defaults.presence_penalty;
-    }
-    if (h.maxTokens == null && defaults.max_tokens != null) h.maxTokens = defaults.max_tokens;
-    if (h.enableThinking == null && defaults.enable_thinking != null) h.enableThinking = defaults.enable_thinking;
-    if (h.preserveThinking == null && defaults.preserve_thinking != null) h.preserveThinking = defaults.preserve_thinking;
-    if (h.reasoningMode == null && defaults.reasoning != null) {
-      h.reasoningMode = defaults.reasoning ? 'on' : 'off';
-    }
-    if (h.reasoningBudget == null && defaults.reasoning_budget != null) h.reasoningBudget = defaults.reasoning_budget;
-    if (h.reasoningBudgetMessage == null && defaults.reasoning_budget_message != null) {
-      h.reasoningBudgetMessage = defaults.reasoning_budget_message;
+    if (canApplyDefaults) {
+      if (h.temperature == null && defaults.temperature != null) h.temperature = defaults.temperature;
+      if (h.topP == null && defaults.top_p != null) h.topP = defaults.top_p;
+      if (h.topK == null && defaults.top_k != null) h.topK = defaults.top_k;
+      if (h.minP == null && defaults.min_p != null) h.minP = defaults.min_p;
+      if (h.repeatPenalty == null && defaults.repeat_penalty != null) h.repeatPenalty = defaults.repeat_penalty;
+      if (h.presencePenalty == null && defaults.presence_penalty != null) {
+        h.presencePenalty = defaults.presence_penalty;
+      }
+      if (h.maxTokens == null && defaults.max_tokens != null) h.maxTokens = defaults.max_tokens;
+      if (h.enableThinking == null && defaults.enable_thinking != null) h.enableThinking = defaults.enable_thinking;
+      if (h.preserveThinking == null && defaults.preserve_thinking != null) h.preserveThinking = defaults.preserve_thinking;
+      if (h.reasoningMode == null && defaults.reasoning != null) {
+        h.reasoningMode = defaults.reasoning ? 'on' : 'off';
+      }
+      if (h.reasoningBudget == null && defaults.reasoning_budget != null) h.reasoningBudget = defaults.reasoning_budget;
+      if (h.reasoningBudgetMessage == null && defaults.reasoning_budget_message != null) {
+        h.reasoningBudgetMessage = defaults.reasoning_budget_message;
+      }
     }
     _syncThinkingFields();
 
-    // Render mode pills if multiple presets are available
-    _renderSamplingPresetPills(data.presets || []);
+    // Rust owns the complete catalog, including stable IDs/provenance/coverage.
+    _renderSamplingPresetPills(data.modes || []);
   } catch { /* non-fatal */ }
-}
-
-// Use-case sampling defaults (temperature, top-p, min-p, repeat-penalty)
-const SAMPLING_DEFAULTS = {
-  agentic:  { temperature: 0.3,  topP: 0.95, minP: 0.02, topK: null, repeatPenalty: 1.05, presencePenalty: null, seed: null },
-  general:  { temperature: 0.7,  topP: 0.9,  minP: 0.05, topK: null, repeatPenalty: 1.05, presencePenalty: null, seed: null },
-  roleplay: { temperature: 1.0,  topP: 0.95, minP: 0.05, topK: null, repeatPenalty: 1.05, presencePenalty: null, seed: null },
-};
-
-function applyUseCaseSamplingDefaults() {
-  const def = SAMPLING_DEFAULTS[wizardState.useCase] || SAMPLING_DEFAULTS.general;
-  const h = wizardState.hardware;
-  // Only apply defaults if user hasn't already set explicit values
-  if (h.temperature == null) h.temperature = def.temperature;
-  if (h.topP == null) h.topP = def.topP;
-  if (h.minP == null) h.minP = def.minP;
-  if (h.topK == null && def.topK != null) h.topK = def.topK;
-  if (h.repeatPenalty == null) h.repeatPenalty = def.repeatPenalty;
-  if (h.presencePenalty == null && def.presencePenalty != null) h.presencePenalty = def.presencePenalty;
 }
 
 // ── Summary (Step 4) ──────────────────────────────────────────────────────────
@@ -9408,8 +9423,6 @@ async function renderSummary() {
   if (!dom.summaryList) return;
   dom.summaryList.innerHTML = '';
 
-  // Apply use-case sampling defaults before rendering
-  applyUseCaseSamplingDefaults();
   // Sync sampling fields in the review step form
   _syncSamplingFields();
 

@@ -16,14 +16,12 @@ pub const PRESET_SCHEMA_VERSION: u32 = 3;
 /// Returns `true` if migration was applied, `false` if already current.
 pub fn migrate_preset(preset: &mut ModelPreset) -> bool {
     let from_version = preset.schema_version.unwrap_or(0);
-    if from_version >= PRESET_SCHEMA_VERSION {
-        return false;
-    }
     let mut migrated = false;
-    // v0 → v1: typed Rapid-MLX model_source migration
-    if from_version < 1 {
-        if let Some(rapid) = preset.rapid_mlx.as_mut()
-            && rapid.model_source.is_none()
+    // Typed Rapid-MLX source is authoritative. Run this normalization at every
+    // persistence boundary too, so API-created/updated legacy presets cannot
+    // reintroduce a divergent secondary `model_path` identity.
+    if let Some(rapid) = preset.rapid_mlx.as_mut() {
+        if rapid.model_source.is_none()
             && !rapid.model_path.is_empty()
             && let Ok(source) =
                 crate::inference::rapid_mlx::model_resolver::source_from_legacy_model_path(
@@ -33,7 +31,15 @@ pub fn migrate_preset(preset: &mut ModelPreset) -> bool {
             rapid.model_source = Some(source);
             migrated = true;
         }
+        if rapid.model_source.is_some() && !rapid.model_path.is_empty() {
+            rapid.model_path.clear();
+            migrated = true;
+        }
+    }
+    // v0 → v1: typed Rapid-MLX model source migration.
+    if from_version < 1 {
         preset.schema_version = Some(1);
+        migrated = true;
     }
     // v1 → v2: Phase 6 Part B — add prefix_cache_enabled (default false) and prefix_cache_budget_bytes.
     // Existing presets remain with prefix_cache_enabled=false (safe default, never auto-enabled).
@@ -48,6 +54,10 @@ pub fn migrate_preset(preset: &mut ModelPreset) -> bool {
     // existing presets load with None (safe degraded mode). Migration bumps schema marker.
     if preset.schema_version.unwrap_or(2) < 3 {
         preset.schema_version = Some(3);
+        migrated = true;
+    }
+    if preset.schema_version.unwrap_or(0) < PRESET_SCHEMA_VERSION {
+        preset.schema_version = Some(PRESET_SCHEMA_VERSION);
         migrated = true;
     }
     migrated
@@ -408,7 +418,11 @@ pub fn save_presets(path: &Path, presets: &[ModelPreset]) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let tmp = path.with_extension("json.tmp");
-    let json = serde_json::to_string_pretty(presets)?;
+    let mut normalized = presets.to_vec();
+    for preset in &mut normalized {
+        migrate_preset(preset);
+    }
+    let json = serde_json::to_string_pretty(&normalized)?;
     std::fs::write(&tmp, json)?;
     std::fs::rename(&tmp, path)?;
     Ok(())
@@ -717,6 +731,28 @@ mod tests {
         assert_eq!(rapid.model_path, "/models/rapid");
         assert_eq!(rapid.served_model_name.as_deref(), Some("rapid-model"));
         assert_eq!(rapid.port, 8123);
+    }
+
+    #[test]
+    fn save_boundary_migrates_legacy_rapid_source_without_dual_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("presets.json");
+        let preset = ModelPreset {
+            name: "Legacy Rapid".into(),
+            backend: InferenceBackend::RapidMlx,
+            rapid_mlx: Some(RapidMlxConfig {
+                model_path: "org/model-alias".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        save_presets(&path, &[preset]).unwrap();
+        let saved: Vec<ModelPreset> =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let rapid = saved[0].rapid_mlx.as_ref().unwrap();
+        assert_eq!(saved[0].schema_version, Some(PRESET_SCHEMA_VERSION));
+        assert!(rapid.model_source.is_some());
+        assert!(rapid.model_path.is_empty());
     }
 
     #[test]

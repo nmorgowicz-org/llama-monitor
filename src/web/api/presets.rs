@@ -132,6 +132,7 @@ fn api_create_preset(
             if !check_api_token(&auth, &cfg) {
                 return futures_util::future::ready(Ok(unauthorized_api_token()));
             }
+            presets::migrate_preset(&mut preset);
             if let Err(error) = validate_preset_backend_config(&preset) {
                 return futures_util::future::ready(Ok::<
                     Box<dyn warp::reply::Reply>,
@@ -178,6 +179,8 @@ fn api_update_preset(
                 if !check_api_token(&auth, &cfg) {
                     return futures_util::future::ready(Ok(unauthorized_api_token()));
                 }
+                updated.id = id.clone();
+                presets::migrate_preset(&mut updated);
                 if let Err(error) = validate_preset_backend_config(&updated) {
                     return futures_util::future::ready(Ok::<
                         Box<dyn warp::reply::Reply>,
@@ -191,8 +194,6 @@ fn api_update_preset(
                         ),
                     )));
                 }
-                updated.id = id.clone();
-
                 let existing_api_key = state
                     .presets
                     .lock()

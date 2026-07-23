@@ -1727,9 +1727,11 @@ fn model_id_for_info(config: &RapidMlxConfig) -> Option<String> {
             }
             AuthoritativeSafetensorsSource::LocalDirectory { .. } => None,
         },
-        Some(RapidMlxModelSource::MlxDirectory { .. } | RapidMlxModelSource::GgufFile { .. }) => {
-            None
-        }
+        Some(
+            RapidMlxModelSource::MlxDirectory { .. }
+            | RapidMlxModelSource::GgufFile { .. }
+            | RapidMlxModelSource::Unknown { .. },
+        ) => None,
         None if !config.model_path.is_empty() => Some(config.model_path.clone()),
         None => None,
     }

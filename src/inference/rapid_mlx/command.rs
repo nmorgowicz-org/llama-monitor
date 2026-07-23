@@ -501,13 +501,10 @@ impl RapidMlxCommandBuilder {
             args.push("--request-safety-policy".to_string());
             args.push(policy.clone());
         }
-        if let Some(ref mode) = self.sampling_mode
-            && mode != "auto"
-        {
-            capabilities.require("--sampling-mode")?;
-            args.push("--sampling-mode".to_string());
-            args.push(mode.clone());
-        }
+        // `sampling_mode` is persisted selection metadata. Phase 2 deliberately
+        // does not turn it into a Rapid argv flag: per-field server-default
+        // support is runtime-qualified in Phase 3, and an unqualified selection
+        // must never create an unsupported launch argument.
         if let Some(ref policy) = self.parser_policy
             && policy != "auto"
         {
@@ -595,7 +592,8 @@ fn validate_trust_consent(
         RapidMlxModelSource::MlxDirectory { .. }
         | RapidMlxModelSource::GgufFile { .. }
         | RapidMlxModelSource::Alias { .. }
-        | RapidMlxModelSource::AuthoritativeSafetensors { .. } => {
+        | RapidMlxModelSource::AuthoritativeSafetensors { .. }
+        | RapidMlxModelSource::Unknown { .. } => {
             anyhow::bail!(
                 "trust_remote_code consent requires an HF repo source; model source kind does not support revision-scoped consent"
             );
@@ -981,10 +979,7 @@ mod tests {
             args.windows(2)
                 .any(|p| p == ["--request-safety-policy", "strict"])
         );
-        assert!(
-            args.windows(2)
-                .any(|p| p == ["--sampling-mode", "explicit_client"])
-        );
+        assert!(!args.iter().any(|arg| arg == "--sampling-mode"));
         assert!(args.windows(2).any(|p| p == ["--parser-policy", "native"]));
         assert!(
             args.windows(2)

@@ -202,3 +202,24 @@ The wizard isolates settings per backend:
   - No llama.cpp flags; Rapid-MLX models do not send llama.cpp args.
 
 This ensures generated launch commands only include parameters valid for the chosen backend.
+
+## Model sources and sampling modes
+
+Rapid-MLX presets store a typed model source rather than relying on a display path.
+Supported sources include a local MLX directory, a Hugging Face repository and revision,
+an alias, an authoritative Safetensors conversion source, and a GGUF source that is retained
+for migration but shown as llama.cpp-only. Older Rapid-MLX presets are migrated to the typed
+source when loaded or saved; the legacy `model_path` is not retained as a second identity.
+Unknown future source kinds are preserved for editing/export but cannot launch until the
+installed Llama Monitor version understands them.
+
+Sampling choices come from one backend API catalog. Each mode includes its stable ID,
+source/provenance, workload badges, and backend field coverage. The catalog always includes
+Model/author default (omit sampler defaults) and Custom (preserve user-entered values), in
+addition to applicable curated family modes. Explicit request values take precedence over a
+selected mode; explicit `0` and `false` remain explicit values rather than being replaced by
+defaults.
+
+For llama.cpp, supported selected defaults become launch defaults exactly once. Rapid-MLX
+sampling defaults remain informational until the selected runtime's per-field capability
+snapshot qualifies them; the wizard does not claim they are active or emit unsupported flags.

@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, anyhow, bail};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -166,6 +166,25 @@ impl RapidMlxModelSourceView {
                     "Use the separate experimental Phase 5.5 import workflow when available".into(),
                 ],
             },
+            RapidMlxModelSource::Unknown { kind, raw } => Self {
+                kind: "unknown".into(),
+                display_name: format!("Unknown source type: {kind}"),
+                canonical_identity: raw
+                    .get("canonical_identity")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                repo_id: None,
+                revision: None,
+                local_path: None,
+                conversion_recipe: None,
+                provenance_hash: None,
+                editable_fields: vec![],
+                launchable: false,
+                warnings: vec![format!(
+                    "This preset uses unsupported future source kind '{kind}'. Preserve it or update llama-monitor before launching."
+                )],
+            },
         }
     }
 
@@ -204,9 +223,37 @@ thread_local! {
     static SAFETENSORS_INDEX_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RapidMlxModelSource {
+    MlxDirectory {
+        path: PathBuf,
+    },
+    HuggingFaceRepo {
+        repo_id: String,
+        revision: String,
+    },
+    Alias {
+        value: String,
+    },
+    AuthoritativeSafetensors {
+        source: AuthoritativeSafetensorsSource,
+        revision_or_hash: String,
+        recipe: MlxConversionRecipe,
+    },
+    GgufFile {
+        path: PathBuf,
+    },
+    /// A forward-compatible source shape from a newer llama-monitor version.
+    /// It round-trips without becoming launchable until this build understands it.
+    Unknown {
+        kind: String,
+        raw: serde_json::Value,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum RapidMlxModelSource {
+enum KnownRapidMlxModelSource {
     MlxDirectory {
         path: PathBuf,
     },
@@ -226,6 +273,91 @@ pub enum RapidMlxModelSource {
     GgufFile {
         path: PathBuf,
     },
+}
+
+impl From<KnownRapidMlxModelSource> for RapidMlxModelSource {
+    fn from(value: KnownRapidMlxModelSource) -> Self {
+        match value {
+            KnownRapidMlxModelSource::MlxDirectory { path } => Self::MlxDirectory { path },
+            KnownRapidMlxModelSource::HuggingFaceRepo { repo_id, revision } => {
+                Self::HuggingFaceRepo { repo_id, revision }
+            }
+            KnownRapidMlxModelSource::Alias { value } => Self::Alias { value },
+            KnownRapidMlxModelSource::AuthoritativeSafetensors {
+                source,
+                revision_or_hash,
+                recipe,
+            } => Self::AuthoritativeSafetensors {
+                source,
+                revision_or_hash,
+                recipe,
+            },
+            KnownRapidMlxModelSource::GgufFile { path } => Self::GgufFile { path },
+        }
+    }
+}
+
+impl Serialize for RapidMlxModelSource {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::MlxDirectory { path } => {
+                KnownRapidMlxModelSource::MlxDirectory { path: path.clone() }.serialize(serializer)
+            }
+            Self::HuggingFaceRepo { repo_id, revision } => {
+                KnownRapidMlxModelSource::HuggingFaceRepo {
+                    repo_id: repo_id.clone(),
+                    revision: revision.clone(),
+                }
+                .serialize(serializer)
+            }
+            Self::Alias { value } => KnownRapidMlxModelSource::Alias {
+                value: value.clone(),
+            }
+            .serialize(serializer),
+            Self::AuthoritativeSafetensors {
+                source,
+                revision_or_hash,
+                recipe,
+            } => KnownRapidMlxModelSource::AuthoritativeSafetensors {
+                source: source.clone(),
+                revision_or_hash: revision_or_hash.clone(),
+                recipe: *recipe,
+            }
+            .serialize(serializer),
+            Self::GgufFile { path } => {
+                KnownRapidMlxModelSource::GgufFile { path: path.clone() }.serialize(serializer)
+            }
+            Self::Unknown { kind, raw } => {
+                let mut value = raw.clone();
+                let object = value.as_object_mut().ok_or_else(|| {
+                    serde::ser::Error::custom("unknown Rapid-MLX source must be an object")
+                })?;
+                object.insert("kind".into(), serde_json::Value::String(kind.clone()));
+                value.serialize(serializer)
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for RapidMlxModelSource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = serde_json::Value::deserialize(deserializer)?;
+        let kind = raw
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("Rapid-MLX model source requires string kind"))?
+            .to_string();
+        match serde_json::from_value::<KnownRapidMlxModelSource>(raw.clone()) {
+            Ok(source) => Ok(source.into()),
+            Err(_) => Ok(Self::Unknown { kind, raw }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -615,6 +747,9 @@ pub async fn resolve(
             context.runtime_version,
             path.display()
         ),
+        RapidMlxModelSource::Unknown { kind, .. } => bail!(
+            "Rapid-MLX source kind '{kind}' is from a newer llama-monitor version and cannot be launched safely by this build"
+        ),
     };
     let mut result = result;
     result.environment.append(&mut environment);
@@ -689,6 +824,9 @@ fn validate_source(source: &RapidMlxModelSource, context: &RapidMlxResolveContex
                 context.runtime_version,
                 path.display()
             )
+        }
+        RapidMlxModelSource::Unknown { kind, .. } => {
+            bail!("Unsupported future Rapid-MLX source kind '{kind}'")
         }
     }?;
     if context.models_dir.as_os_str().is_empty() {
@@ -1476,6 +1614,7 @@ fn source_kind_name(source: &RapidMlxModelSource) -> &'static str {
         RapidMlxModelSource::Alias { .. } => "alias",
         RapidMlxModelSource::AuthoritativeSafetensors { .. } => "authoritative_safetensors",
         RapidMlxModelSource::GgufFile { .. } => "gguf_file",
+        RapidMlxModelSource::Unknown { .. } => "unknown",
     }
 }
 
@@ -1496,6 +1635,7 @@ fn display_name(source: &RapidMlxModelSource) -> String {
                 .to_string(),
             AuthoritativeSafetensorsSource::HuggingFaceRepo { repo_id, .. } => repo_id.clone(),
         },
+        RapidMlxModelSource::Unknown { kind, .. } => format!("Unknown source type: {kind}"),
     }
 }
 
@@ -1935,5 +2075,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("config.json"), b"not json").unwrap();
         assert!(!needs_trust_remote_code(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn unknown_source_kind_roundtrips_and_is_never_launchable() {
+        let source: RapidMlxModelSource = serde_json::from_value(serde_json::json!({
+            "kind": "future_registry_source",
+            "canonical_identity": "registry://future/model",
+            "future_field": {"preserve": true}
+        }))
+        .unwrap();
+        let view = RapidMlxModelSourceView::from_source(&source);
+        assert_eq!(view.kind, "unknown");
+        assert!(!view.launchable);
+        assert_eq!(
+            serde_json::to_value(source).unwrap()["future_field"]["preserve"],
+            true
+        );
     }
 }

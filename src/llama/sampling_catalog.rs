@@ -4,7 +4,7 @@
 //! One Rust-owned catalog for both backends. Parsing adapters may still
 //! populate it; frontend never duplicates this logic.
 
-use crate::llama::model_defaults::{ModelDefaults, ModelPreset};
+use crate::llama::model_defaults::ModelDefaults;
 
 /// Stable sampling mode ID for cross-surface identification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -22,6 +22,8 @@ pub enum SamplingModeId {
     CreativeRoleplay,
     /// Custom user configuration.
     Custom,
+    /// Curated non-thinking mode; distinct from the omission-only Custom choice.
+    NonThinking,
 }
 
 impl SamplingModeId {
@@ -34,6 +36,7 @@ impl SamplingModeId {
             Self::PreciseDeterministic => "precise_deterministic",
             Self::CreativeRoleplay => "creative_roleplay",
             Self::Custom => "custom",
+            Self::NonThinking => "non_thinking",
         }
     }
 }
@@ -68,7 +71,7 @@ pub enum WorkloadBadge {
 }
 
 /// A single sampling mode from the catalog.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SamplingMode {
     pub id: SamplingModeId,
     pub name: String,
@@ -86,7 +89,7 @@ pub struct SamplingMode {
 }
 
 /// Backend-native field coverage for a sampling mode.
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct BackendFieldCoverage {
     pub temperature: bool,
     pub top_p: bool,
@@ -116,23 +119,11 @@ impl BackendFieldCoverage {
         }
     }
 
-    /// Rapid-MLX v0.10.12 coverage: --default-temperature, --default-top-p,
-    /// --default-top-k, --default-min-p, --default-repetition-penalty,
-    /// --default-presence-penalty, --default-frequency-penalty exist.
-    /// Reasoning/thinking are model/template-controlled, not server defaults.
-    pub fn rapid_mlx_current() -> Self {
-        Self {
-            temperature: true,
-            top_p: true,
-            top_k: true,
-            min_p: true,
-            repeat_penalty: true,
-            presence_penalty: true,
-            frequency_penalty: true,
-            enable_thinking: false,
-            preserve_thinking: false,
-            reasoning_budget: false,
-        }
+    /// Rapid-MLX server-default coverage is runtime-qualified in Phase 3.
+    /// Phase 2 deliberately exposes no field as effective until the selected
+    /// executable's exact help/capability snapshot has confirmed it.
+    pub fn rapid_mlx_unqualified() -> Self {
+        Self::default()
     }
 }
 
@@ -164,7 +155,7 @@ impl SamplingCatalog {
         _backend: crate::inference::InferenceBackend,
     ) -> Vec<SamplingMode> {
         let llama_coverage = BackendFieldCoverage::full();
-        let rapid_coverage = BackendFieldCoverage::rapid_mlx_current();
+        let rapid_coverage = BackendFieldCoverage::rapid_mlx_unqualified();
 
         let lower = name_or_repo.to_ascii_lowercase();
         let arch_lower = gguf_arch.to_ascii_lowercase();
@@ -178,7 +169,11 @@ impl SamplingCatalog {
             || family_lower == "qwen3.5";
 
         if is_qwen35 {
-            return Self::qwen35_modes(llama_coverage, rapid_coverage);
+            return Self::with_universal_omission_choices(
+                Self::qwen35_modes(llama_coverage.clone(), rapid_coverage.clone()),
+                llama_coverage,
+                rapid_coverage,
+            );
         }
 
         // Qwen3.6 family (including Qwopus): presets from https://unsloth.ai/docs/models/qwen3.6
@@ -192,7 +187,11 @@ impl SamplingCatalog {
                 && (lower.contains("27b") || lower.contains("35b") || lower.contains("a3b"));
 
         if is_qwen36 {
-            return Self::qwen36_modes(llama_coverage, rapid_coverage);
+            return Self::with_universal_omission_choices(
+                Self::qwen36_modes(llama_coverage.clone(), rapid_coverage.clone()),
+                llama_coverage,
+                rapid_coverage,
+            );
         }
 
         // Generic Qwen3 reasoning/distilled models
@@ -204,12 +203,20 @@ impl SamplingCatalog {
                 || lower.contains("distill")
                 || lower.contains("coder-next"));
         if is_qwen3_reasoning {
-            return Self::qwen3_reasoning_modes(llama_coverage, rapid_coverage);
+            return Self::with_universal_omission_choices(
+                Self::qwen3_reasoning_modes(llama_coverage.clone(), rapid_coverage.clone()),
+                llama_coverage,
+                rapid_coverage,
+            );
         }
 
         // EXAONE 4.5: general-purpose vs OCR/document
         if lower.contains("exaone-4.5") || lower.contains("exaone4.5") {
-            return Self::exaone45_modes(llama_coverage, rapid_coverage);
+            return Self::with_universal_omission_choices(
+                Self::exaone45_modes(llama_coverage.clone(), rapid_coverage.clone()),
+                llama_coverage,
+                rapid_coverage,
+            );
         }
 
         // Gemma4 family
@@ -223,38 +230,20 @@ impl SamplingCatalog {
                     || lower.contains("26b")
                     || lower.contains("31b"));
         if is_gemma4 {
-            return Self::gemma4_modes(llama_coverage, rapid_coverage);
+            return Self::with_universal_omission_choices(
+                Self::gemma4_modes(llama_coverage.clone(), rapid_coverage.clone()),
+                llama_coverage,
+                rapid_coverage,
+            );
         }
 
         // Universal fallback: A51 guarantees every model has General, Coding/Agentic,
         // Precise/Deterministic, Creative/Roleplay, and Custom.
-        Self::universal_modes(llama_coverage, rapid_coverage)
-    }
-
-    /// Convert catalog modes to legacy ModelPreset format for backward compatibility.
-    pub fn modes_as_presets(
-        name_or_repo: &str,
-        size_bytes: u64,
-        tags: &[String],
-        gguf_arch: &str,
-        arch_family: &str,
-    ) -> Vec<ModelPreset> {
-        let modes = Self::modes_for_model(
-            name_or_repo,
-            size_bytes,
-            tags,
-            gguf_arch,
-            arch_family,
-            crate::inference::InferenceBackend::LlamaCpp,
-        );
-        modes
-            .into_iter()
-            .map(|m| ModelPreset {
-                name: m.name,
-                description: m.description,
-                defaults: m.defaults,
-            })
-            .collect()
+        Self::with_universal_omission_choices(
+            Self::universal_modes(llama_coverage.clone(), rapid_coverage.clone()),
+            llama_coverage,
+            rapid_coverage,
+        )
     }
 
     // ------------------------------------------------------------------
@@ -393,7 +382,7 @@ impl SamplingCatalog {
                 rapid_mlx_coverage: rapid_cov.clone(),
             },
             SamplingMode {
-                id: SamplingModeId::Custom,
+                id: SamplingModeId::NonThinking,
                 name: "Non-thinking (Reasoning)".into(),
                 description: Some("High-entropy chat mode without visible thinking blocks.".into()),
                 defaults: ModelDefaults {
@@ -540,7 +529,7 @@ impl SamplingCatalog {
                 rapid_mlx_coverage: rapid_cov.clone(),
             },
             SamplingMode {
-                id: SamplingModeId::Custom,
+                id: SamplingModeId::NonThinking,
                 name: "Non-thinking reasoning".into(),
                 description: Some("High-entropy chat mode without visible thinking blocks.".into()),
                 defaults: ModelDefaults {
@@ -624,7 +613,7 @@ impl SamplingCatalog {
                 rapid_mlx_coverage: rapid_cov.clone(),
             },
             SamplingMode {
-                id: SamplingModeId::Custom,
+                id: SamplingModeId::NonThinking,
                 name: "Non-thinking".into(),
                 description: Some("Balanced chat mode with thinking explicitly disabled.".into()),
                 defaults: ModelDefaults {
@@ -910,6 +899,41 @@ impl SamplingCatalog {
             },
         ]
     }
+
+    /// Model-default and Custom are omission-only universal choices. They are
+    /// appended after curated recommendations so the first mode remains the
+    /// safe recommendation for a newly selected model.
+    fn with_universal_omission_choices(
+        mut modes: Vec<SamplingMode>,
+        llama_cov: BackendFieldCoverage,
+        rapid_cov: BackendFieldCoverage,
+    ) -> Vec<SamplingMode> {
+        modes.push(SamplingMode {
+            id: SamplingModeId::ModelDefault,
+            name: "Model / author default".into(),
+            description: Some("Omit sampler defaults and let the model/runtime decide.".into()),
+            defaults: ModelDefaults::default(),
+            provenance: Some(SamplingSource::ModelAuthor {
+                source: "Model generation_config or runtime default".into(),
+            }),
+            workload_badges: vec![],
+            llama_cpp_coverage: llama_cov.clone(),
+            rapid_mlx_coverage: rapid_cov.clone(),
+        });
+        modes.push(SamplingMode {
+            id: SamplingModeId::Custom,
+            name: "Custom".into(),
+            description: Some(
+                "Keep your explicit sampler values; nothing is applied automatically.".into(),
+            ),
+            defaults: ModelDefaults::default(),
+            provenance: None,
+            workload_badges: vec![],
+            llama_cpp_coverage: llama_cov,
+            rapid_mlx_coverage: rapid_cov,
+        });
+        modes
+    }
 }
 
 #[cfg(test)]
@@ -926,7 +950,7 @@ mod tests {
             "",
             crate::inference::InferenceBackend::LlamaCpp,
         );
-        assert_eq!(modes.len(), 5);
+        assert_eq!(modes.len(), 7);
         assert_eq!(modes[0].id, SamplingModeId::CodingAgentic);
         assert_eq!(modes[0].name, "Agentic / Coding (thinking)");
         assert_eq!(modes[1].name, "Creative / Roleplay (thinking)");
@@ -943,7 +967,7 @@ mod tests {
             "",
             crate::inference::InferenceBackend::LlamaCpp,
         );
-        assert_eq!(modes.len(), 5);
+        assert_eq!(modes.len(), 7);
         assert_eq!(modes[0].id, SamplingModeId::CodingAgentic);
     }
 
@@ -957,7 +981,7 @@ mod tests {
             "",
             crate::inference::InferenceBackend::LlamaCpp,
         );
-        assert_eq!(modes.len(), 5);
+        assert_eq!(modes.len(), 7);
         assert_eq!(modes[0].id, SamplingModeId::General);
         assert_eq!(modes[0].name, "Thinking (General)");
     }
@@ -972,7 +996,7 @@ mod tests {
             "",
             crate::inference::InferenceBackend::LlamaCpp,
         );
-        assert_eq!(modes.len(), 3);
+        assert_eq!(modes.len(), 5);
         assert_eq!(modes[0].id, SamplingModeId::General);
         assert_eq!(modes[1].id, SamplingModeId::CreativeRoleplay);
         assert_eq!(modes[2].id, SamplingModeId::CodingAgentic);
@@ -988,12 +1012,14 @@ mod tests {
             "",
             crate::inference::InferenceBackend::LlamaCpp,
         );
-        assert!(modes.len() >= 4);
+        assert!(modes.len() >= 6);
         let ids: Vec<_> = modes.iter().map(|m| m.id).collect();
         assert!(ids.contains(&SamplingModeId::General));
         assert!(ids.contains(&SamplingModeId::CodingAgentic));
         assert!(ids.contains(&SamplingModeId::PreciseDeterministic));
         assert!(ids.contains(&SamplingModeId::CreativeRoleplay));
+        assert!(ids.contains(&SamplingModeId::ModelDefault));
+        assert!(ids.contains(&SamplingModeId::Custom));
     }
 
     #[test]
@@ -1007,9 +1033,9 @@ mod tests {
             crate::inference::InferenceBackend::RapidMlx,
         );
         for mode in &modes {
-            assert!(mode.rapid_mlx_coverage.temperature);
-            assert!(mode.rapid_mlx_coverage.top_p);
-            assert!(mode.rapid_mlx_coverage.top_k);
+            assert!(!mode.rapid_mlx_coverage.temperature);
+            assert!(!mode.rapid_mlx_coverage.top_p);
+            assert!(!mode.rapid_mlx_coverage.top_k);
             assert!(!mode.rapid_mlx_coverage.enable_thinking);
             assert!(!mode.rapid_mlx_coverage.preserve_thinking);
             assert!(!mode.rapid_mlx_coverage.reasoning_budget);

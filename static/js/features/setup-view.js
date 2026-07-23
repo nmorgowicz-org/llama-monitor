@@ -974,8 +974,7 @@ function _buildLaunchCard(preset, activePresetId) {
     const rapidMlx = preset.rapid_mlx;
     const modelSource = preset.backend === 'rapid_mlx'
         ? (rapidMlx?.model_source_view?.canonical_identity
-            || rapidMlx?.model_source_view?.display_name
-            || rapidMlx?.model_path || '')
+            || rapidMlx?.model_source_view?.display_name || '')
         : (preset.model_path || preset.hf_repo || '');
     const modelFile = (preset.model_path || '').split(/[/\\]/).pop() ||
                       (preset.backend === 'rapid_mlx' ? modelSource.split(/[/\\]/).pop() : '') ||
