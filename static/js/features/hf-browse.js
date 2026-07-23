@@ -477,15 +477,35 @@ export async function hfSearch({
 
       const metaEl = document.createElement('span');
       metaEl.className = 'hf-sr-meta';
-      const metaParts = [];
-      if (m.downloads > 0) metaParts.push(m.downloads >= 1000 ? `${(m.downloads / 1000).toFixed(0)}k↓` : `${m.downloads}↓`);
-      if (m.param_b > 0) metaParts.push(`${m.param_b}B`);
-      // MLX: show quant level + size directly
-      if (format === 'mlx') {
-        if (m.quant_label) metaParts.push(m.quant_label);
-        if (m.model_size_bytes) metaParts.push(formatBytes(m.model_size_bytes));
+      // Param size pill
+      if (m.param_b > 0) {
+        const pill = document.createElement('span');
+        pill.className = 'hf-sr-pill hf-sr-pill--params';
+        pill.textContent = `${m.param_b}B`;
+        metaEl.appendChild(pill);
       }
-      metaEl.textContent = metaParts.join(' · ');
+      // Quant pill (MLX)
+      if (format === 'mlx' && m.quant_label) {
+        const pill = document.createElement('span');
+        pill.className = 'hf-sr-pill hf-sr-pill--quant';
+        pill.textContent = m.quant_label;
+        metaEl.appendChild(pill);
+      }
+      // Size pill (MLX)
+      if (format === 'mlx' && m.model_size_bytes) {
+        const pill = document.createElement('span');
+        pill.className = 'hf-sr-pill hf-sr-pill--size';
+        pill.textContent = formatBytes(m.model_size_bytes);
+        metaEl.appendChild(pill);
+      }
+      // Downloads pill
+      if (m.downloads > 0) {
+        const pill = document.createElement('span');
+        pill.className = 'hf-sr-pill hf-sr-pill--downloads';
+        pill.textContent = m.downloads >= 1000 ? `${(m.downloads / 1000).toFixed(1)}k` : `${m.downloads}`;
+        pill.title = `${m.downloads.toLocaleString()} downloads`;
+        metaEl.appendChild(pill);
+      }
       header.appendChild(metaEl);
 
       // Card link button

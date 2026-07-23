@@ -7,7 +7,7 @@ import { getPlatformInfo } from '../core/platform-info.js';
 import { showToast, showToastWithActions } from './toast.js';
 import Router from './router.js';
 import { _showConfirm } from './presets.js';
-import { openCardPanel } from './spawn-wizard.js';
+import { openCardPanel, openSpawnWizard } from './spawn-wizard.js';
 import { buildEstimateBody } from './vram-estimate.js';
 import {
     hfSearch,
