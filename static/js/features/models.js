@@ -2112,7 +2112,7 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
                 const resp = await fetch('/api/hf/files', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...headers },
-                    body: JSON.stringify({ repoId, format: 'mlx' }),
+                    body: JSON.stringify({ repo_id: repoId, format: 'mlx' }),
                 });
                 if (resp.ok) {
                     const data = await resp.json();
