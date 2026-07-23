@@ -449,15 +449,17 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
             const row = document.createElement('div');
             row.id = 'setup-metal-limit-row';
             row.className = 'metal-limit-row';
-            row.style.cssText = 'margin-top:8px;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#94a3b8;';
+            row.style.cssText = 'margin-top:8px;display:flex;align-items:center;gap:8px;font-size:13px;color:#cbd5e1;';
             const labelSpan = document.createElement('span');
             labelSpan.className = 'metal-limit-text';
+            labelSpan.style.color = '#cbd5e1';
             labelSpan.textContent = 'Metal GPU cap: ' + currentGb + ' GB (of ' + totalGb + ' GB total)';
             row.appendChild(labelSpan);
             const btn = document.createElement('button');
             btn.id = 'setup-metal-limit-btn';
             btn.type = 'button';
             btn.className = 'btn-metal-increase';
+            btn.style.cssText = 'background:none;border:1px solid #475569;color:#cbd5e1;padding:3px 10px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;transition:all 0.15s ease;';
             btn.textContent = 'Increase to ' + recGb + ' GB';
             row.appendChild(btn);
             bar.parentNode.insertBefore(row, bar.nextSibling);
