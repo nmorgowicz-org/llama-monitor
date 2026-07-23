@@ -2091,27 +2091,53 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
         return;
     }
 
-    // MLX repos: treat repo itself as the model — use model_size_bytes directly
+    // MLX repos: treat repo itself as the model — use model_size_bytes if available
     if (modelFormat === 'mlx') {
-        const modelBytes = model.model_size_bytes || 0;
+        let modelBytes = model.model_size_bytes || 0;
+        // Update selected model display
+        const nameEl = document.getElementById('mm-selected-model-name');
+        const metaEl = document.getElementById('mm-selected-model-meta');
+        if (nameEl) nameEl.textContent = repoId;
+        if (metaEl) {
+            const parts = [];
+            if (model.param_b > 0) parts.push(formatParams(model.param_b));
+            if (modelBytes > 0) parts.push(formatBytes(modelBytes));
+            if (model.quant_label) parts.push(model.quant_label);
+            metaEl.textContent = parts.join(' · ');
+        }
+        // If no model_size_bytes from search, fetch from tree API
+        if (modelBytes === 0) {
+            try {
+                const headers = window.authHeaders ? window.authHeaders() : {};
+                const resp = await fetch('/api/hf/files', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...headers },
+                    body: JSON.stringify({ repoId, format: 'mlx' }),
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    if (data.files && data.files.length > 0) {
+                        // Sum file sizes from tree API response
+                        modelBytes = data.files.reduce((sum, f) => sum + (f.size || f.bytes || 0), 0);
+                        hfState.modelBytes = modelBytes;
+                        if (metaEl) {
+                            const parts = [];
+                            if (model.param_b > 0) parts.push(formatParams(model.param_b));
+                            parts.push(formatBytes(modelBytes));
+                            if (model.quant_label) parts.push(model.quant_label);
+                            metaEl.textContent = parts.join(' · ');
+                        }
+                    }
+                }
+            } catch { /* non-fatal */ }
+        }
+        // Show download panel (works with param_b estimate if size unavailable)
         if (modelBytes > 0) {
             hfState.modelBytes = modelBytes;
-            // Show selected model with size
-            const nameEl = document.getElementById('mm-selected-model-name');
-            const metaEl = document.getElementById('mm-selected-model-meta');
-            if (nameEl) nameEl.textContent = repoId;
-            if (metaEl) {
-                const parts = [];
-                if (model.param_b > 0) parts.push(formatParams(model.param_b));
-                if (modelBytes > 0) parts.push(formatBytes(modelBytes));
-                if (model.quant_label) parts.push(model.quant_label);
-                metaEl.textContent = parts.join(' · ');
-            }
-            // Show download panel
             await hfShowDownloadPanel(downloadPanel, repoId);
-            // Show VRAM estimate
-            scheduleVramUpdate({ size: modelBytes });
         }
+        // Show VRAM estimate
+        if (paramB > 0) scheduleVramUpdate({ size: modelBytes });
         return;
     }
 

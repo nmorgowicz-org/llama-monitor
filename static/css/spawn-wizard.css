@@ -2806,6 +2806,27 @@
 .hf-sr-badge-gated   { background:color-mix(in srgb, var(--color-error) 12%, transparent);   color:var(--color-error); }
 .hf-sr-badge-moe     { background:color-mix(in srgb, var(--color-accent) 15%, transparent);  color:var(--color-accent); }
 
+/* Format badges */
+.hf-sr-format-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  margin-left: 6px;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.hf-sr-format-badge--mlx {
+  background: linear-gradient(135deg, rgba(244,63,94,0.2), rgba(168,85,247,0.2));
+  color: #fb7185;
+}
+.hf-sr-format-badge--gguf {
+  background: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  color: var(--color-accent);
+}
+
 .hf-sr-age {
   font-size: 10px;
   color: var(--text-muted, #64748b);
