@@ -1064,10 +1064,10 @@ fn infer_param_b_from_name(name: &str) -> f64 {
     matches.into_iter().fold(0.0_f64, f64::max)
 }
 
-/// Infer MLX quant label from HF tags (preferred) or repo name patterns.
-/// Returns empty string if unknown.
-fn infer_mlx_quant_label(tags: &[String], id: &str) -> String {
-    // First check HF tags for quant info
+/// Infer MLX quant label from HF tags only (not repo names — too many variations).
+/// Repo names are unreliable: crowqwen3.5-4b-agent-heretic-mlx-oq, Bielik-PL-11B-v3.0-Instruct-heretic-mlx-4bit, etc.
+/// Returns empty string if no matching tag found (common for BF16 models without tags).
+fn infer_mlx_quant_label(tags: &[String], _id: &str) -> String {
     let tags_lower = tags.iter().map(|t| t.to_ascii_lowercase());
     for tag in tags_lower {
         if tag == "4-bit" { return "4-bit".into(); }
@@ -1077,23 +1077,6 @@ fn infer_mlx_quant_label(tags: &[String], id: &str) -> String {
         if tag == "5-bit" { return "5-bit".into(); }
         if tag == "6-bit" { return "6-bit".into(); }
     }
-
-    // Fall back to repo name patterns
-    let lower = id.to_ascii_lowercase();
-
-    // MLX native formats
-    if lower.contains("mxfp8") || lower.contains("mx-fp8") { return "FP8".into(); }
-    if lower.contains("mxfp6") || lower.contains("mx-fp6") { return "FP6".into(); }
-    if lower.contains("mxfp4") || lower.contains("mx-fp4") || lower.contains("mxint4") { return "FP4".into(); }
-
-    // Generic quant patterns in repo name
-    if lower.contains("-q8") || lower.contains("_q8") || lower.contains("-8bit") { return "Q8".into(); }
-    if lower.contains("-q6") || lower.contains("_q6") || lower.contains("-6bit") { return "Q6".into(); }
-    if lower.contains("-q5") || lower.contains("_q5") || lower.contains("-5bit") { return "Q5".into(); }
-    if lower.contains("-q4") || lower.contains("_q4") || lower.contains("-4bit") { return "Q4".into(); }
-    if lower.contains("-q3") || lower.contains("_q3") || lower.contains("-3bit") { return "Q3".into(); }
-    if lower.contains("-q2") || lower.contains("_q2") || lower.contains("-2bit") { return "Q2".into(); }
-
     String::new()
 }
 
