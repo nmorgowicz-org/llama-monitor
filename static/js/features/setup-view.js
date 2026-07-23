@@ -472,12 +472,27 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
                 btn.disabled = true;
                 btn.textContent = 'Updating…';
                 try {
-                    const headers = window.authHeaders ? window.authHeaders() : {};
+                    // Fetch admin token (required for system-level changes)
+                    const tokenHeaders = window.authHeaders ? window.authHeaders() : {};
+                    const tokenResp = await fetch('/api/auth/status', { headers: tokenHeaders });
+                    const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
+                    const adminToken = tokenData.token || tokenData.db_admin_token || '';
+                    const headers = {
+                        'Content-Type': 'application/json',
+                        ...(adminToken ? { 'Authorization': `Bearer ${adminToken}` } : {}),
+                    };
                     const resp = await fetch('/api/system/wired-limit', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', ...headers },
+                        headers,
                         body: JSON.stringify({ value_mb: recommendedMb, confirm: 'set-wired-limit' }),
                     });
+                    if (!resp.ok) {
+                        const data = await resp.json().catch(() => ({}));
+                        showToast('Authentication required: ' + (data.error?.reason || 'db-admin-token needed'), 'error');
+                        btn.disabled = false;
+                        btn.textContent = 'Increase to ' + recGb + ' GB';
+                        return;
+                    }
                     const data = await resp.json();
                     if (data.success) {
                         showToast('Metal GPU cap updated to ' + Math.round(data.actual_mb / 1024) + ' GB', 'success');

@@ -310,7 +310,7 @@ struct WiredLimitSetRequest {
 
 fn wired_limit_get(ctx: ApiCtx) -> ApiRoute {
     let config = ctx.config;
-    warp::path!("system" / "wired-limit")
+    warp::path!("api" / "system" / "wired-limit")
         .and(warp::get())
         .and(warp::header::optional::<String>("authorization"))
         .and_then(move |auth: Option<String>| {
@@ -360,7 +360,7 @@ fn wired_limit_get(ctx: ApiCtx) -> ApiRoute {
 
 fn wired_limit_set(ctx: ApiCtx) -> ApiRoute {
     let config = ctx.config;
-    warp::path!("system" / "wired-limit")
+    warp::path!("api" / "system" / "wired-limit")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
