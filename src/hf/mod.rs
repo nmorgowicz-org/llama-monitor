@@ -1492,7 +1492,8 @@ async fn fetch_file_sizes(
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        if !path.to_ascii_lowercase().ends_with(".gguf") {
+        let lower = path.to_ascii_lowercase();
+        if !lower.ends_with(".gguf") && !lower.ends_with(".safetensors") && !lower.ends_with(".safetensors.index.json") {
             continue;
         }
 
