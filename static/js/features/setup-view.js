@@ -449,7 +449,7 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
             const row = document.createElement('div');
             row.id = 'setup-metal-limit-row';
             row.className = 'metal-limit-row';
-            row.style.cssText = 'margin-top:8px;display:flex;align-items:center;gap:8px;font-size:13px;color:#cbd5e1;';
+            row.style.cssText = 'margin-top:8px;display:flex;align-items:center;gap:6px;font-size:13px;color:#cbd5e1;width:fit-content;';
             const labelSpan = document.createElement('span');
             labelSpan.className = 'metal-limit-text';
             labelSpan.style.color = '#cbd5e1';
