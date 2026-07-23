@@ -2536,10 +2536,14 @@ async function updateVramDisplay(file) {
     // Phase 5b Part C: On unified memory (Apple Silicon), use current_safe_availability_bytes
     // from the MemoryAvailabilitySnapshot, NOT total unified memory.
     let availVram = cachedVram || 0;
+    let metalLimit = 0;
     if (cachedUnified) {
         const snapshot = await fetchMemoryAvailability();
         if (snapshot && snapshot.current_safe_availability_bytes > 0) {
             availVram = snapshot.current_safe_availability_bytes;
+        }
+        if (snapshot && snapshot.configured_ceiling_bytes > 0) {
+            metalLimit = snapshot.configured_ceiling_bytes;
         }
     }
     if (!availVram) {
@@ -2608,12 +2612,17 @@ async function updateVramDisplay(file) {
     // Show panel
     panel.style.display = '';
 
-    // Update header — show needed vs available clearly
+    // Update header — show needed vs available, plus max possible (metal limit)
     const labelEl = document.getElementById('mm-vram-panel-label');
     const totalEl = document.getElementById('mm-vram-panel-total');
-    if (labelEl) labelEl.textContent = formatGB(total) + ' needed · ' + formatGB(availVram) + ' available';
+    const availLabel = metalLimit > 0 ? formatGB(availVram) + ' available · ' + formatGB(metalLimit) + ' max' : formatGB(availVram) + ' available';
+    if (labelEl) labelEl.textContent = formatGB(total) + ' needed · ' + availLabel;
     if (totalEl) {
-        if (free < 0) {
+        // Metal limit check: model exceeds the hard cap even if RAM were free
+        if (metalLimit > 0 && total > metalLimit) {
+            totalEl.textContent = 'Exceeds metal limit · need ' + formatGB(metalLimit - total) + ' less';
+            totalEl.style.color = 'var(--color-error, #f44336)';
+        } else if (free < 0) {
             totalEl.textContent = 'Won\'t fit · need ' + formatGB(Math.abs(free)) + ' more';
             totalEl.style.color = 'var(--color-error, #f44336)';
         } else {
@@ -2622,19 +2631,18 @@ async function updateVramDisplay(file) {
         }
     }
 
-    // Update bar
-    const denom = availVram > 0 ? availVram : total;
+    // Update bar — show breakdown of what's needed as parts of total
+    const denom = total > 0 ? total : 1;
     const weightsPct = weightsBytes / denom;
     const kvPct = kvEstimate / denom;
     const mmprojPct = mmprojBytes / denom;
     const overheadPct = overhead / denom;
-    const freePct = Math.max(0, free) / denom;
 
     setSegWidth(document.getElementById('mm-vseg-weights'), weightsPct);
     setSegWidth(document.getElementById('mm-vseg-kv'), kvPct);
     setSegWidth(document.getElementById('mm-vseg-mmproj'), mmprojPct);
     setSegWidth(document.getElementById('mm-vseg-overhead'), overheadPct);
-    setSegWidth(document.getElementById('mm-vseg-free'), freePct);
+    setSegWidth(document.getElementById('mm-vseg-free'), 0);
 
     const barEl = document.getElementById('mm-vram-bar');
     if (barEl) {
@@ -2642,9 +2650,6 @@ async function updateVramDisplay(file) {
         barEl.classList.toggle('tight', ratio >= 0.88 && ratio < 1.0);
         barEl.classList.toggle('over', ratio >= 1.0);
     }
-
-    const freeSeg = document.getElementById('mm-vseg-free');
-    if (freeSeg) freeSeg.classList.toggle('over-budget', free < 0);
 
     // Update legend
     const weightsLabel = document.getElementById('mm-vleg-weights-label');

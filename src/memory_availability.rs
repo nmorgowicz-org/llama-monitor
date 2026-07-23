@@ -137,14 +137,10 @@ fn build_macos_snapshot() -> MemoryAvailabilitySnapshot {
     // This is the effective base Rapid-MLX uses, multiplied by its utilization factor.
     let metal_working_set_bytes = configured_ceiling_bytes;
 
-    // Current safe availability: start from the configured ceiling.
-    // Subtract active/wired pressure to reflect live conditions.
-    // On Apple Silicon, "active" memory includes Metal working set;
-    // "free" is what's immediately available after accounting for compression.
-    let active_pressure = active_bytes.min(configured_ceiling_bytes);
-    let current_safe_availability_bytes = configured_ceiling_bytes
-        .saturating_sub(active_pressure.saturating_sub(free_bytes))
-        .min(configured_ceiling_bytes);
+    // Current safe availability: free RAM.
+    // Metal limit (iogpu.wired_limit_mb) is only enforced when a model would exceed it,
+    // not as a constraint on reported availability.
+    let current_safe_availability_bytes = free_bytes;
 
     // Determine state
     let state = if current_safe_availability_bytes > 0
