@@ -437,30 +437,24 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
     }
     bar.style.display = '';
 
-    // Metal limit teaching: if current cap is below recommended, show increase button
+    // Metal limit teaching: if current cap is below recommended, show increase button next to Metal GPU cap text
     const recommendedMb = Math.round(ramTotalBytes / (1024 * 1024)) - 8192; // total_MB - 8GB
     if (metalGpuLimitMb > 0 && metalGpuLimitMb < recommendedMb) {
         const currentGb = Math.round(metalGpuLimitMb / 1024);
         const recGb = Math.round(recommendedMb / 1024);
         const totalGb = Math.round(ramTotalBytes / (1024 ** 3));
-        const existingRow = document.getElementById('setup-metal-limit-row');
-        if (!existingRow) {
-            const row = document.createElement('div');
-            row.id = 'setup-metal-limit-row';
-            row.style.cssText = 'margin-top:8px;display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#94a3b8;';
-            const labelSpan = document.createElement('span');
-            labelSpan.textContent = 'Metal GPU cap: ' + currentGb + ' GB (of ' + totalGb + ' GB total)';
-            row.appendChild(labelSpan);
-            const btn = document.createElement('button');
-            btn.id = 'setup-metal-limit-btn';
-            btn.style.cssText = 'background:none;border:1px solid #64748b;color:#94a3b8;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:10px;';
-            btn.textContent = 'Increase to ' + recGb + ' GB';
-            row.appendChild(btn);
-            bar.parentNode.insertBefore(row, bar.nextSibling);
+        // Use existing metal-limit-row in VRAM panel (not a separate row below bar)
+        const row = document.getElementById('metal-limit-row');
+        const textEl = document.getElementById('metal-limit-text');
+        const btn = document.getElementById('metal-limit-btn');
+        if (row && textEl) {
+            row.style.display = 'flex';
+            textEl.textContent = 'Metal GPU cap: ' + currentGb + ' GB (of ' + totalGb + ' GB total)';
         }
-        const btn = document.getElementById('setup-metal-limit-btn');
         if (btn && !btn.dataset.wired) {
             btn.dataset.wired = '1';
+            btn.style.display = 'inline-flex';
+            btn.textContent = 'Increase to ' + recGb + ' GB';
             btn.addEventListener('click', async () => {
                 btn.disabled = true;
                 btn.textContent = 'Updating…';
@@ -474,7 +468,7 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
                     const data = await resp.json();
                     if (data.success) {
                         showToast('Metal GPU cap updated to ' + Math.round(data.actual_mb / 1024) + ' GB', 'success');
-                        document.getElementById('setup-metal-limit-row')?.remove();
+                        row?.remove();
                     } else {
                         showToast('Failed: ' + (data.error?.reason || 'unknown'), 'error');
                         btn.disabled = false;
