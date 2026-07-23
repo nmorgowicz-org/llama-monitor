@@ -869,27 +869,27 @@ fn api_hf_qualify(
             warp::body::content_length_limit(64 * 1024)
                 .and(warp::body::json::<crate::hf::QualifyRequest>()),
         )
-        .and_then(move |auth: Option<String>, req: crate::hf::QualifyRequest| {
-            let cfg = config.clone();
-            async move {
-                if !check_api_token(&auth, &cfg) {
-                    return Ok(unauthorized_api_token());
-                }
-                match crate::hf::qualify::hf_qualify_repo(req).await {
-                    Ok(result) => {
-                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&result),
-                        ))
+        .and_then(
+            move |auth: Option<String>, req: crate::hf::QualifyRequest| {
+                let cfg = config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
                     }
-                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({ "error": e })),
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                        ),
-                    )),
+                    match crate::hf::qualify::hf_qualify_repo(req).await {
+                        Ok(result) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&result),
+                        )),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({ "error": e })),
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                            ),
+                        )),
+                    }
                 }
-            }
-        })
+            },
+        )
 }
 
 /// POST /api/hf/identity — authorship and lineage resolution.
@@ -905,32 +905,32 @@ fn api_hf_identity(
             warp::body::content_length_limit(64 * 1024)
                 .and(warp::body::json::<crate::hf::IdentityRequest>()),
         )
-        .and_then(move |auth: Option<String>, req: crate::hf::IdentityRequest| {
-            let cfg = config.clone();
-            async move {
-                if !check_api_token(&auth, &cfg) {
-                    return Ok(unauthorized_api_token());
-                }
-                let explicit_config_dir = req.config_dir.clone();
-                let config_dir = explicit_config_dir
-                    .as_ref()
-                    .map(std::path::Path::new)
-                    .unwrap_or_else(|| cfg.config_dir.as_ref());
-                match crate::hf::qualify::hf_resolve_identity(req, config_dir).await {
-                    Ok(result) => {
-                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&result),
-                        ))
+        .and_then(
+            move |auth: Option<String>, req: crate::hf::IdentityRequest| {
+                let cfg = config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
                     }
-                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({ "error": e })),
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                        ),
-                    )),
+                    let explicit_config_dir = req.config_dir.clone();
+                    let config_dir = explicit_config_dir
+                        .as_ref()
+                        .map(std::path::Path::new)
+                        .unwrap_or_else(|| cfg.config_dir.as_ref());
+                    match crate::hf::qualify::hf_resolve_identity(req, config_dir).await {
+                        Ok(result) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&result),
+                        )),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({ "error": e })),
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                            ),
+                        )),
+                    }
                 }
-            }
-        })
+            },
+        )
 }
 
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {

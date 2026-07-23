@@ -38,6 +38,9 @@ import {
   hfHideDownloadPanel,
   hfRenderDiscoverPills,
   hfLoadQuickPicks,
+  hfCreateScopeSelector,
+  hfCreateSortSelector,
+  HF_SORT,
 } from './hf-browse.js';
 
 // ── VRAM math (client-side, for instant slider feedback) ──────────────────────
@@ -453,6 +456,13 @@ export const wizardState = {
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
 let dom = {};
+const hfBrowseState = {
+  mlxActive: false,
+  ggufActive: true,
+  allActive: false,
+  sort: HF_SORT.DOWNLOADS,
+  quantsOnly: false,
+};
 let pendingHardwareScrollReset = false;
 let pendingHardwareScrollRestore = null;
 let _escapeHatchDescriptors = null; // cached from /api/rapid-mlx/escape-hatch-flags
@@ -463,7 +473,7 @@ export function initSpawnWizard() {
   cacheDom();
   applyReducedMotion();
   bindEvents();
-  bindHfSortSelect();
+  bindHfSearchControls();
   bindQuantizerEditor();
   bindWizardHfToken();
   restoreProfile();
@@ -482,9 +492,7 @@ export function initSpawnWizard() {
     onPillClick: (cat, pillEl) => {
       wizardState.hfBrowseAuthor = null;
       if (dom.hfRepoInput) dom.hfRepoInput.value = '';
-      const sort = cat.params.query
-        ? (dom.hfSortSelect?.value || cat.params.sort)
-        : cat.params.sort;
+      const sort = cat.params.query ? hfBrowseState.sort : (cat.params.sort || hfBrowseState.sort);
       hfSearchForWizard({ ...cat.params, sort });
     },
   });
@@ -496,6 +504,34 @@ export function initSpawnWizard() {
     onAuthorClick: (author) => {
       browseHfAuthor(author);
     },
+  });
+
+  const isMac = navigator.platform?.includes('Mac');
+  hfBrowseState.mlxActive = !!isMac;
+  const scopeContainer = document.getElementById('spawn-hf-scope-container');
+  scopeContainer?.setAttribute('data-hf-scope-mlx', isMac ? '1' : '');
+  scopeContainer?.setAttribute('data-hf-scope-gguf', '1');
+  scopeContainer?.setAttribute('data-hf-scope-all', '');
+  hfCreateScopeSelector({
+    container: scopeContainer,
+    onChange: (mlxActive, ggufActive, allActive) => {
+      hfBrowseState.mlxActive = mlxActive || allActive;
+      hfBrowseState.ggufActive = ggufActive || allActive;
+      hfBrowseState.allActive = allActive;
+      refireHfSearch();
+    },
+  });
+  hfCreateSortSelector({
+    container: document.getElementById('spawn-hf-sort-container'),
+    defaultSort: hfBrowseState.sort,
+    onChange: (sort) => {
+      hfBrowseState.sort = sort;
+      refireHfSearch();
+    },
+  });
+  document.getElementById('spawn-hf-quants-only')?.addEventListener('change', (event) => {
+    hfBrowseState.quantsOnly = event.target.checked;
+    refireHfSearch();
   });
 
   // HF download panel buttons
@@ -864,7 +900,6 @@ function cacheDom() {
   dom.localModelHintTitle = document.getElementById('spawn-local-model-hint-title');
   dom.localModelHintMeta  = document.getElementById('spawn-local-model-hint-meta');
   dom.hfRepoInput       = document.getElementById('spawn-hf-repo');
-  dom.hfSortSelect      = document.getElementById('spawn-hf-sort');
   dom.hfMinSize         = document.getElementById('spawn-hf-min-size');
   dom.hfQuickpicks      = document.getElementById('hf-quickpicks');
   dom.hfSearchResults   = document.getElementById('hf-search-results');
@@ -2746,6 +2781,11 @@ function hfSearchForWizard({ query, author, sort, limit }) {
     query,
     author,
     sort,
+    mlxActive: hfBrowseState.mlxActive,
+    ggufActive: hfBrowseState.ggufActive,
+    allActive: hfBrowseState.allActive,
+    hfSort: hfBrowseState.sort,
+    quantsOnly: hfBrowseState.quantsOnly,
     limit: effectiveLimit,
     minParamB,
     container: dom.hfSearchResults,
@@ -2763,11 +2803,20 @@ function hfSearchForWizard({ query, author, sort, limit }) {
       wizardState.model.path = '';
       wizardState.model.hfFile = '';
       wizardState.model.hfRepo = m.id;
+      wizardState.model.rapidMlxSource = m.format === 'mlx'
+        ? { kind: 'hugging_face_repo', repo_id: m.id, revision: 'main' }
+        : null;
       if (dom.hfRepoInput) dom.hfRepoInput.value = m.id;
       if (m.param_b > 0) wizardState.model.paramB = m.param_b;
       if (dom.hfSearchResults) dom.hfSearchResults.style.display = 'none';
       dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('active'));
-      fetchHfFiles(m.id);
+      if (m.format === 'mlx') {
+        wizardState.model.modelBytes = Number(m.model_size_bytes) || 0;
+        selectWizardEngine('rapid_mlx', true);
+        updateSelectedModelDisplay();
+      } else {
+        fetchHfFiles(m.id);
+      }
       refreshEngineRecommendation();
       if (m.param_b > 0) triggerQuantAdvisor();
       clearValidationError();
@@ -4982,9 +5031,8 @@ function _reloadHfQuickPicks() {
 }
 
 async function browseHfAuthor(author) {
-  const sort = dom.hfSortSelect?.value || 'downloads';
   wizardState.hfBrowseAuthor = author;
-  hfSearchForWizard({ author, sort });
+  hfSearchForWizard({ author, sort: hfBrowseState.sort });
 }
 
 // ── HF file listing ───────────────────────────────────────────────────────────
@@ -5003,31 +5051,30 @@ function triggerHfFileFetch() {
     if (inferredP > 0) wizardState.model.paramB = inferredP;
     fetchHfFiles(input);
   } else {
-    const sort = dom.hfSortSelect?.value || 'downloads';
+    const sort = hfBrowseState.sort;
     hfSearchForWizard({ query: input, sort });
   }
 }
 
-// Sort or min-size change triggers a re-search from page 0
-function bindHfSortSelect() {
-  const refire = () => {
-    const author = wizardState.hfBrowseAuthor;
-    const query  = dom.hfRepoInput?.value.trim() || '';
-    const sort   = dom.hfSortSelect?.value || 'downloads';
-    if (author) {
-      browseHfAuthor(author);
-    } else if (query && !query.includes('/')) {
-      hfSearchForWizard({ query, sort, limit: 20 });
-    } else {
-      const activePill = document.querySelector('#hf-discover-pills .hf-discover-pill.active');
-      if (activePill) {
-        const cat = HF_DISCOVER_CATEGORIES.find(c => c.id === activePill.dataset.catId);
-        if (cat) hfSearchForWizard({ ...cat.params, sort });
-      }
+// Shared Models-modal search controls plus the wizard's minimum-size filter.
+function refireHfSearch() {
+  const author = wizardState.hfBrowseAuthor;
+  const query = dom.hfRepoInput?.value.trim() || '';
+  if (author) {
+    browseHfAuthor(author);
+  } else if (query && !query.includes('/')) {
+    hfSearchForWizard({ query, sort: hfBrowseState.sort, limit: 20 });
+  } else {
+    const activePill = document.querySelector('#hf-discover-pills .hf-discover-pill.active');
+    if (activePill) {
+      const cat = HF_DISCOVER_CATEGORIES.find(c => c.id === activePill.dataset.catId);
+      if (cat) hfSearchForWizard({ ...cat.params, sort: hfBrowseState.sort });
     }
-  };
-  dom.hfSortSelect?.addEventListener('change', refire);
-  dom.hfMinSize?.addEventListener('change', refire);
+  }
+}
+
+function bindHfSearchControls() {
+  dom.hfMinSize?.addEventListener('change', refireHfSearch);
 }
 
 async function fetchHfFiles(repo) {
@@ -8933,14 +8980,12 @@ async function triggerAutoSize() {
 
     if (r.n_cpu_moe != null) wizardState.hardware.nCpuMoe = r.n_cpu_moe;
 
-    // On unified memory (Apple Silicon), set --cache-ram to -1 (no limit, no reservation).
-    // The server default of 8 GB pre-reserves memory wastefully. -1 enables the prompt/idle-slot
-    // cache on demand without a fixed reservation, preserving slot KV state between conversation
-    // turns so long-context sessions don't re-process the full context on every message.
-    // Only apply if the user hasn't explicitly set a value, or if it's still at the old 0 default.
-    if (isUnifiedMemory() && (wizardState.hardware.cacheRam == null || wizardState.hardware.cacheRam === 8192 || wizardState.hardware.cacheRam === 0)) {
-      wizardState.hardware.cacheRam = -1;
-      if (dom.cacheRamInput) dom.cacheRamInput.value = '-1';
+    // Unified memory shares the model and host-cache budget. Auto disables only the
+    // extra host prompt-state cache; ordinary common-prefix reuse remains available.
+    // Preserve every explicit saved or user-entered value, including -1 (unlimited).
+    if (isUnifiedMemory() && wizardState.hardware.cacheRam == null) {
+      wizardState.hardware.cacheRam = 0;
+      if (dom.cacheRamInput) dom.cacheRamInput.value = '0';
     }
 
     // Sync form fields
@@ -10713,14 +10758,11 @@ async function _checkBinaryPrereq() {
       }
     }
 
-    // For unified memory (Apple Silicon): default --cache-ram to -1 (no limit, no reservation).
-    // The server default of 8 GB pre-reserves memory wastefully. -1 enables the cache without
-    // any reservation — it uses memory only as needed, while keeping --cache-idle-slots working
-    // so slot KV state is preserved between conversation turns (avoids re-processing the whole
-    // context on every message). Only set if the user hasn't already configured a value.
+    // Unified-memory Auto disables the extra host prompt-state cache. Preserve explicit
+    // values, including -1 (unlimited), which remains an Advanced user choice.
     if (_platformInfo?.auto_backend === 'metal' && wizardState.hardware.cacheRam == null) {
-      wizardState.hardware.cacheRam = -1;
-      if (dom.cacheRamInput) dom.cacheRamInput.value = '-1';
+      wizardState.hardware.cacheRam = 0;
+      if (dom.cacheRamInput) dom.cacheRamInput.value = '0';
     }
     // Show unified memory note about -cram.
     if (_platformInfo?.auto_backend === 'metal') {

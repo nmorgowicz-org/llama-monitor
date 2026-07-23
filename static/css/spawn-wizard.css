@@ -2776,6 +2776,36 @@
 }
 .hf-search-result:last-child { border-bottom: none; }
 .hf-search-result:hover { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+.hf-search-result.selected {
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+.hf-sr-lineage {
+  font-size: 10.5px;
+  color: color-mix(in srgb, var(--color-accent) 70%, transparent);
+  cursor: pointer;
+  padding-top: 2px;
+}
+.hf-sr-lineage:hover { text-decoration: underline; }
+.hf-sr-lineage-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin-top: 4px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.06);
+  cursor: pointer;
+  font-size: 11px;
+}
+.hf-sr-lineage-item:hover { background: rgba(255,255,255,0.05); }
+.hf-sr-lineage-item.selected {
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  color: var(--color-accent);
+}
+.hf-sr-lineage-meta { color: rgba(255,255,255,0.5); font-size: 10px; flex-shrink: 0; }
 .hf-sr-name {
   flex: 1;
   font-size: 12px;

@@ -2503,6 +2503,7 @@
                     <h2 id="modal-title">New Preset</h2>
                     <p class="preset-editor-subtitle" id="preset-editor-subtitle">New model profile</p>
                 </div>
+                <span class="preset-editor-format" id="preset-editor-format" hidden></span>
             </div>
             <button type="button" class="preset-editor-close" id="preset-modal-close" aria-label="Close">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -2590,9 +2591,7 @@
                                 <div class="pe-input-row" style="align-items:center;">
                                     <input type="text" class="pe-input" id="modal-model-path" required>
                                     <button type="button" class="btn-sm btn-preset" id="preset-browse-model-btn" title="Browse filesystem for .gguf files">Browse</button>
-                                    <div id="preset-hf-format-toggle-wrap"></div>
                                 </div>
-                                <div class="hf-search-results" id="preset-hf-search-results" style="display:none;"></div>
                                 <div class="pe-arch-info" id="pe-arch-info"></div>
                                 <span class="field-error-msg" role="alert">Model path is required</span>
                             </div>
@@ -2735,7 +2734,7 @@
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-cache-ram-mib" title="-cram / --cache-ram. Maximum KV prefix-cache size in MiB. 0 disables it, -1 removes the limit, empty uses llama-server defaults.">Prefix Cache RAM (-cram)</label>
                                 <input type="number" class="pe-input" id="modal-cache-ram-mib" min="-1" step="1" placeholder="8192 (default)">
-                                <div class="pe-field-hint">Set to 0 to disable prefix caching (reduces VRAM, hurts repeated-prompt latency). Leave empty for the default ~8 GiB. Use -1 to remove the cap for long agentic sessions with large shared system prompts.</div>
+                                <div class="pe-field-hint">Set to 0 to disable the extra host prompt-state cache while ordinary common-prefix reuse remains available. Leave empty for the llama-server default. Use -1 only for an explicit unlimited Advanced choice.</div>
                             </div>
                             <!-- Vision tokens: shown only when mmproj is loaded -->
                             <div id="vision-tokens-wrap" style="display:none;">
@@ -3600,12 +3599,6 @@
                         <div class="model-input-row">
                             <input type="text" id="spawn-hf-repo"
                                 placeholder="Repo ID or keyword (e.g. bartowski/Llama-3.3-70B or Qwen3 27B)">
-                            <select id="spawn-hf-sort" class="hf-sort-select" title="Sort order">
-                                <option value="newest" selected>Newest</option>
-                                <option value="downloads">Most downloaded</option>
-                                <option value="trending">Trending</option>
-                                <option value="likes">Most liked</option>
-                            </select>
                             <label for="spawn-hf-min-size" class="hw-quant-label" style="font-size:10px;">Min params</label>
                             <select id="spawn-hf-min-size" class="hf-sort-select" title="Filter by minimum parameter count (billions). e.g. '7' hides everything under 7B.">
                                 <option value="0">Any size</option>
@@ -3615,6 +3608,17 @@
                                 <option value="30">≥30B</option>
                                 <option value="70">≥70B</option>
                             </select>
+                        </div>
+                        <div class="hf-search-controls-row">
+                            <div class="hf-scope-container" id="spawn-hf-scope-container"></div>
+                            <div class="hf-sort-container" id="spawn-hf-sort-container"></div>
+                            <div class="hf-quants-toggle-container">
+                                <label class="hf-quants-toggle-label">
+                                    <input type="checkbox" id="spawn-hf-quants-only">
+                                    <span class="hf-quants-toggle-text">Quants only</span>
+                                    <span class="hf-quants-toggle-hint">(exclude base models)</span>
+                                </label>
+                            </div>
                         </div>
                         <!-- Search results (shown when query isn't a repo ID) -->
                         <div class="hf-search-results" id="hf-search-results" style="display:none;">
@@ -4047,7 +4051,7 @@
                             <div class="hardware-field">
                                 <label for="spawn-cache-ram" title="-cram / --cache-ram: max size of the persistent KV prefix-cache in MiB. llama-server uses this to reuse KV states across requests. Default is 8192 MiB (8 GB) of system RAM. Set 0 to disable, -1 for no limit.">Prefix cache RAM <span class="label-badge">-cram</span></label>
                                 <input type="number" id="spawn-cache-ram" min="-1" step="1" placeholder="8192 (default)">
-                                <div class="field-hint">Max system RAM for KV prefix reuse across requests. Default: 8192 MiB. 0 = disable · −1 = no limit.</div>
+                                <div class="field-hint">Extra host RAM for cached prompt states. 0 = disabled (ordinary common-prefix reuse remains available) · −1 = explicit unlimited Advanced choice.</div>
                             </div>
                             <div class="hardware-field" style="grid-column: 1/-1;">
                                 <label for="spawn-fit-enable">Auto-fit context to memory</label>

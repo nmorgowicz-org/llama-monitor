@@ -137,11 +137,11 @@ fn build_macos_snapshot() -> MemoryAvailabilitySnapshot {
     // This is the effective base Rapid-MLX uses, multiplied by its utilization factor.
     let metal_working_set_bytes = configured_ceiling_bytes;
 
-    // Current safe availability: use sysinfo's available_memory which includes
-    // free + inactive + purgeable pages (matches what macOS Activity Monitor shows).
-    // vm_stat's free pages is misleadingly low on macOS (RAM is aggressively cached).
-    let available_bytes = (sys_info.ram_available_gb * 1024.0 * 1024.0 * 1024.0) as u64;
-    let current_safe_availability_bytes = available_bytes;
+    // Current safe availability: use free_bytes from vm_stat, which matches Activity Monitor's "Free".
+    // sysinfo's available_memory includes inactive/purgeable pages (~54 GB on 64 GB system),
+    // which is misleadingly high — macOS may reclaim some, but they aren't truly available now.
+    // For accurate "can I run this model right now?" we need actual free RAM.
+    let current_safe_availability_bytes = free_bytes;
 
     // Determine state
     let state = if current_safe_availability_bytes > 0

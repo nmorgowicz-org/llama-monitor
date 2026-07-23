@@ -488,27 +488,28 @@ export async function hfSearch({
       });
       header.appendChild(cardLink);
 
-      // Meta pills (quant first for MLX since it's the only one in repo)
-      const metaEl = document.createElement('span');
-      metaEl.className = 'hf-sr-meta';
-      if (format === 'mlx' && m.quant_label) {
-        const pill = document.createElement('span');
-        pill.className = 'hf-sr-pill hf-sr-pill--quant';
-        pill.textContent = m.quant_label;
-        metaEl.appendChild(pill);
-      }
-      if (m.param_b > 0) {
-        const pill = document.createElement('span');
-        pill.className = 'hf-sr-pill hf-sr-pill--params';
-        pill.textContent = `${m.param_b}B`;
-        metaEl.appendChild(pill);
-      }
-      if (format === 'mlx' && m.model_size_bytes) {
-        const pill = document.createElement('span');
-        pill.className = 'hf-sr-pill hf-sr-pill--size';
-        pill.textContent = formatBytes(m.model_size_bytes);
-        metaEl.appendChild(pill);
-      }
+       // Meta pills (quant first for MLX since it's the only one in repo)
+       const metaEl = document.createElement('span');
+       metaEl.className = 'hf-sr-meta';
+       if (format === 'mlx' && m.quant_label) {
+         const pill = document.createElement('span');
+         pill.className = 'hf-sr-pill hf-sr-pill--quant';
+         pill.textContent = m.quant_label;
+         metaEl.appendChild(pill);
+       }
+       if (m.param_b > 0) {
+         const pill = document.createElement('span');
+         pill.className = 'hf-sr-pill hf-sr-pill--params';
+         pill.textContent = `${m.param_b}B`;
+         metaEl.appendChild(pill);
+       }
+       // MLX size from HF tree API (model_size_bytes from search is often null)
+       if (format === 'mlx' && m.model_size_bytes) {
+         const pill = document.createElement('span');
+         pill.className = 'hf-sr-pill hf-sr-pill--size';
+         pill.textContent = formatBytes(m.model_size_bytes);
+         metaEl.appendChild(pill);
+       }
       if (m.downloads > 0) {
         const pill = document.createElement('span');
         pill.className = 'hf-sr-pill hf-sr-pill--downloads';
@@ -523,6 +524,8 @@ export async function hfSearch({
       if (format === 'mlx') {
         // MLX repos: click directly selects model (no file list)
         card.addEventListener('click', () => {
+          container.querySelectorAll('.hf-search-result.selected').forEach(c => c.classList.remove('selected'));
+          card.classList.add('selected');
           if (onSelectModel) {
             onSelectModel({
               repoId: m.id,
@@ -540,6 +543,67 @@ export async function hfSearch({
             card.click();
           }
         });
+
+        // Lineage row: lazily discover sibling MLX quantizations for this repo.
+        const lineageRow = document.createElement('div');
+        lineageRow.className = 'hf-sr-lineage';
+        lineageRow.textContent = 'Other quantizations…';
+        lineageRow.addEventListener('click', async e => {
+          e.stopPropagation();
+          if (lineageRow.dataset.loaded) return;
+          lineageRow.dataset.loaded = '1';
+          lineageRow.textContent = 'Loading…';
+          const lineage = await fetchMlxLineage(m.id);
+          const derivatives = lineage?.nativeMlxDerivatives || [];
+          if (!derivatives.length) {
+            lineageRow.textContent = 'No other quantizations found.';
+            return;
+          }
+          lineageRow.remove();
+          for (const d of derivatives) {
+            const sibling = document.createElement('div');
+            sibling.className = 'hf-sr-lineage-item';
+            sibling.setAttribute('tabindex', '0');
+            sibling.setAttribute('role', 'button');
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'hf-sr-lineage-name';
+            nameSpan.textContent = d.repoId;
+            sibling.appendChild(nameSpan);
+
+            const metaSpan = document.createElement('span');
+            metaSpan.className = 'hf-sr-lineage-meta';
+            const parts = [];
+            if (d.quant?.bits) parts.push(`${d.quant.bits}-bit`);
+            if (d.size) parts.push(formatBytes(d.size));
+            metaSpan.textContent = parts.join(' · ');
+            sibling.appendChild(metaSpan);
+
+            const selectSibling = () => {
+              container.querySelectorAll('.hf-search-result.selected, .hf-sr-lineage-item.selected')
+                .forEach(el => el.classList.remove('selected'));
+              card.classList.add('selected');
+              sibling.classList.add('selected');
+              if (onSelectModel) {
+                onSelectModel({
+                  repoId: d.repoId,
+                  id: d.repoId,
+                  format: 'mlx',
+                  param_b: m.param_b || 0,
+                  quant_label: d.quant?.bits ? `${d.quant.bits}-bit` : '',
+                  model_size_bytes: d.size || 0,
+                });
+              }
+            };
+            sibling.addEventListener('click', ev => { ev.stopPropagation(); selectSibling(); });
+            sibling.addEventListener('keydown', ev => {
+              if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); selectSibling(); }
+            });
+
+            card.appendChild(sibling);
+          }
+        });
+        card.appendChild(lineageRow);
       } else {
         // GGUF repos: click expands file list inline
         const filesContainer = document.createElement('div');
@@ -599,6 +663,10 @@ export async function hfSearch({
 
               fileItem.addEventListener('click', e => {
                 e.stopPropagation();
+                container.querySelectorAll('.hf-sr-file-item.selected').forEach(f => f.classList.remove('selected'));
+                container.querySelectorAll('.hf-search-result.selected').forEach(c => c.classList.remove('selected'));
+                fileItem.classList.add('selected');
+                card.classList.add('selected');
                 if (onSelectModel) {
                   onSelectModel({
                     repoId: m.id,
@@ -1383,7 +1451,7 @@ export function hfCreateSortSelector({ container, defaultSort = HF_SORT.DOWNLOAD
     'background:rgba(0,0,0,0.3);color:rgba(255,255,255,0.8);cursor:pointer;';
 
   const sorts = [
-    { value: HF_SORT.AUTO, label: 'Auto (workload fit)' },
+    { value: HF_SORT.DOWNLOADS, label: 'Most downloaded' },
     { value: HF_SORT.RELEVANCE, label: 'Relevance' },
     { value: HF_SORT.NAME, label: 'Name' },
     { value: HF_SORT.SIZE, label: 'Size' },
@@ -1397,7 +1465,9 @@ export function hfCreateSortSelector({ container, defaultSort = HF_SORT.DOWNLOAD
     select.appendChild(opt);
   }
 
-  select.value = defaultSort;
+  // A caller may restore a sort mode from an older UI version. Never leave the
+  // native select visually blank when that value is no longer offered.
+  select.value = sorts.some(s => s.value === defaultSort) ? defaultSort : HF_SORT.DOWNLOADS;
   select.addEventListener('change', () => {
     container.dataset.hfSearchSort = select.value;
     if (onChange) onChange(select.value);

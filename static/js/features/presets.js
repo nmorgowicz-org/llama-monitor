@@ -15,16 +15,10 @@ import {
     buildCommunityTemplateInstallRequest,
     detectCommunityTemplateFamily,
 } from './chat-template-registry.js';
-import { hfSearch, hfCreateFormatToggle } from './hf-browse.js';
 import { buildEstimateBody } from './vram-estimate.js';
 import { _renderMtpConcurrencyTeaching } from './spawn-wizard.js';
 
 let newPresetSeed = null;
-
-// ── HF search state for preset editor ─────────────────────────────────────────
-let _presetHfSearchTimer = null;
-let _presetHfSearchInitialized = false;
-let _presetHfSearchFormat = 'gguf';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -503,102 +497,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // HF model search for preset editor
-    _initPresetHfSearch();
 });
-
-function _initPresetHfSearch() {
-    if (_presetHfSearchInitialized) return;
-    _presetHfSearchInitialized = true;
-
-    const input = document.getElementById('modal-model-path');
-    const resultsContainer = document.getElementById('preset-hf-search-results');
-    const toggleWrap = document.getElementById('preset-hf-format-toggle-wrap');
-    if (!input || !resultsContainer || !toggleWrap) return;
-
-    // Create format toggle (GGUF/MLX)
-    hfCreateFormatToggle({
-        container: toggleWrap,
-        defaultFormat: 'gguf',
-        onChange: (fmt) => {
-            _presetHfSearchFormat = fmt;
-            _triggerPresetHfSearch();
-        },
-    });
-
-    // Search when user types something that looks like an HF repo id (contains "/")
-    input.addEventListener('input', () => {
-        clearTimeout(_presetHfSearchTimer);
-        _presetHfSearchTimer = setTimeout(_triggerPresetHfSearch, 350);
-    });
-
-    input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && resultsContainer.style.display !== 'none') {
-            e.preventDefault();
-            clearTimeout(_presetHfSearchTimer);
-            const first = resultsContainer.querySelector('.hf-search-result');
-            if (first) first.click();
-        }
-    });
-
-    // Close results when clicking outside
-    document.addEventListener('click', (e) => {
-        if (!input.contains(e.target) && !resultsContainer.contains(e.target) && !toggleWrap.contains(e.target)) {
-            resultsContainer.style.display = 'none';
-        }
-    });
-}
-
-function _looksLikeHfRepoId(value) {
-    if (!value || value.length < 4) return false;
-    const v = value.trim();
-    // Must contain "/" but not look like a local path
-    if (!v.includes('/')) return false;
-    if (v.startsWith('/') || v.startsWith('./') || v.startsWith('../')) return false;
-    if (v.includes('\\') || /^[A-Za-z]:/.test(v)) return false;
-    if (v.toLowerCase().endsWith('.gguf')) return false;
-    // Must be owner/repo format (two path segments)
-    const parts = v.split('/');
-    if (parts.length !== 2 || !parts[0] || !parts[1]) return false;
-    return /^[a-zA-Z0-9._-]+$/.test(parts[0]) && /^[a-zA-Z0-9._/-]+$/.test(parts[1]);
-}
-
-function _triggerPresetHfSearch() {
-    const input = document.getElementById('modal-model-path');
-    const resultsContainer = document.getElementById('preset-hf-search-results');
-    if (!input || !resultsContainer) return;
-
-    const value = input.value.trim();
-    if (!_looksLikeHfRepoId(value)) {
-        resultsContainer.style.display = 'none';
-        return;
-    }
-
-    const parts = value.split('/');
-    const author = parts[0];
-    const query = parts.slice(1).join('/');
-
-    hfSearch({
-        query: query || undefined,
-        author,
-        sort: 'downloads',
-        limit: 8,
-        format: _presetHfSearchFormat,
-        container: resultsContainer,
-        filelistContainer: null,
-        quickpicksContainer: null,
-        discoverPillsContainerId: null,
-        onOpenCardPanel: (repoId) => {
-            window.open(`https://huggingface.co/${repoId}`, '_blank', 'noopener');
-        },
-        onSelectModel: (m) => {
-            input.value = m.id;
-            resultsContainer.style.display = 'none';
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-            showToast(`Selected: ${m.id}`, 'info');
-        },
-    });
-}
 
 // ── Modal ──────────────────────────────────────────────────────────────────────
 
@@ -1212,8 +1111,10 @@ export function openPresetModal(mode, section, seedPreset = null) {
     const modal = document.getElementById('preset-modal');
     const title = document.getElementById('modal-title');
     const subtitle = document.getElementById('preset-editor-subtitle');
+    const formatPill = document.getElementById('preset-editor-format');
     const form = document.getElementById('preset-form');
     form.reset();
+    if (formatPill) formatPill.hidden = true;
     clearFieldErrors();
     newPresetSeed = mode === 'new' && seedPreset ? structuredClone(seedPreset) : null;
     _presetRapidMlxProfile = null;
@@ -1223,7 +1124,17 @@ export function openPresetModal(mode, section, seedPreset = null) {
         const p = sessionState.presets.find(pr => pr.id === id);
         if (!p) { showToast('No preset selected', 'warn'); return; }
         title.textContent = 'Edit Preset';
-        if (subtitle) subtitle.textContent = p.name;
+        if (subtitle) {
+            subtitle.textContent = 'Model profile';
+            subtitle.title = p.name;
+        }
+        if (formatPill) {
+            const source = presetModelSource(p).toLowerCase();
+            const format = p.backend === 'rapid_mlx' ? 'MLX' : source.endsWith('.gguf') ? 'GGUF' : '';
+            formatPill.textContent = format;
+            formatPill.hidden = !format;
+            formatPill.title = format ? `${format} preset` : '';
+        }
         setVal('modal-preset-id', p.id);
         // Model & Memory
         setVal('modal-name', p.name);
@@ -1232,6 +1143,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
         // - Else if hf_repo present, treat as HF repo.
         const modelValue = presetModelSource(p);
         setVal('modal-model-path', modelValue);
+        document.getElementById('modal-model-path').title = modelValue;
         _renderPresetArchInfo(p);
         setVal('modal-alias', p.alias || '');
         // Fetch live Rapid-MLX profile when editing a Rapid-MLX preset
@@ -1408,12 +1320,21 @@ export function openPresetModal(mode, section, seedPreset = null) {
         _configureBackendPresetEditor(p);
     } else {
         title.textContent = 'New Preset';
-        if (subtitle) subtitle.textContent = newPresetSeed?.backend === 'rapid_mlx'
-            ? 'Rapid-MLX model profile'
-            : 'New model profile';
+        if (subtitle) {
+            subtitle.textContent = newPresetSeed?.backend === 'rapid_mlx'
+                ? 'Rapid-MLX model profile'
+                : 'New model profile';
+            subtitle.title = '';
+        }
+        if (formatPill && newPresetSeed?.backend === 'rapid_mlx') {
+            formatPill.textContent = 'MLX';
+            formatPill.title = 'MLX preset';
+            formatPill.hidden = false;
+        }
         setVal('modal-preset-id', '');
         setVal('modal-name', newPresetSeed?.name || '');
         setVal('modal-model-path', presetModelSource(newPresetSeed));
+        document.getElementById('modal-model-path').title = presetModelSource(newPresetSeed);
         setVal('modal-context-size', 128000);
         setVal('modal-ctk', 'q8_0');
         setVal('modal-ctv', 'f16');

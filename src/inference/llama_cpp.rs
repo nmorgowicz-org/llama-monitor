@@ -375,7 +375,6 @@ impl LlamaCppAdapter {
         }
         cmd.arg("--no-warmup");
         cmd.arg("--jinja");
-        cmd.arg("--webui-mcp-proxy");
         cmd.arg("--no-context-shift");
         cmd.arg("--ctx-checkpoints").arg("32");
         cmd.arg("--keep").arg("-1");
@@ -688,7 +687,8 @@ impl LlamaCppAdapter {
         }
         if let Some(v) = self.config.cache_idle_slots {
             if v {
-                let cache_enabled = self.config.cache_ram_mib.map(|mib| mib > 0).unwrap_or(true);
+                // llama-server uses 0 as disabled and -1 as explicitly unlimited.
+                let cache_enabled = self.config.cache_ram_mib != Some(0);
                 if cache_enabled {
                     if self.config.kv_unified.is_none() {
                         cmd.arg("--kv-unified");
@@ -1006,7 +1006,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn default_launch_argv_matches_pre_refactor_contract() {
+    async fn default_launch_argv_omits_experimental_webui_mcp_proxy() {
         let args = launch_args(ServerConfig {
             model_path: "/models/test.gguf".into(),
             ctk: "q8_0".into(),
@@ -1033,7 +1033,6 @@ mod tests {
                 "8080",
                 "--no-warmup",
                 "--jinja",
-                "--webui-mcp-proxy",
                 "--no-context-shift",
                 "--ctx-checkpoints",
                 "32",
@@ -1149,6 +1148,29 @@ mod tests {
             "--image-max-tokens",
         ] {
             assert!(args.iter().any(|arg| arg == required), "missing {required}");
+        }
+    }
+
+    #[tokio::test]
+    async fn cache_ram_sentinels_preserve_llama_server_semantics() {
+        for (cache_ram_mib, idle_slot_cache_expected) in [(0, false), (2048, true), (-1, true)] {
+            let args = launch_args(ServerConfig {
+                model_path: "/models/test.gguf".into(),
+                cache_ram_mib: Some(cache_ram_mib),
+                cache_idle_slots: Some(true),
+                ..Default::default()
+            })
+            .await;
+
+            assert!(
+                args.windows(2)
+                    .any(|pair| { pair == ["--cache-ram", cache_ram_mib.to_string().as_str()] })
+            );
+            assert_eq!(
+                args.iter().any(|arg| arg == "--cache-idle-slots"),
+                idle_slot_cache_expected,
+                "cache_ram_mib={cache_ram_mib}"
+            );
         }
     }
 }

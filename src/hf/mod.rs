@@ -51,6 +51,40 @@ static HF_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
         .unwrap_or_else(|_| reqwest::Client::new())
 });
 
+// ── Process-lifetime cache for per-repo file sizes ────────────────────────────
+//
+// HF tree-API lookups (fetch_file_sizes) are the main source of rate-limit
+// pressure: repeated searches/pagination re-request the same repos. File
+// sizes are effectively immutable for a given repo, so cache them for the
+// life of the process rather than re-fetching every time.
+static HF_SIZE_CACHE: LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, std::collections::HashMap<String, u64>>>,
+> = LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Byte width for a safetensors dtype string (e.g. "BF16", "U32", "I8").
+fn safetensors_dtype_bytes(dtype: &str) -> f64 {
+    match dtype.to_ascii_uppercase().as_str() {
+        "F64" | "I64" | "U64" => 8.0,
+        "F32" | "I32" | "U32" => 4.0,
+        "F16" | "BF16" | "I16" | "U16" => 2.0,
+        "I8" | "U8" | "F8_E4M3" | "F8_E5M2" | "BOOL" => 1.0,
+        "I4" | "U4" | "F4" => 0.5,
+        _ => 2.0, // unknown dtype: assume 2 bytes/param (bf16-class), the common case
+    }
+}
+
+/// Compute total weight bytes from a search result's `safetensors.parameters` map
+/// (present when the request includes `expand[]=safetensors`). Avoids the need
+/// for a separate per-repo HF tree-API call for the common case.
+fn safetensors_total_bytes(item: &serde_json::Value) -> Option<u64> {
+    let params = item.get("safetensors")?.get("parameters")?.as_object()?;
+    let mut total = 0.0_f64;
+    for (dtype, count) in params {
+        total += count.as_u64()? as f64 * safetensors_dtype_bytes(dtype);
+    }
+    (total > 0.0).then_some(total as u64)
+}
+
 // ── Search sort options ───────────────────────────────────────────────────────
 
 /// Sort order for HF model search / author browse.
@@ -879,8 +913,8 @@ async fn hf_search_single(
             HfModelFormat::Mlx => p.append_pair("apps", "mlx-lm"),
             HfModelFormat::Both => unreachable!(), // handled in hf_search_both
         };
-        if params.quants_only {
-            p.append_pair("base_model_relation", "quantized");
+        if matches!(params.format, HfModelFormat::Mlx) {
+            p.append_pair("expand[]", "safetensors");
         }
     }
 
@@ -907,14 +941,41 @@ async fn hf_search_single(
         .json()
         .await
         .map_err(|e| format!("Failed to parse HF response: {e}"))?;
+    let items = if params.quants_only {
+        items
+            .into_iter()
+            .filter(has_quantized_base_model_tag)
+            .collect()
+    } else {
+        items
+    };
 
-    let models: Vec<SimpleModelInfo> = items.into_iter().filter_map(|item| parse_model_item(item, &params.format)).collect();
+    let mut models: Vec<SimpleModelInfo> = items
+        .into_iter()
+        .filter_map(|item| parse_model_item(item, &params.format))
+        .collect();
+
+    // For MLX models where the safetensors expand didn't yield a size, fall back to tree API
+    let token = hf_load_token();
+    for model in models.iter_mut() {
+        if model.model_size_bytes.is_none()
+            && matches!(params.format, HfModelFormat::Mlx | HfModelFormat::Both)
+            && let Ok(files) = fetch_file_sizes(&model.id, token.as_deref()).await
+        {
+            let total: u64 = files.values().sum();
+            if total > 0 {
+                model.model_size_bytes = Some(total);
+            }
+        }
+    }
 
     Ok((models, next_cursor))
 }
 
 /// For Both format, do two separate searches (GGUF + MLX) and merge.
-async fn hf_search_both(params: &HfSearchParams) -> Result<(Vec<SimpleModelInfo>, Option<String>), String> {
+async fn hf_search_both(
+    params: &HfSearchParams,
+) -> Result<(Vec<SimpleModelInfo>, Option<String>), String> {
     let limit = params.limit.clamp(1, 100);
     let token = hf_load_token();
 
@@ -936,9 +997,7 @@ async fn hf_search_both(params: &HfSearchParams) -> Result<(Vec<SimpleModelInfo>
             p.append_pair("cursor", cursor);
         }
         p.append_pair("apps", "llama.cpp,mlx-lm");
-        if params.quants_only {
-            p.append_pair("base_model_relation", "quantized");
-        }
+        p.append_pair("expand[]", "safetensors");
     }
 
     let mut req = HF_HTTP_CLIENT.get(url);
@@ -964,16 +1023,51 @@ async fn hf_search_both(params: &HfSearchParams) -> Result<(Vec<SimpleModelInfo>
         .json()
         .await
         .map_err(|e| format!("Failed to parse HF response: {e}"))?;
+    let items = if params.quants_only {
+        items
+            .into_iter()
+            .filter(has_quantized_base_model_tag)
+            .collect()
+    } else {
+        items
+    };
 
-    let models: Vec<SimpleModelInfo> = items
+    let mut models: Vec<SimpleModelInfo> = items
         .into_iter()
         .filter_map(|item| parse_model_item(item, &HfModelFormat::Both))
         .collect();
+
+    // For MLX models where the safetensors expand didn't yield a size, fall back to tree API
+    let token = hf_load_token();
+    for model in models.iter_mut() {
+        if model.model_size_bytes.is_none()
+            && model.format == "mlx"
+            && let Ok(files) = fetch_file_sizes(&model.id, token.as_deref()).await
+        {
+            let total: u64 = files.values().sum();
+            if total > 0 {
+                model.model_size_bytes = Some(total);
+            }
+        }
+    }
 
     Ok((models, next_cursor))
 }
 
 /// Browse all GGUF models from a specific HF author/org (convenience wrapper).
+/// `base_model_relation` is not a working Hub models-API filter. Retain only
+/// repositories that explicitly declare themselves as a quantization instead.
+fn has_quantized_base_model_tag(item: &serde_json::Value) -> bool {
+    item.get("tags")
+        .and_then(|tags| tags.as_array())
+        .is_some_and(|tags| {
+            tags.iter().any(|tag| {
+                tag.as_str()
+                    .is_some_and(|tag| tag.starts_with("base_model:quantized:"))
+            })
+        })
+}
+
 /// Parse a single model JSON object from the HF API into SimpleModelInfo.
 fn parse_model_item(item: serde_json::Value, format: &HfModelFormat) -> Option<SimpleModelInfo> {
     let id = item
@@ -1010,10 +1104,18 @@ fn parse_model_item(item: serde_json::Value, format: &HfModelFormat) -> Option<S
     // Infer parameter count from repo name
     let param_b = infer_param_b_from_name(&id);
 
-    let model_size_bytes = item.get("model_size_bytes").and_then(|v| v.as_u64());
+    let model_size_bytes = item
+        .get("model_size_bytes")
+        .and_then(|v| v.as_u64())
+        .or_else(|| safetensors_total_bytes(&item));
 
     // Infer quant label from HF tags (preferred) or repo name
     let quant_label = infer_mlx_quant_label(&tags, &id);
+
+    // HF reliably tags MLX repos "mlx" and GGUF repos "gguf" — use the real
+    // per-item tag rather than blanket-stamping "both" for every result.
+    let tag_has_mlx = tags.iter().any(|t| t.eq_ignore_ascii_case("mlx"));
+    let tag_has_gguf = tags.iter().any(|t| t.eq_ignore_ascii_case("gguf"));
 
     Some(SimpleModelInfo {
         id,
@@ -1039,7 +1141,11 @@ fn parse_model_item(item: serde_json::Value, format: &HfModelFormat) -> Option<S
         format: match format {
             HfModelFormat::Mlx => "mlx".into(),
             HfModelFormat::Gguf => "gguf".into(),
-            HfModelFormat::Both => "both".into(),
+            HfModelFormat::Both => match (tag_has_mlx, tag_has_gguf) {
+                (true, false) => "mlx".into(),
+                (false, true) => "gguf".into(),
+                _ => "both".into(),
+            },
         },
         model_size_bytes,
         quant_label,
@@ -1070,12 +1176,24 @@ fn infer_param_b_from_name(name: &str) -> f64 {
 fn infer_mlx_quant_label(tags: &[String], _id: &str) -> String {
     let tags_lower = tags.iter().map(|t| t.to_ascii_lowercase());
     for tag in tags_lower {
-        if tag == "4-bit" { return "4-bit".into(); }
-        if tag == "8-bit" { return "8-bit".into(); }
-        if tag == "3-bit" { return "3-bit".into(); }
-        if tag == "2-bit" { return "2-bit".into(); }
-        if tag == "5-bit" { return "5-bit".into(); }
-        if tag == "6-bit" { return "6-bit".into(); }
+        if tag == "4-bit" {
+            return "4-bit".into();
+        }
+        if tag == "8-bit" {
+            return "8-bit".into();
+        }
+        if tag == "3-bit" {
+            return "3-bit".into();
+        }
+        if tag == "2-bit" {
+            return "2-bit".into();
+        }
+        if tag == "5-bit" {
+            return "5-bit".into();
+        }
+        if tag == "6-bit" {
+            return "6-bit".into();
+        }
     }
     String::new()
 }
@@ -1130,7 +1248,8 @@ pub async fn hf_list_mlx_files(repo_id: &str) -> Result<Vec<serde_json::Value>, 
             let path = s.rfilename.as_str();
             let size = sizes.get(path).copied().unwrap_or(0);
             let lower = path.to_ascii_lowercase();
-            let is_safetensors = lower.ends_with(".safetensors") || lower.ends_with(".safetensors.index.json");
+            let is_safetensors =
+                lower.ends_with(".safetensors") || lower.ends_with(".safetensors.index.json");
             let is_config = lower.ends_with("config.json") || lower.ends_with("config.yaml");
             if is_safetensors || is_config {
                 serde_json::json!({
@@ -1472,6 +1591,10 @@ async fn fetch_file_sizes(
     repo_id: &str,
     token: Option<&str>,
 ) -> Result<std::collections::HashMap<String, u64>> {
+    if let Some(cached) = HF_SIZE_CACHE.lock().unwrap().get(repo_id) {
+        return Ok(cached.clone());
+    }
+
     let url = format!("https://huggingface.co/api/models/{repo_id}/tree/main");
     let mut req = HF_HTTP_CLIENT.get(&url);
     if let Some(t) = token {
@@ -1493,7 +1616,10 @@ async fn fetch_file_sizes(
             .unwrap_or("")
             .to_string();
         let lower = path.to_ascii_lowercase();
-        if !lower.ends_with(".gguf") && !lower.ends_with(".safetensors") && !lower.ends_with(".safetensors.index.json") {
+        if !lower.ends_with(".gguf")
+            && !lower.ends_with(".safetensors")
+            && !lower.ends_with(".safetensors.index.json")
+        {
             continue;
         }
 
@@ -1509,6 +1635,11 @@ async fn fetch_file_sizes(
             map.insert(path, size);
         }
     }
+
+    HF_SIZE_CACHE
+        .lock()
+        .unwrap()
+        .insert(repo_id.to_string(), map.clone());
 
     Ok(map)
 }
@@ -2707,6 +2838,16 @@ mod tests {
     }
 
     #[test]
+    fn test_quants_only_uses_declared_quantized_base_tag() {
+        assert!(has_quantized_base_model_tag(&serde_json::json!({
+            "tags": ["mlx", "base_model:quantized:mistralai/Mistral-7B-Instruct-v0.3"]
+        })));
+        assert!(!has_quantized_base_model_tag(&serde_json::json!({
+            "tags": ["mlx", "base_model:mistralai/Mistral-7B-Instruct-v0.3"]
+        })));
+    }
+
+    #[test]
     fn test_infer_quant_label() {
         assert_eq!(infer_quant_label("model-Q4_K_M.gguf"), "Q4_K_M");
         assert_eq!(infer_quant_label("model-Q8_0.gguf"), "Q8_0");
@@ -3007,6 +3148,56 @@ async fn check_qualified(repo_id: &str) -> bool {
     resp.status().is_success() && repo_id.starts_with("mlx-community/")
 }
 
+/// Query HF's declared `base_model:quantized:` tag for MLX sibling quantizations.
+///
+/// The Hub's `other` and `base_model_relation` query parameters are silently
+/// ignored by the models API. `filter` is the supported exact tag filter. The
+/// selected repo is often itself a quantized leaf, so first resolve its declared
+/// base model and then ask for all MLX quantizations of that base.
+async fn fetch_mlx_relation_derivatives(repo_id: &str) -> Result<Vec<SimpleModelInfo>, String> {
+    let base_model = hf_get_model_info(repo_id)
+        .await
+        .map_err(|e| format!("Failed to resolve MLX base model: {e}"))?
+        .tags
+        .into_iter()
+        .find_map(|tag| tag.strip_prefix("base_model:quantized:").map(str::to_owned))
+        .unwrap_or_else(|| repo_id.to_string());
+
+    let token = hf_load_token();
+    let mut url = reqwest::Url::parse("https://huggingface.co/api/models")
+        .map_err(|e| format!("Invalid HF API URL: {e}"))?;
+    {
+        let mut p = url.query_pairs_mut();
+        p.append_pair("filter", &format!("base_model:quantized:{base_model}"));
+        p.append_pair("apps", "mlx-lm");
+        p.append_pair("limit", "50");
+        p.append_pair("expand[]", "safetensors");
+    }
+
+    let mut req = HF_HTTP_CLIENT.get(url);
+    if let Some(ref tok) = token {
+        req = req.bearer_auth(tok);
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HF relation query failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HF relation query failed: HTTP {}", resp.status()));
+    }
+
+    let items: Vec<serde_json::Value> = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse HF relation response: {e}"))?;
+
+    Ok(items
+        .into_iter()
+        .filter_map(|item| parse_model_item(item, &HfModelFormat::Mlx))
+        .collect())
+}
+
 /// Discover MLX derivatives and conversion recipes for a source repo.
 ///
 /// Searches HF for native MLX derivatives of the given finetune, using the original
@@ -3034,95 +3225,104 @@ pub async fn hf_discover_mlx_derivatives(repo_id: &str) -> Result<MlxDiscoveryRe
 
     // Derive a search stem from the source repo name (without owner prefix)
     let stem = repo_id.split('/').next_back().unwrap_or(repo_id);
-    let search_query = format!("{stem} mlx");
 
     let mut native_mlx_derivatives: Vec<MlxDerivative> = Vec::new();
-    match hf_search_models(&HfSearchParams {
-        query: search_query,
-        author: None,
-        sort: HfSort::Downloads,
-        limit: 15,
-        cursor: None,
-        format: HfModelFormat::Mlx,
-        quants_only: true,
-    })
-    .await
-    {
-        Ok((results, _)) => {
-            for item in results {
-                let id_lower = item.id.to_ascii_lowercase();
-                let stem_lower = stem.to_ascii_lowercase();
 
-                // Must contain stem and not be the source repo itself
-                if item.id == repo_id || !id_lower.contains(&stem_lower[..stem_lower.len().min(16)])
-                {
-                    continue;
-                }
+    // Primary path: HF's author-declared model-relation graph (`base_model:` tag).
+    // This is authoritative — a repo explicitly declares what it was quantized from —
+    // unlike the fuzzy stem-name search below, which is a guess.
+    let relation_results = match fetch_mlx_relation_derivatives(repo_id).await {
+        Ok(results) => results,
+        Err(e) => {
+            errors.push(format!("relation query: {e}"));
+            Vec::new()
+        }
+    };
 
-                // Original author never appears as converter
-                let converter = item.author.clone();
-                if let Some(ref orig) = original_author
-                    && converter.eq_ignore_ascii_case(orig)
-                {
-                    continue;
-                }
-                if let Some(ref orig) = original_author
-                    && converter.eq_ignore_ascii_case(orig)
-                {
-                    continue;
-                }
-                if let Some(ref orig) = original_author
-                    && converter.eq_ignore_ascii_case(orig)
-                {
-                    continue;
-                }
-                if let Some(ref orig) = original_author
-                    && converter.eq_ignore_ascii_case(orig)
-                {
-                    continue;
-                }
-                if let Some(ref orig) = original_author
-                    && converter.eq_ignore_ascii_case(orig)
-                {
-                    continue;
-                }
-
-                // Prefer known MLX publishers
-                let is_known_publisher = known_mlx_publishers()
-                    .iter()
-                    .any(|p| converter.to_ascii_lowercase() == *p);
-
-                // Skip low-signal results unless they're known publishers
-                if !is_known_publisher && item.downloads < 10 {
-                    continue;
-                }
-
-                // Fetch size from HF tree API
-                let size = resolve_mlx_repo_size_bytes(&item.id)
-                    .await
-                    .unwrap_or_default()
-                    .unwrap_or(0);
-
-                // Fetch quant from config
-                let quant = fetch_mlx_quant_for_repo(&item.id).await;
-
-                // Check qualification
-                let is_qualified = check_qualified(&item.id).await;
-
-                native_mlx_derivatives.push(MlxDerivative {
-                    repo_id: item.id,
-                    revision: "main".into(),
-                    converter,
-                    format: "mlx".into(),
-                    is_qualified,
-                    size,
-                    quant,
-                });
+    // Fall back to fuzzy stem search only when the relation graph has nothing declared
+    // (common for older or less-diligently-tagged repos).
+    let via_relation = !relation_results.is_empty();
+    let candidates = if via_relation {
+        relation_results
+    } else {
+        match hf_search_models(&HfSearchParams {
+            query: format!("{stem} mlx"),
+            author: None,
+            sort: HfSort::Downloads,
+            limit: 15,
+            cursor: None,
+            format: HfModelFormat::Mlx,
+            quants_only: true,
+        })
+        .await
+        {
+            Ok((results, _)) => results,
+            Err(e) => {
+                errors.push(format!("search: {e}"));
+                Vec::new()
             }
         }
-        Err(e) => {
-            errors.push(format!("search: {e}"));
+    };
+
+    for item in candidates {
+        // Must not be the source repo itself; when falling back to fuzzy search,
+        // also require the stem to actually appear in the candidate's id (the
+        // relation-graph path is already authoritative and needs no such check).
+        if item.id == repo_id {
+            continue;
         }
+        if !via_relation {
+            let id_lower = item.id.to_ascii_lowercase();
+            let stem_lower = stem.to_ascii_lowercase();
+            if !id_lower.contains(&stem_lower[..stem_lower.len().min(16)]) {
+                continue;
+            }
+        }
+
+        // Original author never appears as converter
+        let converter = item.author.clone();
+        if let Some(ref orig) = original_author
+            && converter.eq_ignore_ascii_case(orig)
+        {
+            continue;
+        }
+
+        // Prefer known MLX publishers
+        let is_known_publisher = known_mlx_publishers()
+            .iter()
+            .any(|p| converter.to_ascii_lowercase() == *p);
+
+        // Skip low-signal results unless they're known publishers
+        if !is_known_publisher && item.downloads < 10 {
+            continue;
+        }
+
+        // Fetch size: prefer what the search response already carried (safetensors
+        // expand or relation-query result), only hitting the tree API if still unknown
+        let size = if let Some(bytes) = item.model_size_bytes {
+            bytes
+        } else {
+            resolve_mlx_repo_size_bytes(&item.id)
+                .await
+                .unwrap_or_default()
+                .unwrap_or(0)
+        };
+
+        // Fetch quant from config
+        let quant = fetch_mlx_quant_for_repo(&item.id).await;
+
+        // Check qualification
+        let is_qualified = check_qualified(&item.id).await;
+
+        native_mlx_derivatives.push(MlxDerivative {
+            repo_id: item.id,
+            revision: "main".into(),
+            converter,
+            format: "mlx".into(),
+            is_qualified,
+            size,
+            quant,
+        });
     }
 
     // Sort by known publisher (preferred), then qualification
