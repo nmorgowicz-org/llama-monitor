@@ -2058,7 +2058,6 @@ async function initHfDownloadTab() {
 }
 
 async function onHfModelSelected(model, filelistContainer, downloadPanel) {
-    console.log('[MODELS] onHfModelSelected:', model.repoId || model.id, 'format:', model.format);
     // Handle both raw model objects and selection payloads
     const repoId = model.repoId || model.id || '';
     const paramB = model.param_b || model._raw?.param_b || 0;
@@ -2095,11 +2094,9 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
     // MLX repos: treat repo itself as the model — use model_size_bytes if available
     if (modelFormat === 'mlx') {
         let modelBytes = model.model_size_bytes || 0;
-        console.log('[MODELS] MLX path: modelBytes=', modelBytes, 'paramB=', paramB, 'model=', model);
         // Update selected model display
         const nameEl = document.getElementById('mm-selected-model-name');
         const metaEl = document.getElementById('mm-selected-model-meta');
-        console.log('[MODELS] DOM elements: nameEl=', !!nameEl, 'metaEl=', !!metaEl, 'downloadPanel=', !!downloadPanel);
         if (nameEl) nameEl.textContent = repoId;
         if (metaEl) {
             const parts = [];
@@ -2110,7 +2107,6 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
         }
         // If no model_size_bytes from search, fetch from tree API
         if (modelBytes === 0) {
-            console.log('[MODELS] Fetching file sizes from tree API...');
             try {
                 const headers = window.authHeaders ? window.authHeaders() : {};
                 const resp = await fetch('/api/hf/files', {
@@ -2118,15 +2114,12 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
                     headers: { 'Content-Type': 'application/json', ...headers },
                     body: JSON.stringify({ repo_id: repoId, format: 'mlx' }),
                 });
-                console.log('[MODELS] Tree API response status:', resp.status);
                 if (resp.ok) {
                     const data = await resp.json();
-                    console.log('[MODELS] Tree API data:', data);
                     if (data.files && data.files.length > 0) {
                         // Sum file sizes from tree API response
                         modelBytes = data.files.reduce((sum, f) => sum + (f.size || f.bytes || 0), 0);
                         hfState.modelBytes = modelBytes;
-                        console.log('[MODELS] Computed modelBytes:', modelBytes);
                         if (metaEl) {
                             const parts = [];
                             if (model.param_b > 0) parts.push(formatParams(model.param_b));
@@ -2136,21 +2129,15 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
                         }
                     }
                 }
-            } catch (e) { console.log('[MODELS] Tree API error:', e); }
+            } catch { /* non-fatal */ }
         }
-        // Show download panel (works with param_b estimate if size unavailable)
+        // Show download panel
         if (modelBytes > 0) {
             hfState.modelBytes = modelBytes;
-            console.log('[MODELS] Showing download panel for:', repoId);
             await hfShowDownloadPanel(downloadPanel, repoId);
-        } else {
-            console.log('[MODELS] Skipping download panel: no modelBytes');
         }
         // Show VRAM estimate
-        if (paramB > 0) {
-            console.log('[MODELS] Scheduling VRAM update with size:', modelBytes);
-            scheduleVramUpdate({ size: modelBytes });
-        }
+        if (paramB > 0) scheduleVramUpdate({ size: modelBytes });
         return;
     }
 

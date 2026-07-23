@@ -506,7 +506,6 @@ export async function hfSearch({
       if (format === 'mlx') {
         // MLX repos: click directly selects model (no file list)
         card.addEventListener('click', () => {
-          console.log('[HF-BROWSE] MLX card clicked:', m.id, 'onSelectModel:', !!onSelectModel);
           if (onSelectModel) {
             onSelectModel({
               repoId: m.id,
