@@ -472,11 +472,14 @@ async function _renderUnifiedMemoryBar(bar, purgeBtn, metalGpuLimitMb, ramTotalB
                 btn.disabled = true;
                 btn.textContent = 'Updating…';
                 try {
-                    // Fetch admin token (required for system-level changes)
+                    // Fetch db-admin-token (required for system-level changes)
                     const tokenHeaders = window.authHeaders ? window.authHeaders() : {};
-                    const tokenResp = await fetch('/api/auth/status', { headers: tokenHeaders });
-                    const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
-                    const adminToken = tokenData.token || tokenData.db_admin_token || '';
+                    const tokenResp = await fetch('/api/db/admin-token', { headers: tokenHeaders });
+                    let adminToken = '';
+                    if (tokenResp.ok) {
+                        const data = await tokenResp.json().catch(() => ({}));
+                        adminToken = data.token || '';
+                    }
                     const headers = {
                         'Content-Type': 'application/json',
                         ...(adminToken ? { 'Authorization': `Bearer ${adminToken}` } : {}),
