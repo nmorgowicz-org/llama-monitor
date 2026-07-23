@@ -69,7 +69,7 @@ pub struct RuntimeMetadata {
 
 /// Resolved receipt of dependency installation for a managed environment.
 /// Preserves the exact packages installed from Rapid's upstream contract + supported extras.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolvedDependencyReceipt {
     pub rapid_mlx_version: String,
     /// Exact resolved versions of all installed packages.
@@ -80,7 +80,7 @@ pub struct ResolvedDependencyReceipt {
     pub rollback_eligible: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolvedPackage {
     pub name: String,
     pub version: String,

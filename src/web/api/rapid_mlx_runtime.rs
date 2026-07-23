@@ -1987,6 +1987,8 @@ mod tests {
             active: true,
             rollback_candidate: false,
             complete: true,
+            resolved_receipt: None,
+            last_probe_result: None,
         };
         let public = PublicRuntimeInventoryEntry::from(internal);
         let json = serde_json::to_string(&public).unwrap();

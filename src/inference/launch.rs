@@ -341,6 +341,15 @@ pub async fn construct_adapter(
 ) -> Result<BackendAdapter> {
     match request {
         LocalLaunchRequest::LlamaCpp(config) => {
+            // Capability claims must be tied to the exact selected llama-server
+            // binary rather than the build bundled during development. Snapshot
+            // generation is bounded; validation below remains the launch gate.
+            if app_config.llama_server_path.is_file() {
+                let _ = crate::inference::llama_cpp_capabilities::generate_snapshot(
+                    &app_config.llama_server_path,
+                )
+                .await;
+            }
             let gpu_env = state.gpu_env.lock().unwrap().clone();
             Ok(BackendAdapter::LlamaCpp(Arc::new(LlamaCppAdapter::new(
                 app_config.clone(),
@@ -379,13 +388,29 @@ pub async fn construct_adapter(
                     }
                     Err(_) => None,
                 };
+            let managed_evidence =
+                if source == crate::inference::rapid_mlx::runtime::RuntimeSource::Managed {
+                    crate::inference::rapid_mlx::updater::RapidMlxRuntimeManager::new(
+                        &app_config.config_dir,
+                    )
+                    .ok()
+                    .and_then(|manager| manager.status().ok())
+                    .and_then(|status| status.active)
+                    .filter(|entry| entry.executable_path == executable_path)
+                } else {
+                    None
+                };
             let runtime = RuntimeMetadata {
                 executable_path,
                 source,
                 version,
                 capability_snapshot,
-                resolved_receipt: None,
-                last_probe_result: None,
+                resolved_receipt: managed_evidence
+                    .as_ref()
+                    .and_then(|entry| entry.resolved_receipt.clone()),
+                last_probe_result: managed_evidence
+                    .as_ref()
+                    .and_then(|entry| entry.last_probe_result.clone()),
                 prefix_cache_enabled: config.prefix_cache_enabled,
                 prefix_cache_budget_bytes: config.prefix_cache_budget_bytes,
             };

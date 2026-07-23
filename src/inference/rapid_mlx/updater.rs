@@ -4,7 +4,9 @@ use crate::inference::rapid_mlx::compatibility::{
     CompatibilityProfile, CompatibilityState, MINIMUM_VERIFIED_VERSION,
     probe_published_managed_release,
 };
-use crate::inference::rapid_mlx::runtime::{ProbeResult, RuntimeSource};
+use crate::inference::rapid_mlx::runtime::{
+    ProbeResult, ResolvedDependencyReceipt, ResolvedPackage, RuntimeSource,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use rand::TryRng;
 use rand::rngs::SysRng;
@@ -43,6 +45,10 @@ pub struct RuntimeInventoryEntry {
     pub active: bool,
     pub rollback_candidate: bool,
     pub complete: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_receipt: Option<ResolvedDependencyReceipt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_probe_result: Option<ProbeResult>,
 }
 
 impl Default for RuntimeInventoryEntry {
@@ -55,6 +61,8 @@ impl Default for RuntimeInventoryEntry {
             active: false,
             rollback_candidate: false,
             complete: false,
+            resolved_receipt: None,
+            last_probe_result: None,
         }
     }
 }
@@ -183,21 +191,6 @@ struct EnvironmentManifest {
     last_probe_result: Option<ProbeResult>,
 }
 
-/// Resolved receipt for a managed environment.
-/// Records exact packages installed from Rapid's upstream contract + product-supported extras.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct ResolvedDependencyReceipt {
-    rapid_mlx_version: String,
-    packages: Vec<ResolvedPackage>,
-    installed_at: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct ResolvedPackage {
-    name: String,
-    version: String,
-}
-
 trait RuntimeProbe: Send + Sync {
     fn probe<'a>(
         &'a self,
@@ -312,6 +305,8 @@ impl RapidMlxRuntimeManager {
                     active: false,
                     rollback_candidate: false,
                     complete: true,
+                    resolved_receipt: manifest.resolved_receipt,
+                    last_probe_result: manifest.last_probe_result,
                 });
             }
         }
@@ -620,6 +615,8 @@ impl RapidMlxRuntimeManager {
             active,
             rollback_candidate,
             complete: true,
+            resolved_receipt: manifest.resolved_receipt,
+            last_probe_result: manifest.last_probe_result,
         })
     }
 
@@ -1160,6 +1157,7 @@ fn capture_resolved_receipt(
         rapid_mlx_version: rapid_version.to_string(),
         packages,
         installed_at: now,
+        rollback_eligible: true,
     }))
 }
 

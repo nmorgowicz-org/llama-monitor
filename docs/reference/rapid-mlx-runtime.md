@@ -18,6 +18,22 @@ The managed runtime is designed with these goals:
 - No leakage of internal filesystem paths into API responses.
 - Capability-driven compatibility checks instead of hard-coded version allowlists.
 
+### Capability evidence
+
+Every launch re-runs bounded version, help, dependency, and optional-extra probes for
+the selected executable. This avoids treating a Python-environment dependency update
+as unchanged merely because the `rapid-mlx` executable did not change. A healthy
+Homebrew, pip, pipx, or custom installation that passes the baseline probe is not
+shown a global provisional warning; missing or indeterminate optional features are
+reported only on the feature that needs them.
+
+Managed environments keep the exact resolved dependency receipt and their most recent
+user-driven update-validation result with the active runtime. The validation probe is
+bounded and runs after managed installs, upgrades, repairs, and rollbacks. It checks
+the core runtime separately from optional extras, so a missing `[guided]`, vision, or
+embeddings extra produces actionable feature guidance rather than invalidating an
+otherwise usable runtime.
+
 ## Directory layout
 
 All managed runtime files live under:

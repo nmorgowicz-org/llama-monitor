@@ -1,8 +1,6 @@
 #![allow(clippy::collapsible_if)]
 
-use crate::inference::rapid_mlx::capabilities::{
-    self as cap, CapabilitySnapshot, ExecutableIdentity,
-};
+use crate::inference::rapid_mlx::capabilities::{self as cap, CapabilitySnapshot};
 use crate::inference::rapid_mlx::runtime::RuntimeSource;
 use anyhow::{Context, Result, anyhow};
 use std::collections::BTreeSet;
@@ -100,16 +98,12 @@ impl CompatibilityProfile {
         }
     }
 
-    /// Build a CompatibilityProfile from an existing capability snapshot.
+    /// Build a profile from an already-successful capability snapshot.
+    /// The runtime source must not turn a healthy externally managed
+    /// environment into a global provisional state.
     pub fn from_snapshot(snapshot: &CapabilitySnapshot) -> Self {
         Self {
-            state: if snapshot.source == cap::CapabilitySnapshotSource::ManualOverride
-                || snapshot.rapid_mlx_version.as_str() >= LATEST_QUALIFIED_VERSION_TEXT
-            {
-                CompatibilityState::Verified
-            } else {
-                CompatibilityState::Provisional
-            },
+            state: CompatibilityState::Verified,
             version: snapshot.rapid_mlx_version.clone(),
             capabilities: ServeCapabilities::from_flags(&snapshot.serve_flags),
         }
@@ -125,13 +119,8 @@ fn profile_from_snapshot(
 }
 
 pub async fn probe(binary: &Path, source: RuntimeSource) -> Result<CompatibilityProfile> {
-    // Check for cached capability snapshot first; use it if valid
-    if let Ok(identity) = ExecutableIdentity::from_path(binary) {
-        if let Some(snapshot) = cap::cached_snapshot(&identity) {
-            // Reuse compatible profile from snapshot when possible
-            return Ok(profile_from_snapshot(&snapshot, source));
-        }
-    }
+    // Dependencies can change without changing the executable. Re-probe so an
+    // identity-only cache never supplies stale capability evidence.
     probe_with_policy(binary, source, false, PROBE_TIMEOUT, MAX_PROBE_OUTPUT_BYTES).await
 }
 
@@ -246,17 +235,13 @@ async fn probe_with_policy(
         })?;
     }
 
-    // Generate capability snapshot from this probe; cache it for future use.
-    // This is lazy: we only do the full dependency/extra probe on first
-    // compatibility check; subsequent calls reuse the cached snapshot.
+    // Refresh the full dependency/extra snapshot after every baseline probe.
     let _ = cap::generate_snapshot(binary, source).await;
 
     Ok(CompatibilityProfile {
-        state: if source == RuntimeSource::Managed {
-            CompatibilityState::Verified
-        } else {
-            CompatibilityState::Provisional
-        },
+        // A successful bounded baseline probe qualifies every supported source;
+        // optional uncertainty remains per-feature rather than globally.
+        state: CompatibilityState::Verified,
         version: parsed_version.exact,
         capabilities,
     })
@@ -498,11 +483,11 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn live_probe_distinguishes_verified_and_provisional_profiles() {
+    async fn live_probe_qualifies_healthy_external_profiles_without_global_warning() {
         let required = "--host --port --log-level --served-model-name --timeout --max-cache-blocks";
         let (_dir, binary) = fixture_runtime("0.10.10", required);
         let profile = probe(&binary, RuntimeSource::Custom).await.unwrap();
-        assert_eq!(profile.state, CompatibilityState::Provisional);
+        assert_eq!(profile.state, CompatibilityState::Verified);
         assert!(profile.capabilities.contains("--timeout"));
 
         let profile = probe(&binary, RuntimeSource::Managed).await.unwrap();
@@ -521,7 +506,7 @@ mod tests {
 
         let (_dir, binary) = fixture_runtime("0.11.0", "--host --port");
         let profile = probe(&binary, RuntimeSource::Homebrew).await.unwrap();
-        assert_eq!(profile.state, CompatibilityState::Provisional);
+        assert_eq!(profile.state, CompatibilityState::Verified);
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -557,7 +542,7 @@ mod tests {
             );
 
             let profile = probe(&binary, RuntimeSource::Custom).await.unwrap();
-            assert_eq!(profile.state, CompatibilityState::Provisional, "{version}");
+            assert_eq!(profile.state, CompatibilityState::Verified, "{version}");
         }
 
         for version in ["0.10.11", "0.10.10", "0.10.9"] {

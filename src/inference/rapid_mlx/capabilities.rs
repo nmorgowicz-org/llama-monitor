@@ -202,7 +202,8 @@ impl Default for SamplingCascade {
                 SamplingSource::HardcodedFallback,
             ],
             cli_defaults_available: SamplingDefaultFields::default(),
-            all_defaults_mapped: true,
+            // Flag presence does not prove a selected default is effective.
+            all_defaults_mapped: false,
         }
     }
 }
@@ -235,7 +236,9 @@ impl SamplingCascade {
                 SamplingSource::HardcodedFallback,
             ],
             cli_defaults_available: cli_defaults,
-            all_defaults_mapped: true,
+            // The native cascade is known, but per-field effectiveness needs a
+            // protocol probe and must not be inferred from help text.
+            all_defaults_mapped: false,
         }
     }
 }
@@ -424,8 +427,13 @@ pub async fn generate_snapshot(binary: &Path, source: RuntimeSource) -> Result<C
     let installed_extras = probe_extras(binary, &package_versions).await;
 
     // 5. Derive qualified features from flags + extras + baseline checks
-    let qualified_features =
-        derive_qualified_features(&serve_flags, &installed_extras, &version, source);
+    let qualified_features = derive_qualified_features(
+        &serve_flags,
+        &installed_extras,
+        &package_versions,
+        &version,
+        source,
+    );
 
     // 6. Derive MTP concurrency state and sampling default fields from flags
     let mtp_concurrency = derive_mtp_concurrency(&serve_flags);
@@ -732,7 +740,8 @@ except Exception as e:
 fn derive_qualified_features(
     flags: &[String],
     extras: &InstalledExtras,
-    version: &str,
+    package_versions: &[DependencyVersion],
+    _version: &str,
     source: RuntimeSource,
 ) -> QualifiedFeatures {
     let has_tool_parser = flags.iter().any(|f| f == "--tool-call-parser");
@@ -742,27 +751,36 @@ fn derive_qualified_features(
         .iter()
         .any(|f| *f == "--enable-thinking" || *f == "--reasoning-effort");
 
-    // Base availability from flags
+    // Flags establish surface availability only. Consequential protocol/model
+    // behavior remains per-feature indeterminate until its smoke probe exists.
     let tool_parsing = if has_tool_parser {
-        FeatureQualification::Available
+        FeatureQualification::Indeterminate(
+            "--tool-call-parser is present; protocol/model smoke test has not run".into(),
+        )
     } else {
         FeatureQualification::Unavailable("Missing --tool-call-parser flag".into())
     };
 
     let automatic_tool_choice = if has_auto_tool_choice {
-        FeatureQualification::Available
+        FeatureQualification::Indeterminate(
+            "--enable-auto-tool-choice is present; protocol/model smoke test has not run".into(),
+        )
     } else {
         FeatureQualification::Unavailable("Missing --enable-auto-tool-choice flag".into())
     };
 
     let reasoning_parser = if has_reasoning || has_thinking {
-        FeatureQualification::Available
+        FeatureQualification::Indeterminate(
+            "reasoning/thinking flags are present; protocol/model smoke test has not run".into(),
+        )
     } else {
         FeatureQualification::Unavailable("No reasoning/thinking flags detected".into())
     };
 
     let thinking_controls = if has_thinking {
-        FeatureQualification::Available
+        FeatureQualification::Indeterminate(
+            "thinking control flags are present; protocol/model smoke test has not run".into(),
+        )
     } else {
         FeatureQualification::Unavailable("No thinking control flags detected".into())
     };
@@ -779,13 +797,15 @@ fn derive_qualified_features(
 
     let vision = match extras.vision {
         ExtraState::Installed => {
-            // mlx-vlm installed; mark as available unless broken version known
-            if is_broken_vision_version(version) {
+            // An import is necessary but does not qualify a model path.
+            if is_broken_vision_version(package_versions) {
                 FeatureQualification::Indeterminate(
-                    "mlx-vlm version not yet smoke-tested for Qwen/Gemma paths".into(),
+                    "mlx-vlm 0.6.4 is known broken for affected Qwen/Gemma paths".into(),
                 )
             } else {
-                FeatureQualification::Available
+                FeatureQualification::Indeterminate(
+                    "mlx-vlm import succeeded; model-path smoke test has not run".into(),
+                )
             }
         }
         ExtraState::Missing => {
@@ -825,26 +845,20 @@ fn derive_qualified_features(
     }
 }
 
-fn is_broken_vision_version(_rapid_version: &str) -> bool {
-    // Known broken: mlx-vlm==0.6.4; qualified: 0.6.5+ once smoke-tested.
-    // For now treat as indeterminate until smoke matrix runs.
-    true
+fn is_broken_vision_version(package_versions: &[DependencyVersion]) -> bool {
+    package_versions.iter().any(|package| {
+        (package.package.eq_ignore_ascii_case("mlx-vlm")
+            || package.package.eq_ignore_ascii_case("mlx_vlm"))
+            && package.version == "0.6.4"
+    })
 }
 
 /// Derive MTP concurrency qualification from serve --help flags.
 /// Uses flag presence to detect Rapid's single-live-greedy fast-path.
-fn derive_mtp_concurrency(flags: &[String]) -> MtpConcurrencyState {
-    // Rapid's audited source documents single-live-greedy fast-path with fallback.
-    // Presence of any MTP-related flags (e.g., --speculative) indicates this mode.
-    let has_mtp_flags = flags
-        .iter()
-        .any(|f| f.contains("speculative") || f.contains("mtp") || f.contains("spec_decode"));
-    if has_mtp_flags {
-        MtpConcurrencyState::SingleActiveGreedy
-    } else {
-        // Without explicit MTP flags, assume single-active (conservative)
-        MtpConcurrencyState::SingleActiveGreedy
-    }
+fn derive_mtp_concurrency(_flags: &[String]) -> MtpConcurrencyState {
+    // Help output cannot prove model eligibility, companion ownership, or
+    // mid-stream fallback. Preserve unknown until model qualification does.
+    MtpConcurrencyState::Unknown
 }
 
 struct ProbeOutput {
@@ -1673,6 +1687,7 @@ Options:
                 vision: ExtraState::Missing,
                 embeddings: ExtraState::Missing,
             },
+            &[],
             "0.10.10",
             RuntimeSource::Managed,
         );
@@ -1684,7 +1699,7 @@ Options:
         }
         assert!(matches!(
             features.tool_parsing,
-            FeatureQualification::Available
+            FeatureQualification::Indeterminate(_)
         ));
     }
 
@@ -1701,6 +1716,7 @@ Options:
                 .map(String::from)
                 .collect::<Vec<_>>(),
             &extras,
+            &[],
             "0.10.10",
             RuntimeSource::Managed,
         );
@@ -1727,10 +1743,10 @@ Options:
             embeddings: ExtraState::Installed,
         };
         let features =
-            derive_qualified_features(&flags, &extras, "0.10.10", RuntimeSource::Managed);
+            derive_qualified_features(&flags, &extras, &[], "0.10.10", RuntimeSource::Managed);
         assert!(matches!(
             features.tool_parsing,
-            FeatureQualification::Available
+            FeatureQualification::Indeterminate(_)
         ));
         assert!(matches!(
             features.guided_generation,
@@ -1757,7 +1773,7 @@ Options:
             embeddings: ExtraState::Missing,
         };
         let features =
-            derive_qualified_features(&flags, &extras, "0.10.10", RuntimeSource::Managed);
+            derive_qualified_features(&flags, &extras, &[], "0.10.10", RuntimeSource::Managed);
         match features.guided_generation {
             FeatureQualification::Unavailable(_) => {}
             other => panic!(
@@ -1957,25 +1973,19 @@ Options:
     }
 
     #[test]
-    fn mtp_concurrency_derived_as_single_active_greedy() {
+    fn mtp_concurrency_is_unknown_without_model_qualification() {
         let flags = vec![
             "--host".into(),
             "--port".into(),
             "--tool-call-parser".into(),
         ];
-        assert_eq!(
-            derive_mtp_concurrency(&flags),
-            MtpConcurrencyState::SingleActiveGreedy
-        );
+        assert_eq!(derive_mtp_concurrency(&flags), MtpConcurrencyState::Unknown);
     }
 
     #[test]
-    fn mtp_concurrency_with_speculative_flags_still_single_active_greedy() {
+    fn mtp_concurrency_is_not_inferred_from_speculative_flags() {
         let flags = vec!["--host".into(), "--port".into(), "--speculative".into()];
-        assert_eq!(
-            derive_mtp_concurrency(&flags),
-            MtpConcurrencyState::SingleActiveGreedy
-        );
+        assert_eq!(derive_mtp_concurrency(&flags), MtpConcurrencyState::Unknown);
     }
 
     // Sampling default fields tests
@@ -2280,10 +2290,7 @@ Options:
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
         };
-        assert_eq!(
-            snapshot.mtp_concurrency,
-            MtpConcurrencyState::SingleActiveGreedy
-        );
+        assert_eq!(snapshot.mtp_concurrency, MtpConcurrencyState::Unknown);
         assert!(matches!(
             snapshot.sampling_defaults.temperature,
             DefaultFieldState::Supported
