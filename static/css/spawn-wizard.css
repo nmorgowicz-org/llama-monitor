@@ -3566,9 +3566,11 @@
   margin-top: 14px;
   border: 1px solid rgba(255,255,255,0.09);
   border-radius: 12px;
-  overflow: hidden;
   background: rgba(15, 23, 42, 0.4);
   animation: qa-fade-in 0.25s ease;
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
 }
 
 @keyframes qa-fade-in {
@@ -3597,8 +3599,9 @@
 
 .quant-advisor-table {
   width: 100%;
-  overflow-x: auto;
+  overflow: auto;
   padding: 4px 0;
+  flex: 1;
 }
 
 .qa-table {
@@ -3901,6 +3904,35 @@
 
 .reduce-motion .vram-bar.has-data .vram-segment::after { animation: none; }
 .reduce-motion .vram-segment { transition: none; }
+
+/* Context size pills */
+.vram-ctx-pills {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.vram-ctx-pill {
+  padding: 2px 8px;
+  font-size: 9px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255,255,255,0.4);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.vram-ctx-pill:hover {
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.7);
+}
+.vram-ctx-pill.active {
+  background: rgba(99,102,241,0.25);
+  border-color: rgba(99,102,241,0.6);
+  color: #fff;
+}
 
 .seg-weights  { background: linear-gradient(135deg, var(--color-accent), var(--color-accent-deep)); }
 .seg-kv       { background: linear-gradient(135deg, var(--color-accent-deep), var(--color-accent-light)); }

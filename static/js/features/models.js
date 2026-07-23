@@ -100,6 +100,7 @@ let hfState = {
     discoveryScopeGguf: true, // default: GGUF always active; macOS will also activate MLX below
     discoverySort: HF_SORT.DOWNLOADS,
     discoveryQuantsOnly: false, // filter to show only quantized variants
+    previewCtx: 65536, // default context for VRAM calculation
 };
 
 // Cached hardware
@@ -2032,6 +2033,21 @@ async function initHfDownloadTab() {
         });
     }
 
+    // Context size pills
+    const ctxPills = document.getElementById('mm-vram-ctx-pills');
+    if (ctxPills) {
+        ctxPills.addEventListener('click', (e) => {
+            const pill = e.target.closest('.vram-ctx-pill');
+            if (!pill) return;
+            ctxPills.querySelectorAll('.vram-ctx-pill').forEach(p => p.classList.remove('active'));
+            pill.classList.add('active');
+            hfState.previewCtx = parseInt(pill.dataset.ctx, 10);
+            if (hfState.selectedFile) {
+                scheduleVramUpdate(hfState.selectedFile);
+            }
+        });
+    }
+
     // Settings link from warning
     const settingsBtn = document.getElementById('mm-hf-dlp-open-settings');
     if (settingsBtn) {
@@ -2048,36 +2064,65 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
     const modelFormat = model.format || model._raw?.format || 'unknown';
 
     hfState.selectedRepoId = repoId;
-    hfState.selectedFile = null;
     hfState.paramB = paramB;
-    hfState.modelFormat = modelFormat; // track format for MLX vs GGUF handling
+    hfState.modelFormat = modelFormat;
     hfState.mmprojFiles = [];
     hfState.mmprojPath = '';
     hfState.mmprojRepoId = '';
     hfState.mmprojBytes = 0;
+    hfState.availableFiles = [];
     hfHideDownloadPanel(downloadPanel);
     hideQuantAdvisor();
     hideMmprojSection();
     hideVramPanel();
     hideCtxTrainWarning();
-
-    // Hide the generic hardware info card — we'll show real estimates below
     hideHardwareInfoCard();
+
+    // Hide file list container (GGUF only)
+    filelistContainer.innerHTML = '';
+    filelistContainer.classList.remove('visible');
 
     // Show selected model info
     showSelectedModel(repoId, model);
 
+    // If clicked from inline file list, _file is set
+    if (model._file) {
+        await onHfFileSelected(model._file, repoId, downloadPanel);
+        return;
+    }
+
+    // MLX repos: treat repo itself as the model — use model_size_bytes directly
+    if (modelFormat === 'mlx') {
+        const modelBytes = model.model_size_bytes || 0;
+        if (modelBytes > 0) {
+            hfState.modelBytes = modelBytes;
+            // Show selected model with size
+            const nameEl = document.getElementById('mm-selected-model-name');
+            const metaEl = document.getElementById('mm-selected-model-meta');
+            if (nameEl) nameEl.textContent = repoId;
+            if (metaEl) {
+                const parts = [];
+                if (model.param_b > 0) parts.push(formatParams(model.param_b));
+                if (modelBytes > 0) parts.push(formatBytes(modelBytes));
+                if (model.quant_label) parts.push(model.quant_label);
+                metaEl.textContent = parts.join(' · ');
+            }
+            // Show download panel
+            await hfShowDownloadPanel(downloadPanel, repoId);
+            // Show VRAM estimate
+            scheduleVramUpdate({ size: modelBytes });
+        }
+        return;
+    }
+
+    // GGUF repos: list files
     await hfListFiles({
         repoId,
         container: filelistContainer,
         vramGb: cachedVram > 0 ? cachedVram / (1024 * 1024 * 1024) : 0,
         onSelectFile: (file, repoId) => onHfFileSelected(file, repoId, downloadPanel),
+        onFilesLoaded: (files) => { hfState.availableFiles = files; },
     });
-
-    // Only show quant advisor for GGUF models (MLX models are pre-quantized, no choices)
-    if (hfState.paramB > 0 && modelFormat === 'gguf') {
-        triggerQuantAdvisor();
-    }
 }
 
 async function onHfFileSelected(file, repoId, downloadPanel) {
@@ -2264,6 +2309,20 @@ function renderQuantAdvisor(quants, availVram) {
     if (!panel || !tableEl) return;
     if (!quants || quants.length === 0) { panel.style.display = 'none'; return; }
 
+    // Filter to only quants that exist in the repo's files
+    const fileLabels = new Set();
+    if (hfState.availableFiles && hfState.availableFiles.length > 0) {
+        hfState.availableFiles.forEach(f => {
+            const label = f.label || '';
+            if (label) fileLabels.add(label);
+        });
+    }
+    const availableQuants = fileLabels.size > 0
+        ? quants.filter(q => fileLabels.has(q.label))
+        : quants;
+
+    if (!availableQuants || availableQuants.length === 0) { panel.style.display = 'none'; return; }
+
     const availGb = Math.round(availVram / (1024 ** 3));
     if (subtitleEl) subtitleEl.textContent = `Estimated VRAM available: ${availGb} GB`;
 
@@ -2279,7 +2338,7 @@ function renderQuantAdvisor(quants, availVram) {
     });
 
     const tbody = table.createTBody();
-    for (const q of quants) {
+    for (const q of availableQuants) {
         const tr = tbody.insertRow();
         if (q.recommended) tr.className = 'qa-row-rec';
         if (!q.fits_vram) tr.className = (tr.className + ' qa-row-nofit').trim();
@@ -2444,9 +2503,8 @@ async function updateVramDisplay(file) {
 
     // Estimate via the backend so the preview uses the SAME math as the spawn wizard /
     // preset editor. Pre-download, the backend range-fetches the GGUF header from HuggingFace
-    // (hf_repo_id + hf_file_path) to introspect the model's real architecture — no name
-    // guessing, no divergent client-side formula. We assume a modest preview context.
-    const PREVIEW_CTX = 16384;
+    // Use user-selected context size (default 64K) for VRAM calculation.
+    const previewCtx = hfState.previewCtx || 65536;
     const mmprojBytes = hfState.mmprojBytes || 0;
     let data;
     try {
@@ -2456,7 +2514,7 @@ async function updateVramDisplay(file) {
             hf_repo_id: hfState.selectedRepoId || null,
             hf_file_path: file?.path || file?.name || null,
             model_size_bytes: modelBytes,
-            n_ctx: PREVIEW_CTX,
+            n_ctx: previewCtx,
             parallel_slots: 1,
             ubatch_size: 512,
             ctk: 'q8_0',
@@ -2491,7 +2549,7 @@ async function updateVramDisplay(file) {
     // Update header
     const labelEl = document.getElementById('mm-vram-panel-label');
     const totalEl = document.getElementById('mm-vram-panel-total');
-    if (labelEl) labelEl.textContent = `VRAM @ ${PREVIEW_CTX / 1024}K ctx`;
+    if (labelEl) labelEl.textContent = `VRAM @ ${Math.round(previewCtx / 1024)}K ctx`;
     if (totalEl) totalEl.textContent = formatVramTotal(availVram) + ' total';
 
     // Update bar

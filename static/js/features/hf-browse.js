@@ -441,381 +441,186 @@ export async function hfSearch({
       return;
     }
 
-    // ── Phase 8B2: Two-level card hierarchy (group + variants) ─────────────────
-    // Group models by base model name, render group header + variant rows.
-
-    const groups = new Map();
-    for (const m of models) {
-      const baseName = extractBaseModelName(m.id);
-      if (!groups.has(baseName)) {
-        groups.set(baseName, { baseName, models: [], tags: new Set(), author: null });
-      }
-      const g = groups.get(baseName);
-      g.models.push(m);
-      (m.tags || []).forEach(t => g.tags.add(t));
-      // Use original-author role as group author if present
-      if (!g.author && m.id.split('/')[0]) {
-        const role = resolveAuthorRole(m.id, m.tags);
-        if (role && role.role === 'original-author') {
-          g.author = m.id.split('/')[0];
-        }
-      }
-    }
-
-    // Sort groups: Community Picks first, then by first model's downloads
-    const sortedGroups = [...groups.values()].sort((a, b) => {
-      const aHasPick = a.models.some(m => m.is_community_pick || (m.community_picks || []).length > 0);
-      const bHasPick = b.models.some(m => m.is_community_pick || (m.community_picks || []).length > 0);
-      if (aHasPick !== bHasPick) return aHasPick ? -1 : 1;
-      const aDl = (a.models[0]?.downloads || 0);
-      const bDl = (b.models[0]?.downloads || 0);
+    // Sort models by downloads (descending)
+    const sortedModels = [...models].sort((a, b) => {
+      const aDl = a.downloads || 0;
+      const bDl = b.downloads || 0;
       return bDl - aDl;
     });
 
-    // Show loading indicator for lineage/enrichment
-    const enrichingEl = document.createElement('div');
-    enrichingEl.className = 'hf-search-loading';
-    enrichingEl.textContent = 'Checking model lineage…';
-    container.appendChild(enrichingEl);
+    // Render each repo as a simple card — click to expand and show files
+    for (const m of sortedModels) {
+      const card = document.createElement('div');
+      card.className = 'hf-search-result';
+      card.setAttribute('tabindex', '0');
+      card.setAttribute('role', 'button');
 
-    // Fetch identity for each group to get original author (concurrent, bounded)
-    const identityTasks = [];
-    for (const g of sortedGroups) {
-      if (g.models.length > 0) {
-        identityTasks.push(
-          (async (group) => {
-            const firstModel = group.models[0];
-            try {
-              const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
-              const resp = await fetch('/api/hf/identity', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ repoId: firstModel.id }),
-              });
-              if (resp.ok) {
-                const data = await resp.json();
-                group.originalAuthor = data.original_author?.username || data.original_author?.display_name || null;
-                group.isFinetune = !!data.is_finetune;
-              }
-            } catch {
-              // Non-fatal: fall back to heuristic author from Phase 8B1
-            }
-            group.author = group.originalAuthor || group.author || firstModel.id.split('/')[0];
-          })(g)
-        );
-      }
-    }
+      const repoIdLower = (m.id || '').toLowerCase();
+      const isMlx = m.format === 'mlx' || repoIdLower.includes('.mlx') || repoIdLower.includes('/mlx/') || repoIdLower.includes('-mlx-') || repoIdLower.endsWith('-mlx') || repoIdLower.includes('.safetensors');
+      const isGguf = m.format === 'gguf' || repoIdLower.includes('.gguf') || repoIdLower.includes('-gguf') || repoIdLower.includes('/gguf/');
+      const format = isGguf ? 'gguf' : isMlx ? 'mlx' : 'unknown';
 
-    // Fetch MLX lineage for groups when MLX is active or All is active (bounded concurrency)
-    const mlxTasks = [];
-    if (mlxActive || allActive) {
-      for (let i = 0; i < sortedGroups.length; i++) {
-        const g = sortedGroups[i];
-        // Only fetch MLX lineage for finetunes or models with >5 downloads (signal of maturity)
-        if (g.isFinetune || (g.models[0]?.downloads || 0) > 5) {
-          mlxTasks.push(
-            (async (group) => {
-              group.mlxLineage = await fetchMlxLineage(g.models[0].id);
-            })(g)
-          );
-        }
-      }
-    }
-
-    // Wait for enrichment with timeout (don't block too long)
-    try {
-      await Promise.race([
-        Promise.all([...identityTasks, ...mlxTasks]),
-        new Promise(r => setTimeout(r, 4000)),
-      ]);
-    } catch {
-      // Non-fatal: proceed with partial data
-    }
-
-    // Remove enriching indicator
-    enrichingEl.remove();
-
-    // Render each group
-    for (const g of sortedGroups) {
-      const groupEl = document.createElement('div');
-      groupEl.className = 'hf-search-group';
-      groupEl.dataset.baseName = g.baseName;
-
-      // ── Group header ───────────────────────────────────────────────────────
+      // Header line: repo name, format badge, meta
       const header = document.createElement('div');
-      header.className = 'hf-sg-header';
+      header.className = 'hf-sr-header';
 
-      // Base model name + original author
-      const headerNameLine = document.createElement('div');
-      headerNameLine.className = 'hf-sg-header-name';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'hf-sr-name';
+      nameEl.textContent = m.id;
+      nameEl.title = m.id;
+      header.appendChild(nameEl);
 
-      const baseNameEl = document.createElement('span');
-      baseNameEl.className = 'hf-sg-base-name';
-      baseNameEl.textContent = g.baseName;
-      baseNameEl.title = g.baseName; // tooltip for full name on hover
-      headerNameLine.appendChild(baseNameEl);
+      const formatBadge = document.createElement('span');
+      formatBadge.className = `hf-sr-format-badge hf-sr-format-badge--${format}`;
+      formatBadge.textContent = format.toUpperCase();
+      header.appendChild(formatBadge);
 
-      // Original author badge
-      if (g.originalAuthor && g.originalAuthor !== g.author) {
-        const origBadge = document.createElement('span');
-        origBadge.className = 'hf-sg-role-badge hf-sg-role-badge--original-author';
-        origBadge.textContent = 'by ' + escHtml(g.originalAuthor);
-        origBadge.title = 'Original author';
-        headerNameLine.appendChild(origBadge);
-      } else if (g.author) {
-        const origBadge = document.createElement('span');
-        origBadge.className = 'hf-sg-role-badge hf-sg-role-badge--original-author';
-        origBadge.textContent = 'by ' + escHtml(g.author);
-        origBadge.title = 'Original author';
-        headerNameLine.appendChild(origBadge);
-      }
-
-      // Community Picks badge if any variant is a pick
-      const hasPick = g.models.some(m => m.is_community_pick || (m.community_picks || []).length > 0);
-      if (hasPick) {
-        const cpBadge = document.createElement('span');
-        cpBadge.className = 'hf-sg-role-badge hf-sg-role-badge--community-pick';
-        cpBadge.textContent = '★ Community Pick';
-        cpBadge.title = 'High-quality repo selected by the community';
-        headerNameLine.appendChild(cpBadge);
-      }
-
-      header.appendChild(headerNameLine);
-
-      // Categories
-      const groupCategories = resolveCategories([...g.tags]);
-      if (groupCategories.length > 0) {
-        const catRail = document.createElement('div');
-        catRail.className = 'hf-sg-categories';
-        groupCategories.forEach(cat => {
-          const pill = document.createElement('span');
-          pill.className = `hf-sr-category hf-sr-category--${cat}`;
-          pill.textContent = cat.charAt(0).toUpperCase() + cat.slice(1);
-          catRail.appendChild(pill);
-        });
-        header.appendChild(catRail);
-      }
-
-      // Expand/collapse toggle
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = 'hf-sg-toggle';
-      toggle.textContent = '▾';
-      toggle.setAttribute('aria-label', 'Toggle variants');
-      toggle.addEventListener('click', () => {
-        const body = groupEl.querySelector('.hf-sg-body');
-        if (body.style.display === 'none') {
-          body.style.display = '';
-          toggle.textContent = '▾';
-        } else {
-          body.style.display = 'none';
-          toggle.textContent = '▸';
-        }
-      });
-      header.appendChild(toggle);
-
-      groupEl.appendChild(header);
-
-      // ── Group body (variants list) ─────────────────────────────────────────
-      const body = document.createElement('div');
-      body.className = 'hf-sg-body';
-
-      // Variant rows for each model in the group
-      for (const m of g.models) {
-        const variantRow = document.createElement('div');
-        variantRow.className = 'hf-sg-variant';
-        variantRow.setAttribute('tabindex', '0');
-        variantRow.setAttribute('role', 'button');
-
-        // Variant name (repo id with converter prefix)
-        const variantName = document.createElement('span');
-        variantName.className = 'hf-sg-variant-name';
-        variantName.textContent = m.id;
-        variantName.title = m.id; // tooltip for full name on hover
-        variantRow.appendChild(variantName);
-
-        // Format badge — detect from repo name/ID (never trust HF tags)
-        const repoIdLower = (m.id || '').toLowerCase();
-        const isMlx = repoIdLower.includes('.mlx') ||
-          repoIdLower.includes('/mlx/') ||
-          repoIdLower.includes('-mlx-') ||
-          repoIdLower.endsWith('-mlx') ||
-          repoIdLower.includes('.safetensors');
-        const isGguf = repoIdLower.includes('.gguf') || repoIdLower.includes('-gguf') || repoIdLower.includes('/gguf/');
-        // GGUF repo name takes priority over safetensors (many MLX repos host GGUF versions with -GGUF suffix)
-        const format = isGguf ? 'gguf' : isMlx ? 'mlx' : 'unknown';
-        const formatBadge = document.createElement('span');
-        formatBadge.className = `hf-sg-format-badge hf-sg-format-badge--${format}`;
-        formatBadge.textContent = format.toUpperCase();
-        formatBadge.title = `Format: ${format.toUpperCase()}`;
-        variantRow.appendChild(formatBadge);
-
-        // Quant label / size
-        const variantMeta = document.createElement('span');
-        variantMeta.className = 'hf-sg-variant-meta';
-        const metaParts = [];
+      const metaEl = document.createElement('span');
+      metaEl.className = 'hf-sr-meta';
+      const metaParts = [];
+      if (m.downloads > 0) metaParts.push(m.downloads >= 1000 ? `${(m.downloads / 1000).toFixed(0)}k↓` : `${m.downloads}↓`);
+      if (m.param_b > 0) metaParts.push(`${m.param_b}B`);
+      // MLX: show quant level + size directly
+      if (format === 'mlx') {
         if (m.quant_label) metaParts.push(m.quant_label);
         if (m.model_size_bytes) metaParts.push(formatBytes(m.model_size_bytes));
-        if (m.downloads > 0) metaParts.push(m.downloads >= 1000 ? `${(m.downloads / 1000).toFixed(0)}k↓` : `${m.downloads}↓`);
-        variantMeta.textContent = metaParts.join(' · ');
-        variantRow.appendChild(variantMeta);
-
-        // Converter role badge
-        const converterRole = resolveAuthorRole(m.id, m.tags);
-        if (converterRole && converterRole.role !== 'original-author') {
-          const roleBadge = document.createElement('span');
-          roleBadge.className = `hf-sg-role-badge hf-sg-role-badge--${converterRole.role}`;
-          roleBadge.textContent = escHtml(m.id.split('/')[0]);
-          roleBadge.title = converterRole.label + ' — ' + m.id.split('/')[0];
-          variantRow.appendChild(roleBadge);
-        }
-
-        // Card link button
-        const cardLink = document.createElement('button');
-        cardLink.type = 'button';
-        cardLink.className = 'hf-sg-card-link';
-        cardLink.title = 'View model card';
-        cardLink.setAttribute('aria-label', `View model card for ${escHtml(m.id)}`);
-        cardLink.innerHTML =
-          '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>';
-        cardLink.addEventListener('click', e => {
-          e.stopPropagation();
-          if (onOpenCardPanel) onOpenCardPanel(m.id);
-          else window.open(`https://huggingface.co/${escHtml(m.id)}`, '_blank', 'noopener');
-        });
-        variantRow.appendChild(cardLink);
-
-        // Selection handler with enriched payload
-        const selectVariant = () => {
-          if (onSelectModel) {
-            const payload = buildSelectionPayload(m, {
-              format,
-              converter: converterRole ? m.id.split('/')[0] : null,
-              originalAuthor: g.originalAuthor || g.author || null,
-            });
-            onSelectModel(payload);
-          }
-        };
-        variantRow.addEventListener('click', selectVariant);
-        variantRow.addEventListener('keydown', e => {
-          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectVariant(); }
-        });
-
-        body.appendChild(variantRow);
       }
+      metaEl.textContent = metaParts.join(' · ');
+      header.appendChild(metaEl);
 
-      // ── MLX lineage section (Phase 8B2: native + converted) ───────────────
-      if (g.mlxLineage && (mlxActive || allActive)) {
-        const lineageSection = document.createElement('div');
-        lineageSection.className = 'hf-sg-mlx-lineage';
+      // Card link button
+      const cardLink = document.createElement('button');
+      cardLink.type = 'button';
+      cardLink.className = 'hf-sr-card-link';
+      cardLink.title = 'View model card';
+      cardLink.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>';
+      cardLink.addEventListener('click', e => {
+        e.stopPropagation();
+        if (onOpenCardPanel) onOpenCardPanel(m.id);
+        else window.open(`https://huggingface.co/${escHtml(m.id)}`, '_blank', 'noopener');
+      });
+      header.appendChild(cardLink);
 
-        // Native MLX derivatives
-        const nativeDerivs = (g.mlxLineage.native_mlx_derivatives || []).slice(0, 3);
-        if (nativeDerivs.length > 0) {
-          const nativeHeader = document.createElement('div');
-          nativeHeader.className = 'hf-sg-mlx-section-label';
-          nativeHeader.textContent = 'MLX variants';
-          lineageSection.appendChild(nativeHeader);
+      card.appendChild(header);
 
-          for (const d of nativeDerivs) {
-            const mlxRow = document.createElement('div');
-            mlxRow.className = 'hf-sg-mlx-variant';
-            mlxRow.setAttribute('tabindex', '0');
-            mlxRow.setAttribute('role', 'button');
+      if (format === 'mlx') {
+        // MLX repos: click directly selects model (no file list)
+        card.addEventListener('click', () => {
+          if (onSelectModel) {
+            onSelectModel({
+              repoId: m.id,
+              id: m.id,
+              format: 'mlx',
+              param_b: m.param_b || 0,
+              quant_label: m.quant_label || '',
+              model_size_bytes: m.model_size_bytes || 0,
+            });
+          }
+        });
+        card.addEventListener('keydown', e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            card.click();
+          }
+        });
+      } else {
+        // GGUF repos: click expands file list inline
+        const filesContainer = document.createElement('div');
+        filesContainer.className = 'hf-sr-files';
+        filesContainer.style.display = 'none';
+        card.appendChild(filesContainer);
 
-            const mlxName = document.createElement('span');
-            mlxName.className = 'hf-sg-mlx-variant-name';
-            mlxName.textContent = d.repo_id;
-            mlxRow.appendChild(mlxName);
+        let filesLoaded = false;
+        const loadFiles = async () => {
+          if (filesLoaded) return;
+          filesLoaded = true;
+          filesContainer.style.display = '';
+          filesContainer.innerHTML = '<div class="hf-file-loading">Loading files…</div>';
 
-            // Native vs converted label
-            const isKnownPublisher = ['mlx-community', 'ml-explore'].includes(d.converter);
-            const mlxLabel = document.createElement('span');
-            mlxLabel.className = `hf-sg-mlx-label ${isKnownPublisher ? 'hf-sg-mlx-label--native' : 'hf-sg-mlx-label--converted'}`;
-            mlxLabel.textContent = isKnownPublisher
-              ? `Native MLX by ${escHtml(d.converter)}`
-              : `Converted by ${escHtml(d.converter)}`;
-            mlxRow.appendChild(mlxLabel);
-
-            // Size
-            if (d.size > 0) {
-              const mlxSize = document.createElement('span');
-              mlxSize.className = 'hf-sg-mlx-variant-meta';
-              mlxSize.textContent = formatBytes(d.size);
-              mlxRow.appendChild(mlxSize);
+          try {
+            const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
+            const resp = await fetch('/api/hf/files', {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ repo_id: m.id, format: 'gguf' }),
+            });
+            if (!resp.ok) {
+              filesContainer.innerHTML = '<div class="hf-file-empty">Failed to load files.</div>';
+              return;
+            }
+            const data = await resp.json();
+            const files = (data.files || []).filter(Boolean);
+            filesContainer.innerHTML = '';
+            if (!files.length) {
+              filesContainer.innerHTML = '<div class="hf-file-empty">No files found in this repo.</div>';
+              return;
             }
 
-            const selectMlx = () => {
-              if (onSelectModel) {
-                const payload = buildSelectionPayload(
-                  { id: d.repo_id, revision: d.revision, model_size_bytes: d.size },
-                  {
-                    format: 'mlx',
-                    converter: d.converter,
-                    originalAuthor: g.originalAuthor || g.author || g.mlxLineage.original_author || null,
-                    backendHint: 'rapid_mlx',
-                  }
-                );
-                onSelectModel(payload);
-              }
-            };
-            mlxRow.addEventListener('click', selectMlx);
-            mlxRow.addEventListener('keydown', e => {
-              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectMlx(); }
-            });
+            for (const file of files) {
+              const fname = file.path || file.name || '';
+              if (!fname) continue;
 
-            lineageSection.appendChild(mlxRow);
+              const fileItem = document.createElement('div');
+              fileItem.className = 'hf-file-item hf-sr-file-item';
+              fileItem.setAttribute('tabindex', '0');
+              fileItem.setAttribute('role', 'button');
+              fileItem.dataset.filename = fname;
+              fileItem.dataset.repoId = m.id;
+
+              const nameSpan = document.createElement('span');
+              nameSpan.className = 'hf-file-name';
+              nameSpan.textContent = fname.split('/').pop() || fname;
+              fileItem.appendChild(nameSpan);
+
+              const metaSpan = document.createElement('span');
+              metaSpan.className = 'hf-file-meta';
+              const fileMeta = [];
+              if (file.size) fileMeta.push(formatBytes(file.size));
+              if (file.label) fileMeta.push(file.label);
+              metaSpan.textContent = fileMeta.join(' · ');
+              fileItem.appendChild(metaSpan);
+
+              fileItem.addEventListener('click', e => {
+                e.stopPropagation();
+                if (onSelectModel) {
+                  onSelectModel({
+                    repoId: m.id,
+                    id: m.id,
+                    format: 'gguf',
+                    param_b: m.param_b || 0,
+                    _file: file,
+                  });
+                }
+              });
+
+              filesContainer.appendChild(fileItem);
+            }
+          } catch {
+            filesContainer.innerHTML = '<div class="hf-file-empty">Failed to load files.</div>';
           }
-        }
+        };
 
-        // Conversion candidates
-        const recipes = (g.mlxLineage.conversion_recipes || []).slice(0, 2);
-        if (recipes.length > 0) {
-          const convHeader = document.createElement('div');
-          convHeader.className = 'hf-sg-mlx-section-label';
-          convHeader.textContent = 'Conversion options';
-          lineageSection.appendChild(convHeader);
+        card.addEventListener('click', () => {
+          const wasOpen = filesContainer.style.display !== 'none';
+          container.querySelectorAll('.hf-search-result .hf-sr-files').forEach(fc => {
+            if (fc !== filesContainer) fc.style.display = 'none';
+          });
+          if (!wasOpen) loadFiles();
+        });
 
-          for (const r of recipes) {
-            const convRow = document.createElement('div');
-            convRow.className = 'hf-sg-mlx-recipe';
-            const convName = document.createElement('span');
-            convName.className = 'hf-sg-mlx-recipe-name';
-            convName.textContent = r.recipe;
-            convRow.appendChild(convName);
-            const convMeta = document.createElement('span');
-            convMeta.className = 'hf-sg-mlx-recipe-meta';
-            const parts = [];
-            if (r.input_format) parts.push(r.input_format);
-            if (r.estimated_time) parts.push(r.estimated_time);
-            convMeta.textContent = parts.join(' · ');
-            convRow.appendChild(convMeta);
-            convRow.title = r.description || '';
-
-            // Conversion candidates show recipe info; clicking opens info (not auto-select)
-            const convLink = document.createElement('button');
-            convLink.type = 'button';
-            convLink.className = 'hf-sg-card-link';
-            convLink.title = r.description || 'View conversion details';
-            convLink.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>';
-            convLink.addEventListener('click', e => {
-              e.stopPropagation();
-              showToast(`Conversion: ${r.recipe} — ${r.description}`, 'info');
-            });
-            convRow.appendChild(convLink);
-
-            lineageSection.appendChild(convRow);
+        card.addEventListener('keydown', e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            card.click();
           }
-        }
-
-        body.appendChild(lineageSection);
+        });
       }
 
-      groupEl.appendChild(body);
-      container.appendChild(groupEl);
+      container.appendChild(card);
     }
 
-    if (hasMore) {
+    // If appending and we hit the limit, add load-more button
+    if (append && models.length < allModels.length) {
       const moreBtn = _makeLoadMoreBtn(() => hfSearch({
         query, author, sort, limit, mlxActive, ggufActive, allActive, hfSort, minParamB, cursor: nextCursor, append: true,
         _cascadeDepth: 0,
@@ -882,6 +687,7 @@ export async function hfListFiles({
   vramGb,
   onOpenCardPanel,
   onSelectFile,
+  onFilesLoaded,
 }) {
   if (!container) return;
 
@@ -901,6 +707,8 @@ export async function hfListFiles({
     }
     const data = await resp.json();
     const files = (data.files || []).filter(Boolean);
+
+    if (onFilesLoaded) onFilesLoaded(files);
 
     container.innerHTML = '';
     if (!files.length) {

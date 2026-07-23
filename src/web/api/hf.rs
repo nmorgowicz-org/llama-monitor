@@ -190,6 +190,7 @@ fn api_hf_files(
                 }
 
                 let repo_id = body["repo_id"].as_str().unwrap_or("").trim().to_string();
+                let format = body["format"].as_str().unwrap_or("gguf");
                 if repo_id.is_empty() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
@@ -210,7 +211,16 @@ fn api_hf_files(
                     ));
                 }
 
-                match crate::hf::hf_list_gguf_files(&repo_id).await {
+                let result: Result<Vec<serde_json::Value>, String> = if format == "mlx" {
+                    crate::hf::hf_list_mlx_files(&repo_id).await
+                } else {
+                    match crate::hf::hf_list_gguf_files(&repo_id).await {
+                        Ok(files) => Ok(files.into_iter().map(|f| serde_json::json!(f)).collect()),
+                        Err(e) => Err(e),
+                    }
+                };
+
+                match result {
                     Ok(files) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
                             "ok": true,

@@ -237,6 +237,12 @@ pub struct SimpleModelInfo {
     pub base_model: String,
     /// Model format from HF filter used during search: "mlx" or "gguf".
     pub format: String,
+    /// Repo size on disk (from HF API), useful for MLX models.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_size_bytes: Option<u64>,
+    /// Quant label for MLX models (e.g. "MXFP4", "Q4"). Empty for GGUF (use file list instead).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub quant_label: String,
 }
 
 /// A GGUF file in an HF repo, with real file size and quant classification.
@@ -379,7 +385,7 @@ pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
         },
         KnownQuantizer {
             username: "nightmedia".into(),
-            display_name: "Night Media".into(),
+            display_name: "nightmedia".into(),
             description: "MLX model conversions, high-quality MLX quantizations.".into(),
             quant_style: "mlx",
             note: None,
@@ -1004,6 +1010,11 @@ fn parse_model_item(item: serde_json::Value, format: &HfModelFormat) -> Option<S
     // Infer parameter count from repo name
     let param_b = infer_param_b_from_name(&id);
 
+    let model_size_bytes = item.get("model_size_bytes").and_then(|v| v.as_u64());
+
+    // Infer quant label from HF tags (preferred) or repo name
+    let quant_label = infer_mlx_quant_label(&tags, &id);
+
     Some(SimpleModelInfo {
         id,
         gated: item.get("gated").and_then(|v| v.as_bool()).unwrap_or(false),
@@ -1030,6 +1041,8 @@ fn parse_model_item(item: serde_json::Value, format: &HfModelFormat) -> Option<S
             HfModelFormat::Gguf => "gguf".into(),
             HfModelFormat::Both => "both".into(),
         },
+        model_size_bytes,
+        quant_label,
     })
 }
 
@@ -1051,6 +1064,39 @@ fn infer_param_b_from_name(name: &str) -> f64 {
     matches.into_iter().fold(0.0_f64, f64::max)
 }
 
+/// Infer MLX quant label from HF tags (preferred) or repo name patterns.
+/// Returns empty string if unknown.
+fn infer_mlx_quant_label(tags: &[String], id: &str) -> String {
+    // First check HF tags for quant info
+    let tags_lower = tags.iter().map(|t| t.to_ascii_lowercase());
+    for tag in tags_lower {
+        if tag == "4-bit" { return "4-bit".into(); }
+        if tag == "8-bit" { return "8-bit".into(); }
+        if tag == "3-bit" { return "3-bit".into(); }
+        if tag == "2-bit" { return "2-bit".into(); }
+        if tag == "5-bit" { return "5-bit".into(); }
+        if tag == "6-bit" { return "6-bit".into(); }
+    }
+
+    // Fall back to repo name patterns
+    let lower = id.to_ascii_lowercase();
+
+    // MLX native formats
+    if lower.contains("mxfp8") || lower.contains("mx-fp8") { return "FP8".into(); }
+    if lower.contains("mxfp6") || lower.contains("mx-fp6") { return "FP6".into(); }
+    if lower.contains("mxfp4") || lower.contains("mx-fp4") || lower.contains("mxint4") { return "FP4".into(); }
+
+    // Generic quant patterns in repo name
+    if lower.contains("-q8") || lower.contains("_q8") || lower.contains("-8bit") { return "Q8".into(); }
+    if lower.contains("-q6") || lower.contains("_q6") || lower.contains("-6bit") { return "Q6".into(); }
+    if lower.contains("-q5") || lower.contains("_q5") || lower.contains("-5bit") { return "Q5".into(); }
+    if lower.contains("-q4") || lower.contains("_q4") || lower.contains("-4bit") { return "Q4".into(); }
+    if lower.contains("-q3") || lower.contains("_q3") || lower.contains("-3bit") { return "Q3".into(); }
+    if lower.contains("-q2") || lower.contains("_q2") || lower.contains("-2bit") { return "Q2".into(); }
+
+    String::new()
+}
+
 // ── GGUF file listing with real sizes ────────────────────────────────────────
 
 /// List GGUF files for a repo, fetching real file sizes from the HF tree API.
@@ -1068,6 +1114,54 @@ pub async fn hf_list_gguf_files(repo_id: &str) -> Result<Vec<HfGgufFile>, String
         result.extend(companion_files.into_iter().filter(|file| file.is_mmproj));
         sort_gguf_files(&mut result);
     }
+
+    Ok(result)
+}
+
+/// List MLX model files for a repo.
+/// MLX models are directories containing .safetensors files; each directory is treated as a "model".
+pub async fn hf_list_mlx_files(repo_id: &str) -> Result<Vec<serde_json::Value>, String> {
+    let token = hf_load_token();
+    let sizes = fetch_file_sizes(repo_id, token.as_deref())
+        .await
+        .unwrap_or_default();
+
+    let (owner, name) = repo_id
+        .split_once('/')
+        .ok_or_else(|| format!("Invalid repo_id format: {repo_id}"))?;
+    let client = hf_build_client(token).map_err(|e| format!("Failed to build HF client: {e}"))?;
+    let info = client
+        .model(owner, name)
+        .info()
+        .send()
+        .map_err(|e| format!("Failed to list repo files: {e}"))?;
+
+    let siblings = info
+        .siblings
+        .ok_or_else(|| format!("HF API did not return file listing for {repo_id}"))?;
+
+    // MLX models: list safetensors files or directories containing them
+    let result: Vec<serde_json::Value> = siblings
+        .iter()
+        .map(|s| {
+            let path = s.rfilename.as_str();
+            let size = sizes.get(path).copied().unwrap_or(0);
+            let lower = path.to_ascii_lowercase();
+            let is_safetensors = lower.ends_with(".safetensors") || lower.ends_with(".safetensors.index.json");
+            let is_config = lower.ends_with("config.json") || lower.ends_with("config.yaml");
+            if is_safetensors || is_config {
+                serde_json::json!({
+                    "name": path,
+                    "path": path,
+                    "size": size,
+                    "repo_id": repo_id,
+                })
+            } else {
+                serde_json::json!(null)
+            }
+        })
+        .filter_map(|v| v.as_null().map_or(Some(v), |_| None))
+        .collect();
 
     Ok(result)
 }

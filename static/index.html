@@ -4779,9 +4779,6 @@
                     <!-- Search results -->
                     <div class="hf-search-results" id="mm-hf-search-results" style="display:none;"></div>
 
-                    <!-- File list -->
-                    <div class="hf-file-list" id="mm-hf-file-list"></div>
-
                     <!-- Selected model info (wizard-style) -->
                     <div class="selected-model" id="mm-selected-model" style="display:none;">
                         <span class="selected-model-icon">🧠</span>
@@ -4812,12 +4809,20 @@
                             <span class="vram-panel-label" id="mm-vram-panel-label">VRAM budget</span>
                             <span class="vram-panel-total" id="mm-vram-panel-total">—</span>
                         </div>
+                        <!-- Context size pills -->
+                        <div class="vram-ctx-pills" id="mm-vram-ctx-pills">
+                            <button type="button" class="vram-ctx-pill active" data-ctx="65536">64K</button>
+                            <button type="button" class="vram-ctx-pill" data-ctx="131072">128K</button>
+                            <button type="button" class="vram-ctx-pill" data-ctx="163840">160K</button>
+                            <button type="button" class="vram-ctx-pill" data-ctx="204800">200K</button>
+                            <button type="button" class="vram-ctx-pill" data-ctx="262144">256K</button>
+                        </div>
                         <div class="vram-bar" id="mm-vram-bar">
-                            <div class="vram-segment vram-weights" id="mm-vseg-weights"></div>
-                            <div class="vram-segment vram-kv" id="mm-vseg-kv"></div>
-                            <div class="vram-segment vram-mmproj" id="mm-vseg-mmproj"></div>
-                            <div class="vram-segment vram-overhead" id="mm-vseg-overhead"></div>
-                            <div class="vram-segment vram-free" id="mm-vseg-free"></div>
+                            <div class="vram-segment seg-weights" id="mm-vseg-weights"></div>
+                            <div class="vram-segment seg-kv" id="mm-vseg-kv"></div>
+                            <div class="vram-segment seg-mmproj" id="mm-vseg-mmproj"></div>
+                            <div class="vram-segment seg-overhead" id="mm-vseg-overhead"></div>
+                            <div class="vram-segment seg-free" id="mm-vseg-free"></div>
                         </div>
                         <div class="vram-legend" id="mm-vram-legend">
                             <span class="vram-legend-item" id="mm-vleg-weights"><span class="vram-legend-dot vram-legend-dot-weights"></span><span id="mm-vleg-weights-label">Weights</span></span>
@@ -4831,22 +4836,6 @@
                     <!-- Context train warning -->
                     <div class="ctx-fit-warning" id="mm-ctx-train-warning" style="display:none;"></div>
 
-                    <!-- Quant advisor (wizard-style, model-selected state) -->
-                    <div class="quant-advisor" id="mm-quant-advisor" style="display:none;">
-                        <div class="quant-advisor-header">
-                            <span class="quant-advisor-title">Quant advisor</span>
-                            <span class="quant-advisor-subtitle" id="mm-quant-advisor-subtitle">Compare quants — VRAM, size, context per quantization</span>
-                        </div>
-                        <div class="quant-advisor-table" id="mm-quant-advisor-table">
-                            <!-- populated by JS -->
-                        </div>
-                        <div class="quant-advisor-legend">
-                            <span class="legend-item"><span class="legend-dot legend-fit"></span>Fits in memory</span>
-                            <span class="legend-item"><span class="legend-dot legend-nofit"></span>Requires CPU offload</span>
-                            <span class="legend-item"><span class="legend-dot legend-rec"></span>Recommended</span>
-                        </div>
-                    </div>
-
                     <!-- Hardware info card -->
                     <div class="mm-hw-info" id="mm-hw-info">
                         <div class="mm-hw-info-title">Hardware-aware download</div>
@@ -4854,6 +4843,9 @@
                             We'll estimate VRAM usage, recommend a quant, and warn if a model is too large for your GPU.
                         </p>
                     </div>
+
+                    <!-- File list (right pane — shows actual files from repo) -->
+                    <div class="hf-file-list" id="mm-hf-file-list"></div>
 
                     <!-- Download panel (wizard-style) -->
                     <div class="hf-download-panel" id="mm-hf-download-panel" style="display:none;">
