@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.2](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.8.1...v1.8.2) (2026-07-24)
+
+
+### Bug Fixes
+
+* **deps:** update rust crate base64 to 0.23 ([#326](https://github.com/nmorgowicz-org/llama-monitor/issues/326)) ([efbe35e](https://github.com/nmorgowicz-org/llama-monitor/commit/efbe35e5e5e7aaf357b42598ea05a3d0570e84fa))
+* **deps:** update rust crate hf-hub to v1 ([#307](https://github.com/nmorgowicz-org/llama-monitor/issues/307)) ([451ce28](https://github.com/nmorgowicz-org/llama-monitor/commit/451ce280040f0747684c15eda4fb79a815bdd489))
+
 ## [1.8.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v1.8.0...v1.8.1) (2026-07-07)
 
 
