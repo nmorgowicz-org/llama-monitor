@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "kind": "rapid_mlx_runtime_receipt",
+  "evidence_level": "provisional",
+  "scope": {
+    "included": [
+      "cold model load",
+      "one single-sequence text completion",
+      "cache-disabled",
+      "PFlash disabled",
+      "32-token generation cap"
+    ],
+    "excluded": [
+      "8k, 32k, and 131k context envelopes",
+      "retained-prefix cache growth",
+      "multi-sequence admission",
+      "vision/VLM requests",
+      "estimator residual qualification"
+    ],
+    "qualification_note": "This receipt validates runtime dispatch and metrics semantics only. It is not a D28 Qualified calibration envelope."
+  },
+  "runtime": {
+    "backend": "rapid-mlx",
+    "version": "0.10.17",
+    "host": "127.0.0.1",
+    "max_num_seqs": 1,
+    "max_concurrent_requests": 1,
+    "gpu_memory_utilization": 0.75
+  },
+  "hardware": {
+    "cpu": "Apple M5 Max",
+    "unified_memory_bytes": 68719476736,
+    "measurement_limitations": [
+      "Metal allocator active/peak values are backend metrics, not whole-process physical footprint.",
+      "The host had approximately 19 to 20 GB OS memory in use at preflight; this is not a clean-room capacity measurement."
+    ]
+  },
+  "model": {
+    "hf_repo_id": "mlx-community/Qwen3.6-35B-A3B-4bit",
+    "revision": "38740b847e4cb78f352aba30aa41c76e08e6eb46",
+    "config_sha256": "a822a9e48b0aafbe3144ec37d4fb067e178ed96615ce6e4420b3149893cc5767",
+    "family": "Qwen3.6-35B-A3B",
+    "architecture_notes": [
+      "hybrid linear-attention/Mamba",
+      "Mixture of Experts",
+      "speculative decoding disabled by Rapid for this hybrid path"
+    ]
+  },
+  "procedure": {
+    "common_arguments": [
+      "--host 127.0.0.1",
+      "--port 17879",
+      "--max-num-seqs 1",
+      "--max-concurrent-requests 1",
+      "--disable-prefix-cache",
+      "--pflash off",
+      "--kv-cache-dtype int4",
+      "--max-tokens 32",
+      "--gpu-memory-utilization 0.75"
+    ],
+    "request": {
+      "endpoint": "/v1/chat/completions",
+      "temperature": 0,
+      "max_tokens": 16,
+      "content": "short deterministic text instruction only"
+    },
+    "metrics_endpoint": "/metrics"
+  },
+  "observations": [
+    {
+      "id": "standard-int4-explicit-off",
+      "arguments": ["--kv-cache-turboquant none"],
+      "request_succeeded": true,
+      "effective_runtime_metrics": {
+        "rapid_mlx_kv_cache_dtype": "int4",
+        "rapid_mlx_turboquant_mode": "disabled",
+        "metal_active_memory_bytes": 19510000000,
+        "metal_peak_memory_bytes_before_request": 19610000000,
+        "metal_peak_memory_bytes_after_request": 19630000000
+      },
+      "interpretation": "Explicit none is necessary to override this alias's upstream K8V4 default; Standard/int4 is genuinely active."
+    },
+    {
+      "id": "turboquant-k8v4-explicit",
+      "arguments": ["--kv-cache-turboquant k8v4"],
+      "request_succeeded": true,
+      "effective_runtime_metrics": {
+        "rapid_mlx_kv_cache_dtype": "bf16",
+        "rapid_mlx_turboquant_mode": "k8v4",
+        "turboquant_skipped_sliding_window": 0,
+        "turboquant_skipped_mla": 0,
+        "turboquant_skipped_other": 0,
+        "turboquant_fused_kernel": "available",
+        "metal_active_memory_bytes": 19510000000,
+        "metal_peak_memory_bytes_before_request": 19610000000,
+        "metal_peak_memory_bytes_after_request": 19650000000
+      },
+      "interpretation": "Rapid reports bf16 as its active compute-cache dtype while K8V4 owns retained-prefix storage. Estimator policy must preserve this requested/effective distinction."
+    }
+  ],
+  "next_measurements_required": [
+    "Repeat each mode at 8k, 32k, and 131k with controlled prompt construction.",
+    "Measure retained-prefix reuse, hit TTFT, stored bytes, compression ratio, decode latency, and transient peak.",
+    "Compare estimator components and total against process/Metal observations to establish a bounded residual envelope.",
+    "Collect Gemma4-26B-A4B QAT VLM evidence on a host with enough free unified memory."
+  ]
+}

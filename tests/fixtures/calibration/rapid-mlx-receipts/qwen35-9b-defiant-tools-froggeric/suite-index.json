@@ -1,0 +1,13 @@
+{
+  "model": "nightmedia/Qwen3.5-9B-DS9-USS-Defiant-1M-q8-hi-mlx",
+  "suite": "tools",
+  "receipts": [
+    {
+      "label": "00-tools-sequential-8k",
+      "receipt": "00-00-tools-sequential-8k.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}
