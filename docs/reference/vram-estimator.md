@@ -955,6 +955,15 @@ To recalibrate against real Rapid-MLX process-footprint measurements:
 
 Until that work is done, Rapid-MLX overhead must continue to be reported as `Approximate`.
 
+### Current active-KV qualification
+
+For Rapid-MLX v0.11.0, active KV is modeled as **BF16** even when
+`--kv-cache-dtype int4` or `int8` was requested. This records the observed
+behavior in upstream issue #1197 rather than claiming memory savings the
+runtime did not realize. The request is still returned beside the effective
+value. Revisit this only after the upstream fix is released and a fresh,
+pinned receipt verifies the effective active-KV representation.
+
 ### Estimator-to-runtime calibration receipt
 
 To recalibrate `mlx_overhead_bytes` against real Rapid-MLX evidence rather than a formula, a
@@ -963,6 +972,19 @@ fresh-server-per-cell `model_runtime_benchmark_receipt` cell (see
 `docs/reference/model-runtime-benchmarking.md`) and records the residual between them. This is
 a distinct artifact from both: it never re-implements estimation or benchmarking, it only pairs
 their outputs.
+
+Create it after capturing the estimator request and response bodies, without
+their HTTP headers:
+
+```bash
+node scripts/write-estimator-calibration-receipt.mjs \
+  --runtime-receipt tests/fixtures/calibration/rapid-mlx-receipts/<suite>/<cell>.json \
+  --cell <cell-id> --attempt cold \
+  --estimator-request /private/tmp/estimator-request.json \
+  --estimator-response /private/tmp/estimator-response.json \
+  --dataset-role tuning \
+  --out tests/fixtures/calibration/rapid-mlx-receipts/<suite>/<cell>.calibration.json
+```
 
 ```json
 {

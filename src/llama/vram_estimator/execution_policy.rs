@@ -119,6 +119,12 @@ impl TurboQuantMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PolicyReason {
+    /// Current Rapid-MLX batch generation keeps the active KV cache in bf16
+    /// regardless of the requested `--kv-cache-dtype` in Rapid-MLX v0.11.0
+    /// (upstream issue #1197).
+    /// This is a bounded current-runtime observation; revisit it after the
+    /// upstream fix is released and re-qualified.
+    RuntimeActiveKvBf16,
     /// `reasoning_mode=true` forced KV dtype to int8 regardless of requested dtype.
     /// Evidence: `vllm_mlx/cli.py:6846`.
     ReasoningModeOverridesKvToInt8,
@@ -138,6 +144,7 @@ pub enum PolicyReason {
 impl std::fmt::Display for PolicyReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::RuntimeActiveKvBf16 => write!(f, "runtime_active_kv_bf16"),
             Self::ReasoningModeOverridesKvToInt8 => {
                 write!(f, "reasoning_mode_overrides_kv_to_int8")
             }
@@ -199,15 +206,16 @@ pub enum TurboQuantEligibilityReason {
 /// This type is independent of llama.cpp execution policies; it MUST NOT contain
 /// llama `ctk`/`ctv` vocabulary.
 ///
-/// The `effective_kv_dtype` field captures what Rapid will actually use after:
-/// - reasoning_mode int8 override
-/// - model-safe bf16 downgrade
+/// The `effective_kv_dtype` field captures what the currently qualified Rapid
+/// v0.11.0 batch-generation path actually uses. Upstream issue #1197 means that path
+/// currently keeps active KV in bf16 even when int4/int8 was requested.
 pub struct RapidMlxExecutionPolicy {
     /// KV cache dtype requested by the user/config.
     /// Source: `--kv-cache-dtype` CLI flag, default int4 if omitted.
     pub kv_cache_dtype: Option<KvCacheDtype>,
     /// Whether reasoning mode is enabled (--reasoning flag).
-    /// When true, forces effective_kv_dtype to int8 (Phase 0 E3 fact-pin).
+    /// The request is preserved for future fixed runtimes, but the current
+    /// batch-generation path still reports bf16 active KV.
     /// Source: `--reasoning` CLI flag.
     pub reasoning_mode: bool,
     /// TurboQuant mode requested by the user/config.
@@ -228,11 +236,9 @@ impl RapidMlxExecutionPolicy {
     /// Construct policy with automatic effective_kv_dtype and TurboQuant eligibility resolution.
     ///
     /// Rules:
-    /// 1. A qualified TurboQuant mode owns the cache path. Rapid 0.10.17
-    ///    reports its active compute cache as bf16 (Qwen3-0.6B local receipt).
-    /// 2. Otherwise, reasoning_mode=true → effective_kv_dtype is Int8 (E3 fact-pin)
-    /// 3. Otherwise use requested kv_cache_dtype, or default Int4
-    /// 4. TurboQuant eligibility (D31): effective_turboquant = requested only if model is Qualified;
+    /// 1. The currently qualified batch-generation runtime keeps active KV in
+    ///    bf16 (Rapid-MLX v0.11.0, #1197), regardless of a requested dtype.
+    /// 2. TurboQuant eligibility (D31): effective_turboquant = requested only if model is Qualified;
     ///    otherwise falls back to Disabled with a reason.
     pub fn new_with_eligibility(
         kv_cache_dtype: Option<KvCacheDtype>,
@@ -250,13 +256,9 @@ impl RapidMlxExecutionPolicy {
             _ => TurboQuantMode::Disabled,
         };
 
-        let effective_kv_dtype = if effective_turboquant.is_enabled() {
-            KvCacheDtype::Bf16
-        } else if reasoning_mode {
-            KvCacheDtype::Int8
-        } else {
-            kv_cache_dtype.unwrap_or_default()
-        };
+        // Do not model int4/int8 active-KV savings for v0.11.0 until the upstream #1197
+        // fix is released and a fresh receipt qualifies its effective state.
+        let effective_kv_dtype = KvCacheDtype::Bf16;
 
         Self {
             kv_cache_dtype,
@@ -292,18 +294,13 @@ impl RapidMlxExecutionPolicy {
     pub fn effective_reasons(&self) -> Vec<PolicyReason> {
         let mut reasons = Vec::new();
 
-        // Rule 1: TurboQuant owns the active cache representation.
-        if self.effective_turboquant.is_enabled() && self.kv_cache_dtype != Some(KvCacheDtype::Bf16)
-        {
-            reasons.push(PolicyReason::TurboQuantOverridesKvToBf16);
-        // Rule 2: reasoning_mode forces int8 only when TurboQuant is inactive.
-        } else if self.reasoning_mode
-            && self.kv_cache_dtype.is_some_and(|d| d != KvCacheDtype::Int8)
-        {
-            reasons.push(PolicyReason::ReasoningModeOverridesKvToInt8);
+        // Rule 1: active KV remains bf16 in the current batch-generation
+        // runtime; requested values remain visible but do not change memory.
+        if self.kv_cache_dtype != Some(KvCacheDtype::Bf16) {
+            reasons.push(PolicyReason::RuntimeActiveKvBf16);
         }
 
-        // Rule 3: TurboQuant eligibility (D31)
+        // Rule 2: TurboQuant eligibility (D31)
         if let Some(requested) = self.turboquant
             && requested.is_enabled()
             && !self.effective_turboquant.is_enabled()
@@ -590,7 +587,7 @@ mod tests {
         assert_eq!(value["kv_cache_dtype"], "int8");
         assert_eq!(value["reasoning_mode"], false);
         assert!(value["turboquant"].is_null());
-        assert_eq!(value["effective_kv_dtype"], "int8");
+        assert_eq!(value["effective_kv_dtype"], "bf16");
     }
 
     #[test]
@@ -610,36 +607,36 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_mode_true_forces_effective_int8() {
-        // Explicitly requested bf16, but reasoning_mode forces int8
+    fn current_runtime_keeps_reasoning_active_kv_bf16() {
+        // Rapid-MLX v0.11.0 issue #1197: the batch path keeps active KV in bf16.
         let policy = RapidMlxExecutionPolicy::new(Some(KvCacheDtype::Bf16), true, None);
-        assert_eq!(policy.effective_kv_dtype, KvCacheDtype::Int8);
+        assert_eq!(policy.effective_kv_dtype, KvCacheDtype::Bf16);
         assert_eq!(policy.kv_cache_dtype, Some(KvCacheDtype::Bf16)); // requested preserved
     }
 
     #[test]
     fn reasoning_mode_true_with_explicit_int8_no_conflict() {
         let policy = RapidMlxExecutionPolicy::new(Some(KvCacheDtype::Int8), true, None);
-        assert_eq!(policy.effective_kv_dtype, KvCacheDtype::Int8);
+        assert_eq!(policy.effective_kv_dtype, KvCacheDtype::Bf16);
     }
 
     #[test]
     fn reasoning_mode_true_with_explicit_int4_overridden() {
         let policy = RapidMlxExecutionPolicy::new(Some(KvCacheDtype::Int4), true, None);
-        assert_eq!(policy.effective_kv_dtype, KvCacheDtype::Int8);
+        assert_eq!(policy.effective_kv_dtype, KvCacheDtype::Bf16);
     }
 
     #[test]
-    fn effective_reasons_includes_reasoning_override_when_applicable() {
-        let policy = RapidMlxExecutionPolicy::new(Some(KvCacheDtype::Bf16), true, None);
+    fn effective_reasons_record_current_runtime_bf16_override() {
+        let policy = RapidMlxExecutionPolicy::new(Some(KvCacheDtype::Int4), true, None);
         let reasons = policy.effective_reasons();
         assert_eq!(reasons.len(), 1);
-        assert_eq!(reasons[0], PolicyReason::ReasoningModeOverridesKvToInt8);
+        assert_eq!(reasons[0], PolicyReason::RuntimeActiveKvBf16);
     }
 
     #[test]
     fn effective_reasons_empty_when_no_override_needed() {
-        let policy = RapidMlxExecutionPolicy::new(Some(KvCacheDtype::Int4), false, None);
+        let policy = RapidMlxExecutionPolicy::new(Some(KvCacheDtype::Bf16), false, None);
         let reasons = policy.effective_reasons();
         assert!(reasons.is_empty());
     }
@@ -650,7 +647,7 @@ mod tests {
         assert_eq!(policy.kv_cache_dtype, None); // not specified
         assert!(!policy.reasoning_mode);
         assert_eq!(policy.turboquant, None);
-        assert_eq!(policy.effective_kv_dtype, KvCacheDtype::Int4); // Rapid default
+        assert_eq!(policy.effective_kv_dtype, KvCacheDtype::Bf16);
     }
 
     // ── MemoryBreakdown tests ────────────────────────────────────────────────
@@ -726,7 +723,7 @@ mod tests {
             headroom_bytes: 0,
             requested_policy,
             effective_policy,
-            reasons: vec![PolicyReason::ReasoningModeOverridesKvToInt8],
+            reasons: vec![PolicyReason::RuntimeActiveKvBf16],
         };
 
         let json = serde_json::to_string(&breakdown).unwrap();
@@ -739,7 +736,7 @@ mod tests {
         );
         assert_eq!(
             value["reasons"][0].as_str().unwrap(),
-            "reasoning_mode_overrides_kv_to_int8"
+            "runtime_active_kv_bf16"
         );
     }
 
@@ -850,13 +847,13 @@ mod tests {
             TurboQuantMode::K8V4,
             "Qualified model must apply requested TurboQuant mode"
         );
-        // Local Rapid 0.10.17 receipt: with `--kv-cache-turboquant k8v4`
-        // plus `--kv-cache-dtype int4`, `/metrics` reports bf16 active KV.
+        // Rapid-MLX v0.11.0 issue #1197 reports bf16 active KV even when
+        // `--kv-cache-dtype int4` is requested.
         assert_eq!(policy.effective_kv_dtype, KvCacheDtype::Bf16);
         assert!(
             policy
                 .effective_reasons()
-                .contains(&PolicyReason::TurboQuantOverridesKvToBf16)
+                .contains(&PolicyReason::RuntimeActiveKvBf16)
         );
     }
 

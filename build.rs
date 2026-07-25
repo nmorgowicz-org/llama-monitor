@@ -9,6 +9,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::process::Command;
 
 fn main() {
     let static_dir = "static";
@@ -28,9 +29,26 @@ fn main() {
     // Generate routes.rs
     generate_routes(&files, &format!("{}/routes.rs", out_dir));
 
+    // Keep generated Rust stable under `cargo fmt -- --check`. Without this,
+    // each Cargo invocation rewrites these tracked files in an unformatted
+    // shape and leaves the worktree dirty even when no static asset changed.
+    format_generated_file(&format!("{}/static_assets.rs", out_dir));
+    format_generated_file(&format!("{}/routes.rs", out_dir));
+
     // Tell Cargo to rerun when any file in static/ changes
     mark_rerun(static_dir);
     println!("cargo:rerun-if-changed=build.rs");
+}
+
+fn format_generated_file(path: &str) {
+    let status = Command::new("rustfmt")
+        .args(["--edition", "2024"])
+        .arg(path)
+        .status()
+        .unwrap_or_else(|error| panic!("Failed to run rustfmt on {path}: {error}"));
+    if !status.success() {
+        panic!("rustfmt failed for {path}");
+    }
 }
 
 fn mark_rerun(dir: &str) {
