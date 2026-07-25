@@ -307,6 +307,20 @@ impl WorkloadScenario {
         }
     }
 
+    /// Resolve the stable product-profile IDs used by the wizard as well as
+    /// the estimator's compact scenario keys.  Profiles and scenarios are not
+    /// the same UI concept, but they must map to one memory policy everywhere.
+    pub fn from_profile_or_key(key: &str) -> Option<Self> {
+        let canonical = match key {
+            "interactive_coding_agent" => "coding_agent",
+            "roleplay_storytelling" => "roleplay",
+            "general_chat" => "interactive_chat",
+            "deterministic_batch_eval" => "batch_eval",
+            other => other,
+        };
+        Self::from_key(canonical)
+    }
+
     /// Returns all predefined scenario keys.
     pub fn all_keys() -> &'static [&'static str] {
         &[
@@ -699,6 +713,22 @@ mod tests {
         };
         assert_eq!(scenario.recommended_kv_dtype(), RecommendedKvDtype::Int4);
         assert!(scenario.mtp_eligible());
+    }
+
+    #[test]
+    fn product_profile_ids_resolve_to_estimator_scenarios() {
+        assert!(matches!(
+            WorkloadScenario::from_profile_or_key("interactive_coding_agent"),
+            Some(WorkloadScenario::CodingAgent { .. })
+        ));
+        assert!(matches!(
+            WorkloadScenario::from_profile_or_key("roleplay_storytelling"),
+            Some(WorkloadScenario::Roleplay { .. })
+        ));
+        assert!(matches!(
+            WorkloadScenario::from_profile_or_key("deterministic_batch_eval"),
+            Some(WorkloadScenario::BatchEval { .. })
+        ));
     }
 
     #[test]

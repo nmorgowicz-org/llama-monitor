@@ -21,6 +21,23 @@ pub enum LaunchIntent {
     ReplaceExisting,
 }
 
+/// The launch-specific facts required to turn a live memory sample into a fit
+/// decision.  A bare machine snapshot must never pretend to know whether a
+/// particular model fits.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct MemoryAvailabilityRequest {
+    /// Estimated peak bytes for the selected model/configuration.
+    #[serde(default)]
+    pub required_bytes: u64,
+    /// Whether this launch coexists with a running model or replaces one.
+    #[serde(default)]
+    pub launch_intent: Option<LaunchIntent>,
+    /// Measured footprint of an app-owned runtime which this launch will stop.
+    /// Callers must leave this at zero when the runtime is not known/app-owned.
+    #[serde(default)]
+    pub replace_runtime_bytes: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryAvailabilitySnapshot {
     /// Total unified/system memory in bytes. Informational only; never called "available".
@@ -64,6 +81,24 @@ pub struct MemoryAvailabilitySnapshot {
     #[serde(default)]
     pub current_safe_availability_bytes: u64,
 
+    /// Launch-specific requested footprint. Zero means this is a capacity
+    /// snapshot only, not a model-fit claim.
+    #[serde(default)]
+    pub required_bytes: u64,
+
+    /// Conservatively projected availability after reclaiming only reclaimable
+    /// state. This is distinct from current safe availability.
+    #[serde(default)]
+    pub after_reclaim_bytes: u64,
+
+    /// Availability after a measured app-owned runtime is stopped. It never
+    /// includes arbitrary third-party process memory.
+    #[serde(default)]
+    pub after_closing_apps_bytes: u64,
+
+    #[serde(default)]
+    pub launch_intent: Option<LaunchIntent>,
+
     /// The determined availability state for a given launch scenario.
     #[serde(default)]
     pub state: MemoryAvailabilityState,
@@ -90,6 +125,10 @@ impl Default for MemoryAvailabilitySnapshot {
             metal_working_set_bytes: 0,
             configured_ceiling_bytes: 0,
             current_safe_availability_bytes: 0,
+            required_bytes: 0,
+            after_reclaim_bytes: 0,
+            after_closing_apps_bytes: 0,
+            launch_intent: None,
             state: MemoryAvailabilityState::Unsafe,
             backend_specific: serde_json::Map::new(),
             timestamp: 0,
@@ -101,18 +140,23 @@ impl Default for MemoryAvailabilitySnapshot {
 /// On Apple Silicon (macOS), uses Metal working set and iogpu wired limit.
 /// On other platforms, returns a safe degraded snapshot.
 pub fn build_snapshot() -> MemoryAvailabilitySnapshot {
+    build_snapshot_for(&MemoryAvailabilityRequest::default())
+}
+
+/// Build a fresh snapshot with an optional selected-launch fit contract.
+pub fn build_snapshot_for(request: &MemoryAvailabilityRequest) -> MemoryAvailabilitySnapshot {
     #[cfg(target_os = "macos")]
     {
-        build_macos_snapshot()
+        build_macos_snapshot(request)
     }
     #[cfg(not(target_os = "macos"))]
     {
-        build_non_macos_snapshot()
+        build_non_macos_snapshot(request)
     }
 }
 
 #[cfg(target_os = "macos")]
-fn build_macos_snapshot() -> MemoryAvailabilitySnapshot {
+fn build_macos_snapshot(request: &MemoryAvailabilityRequest) -> MemoryAvailabilitySnapshot {
     let sys_info = crate::system::get_system_metrics();
     let total_bytes = (sys_info.ram_total_gb * 1024.0 * 1024.0 * 1024.0) as u64;
     let wired_bytes = (sys_info.memory_wired_gb * 1024.0 * 1024.0 * 1024.0) as u64;
@@ -141,20 +185,26 @@ fn build_macos_snapshot() -> MemoryAvailabilitySnapshot {
     // sysinfo's available_memory includes inactive/purgeable pages (~54 GB on 64 GB system),
     // which is misleadingly high — macOS may reclaim some, but they aren't truly available now.
     // For accurate "can I run this model right now?" we need actual free RAM.
-    let current_safe_availability_bytes = free_bytes;
-
-    // Determine state
-    let state = if current_safe_availability_bytes > 0
-        && current_safe_availability_bytes >= configured_ceiling_bytes.saturating_mul(50) / 100
-    {
-        MemoryAvailabilityState::SafeNow
-    } else if free_bytes > 0 && free_bytes < current_safe_availability_bytes {
-        MemoryAvailabilityState::ConditionalAfterReclaim
-    } else if free_bytes == 0 && wired_bytes > 0 {
-        MemoryAvailabilityState::AfterClosingApps
+    let replace_credit = if matches!(request.launch_intent, Some(LaunchIntent::ReplaceExisting)) {
+        request.replace_runtime_bytes
     } else {
-        MemoryAvailabilityState::Unsafe
+        0
     };
+    let current_safe_availability_bytes = free_bytes
+        .saturating_add(replace_credit)
+        .min(configured_ceiling_bytes);
+    // Only a quarter of inactive/speculative memory is treated as reclaimable.
+    // This is deliberately conservative and is never described as free-now.
+    let after_reclaim_bytes = current_safe_availability_bytes
+        .saturating_add(speculative_bytes / 4)
+        .min(configured_ceiling_bytes);
+    let after_closing_apps_bytes = current_safe_availability_bytes;
+    let state = classify_state(
+        request.required_bytes,
+        current_safe_availability_bytes,
+        after_reclaim_bytes,
+        after_closing_apps_bytes,
+    );
 
     // Build backend-specific metadata for Metal
     let mut backend_specific = serde_json::Map::new();
@@ -185,6 +235,10 @@ fn build_macos_snapshot() -> MemoryAvailabilitySnapshot {
         metal_working_set_bytes,
         configured_ceiling_bytes,
         current_safe_availability_bytes,
+        required_bytes: request.required_bytes,
+        after_reclaim_bytes,
+        after_closing_apps_bytes,
+        launch_intent: request.launch_intent.clone(),
         state,
         backend_specific,
         timestamp: std::time::SystemTime::now()
@@ -195,7 +249,7 @@ fn build_macos_snapshot() -> MemoryAvailabilitySnapshot {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn build_non_macos_snapshot() -> MemoryAvailabilitySnapshot {
+fn build_non_macos_snapshot(request: &MemoryAvailabilityRequest) -> MemoryAvailabilitySnapshot {
     let sys_info = crate::system::get_system_metrics();
     let total_bytes = (sys_info.ram_total_gb * 1024.0 * 1024.0 * 1024.0) as u64;
     let free_bytes = (sys_info.memory_free_gb * 1024.0 * 1024.0 * 1024.0) as u64;
@@ -203,16 +257,20 @@ fn build_non_macos_snapshot() -> MemoryAvailabilitySnapshot {
 
     // On non-macOS, use a safe RAM-relative ceiling (80% of total)
     let configured_ceiling_bytes = (total_bytes as f64 * 0.80) as u64;
-    let current_safe_availability_bytes = available_bytes.min(configured_ceiling_bytes);
-
-    let state =
-        if current_safe_availability_bytes >= configured_ceiling_bytes.saturating_mul(50) / 100 {
-            MemoryAvailabilityState::SafeNow
-        } else if available_bytes > 0 {
-            MemoryAvailabilityState::ConditionalAfterReclaim
-        } else {
-            MemoryAvailabilityState::Unsafe
-        };
+    let replace_credit = if matches!(request.launch_intent, Some(LaunchIntent::ReplaceExisting)) {
+        request.replace_runtime_bytes
+    } else {
+        0
+    };
+    let current_safe_availability_bytes = available_bytes
+        .saturating_add(replace_credit)
+        .min(configured_ceiling_bytes);
+    let state = classify_state(
+        request.required_bytes,
+        current_safe_availability_bytes,
+        current_safe_availability_bytes,
+        current_safe_availability_bytes,
+    );
 
     MemoryAvailabilitySnapshot {
         total_unified_bytes: total_bytes,
@@ -224,12 +282,33 @@ fn build_non_macos_snapshot() -> MemoryAvailabilitySnapshot {
         metal_working_set_bytes: 0,
         configured_ceiling_bytes,
         current_safe_availability_bytes,
+        required_bytes: request.required_bytes,
+        after_reclaim_bytes: current_safe_availability_bytes,
+        after_closing_apps_bytes: current_safe_availability_bytes,
+        launch_intent: request.launch_intent.clone(),
         state,
         backend_specific: serde_json::Map::new(),
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs(),
+    }
+}
+
+fn classify_state(
+    required_bytes: u64,
+    safe_now_bytes: u64,
+    after_reclaim_bytes: u64,
+    after_closing_apps_bytes: u64,
+) -> MemoryAvailabilityState {
+    if required_bytes == 0 || safe_now_bytes >= required_bytes {
+        MemoryAvailabilityState::SafeNow
+    } else if after_reclaim_bytes >= required_bytes {
+        MemoryAvailabilityState::ConditionalAfterReclaim
+    } else if after_closing_apps_bytes >= required_bytes {
+        MemoryAvailabilityState::AfterClosingApps
+    } else {
+        MemoryAvailabilityState::Unsafe
     }
 }
 
@@ -327,6 +406,26 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&replace).unwrap(),
             r#""replace_existing""#
+        );
+    }
+
+    #[test]
+    fn fit_state_uses_the_selected_requirement_not_a_generic_percentage() {
+        assert_eq!(
+            classify_state(20, 24, 24, 24),
+            MemoryAvailabilityState::SafeNow
+        );
+        assert_eq!(
+            classify_state(20, 16, 22, 16),
+            MemoryAvailabilityState::ConditionalAfterReclaim
+        );
+        assert_eq!(
+            classify_state(20, 16, 18, 24),
+            MemoryAvailabilityState::AfterClosingApps
+        );
+        assert_eq!(
+            classify_state(20, 16, 18, 19),
+            MemoryAvailabilityState::Unsafe
         );
     }
 

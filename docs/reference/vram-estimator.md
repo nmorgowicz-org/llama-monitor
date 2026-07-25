@@ -670,6 +670,8 @@ Architecture-aware, backend-aware VRAM breakdown endpoint.
   - **Explicit `hf_repo_id`**: for Rapid-MLX, `hf_repo_id` plus optional immutable `hf_repo_revision` fetches `config.json` directly. `hf_file_path` is never treated as a config filename. Referenced text configs are revision-pinned, bounded, cycle-checked, and limited to safe relative JSON paths. `model_size_bytes` is required when the tree lookup cannot determine the weight size.
   - **Degraded**: if required config fields (`hidden_size`, `num_hidden_layers`, `num_attention_heads`) are missing or unrecognized, the architecture is built via `ModelArch::from_name_and_params()` and `evidence` is set to `"degraded"`. This never silently presents a heuristic guess as authoritative.
   - Optional `mlx_prefix_cache_tokens` + `mlx_prefix_cache_bits` (4 or 8, default 8) reserve a **separate** stored budget for Rapid-MLX's compressed prefix cache. This is intentionally NOT a reduction of `kv_cache_bytes`: cached entries are decompressed back to the active compute dtype before reuse, so active-request KV is unaffected by how much prefix cache exists.
+  - Rapid-native policy fields are `kv_cache_dtype` (`bf16`, `int8`, or `int4`), `reasoning_mode`, and `turboquant_mode` (`v4`, `k8v4`, or `none`). The estimator never accepts llama.cpp's `ctk`/`ctv` vocabulary for a Rapid result. Reasoning resolves the active KV dtype to `int8`.
+  - TurboQuant is retained-prefix storage only. It never reduces model weights, recurrent state, MTP, prefill, or the transient decompression peak. A local Rapid 0.10.17 receipt showed that `--kv-cache-turboquant k8v4` owns the active cache path: the runtime reports its active compute KV as `bf16` and does not apply a simultaneously requested `--kv-cache-dtype int4`. `k8v4` is an Advanced trial: it becomes effective only after exact model/revision qualification; an unknown community finetune is estimated as Standard retained storage and receives an explicit fallback reason. The Rapid argv is `--kv-cache-turboquant {v4,k8v4,none}`.
 - Output fields: `weights_bytes`, `kv_cache_bytes`, `linear_attn_state_bytes`, `mmproj_bytes`, `mtp_bytes`, `overhead_bytes`, `total_bytes`, `available_bytes`, `headroom_bytes`, `ram_bytes`, `available_ram_bytes`, `ram_headroom_bytes`, `recommendation`, `note`
 - Additional output fields (both backends; zero/"measured" for GGUF llama.cpp):
   - `mlx_prefix_cache_bytes` (u64) — the separate compressed prefix-cache budget described above (non-zero only for Rapid-MLX).
@@ -678,6 +680,16 @@ Architecture-aware, backend-aware VRAM breakdown endpoint.
     - `"approximate"`: Rapid-MLX with real MLX config metadata but an uncalibrated overhead formula (see next section). Every Rapid-MLX estimate is at best `"approximate"`.
     - `"degraded"`: one or more required architecture fields were missing/unrecognized and a name/param heuristic was used instead of real model metadata (applies to both backends).
 - Consumers: Spawn Wizard, Preset Editor, Setup view, **and the Models modal HF-browse preview bar** (`updateVramDisplay` in `static/js/features/models.js`) — all share this one endpoint. The Spawn Wizard's VRAM bar tooltip appends a plain-text note when `evidence` is `"approximate"` or `"degraded"`. No independent client-side VRAM math exists — this is always backend-driven only.
+
+### GET /api/memory-availability and POST /api/memory-availability/fit
+
+These authenticated endpoints provide the live, backend-owned availability sample used alongside an estimate on unified-memory systems. They deliberately distinguish capacity from current launch readiness:
+
+- `GET /api/memory-availability` returns a fresh capacity snapshot. `total_unified_bytes` and `configured_ceiling_bytes` are informational and are never presented as currently available memory.
+- `POST /api/memory-availability/fit` accepts `required_bytes`, `launch_intent` (`additional_generation` or `replace_existing`), and an optional `replace_runtime_bytes`. The replacement credit is valid only for a measured, app-owned runtime that the launch will stop.
+- The response reports `current_safe_availability_bytes`, `after_reclaim_bytes`, `after_closing_apps_bytes`, the selected `required_bytes`, and a target-specific state: `safe_now`, `conditional_after_reclaim`, `after_closing_apps`, or `unsafe`.
+
+Reclaim and close-app figures are conditional scenarios, not free memory. Disk-cache purge does not claim to free a model heap, Metal allocation, or wired memory.
 
 ### Rapid-MLX overhead — approximate, not yet hardware-calibrated
 
@@ -942,6 +954,74 @@ To recalibrate against real Rapid-MLX process-footprint measurements:
   to `Measured` for Rapid-MLX (and update this file).
 
 Until that work is done, Rapid-MLX overhead must continue to be reported as `Approximate`.
+
+### Estimator-to-runtime calibration receipt
+
+To recalibrate `mlx_overhead_bytes` against real Rapid-MLX evidence rather than a formula, a
+separate **calibration receipt** binds one canonical `/api/vram-estimate` prediction to one
+fresh-server-per-cell `model_runtime_benchmark_receipt` cell (see
+`docs/reference/model-runtime-benchmarking.md`) and records the residual between them. This is
+a distinct artifact from both: it never re-implements estimation or benchmarking, it only pairs
+their outputs.
+
+```json
+{
+  "schema_version": 1,
+  "kind": "estimator_calibration_receipt",
+  "captured_at": "2026-07-24T12:00:00.000Z",
+  "estimator": {
+    "endpoint": "/api/vram-estimate",
+    "request": { "model_path": "...", "backend": "rapid_mlx", "n_ctx": 8000, "kv_cache_dtype": "int8" },
+    "response": { "total_bytes": 0, "evidence": "approximate", "recommendation": "fit" }
+  },
+  "runtime_receipt": {
+    "path": "tests/fixtures/calibration/rapid-mlx-receipts/.../01-01-context-8000-int8.json",
+    "cell_id": "context-8000-int8",
+    "attempt_phase": "cold",
+    "fresh_server_per_cell": true,
+    "sha256": "receipt file digest, for tamper-evidence"
+  },
+  "model": {
+    "hf_repo_id": "nightmedia/Qwen3.5-9B-DS9-USS-Defiant-1M-q8-hi-mlx",
+    "revision": "...",
+    "config_sha256": "..."
+  },
+  "measurement": {
+    "metric_name": "rapid_mlx_metal_peak_memory_bytes",
+    "actual_peak_bytes": 0
+  },
+  "residual": {
+    "predicted_total_bytes": 0,
+    "actual_peak_bytes": 0,
+    "residual_bytes": 0,
+    "residual_pct": 0.0,
+    "predicted_gib": 0.0,
+    "actual_gib": 0.0
+  },
+  "dataset_role": "tuning"
+}
+```
+
+Field notes:
+
+- `estimator.request` / `estimator.response` are the exact JSON body sent to and returned from
+  `/api/vram-estimate`. **The `Authorization` header and API token are never persisted** —
+  the calibration writer strips them before serialization; a receipt containing a token must be
+  treated as a bug, not a formatting choice.
+- `runtime_receipt.fresh_server_per_cell` must be `true`, and `measurement.metric_name` must be
+  a peak (not lifetime-high-water-mark) metric — otherwise the residual is diagnostic context
+  only, not calibration evidence (same rule as the benchmarking doc's "Required comparison
+  discipline").
+- `residual.residual_bytes = actual_peak_bytes − predicted_total_bytes`; positive means the
+  estimator under-predicted (unsafe direction), negative means it over-predicted (safe
+  direction).
+- `dataset_role` is `"tuning"` for rows used to fit `mlx_overhead_base_bytes` /
+  `MLX_KV_OVERHEAD_FRACTION`, and `"holdout"` for rows reserved to validate the fit. At least
+  one context/dtype row must be `"holdout"` before a calibration can be called qualified — a fit
+  validated only on its own training rows is not evidence of generalization.
+- Only after holdout rows confirm the tuned formula does `EstimateEvidence` change from
+  `Approximate` to `Measured` for Rapid-MLX, per the "Recalibrating the MLX overhead" section
+  above.
 
 ---
 

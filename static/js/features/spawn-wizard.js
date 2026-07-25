@@ -22,7 +22,7 @@ import {
   detectCommunityTemplateFamily,
 } from './chat-template-registry.js';
 import Router, { routeForCurrentView } from './router.js';
-import { scheduleEstimate, cancelEstimate, buildEstimateBody } from './vram-estimate.js';
+import { scheduleEstimate, cancelEstimate, buildEstimateBody, rapidEstimatePolicyFromWizardHardware } from './vram-estimate.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune, requestDepthSweep, renderDepthSweep, requestBatchSweep, renderBatchSweep } from './tuning-cards.js';
 import { setHeaderMode } from './attach-detach.js';
@@ -231,6 +231,17 @@ const WORKLOAD_SCENARIO_TO_PROFILE = {
   roleplay: 'roleplay_storytelling',
 };
 
+// Page-1 "what are you running this for?" cards drive the real workload profile
+// (KV-dtype recommendation, context/retained-cache target) directly, so step 3
+// no longer needs its own duplicate profile picker. Deterministic batch/eval and
+// the multi-slot tool/research variant are advanced-only and not exposed here —
+// home GPUs (8-32GB) should default to single-slot concurrency.
+const USE_CASE_TO_PROFILE = {
+  agentic: 'interactive_coding_agent',
+  general: 'general_chat',
+  roleplay: 'roleplay_storytelling',
+};
+
 function formatCtx(n) {
   if (!n) return '—';
   if (n >= 1_000_000) return (n / 1e6).toFixed(1) + 'M';
@@ -339,7 +350,7 @@ export const wizardState = {
     rapidMlxRuntimeCompatible: false,
   },
   profile: 'balanced',
-  useCase: 'general',    // 'agentic' | 'general' | 'roleplay'
+  useCase: 'agentic',    // 'agentic' | 'general' | 'roleplay'
   mode: 'guided',
   model: {
     source: 'local',     // 'local' | 'hf' | 'import'
@@ -618,6 +629,7 @@ function applyReducedMotion() {
 export function openSpawnWizard(opts = {}) {
   if (!dom.overlay) return;
   resetWizardState();
+  _initWorkloadProfiles();
   document.getElementById('models-modal')?.classList.remove('open');
   window.closePresetsPanel?.();
   dom.overlay.classList.add('open');
@@ -847,7 +859,7 @@ function resetWizardState() {
   wizardState.engine.selected = 'llama_cpp';
   wizardState.engine.explicit = false;
   wizardState.engine.recommendation = null;
-  wizardState.useCase = 'general';
+  wizardState.useCase = 'agentic';
   wizardState.profile = 'balanced';
   wizardState.mode = 'guided';
   wizardState.model.chatTemplateMode = 'auto';
@@ -1128,12 +1140,15 @@ function bindEvents() {
     card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } });
   });
 
-  // Use-case cards
+  // Use-case cards — also drive the real workload profile (KV-dtype + context
+  // target) so this single page-1 choice replaces the old step-3 picker.
   dom.usecaseCards?.forEach(card => {
     card.addEventListener('click', () => {
       wizardState.useCase = card.dataset.usecase;
       dom.usecaseCards.forEach(c => c.classList.remove('selected'));
       card.classList.add('selected');
+      const profileId = USE_CASE_TO_PROFILE[card.dataset.usecase];
+      if (profileId) _selectWorkloadProfile(profileId);
       updateVramDisplay();
       refreshStepGuardrails();
     });
@@ -2155,14 +2170,9 @@ function getStepGuardState(step = wizardState.currentStep) {
   }
 
   if (step === 2) {
-    // Phase 7B2: Require workload profile confirmation before proceeding
-    const wp = wizardState.hardware.workloadProfile;
-    if (!wp || !wp.id) {
-      return error('Select a workload profile to continue.', document.getElementById('workload-profile-cards'));
-    }
-    if (!wizardState.hardware.workloadProfileConfirmed) {
-      return error('Review the workload assumptions and confirm they match your usage.', document.getElementById('workload-confirm-check'));
-    }
+    // Workload/use-case is now chosen on page 1 and auto-applied with a sane
+    // default (Phase 7B2's dedicated step-3 picker + confirmation gate was
+    // redundant with it and has been removed).
     if (wizardState.engine.selected === 'rapid_mlx') {
       return info('Rapid-MLX backend controls remain isolated from llama.cpp memory and speculation flags.');
     }
@@ -5734,6 +5744,7 @@ async function clampAutoSizeResultToSizingMath(result, arch, modelBytes, availVr
       is_unified_memory: isUnifiedMemory(),
       mmproj_path: wizardState.model.mmprojPath || null,
       mmproj_bytes: wizardState.arch.mmprojBytes || 0,
+      ...(wizardState.engine.selected === 'rapid_mlx' ? rapidEstimatePolicyFromWizardHardware(hw) : {}),
     });
 
     return (async () => {
@@ -6618,6 +6629,7 @@ async function renderScenarioCards(modelBytes, arch, availVram) {
           is_unified_memory: isUnifiedMemory(),
           mmproj_path: wizardState.model.mmprojPath || null,
           mmproj_bytes: wizardState.arch.mmprojBytes || 0,
+          ...(wizardState.engine.selected === 'rapid_mlx' ? rapidEstimatePolicyFromWizardHardware(hw) : {}),
         });
         const headers = (window.authHeaders ? window.authHeaders() : {});
         const res = await fetch('/api/vram-estimate', {
@@ -9482,6 +9494,7 @@ async function renderSummary() {
          is_unified_memory: isUnifiedMemory(),
          mmproj_path: m.mmprojPath || null,
          mmproj_bytes: m.mmprojBytes || 0,
+         ...(wizardState.engine.selected === 'rapid_mlx' ? rapidEstimatePolicyFromWizardHardware(hw) : {}),
        });
        const headers = (window.authHeaders ? window.authHeaders() : {});
        const res = await fetch('/api/vram-estimate', {

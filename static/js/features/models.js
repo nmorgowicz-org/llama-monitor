@@ -2598,6 +2598,10 @@ async function updateVramDisplay(file) {
             available_vram_bytes: availVram,
             is_unified_memory: isMlx || cachedUnified,
             mmproj_bytes: mmprojBytes,
+            // Model Library starts from the selected product workload rather
+            // than an unrelated generic 8K/default scenario. The backend
+            // normalizes the profile ID into its estimator policy.
+            workload_scenario: sessionState.workloadProfile?.id || 'interactive_coding_agent',
         });
         const headers = window.authHeaders
             ? { ...window.authHeaders(), 'Content-Type': 'application/json' }

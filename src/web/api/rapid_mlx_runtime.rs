@@ -467,9 +467,20 @@ async fn build_command_preview(req: CommandPreviewRequest) -> ApiReply {
 }
 
 fn build_effective_policy(config: &RapidMlxConfig) -> serde_json::Value {
+    // Keep this snapshot honest: advanced TurboQuant requests are persisted so
+    // the user can see and qualify them, but launch deliberately omits them
+    // until an exact model/revision receipt exists. The requested-vs-effective
+    // diff below carries the corresponding reason.
+    let effective_turboquant_mode = match config.turboquant_mode {
+        Some(crate::inference::rapid_mlx::TurboQuantMode::V4)
+        | Some(crate::inference::rapid_mlx::TurboQuantMode::K8V4) => {
+            Some(crate::inference::rapid_mlx::TurboQuantMode::Off)
+        }
+        ref other => other.clone(),
+    };
     serde_json::json!({
         "kv_cache_dtype": config.kv_cache_dtype,
-        "turboquant_mode": config.turboquant_mode,
+        "turboquant_mode": effective_turboquant_mode,
         "prefix_cache_policy": config.prefix_cache_policy,
         "hybrid_cache_entries": config.hybrid_cache_entries,
         "pflash_policy": config.pflash_policy,
@@ -508,7 +519,9 @@ fn build_requested_vs_effective(
         let requested = dtype.to_string();
         let _effective = match dtype {
             crate::inference::rapid_mlx::KvCacheConfig::Auto => "auto".to_string(),
-            crate::inference::rapid_mlx::KvCacheConfig::Fp16 => {
+            crate::inference::rapid_mlx::KvCacheConfig::Bf16
+            | crate::inference::rapid_mlx::KvCacheConfig::Int8
+            | crate::inference::rapid_mlx::KvCacheConfig::Int4 => {
                 if !capabilities.contains("--kv-cache-dtype") {
                     diff.insert("kv_cache_dtype".to_string(), serde_json::json!({
                         "requested": requested,
@@ -517,32 +530,17 @@ fn build_requested_vs_effective(
                     }));
                     "auto".to_string()
                 } else {
-                    "fp16".to_string()
+                    requested.clone()
                 }
             }
-            crate::inference::rapid_mlx::KvCacheConfig::Bf16 => {
-                if !capabilities.contains("--kv-cache-dtype") {
-                    diff.insert("kv_cache_dtype".to_string(), serde_json::json!({
-                        "requested": requested,
-                        "effective": "auto",
-                        "reason": "KV cache dtype flag not supported by this runtime version; using runtime default"
-                    }));
-                    "auto".to_string()
-                } else {
-                    "bf16".to_string()
-                }
-            }
-            crate::inference::rapid_mlx::KvCacheConfig::Fp8 => {
-                if !capabilities.contains("--kv-cache-dtype") {
-                    diff.insert("kv_cache_dtype".to_string(), serde_json::json!({
-                        "requested": requested,
-                        "effective": "auto",
-                        "reason": "KV cache dtype flag not supported by this runtime version; using runtime default"
-                    }));
-                    "auto".to_string()
-                } else {
-                    "fp8".to_string()
-                }
+            crate::inference::rapid_mlx::KvCacheConfig::LegacyFp16
+            | crate::inference::rapid_mlx::KvCacheConfig::LegacyFp8 => {
+                diff.insert("kv_cache_dtype".to_string(), serde_json::json!({
+                    "requested": requested,
+                    "effective": null,
+                    "reason": "This preset contains a legacy unsupported KV dtype. Choose bf16, int8, or int4 before launching."
+                }));
+                "invalid_legacy_value".to_string()
             }
         };
     }
@@ -562,16 +560,23 @@ fn build_requested_vs_effective(
         );
     }
 
-    // TurboQuant: may be unavailable
+    // TurboQuant requires an exact model/revision qualification receipt. The
+    // current runtime snapshot establishes only that the flag exists, not that
+    // this model's retained KV path is eligible. Keep the requested value
+    // visible, but omit it from preview/launch until that evidence is wired.
     if let Some(ref mode) = config.turboquant_mode {
         let mode_str = mode.to_string();
-        if !(mode_str == "auto" || mode_str == "none" || capabilities.contains("--turboquant")) {
+        if mode_str != "auto" && mode_str != "none" {
             diff.insert(
                 "turboquant_mode".to_string(),
                 serde_json::json!({
                     "requested": mode_str,
                     "effective": "none",
-                    "reason": "TurboQuant not supported by this runtime version; disabled"
+                    "reason": if capabilities.contains("--kv-cache-turboquant") {
+                        "No exact model/revision TurboQuant qualification receipt is available; disabled"
+                    } else {
+                        "TurboQuant is not supported by this runtime version; disabled"
+                    }
                 }),
             );
         }
@@ -605,18 +610,29 @@ fn apply_phase7_config(
             use crate::inference::rapid_mlx::command::KvCacheDtypeArg;
             match kv {
                 crate::inference::rapid_mlx::KvCacheConfig::Auto => KvCacheDtypeArg::Auto,
-                crate::inference::rapid_mlx::KvCacheConfig::Fp16 => {
-                    KvCacheDtypeArg::Explicit("fp16".into())
-                }
                 crate::inference::rapid_mlx::KvCacheConfig::Bf16 => {
                     KvCacheDtypeArg::Explicit("bf16".into())
                 }
-                crate::inference::rapid_mlx::KvCacheConfig::Fp8 => {
+                crate::inference::rapid_mlx::KvCacheConfig::Int8 => {
+                    KvCacheDtypeArg::Explicit("int8".into())
+                }
+                crate::inference::rapid_mlx::KvCacheConfig::Int4 => {
+                    KvCacheDtypeArg::Explicit("int4".into())
+                }
+                crate::inference::rapid_mlx::KvCacheConfig::LegacyFp16 => {
+                    KvCacheDtypeArg::Explicit("fp16".into())
+                }
+                crate::inference::rapid_mlx::KvCacheConfig::LegacyFp8 => {
                     KvCacheDtypeArg::Explicit("fp8".into())
                 }
             }
         }))
-        .turboquant_mode(config.turboquant_mode.as_ref().map(|t| t.to_string()))
+        .turboquant_mode(config.turboquant_mode.as_ref().and_then(|t| match t {
+            crate::inference::rapid_mlx::TurboQuantMode::Auto
+            | crate::inference::rapid_mlx::TurboQuantMode::Off => None,
+            crate::inference::rapid_mlx::TurboQuantMode::V4
+            | crate::inference::rapid_mlx::TurboQuantMode::K8V4 => None,
+        }))
         .prefix_cache_policy(config.prefix_cache_policy.clone())
         .hybrid_cache_entries(config.hybrid_cache_entries)
         .pflash_policy(config.pflash_policy.clone())
@@ -2154,7 +2170,7 @@ Run with `--verbose` for details on each check.
     #[test]
     fn flag_advisor_emits_fix_when_preset_missing_tool_call_flags() {
         let profile = sample_profile_with_tool_format("hermes");
-        let config = RapidMlxConfig {
+        let mut config = RapidMlxConfig {
             model_path: String::new(),
             model_source: None,
             served_model_name: None,
@@ -2221,6 +2237,14 @@ Run with `--verbose` for details on each check.
             findings
                 .iter()
                 .all(|f| f.finding_type == DoctorFindingType::Preset)
+        );
+
+        // A requested K8V4 trial must not be reported as effective until a
+        // revision-bound qualification receipt is available to the launch path.
+        config.turboquant_mode = Some(crate::inference::rapid_mlx::TurboQuantMode::K8V4);
+        assert_eq!(
+            build_effective_policy(&config)["turboquant_mode"],
+            serde_json::json!("none")
         );
     }
 

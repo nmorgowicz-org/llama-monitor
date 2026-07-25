@@ -10,6 +10,33 @@ import { showToast } from './toast.js';
 let debounce = null;
 let currentRequestId = 0;
 
+// Extract the persisted Rapid settings which materially change an estimate.
+// Keeping this at the canonical request boundary prevents the wizard, preset
+// editor, and welcome cards from quietly using different defaults.
+export function rapidEstimatePolicyFromConfig(rapidMlx = {}) {
+  const reasoning = rapidMlx.reasoning_mode;
+  return {
+    kv_cache_dtype: rapidMlx.kv_cache_dtype || null,
+    turboquant_mode: rapidMlx.turboquant_mode || null,
+    reasoning_mode: reasoning === true || reasoning === 'on' || reasoning === 'enable',
+    workload_scenario: rapidMlx.workload_scenario || null,
+    concurrency_policy: rapidMlx.concurrency_policy || null,
+    max_cache_blocks: rapidMlx.max_cache_blocks ?? null,
+  };
+}
+
+export function rapidEstimatePolicyFromWizardHardware(hardware = {}) {
+  return {
+    kv_cache_dtype: hardware.kvCacheDtype || null,
+    turboquant_mode: hardware.turboquantMode || null,
+    reasoning_mode: hardware.reasoningMode === true || hardware.reasoningMode === 'on',
+    workload_scenario: hardware.workloadProfile?.id || hardware.workloadScenario || null,
+    concurrency_policy: hardware.concurrencyPolicy || null,
+    mtp_config: hardware.mtpConfig || null,
+    max_cache_blocks: hardware.maxCacheBlocks ?? null,
+  };
+}
+
 // ── Canonical body builder ───────────────────────────────────────────────────
 //
 // Builder item 6: single source of truth for /api/vram-estimate parameters.
@@ -168,16 +195,11 @@ function buildEstimateBodyFromWizardState(state) {
     hf_file_path: m.hfFile || null,
     model_size_bytes: m.modelBytes || null,
     // Rapid execution policy fields (when wizard populates them).
-    kv_cache_dtype: hw.kvCacheDtype || null,
-    reasoning_mode: hw.reasoningMode || false,
-    turboquant_mode: hw.turboquantMode || null,
-    // Workload scenario (when wizard populates it).
-    workload_scenario: hw.workloadScenario || null,
+    ...rapidEstimatePolicyFromWizardHardware(hw),
+    // Explicit planning fields are intentionally separate from the profile ID.
     rapid_planning_context_tokens: hw.rapidPlanningContextTokens || null,
     rapid_retained_cache_tokens: hw.rapidRetainedCacheTokens || null,
     client_type: hw.clientType || null,
-    concurrency_policy: hw.concurrencyPolicy || null,
-    mtp_config: hw.mtpConfig || null,
   });
 }
 

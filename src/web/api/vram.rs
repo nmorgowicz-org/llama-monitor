@@ -10,6 +10,32 @@ use super::common::{
     unauthorized_db_admin_token,
 };
 
+fn workload_scenario_from_json(
+    value: &serde_json::Value,
+) -> Option<crate::llama::vram_estimator::WorkloadScenario> {
+    value
+        .as_str()
+        .and_then(crate::llama::vram_estimator::WorkloadScenario::from_profile_or_key)
+        .or_else(|| serde_json::from_value(value.clone()).ok())
+}
+
+/// Translate Rapid's resolved native cache dtype to the shared estimator's
+/// byte-width labels. This is intentionally internal: Rapid request bodies
+/// never accept llama.cpp `ctk` / `ctv` vocabulary.
+fn rapid_estimator_kv_quants(
+    dtype: crate::llama::vram_estimator::execution_policy::KvCacheDtype,
+) -> (&'static str, &'static str) {
+    use crate::llama::vram_estimator::execution_policy::KvCacheDtype;
+
+    match dtype {
+        // The shared estimator calls its two-byte representation `f16`; it is
+        // the correct byte-width proxy for Rapid's runtime-reported bf16 cache.
+        KvCacheDtype::Bf16 => ("f16", "f16"),
+        KvCacheDtype::Int8 => ("q8_0", "q8_0"),
+        KvCacheDtype::Int4 => ("q4_0", "q4_0"),
+    }
+}
+
 // 7) POST /api/vram-estimate (architecture-aware breakdown)
 fn api_vram_estimate_breakdown(
     _state: AppState,
@@ -295,20 +321,7 @@ fn api_vram_estimate_breakdown(
 
                 // Builder item 11: accept optional workload_scenario. Scenario-derived parameters
                 // only apply when explicit client values are omitted (Phase 2 omission-only rule).
-                let workload_scenario: Option<crate::llama::vram_estimator::WorkloadScenario> =
-                    body["workload_scenario"]
-                        .as_str()
-                        .and_then(|s| {
-                            serde_json::from_str::<crate::llama::vram_estimator::WorkloadScenario>(&format!("\"{s}\"")).ok()
-                        })
-                        .or_else(|| {
-                            body["workload_scenario"]
-                                .as_object()
-                                .and_then(|obj| serde_json::to_value(obj).ok())
-                                .and_then(|val| {
-                                    serde_json::from_value::<crate::llama::vram_estimator::WorkloadScenario>(val).ok()
-                                })
-                        });
+                let workload_scenario = workload_scenario_from_json(&body["workload_scenario"]);
 
                 // Scenario-derived tokens only fill gaps where explicit client values are omitted.
                 let scenario_params = workload_scenario.as_ref().map(|s| s.to_estimator_params(
@@ -387,12 +400,22 @@ fn api_vram_estimate_breakdown(
                     prefix_cache_budget_bytes,
                 };
 
+                // `ctk` / `ctv` are llama.cpp vocabulary. Rapid uses its
+                // resolved native policy, so do not let a stale llama default
+                // decide MLX KV bytes. `f16` is the estimator's two-byte proxy
+                // for Rapid's runtime-reported bf16 active compute cache.
+                let (estimate_ctk, estimate_ctv) = if is_rapid_mlx {
+                    rapid_estimator_kv_quants(rapid_execution_policy.effective_kv_dtype)
+                } else {
+                    (ctk.as_str(), ctv.as_str())
+                };
+
                 let breakdown = crate::llama::vram_estimator::full_estimate(
                     model_size_bytes,
                     &arch,
                     n_ctx,
-                    &ctk,
-                    &ctv,
+                    estimate_ctk,
+                    estimate_ctv,
                     parallel_slots,
                     ubatch_size,
                     n_cpu_moe,
@@ -590,20 +613,7 @@ fn api_vram_quant_compare(
 
                 // Builder item 11: accept optional workload_scenario for workload-fit quant guidance.
                 // When present, replaces generic 8k context with scenario-specific parameters.
-                let workload_scenario: Option<crate::llama::vram_estimator::WorkloadScenario> =
-                    body["workload_scenario"]
-                        .as_str()
-                        .and_then(|s| {
-                            serde_json::from_str::<crate::llama::vram_estimator::WorkloadScenario>(&format!("\"{s}\"")).ok()
-                        })
-                        .or_else(|| {
-                            body["workload_scenario"]
-                                .as_object()
-                                .and_then(|obj| serde_json::to_value(obj).ok())
-                                .and_then(|val| {
-                                    serde_json::from_value::<crate::llama::vram_estimator::WorkloadScenario>(val).ok()
-                                })
-                        });
+                let workload_scenario = workload_scenario_from_json(&body["workload_scenario"]);
 
                 // Optionally accept explicit arch fields to improve accuracy when
                 // called after introspection.
@@ -1152,6 +1162,34 @@ fn api_memory_availability(
         })
 }
 
+/// POST /api/memory-availability/fit — evaluate a selected launch against a
+/// fresh snapshot. The caller supplies only the selected estimate and explicit
+/// launch intent; replace credit is permitted solely for measured app-owned
+/// runtime memory.
+fn api_memory_availability_fit(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "memory-availability" / "fit")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<
+            crate::memory_availability::MemoryAvailabilityRequest,
+        >())
+        .and_then(move |auth: Option<String>, request| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let snapshot = crate::memory_availability::build_snapshot_for(&request);
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({ "ok": true, "snapshot": snapshot }),
+                )))
+            }
+        })
+}
+
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let state = ctx.state.clone();
     let config = ctx.config.clone();
@@ -1182,6 +1220,10 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r
         .or(api_memory_availability(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_memory_availability_fit(state.clone(), config.clone()))
         .unify()
         .boxed();
     r
@@ -1284,6 +1326,7 @@ async fn mlx_hf_estimate_from_repo(
 #[cfg(test)]
 mod mlx_estimate_tests {
     use super::*;
+    use crate::llama::vram_estimator::execution_policy::KvCacheDtype;
     use crate::web::auth::AuthManager;
     use warp::http::StatusCode;
 
@@ -1297,6 +1340,22 @@ mod mlx_estimate_tests {
             auth: AuthManager::new(None, None, &crate::config::TLSConfig::default().mode),
             config,
         })
+    }
+
+    #[test]
+    fn rapid_kv_dtypes_map_to_shared_estimator_byte_widths() {
+        assert_eq!(
+            rapid_estimator_kv_quants(KvCacheDtype::Bf16),
+            ("f16", "f16")
+        );
+        assert_eq!(
+            rapid_estimator_kv_quants(KvCacheDtype::Int8),
+            ("q8_0", "q8_0")
+        );
+        assert_eq!(
+            rapid_estimator_kv_quants(KvCacheDtype::Int4),
+            ("q4_0", "q4_0")
+        );
     }
 
     /// `/api/vram-estimate` is a data-reading endpoint (it introspects local model files) and
@@ -1605,5 +1664,26 @@ mod mlx_estimate_tests {
             valid_states,
             state
         );
+    }
+
+    #[tokio::test]
+    async fn memory_availability_fit_accepts_target_and_launch_intent() {
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/memory-availability/fit")
+            .header("authorization", "Bearer api-secret")
+            .json(&serde_json::json!({
+                "required_bytes": 1234,
+                "launch_intent": "replace_existing",
+                "replace_runtime_bytes": 5678
+            }))
+            .reply(&test_routes())
+            .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let json: serde_json::Value = serde_json::from_slice(response.body()).unwrap();
+        assert_eq!(json["snapshot"]["required_bytes"], 1234);
+        assert_eq!(json["snapshot"]["launch_intent"], "replace_existing");
+        assert!(json["snapshot"].get("after_reclaim_bytes").is_some());
+        assert!(json["snapshot"].get("after_closing_apps_bytes").is_some());
     }
 }

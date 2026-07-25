@@ -15,7 +15,7 @@ import {
     buildCommunityTemplateInstallRequest,
     detectCommunityTemplateFamily,
 } from './chat-template-registry.js';
-import { buildEstimateBody } from './vram-estimate.js';
+import { buildEstimateBody, rapidEstimatePolicyFromConfig } from './vram-estimate.js';
 import { _renderMtpConcurrencyTeaching } from './spawn-wizard.js';
 
 let newPresetSeed = null;
@@ -904,6 +904,7 @@ export function updatePresetVram() {
         const currentPreset = _currentModalPreset();
         const isRapidMlx = currentPreset?.backend === 'rapid_mlx';
         const backend = isRapidMlx ? 'rapid_mlx' : 'llama_cpp';
+        const rapidPolicy = isRapidMlx ? rapidEstimatePolicyFromConfig(currentPreset?.rapid_mlx) : {};
 
         // Builder item 6: use canonical body builder for cross-surface equality.
         const body = buildEstimateBody({
@@ -920,6 +921,7 @@ export function updatePresetVram() {
             available_ram_bytes: _presetAvailableRamBytes(),
             is_unified_memory: !!isUnified,
             mmproj_path: mmprojPath || null,
+            ...rapidPolicy,
         });
         const seq = ++_presetVramSeq;
         try {

@@ -320,6 +320,8 @@ The estimator accepts `ctk`/`ctv` values such as `q8_0`, `q4_0`, and `f16`. Rapi
 
 The app launches none of these fields, while estimates read shared llama values. Rapid-MLX also has no server `--ctx-size`; current context is a planning target rather than a launch-enforced allocation. Present estimates therefore look precise while being disconnected from the actual runtime policy.
 
+**Update (2026-07-24, confirmed via source read):** `--kv-cache-dtype {int8,int4}` is not merely unlaunched by our app — it is a structural no-op on rapid-mlx's own continuous-batching (`BatchGenerator`) path even when passed directly on the CLI: the live per-request KV cache never leaves bf16 regardless of the requested dtype (only the cross-request prefix-reuse cache and the `/metrics` gauge honor it). Any estimator math that treats requested int8/int4 as the live-KV dtype for the rapid-mlx backend is wrong; it must model live KV as always-bf16 until upstream fixes this. Separately, upstream shipped a net-new per-request field in the last 24h, `reasoning_max_tokens` (generation-time thinking-token budget, PRs #1185/#1186/#1190, 0.11.0) that is distinct from `--reasoning`/`reasoning_effort` above and has no backend or frontend exposure yet. Full trace, code paths, and required additions: `docs/plans/20260724-rapidmlx-benchmark-continuation.md` "Outstanding investigation items" 1 and 5-6.
+
 Two distinct facts must not be conflated when this is repaired (see §13.1 for the pin split):
 
 - **llama.cpp KV floor for tool calling is a known heuristic.** For agentic / tool-calling workloads on these smaller models, KV below `q8_0` (e.g. `q4_0`) becomes unreliable and prone to loops. This is lived and community-corroborated; encode it as a warning when a tool-enabled llama runtime is configured below `q8_0` KV.
@@ -359,6 +361,40 @@ The HF/Model Library audit also found that existing first-class GGUF concepts ar
 - PFlash/TurboQuant alias tiers cannot be inferred for arbitrary repos from this command.
 
 Every profile field must carry source and confidence. Unknown must remain unknown. Never upgrade a finetune to verified-alias confidence because the text parser returned a partial table.
+
+### 3.8a P0: native-MLX vision claims require a revision-bound runnable-capability receipt
+
+**Driving defect.** Hugging Face tags, a `vision_config` object, `preprocessor_config.json`, a model-family name, and `rapid-mlx info` are discovery signals, not proof that an exact native-MLX revision can accept image input. The distinction is observable and must survive product/UI design:
+
+- `mlx-community/gemma-4-26B-A4B-it-qat-q4_0-mlx-aligned` is a valid QAT text-generation artifact, but its exact revision `745a97a754ed4b7713163c7d0e9c11da41809e0c` declares `vision_config` while its indexed safetensors lack 211 required vision tensors. Rapid 0.10.17 starts it text-only; an image request is rejected, and explicit `--mllm` fails loudly. It is **not** a runnable Rapid VLM.
+- `mlx-community/gemma-4-26B-A4B-it-qat-OptiQ-4bit` includes a separate `optiq/optiq_vision.safetensors`, but is a 6.01-bit mixed-precision OptiQ artifact requiring the OptiQ/MLX-LM path. It must not be used as a uniform-Q4 Rapid baseline or silently promoted to Rapid VLM support.
+- `froggeric/Qwen3.6-35B-A3B-Uncensored-Heretic-MLX-4bit` has `vision_config`, processor/preprocessor configs, and indexed `vision_tower.*` tensors. This is structural evidence that it is a candidate VLM, not final proof; the exact immutable revision must still load and pass a real image request on the installed Rapid/dependency tuple.
+- `nightmedia/Qwen3.6-35B-A3B-Fable-Holo3.1-mxfp4-mlx` revision `16279aa65cee814c6b23e068a71eec7e1617fae0` is the current **primary user-selected 35B performance target**: it is a 19.35 GB MXFP4 Fable Holo 3.1 coding/reasoning merge with `Qwen3VLProcessor`, `Qwen2VLImageProcessorFast`, and indexed `vision_tower.*` tensors. On Rapid 0.10.17, automatic startup falsely reports `modality:image`/`vision` but rejects image input; explicit `--mllm` fails because Qwen3.6 hybrid/linear-attention uses `ArraysCache` while Rapid’s MLLM path requires `RotatingKVCache`. This revision is therefore **Vision Unavailable on Rapid 0.10.17**, while remaining the desired text/performance model. Its MXFP4 loader compatibility is confirmed; quality/tool behavior, memory, and performance remain separate device gates.
+- `nightmedia/Qwen3.5-9B-DS9-USS-Defiant-1M-q8-hi-mlx` revision `59b2511bfda3a1ce17b999f90d22b63e98c87f7e` is the current **primary VLM/long-context fixture**: 11.01 GB, `Qwen3VLProcessor`, indexed `vision_tower.*` tensors, and a nested declared text ceiling of 1,048,576 tokens. Its staged 8k → 32k → 128k → 255k qualification must prove actual image routing and fit before any high-context or video claim.
+
+**Accepted capability ladder.** Store one structured, immutable-revision receipt and render its state consistently in Hugging Face search, Model Library, Wizard, Preset Editor, launch review, and diagnostics. Never collapse these states into one green “Vision” pill:
+
+| State | Required evidence | User-facing meaning | Permitted action |
+|---|---|---|---|
+| `vision_declared` | model card/tag or `vision_config` only | “Vision declared — not yet checked” | discovery only; no launch recommendation |
+| `vision_components_present` | pinned config + processor/preprocessor evidence + recognized, complete indexed vision-tower tensor family | “Vision components found — runtime not yet verified” | allow explicit trial with Provisional warning |
+| `vision_runtime_verified` | exact repo/revision/hash, installed Rapid/dependency receipt, successful image request, live post-load modality, and bounded Metal/pressure observation | “Vision verified on this runtime” | enable normal VLM launch and recommend only within measured envelope |
+| `vision_unavailable` | missing/malformed/incompatible tower, missing/broken `mlx-vlm`, unsupported processor, or failed image smoke | “Vision unavailable on this revision/runtime” plus concrete reason | text-only launch only if safe; hide/disable VLM controls |
+| `vision_stale` | earlier verified receipt does not match current revision, Rapid version, dependency tuple, or changed index/config hash | “Vision needs re-check after update” | preserve history; do not inherit prior green state |
+
+`vision_declared` and `vision_components_present` are source-inspection results. Only `vision_runtime_verified` may drive a green badge, a fit recommendation that includes vision memory, or a claim that image input will work. An upstream alias/profile must never upgrade a community finetune’s state. A failure is a durable, revision-scoped fact—not a reason to hide the model or erase its text capability.
+
+**Inspection algorithm (read-only, bounded, tokenless for public repositories).** Resolve the mutable HF ref to an immutable commit first. Fetch and hash `config.json`, `processor_config.json`, `preprocessor_config.json`, `video_preprocessor_config.json` when present, and `model.safetensors.index.json`; do not execute repository code. Parse canonical tensor-name prefixes, not bare substring matches, and require the family-specific set to be complete enough to load. For Qwen VLM candidates this includes a contiguous `vision_tower.*` family and processor closure; for Gemma use the actual MLX-VLM-required prefixes. Verify every index shard path is safe and present/available before claiming components. Keep the exact missing-prefix/error list in the receipt. A separate nonstandard companion (for example OptiQ’s vision file) must remain a distinct ownership/loader path, never be silently treated as a standard integrated tower.
+
+**Runtime qualification protocol (device gate; no synthetic success).**
+
+1. Record executable path/version/help hash, Python/MLX/MLX-VLM versions, installed-extra status, macOS/hardware/unified-memory snapshot, exact repo/revision/config/index hashes, command, and requested settings. Use loopback-only serving and one admitted sequence for initial safety.
+2. Run the automatic lane first. Read live `/v1/models` modality after startup; do not infer it from pre-launch config. Run explicit `--mllm` only as a controlled diagnostic. If either path degrades to text-only or fails, capture the exact reason and stop claiming vision.
+3. Send one deterministic text request, one minimal in-memory PNG request, then one harmless real image fixture such as the screenshot-harness coding UI. Confirm an OpenAI-compatible content-part image request reaches the model; a 200 status without image processing is not proof. Record prompt/image dimensions, response status, parser/processor warnings, Metal active/peak, and relevant metrics without retaining user image contents.
+4. Repeat a small image request to establish whether the cache path is supported; then test the selected coding/tool image workflow with the model’s normal template. Test tools/reasoning separately from vision. A text success does not qualify image + tools, and a vision success does not qualify a cache or TurboQuant recommendation.
+5. Put the raw observations in `tests/fixtures/calibration/rapid-mlx-receipts/`; never overwrite formula-only fixtures with a runtime observation. Store scope and exclusions prominently. A successful small smoke is `Provisional`, not a D28 Qualified estimator envelope.
+
+**Product contract.** Rapid has no GGUF `mmproj` analogue. Native MLX cards must show an integrated VLM component only when this receipt permits it; otherwise show a status badge/reason, not a browse-field for a pretend projector. Phase 7 owns the `--mllm` setting and must derive its availability from the same capability result. Phase 8 owns revision-aware inspection, discovery badge/card rendering, and source lifecycle. Phase 11 owns live modality/metrics/diagnostics. Capture dark/light/narrow, declared/components-present/verified/unavailable/stale, and long-reason states. This closes the local-model failure mode “config/tag means works.”
 
 ### 3.9 P0/P1: stock chat templates are tool-call-unreliable, and no revision-pinned template substitution exists
 
@@ -401,6 +437,14 @@ The new canonical workload exposes shared and llama.cpp-specific risks that a Ra
 
 Treat the automatic `-1` assignment as an urgent recommendation defect: Phase 1 must stop applying it to new/auto-sized presets until Phase 5/6 establishes a bounded, headroom-aware policy. Preserve explicit user values and explain migration; do not silently rewrite existing presets.
 
+
+### 3.12 P1: Rapid-MLX `--gpu-memory-utilization` default is stale and the knob is not user-facing
+
+Upstream `rapid-mlx serve --help` documents `--gpu-memory-utilization` as "Fraction of device memory for Metal allocation limit and emergency cache clear threshold (0.0-1.0, default: 0.90). Increase to 0.95 for large models (200GB+) that need more memory headroom." This is a **model-size-triggered manual recommendation**, not an automatic system-size default — upstream does not scale the value based on total unified memory or system tier. Two gaps follow:
+
+1. `scripts/rapid-mlx-benchmark-suite.mjs` hardcodes `DEFAULT_UTILIZATION = '0.88'`, which is *below* upstream's own 0.90 default and was never validated against upstream docs — it should be corrected to 0.90 so benchmark receipts reflect the shipped default rather than an arbitrary harness-only value.
+2. The app already threads `gpu_memory_utilization` end-to-end (`src/inference/rapid_mlx/{command,mod,settings}.rs`, validated range `[0.5, 1.0]`) but has no UI control. Given this project already surfaces and manages the Metal `iogpu` wired-limit budget elsewhere (`src/gpu/apple`, `src/web/api/system_tools.rs`/`vram.rs`), `--gpu-memory-utilization` should be exposed as a welcome-screen/setup option tied to that same iogpu budget surface, with upstream's 200GB+ model-size threshold (not raw system memory) driving the 0.90→0.95 recommendation copy.
+
 ## 4. Capability Inventory and Product Priority
 
 ### 4.1 First-class settings or policies
@@ -415,7 +459,7 @@ These should become typed, capability-gated product concepts rather than free-fo
 - prefix-cache enablement and byte/percent budget;
 - hybrid/SWA retained-prefix policy;
 - GPU memory utilization after calibration;
-- PFlash mode and model/workload safety guidance;
+- PFlash mode and model/workload safety guidance (**current verdict, 2026-07-24:** `auto`/`always` not recommended at v0.11.0 — recall collapses to 0-40% above the 32768-token threshold in the step=512 quant-baseline run across both TurboQuant settings; default guidance must steer to `off` until source-level investigation or re-test; see `docs/plans/20260724-rapidmlx-benchmark-continuation.md` "PFlash facts to preserve");
 - verified speculative method/configuration;
 - parser/reasoning selections and disable overrides;
 - MLLM/text-only mode and required extra;
@@ -778,6 +822,32 @@ Even a Qualified estimate becomes Tight when remaining margin is smaller than es
 **Approach B:** use source-derived formulas plus one broad 15–25% safety multiplier and label every backend/model Approximate.
 
 Approach B avoids false precision but discards the first-class calibration standard already established for llama.cpp, over-restricts viable contexts, and hides where evidence is genuinely strong. Reject.
+
+#### D28/D31 device measurement protocol — required before performance, RAM, or tooltip claims
+
+The product must not translate upstream marketing, one cold prompt, or a byte formula directly into “faster,” “saves RAM,” or a recommended setting. A model/hardware/runtime/configuration tuple needs paired measurement evidence. The first real-model target is the user-selected Nightmedia Qwen3.6-35B-A3B Fable Holo 3.1 MXFP4 VLM revision in §3.8a; Froggeric remains a structurally complete fallback/control. Follow with a complete-tower Gemma4 A4B VLM. The QAT aligned Gemma text artifact is a useful negative VLM fixture and text-memory case, not a VLM qualifier.
+
+**Fixed identity and safety preamble.** Before each run record Rapid executable/version/help hash, dependency versions/extras, model repo/revision/config/index hashes, quant/weight bytes, macOS/hardware/unified-memory snapshot, current safe availability, effective Metal ceiling, process/Metal baseline, exact argv, and request workload fixture hashes. Run loopback-only. Stop an agent-started runtime before replacing it; never stop an arbitrary user process. Do not call configured RAM/wired capacity available memory, do not interpret `purge` as releasing live model/Metal memory, and abort a run when the fresh pressure snapshot crosses the safety boundary.
+
+**Independent variables.** The minimum risk matrix is deliberately small enough to execute but broad enough to expose false recommendations:
+
+| Dimension | Required rows | Reason |
+|---|---|---|
+| Context / prompt shape | 8k, 32k, 131k where safe; cold prompt; stable repeated prefix; prefix extension; image-bearing prompt for verified VLM | separates active KV, recurrent/SWA state, retained prefix, long-prefill, and image companion costs |
+| KV fidelity for agents | Rapid `int8` conservative control; Rapid `int4` candidate; `bf16` when runtime/effective policy selects it; reasoning on/off where supported | llama.cpp `q8_0` tool-call evidence does not transfer numerically to MLX, but KV quantization can still affect structured/tool reliability; no Rapid int4 default is “agent-safe” without a direct trace |
+| Retained-storage policy | Standard/explicit `none`; K8V4 only after exact-revision eligibility; V-only as Expert A/B only | TurboQuant changes retained reusable snapshots, not weights/cold prompt/active generation |
+| Cache policy | disabled control; bounded prefix cache; repeated request; cache pressure/eviction | prevents attributing an alias default or cache hit to a KV mode |
+| Workload | interactive coding stable system/tools; tool/research changing observations; one-shot research; deterministic exact-repeat API; roleplay/lore mutation | recommendation must reflect actual prefix stability, streaming, tools, and request ownership |
+| Concurrency | one active generation baseline; bounded admitted multi-sequence stress only after baseline fits | measures worst admitted peak/context guarantee rather than an idle ceiling |
+| Companion path | no companion; verified vision image input; MTP only if loader/weights/dispatch are independently qualified | companion resident weights/state must be additive and never hidden |
+
+**Per-cell procedure.** First run a cold text request after server readiness. Then run the same prompt twice with the cache policy under test, followed by a stable-prefix extension. Capture request success/correctness, prompt and completion token counts, TTFT, prefill tokens/s, decode tokens/s, end-to-end duration, active and peak Metal bytes, process physical footprint where available, cache stored/retained bytes, hit/miss/skip/eviction counters, TurboQuant encoded/decoded bytes and latency, transient peak, and pressure state before/after. For VLM, repeat with a fixed harmless PNG and a real coding screenshot fixture, but do not retain user image contents. For agentic KV fidelity, run the exact same revision-pinned template and tool schema under int8 and int4: single call, sequential multi-turn calls, parallel calls where supported, null/empty arguments, large tool observations, tool-error/retry, and cached-prefix reuse. Score parse success, function/name/argument fidelity, loop/retry anomalies, reasoning preservation, finish reason, latency, and memory. A response is only a performance sample when it completed normally and the expected parser/tool/image path was actually exercised.
+
+**Comparison rules.** Compare Standard and K8V4 with identical model revision, context, cache budget, workload, prompt fixture, concurrency, requested output length, and process freshness. Report absolute values plus deltas. Treat a cache-disabled or one-shot run as a dispatch/control observation only: K8V4 is expected to show no meaningful retained-memory or TTFT advantage there. Do not interpret K8V4’s runtime-reported effective `bf16` active-cache label as a loss of the retained-storage compression path; display requested policy, effective policy, and active-versus-retained bytes separately. A small peak delta without retained entries is noise unless repeated and bounded.
+
+**Qualification and tooltip thresholds.** “May help” can be shown only from source- or runtime-identified mechanism. “Recommended” requires the real selected workload/revision/hardware envelope to demonstrate a material benefit with no correctness, tool, image, or unacceptable cache-hit TTFT regression. “Verified” requires reproducible raw receipts and estimator residual within D28’s ±10% envelope. Otherwise show Calculated/Provisional and name the missing evidence. Tooltips must explain the condition, not merely the control: K8V4 helps revisited eligible conventional-KV prefixes; it does not make a cold prompt, active generation, recurrent state, model weights, or unqualified finetune fit. Rapid `int8` is the conservative **Provisional agentic control** until direct tool traces qualify an alternative; do not map it to or claim it is equivalent to llama.cpp `q8_0`. Rapid `int4` is a memory-saving candidate, never an agentic recommendation merely because it is the runtime default. Reasoning can force effective int8. More active sequences trades throughput for peak memory and guaranteed context. Response cache only benefits deterministic exact repeats, not streaming/sampled/tool-heavy work. PFlash, prefix state, and response-cache outcomes remain separate.
+
+**Receipt shape and promotion.** Store one JSON receipt per runtime/model/revision/configuration envelope under `tests/fixtures/calibration/rapid-mlx-receipts/`, containing requested/effective settings, procedure, raw before/after observations, predicted component totals, residuals, limitations, and exclusions. Runtime receipts do not overwrite formula fixtures. Phase 5 consumes the data for estimator confidence; Phase 6 converts qualified rows into cache recommendations and educational copy; Phase 7 renders capability-gated controls and exact effective argv; Phase 11 surfaces live counters and diagnoses; Phase 12/14 re-run the matrix. No phase may promote a UI badge or tooltip beyond the evidence level it has actually received.
 
 ### D29. Curated community finetunes, distillations, and alignment variants
 

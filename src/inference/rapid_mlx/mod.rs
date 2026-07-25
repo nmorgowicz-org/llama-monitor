@@ -197,45 +197,62 @@ fn default_log_level() -> String {
     "INFO".into()
 }
 
-/// KV cache dtype configuration (D1/D2).
-/// Represents the effective KV cache dtype after considering all overrides.
+/// KV cache dtype configuration for Rapid-MLX.
+///
+/// These are the values accepted by the published Rapid-MLX CLI.  The two
+/// legacy variants are retained only so an existing preset can be restored and
+/// diagnosed instead of being silently rewritten; launch rejects them with a
+/// clear migration error.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "lowercase")]
 pub enum KvCacheConfig {
     /// Use default behavior.
     Auto,
-    /// Override to FP16 (e.g., `fp16` for `--kv-cache-dtype`).
-    Fp16,
     /// Override to BF16.
     Bf16,
-    /// Override to FP8.
-    Fp8,
+    /// Override to 8-bit KV.
+    Int8,
+    /// Override to 4-bit KV.
+    Int4,
+    /// A value written by older Llama Monitor builds. Rapid-MLX 0.10.17 does
+    /// not accept it, so keep it round-trippable but never emit it.
+    #[serde(rename = "fp16")]
+    LegacyFp16,
+    /// A value written by older Llama Monitor builds. Rapid-MLX 0.10.17 does
+    /// not accept it, so keep it round-trippable but never emit it.
+    #[serde(rename = "fp8")]
+    LegacyFp8,
 }
 
 impl std::fmt::Display for KvCacheConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             KvCacheConfig::Auto => write!(f, "auto"),
-            KvCacheConfig::Fp16 => write!(f, "fp16"),
             KvCacheConfig::Bf16 => write!(f, "bf16"),
-            KvCacheConfig::Fp8 => write!(f, "fp8"),
+            KvCacheConfig::Int8 => write!(f, "int8"),
+            KvCacheConfig::Int4 => write!(f, "int4"),
+            KvCacheConfig::LegacyFp16 => write!(f, "fp16"),
+            KvCacheConfig::LegacyFp8 => write!(f, "fp8"),
         }
     }
 }
 
 /// TurboQuant reusable-prompt storage policy (D31).
-/// Values match Rapid-MLX CLI --turboquant flag: v4, k8v4, none.
-/// "auto" is our config sentinel; the builder maps it to omitting --turboquant (runtime default).
+/// Values match Rapid-MLX CLI --kv-cache-turboquant flag: v4, k8v4, none.
+/// "auto" is our config sentinel; the builder maps it to omitting the flag (runtime default).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum TurboQuantMode {
-    /// Use runtime default (omit --turboquant flag).
+    /// Use runtime default (omit --kv-cache-turboquant flag).
+    #[serde(rename = "auto")]
     Auto,
     /// V-only TurboQuant (expert legacy/A-B).
+    #[serde(rename = "v4")]
     V4,
     /// K8V4 asymmetric TurboQuant (Advanced trial recommendation).
+    #[serde(rename = "k8v4", alias = "k8_v4")]
     K8V4,
     /// Disable TurboQuant (Standard retained-storage policy, normally int4).
+    #[serde(rename = "none", alias = "off")]
     Off,
 }
 
@@ -713,17 +730,17 @@ fn apply_phase7_adapter_config(
             use crate::inference::rapid_mlx::command::KvCacheDtypeArg;
             match kv {
                 KvCacheConfig::Auto => KvCacheDtypeArg::Auto,
-                KvCacheConfig::Fp16 => KvCacheDtypeArg::Explicit("fp16".into()),
                 KvCacheConfig::Bf16 => KvCacheDtypeArg::Explicit("bf16".into()),
-                KvCacheConfig::Fp8 => KvCacheDtypeArg::Explicit("fp8".into()),
+                KvCacheConfig::Int8 => KvCacheDtypeArg::Explicit("int8".into()),
+                KvCacheConfig::Int4 => KvCacheDtypeArg::Explicit("int4".into()),
+                KvCacheConfig::LegacyFp16 => KvCacheDtypeArg::Explicit("fp16".into()),
+                KvCacheConfig::LegacyFp8 => KvCacheDtypeArg::Explicit("fp8".into()),
             }
         }))
-        .turboquant_mode(adapter.turboquant_mode.as_ref().and_then(|t| match t {
-            TurboQuantMode::Auto => None,
-            TurboQuantMode::V4 => Some("v4".into()),
-            TurboQuantMode::K8V4 => Some("k8v4".into()),
-            TurboQuantMode::Off => Some("none".into()),
-        }))
+        // A runtime flag alone is insufficient evidence that this exact
+        // model/revision has a qualified retained-KV path. Keep the requested
+        // setting persisted, but omit TurboQuant until a receipt is available.
+        .turboquant_mode(None)
         .prefix_cache_policy(adapter.prefix_cache_policy.clone())
         .hybrid_cache_entries(adapter.hybrid_cache_entries)
         .pflash_policy(adapter.pflash_policy.clone())
@@ -848,7 +865,7 @@ mod tests {
         // Verify RapidMlxConfig with all Phase 7 fields serializes/deserializes without loss.
         let config = RapidMlxConfig {
             model_path: "/model".into(),
-            kv_cache_dtype: Some(KvCacheConfig::Fp16),
+            kv_cache_dtype: Some(KvCacheConfig::Int8),
             turboquant_mode: Some(TurboQuantMode::K8V4),
             prefix_cache_policy: Some("auto".into()),
             hybrid_cache_entries: Some(100),
@@ -877,6 +894,7 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_value(&config).unwrap();
+        assert_eq!(json["turboquant_mode"], serde_json::json!("k8v4"));
         let restored: RapidMlxConfig = serde_json::from_value(json).unwrap();
         assert_eq!(restored.kv_cache_dtype, config.kv_cache_dtype);
         assert_eq!(restored.turboquant_mode, config.turboquant_mode);
@@ -887,6 +905,16 @@ mod tests {
         );
         assert_eq!(restored.web_ui_availability, config.web_ui_availability);
         assert_eq!(restored.security_policy, config.security_policy);
+    }
+
+    #[test]
+    fn turboquant_legacy_preset_literals_remain_readable() {
+        let legacy_k8: TurboQuantMode = serde_json::from_str("\"k8_v4\"").unwrap();
+        let legacy_off: TurboQuantMode = serde_json::from_str("\"off\"").unwrap();
+        assert_eq!(legacy_k8, TurboQuantMode::K8V4);
+        assert_eq!(legacy_off, TurboQuantMode::Off);
+        assert_eq!(serde_json::to_string(&legacy_k8).unwrap(), "\"k8v4\"");
+        assert_eq!(serde_json::to_string(&legacy_off).unwrap(), "\"none\"");
     }
 
     #[test]

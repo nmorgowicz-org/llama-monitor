@@ -8,7 +8,7 @@ import { presetModelSource } from './presets.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showConfirmDialog, showPromptDialog } from './toast.js';
 import Router from './router.js';
-import { buildEstimateBody } from './vram-estimate.js';
+import { buildEstimateBody, rapidEstimatePolicyFromConfig } from './vram-estimate.js';
 
 // ── Model / preset classification (from GGUF-derived metadata) ────────────────
 // No name-based guessing: labels come from preset.family and preset.size_class
@@ -1156,6 +1156,7 @@ async function _fetchCardVramEstimates(availBytes, availRamBytes, isUnified, bud
                 available_vram_bytes: availBytes,
                 available_ram_bytes: availRamBytes,
                 is_unified_memory: isUnified,
+                ...(isRapidMlx ? rapidEstimatePolicyFromConfig(preset.rapid_mlx) : {}),
             });
             const headers = window.authHeaders ? window.authHeaders() : {};
             const resp = await fetch('/api/vram-estimate', {

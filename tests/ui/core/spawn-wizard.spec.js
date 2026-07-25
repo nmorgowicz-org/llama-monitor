@@ -1013,41 +1013,6 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         }
     });
 
-    test('@in-memory-test workload profile confirmation guard blocks wizard progress', async ({ page }) => {
-        await page.goto('/');
-        await page.waitForLoadState('networkidle');
-
-        const result = await page.evaluate(async () => {
-            const { wizardState } = await import('/js/features/spawn-wizard.js');
-
-            // Check: profile selected but not confirmed → blocked
-            wizardState.hardware.workloadProfile = { id: 'tool_research_agent' };
-            wizardState.hardware.workloadProfileConfirmed = false;
-            const profileSetButNotConfirmed =
-                wizardState.hardware.workloadProfile &&
-                wizardState.hardware.workloadProfile.id &&
-                !wizardState.hardware.workloadProfileConfirmed;
-
-            // Check: profile selected and confirmed → unblocked
-            wizardState.hardware.workloadProfileConfirmed = true;
-            const profileSetAndConfirmed =
-                wizardState.hardware.workloadProfile &&
-                wizardState.hardware.workloadProfile.id &&
-                wizardState.hardware.workloadProfileConfirmed;
-
-            // Check: no profile → guard doesn't block
-            wizardState.hardware.workloadProfile = null;
-            wizardState.hardware.workloadProfileConfirmed = false;
-            const noProfileSelected = !wizardState.hardware.workloadProfile;
-
-            return { profileSetButNotConfirmed, profileSetAndConfirmed, noProfileSelected };
-        });
-
-        expect(result.profileSetButNotConfirmed).toBe(true);
-        expect(result.profileSetAndConfirmed).toBe(true);
-        expect(result.noProfileSelected).toBe(true);
-    });
-
     test('@in-memory-test workload profile serializes correctly in spawn payload', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');

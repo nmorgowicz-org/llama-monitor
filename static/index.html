@@ -3433,14 +3433,14 @@
                     <!-- Use-case selector: affects KV quant recommendations and warnings -->
                     <div class="wizard-section-title">What are you running this for?</div>
                     <div class="usecase-cards">
-                        <div class="usecase-card" data-usecase="agentic" tabindex="0" role="button">
+                        <div class="usecase-card selected" data-usecase="agentic" tabindex="0" role="button">
                             <span class="usecase-icon">🤖</span>
                             <div class="usecase-body">
                                 <div class="usecase-name">Agentic / RAG</div>
                                 <div class="usecase-desc">Tool calling, agents, retrieval. q8_0 KV minimum for coherent context.</div>
                             </div>
                         </div>
-                        <div class="usecase-card selected" data-usecase="general" tabindex="0" role="button">
+                        <div class="usecase-card" data-usecase="general" tabindex="0" role="button">
                             <span class="usecase-icon">💬</span>
                             <div class="usecase-body">
                                 <div class="usecase-name">General chat</div>
@@ -3739,24 +3739,8 @@
                          <div class="rapid-only" id="spawn-rapid-advanced-fields" style="display:none;">
                              <div class="wizard-section-title" style="margin-top:16px;">Rapid-MLX advanced</div>
                              <div class="field-hint" style="margin-bottom:10px;">Execution policy controls for KV precision, caching, workload tuning, and server features.</div>
-                             <!-- Workload profiles (Phase 7B2) — placed first as foundational choice -->
-                             <div class="workload-profiles-section">
-                                 <label class="wizard-field-label" title="Choose the workload profile that best matches your usage. Each profile sets explicit assumptions about streaming, tools, prompt ownership, caching, and more.">Workload profile</label>
-                                 <div id="workload-profile-cards" class="wp-cards-grid"></div>
-                                 <div class="field-hint">Select a profile to see its derived assumptions. Review and confirm before proceeding.</div>
-
-                                  <!-- Assumptions panel (progressive disclosure) -->
-                                  <div id="workload-assumptions-panel" class="wp-assumptions-panel"></div>
-
-                                    <!-- Roleplay-specific teaching panel (Phase 7B3, D21) -->
-                                    <div id="wp-roleplay-teaching" class="wp-roleplay-teaching" hidden></div>
-
-                                    <!-- MTP/concurrency teaching panel (Phase 7B4, D25) -->
-                                    <div id="wp-mtp-concurrency-teaching" class="wp-mtp-concurrency-teaching" hidden></div>
-
-                                    <!-- Confirmation requirement -->
-                                 <div id="workload-confirmation-area" class="wp-confirmation-area"></div>
-                             </div>
+                             <!-- Workload profile is chosen on page 1 ("What are you running this for?") and
+                              auto-applied here (drives KV-dtype recommendation and context target). -->
                              <!-- Hidden select for backward compat with existing bindings -->
                              <select id="spawn-workload-scenario" style="display:none;"></select>
                              <!-- Memory/exec controls below workload profile -->

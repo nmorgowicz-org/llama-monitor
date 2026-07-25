@@ -37,7 +37,6 @@ test.describe('Phase 7 preset serialization', () => {
           responseCacheEligible: false,
         },
       };
-      wizardState.hardware.workloadProfileConfirmed = true;
     });
 
     // Verify wizardState reflects the profile
@@ -85,7 +84,6 @@ test.describe('Phase 7 preset serialization', () => {
           responseCacheEligible: false,
         },
       };
-      wizardState.hardware.workloadProfileConfirmed = true;
 
       return buildPresetPayload();
     });
@@ -129,7 +127,6 @@ test.describe('Phase 7 preset serialization', () => {
           responseCacheEligible: false,
         },
       };
-      wizardState.hardware.workloadProfileConfirmed = true;
 
       return buildSpawnPayload();
     });

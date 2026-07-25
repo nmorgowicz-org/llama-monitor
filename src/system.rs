@@ -1274,6 +1274,10 @@ pub struct ReclaimGuidance {
     /// Whether current state already meets typical launch requirements.
     #[serde(default)]
     pub safe_now: bool,
+    /// Honest next-step copy when no in-app operation is both available and
+    /// proven to cross the selected fit boundary.
+    #[serde(default)]
+    pub diagnostic_message: String,
 }
 
 /// Compute reclaim guidance based on current MemoryAvailabilitySnapshot.
@@ -1291,39 +1295,29 @@ pub fn compute_reclaim_guidance(
         crate::memory_availability::MemoryAvailabilityState::SafeNow
     );
 
-    let mut available_actions = Vec::new();
-    let mut estimate_parts = Vec::new();
-
-    match state {
-        crate::memory_availability::MemoryAvailabilityState::Unsafe => {
-            // All actions potentially useful in unsafe state.
-            available_actions.push(ReclaimAction::BackendAllocatorCacheClear);
-            available_actions.push(ReclaimAction::ReusableStateEviction);
-            available_actions.push(ReclaimAction::AppOwnedRuntimeStop);
-            available_actions.push(ReclaimAction::OsDiskPurge);
-            estimate_parts.push("may free 2-9 GB combined");
-        }
-        crate::memory_availability::MemoryAvailabilityState::ConditionalAfterReclaim => {
-            // Reclaim can help cross boundary.
-            available_actions.push(ReclaimAction::BackendAllocatorCacheClear);
-            available_actions.push(ReclaimAction::ReusableStateEviction);
-            available_actions.push(ReclaimAction::OsDiskPurge);
-            estimate_parts.push("may free 2-7 GB combined");
-        }
-        crate::memory_availability::MemoryAvailabilityState::AfterClosingApps => {
-            // Only app-level actions meaningful here.
-            available_actions.push(ReclaimAction::AppOwnedRuntimeStop);
-            estimate_parts.push("may free 2-8 GB if runtime is running");
-        }
-        crate::memory_availability::MemoryAvailabilityState::SafeNow => {
-            // No actions needed.
-        }
-    }
-
-    let conservative_estimate = if estimate_parts.is_empty() {
-        "Current memory state is sufficient for typical launches.".to_string()
-    } else {
-        format!("Reclaim actions {}", estimate_parts.join(", "))
+    // Do not advertise an action merely because it sounds plausible. The
+    // allocator/session/runtime operations are not yet coordinated with a
+    // selected running backend, and disk-cache purge never frees live model
+    // memory. Until a concrete action can remeasure and cross this exact
+    // target, return diagnostics rather than a deceptive button.
+    let available_actions = Vec::new();
+    let (conservative_estimate, diagnostic_message) = match state {
+        crate::memory_availability::MemoryAvailabilityState::SafeNow => (
+            "Selected configuration fits current safe availability.".to_string(),
+            "No reclaim action is needed.".to_string(),
+        ),
+        crate::memory_availability::MemoryAvailabilityState::ConditionalAfterReclaim => (
+            "A conservative reclaim projection could meet this selected footprint, but no managed in-app reclaimer is available yet.".to_string(),
+            "Close or stop known app-owned work, then remeasure before launching. Disk-cache purge does not free live model memory.".to_string(),
+        ),
+        crate::memory_availability::MemoryAvailabilityState::AfterClosingApps => (
+            "This launch needs a measured app-owned runtime to stop before it can fit.".to_string(),
+            "Stop the selected app-owned runtime through its session controls, then remeasure.".to_string(),
+        ),
+        crate::memory_availability::MemoryAvailabilityState::Unsafe => (
+            "No conservative reclaim projection reaches the selected footprint.".to_string(),
+            "Choose a smaller model, context, or concurrency target; do not rely on disk-cache purge for live model memory.".to_string(),
+        ),
     };
 
     let high_memory_processes = collect_high_memory_processes(10);
@@ -1334,6 +1328,7 @@ pub fn compute_reclaim_guidance(
         conservative_estimate,
         high_memory_processes,
         safe_now,
+        diagnostic_message,
     }
 }
 

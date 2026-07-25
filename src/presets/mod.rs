@@ -951,7 +951,7 @@ mod tests {
             backend: crate::inference::InferenceBackend::RapidMlx,
             rapid_mlx: Some(crate::inference::rapid_mlx::RapidMlxConfig {
                 model_path: "/path/to/model".into(),
-                kv_cache_dtype: Some(KvCacheConfig::Fp16),
+                kv_cache_dtype: Some(KvCacheConfig::Int8),
                 turboquant_mode: Some(TurboQuantMode::K8V4),
                 prefix_cache_policy: Some("auto".into()),
                 hybrid_cache_entries: Some(256),
@@ -988,7 +988,7 @@ mod tests {
 
         assert_eq!(loaded.schema_version, Some(3));
         let rapid = loaded.rapid_mlx.unwrap();
-        assert_eq!(rapid.kv_cache_dtype, Some(KvCacheConfig::Fp16));
+        assert_eq!(rapid.kv_cache_dtype, Some(KvCacheConfig::Int8));
         assert_eq!(rapid.turboquant_mode, Some(TurboQuantMode::K8V4));
         assert_eq!(rapid.prefix_cache_policy, Some("auto".into()));
         assert_eq!(rapid.hybrid_cache_entries, Some(256));

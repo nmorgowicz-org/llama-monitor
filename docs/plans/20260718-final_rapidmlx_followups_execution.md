@@ -224,6 +224,13 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 - **Do not claim yet:** `v0.10.17` predates main commit `9a5151e147` (`fix(mllm): auto-degrade to text lane for vision-config checkpoints with no vision tower`). Until that commit is included in a published release and passes the on-device probe, a vision-declared model without a verified vision tower must be diagnosed as unavailable rather than promised a text fallback.
 - **Required next-release validation:** test (1) a real vision-tower model with MLX-VLM available and an image request, (2) MLX-VLM missing/incompatible remediation, (3) a vision-config/weightless-tower checkpoint in Auto mode falls back to text and reports post-degrade modality, and (4) explicit `--mllm` fails clearly for that checkpoint. Add dark/light/narrow capture coverage once Phase 7 wires MLLM through launch and review.
 
+#### VLM + performance calibration locator (added 2026-07-23)
+
+- **Authoritative detail:** comprehensive plan §3.8a is the revision-bound native-MLX vision qualification contract; D28/D31 “device measurement protocol” is the required real-model Standard/K8V4/cache/context/performance procedure. Do not restate or weaken either here.
+- **Current evidence:** Gemma4 QAT aligned revision is text-capable but Vision Unavailable (declared config, 211 missing tower tensors); Gemma OptiQ is a distinct 6.01-bit OptiQ/MLX-LM companion path, not a standard Rapid baseline; Froggeric Qwen3.6-35B-A3B is Vision Components Present fallback/control; Nightmedia Qwen3.6-35B-A3B Fable Holo 3.1 MXFP4 revision `16279aa65cee814c6b23e068a71eec7e1617fae0` is the user-selected primary 35B performance target but Vision Unavailable on Rapid 0.10.17 (auto metadata falsely says vision; image request rejects; explicit `--mllm` rejects hybrid `ArraysCache`); Nightmedia Qwen3.5-9B Defiant 1M Q8 revision `59b2511bfda3a1ce17b999f90d22b63e98c87f7e` is the primary Vision Components Present/long-context fixture. Neither may be promoted until a live image request succeeds.
+- **Where work lands:** Phase 5a-Part 5 consumes receipts for estimator/cross-surface calibration; Phase 5b consumes fresh pressure/fit observations; Phase 6 owns evidence-backed cache recommendations/copy; Phase 7 owns capability-gated `--mllm` and requested/effective control UI; Phase 8 owns revision-aware VLM badges/cards and source lifecycle; Phase 11 owns live modality/cache/Metal diagnostics; Phase 12/14 rerun the full matrix and release gate.
+- **Immediate order:** pin 9B Nightmedia revision/config/index hashes → auto/explicit-MMLM smoke → text + minimal PNG + coding-screenshot image request → staged 8k/32k/128k/255k fit cells; in parallel retain the 35B Nightmedia text-only model for bounded cache-enabled Standard/K8V4 repeated-prefix performance cells → record raw receipts and only then assess recommendation eligibility. A text request, HF tag, config field, `info` line, live model metadata, or cache-disabled one-shot never earns a verified badge or performance recommendation.
+
 ### Phase 4 — Normalized MLX architecture metadata
 
 - **State:** Remediation validated; commit pending. Do not advance Phase 5 from this ledger until the normalized-profile integration is committed.
@@ -240,7 +247,7 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 
 ### Phase 5 — Execution policies and estimator
 
-- **State:** Not started (E5 formal sub-phases; 5a splits into 5 parts, 5b into 3 parts per §4.1)
+- **State:** Implementation verified complete (5a + 5b); bounded evidence/ledger closeout in progress as of 2026-07-24. The remaining work is not a rebuild of the estimator or availability policy: it is a fresh integration regression pass, revision-pinned estimator-versus-runtime calibration, and conservative evidence-tier recording before Phase 6 cache guidance can promote any recommendation.
 - **Budget:** 190k total (5a ~120k across 5 parts, 5b ~70k across 3 parts)
 - **Depends on:** Phases 3–4
 - **Read:** gaps 3.5–3.7/3.11; accepted D1–D4, D18–D25, D28, and D30–D31; contracts 7.2–7.4; A1/A3–A5/A21–A22/A42–A43/A46–A48/A53–A54/A58; existing RTX 5090/M5 Max calibration evidence; Phase 5; memory/llama/client matrices.
@@ -252,11 +259,21 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
   - **5a-Part 2 (~45k):** Verified complete — TurboQuant/D31 + active vs retained separation — items 3-5; TurboQuant savings (K8V4=0.575, V4=0.34) on retained KV only; active/retained split via rapid_planning_context_tokens/rapid_retained_cache_tokens; transient_peak_bytes included; eligibility gating; 36 new tests, 49 total pass; committed 4410a0f
   - **5a-Part 3 (~40k):** Verified complete — llama.cpp slot/unified-KV revalidation + MTP single-stream — items 8,9,12; no code changes needed (existing math correct); host cache/checkpoints correctly excluded; MTP overhead counted; 17 regression tests; 256 tests pass; committed 1b7fa34
   - **5a-Part 4 (~45k):** Verified complete — workload scenarios + quant rebase + Rapid MTP modeling — items 10,11,13,14; 5 scenario types (InteractiveChat/CodingAgent/ToolResearchAgent/BatchEval/Roleplay); quant_comparison_table scenario-based; agentic min 32K; Rapid MTP embedded/external with D25 admission; ClientType (App vs ExternalClient); 1013-line workload_scenarios.rs new; 143 tests pass; committed 345127a
-  - **5a-Part 5 (~40k):** Cross-surface equality wiring + calibration — items 6-7; files: web/api/vram.rs (canonical serialization), static/js/features/vram-estimate.js, spawn-wizard.js, presets.js, setup-view.js, models.js, tests/fixtures/calibration/; deliver: wizard/preset/welcome/Model Library/HF preview all consume same MemoryBreakdown from one API result; calibration envelope; hard gate: cross-surface estimate equality (5a exit gate)
+  - **5a-Part 5 (~40k):** Verified complete — Cross-surface equality wiring + calibration fixtures — items 6-7; commit `791635e`; wizard/preset/welcome/Model Library/HF preview consume the same `MemoryBreakdown` API result; calibration fixtures are present; 5a exit gate passed.
 - **Phase 5b Parts:**
-  - **5b-Part A (~55k):** MemoryAvailabilitySnapshot core + Rapid fresh-snapshot repair — item 15 + 18 sub-item; files: new memory_availability.rs or system.rs, gpu/apple.rs, web/api/vram.rs, rapid_mlx/{mod.rs,runtime.rs}, static/js/features/spawn-wizard.js; deliver: MemoryAvailabilitySnapshot struct (safe-now/conditional-after-reclaim/after-closing-apps/configured-ceiling/unsafe), GET /api/memory-availability, launch intent (additional vs replace), Rapid Wizard fresh snapshot fetch; hard gates: all surfaces same snapshot; Rapid no stale llama caches; no total unified called available
-  - **5b-Part B (~60k):** Wired-limit hardening — item 17; files: gpu/apple.rs, web/api/system_tools.rs; deliver: RAM-relative bounds, consequence/confirmation, exact readback, restore/default, failure provenance, restart handling, preserve M5 Max path; hard gate: sysctl bounded/reversible/exactly verified/restart-aware/persistence-qualified
-  - **5b-Part C (~130k):** Reclaim + remaining frontend propagation — items 16 + remaining 18 sub-items; files: system.rs, web/api/system_tools.rs, web/api/vram.rs, static/js/features/vram-estimate.js, presets.js, models.js, setup-view.js, dashboard-render.js; deliver: 4 reclaim actions (allocator-cache/reusable-state/runtime-stop/disk-purge) with conservative estimates + remeasure, privacy-safe process reporting, Model Browser availability fix, partial-info overwrite fix, Preset Editor refresh, max_cache_blocks prelaunch; hard gates: reclaim conservative/remeasured; no process secrets; all propagation gaps land
+  - **5b-Part A (~55k):** Verified complete — MemoryAvailabilitySnapshot core + Rapid fresh-snapshot repair — item 15 + 18 sub-item; commit `72d9efb`.
+  - **5b-Part B (~60k):** Verified complete — Wired-limit hardening — item 17; commit `dcd6da8`.
+  - **5b-Part C (~130k):** Verified complete — Reclaim + frontend propagation repairs — items 16 + remaining 18 sub-items; commit `b2a6fed`; verifier checkpoint `6a14cc7`.
+
+#### Phase 5 evidence closeout (2026-07-24)
+
+Implementation acceptance does not automatically qualify runtime recommendations. Before Phase 6 may call a cache/quant configuration Recommended or Verified, the closeout must: (1) rerun a focused integrated Phase 5 regression and cross-surface UI/API equality check; (2) pair revision-pinned fresh-server runtime receipts with the canonical estimator result and record peak-memory residuals against the ±10% qualified envelope; and (3) record each tested configuration as Qualified, Calculated, or Provisional without promoting a family-wide claim from one conversion.
+
+Current conservative evidence: Qwen 3.6 35B A3B text receipts fail the source-retrieval fixture at roughly 32k raw prompt tokens for both int8 and int4, so no high-context or agentic recommendation may be made. Qwen 3.5 9B Defiant has a corrected 32k-output/16k-reasoning stateful-tool receipt with a parsed call but incorrect initial call ordering; it is not agent-qualified. K8V4 has no repeat/extension evidence sufficient for a recommendation. Tested hybrid Qwen image paths remain Vision Unavailable on Rapid 0.10.17, which is a runtime-path result—not a general model capability claim. Until the relevant rows qualify, Rapid int8 is only the conservative Provisional agentic control, int4 is a memory-saving candidate, and K8V4 is not recommended.
+
+**Re-test trigger (2026-07-24, do not skip):** upstream PR #1192 ("reasoning-gated forced tool grammar via thinking budget", merged into 0.11.0) hard-constrains forced tool-call argument JSON once a `reasoning_max_tokens` budget closes `</think>` — this directly targets the "incorrect initial call ordering" defect recorded above, which predates the fix. The Qwen 3.5 9B Defiant stateful-tool receipt must be re-collected post-upgrade with `reasoning_max_tokens` set (not only `reasoning_effort`) before the ordering defect can be called resolved or still-reproducing. `reasoning_max_tokens` is also a net-new per-request field (upstream #1185/#1186) with no backend (`src/inference/rapid_mlx/*`) or frontend (`static/js/features/*.js`) exposure yet — see `docs/plans/20260724-rapidmlx-benchmark-continuation.md` "Outstanding investigation items" 5-6 for the full trace and required schema/UI additions.
+
+**First direct residual (2026-07-24):** a canonical `/api/vram-estimate` call against the pinned local Qwen 3.5 9B Defiant snapshot, int8, 8,225 planning tokens, and 4,096 retained tokens returned `total_bytes = 11.64` decimal GB. The matching fresh-server Rapid tool receipt recorded `rapid_mlx_metal_peak_memory_bytes = 16.64` decimal GB. The estimate therefore under-predicts this envelope by roughly 43%, well outside the ±10% qualified bar. This is a single diagnostic point, not a calibration fixture: it has no durable paired estimator response yet. It proves the calibration bridge is necessary and blocks promotion, not the estimator implementation itself.
 - **Dependencies:** 5a P1→P2→P4→P5; 5a P3 independent of Rapid chain but feeds P5; 5b A→B,C (B,C parallel); 5b D depends on A,B,C
 
 ### Phase 6 — Cross-backend cache guidance
@@ -272,26 +289,26 @@ Each card identifies the minimum comprehensive-plan reading set. The exact phase
 
 **NOTE:** Previous builder mislabeled Part B UI work as "Part A" (commits 3437201, cbf4476). Actual Part A (backend Rust) was never done. Phase 7 is now formally split into 7A and 7B below.
 
-#### Phase 7A — Rust backend (split into 3 parts for context management) — VERIFIED COMPLETE
+#### Phase 7A — Rust backend (split into 3 parts for context management) — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
 Phase 7A = builder brief items 1–5 from `docs/plans/20260718-final_rapidmlx_followups.md` §1850-1854.
 Checkpoint: 774b611 (2026-07-21). 820 tests pass.
 
-##### Phase 7A1 — Semantic catalog + config fields — VERIFIED
+##### Phase 7A1 — Semantic catalog + config fields — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
-- **State:** Verified complete
+- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 - **Files:** settings.rs (25-setting catalog), mod.rs (Phase 7 fields), execution_policy.rs/workload_scenarios.rs wired
 - **Commit:** 774b611
 
-##### Phase 7A2 — Command builder + launch wiring — VERIFIED
+##### Phase 7A2 — Command builder + launch wiring — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
-- **State:** Verified complete
+- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 - **Files:** command.rs (26 setters, all Phase 7 flags in build()), launch.rs (wire-through), capabilities.rs (register flags)
 - **Commit:** 774b611
 
-##### Phase 7A3 — API endpoint + preset migration — VERIFIED
+##### Phase 7A3 — API endpoint + preset migration — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
-- **State:** Verified complete
+- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 - **Files:** rapid_mlx_runtime.rs (POST /api/rapid-mlx/command-preview with auth), presets/mod.rs (v3 migration), api/mod.rs (route)
 - **Commit:** 774b611
 
@@ -299,59 +316,65 @@ Checkpoint: 774b611 (2026-07-21). 820 tests pass.
 
 Phase 7B = builder brief items 6–13. Each part requires screenshot validation before proceeding.
 
-##### Phase 7B1 — Wire existing controls + Web UI/sampling/prompt storage — VERIFIED
+##### Phase 7B1 — Wire existing controls + Web UI/sampling/prompt storage — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
-- **State:** Verified complete
+- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 - **Commit:** 31af56b (2026-07-21)
 - **Screenshots:** spawn-wizard-rapid-mlx-advanced-controls.png, spawn-wizard-rapid-mlx-webui-group.png, rapid-mlx-preset-editor-advanced.png
 
-##### Phase 7B2 — Workload profiles + confirmation — VERIFIED
+##### Phase 7B2 — Workload profiles + confirmation — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
-- **State:** Verified complete
+- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 - **Commit:** 5d00ee0 (2026-07-21)
 - **Screenshots:** spawn-wizard-workload-profiles.png, spawn-wizard-workload-roleplay.png, spawn-wizard-workload-tool-research.png, spawn-wizard-workload-deterministic.png
 - **Features:** 5 profiles (Interactive coding agent default, Tool/research, Roleplay, General chat, Deterministic batch/eval advanced); editable assumptions; confirmation checkbox required
 
-#### Phase 7.5 — Testing framework improvements — VERIFIED
+#### Phase 7.5 — Testing framework improvements — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
 Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime testing.
 
-##### Phase 7.5A — Playwright solidification — VERIFIED
+##### Phase 7.5A — Playwright solidification — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
-- **State:** Verified complete
+- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 - **Commit:** b16d50a (2026-07-21)
 - **Work:** Tagged existing tests (@in-memory-test, @fake-data-bypass); added phase7-presets.spec.js, phase7-command-preview.spec.js, workload profile tests in spawn-wizard.spec.js
 - **Tests:** 9 new Phase 7-specific tests (6 pass in CI, 3 runtime-gated)
 
-##### Phase 7.5B — Rapid-MLX runtime testing — VERIFIED
+##### Phase 7.5B — Rapid-MLX runtime testing — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
-- **State:** Verified complete
+- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 - **Commit:** 18397a7 (2026-07-21)
 - **Work:** Added rapid-mlx-live capture scenario (seed preset → spawn → health → telemetry → chat → stop)
 - **Screenshots:** rapid-mlx-live-dashboard-telemetry.png, rapid-mlx-live-chat-response.png, rapid-mlx-live-stopped.png
 - **Note:** Developer-only (NOT CI); requires rapid-mlx on PATH + cached Qwen3-0.6B-4bit
 
-##### Phase 7.5C — Harness hardening — VERIFIED
+##### Phase 7.5C — Harness hardening — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
-- **State:** Verified complete
+- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 - **Commit:** f3d0153 (2026-07-21)
 - **Work:** SCENARIO_REQUIREMENTS table documenting mock vs real per scenario; extended spawn-wizard-engines with tool-research and deterministic profile captures; mock note on dashboard-rapid-mlx
 
-##### Phase 7B3 — Roleplay-specific controls — VERIFIED
+##### Phase 7B3 — Roleplay-specific controls — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
-- **State:** Verified complete
+- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 - **Commit:** 91468fb (2026-07-21)
 - **Screenshots:** spawn-wizard-roleplay-teaching.png
 - **Features:** Roleplay teaching panel explains long-context reserve, client-owned samplers/stops, chat-vs-text formatting owner, prompt-cache behavior without SillyTavern-specific server facts
 - **Tests:** 3 roleplay teaching tests in spawn-wizard.spec.js (all pass)
 
-##### Phase 7B4 — Parallel slots/MTP teaching + endpoint compatibility — VERIFIED
+##### Phase 7B4 — Parallel slots/MTP teaching + endpoint compatibility — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
-- **State:** Verified complete
+- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 - **Commit:** 3b96564 (2026-07-21)
 - **Screenshots:** spawn-wizard-mtp-concurrency-teaching.png, spawn-wizard-endpoint-compatibility.png
 - **Tests:** 5 @in-memory-test tests added to spawn-wizard.spec.js (tests 16-20)
 - **Features:** MTP/concurrency teaching (4 cards from D25), endpoint compatibility per workload in assumptions panel
+
+##### Phase 7B5 — GPU memory utilization welcome-screen control — NOT STARTED
+
+- **State:** Not started; new item added 2026-07-24, see followups §3.12.
+- **Scope:** (1) correct `scripts/rapid-mlx-benchmark-suite.mjs` `DEFAULT_UTILIZATION` from `'0.88'` to `'0.90'` to match upstream `rapid-mlx serve --help`'s documented default; (2) expose `--gpu-memory-utilization` (already threaded through `command.rs`/`mod.rs`/`settings.rs`, validated `[0.5, 1.0]`) as a welcome-screen/setup control, colocated with the existing Metal `iogpu` wired-limit budget surface (`src/gpu/apple`, `src/web/api/system_tools.rs`/`vram.rs`); (3) recommendation copy for the 0.90→0.95 bump must key off upstream's stated 200GB+ model-size threshold, not raw system memory — verify there is no separate automatic system-tier default before writing copy that implies one.
+- **Files (expected):** scripts/rapid-mlx-benchmark-suite.mjs, static/js/features/setup-view.js (or spawn-wizard.js if colocated there instead), src/web/api/system_tools.rs or vram.rs (read-side), presets/mod.rs (if persisted).
 
 **Phase 7 exit gate:** one fresh Verifier evaluates the complete Phase 7 diff after all of 7A and 7B are verified.
 
@@ -364,9 +387,9 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 - **Completion proof:** search is not qualification; every mature GGUF discovery/quant/mmproj behavior has a regression gate; original author and converter stay distinct; community finetunes reach Rapid through qualified native MLX or conversion; repo/revision/variant survives end to end; context/KV changes recompute but never silently switch model quant; Recommended means workload fit; public search remains tokenless.
 - **Mandatory Builder packets:** 8A (qualification/identity/lineage/fit APIs and fixtures) <=120k; then 8B split into 8B1 + 8B2 + 8B3 for context management. Each part returns its own handoff/checkpoint; one fresh Verifier evaluates the complete Phase 8 diff after all parts.
 
-#### Phase 8A — Backend APIs and fixtures — VERIFIED COMPLETE
+#### Phase 8A — Backend APIs and fixtures — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
-- **State:** Verified complete
+- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 - **Commit:** 0fe6105 (2026-07-21)
 - **Parts:** 8A1 + 8A2 + 8A3 (split for context management)
 - **8A1 — CommunitySourceCatalog:** role-based catalog (OriginalAuthor, GgufQuantizer, MlxConverter, DatasetAuthor, Curator, MergerDistiller, Custom), user-editable, bundled creators (bartowski, mlx-community, DavidAU heretic/uncensored, etc.), KnownQuantizer migration, heretic/uncensored/updated-finetune preferences
@@ -376,17 +399,17 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 
 #### Phase 8B — HF/Library discovery, cards, quant-switch UX (split into 3 parts)
 
-##### Phase 8B1 — Discovery scopes, sorting, categories, curated authors, workload-start — VERIFIED
+##### Phase 8B1 — Discovery scopes, sorting, categories, curated authors, workload-start — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
-- **State:** Verified complete
+- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 - **Commit:** f290273 (2026-07-22)
 - **Scope:** builder brief items 1, 3, 8
 - **Screenshot gates:** panels-model-library-discovery.png (Auto/GGUF/MLX/All toggle, workload-start discovery, curated authors)
 - **Deliverables:** Auto/GGUF/MLX/All scopes, Auto/Relevance/Name/Size/Last updated sort (workload-aware), category badges (descriptive), author/converter role badges, workload-profile-aware defaults
 
-##### Phase 8B2 — Cards with lineage/qualification display — VERIFIED
+##### Phase 8B2 — Cards with lineage/qualification display — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
-- **State:** Verified complete
+- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 - **Commits:** 7011f5c + 0f0b575 (screenshot/model card fixes)
 - **Scope:** builder brief items 4, 5, 6, 7, 11
 - **Screenshots:** panels-model-library-discovery.png, panels-model-library-qualification-badges.png, panels-model-library-mlx-scope.png (mlx-lineage removed as duplicate)
@@ -610,7 +633,7 @@ Return a focused Builder handoff. A fresh verification pass will follow.
 
 Only the Coordinator updates this table after independent verification.
 
-**Last updated:** 2026-07-22 by Coordinator (Phase 0-4 verified; Phase 5a Parts 1-4 verified Part 5 pending; Phase 5b Parts A-C verified (5b complete); wired limit: tiered reserves ≤16GB:-6GB, ≥24GB:-8GB, 95% hard ceiling, GUI planned Phase 7; reclaim guidance: 4 actions with conservative estimates; all frontend surfaces consume same MemoryAvailabilitySnapshot; Phase 7: ALL PARTS VERIFIED — exit gate PASS WITH NOTES (Web UI wizard/editor parity gap documented for Phase 10 IA); Phase 8: 8A verified (0fe6105), 8B1 (f290273), 8B2 (7011f5c+0f0b575 fixes) verified; Phase 8B3 pending (includes scope UX fix: additive MLX+GGUF+All toggles); HEAD 0f0b575)
+**Last updated:** 2026-07-25 by Coordinator. Phase 5a/5b implementation is verified complete (`791635e`, `6a14cc7`); the independent runtime-evidence closeout is active and does not reopen the code gate. Phase 7 and Phase 8 (7A–8B2) are now UNVERIFIED — flagged 2026-07-25 after discovering the Phase 7B2 workload-profile confirmation flow was broken despite being marked verified; prior local-model verification of everything past Phase 5 cannot be trusted and needs re-checking. Phase 8B3 remains pending. Preserve the existing Phase 7/8 checkpoint history below until those phases are reconciled separately.
 
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|
@@ -621,19 +644,19 @@ Only the Coordinator updates this table after independent verification.
 | 3B | Verified complete | handoff.md | PASS WITH CONDITION (1, none block P14) | phase-3b/ | COND-P3B-R1 (CriticalFail UX → Phase 7) |
 | 3C | Verified complete | handoff.md | PASS (condition C-P3C-RAPID-HASH remediated inline) | phase-3c/ | None |
 | 4 | Verified complete | handoffs for A/B/C | PASS (all 3 parts) | ae42537 | None |
-| 5a | Parts 1-4 verified, Part 5 pending | handoffs for P1-P4 | PASS (all 4 parts) | 345127a | Part 5 pending: cross-surface equality (5a exit gate) |
-| 5b | Not started | — | — | — | Phase 5a Verified (memory-availability + reclaim + wired-limit + acquisition repairs) |
-| 6 | Not started | — | — | — | Phase 5 (5a + 5b) |
-| 7A1 | Verified complete | — | PASS (settings.rs validated, mod.rs validated, 814 tests pass) | HEAD pending | None |
-| 7A2 | Verified complete | — | PASS (command.rs validated, launch.rs validated, mutual exclusions wired, 817 tests) | HEAD pending | None |
-| 7A3 | Verified complete | — | PASS (command-preview endpoint with auth, preset migration v3, 820 tests) | 774b611 | None |
-| 7B1 | Verified complete | — | PASS (existing controls wired to catalog, Web UI group, sampling selector, prompt storage, screenshots verified) | 31af56b | None |
-| 7B2 | Verified complete | — | PASS (workload profiles with editable assumptions, confirmation flow, screenshots verified) | 5d00ee0 | None |
-| 7B3 | Verified complete | — | PASS (roleplay teaching panel, 3 tests) | 91468fb | None |
-| 7B4 | Verified complete | — | PASS (MTP/concurrency teaching, endpoint compatibility, 5 tests, screenshots verified) | 3b96564 | None |
-| 8A | Verified complete | — | PASS (CommunitySourceCatalog, HF qualify/identity APIs, MLX discovery/introspection, 825 tests) | 0fe6105 | None |
-| 8B1 | Verified complete | — | PASS (discovery scopes, sorting, categories, author roles, workload-start) | f290273 | None |
-| 8B2 | Verified complete | — | PASS (cards with lineage, MLX lineage, qualification badges, model card wiring, real HF screenshots) | 7011f5c+0f0b575 | None |
+| 5a | Verified complete | handoffs for P1-P5 | PASS; cross-surface equality gate passed | `791635e` | Runtime calibration evidence is tracked separately below; it does not reopen estimator implementation |
+| 5b | Verified complete | handoffs for A-C | PASS | `6a14cc7` | Fresh integration regression and evidence-tier closeout active |
+| 6 | Not started | — | — | — | Phase 5 evidence closeout must record conservative cache/quant eligibility first |
+| 7A1 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (settings.rs validated, mod.rs validated, 814 tests pass) | HEAD pending | None |
+| 7A2 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (command.rs validated, launch.rs validated, mutual exclusions wired, 817 tests) | HEAD pending | None |
+| 7A3 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (command-preview endpoint with auth, preset migration v3, 820 tests) | 774b611 | None |
+| 7B1 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (existing controls wired to catalog, Web UI group, sampling selector, prompt storage, screenshots verified) | 31af56b | None |
+| 7B2 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (workload profiles with editable assumptions, confirmation flow, screenshots verified) | 5d00ee0 | None |
+| 7B3 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (roleplay teaching panel, 3 tests) | 91468fb | None |
+| 7B4 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (MTP/concurrency teaching, endpoint compatibility, 5 tests, screenshots verified) | 3b96564 | None |
+| 8A | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (CommunitySourceCatalog, HF qualify/identity APIs, MLX discovery/introspection, 825 tests) | 0fe6105 | None |
+| 8B1 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (discovery scopes, sorting, categories, author roles, workload-start) | f290273 | None |
+| 8B2 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (cards with lineage, MLX lineage, qualification badges, model card wiring, real HF screenshots) | 7011f5c+0f0b575 | None |
 | 8B3 | Not started | — | — | — | 8B2 verified + screenshots approved (includes scope UX fix: additive MLX+GGUF+All toggles, platform-smart defaults) |
 | 9 | Not started | — | — | — | Phases 2–3 |
 | 10 | Not started | — | — | — | Phases 7–9 and user IA decision |

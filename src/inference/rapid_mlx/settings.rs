@@ -124,7 +124,7 @@ impl RapidMlxSetting {
 
         match self {
             Self::KvCacheDtype => has_flag("--kv-cache-dtype"),
-            Self::TurboquantMode => has_flag("--turboquant"),
+            Self::TurboquantMode => has_flag("--kv-cache-turboquant"),
             Self::PrefixCachePolicy => has_flag("--max-cache-blocks"),
             Self::HybridCacheEntries => has_flag("--hybrid-cache-entries"),
             Self::PflashPolicy => has_flag("--pflash"),
@@ -322,7 +322,7 @@ impl RapidMlxSetting {
             Self::TurboquantMode => {
                 let mode = value.as_str().unwrap_or("none");
                 if mode != "none" {
-                    args.push("--turboquant".into());
+                    args.push("--kv-cache-turboquant".into());
                     args.push(mode.into());
                 }
             }
@@ -445,7 +445,7 @@ impl RapidMlxSetting {
 
         Some(match self {
             Self::KvCacheDtype => "Current runtime does not support --kv-cache-dtype".into(),
-            Self::TurboquantMode => "Current runtime does not support --turboquant".into(),
+            Self::TurboquantMode => "Current runtime does not support --kv-cache-turboquant".into(),
             Self::ReasoningMode => "Current runtime does not support --reasoning".into(),
             Self::SpeculativePolicy => "Current runtime does not support --speculative".into(),
             Self::MllmVision => "Vision extra (mlx-vlm) is not installed or not qualified".into(),
@@ -557,7 +557,7 @@ mod tests {
             help_hash: "hash".into(),
             serve_flags: vec![
                 "--kv-cache-dtype".into(),
-                "--turboquant".into(),
+                "--kv-cache-turboquant".into(),
                 "--max-cache-blocks".into(),
                 "--reasoning".into(),
                 "--max-num-seqs".into(),
@@ -738,7 +738,7 @@ mod tests {
         assert!(args_none.is_empty());
 
         let args_k8v4 = setting.to_cli_args(&serde_json::json!("k8v4"));
-        assert_eq!(args_k8v4, vec!["--turboquant", "k8v4"]);
+        assert_eq!(args_k8v4, vec!["--kv-cache-turboquant", "k8v4"]);
     }
 
     #[test]

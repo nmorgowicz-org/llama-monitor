@@ -347,9 +347,14 @@ impl RapidMlxCommandBuilder {
         if let Some(ref dtype) = self.kv_cache_dtype {
             match dtype {
                 KvCacheDtypeArg::Explicit(effective) => {
+                    if !matches!(effective.as_str(), "bf16" | "int8" | "int4") {
+                        return Err(anyhow::anyhow!(
+                            "Unsupported legacy Rapid-MLX kv_cache_dtype '{effective}'. Choose bf16, int8, or int4 before launching."
+                        ));
+                    }
                     capabilities.require("--kv-cache-dtype")?;
                     args.push("--kv-cache-dtype".to_string());
-                    args.push(format!("{{\"effective\":\"{}\"}}", effective));
+                    args.push(effective.clone());
                 }
                 KvCacheDtypeArg::Auto => {}
             }
@@ -357,8 +362,8 @@ impl RapidMlxCommandBuilder {
         if let Some(ref mode) = self.turboquant_mode
             && *mode != "none"
         {
-            capabilities.require("--turboquant")?;
-            args.push("--turboquant".to_string());
+            capabilities.require("--kv-cache-turboquant")?;
+            args.push("--kv-cache-turboquant".to_string());
             args.push(mode.clone());
         }
         if let Some(ref policy) = self.prefix_cache_policy
@@ -899,7 +904,7 @@ mod tests {
         // Phase 7 runtime with all flags present
         let capabilities = ServeCapabilities::from_help(
             "--host --port --served-model-name --timeout --max-cache-blocks \
-             --kv-cache-dtype --turboquant --max-num-seqs --max-concurrent-requests \
+             --kv-cache-dtype --kv-cache-turboquant --max-num-seqs --max-concurrent-requests \
              --prefill-batch-size --completion-batch-size --batching-policy --concurrency-policy \
              --reasoning --speculative --mllm --no-mllm --gpu-memory-utilization \
              --ui --no-ui --path --ui-config --pflash --hybrid-cache-entries \
@@ -935,11 +940,11 @@ mod tests {
         .build("rapid-mlx".into(), &capabilities)
         .unwrap();
         let args = args(&launch);
+        assert!(args.windows(2).any(|p| p == ["--kv-cache-dtype", "int8"]));
         assert!(
             args.windows(2)
-                .any(|p| p == ["--kv-cache-dtype", "{\"effective\":\"int8\"}"])
+                .any(|p| p == ["--kv-cache-turboquant", "k8v4"])
         );
-        assert!(args.windows(2).any(|p| p == ["--turboquant", "k8v4"]));
         assert!(args.windows(2).any(|p| p == ["--pflash", "always"]));
         assert!(
             args.windows(2)
@@ -1016,7 +1021,7 @@ mod tests {
         .unwrap();
         let args = args(&launch);
         assert!(!args.iter().any(|a| a.starts_with("--kv-cache-dtype")));
-        assert!(!args.iter().any(|a| a.starts_with("--turboquant")));
+        assert!(!args.iter().any(|a| a.starts_with("--kv-cache-turboquant")));
         assert!(!args.iter().any(|a| a.starts_with("--reasoning")));
         assert!(!args.iter().any(|a| a.starts_with("--mllm")));
         assert!(!args.iter().any(|a| a.starts_with("--no-mllm")));
@@ -1038,6 +1043,21 @@ mod tests {
         assert!(!args.iter().any(|a| a.starts_with("--sampling-mode")));
         assert!(!args.iter().any(|a| a.starts_with("--parser-policy")));
         assert!(!args.iter().any(|a| a.starts_with("--security-policy")));
+    }
+
+    #[test]
+    fn legacy_kv_dtype_fails_before_invalid_argv_is_spawned() {
+        let error = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .kv_cache_dtype(Some(KvCacheDtypeArg::Explicit("fp8".into())))
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("legacy Rapid-MLX kv_cache_dtype")
+        );
     }
 
     #[test]
@@ -1074,6 +1094,6 @@ mod tests {
         .turboquant_mode(Some("k8v4".into()))
         .build("rapid-mlx".into(), &capabilities)
         .unwrap_err();
-        assert!(error.to_string().contains("--turboquant"));
+        assert!(error.to_string().contains("--kv-cache-turboquant"));
     }
 }
