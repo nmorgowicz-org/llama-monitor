@@ -1,0 +1,13 @@
+{
+  "model": "nightmedia/Qwen3.6-27B-Architect-Polaris2-Fable-B-F451-Tess-mxfp4-mlx",
+  "suite": "context",
+  "receipts": [
+    {
+      "label": "00-context-32000-int8",
+      "receipt": "00-00-context-32000-int8.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

@@ -43,6 +43,7 @@ function parseArgs(argv) {
     if (!key.startsWith('--')) die(`Invalid argument: ${key}`);
     if (key === '--keep-manifests') { options.keepManifests = true; continue; }
     if (key === '--resume') { options.resume = true; continue; }
+    if (key === '--force-hybrid') { options.forceHybrid = true; continue; }
     const value = rest[index + 1];
     if (value === undefined) die(`Missing value for ${key}`);
     index += 1;
@@ -327,7 +328,7 @@ const DEFAULT_PREFILL_STEP_SIZE = '512';
 
 function argvFor(model, config, port, utilization, servedModelName = null, profile = {}) {
   const cache = config.prefix_cache.startsWith('enabled');
-  return ['--no-telemetry', 'serve', model, ...(servedModelName ? ['--served-model-name', servedModelName] : []), '--port', String(port), '--host', '127.0.0.1', '--max-num-seqs', '1', '--max-concurrent-requests', '1', cache ? '--enable-prefix-cache' : '--disable-prefix-cache', ...(cache ? ['--cache-memory-mb', '4096', '--hybrid-cache-entries', '4'] : []), '--pflash', config.pflash, ...(config.pflash === 'auto' ? ['--pflash-threshold', '32768'] : []), '--prefill-step-size', config.prefill_step_size ?? DEFAULT_PREFILL_STEP_SIZE, '--max-tokens', String(config.server_max_tokens ?? 128), '--kv-cache-dtype', config.kv_cache_dtype_requested, '--kv-cache-turboquant', config.turboquant_requested, config.mllm ? '--mllm' : '--no-mllm', '--gpu-memory-utilization', String(utilization), ...(profile.tool_call_parser ? ['--tool-call-parser', profile.tool_call_parser, '--enable-auto-tool-choice'] : []), ...(profile.reasoning_parser ? ['--reasoning-parser', profile.reasoning_parser] : []), '--log-level', 'INFO'];
+  return ['--no-telemetry', 'serve', model, ...(servedModelName ? ['--served-model-name', servedModelName] : []), '--port', String(port), '--host', '127.0.0.1', '--max-num-seqs', '1', '--max-concurrent-requests', '1', cache ? '--enable-prefix-cache' : '--disable-prefix-cache', ...(cache ? ['--cache-memory-mb', '4096', '--hybrid-cache-entries', '4'] : []), '--pflash', config.pflash, ...(config.pflash === 'auto' ? ['--pflash-threshold', '32768'] : []), '--prefill-step-size', config.prefill_step_size ?? DEFAULT_PREFILL_STEP_SIZE, '--max-tokens', String(config.server_max_tokens ?? 128), '--kv-cache-dtype', config.kv_cache_dtype_requested, '--kv-cache-turboquant', config.turboquant_requested, config.mllm ? '--mllm' : '--no-mllm', '--gpu-memory-utilization', String(utilization), ...(profile.tool_call_parser ? ['--tool-call-parser', profile.tool_call_parser, '--enable-auto-tool-choice'] : []), ...(profile.reasoning_parser ? ['--reasoning-parser', profile.reasoning_parser] : []), ...(profile.force_hybrid ? ['--force-hybrid'] : []), '--log-level', 'INFO'];
 }
 
 async function localModelIdentity(model, requestedRevision) {
@@ -509,6 +510,7 @@ if (options.cells) {
   if (unknown.length) die(`Unknown cells for ${options.suite}: ${unknown.join(', ')}`);
 }
 const profile = await profileOverridesFor(options.model, rapidMlxBin);
+if (options.forceHybrid) profile.force_hybrid = true;
 const runtimeVersion = installedRapidMlxVersion(rapidMlxBin);
 
 if (command === 'plan') {
