@@ -32,6 +32,8 @@ The tool driver now correctly makes primary-agent tool cells request **32,768 ou
 
 **Source KV calibration (2026-07-25):** against `rapid-mlx 0.11.0+git.5fc6556c`, PFlash-off and `prefill_step_size=512`, Qwen 3.5 9B completed every marker row at 5/5. Metal peaks in GB were BF16/int8/int4: 32k `12.34/12.30/12.22`, 65k `14.29/13.45/12.86`, and 131k `18.78/17.03/15.95`; int8 was `18.55` at 160k and `20.67` at 200k. This is the first source-path evidence that #1197 live KV quantization is effective: int8/int4 savings grow with context while recall remains intact. Use these 512-step receipts—not the 4096-step capability peaks—for the next estimator comparison; do not promote a global constant until the estimator residual/holdout analysis is recorded.
 
+The same source envelope on Unsloth Qwen 3.6 35B was also 5/5 throughout: BF16/int8/int4 peaks at 32k were `22.56/22.31/22.13` GB, at 65k `23.79/23.26/22.92`, and at 131k `26.43/25.31/24.64`; int8 was `26.21` at 160k and `27.46` at 200k. The 35B runtime was allowed to resolve its documented hybrid architecture itself—no `--force-hybrid` or `--no-hybrid` was passed.
+
 Ordered next work:
 
 1. Add the durable estimator-to-runtime comparison writer, then pair it with the existing Qwen 3.5 9B fresh context receipts (8k/16k/32k, int8 and int4, PFlash off). Use some rows to tune a Rapid-specific fixed/load/allocator term and context slope; hold out at least one context/dtype row before declaring any calibration improvement.
