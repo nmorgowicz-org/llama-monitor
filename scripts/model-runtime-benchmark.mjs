@@ -220,6 +220,11 @@ async function streamRequest(baseUrl, request) {
       usage?.completion_tokens && generationMs && generationMs > 0
         ? Math.round((usage.completion_tokens * 100000) / generationMs) / 100
         : null,
+    // Keep the complete response only until fidelity/tool-trace scoring has
+    // run. Long reasoning models can put the decisive marker after the
+    // receipt preview cutoff; serializing the full text would make fixtures
+    // unnecessarily large and may retain user-like prompt material.
+    completion_text: completion,
     completion_preview: completion.slice(0, 2000),
     server_errors: errors,
     tool_calls: mergedToolCalls,
@@ -295,7 +300,10 @@ function scoreFidelity(workload, response) {
   return {
     request_succeeded: requestSucceeded,
     failure_reason: failureReason,
-    marker_recall: scoreMarkerRecall(workload.markers, response.completion_preview),
+    marker_recall: scoreMarkerRecall(
+      workload.markers,
+      response.completion_text ?? response.completion_preview,
+    ),
     expected_tool_name: workload.expected_tool_name ?? null,
     tool_call_observed: workload.expected_tool_name
       ? Boolean(matchingTool)
@@ -335,7 +343,7 @@ function scoreToolExpectation(response, expectation = {}) {
 function assistantToolMessage(response) {
   return {
     role: 'assistant',
-    content: response.completion_preview || null,
+    content: response.completion_text ?? response.completion_preview ?? null,
     tool_calls: response.tool_calls.map((call, index) => ({
       id: call.id ?? `benchmark-tool-${index}`,
       type: 'function',
@@ -378,6 +386,9 @@ function receiptRequest(request) {
     model: request.model,
     temperature: request.temperature,
     max_tokens: request.max_tokens,
+    reasoning_max_tokens: request.reasoning_max_tokens ?? null,
+    reasoning_effort: request.reasoning_effort ?? null,
+    enable_thinking: request.enable_thinking ?? request.chat_template_kwargs?.enable_thinking ?? null,
     message_characters: contents.length,
     message_sha256: createHash('sha256').update(contents).digest('hex'),
     tool_names: request.tools?.map((tool) => tool.function?.name).filter(Boolean) ?? [],
@@ -494,11 +505,18 @@ async function runAttempt(baseUrl, metricsPath, cell, phase, extension = false, 
     });
     traceResponse = followupResponse;
   }
+  const fidelity = scoreFidelity(cell.workload, response);
+  // Full completions are needed for scoring but are deliberately kept out of
+  // durable receipts; the bounded preview remains the diagnostic artifact.
+  delete response.completion_text;
+  for (const item of trace) {
+    if (item.response) delete item.response.completion_text;
+  }
   return {
     phase,
     request: receiptRequest(request),
     response,
-    fidelity: scoreFidelity(cell.workload, response),
+    fidelity,
     tool_trace: trace,
     metrics_before: before,
     metrics_after: after,

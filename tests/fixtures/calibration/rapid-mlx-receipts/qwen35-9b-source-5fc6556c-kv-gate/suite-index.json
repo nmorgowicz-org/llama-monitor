@@ -1,0 +1,23 @@
+{
+  "model": "nightmedia/Qwen3.5-9B-DS9-USS-Defiant-1M-q8-hi-mlx",
+  "suite": "context",
+  "receipts": [
+    {
+      "label": "00-context-32000-bf16",
+      "receipt": "00-00-context-32000-bf16.json",
+      "manifest": null
+    },
+    {
+      "label": "01-context-32000-int8",
+      "receipt": "01-01-context-32000-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "02-context-32000-int4",
+      "receipt": "02-02-context-32000-int4.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}
