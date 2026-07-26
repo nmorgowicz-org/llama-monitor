@@ -30,6 +30,8 @@ The tool driver now correctly makes primary-agent tool cells request **32,768 ou
 
 **Prefill versus KV accounting:** `rapid_mlx_metal_peak_memory_bytes` is a Metal allocator high-water, so it includes transient prefill buffers. The 4096-token prefill context-capability pass is valid for throughput/peak-capability qualification but must not calibrate the persistent-KV estimator: prior 9B int8 measurements were 20.69/23.35 GB at 160k/200k with a 512-token prefill step, versus 39.55/46.59 GB using 4096. The regular `context` suite therefore pins `prefill_step_size=512`; the `prefill` suite owns explicit throughput-versus-peak comparisons.
 
+**Source KV calibration (2026-07-25):** against `rapid-mlx 0.11.0+git.5fc6556c`, PFlash-off and `prefill_step_size=512`, Qwen 3.5 9B completed every marker row at 5/5. Metal peaks in GB were BF16/int8/int4: 32k `12.34/12.30/12.22`, 65k `14.29/13.45/12.86`, and 131k `18.78/17.03/15.95`; int8 was `18.55` at 160k and `20.67` at 200k. This is the first source-path evidence that #1197 live KV quantization is effective: int8/int4 savings grow with context while recall remains intact. Use these 512-step receipts—not the 4096-step capability peaks—for the next estimator comparison; do not promote a global constant until the estimator residual/holdout analysis is recorded.
+
 Ordered next work:
 
 1. Add the durable estimator-to-runtime comparison writer, then pair it with the existing Qwen 3.5 9B fresh context receipts (8k/16k/32k, int8 and int4, PFlash off). Use some rows to tune a Rapid-specific fixed/load/allocator term and context slope; hold out at least one context/dtype row before declaring any calibration improvement.
