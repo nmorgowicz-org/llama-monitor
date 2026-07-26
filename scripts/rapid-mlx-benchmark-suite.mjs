@@ -139,19 +139,15 @@ function suiteCells(model, suite, imagePath) {
     // fidelity is proven at the sizes that actually matter for coding
     // workloads, not just comfortable mid-range ones.
     //
-    // 160k/200k are int8-only, not swept across both dtypes: KV-cache RAM at
-    // a given dtype is a direct linear multiply of context length, so it
-    // extrapolates cleanly from the 32k/65k/131k int4 points without needing
-    // a second full run up there. PP/prefill throughput and crash-safety do
-    // NOT extrapolate the same way (prefill cost grows close to quadratically
-    // with context via the chunked-attention buffer, which is the exact
-    // mechanism behind the original 131k crash), so those top two tiers are
-    // still measured directly, just under one dtype (int8) as the spot-check
-    // rather than the full matrix.
+    // 160k/200k retain both int8 and int4. Source #1197 qualification made
+    // live quantization effective, so these rows validate the high-context
+    // int4 slope instead of assuming it extrapolates from 32k/65k/131k.
     for (const dtype of ['bf16', 'int8', 'int4']) {
       for (const tokens of [32000, 65536, 131072]) cells.push(cell(model, `context-${tokens}-${dtype}`, tokens, configuration({ dtype, prefillStepSize: '512' })));
     }
-    for (const tokens of [160000, 200000]) cells.push(cell(model, `context-${tokens}-int8`, tokens, configuration({ dtype: 'int8', prefillStepSize: '512' })));
+    for (const dtype of ['int8', 'int4']) {
+      for (const tokens of [160000, 200000]) cells.push(cell(model, `context-${tokens}-${dtype}`, tokens, configuration({ dtype, prefillStepSize: '512' })));
+    }
   }
   // Explicit throughput/peak comparison above the harness's conservative
   // 512-token default. This suite is not a persistent-KV calibration lane.
