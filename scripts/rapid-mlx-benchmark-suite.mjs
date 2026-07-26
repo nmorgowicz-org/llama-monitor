@@ -149,13 +149,12 @@ function suiteCells(model, suite, imagePath) {
     // still measured directly, just under one dtype (int8) as the spot-check
     // rather than the full matrix.
     for (const dtype of ['bf16', 'int8', 'int4']) {
-      for (const tokens of [32000, 65536, 131072]) cells.push(cell(model, `context-${tokens}-${dtype}`, tokens, configuration({ dtype })));
+      for (const tokens of [32000, 65536, 131072]) cells.push(cell(model, `context-${tokens}-${dtype}`, tokens, configuration({ dtype, prefillStepSize: '512' })));
     }
-    for (const tokens of [160000, 200000]) cells.push(cell(model, `context-${tokens}-int8`, tokens, configuration({ dtype: 'int8' })));
+    for (const tokens of [160000, 200000]) cells.push(cell(model, `context-${tokens}-int8`, tokens, configuration({ dtype: 'int8', prefillStepSize: '512' })));
   }
-  // Calibration-only comparison of upstream's shipped default (2048) against
-  // the value this harness actually runs with (4096, chosen to fix the
-  // 131k-context Metal-buffer crash — see DEFAULT_PREFILL_STEP_SIZE above).
+  // Explicit throughput/peak comparison above the harness's conservative
+  // 512-token default. This suite is not a persistent-KV calibration lane.
   // Deliberately NOT folded into 'all': it's a one-time knob-tuning pass, not
   // part of the recurring model-comparison matrix. 131072 is included because
   // that's the exact token count the crash was observed at, so both values
@@ -305,9 +304,7 @@ async function profileOverridesFor(model, rapidMlxBin) {
     const keyNormalized = key.toLowerCase().replace(/[ _-]/g, '');
     if (keyNormalized === 'toolformat' || keyNormalized === 'tool') profile.tool_call_parser = value;
     else if (keyNormalized === 'reasoningparser' || keyNormalized === 'reasoning') profile.reasoning_parser = value;
-    else if ((keyNormalized === 'architecture' || keyNormalized === 'arch') && !value.toLowerCase().includes('hybrid')) {
-      profile.force_non_hybrid = true;
-    }
+    else if (keyNormalized === 'architecture' || keyNormalized === 'arch') profile.architecture = value;
   }
   return profile;
 }
@@ -327,14 +324,14 @@ function installedRapidMlxVersion(rapidMlxBin) {
 //   prefill_step * context_tokens * num_heads * dtype_bytes > max_buffer_length
 // so the previous values (32768, and 150000 for pflash=auto) silently crashed
 // any context above ~40k with a swallowed Metal OOM (clean 200, zero tokens).
-// 4096 is verified safe to ~318k context on the Qwen3.5-9B target and is the
-// research-pending default until best-practice tuning of this param is done.
-// See docs/plans/20260724-rapidmlx-benchmark-continuation.md "RESOLVED" section.
-const DEFAULT_PREFILL_STEP_SIZE = '4096';
+// 512 is the measurement and launch default: it keeps transient prefill
+// allocation from contaminating persistent-KV accounting. Higher values are
+// exercised only by the explicit prefill/ubatch throughput suites.
+const DEFAULT_PREFILL_STEP_SIZE = '512';
 
 function argvFor(model, config, port, utilization, servedModelName = null, profile = {}) {
   const cache = config.prefix_cache.startsWith('enabled');
-  return ['--no-telemetry', 'serve', model, ...(servedModelName ? ['--served-model-name', servedModelName] : []), '--port', String(port), '--host', '127.0.0.1', '--max-num-seqs', '1', '--max-concurrent-requests', '1', cache ? '--enable-prefix-cache' : '--disable-prefix-cache', ...(cache ? ['--cache-memory-mb', '4096', '--hybrid-cache-entries', '4'] : []), '--pflash', config.pflash, ...(config.pflash === 'auto' ? ['--pflash-threshold', '32768'] : []), '--prefill-step-size', config.prefill_step_size ?? DEFAULT_PREFILL_STEP_SIZE, '--max-tokens', String(config.server_max_tokens ?? 128), '--kv-cache-dtype', config.kv_cache_dtype_requested, '--kv-cache-turboquant', config.turboquant_requested, config.mllm ? '--mllm' : '--no-mllm', '--gpu-memory-utilization', String(utilization), ...(profile.tool_call_parser ? ['--tool-call-parser', profile.tool_call_parser, '--enable-auto-tool-choice'] : []), ...(profile.reasoning_parser ? ['--reasoning-parser', profile.reasoning_parser] : []), ...(profile.force_non_hybrid ? ['--no-hybrid'] : []), '--log-level', 'INFO'];
+  return ['--no-telemetry', 'serve', model, ...(servedModelName ? ['--served-model-name', servedModelName] : []), '--port', String(port), '--host', '127.0.0.1', '--max-num-seqs', '1', '--max-concurrent-requests', '1', cache ? '--enable-prefix-cache' : '--disable-prefix-cache', ...(cache ? ['--cache-memory-mb', '4096', '--hybrid-cache-entries', '4'] : []), '--pflash', config.pflash, ...(config.pflash === 'auto' ? ['--pflash-threshold', '32768'] : []), '--prefill-step-size', config.prefill_step_size ?? DEFAULT_PREFILL_STEP_SIZE, '--max-tokens', String(config.server_max_tokens ?? 128), '--kv-cache-dtype', config.kv_cache_dtype_requested, '--kv-cache-turboquant', config.turboquant_requested, config.mllm ? '--mllm' : '--no-mllm', '--gpu-memory-utilization', String(utilization), ...(profile.tool_call_parser ? ['--tool-call-parser', profile.tool_call_parser, '--enable-auto-tool-choice'] : []), ...(profile.reasoning_parser ? ['--reasoning-parser', profile.reasoning_parser] : []), '--log-level', 'INFO'];
 }
 
 async function localModelIdentity(model, requestedRevision) {
