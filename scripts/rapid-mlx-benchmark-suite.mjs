@@ -48,6 +48,7 @@ function parseArgs(argv) {
     index += 1;
     if (key === '--model') options.model = value;
     else if (key === '--suite') options.suite = value;
+    else if (key === '--cell') (options.cells ??= []).push(value);
     else if (key === '--out') options.out = value;
     else if (key === '--port') options.port = Number(value);
     else if (key === '--gpu-memory-utilization') options.utilization = value;
@@ -502,7 +503,16 @@ async function runSuite(options, manifests, tempDir) {
 
 const { command, options } = parseArgs(process.argv);
 const identity = await localModelIdentity(options.model, options.revision);
-const cells = suiteCells(options.model, options.suite, options.image);
+const allCells = suiteCells(options.model, options.suite, options.image);
+const cells = options.cells
+  ? allCells.filter((cell) => options.cells.includes(cell.id))
+  : allCells;
+if (!cells.length) die(`No cells selected for ${options.suite}; check --cell values.`);
+if (options.cells) {
+  const known = new Set(allCells.map((cell) => cell.id));
+  const unknown = options.cells.filter((cell) => !known.has(cell));
+  if (unknown.length) die(`Unknown cells for ${options.suite}: ${unknown.join(', ')}`);
+}
 const profile = await profileOverridesFor(options.model);
 const runtimeVersion = installedRapidMlxVersion();
 
