@@ -29,6 +29,21 @@ HF-browse preview) are driven by the backend `/api/vram-estimate` with the appro
 fetches the model's real metadata (GGUF header or MLX config) from HuggingFace so even
 the browse preview uses the model's real architecture.
 
+### Native context ceilings
+
+The estimator response carries `native_context_limit` when metadata provides one.
+GGUF uses its authoritative `*.context_length`; MLX uses
+`max_position_embeddings` (or `model_max_length` only when the canonical field
+is absent). Spawn Wizard and the preset editor use that value to distinguish a
+standard context choice from an advanced-only extension. The standard choices
+are 32K, 65K, 131K, 160K, 200K, and 262K; a choice above the metadata ceiling
+is not a normal-fit recommendation, even if the memory estimate fits.
+
+RoPE/YaRN and related extension controls are deliberately not emitted or
+estimated yet. They require model-specific launch mapping, tokenizer/template
+headroom, and extended-context calibration before they can become a supported
+configuration.
+
 ## Memory-pool and active-parameter behavior (llama.cpp GGUF)
 
 GGUF tensor shapes are the source of truth for MoE active parameters:
@@ -670,6 +685,12 @@ Architecture-aware, backend-aware VRAM breakdown endpoint.
   - **Explicit `hf_repo_id`**: for Rapid-MLX, `hf_repo_id` plus optional immutable `hf_repo_revision` fetches `config.json` directly. `hf_file_path` is never treated as a config filename. Referenced text configs are revision-pinned, bounded, cycle-checked, and limited to safe relative JSON paths. `model_size_bytes` is required when the tree lookup cannot determine the weight size.
   - **Degraded**: if required config fields (`hidden_size`, `num_hidden_layers`, `num_attention_heads`) are missing or unrecognized, the architecture is built via `ModelArch::from_name_and_params()` and `evidence` is set to `"degraded"`. This never silently presents a heuristic guess as authoritative.
   - Optional `mlx_prefix_cache_tokens` + `mlx_prefix_cache_bits` (4 or 8, default 8) reserve a **separate** stored budget for Rapid-MLX's compressed prefix cache. This is intentionally NOT a reduction of `kv_cache_bytes`: cached entries are decompressed back to the active compute dtype before reuse, so active-request KV is unaffected by how much prefix cache exists.
+  - A retained-cache recommendation is optional growth, not mandatory fit. The
+    estimator presents the base launch requirement separately from the chosen
+    cache budget and reserve. For qualified one-user Rapid coding workloads,
+    8 GiB is the baseline retained-cache choice; 16 GiB is a branch-retention
+    option. Disk checkpoints are excluded because they are snapshot writes,
+    not automatic RAM-cache restoration.
   - Rapid-native policy fields are `kv_cache_dtype` (`bf16`, `int8`, or `int4`), `reasoning_mode`, and `turboquant_mode` (`v4`, `k8v4`, or `none`). The estimator never accepts llama.cpp's `ctk`/`ctv` vocabulary for a Rapid result. Reasoning resolves the active KV dtype to `int8`.
   - TurboQuant is retained-prefix storage only. It never reduces model weights, recurrent state, MTP, prefill, or the transient decompression peak. A local Rapid 0.10.17 receipt showed that `--kv-cache-turboquant k8v4` owns the active cache path: the runtime reports its active compute KV as `bf16` and does not apply a simultaneously requested `--kv-cache-dtype int4`. `k8v4` is an Advanced trial: it becomes effective only after exact model/revision qualification; an unknown community finetune is estimated as Standard retained storage and receives an explicit fallback reason. The Rapid argv is `--kv-cache-turboquant {v4,k8v4,none}`.
 - Output fields: `weights_bytes`, `kv_cache_bytes`, `linear_attn_state_bytes`, `mmproj_bytes`, `mtp_bytes`, `overhead_bytes`, `total_bytes`, `available_bytes`, `headroom_bytes`, `ram_bytes`, `available_ram_bytes`, `ram_headroom_bytes`, `recommendation`, `note`

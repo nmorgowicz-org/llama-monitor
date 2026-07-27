@@ -36,6 +36,18 @@ Stable Markdown headings are authoritative references. The line hints below are 
 
 ## 2. First 15 Minutes for a Context-Free Coordinator
 
+**Phase 6 evidence update (2026-07-27):** Qwen 3.6 35B’s 160K/200K real
+workspace-fork matrix supports an 8 GiB retained-cache baseline. It keeps the
+newest fork fast while 16 GiB preserves older branch boundaries; 16 GiB is not
+a speed recommendation. The authoritative measurements and limits are in
+`20260726-phase6_rapidmlx_cache_benchmarking.md`. Disk checkpoint work must
+remain a separate `0` versus `8192` write/persistence experiment: current
+Rapid source does not automatically reload evicted cache entries from disk.
+The completed 200K INT4/8 GiB `0` versus `8192` lane found a 56.5 s (24%) cold
+TTFT penalty at `8192` with no fork-reuse gain; use `0` for interactive cache
+recommendations until the separate manual export/import persistence test is
+qualified.
+
 1. Read repository `AGENTS.md` completely.
 2. Read this companion completely.
 3. Inspect branch, `HEAD`, worktree, and current phase ledger without changing files.
@@ -276,6 +288,10 @@ Current conservative evidence: Qwen 3.6 35B A3B text receipts fail the source-re
 **Current calibration posture (2026-07-25):** Rapid-MLX v0.11.0 issue #1197 keeps observed batch-generation active KV in bf16 despite requested int8/int4. Phase 5 therefore models active KV as effective bf16 while preserving the requested value in the response. Pair each fresh-server receipt with its exact token-free estimator request/response using `scripts/write-estimator-calibration-receipt.mjs`; tune only on designated rows and reserve a context/dtype holdout. The upstream fix may be evaluated at its exact commit now, then requires a compact release confirmation run before int4/int8 active-KV savings can be promoted.
 
 **v0.11.0 BF16 calibration result (2026-07-25):** fresh Qwen 3.5 9B Defiant PFlash-off requested-int8 cells now have versioned, token-free paired calibration receipts under `tests/fixtures/calibration/rapid-mlx-receipts/qwen35-9b-v011-bf16-calibration/`. Requested int8 correctly resolves to estimator-effective bf16. The 32k and 65k tuning residuals are -1.50% and +4.93%; the independent 131k holdout is +17.06% (unsafe under-prediction), outside the ±10% Qualified bar. Keep this Rapid v0.11.0 envelope **Provisional** and do not promote a memory-fit/cache/quant recommendation or change global formula constants from this one conversion. A later release containing the upstream #1197 fix gets a compact confirmation/recalibration pass.
+
+**Phase 5 → Phase 6 transition (2026-07-26):** finish the paired AilexLeon Gemma 4 26B LM/VLM cold-path comparison before beginning cache qualification. Preserve source-build Qwen KV rows as pre-release evidence. Phase 6 then starts with the telemetry-contract control (`cold → exact replay → +512`, one persistent server, PFlash/speculative decoding off, raw `/metrics` snapshots before/after each request). Normalize only series actually emitted and behaviorally validated by that control; retain unknown cache values as unavailable and document any derived values with their formula. The detailed Phase 6 benchmark plan is [`20260726-phase6_rapidmlx_cache_benchmarking.md`](./20260726-phase6_rapidmlx_cache_benchmarking.md). No cache recommendation, cache reservation formula, or UI policy may promote before this gate and the subsequent model-specific evidence pass.
+
+**Deferred dense-Gemma scope (2026-07-26):** Gemma 4 31B QAT is deliberately deferred. It is a larger dense comparison than the already-qualified 27B dense Qwen and is not part of the Phase 5 closeout. After the Phase 6 cache harness and initial model tracks are established, run its cold and cache qualification through that single completed protocol rather than spending a separate pre-cache matrix now.
 - **Dependencies:** 5a P1→P2→P4→P5; 5a P3 independent of Rapid chain but feeds P5; 5b A→B,C (B,C parallel); 5b D depends on A,B,C
 
 ### Phase 6 — Cross-backend cache guidance
@@ -283,9 +299,36 @@ Current conservative evidence: Qwen 3.6 35B A3B text receipts fail the source-re
 - **State:** Not started
 - **Budget:** 170k
 - **Depends on:** Phase 5
-- **Read:** comprehensive Section 6 in full; D14/D15/D17–D20; A6–A9/A21/A23/A31–A37/A41; Phase 6; cache/client matrices; cache evidence ledger rows.
+- **Read:** comprehensive Section 6 in full; D14/D15/D17–D20; A6–A9/A21/A23/A31–A37/A41; Phase 6; cache/client matrices; cache evidence ledger rows; [`20260726-phase6_rapidmlx_cache_benchmarking.md`](./20260726-phase6_rapidmlx_cache_benchmarking.md).
 - **Primary output:** shared Reusable prompt state Auto/Off/Advanced Custom with backend-native effective behavior; Rapid hybrid and expert-only response-cache policies; bounded llama prompt-cache policy; educational workload profiles; recommendation/refusal logic. Cache-repeat observation ships as an **explicit opt-in trial by default** (E9); the ephemeral per-runtime HMAC-fingerprint shadow observer is **DEFERRED/optional**, since the cache is Off by default and a privacy-sensitive fingerprinting subsystem is not justified before demand is proven.
 - **Completion proof:** response cache Off for normal agents/roleplay; Rapid Auto uses the smallest memory-safe working set for the dominant single-user loop, does not permanently provision for brief cron overlap, and resolves Off when ineligible/unbounded; llama unified-memory Auto defaults extra host states to `0` while ordinary common-prefix reuse remains active, and only confirmed evidence-backed surplus permits a bounded positive cap; no generic concurrency value becomes cache size; the default path is the explicit trial with no fingerprinting subsystem built; IF the shadow observer is later built, its fingerprints use a random per-runtime HMAC key, remain memory-only/TTL- and size-bounded, emit aggregates only, and cannot reach persistence/log/export/backup/network surfaces; telemetry never mutates or restarts automatically.
+
+### Phase 6.5 — Speculative decoding / MTP runtime qualification
+
+**Objective:** Reconcile stale Phase 3/5 MTP assumptions with the selected
+current Rapid source, then produce revision-pinned functionality, acceptance,
+correctness, and memory evidence before Phase 7 exposes a control.
+
+**Reason for a full phase:** no local MTP path has been independently
+qualified. Recent source fixes are material inputs: `738a44e` repairs Qwen
+sidecar extraction/loadability and reports K=1 acceptance ~0% → ~89%;
+`eab126d` admits eligible local model directories; `a79997e` repairs Qwen 3.6
+bundled-MTP norm corruption. They are source-build evidence, not release
+qualification.
+
+**Packets:** (1) source/capability inventory of embedded, extracted, and
+external heads/sidecars plus exact requested/effective/fallback argv; (2)
+benchmark-harness MTP lane recording proposal/accepted/rejected tokens,
+acceptance, TTFT, PP/TG, correctness, active/peak memory, and fallback; (3)
+Rapid Qwen 3.5/3.6 local/HF and eligible sidecar tests; (4) GGUF embedded and
+`-md` draft-model tests, including Gemma 4, with normal llama MTP at one slot;
+(5) fresh estimator ownership/admission audit. Missing metrics remain
+unavailable rather than inferred from speed.
+
+**Exit gate:** every Phase 7 MTP control traces capability → eligibility → argv
+→ launch → observed metric → memory estimate → restore/summary. Unsupported
+or provisional paths have an explicit reason and are not exposed as enabled.
+Do not begin broad UI exposure, multi-slot experiments, or release claims.
 
 ### Phase 7 — Critical settings and shared UI
 
@@ -440,6 +483,9 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 - **Primary output (E1 — architecture is resolved, this is NOT a "native override investigation"):** ONE revision-pinned template-selection layer with two thin appliers — llama.cpp via `--chat-template`/`--chat-template-file`, Rapid via **file placement** into an llama-monitor-owned copy/overlay (never the canonical/HF-cache dir), or a template-path flag if Phase 0's grep found Rapid accepts one. The driving reason is the §3.9 **tool-call-reliability** defect (stock Qwen3.6/Gemma4 templates loop/fail on tool calls; Froggeric and the official Google Gemma template are the candidates to qualify). A tool-call smoke-test matrix gates activation; one retained `[escalate→device]` M5 Max check confirms the first real substitution loads and kills the observed loop. Preserve Froggeric SHA/update handling while adding immutable `TemplateRelease` records, alternatives, provenance-distinct official-Google/community candidates, comparison, stale/update state, bounded history, and rollback. Plus client-protocol qualification and SillyTavern raw Text / structured Chat paths.
 
 - **2026-07-26 template-source decision:** the selection presented in both Spawn Wizard and Preset Editor is `(a) Native model template` by default, `(b) a qualified immutable `TemplateRelease`, or `(c) explicit local custom`. Native is not a copied library artifact: for an HF snapshot, the Rapid-owned overlay must re-link the original `chat_template.jinja`/tokenizer template source in that pinned snapshot; for a non-HF/local model, it must re-link the original model files. Selecting Native therefore undoes a prior override without mutating canonical/HF-cache files. Qwen3.5/Qwen3.6 selection offers the native entry plus version-specific Froggeric or other qualified releases, each identified by source repo, pinned revision, file path, content SHA-256, provenance, and qualification result. A release is installed alongside existing releases and activated explicitly; rollback reaches Native or any retained release. Never add app-side Jinja rendering, raw-prompt rewriting, or a proxy.
+- **Later vision-compatibility follow-up (queued; does not block Phase 9 template work):** investigate the Qwen3.6 hybrid-VLM image failure as a layered, revision-pinned compatibility matrix, suitable for an upstream Rapid-MLX issue/PR when evidence identifies the owner. For the exact model conversion and image fixture, test: (1) direct `mlx-vlm` at Rapid's supported pin, (2) direct latest stable `mlx-vlm`, (3) Rapid at its supported vision dependency, and only if direct latest materially improves, (4) an isolated Rapid source build pinned to that newer `mlx-vlm`. Record converter/model revision, `mlx-vlm` version/commit, Rapid revision, effective MLLM/text lane, processor/template, first failure layer, full error/log, and image result. A direct-latest pass plus Rapid failure is Rapid MLLM routing/scheduler/cache integration evidence; a direct failure remains model/conversion or upstream `mlx-vlm` evidence. Never force-upgrade the normal Rapid environment or claim vision support until an actual OpenAI image request succeeds.
+
+- **Later native-context extension follow-up (queued; does not block current loader work):** map native context ceilings from GGUF `*.context_length` and MLX `max_position_embeddings`/`model_max_length`, then qualify model-specific RoPE, YaRN, and related extension controls before exposing them. The work must cover effective launch arguments, tokenizer/template headroom, supported model families, KV/overhead math at each extended target, and an actual long-context benchmark matrix. Until then, 32K, 65K, 131K, 160K, 200K, and 262K are standard context choices only when at or below the introspected native ceiling; higher values are explicitly advanced-only and untested.
 - **Completion proof:** the Rapid applier never mutates the canonical/HF-cache dir (only an owned copy/overlay, reversible/re-download-safe); the applier is labeled honestly per backend (no false parity); no Jinja renderer, shim/proxy, fork, or unreleased pin; a candidate becomes active only after passing the tool-call smoke test, and a failed test leaves the active selection unchanged; the M5 Max device check passes; Froggeric behavior does not regress; mutable upstream updates install alongside rather than overwrite the active release; official Google templates and community forks are provenance-distinct; rollback reaches the model-provided or any retained pinned release; no double template; SillyTavern owns raw instruct prompts; Rapid `/v1/completions` and llama `/completion` separately pass. There is no A27 "stop for approval" fork — the plan never depended on Rapid gaining native override. A heavier full tokenizer/config-replacement overlay still needs separate approval.
 
 ### Phase 10 — Screenshot-driven IA

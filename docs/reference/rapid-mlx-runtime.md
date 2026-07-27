@@ -34,6 +34,21 @@ the core runtime separately from optional extras, so a missing `[guided]`, visio
 embeddings extra produces actionable feature guidance rather than invalidating an
 otherwise usable runtime.
 
+## Cache policy
+
+For a qualified one-user coding-agent workload, the optional Rapid retained
+prefix-cache budget starts at **8 GiB** when it fits after model weights, active
+KV/context, runtime overhead, and a safety reserve. **16 GiB** is an explicit
+branch-retention choice: it can keep older conversation branches resident, but
+is not presented as a guaranteed speed upgrade for the newest turn.
+
+Rapid disk checkpoints are not an interactive lower cache tier. Current builds
+write snapshots but do not automatically reload evicted entries, so normal
+presets keep their interval disabled. Manual cache export/import is an advanced
+restart warm-start operation and is not offered as a memory-saving control.
+See [cache benchmark results](cache-benchmark-results.md) for the measured
+limits, runtime versions, and receipt locations.
+
 ## Directory layout
 
 All managed runtime files live under:

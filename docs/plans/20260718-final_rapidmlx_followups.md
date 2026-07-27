@@ -1909,6 +1909,17 @@ _— Phase 5a gate falls here; 5b begins. A fresh Verifier must pass Phase 5a (i
 
 **Handoff emphasis:** recommendation examples, refusal cases, exact copy, memory math, argv/round-trip tests, capture paths.
 
+### Phase 6.5 — Speculative decoding / MTP runtime qualification
+
+Before Phase 7 exposes speculative controls, qualify the selected Rapid source
+and current llama build end to end. This phase supersedes stale Phase 3/5 MTP
+assumptions with revision-pinned source inventory, acceptance/correctness and
+memory benchmarks, exact requested/effective/fallback evidence, and a fresh
+estimator ownership audit. Cover Qwen embedded/extracted/external candidates
+only when the source admits them, and GGUF embedded/`-md` draft-model paths
+including Gemma 4. Rapid fixes `738a44e`, `eab126d`, and `a79997e` are inputs,
+not a basis for UI exposure by themselves.
+
 ### Phase 7 — Critical launch settings and shared backend-settings UI
 
 **Objective and outcome:** Make every retained critical Rapid control real and keep wizard and preset editor on one descriptor/schema path.

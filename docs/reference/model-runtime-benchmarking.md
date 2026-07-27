@@ -76,6 +76,19 @@ Suites: `smoke`, `context`, `pflash`, `cache`, `tools`, `image --image PATH`, an
 
 The runner records actual server-reported prompt/completion tokens, raw prompt throughput (raw prompt tokens divided by TTFT), generation tokens per second, selected Prometheus metrics before/after each request, and a bounded fidelity result. When a runtime exports PFlash compressed-token metrics, the receipt also records compressed and retained-token estimates. Raw PP includes compression/scoring time; it is not interchangeable with a native full-prefill kernel rate. Context cells scatter five numeric `CHECK_*` markers across the corpus (10/30/50/70/90% of context) and score fidelity as graduated recall (`marker_recall.recall_rate`) instead of a single verbatim string match, so results stay meaningful across sampling/temperature variation and cannot be satisfied by pattern-completing repeated filler text. Cache cells may use `cold`, `repeat`, and `extension` phases. Tool cells can declare tools and an expected tool name; image cells should be added only after the runtime has independently passed an image-input smoke test.
 
+### Cache qualification
+
+For a coding-agent cache test, select the `cache` suite and run the persistent
+`cold → repeat → follow-up → fork` sequence. It measures a real shared-history
+branch, not a cosmetic suffix appended to one user message. For Rapid, use
+`--cache-contexts`, `--cache-memory-mb`, `--cache-dtypes`, and (only for a
+separate write-cost experiment) `--cache-disk-checkpoint-intervals`.
+
+Keep Rapid disk checkpoints at `0` in performance rows. Current Rapid source
+writes snapshots but does not automatically reload evicted retained entries;
+it is not disk-backed prompt caching. Read [cache benchmark results](cache-benchmark-results.md)
+before turning a receipt into an application recommendation.
+
 ## llama.cpp GGUF micro-batch matrix
 
 `scripts/llama-cpp-benchmark-suite.mjs` runs fresh `llama-server` processes for the requested GGUF with exactly `-ngl 99 -fa on -ctk q8_0 -ctv q8_0 -np 1 --metrics --jinja`. Its fixed matrix compares physical micro-batches (`-ub`) **512** and **2048** at 32k, 65,536, 131,072, 160k, and 200k context.
@@ -91,6 +104,12 @@ node scripts/model-runtime-benchmark.mjs report "${args[@]}" --out /private/tmp/
 ```
 
 Use `plan` in place of `run` to inspect all ten exact server commands without loading the model. `--resume` preserves valid receipts and resumes an interrupted matrix. The code-corpus fixture leaves completion/template headroom below each `-c` hard limit; compare actual server-reported prompt tokens, not the nominal context size. The report compares raw PP, TTFT, TG, and marker recall. **Server RSS after** is a post-request OS sample, not an allocator high-water mark; compare it only between these fresh, otherwise-identical cells. `suite-index.json` lists all completed rows.
+
+For the llama.cpp host-cache lane, add `--suite cache`. It fixes `-ub 512`,
+Q8_0 K/V, Flash Attention, one slot, `-ctxcp 32`, and `-cms 8192`, then varies
+only `--cache-ram-mib 0,8192` across the requested `--cache-contexts`. A
+one-slot repeat/fork test measures live-slot reuse even at `-cram 0`; it does
+not by itself qualify an extra host-cache reservation.
 
 ## Tool protocol traces
 
