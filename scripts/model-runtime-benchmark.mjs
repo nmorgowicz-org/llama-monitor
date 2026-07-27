@@ -109,13 +109,59 @@ function makeCorpus(workload, targetWords, includeMarkers = true) {
 }
 
 function workloadText(workload, extension = false) {
-  const reference = extension
+  const reference = extension && workload.exact_extension_text
+    ? `${makeCorpus(workload, workload.target_words)}\n\n${workload.exact_extension_text}`
+    : workload.reference_text ?? (extension
     ? `${makeCorpus(workload, workload.target_words)}\n\n${makeCorpus(workload, workload.extension_words, false)}`
-    : makeCorpus(workload, workload.target_words);
+    : makeCorpus(workload, workload.target_words));
   const instruction = workload.instruction ?? (workload.markers?.length
     ? 'List every CHECK_* constant name and its numeric value found in the reference below, one per line as NAME=VALUE. Output nothing else.'
     : `Read the reference, then output exactly ${workload.output_words ?? 96} ordinary English words separated by spaces, with no explanation or punctuation.`);
   return `${instruction}\n\n${reference}`;
+}
+
+function prepareExactExtension(workload, runtime, model) {
+  if (!workload.exact_extension_tokens || workload.exact_extension_text) return;
+  if (!runtime.tokenizer_python || !model.tokenizer_snapshot_path) {
+    die('exact_extension_tokens requires --tokenizer-python and a pinned tokenizer snapshot.');
+  }
+  const baseText = workloadText(workload, false);
+  const script = String.raw`import json, sys
+from transformers import AutoTokenizer
+payload = json.load(sys.stdin)
+tok = AutoTokenizer.from_pretrained(payload['snapshot'], local_files_only=True)
+def count(text):
+    # Some community Qwen tokenizer snapshots expose a chat-template entry
+    # which renders an empty user turn through Transformers, while Rapid uses
+    # its own compatible formatter. Count the exact user-content suffix with
+    # the model tokenizer instead; the receipt separately records the server's
+    # actual rendered prompt-token delta.
+    return len(tok.encode(text, add_special_tokens=False))
+base = count(payload['base'])
+target = payload['target']
+def candidate(n): return ' cache' * n
+hi = max(target * 2, 64)
+while count(payload['base'] + '\n\n' + candidate(hi)) - base < target:
+    hi *= 2
+    if hi > target * 32 + 4096: raise RuntimeError('could not bracket exact suffix')
+lo = 0
+while lo < hi:
+    mid = (lo + hi) // 2
+    if count(payload['base'] + '\n\n' + candidate(mid)) - base < target: lo = mid + 1
+    else: hi = mid
+suffix = candidate(lo)
+delta = count(payload['base'] + '\n\n' + suffix) - base
+if delta != target: raise RuntimeError(f'exact suffix unavailable: requested {target}, got {delta}')
+print(json.dumps({'text': suffix, 'base_tokens': base, 'extension_tokens': delta, 'tokenization_scope': 'user_content'}))`;
+  const result = spawnSync(runtime.tokenizer_python, ['-c', script], {
+    input: JSON.stringify({ snapshot: model.tokenizer_snapshot_path, base: baseText, target: workload.exact_extension_tokens }),
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024,
+  });
+  if (result.status !== 0) die(`Exact-token suffix construction failed: ${result.stderr || result.stdout}`);
+  const prepared = JSON.parse(result.stdout);
+  workload.exact_extension_text = prepared.text;
+  workload.exact_extension_tokenizer = { requested_tokens: workload.exact_extension_tokens, ...prepared };
 }
 
 function parsePrometheus(text) {
@@ -314,6 +360,14 @@ function scoreFidelity(workload, response) {
     completion_length_passed: workload.minimum_completion_tokens
       ? (response.usage?.completion_tokens ?? 0) >= workload.minimum_completion_tokens
       : null,
+    expected_visual_terms: workload.expected_visual_terms ?? null,
+    visual_terms_passed: workload.expected_visual_terms
+      ? workload.expected_visual_terms.every((term) => (response.completion_text ?? '').toLowerCase().includes(term.toLowerCase()))
+      : null,
+    expected_content_terms: workload.expected_content_terms ?? null,
+    content_terms_passed: workload.expected_content_terms
+      ? workload.expected_content_terms.every((term) => (response.completion_text ?? '').toLowerCase().includes(term.toLowerCase()))
+      : null,
   };
 }
 
@@ -453,11 +507,11 @@ function sampleOsMemory(serverPid) {
   };
 }
 
-async function runAttempt(baseUrl, metricsPath, cell, phase, extension = false, serverPid = null) {
+async function runAttempt(baseUrl, metricsPath, cell, phase, extension = false, serverPid = null, requestOverride = null) {
   const before = await getMetrics(baseUrl, metricsPath);
   const osMemoryBefore = sampleOsMemory(serverPid);
   verifyExpectedMetrics(cell, before);
-  const request = await requestFor(cell, extension);
+  const request = requestOverride ?? await requestFor(cell, extension);
   const response = await streamRequest(baseUrl, request);
   const after = await getMetrics(baseUrl, metricsPath);
   const osMemoryAfter = sampleOsMemory(serverPid);
@@ -506,6 +560,7 @@ async function runAttempt(baseUrl, metricsPath, cell, phase, extension = false, 
     traceResponse = followupResponse;
   }
   const fidelity = scoreFidelity(cell.workload, response);
+  const conversationAssistantContent = response.completion_text;
   // Full completions are needed for scoring but are deliberately kept out of
   // durable receipts; the bounded preview remains the diagnostic artifact.
   delete response.completion_text;
@@ -514,7 +569,8 @@ async function runAttempt(baseUrl, metricsPath, cell, phase, extension = false, 
   }
   return {
     phase,
-    request: receiptRequest(request),
+    conversation_assistant_content: conversationAssistantContent,
+    request: { ...receiptRequest(request), image_fixture: cell.workload.image_fixture ?? null, workspace_fixture: cell.workload.workspace_fixture ?? null },
     response,
     fidelity,
     tool_trace: trace,
@@ -537,13 +593,29 @@ async function runManifest(manifest, selectedCells, serverPid = null) {
   const results = [];
   for (const cell of cells) {
     if (!cell.id || !cell.model || !cell.workload?.target_words) die(`Malformed cell: ${cell.id ?? 'unknown'}`);
+    prepareExactExtension(cell.workload, runtime, manifest.model);
     const sequence = cell.sequence ?? ['cold'];
     const attempts = [];
+    let coldAttempt = null;
     for (const phase of sequence) {
-      if (!['cold', 'repeat', 'extension'].includes(phase)) die(`Unsupported phase ${phase} in ${cell.id}`);
-      if (phase === 'extension' && !cell.workload.extension_words) die(`${cell.id} needs workload.extension_words for extension.`);
-      attempts.push(await runAttempt(runtime.base_url, runtime.metrics_path, cell, phase, phase === 'extension', serverPid));
+      if (!['cold', 'repeat', 'extension', 'followup', 'fork'].includes(phase)) die(`Unsupported phase ${phase} in ${cell.id}`);
+      if (phase === 'extension' && !cell.workload.extension_words && !cell.workload.exact_extension_text) die(`${cell.id} needs extension_words or exact_extension_tokens for extension.`);
+      let requestOverride = null;
+      if (phase === 'followup' || phase === 'fork') {
+        if (!coldAttempt?.conversation_assistant_content) die(`${cell.id} ${phase} requires a completed cold assistant turn.`);
+        const baseRequest = await requestFor(cell, false);
+        const priorMessages = [...baseRequest.messages, { role: 'assistant', content: coldAttempt.conversation_assistant_content }];
+        const suffix = cell.workload.exact_extension_text ?? makeCorpus(cell.workload, cell.workload.extension_words ?? 0, false);
+        const instruction = phase === 'followup'
+          ? 'Continue the coding task using the same project context. Inspect this follow-up note and answer concisely:'
+          : 'Review an alternative follow-up for the same completed coding task. Answer concisely:';
+        requestOverride = { ...baseRequest, messages: [...priorMessages, { role: 'user', content: `${instruction}\n\n${suffix}` }] };
+      }
+      const attempt = await runAttempt(runtime.base_url, runtime.metrics_path, cell, phase, phase === 'extension', serverPid, requestOverride);
+      attempts.push(attempt);
+      if (phase === 'cold') coldAttempt = attempt;
     }
+    for (const attempt of attempts) delete attempt.conversation_assistant_content;
     results.push({ id: cell.id, model: cell.model, configuration: cell.configuration, workload: cell.workload, attempts });
   }
   return {

@@ -32,6 +32,7 @@ const MODEL_PREFIX = 'models--';
 // headroom for the short marker-list answer once the budget closes thinking.
 const REASONING_BUDGET = 16000;
 const MAX_TOKENS = REASONING_BUDGET + 512;
+const SAFE_MLLM_PREFILL_STEPS = new Set([512, 1024, 1536, 2048]);
 
 function die(message) { throw new Error(message); }
 
@@ -55,6 +56,14 @@ function parseArgs(argv) {
     else if (key === '--port') options.port = Number(value);
     else if (key === '--gpu-memory-utilization') options.utilization = value;
     else if (key === '--image') options.image = value;
+    else if (key === '--expected-visual-term') (options.expectedVisualTerms ??= []).push(value);
+    else if (key === '--mllm-prefill-step-size') options.mllmPrefillStepSize = Number(value);
+    else if (key === '--tokenizer-python') options.tokenizerPython = value;
+    else if (key === '--workspace-pack') options.workspacePack = value;
+    else if (key === '--cache-contexts') options.cacheContexts = value.split(',').map((item) => Number(item));
+    else if (key === '--cache-memory-mb') options.cacheMemoryMb = value.split(',').map((item) => Number(item));
+    else if (key === '--cache-dtypes') options.cacheDtypes = value.split(',');
+    else if (key === '--cache-disk-checkpoint-intervals') options.cacheDiskCheckpointIntervals = value.split(',').map((item) => Number(item));
     else if (key === '--revision') options.revision = value;
     else if (key === '--chat-template') options.chatTemplate = value;
     else die(`Unknown option: ${key}`);
@@ -101,7 +110,23 @@ function workload(tokens, overrides = {}) {
   };
 }
 
-function configuration({ dtype = 'int8', pflash = 'off', turboquant = 'none', cache = false, maxTokens = MAX_TOKENS, mllm = false, prefillStepSize = DEFAULT_PREFILL_STEP_SIZE }) {
+function configuration({
+  dtype = 'int8',
+  pflash = 'off',
+  turboquant = 'none',
+  cache = false,
+  cacheMemoryMb = 8192,
+  hybridCacheEntries = 16,
+  diskCheckpointInterval = 0,
+  maxTokens = MAX_TOKENS,
+  mllm = false,
+  prefillStepSize = DEFAULT_PREFILL_STEP_SIZE,
+  mllmPrefillStepSize = null,
+}) {
+  if (mllm && pflash !== 'off') die('MLLM benchmark cells must disable PFlash.');
+  if (mllm && !SAFE_MLLM_PREFILL_STEPS.has(mllmPrefillStepSize)) {
+    die('MLLM benchmark cells allow only --prefill-step-size 512, 1024, 1536, or 2048.');
+  }
   const expectedMetrics = {
     [`rapid_mlx_turboquant_mode{mode="${turboquant === 'none' ? 'disabled' : turboquant}"}`]: 1,
   };
@@ -112,23 +137,58 @@ function configuration({ dtype = 'int8', pflash = 'off', turboquant = 'none', ca
   return {
     kv_cache_dtype_requested: dtype,
     turboquant_requested: turboquant,
-    prefix_cache: cache ? 'enabled; cache-memory-mb=4096; hybrid-cache-entries=4' : 'disabled',
+    // Long-context cache controls start with the agreed 8 GiB floor. Later
+    // rows may raise this only from observed occupancy/eviction evidence.
+    prefix_cache: cache ? `enabled; cache-memory-mb=${cacheMemoryMb}; hybrid-cache-entries=${hybridCacheEntries}` : 'disabled',
+    cache_memory_mb: cache ? cacheMemoryMb : null,
+    hybrid_cache_entries: cache ? hybridCacheEntries : null,
+    disk_checkpoint_interval: diskCheckpointInterval,
     pflash,
     server_max_tokens: maxTokens,
     concurrency: 1,
     mllm,
     prefill_step_size: prefillStepSize,
+    // This is a separately recorded MLLM setting. Never relax the ceiling
+    // above 2048: larger values caused unsafe unified-memory spikes on M5
+    // Max before request processing began.
+    mllm_prefill_step_size: mllmPrefillStepSize,
     expected_metrics: expectedMetrics,
   };
 }
 
 function cell(model, id, tokens, config, overrides = {}) {
-  return { id, model, configuration: config, sequence: ['cold'], workload: workload(tokens, overrides) };
+  return { id, model, target_tokens: tokens, configuration: config, sequence: ['cold'], workload: workload(tokens, overrides) };
 }
 
-function suiteCells(model, suite, imagePath) {
+async function imageFixtureMetadata(imagePath) {
+  const sourcePath = resolve(imagePath);
+  const bytes = await readFile(sourcePath);
+  const isPng = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  if (!isPng || bytes.length < 24) die(`Image fixture must be a readable PNG: ${sourcePath}`);
+  return {
+    source_path: sourcePath,
+    sha256: createHash('sha256').update(bytes).digest('hex'),
+    bytes: bytes.length,
+    mime_type: 'image/png',
+    width: bytes.readUInt32BE(16),
+    height: bytes.readUInt32BE(20),
+  };
+}
+
+async function suiteCells(model, suite, imagePath, expectedVisualTerms = [], mllmPrefillStepSize = 1024, workspacePackPath = 'tests/fixtures/calibration/workspace-cache/project-pack.json') {
   const include = (name) => suite === 'all' || suite === name;
   const cells = [];
+  let workspacePack = null;
+  if (include('cache')) {
+    const parsed = JSON.parse(await readFile(resolve(workspacePackPath), 'utf8'));
+    const words = parsed.corpus.trim().split(/\s+/).length;
+    workspacePack = {
+      sha256: parsed.corpus_sha256,
+      files: parsed.files,
+      corpus: parsed.corpus,
+      words,
+    };
+  }
   if (include('smoke')) cells.push(cell(model, 'smoke-8k-int8', 8000, configuration({ dtype: 'int8' })));
   if (include('context')) {
     // 131072/160000/200000 here use pflash 'off' (the configuration()
@@ -184,9 +244,11 @@ function suiteCells(model, suite, imagePath) {
   // Baseline quant-effect pass at the prefill-step-size winner from the
   // calibration above (512 — lowest peak memory at every tier, competitive-
   // to-better PP throughput; see prefill-step-size comparison). dtype is
-  // fixed at int8 rather than swept: rapid-mlx's --kv-cache-dtype is
-  // currently a batch-path no-op (live KV cache stays bf16 regardless of the
-  // requested dtype), so int4 would not exercise a different code path here.
+  // fixed at int8 rather than swept. The preceding 0.10.17 release had a
+  // batch-path no-op (live KV remained bf16), but the 0.11.0 source build
+  // under qualification includes the upstream live-KV fix. Keep the legacy
+  // calibration interpretation version-scoped; cache cells intentionally
+  // cover both int8 and int4 on the fixed source build.
   // TurboQuant and pflash are separate, real mechanisms (retained prefix-
   // cache compression and long-context KV compression respectively) and are
   // the two axes actually worth baselining until upstream fixes KV
@@ -205,10 +267,33 @@ function suiteCells(model, suite, imagePath) {
     for (const tokens of [65536, 131072, 160000, 200000]) cells.push(cell(model, `pflash-${tokens}-int4`, tokens, configuration({ dtype: 'int4', pflash: 'auto' })));
   }
   if (include('cache')) {
-    for (const turboquant of ['none', 'k8v4']) {
-      const cached = cell(model, `cache-8k-${turboquant}`, 8000, configuration({ dtype: 'int8', turboquant, cache: true }), { extension_words: 500 });
-      cached.sequence = ['cold', 'repeat', 'extension'];
-      cells.push(cached);
+    const capacitiesFor = (tokens) => tokens === 131072 ? [8192, 12288, 16384] : (tokens >= 160000 ? [8192, 16384] : [8192]);
+    for (const tokens of [8000, 32000, 65536, 131072, 160000, 200000]) {
+      for (const cacheMemoryMb of capacitiesFor(tokens)) {
+        // Qwen's tokenizer measured this frozen pack at ~101,070 tokens.
+        // Preserve source formatting while taking a proportional final slice;
+        // the server receipt remains the authoritative rendered-token count.
+        const targetTokens = tokens === 131072 ? 131000 : tokens;
+        const estimatedPackTokens = 101070;
+        const fullCopies = Math.floor(targetTokens / estimatedPackTokens);
+        const remainder = targetTokens % estimatedPackTokens;
+        const tailChars = Math.floor(workspacePack.corpus.length * (remainder / estimatedPackTokens));
+        const referenceText = [
+          ...Array.from({ length: fullCopies }, () => workspacePack.corpus),
+          ...(tailChars > 0 ? [workspacePack.corpus.slice(0, tailChars)] : []),
+        ].join('\n\n===== repeated workspace context =====\n\n');
+        const repeats = fullCopies + (tailChars > 0 ? 1 : 0);
+        for (const dtype of ['int8', 'int4']) {
+          const cached = cell(model, `cache-${tokens}-ram-${cacheMemoryMb}-${dtype}`, tokens, configuration({ dtype, cache: true, cacheMemoryMb, diskCheckpointInterval: 0 }), {
+            exact_extension_tokens: 512,
+            reference_text: referenceText,
+            workspace_fixture: { corpus_sha256: workspacePack.sha256, files: workspacePack.files, repetitions: repeats },
+            instruction: 'You are working in this coding project. Review the supplied source and plans, identify the requested implementation boundary, and give a concise implementation plan with concrete files to change.',
+          });
+          cached.sequence = ['cold', 'repeat', 'followup', 'fork'];
+          cells.push(cached);
+        }
+      }
     }
   }
   // TurboQuant only compresses the retained/reused prefix-cache snapshot, so
@@ -268,9 +353,73 @@ function suiteCells(model, suite, imagePath) {
     }
   }
   if (include('image') && imagePath) {
-    cells.push(cell(model, 'image-smoke-8k', 8000, configuration({ dtype: 'int8', mllm: true }), { image_path: imagePath }));
+    const imageFixture = await imageFixtureMetadata(imagePath);
+    const imageWorkload = (overrides = {}) => ({
+      image_path: imageFixture.source_path,
+      image_fixture: imageFixture,
+      // The visual question makes this a vision-fidelity probe, rather than a
+      // text-retrieval request that happens to carry an ignored image.
+      instruction: 'Identify the exact large product title in the top-left logo area of the screenshot, then list every CHECK_* constant name and numeric value in the reference below. Include the product title and output one CHECK_* NAME=VALUE per line.',
+      expected_visual_terms: expectedVisualTerms,
+      ...overrides,
+    });
+    const imageAgentReference = [
+      'File: src/components/header.tsx',
+      'export const brandTitle = "Lama Monitor";',
+      'export function Header() {',
+      '  return <h1>{brandTitle}</h1>;',
+      '}',
+    ].join('\n');
+    const imageConfig = (dtype, maxTokens) => configuration({
+      dtype,
+      mllm: true,
+      maxTokens,
+      prefillStepSize: DEFAULT_PREFILL_STEP_SIZE,
+      mllmPrefillStepSize,
+    });
+    // Rapid's current MLLM admission path rejects any rendered prompt wider
+    // than this safe prefill step. Real image-plus-instruction work begins at
+    // 1024: the selected screenshot alone consumed roughly 486 rendered
+    // tokens, leaving no useful instruction headroom at 512. Therefore this
+    // is a real vision-capability
+    // smoke, not a false long-context image matrix. Long image context stays
+    // refused until Rapid exposes a safe chunked-admission mechanism.
+    cells.push({
+      id: 'image-visual-smoke-int8',
+      model,
+      configuration: imageConfig('int8', 1024),
+      sequence: ['cold'],
+      workload: workload(8000, imageWorkload({
+        target_words: 32,
+        markers: [],
+        max_tokens: 1024,
+        extra_body: { reasoning_max_tokens: 512 },
+      })),
+    });
+    // This is the representative image-use cell: ordinary agent-scale
+    // output/reasoning, an actual screenshot, and a 1024-token MLLM admission
+    // width. It is intentionally short only because current Rapid MLLM still
+    // rejects rendered prompts wider than that width rather than chunking them.
+    cells.push({
+      id: 'image-agent-smoke-int8',
+      model,
+      configuration: imageConfig('int8', MAX_TOKENS),
+      sequence: ['cold'],
+      workload: workload(8000, imageWorkload({
+        target_words: 32,
+        markers: [],
+        reference_text: imageAgentReference,
+        instruction: 'A user pasted this UI screenshot and asks you to fix the typo in the code below so the visible product name and header match. Identify the large top-left product title in the screenshot, then return a concise unified diff that fixes the code. Do not speculate or repeatedly re-read the prompt.',
+        max_tokens: MAX_TOKENS,
+        expected_content_terms: ['brandTitle', 'Llama Monitor'],
+        extra_body: { reasoning_max_tokens: REASONING_BUDGET },
+      })),
+    });
   }
   if (suite === 'image' && !imagePath) die('The image suite requires --image PATH.');
+  if (suite === 'image' && !expectedVisualTerms.length) {
+    die('The image suite requires one or more --expected-visual-term values for the tracked fixture.');
+  }
   return cells;
 }
 
@@ -328,7 +477,10 @@ const DEFAULT_PREFILL_STEP_SIZE = '512';
 
 function argvFor(model, config, port, utilization, servedModelName = null, profile = {}) {
   const cache = config.prefix_cache.startsWith('enabled');
-  return ['--no-telemetry', 'serve', model, ...(servedModelName ? ['--served-model-name', servedModelName] : []), '--port', String(port), '--host', '127.0.0.1', '--max-num-seqs', '1', '--max-concurrent-requests', '1', cache ? '--enable-prefix-cache' : '--disable-prefix-cache', ...(cache ? ['--cache-memory-mb', '4096', '--hybrid-cache-entries', '4'] : []), '--pflash', config.pflash, ...(config.pflash === 'auto' ? ['--pflash-threshold', '32768'] : []), '--prefill-step-size', config.prefill_step_size ?? DEFAULT_PREFILL_STEP_SIZE, '--max-tokens', String(config.server_max_tokens ?? 128), '--kv-cache-dtype', config.kv_cache_dtype_requested, '--kv-cache-turboquant', config.turboquant_requested, config.mllm ? '--mllm' : '--no-mllm', '--gpu-memory-utilization', String(utilization), ...(profile.tool_call_parser ? ['--tool-call-parser', profile.tool_call_parser, '--enable-auto-tool-choice'] : []), ...(profile.reasoning_parser ? ['--reasoning-parser', profile.reasoning_parser] : []), ...(profile.force_hybrid ? ['--force-hybrid'] : []), '--log-level', 'INFO'];
+  const prefillStepSize = config.mllm
+    ? config.mllm_prefill_step_size
+    : (config.prefill_step_size ?? DEFAULT_PREFILL_STEP_SIZE);
+  return ['--no-telemetry', 'serve', model, ...(servedModelName ? ['--served-model-name', servedModelName] : []), '--port', String(port), '--host', '127.0.0.1', '--max-num-seqs', '1', '--max-concurrent-requests', '1', cache ? '--enable-prefix-cache' : '--disable-prefix-cache', ...(cache ? ['--cache-memory-mb', String(config.cache_memory_mb ?? 8192), '--hybrid-cache-entries', String(config.hybrid_cache_entries ?? 16)] : []), '--kv-disk-checkpoint-interval', String(config.disk_checkpoint_interval ?? 0), '--pflash', config.pflash, ...(config.pflash === 'auto' ? ['--pflash-threshold', '32768'] : []), '--prefill-step-size', String(prefillStepSize), '--max-tokens', String(config.server_max_tokens ?? 128), '--kv-cache-dtype', config.kv_cache_dtype_requested, '--kv-cache-turboquant', config.turboquant_requested, config.mllm ? '--mllm' : '--no-mllm', '--gpu-memory-utilization', String(utilization), ...(profile.tool_call_parser ? ['--tool-call-parser', profile.tool_call_parser, '--enable-auto-tool-choice'] : []), ...(profile.reasoning_parser ? ['--reasoning-parser', profile.reasoning_parser] : []), ...(profile.force_hybrid ? ['--force-hybrid'] : []), '--log-level', 'INFO'];
 }
 
 async function localModelIdentity(model, requestedRevision) {
@@ -390,14 +542,14 @@ async function patchChatTemplateInSnapshot(identity, templatePath) {
   };
 }
 
-function manifestFor(model, identity, runtimeVersion, rapidMlxBin, config, cells, port, utilization, serverModelPath, chatTemplate, profile = {}) {
+function manifestFor(model, identity, runtimeVersion, rapidMlxBin, config, cells, port, utilization, serverModelPath, chatTemplate, profile = {}, tokenizerPython = null) {
   const argv = [rapidMlxBin, ...argvFor(serverModelPath ?? model, config, port, utilization, model, profile)];
   return {
     schema_version: 1,
     benchmark: { name: `Rapid-MLX generated ${cells[0].id}`, purpose: 'Generated by rapid-mlx-benchmark-suite.mjs; do not hand-edit.' },
-    runtime: { backend: 'rapid-mlx', version: runtimeVersion, base_url: `http://127.0.0.1:${port}`, health_path: '/health', metrics_path: '/metrics', fresh_server_per_cell: true, exact_argv: argv },
+    runtime: { backend: 'rapid-mlx', version: runtimeVersion, base_url: `http://127.0.0.1:${port}`, health_path: '/health', metrics_path: '/metrics', fresh_server_per_cell: true, exact_argv: argv, ...(tokenizerPython ? { tokenizer_python: tokenizerPython } : {}) },
     hardware: { cpu: 'recorded by operator', unified_memory_bytes: null },
-    model: { hf_repo_id: model, revision: identity.revision, config_sha256: identity.config_sha256, profile_overrides: profile, ...(chatTemplate ? { chat_template_override: chatTemplate } : {}) },
+    model: { hf_repo_id: model, revision: identity.revision, config_sha256: identity.config_sha256, tokenizer_snapshot_path: identity.snapshot_path, profile_overrides: profile, ...(chatTemplate ? { chat_template_override: chatTemplate } : {}) },
     cells,
   };
 }
@@ -499,10 +651,25 @@ async function runSuite(options, manifests, tempDir) {
 const { command, options } = parseArgs(process.argv);
 const rapidMlxBin = options.rapidMlxBin ?? 'rapid-mlx';
 const identity = await localModelIdentity(options.model, options.revision);
-const allCells = suiteCells(options.model, options.suite, options.image);
-const cells = options.cells
+const allCells = await suiteCells(options.model, options.suite, options.image, options.expectedVisualTerms, options.mllmPrefillStepSize ?? 1024, options.workspacePack);
+let cells = options.cells
   ? allCells.filter((cell) => options.cells.includes(cell.id))
   : allCells;
+if (options.cacheContexts || options.cacheMemoryMb || options.cacheDtypes || options.cacheDiskCheckpointIntervals) {
+  if (options.suite !== 'cache') die('cache selectors require --suite cache.');
+  cells = cells.filter((cell) => (
+    (!options.cacheContexts || options.cacheContexts.includes(cell.target_tokens))
+    && (!options.cacheMemoryMb || options.cacheMemoryMb.includes(cell.configuration.cache_memory_mb))
+    && (!options.cacheDtypes || options.cacheDtypes.includes(cell.configuration.kv_cache_dtype_requested))
+  ));
+}
+if (options.cacheDiskCheckpointIntervals) {
+  cells = cells.flatMap((cell) => options.cacheDiskCheckpointIntervals.map((interval) => ({
+    ...cell,
+    id: `${cell.id}-checkpoint-${interval}`,
+    configuration: { ...cell.configuration, disk_checkpoint_interval: interval },
+  })));
+}
 if (!cells.length) die(`No cells selected for ${options.suite}; check --cell values.`);
 if (options.cells) {
   const known = new Set(allCells.map((cell) => cell.id));
@@ -516,7 +683,7 @@ const runtimeVersion = installedRapidMlxVersion(rapidMlxBin);
 if (command === 'plan') {
   const manifests = cells.map((item, index) => ({
     label: `${String(index).padStart(2, '0')}-${item.id}`,
-    manifest: manifestFor(options.model, identity, runtimeVersion, rapidMlxBin, item.configuration, [item], options.port, options.utilization, null, options.chatTemplate ? { source_path: resolve(options.chatTemplate), note: 'materialized as an isolated overlay at run time' } : null, profile),
+    manifest: manifestFor(options.model, identity, runtimeVersion, rapidMlxBin, item.configuration, [item], options.port, options.utilization, null, options.chatTemplate ? { source_path: resolve(options.chatTemplate), note: 'materialized as an isolated overlay at run time' } : null, profile, options.tokenizerPython ?? null),
   }));
   process.stdout.write(`${JSON.stringify({ model: options.model, identity, suite: options.suite, manifests: manifests.map(({ label, manifest }) => ({ label, cells: manifest.cells.map((item) => item.id), argv: manifest.runtime.exact_argv })) }, null, 2)}\n`);
 } else {
@@ -525,7 +692,7 @@ if (command === 'plan') {
     const template = await patchChatTemplateInSnapshot(identity, options.chatTemplate);
     const manifests = cells.map((item, index) => ({
       label: `${String(index).padStart(2, '0')}-${item.id}`,
-      manifest: manifestFor(options.model, identity, runtimeVersion, rapidMlxBin, item.configuration, [item], options.port, options.utilization, template.modelPath, template.metadata, profile),
+      manifest: manifestFor(options.model, identity, runtimeVersion, rapidMlxBin, item.configuration, [item], options.port, options.utilization, template.modelPath, template.metadata, profile, options.tokenizerPython ?? null),
     }));
     try { await runSuite(options, manifests, tempDir); } finally { await template.restore(); }
   } finally { if (!options.keepManifests) await rm(tempDir, { recursive: true, force: true }); }
