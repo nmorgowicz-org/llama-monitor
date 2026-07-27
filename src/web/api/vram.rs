@@ -117,9 +117,9 @@ fn api_vram_estimate_breakdown(
                     Default::default()
                 };
 
-                // Rapid-MLX prefix-cache compression budget (optional; 0 = no reservation).
-                let mlx_prefix_cache_tokens = body["mlx_prefix_cache_tokens"].as_u64().unwrap_or(0);
-                let mlx_prefix_cache_bits = body["mlx_prefix_cache_bits"].as_u64().unwrap_or(8) as u8;
+                // Rapid retained-cache is an explicit optional MiB reservation.
+                // It is never derived from a generic percentage of device memory.
+                let retained_cache_mib = body["retained_cache_mib"].as_u64().unwrap_or(0);
 
                 // Resolve (model_size_bytes, arch, evidence) from a local file/directory
                 // (preferred) or, failing that, by fetching metadata straight from HuggingFace.
@@ -131,7 +131,7 @@ fn api_vram_estimate_breakdown(
                 //
                 // We mirror model_resolver.rs: first try as local directory;
                 // if it fails and looks like an alias, treat it as an HF repo ID.
-                let (model_size_bytes, mut arch, evidence) = if is_rapid_mlx {
+                let (model_size_bytes, mut arch, evidence, native_context_limit) = if is_rapid_mlx {
                     // Rapid-MLX is Apple-Silicon/unified-memory only.
                     is_unified_memory = true;
 
@@ -182,7 +182,7 @@ fn api_vram_estimate_breakdown(
                         } else {
                             crate::llama::vram_estimator::EstimateEvidence::Degraded
                         };
-                        (size, arch, ev)
+                        (size, arch, ev, profile.model_context_limit.map(u64::from))
                     } else if is_mlx_hf_repo_alias(&model_path) {
                         // model_path is not a local directory but looks like an HF-repo-style alias
                         // (e.g. "mlx-community/Qwen3-30B-A3B-4bit"). Treat it as hf_repo_id.
@@ -191,7 +191,7 @@ fn api_vram_estimate_breakdown(
                             &effective_repo,
                             model_size_override,
                         ).await;
-                        let (size, arch, ev) = match mlx_hf_estimate_from_repo(
+                        let (size, arch, ev, native_context_limit) = match mlx_hf_estimate_from_repo(
                             &effective_repo,
                             &hf_repo_revision,
                             size,
@@ -206,11 +206,11 @@ fn api_vram_estimate_breakdown(
                                 ));
                             }
                         };
-                        (size, arch, ev)
+                        (size, arch, ev, native_context_limit)
                     } else if !hf_repo_id.is_empty() {
                         // Caller provided explicit hf_repo_id
                         let size = resolve_mlx_hf_size(&hf_repo_id, model_size_override).await;
-                        let (size, arch, ev) = match mlx_hf_estimate_from_repo(
+                        let (size, arch, ev, native_context_limit) = match mlx_hf_estimate_from_repo(
                             &hf_repo_id,
                             &hf_repo_revision,
                             size,
@@ -225,7 +225,7 @@ fn api_vram_estimate_breakdown(
                                 ));
                             }
                         };
-                        (size, arch, ev)
+                        (size, arch, ev, native_context_limit)
                     } else {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::json(&serde_json::json!({
@@ -246,13 +246,14 @@ fn api_vram_estimate_breakdown(
                             ));
                         }
                     };
-                    let (arch, ev) = match crate::llama::gguf_meta::read_gguf_metadata(
+                    let (arch, ev, native_context_limit) = match crate::llama::gguf_meta::read_gguf_metadata(
                         std::path::Path::new(&model_path),
                     ) {
                         Ok(meta) => (
                             meta.to_model_metadata()
                                 .to_arch(&model_path, meta.param_b().unwrap_or(0.0)),
                             crate::llama::vram_estimator::EstimateEvidence::Measured,
+                            meta.context_length.map(u64::from),
                         ),
                         Err(_) => (
                             crate::llama::vram_estimator::ModelArch::from_name_and_params(
@@ -260,9 +261,10 @@ fn api_vram_estimate_breakdown(
                                 crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
                             ),
                             crate::llama::vram_estimator::EstimateEvidence::Degraded,
+                            None,
                         ),
                     };
-                    (size, arch, ev)
+                    (size, arch, ev, native_context_limit)
                 } else if !hf_repo_id.is_empty() && !hf_file_path.is_empty() {
                     // Size must be supplied by the caller (from the HF file listing).
                     let size = model_size_override.unwrap_or(0);
@@ -274,13 +276,14 @@ fn api_vram_estimate_breakdown(
                             })),
                         ));
                     }
-                    let (arch, ev) =
+                    let (arch, ev, native_context_limit) =
                         match crate::hf::fetch_gguf_header_metadata(&hf_repo_id, &hf_file_path).await
                         {
                             Ok(meta) => (
                                 meta.to_model_metadata()
                                     .to_arch(&hf_file_path, meta.param_b().unwrap_or(0.0)),
                                 crate::llama::vram_estimator::EstimateEvidence::Measured,
+                                meta.context_length.map(u64::from),
                             ),
                             // Range-fetch failed (offline / gated / no range support): fall back
                             // to the name heuristic so the caller still gets a (rougher) estimate.
@@ -290,9 +293,10 @@ fn api_vram_estimate_breakdown(
                                     crate::llama::vram_estimator::estimate_param_b_from_size(size, 4.85),
                                 ),
                                 crate::llama::vram_estimator::EstimateEvidence::Degraded,
+                                None,
                             ),
                         };
-                    (size, arch, ev)
+                    (size, arch, ev, native_context_limit)
                 } else {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
@@ -310,14 +314,8 @@ fn api_vram_estimate_breakdown(
                 }
 
                 let mlx_cache_bytes = if is_rapid_mlx {
-                    crate::llama::vram_estimator::mlx_prefix_cache_bytes(
-                        &arch,
-                        mlx_prefix_cache_tokens,
-                        mlx_prefix_cache_bits,
-                    )
-                } else {
-                    0
-                };
+                    retained_cache_mib.saturating_mul(1024 * 1024)
+                } else { 0 };
 
                 // Builder item 11: accept optional workload_scenario. Scenario-derived parameters
                 // only apply when explicit client values are omitted (Phase 2 omission-only rule).
@@ -343,29 +341,7 @@ fn api_vram_estimate_breakdown(
                         serde_json::from_value::<crate::llama::vram_estimator::MtpConfig>(serde_json::Value::Object(obj.clone())).ok()
                     });
 
-                // Phase 5b Part C: max_cache_blocks from preset config for prelaunch estimates.
-                let max_cache_blocks = body["max_cache_blocks"].as_u64().map(|v| v as u32);
-
-                // Phase 6 Part B: prefix cache budget — user explicit value wins (hard gate).
-                // When caller provides configured_ceiling_bytes, derive D30 budget = ceiling × 0.10.
-                // When caller provides prefix_cache_budget_bytes explicitly, that overrides D30.
-                let configured_ceiling_bytes = body["configured_ceiling_bytes"].as_u64().unwrap_or(0);
-                let user_explicit_budget = body["prefix_cache_budget_bytes"].as_u64();
-                let prefix_cache_budget_bytes = if is_rapid_mlx {
-                    if let Some(explicit) = user_explicit_budget {
-                        // User explicit values win (hard gate).
-                        explicit
-                    } else if configured_ceiling_bytes > 0 {
-                        // D30: auto-computed from configured_ceiling_bytes.
-                        (configured_ceiling_bytes as f64
-                            * crate::inference::rapid_mlx::capabilities::PREFIX_CACHE_BUDGET_FRACTION)
-                            as u64
-                    } else {
-                        0
-                    }
-                } else {
-                    0
-                };
+                let prefix_cache_budget_bytes = mlx_cache_bytes;
 
                 // Use the execution policy's effective TurboQuant mode for the estimator.
                 // Per D31: effective_turboquant already has eligibility applied.
@@ -396,7 +372,6 @@ fn api_vram_estimate_breakdown(
                             serde_json::from_str::<crate::llama::vram_estimator::ConcurrencyPolicy>(&format!("\"{s}\"")).ok()
                         })
                         .unwrap_or_default(),
-                    max_cache_blocks,
                     prefix_cache_budget_bytes,
                 };
 
@@ -466,7 +441,6 @@ fn api_vram_estimate_breakdown(
                         "recommendation": serde_json::to_value(&breakdown.recommendation).unwrap_or(serde_json::Value::Null),
                         "note": breakdown.note,
                         "mlx_prefix_cache_bytes": breakdown.mlx_prefix_cache_bytes,
-                        "max_cache_blocks_bytes": breakdown.max_cache_blocks_bytes,
                         "evidence": serde_json::to_value(breakdown.evidence).unwrap_or(serde_json::Value::Null),
                         "effective_turboquant": serde_json::to_value(breakdown.effective_turboquant).unwrap_or(serde_json::Value::Null),
                         "mtp_mode": serde_json::to_value(breakdown.mtp_mode).unwrap_or(serde_json::Value::Null),
@@ -476,7 +450,9 @@ fn api_vram_estimate_breakdown(
                          "execution_policy": execution_policy_json,
                          "workload_scenario": workload_scenario_json,
                          "effective_kv_dtype": effective_kv_dtype_json,
-                         "prefix_cache_budget_bytes": breakdown.prefix_cache_budget_bytes,
+                        "prefix_cache_budget_bytes": breakdown.prefix_cache_budget_bytes,
+                        "native_context_limit": native_context_limit,
+                        "context_extension_required": native_context_limit.is_some_and(|limit| n_ctx > limit),
                        }))),
                 )
             }
@@ -747,8 +723,12 @@ fn api_vram_auto_size(
                 let mut enriched_body = body.clone();
                 enriched_body["gguf_arch"] = serde_json::json!(resolved_arch);
 
-                // Also cap auto-size at the model's training context length
-                let context_cap = gguf_context_length.map(|c| c as u64);
+                // Also cap auto-size at the model's native context length. GGUF
+                // supplies this directly; MLX callers forward the ceiling from
+                // the same metadata-backed /api/vram-estimate response.
+                let context_cap = gguf_context_length
+                    .map(u64::from)
+                    .or_else(|| body["native_context_limit"].as_u64());
 
                 // When the GGUF file is present, build the arch straight from its real
                 // metadata (full_attention_interval, ssm.*, per-layer head_count_kv,
@@ -1271,7 +1251,7 @@ async fn resolve_mlx_hf_size(repo_id: &str, model_size_override: Option<u64>) ->
 }
 
 /// Shared HF-repo introspection for MLX: fetch config, build arch, etc.
-/// Returns (size, arch, evidence) or an error string.
+/// Returns (size, arch, evidence, native_context_limit) or an error string.
 async fn mlx_hf_estimate_from_repo(
     repo_id: &str,
     revision: &str,
@@ -1281,6 +1261,7 @@ async fn mlx_hf_estimate_from_repo(
         u64,
         crate::llama::vram_estimator::ModelArch,
         crate::llama::vram_estimator::EstimateEvidence,
+        Option<u64>,
     ),
     String,
 > {
@@ -1307,7 +1288,7 @@ async fn mlx_hf_estimate_from_repo(
             } else {
                 0
             };
-            Ok((size, arch, ev))
+            Ok((size, arch, ev, profile.model_context_limit.map(u64::from)))
         }
         Err(_) => {
             let arch = crate::llama::vram_estimator::ModelArch::from_name_and_params(
@@ -1318,6 +1299,7 @@ async fn mlx_hf_estimate_from_repo(
                 size,
                 arch,
                 crate::llama::vram_estimator::EstimateEvidence::Degraded,
+                None,
             ))
         }
     }
@@ -1424,7 +1406,8 @@ mod mlx_estimate_tests {
                 "num_hidden_layers": 28,
                 "num_attention_heads": 16,
                 "num_key_value_heads": 8,
-                "head_dim": 128
+                "head_dim": 128,
+                "max_position_embeddings": 131072
             }"#,
         )
         .unwrap();
@@ -1454,6 +1437,8 @@ mod mlx_estimate_tests {
         assert_eq!(json["ok"], serde_json::json!(true));
         assert_eq!(json["mlx_prefix_cache_bytes"], serde_json::json!(0));
         assert_eq!(json["evidence"], serde_json::json!("approximate"));
+        assert_eq!(json["native_context_limit"], serde_json::json!(131072));
+        assert_eq!(json["context_extension_required"], serde_json::json!(false));
         assert!(json["weights_bytes"].as_u64().unwrap() > 0);
     }
 

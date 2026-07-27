@@ -1559,6 +1559,46 @@ fn active_and_retained_totals_are_distinct_no_double_counting() {
 }
 
 #[test]
+fn explicit_rapid_cache_cap_replaces_token_derived_retained_reservation() {
+    let arch = ModelArch {
+        n_layers: 32,
+        n_kv_heads: 8,
+        head_dim: 128,
+        ..Default::default()
+    };
+    let cache_cap = 8 * 1024 * 1024 * 1024;
+    let bd = full_estimate(
+        estimate_model_size_bytes(7.0, "q4_k_m"),
+        &arch,
+        0,
+        "q8_0",
+        "q8_0",
+        1,
+        512,
+        0,
+        -1,
+        64 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: cache_cap,
+            rapid_planning_context_tokens: 131_072,
+            rapid_retained_cache_tokens: 131_072,
+            ..Default::default()
+        },
+    );
+
+    assert_eq!(bd.mlx_prefix_cache_bytes, cache_cap);
+    assert_eq!(
+        bd.retained_kv_bytes, 0,
+        "configured cache cap and token-derived retained KV must not both be reserved"
+    );
+    assert_eq!(bd.kv_cache_bytes, bd.active_kv_bytes);
+}
+
+#[test]
 fn standard_mode_not_mislabeled_as_fp16() {
     let mode = execution_policy::TurboQuantMode::Disabled;
     let savings = mode.retained_kv_savings_fraction();

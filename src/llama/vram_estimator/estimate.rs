@@ -351,9 +351,6 @@ pub struct EstimatorOptions {
     pub client_type: super::workload_scenarios::ClientType,
     /// D25: Concurrency policy for MTP admission.
     pub concurrency_policy: super::workload_scenarios::ConcurrencyPolicy,
-    /// Phase 5b Part C: max_cache_blocks from the preset. Used for prelaunch estimates
-    /// to account for Rapid-MLX cache reservations. Only applies to Rapid-MLX backend.
-    pub max_cache_blocks: Option<u32>,
     /// Phase 6 Part A: D30 prefix cache budget from MemoryAvailabilitySnapshot.
     /// Budget = configured_ceiling_bytes × prefix_cache_fraction.
     /// Used to derive prefix_cache_budget_bytes in VramBreakdown.
@@ -375,7 +372,6 @@ impl Default for EstimatorOptions {
             mtp_config: None,
             client_type: Default::default(),
             concurrency_policy: Default::default(),
-            max_cache_blocks: None,
             prefix_cache_budget_bytes: 0,
         }
     }
@@ -444,6 +440,7 @@ pub fn mlx_overhead_bytes(arch: &ModelArch, ubatch_size: u32, kv_cache_bytes: u6
 /// caller wants budgeted (0 = no reservation, the default when the caller hasn't configured a
 /// cache budget). `compression_bits` is 4 or 8; any other value is treated as 8 (uncompressed
 /// int8 baseline) to fail safe (never under-reserve).
+#[cfg(test)]
 pub fn mlx_prefix_cache_bytes(arch: &ModelArch, cached_tokens: u64, compression_bits: u8) -> u64 {
     if cached_tokens == 0 || arch.n_layers == 0 {
         return 0;
@@ -529,11 +526,6 @@ pub struct VramBreakdown {
     /// `mlx_prefix_cache_bytes` for why cached (compressed) entries don't shrink active KV.
     #[serde(default)]
     pub mlx_prefix_cache_bytes: u64,
-    /// Phase 5b Part C: memory reservation for max_cache_blocks from the preset.
-    /// Only applies to Rapid-MLX; accounts for the cache block limit set in the preset config.
-    /// 0 when max_cache_blocks is not configured or backend is llama.cpp.
-    #[serde(default)]
-    pub max_cache_blocks_bytes: u64,
     /// How much of this breakdown is backed by real hardware measurements vs. a formula-based
     /// approximation or a degraded (heuristic-fallback) architecture guess.
     #[serde(default)]
@@ -630,9 +622,15 @@ pub fn full_estimate(
             ctk,
             ctv,
         );
-        // Retained KV (uncompressed): from prefix-cache tokens budget
-        // Single "slot" because prefix cache is shared, not per-parallel-slot.
-        let retained = kv_cache_bytes(arch, opts.rapid_retained_cache_tokens, 1, ctk, ctv);
+        // An explicit --cache-memory-mb ceiling is the admission reservation.
+        // Token-derived retained KV is used only when no explicit byte ceiling
+        // exists; summing both would reserve the same retained state twice.
+        let retained = if opts.mlx_prefix_cache_bytes > 0 {
+            0
+        } else {
+            // Single "slot" because prefix cache is shared, not per-parallel-slot.
+            kv_cache_bytes(arch, opts.rapid_retained_cache_tokens, 1, ctk, ctv)
+        };
         (active, retained)
     } else {
         // Legacy path: unified KV (backward compatible with all existing callers).
@@ -705,27 +703,6 @@ pub fn full_estimate(
     };
     let mlx_cache = opts.mlx_prefix_cache_bytes;
 
-    // Phase 5b Part C: compute memory for max_cache_blocks reservation (Rapid-MLX only).
-    // Each cache block holds n_embd tokens × kv_heads × head_dim bytes per layer.
-    // For a conservative estimate: blocks × n_embd × n_kv_heads × head_dim × dtype_size.
-    // This is additive to active KV; represents the maximum cache reservation.
-    let max_cache_blocks_bytes =
-        if let (Backend::RapidMlx, Some(blocks)) = (opts.backend, opts.max_cache_blocks) {
-            let n_embd = arch.n_embd as u64;
-            let n_kv_heads = arch.n_kv_heads as u64;
-            let head_dim = arch.head_dim as u64;
-            // Conservative: assume bf16 (2 bytes) per element.
-            // A block stores KV for n_embd tokens across all layers.
-            // Total = blocks × n_embd × n_kv_heads × head_dim × 2 bytes.
-            (blocks as u64)
-                .saturating_mul(n_embd)
-                .saturating_mul(n_kv_heads)
-                .saturating_mul(head_dim)
-                .saturating_mul(2)
-        } else {
-            0
-        };
-
     // TOTAL is additive: all components summed, none double-counted.
     // TurboQuant transient peak is INCLUDED (it's a real memory cost during decompression).
     let total = weight_vram
@@ -736,8 +713,7 @@ pub fn full_estimate(
         + mtp
         + turboquant_transient_peak
         + overhead
-        + mlx_cache
-        + max_cache_blocks_bytes;
+        + mlx_cache;
     let headroom = available_vram_bytes as i64 - total as i64;
     let ram_headroom = available_ram_bytes as i64 - ram as i64;
 
@@ -843,7 +819,6 @@ pub fn full_estimate(
         recommendation,
         note,
         mlx_prefix_cache_bytes: mlx_cache,
-        max_cache_blocks_bytes,
         evidence: opts.evidence,
         effective_turboquant,
         mtp_mode,
