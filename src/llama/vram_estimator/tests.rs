@@ -2556,3 +2556,295 @@ fn llama_mtp_overhead_included_in_full_estimate_total() {
         "Total difference must be at least MTP overhead (allowing minor rounding)"
     );
 }
+
+// ── DoD item 6: standard contexts × dtypes × architectures ────────────────────
+
+fn qwen36_27b_arch_rapid() -> ModelArch {
+    ModelArch {
+        n_layers: 64,
+        n_attn_layers: 16,
+        n_kv_heads: 4,
+        head_dim: 256,
+        ..Default::default()
+    }
+}
+
+fn gemma4_26b_arch_rapid() -> ModelArch {
+    ModelArch {
+        n_layers: 30,
+        n_global_attn_layers: 5,
+        n_kv_heads: 2,
+        head_dim: 256,
+        global_head_dim: 512,
+        local_attn_window: 1024,
+        local_kv_heads: 8,
+        ..Default::default()
+    }
+}
+
+fn standard_arch_rapid() -> ModelArch {
+    ModelArch {
+        n_layers: 32,
+        n_kv_heads: 8,
+        head_dim: 128,
+        ..Default::default()
+    }
+}
+
+fn standard_contexts() -> [u64; 6] {
+    [32_768, 65_536, 131_072, 163_840, 200_000, 262_144]
+}
+
+fn rapid_dtypes() -> [&'static str; 3] {
+    ["bf16", "int8", "int4"]
+}
+
+fn rapid_estimate(arch: &ModelArch, ctx: u64, dtype: &str) -> VramBreakdown {
+    // Use llama-style quant names for the estimator (BF16→f16, INT8→q8_0, INT4→q4_0).
+    let quant = match dtype {
+        "bf16" => "f16",
+        "int8" => "q8_0",
+        "int4" => "q4_0",
+        _ => "q4_0",
+    };
+    full_estimate(
+        estimate_model_size_bytes(10.0, "q4_k_m"),
+        arch,
+        1024,
+        quant,
+        quant,
+        1,
+        512,
+        0,
+        -1,
+        64 * 1024 * 1024 * 1024,
+        0,
+        true,
+        EstimatorOptions {
+            backend: Backend::RapidMlx,
+            evidence: EstimateEvidence::Approximate,
+            mlx_prefix_cache_bytes: 0,
+            turboquant_mode: None,
+            rapid_planning_context_tokens: ctx,
+            rapid_retained_cache_tokens: 0,
+            turboquant_eligibility: Default::default(),
+            ..Default::default()
+        },
+    )
+}
+
+#[test]
+fn hybrid_deltanet_all_contexts_all_dtypes() {
+    let arch = qwen36_27b_arch_rapid();
+    let contexts = standard_contexts();
+    let dtypes = rapid_dtypes();
+    let mut prev_kv = [0u64; 3];
+
+    for &ctx in &contexts {
+        for (idx, &dtype) in dtypes.iter().enumerate() {
+            let bd = rapid_estimate(&arch, ctx, dtype);
+            assert!(
+                bd.active_kv_bytes > prev_kv[idx],
+                "Hybrid: {dtype} at {ctx} tokens active_kv ({}) not > prev ({})",
+                bd.active_kv_bytes,
+                prev_kv[idx]
+            );
+            prev_kv[idx] = bd.active_kv_bytes;
+        }
+    }
+}
+
+#[test]
+fn hybrid_deltanet_context_160k_all_dtypes() {
+    let arch = qwen36_27b_arch_rapid();
+    let ctx = 163_840u64;
+    let bf16 = rapid_estimate(&arch, ctx, "bf16").active_kv_bytes;
+    let int8 = rapid_estimate(&arch, ctx, "int8").active_kv_bytes;
+    let int4 = rapid_estimate(&arch, ctx, "int4").active_kv_bytes;
+    assert!(
+        bf16 > int8 && int8 > int4,
+        "Hybrid 160K: BF16 > INT8 > INT4"
+    );
+}
+
+#[test]
+fn hybrid_deltanet_context_200k_all_dtypes() {
+    let arch = qwen36_27b_arch_rapid();
+    let ctx = 200_000u64;
+    let bf16 = rapid_estimate(&arch, ctx, "bf16").active_kv_bytes;
+    let int8 = rapid_estimate(&arch, ctx, "int8").active_kv_bytes;
+    let int4 = rapid_estimate(&arch, ctx, "int4").active_kv_bytes;
+    assert!(
+        bf16 > int8 && int8 > int4,
+        "Hybrid 200K: BF16 > INT8 > INT4"
+    );
+}
+
+#[test]
+fn hybrid_deltanet_context_262k_all_dtypes() {
+    let arch = qwen36_27b_arch_rapid();
+    let ctx = 262_144u64;
+    let bf16 = rapid_estimate(&arch, ctx, "bf16").active_kv_bytes;
+    let int8 = rapid_estimate(&arch, ctx, "int8").active_kv_bytes;
+    let int4 = rapid_estimate(&arch, ctx, "int4").active_kv_bytes;
+    assert!(
+        bf16 > int8 && int8 > int4,
+        "Hybrid 262K: BF16 > INT8 > INT4"
+    );
+}
+
+#[test]
+fn sliding_window_all_contexts_all_dtypes() {
+    let arch = gemma4_26b_arch_rapid();
+    let contexts = standard_contexts();
+    let dtypes = rapid_dtypes();
+    let mut prev_kv = [0u64; 3];
+
+    for &ctx in &contexts {
+        for (idx, &dtype) in dtypes.iter().enumerate() {
+            let bd = rapid_estimate(&arch, ctx, dtype);
+            assert!(
+                bd.active_kv_bytes > prev_kv[idx],
+                "Sliding window: {dtype} at {ctx} tokens active_kv ({}) not > prev ({})",
+                bd.active_kv_bytes,
+                prev_kv[idx]
+            );
+            prev_kv[idx] = bd.active_kv_bytes;
+        }
+    }
+}
+
+#[test]
+fn sliding_window_context_160k_all_dtypes() {
+    let arch = gemma4_26b_arch_rapid();
+    let ctx = 163_840u64;
+    let bf16 = rapid_estimate(&arch, ctx, "bf16").active_kv_bytes;
+    let int8 = rapid_estimate(&arch, ctx, "int8").active_kv_bytes;
+    let int4 = rapid_estimate(&arch, ctx, "int4").active_kv_bytes;
+    assert!(
+        bf16 > int8 && int8 > int4,
+        "Sliding window 160K: BF16 > INT8 > INT4"
+    );
+}
+
+#[test]
+fn sliding_window_context_200k_all_dtypes() {
+    let arch = gemma4_26b_arch_rapid();
+    let ctx = 200_000u64;
+    let bf16 = rapid_estimate(&arch, ctx, "bf16").active_kv_bytes;
+    let int8 = rapid_estimate(&arch, ctx, "int8").active_kv_bytes;
+    let int4 = rapid_estimate(&arch, ctx, "int4").active_kv_bytes;
+    assert!(
+        bf16 > int8 && int8 > int4,
+        "Sliding window 200K: BF16 > INT8 > INT4"
+    );
+}
+
+#[test]
+fn sliding_window_context_262k_all_dtypes() {
+    let arch = gemma4_26b_arch_rapid();
+    let ctx = 262_144u64;
+    let bf16 = rapid_estimate(&arch, ctx, "bf16").active_kv_bytes;
+    let int8 = rapid_estimate(&arch, ctx, "int8").active_kv_bytes;
+    let int4 = rapid_estimate(&arch, ctx, "int4").active_kv_bytes;
+    assert!(
+        bf16 > int8 && int8 > int4,
+        "Sliding window 262K: BF16 > INT8 > INT4"
+    );
+}
+
+#[test]
+fn standard_all_contexts_all_dtypes() {
+    let arch = standard_arch_rapid();
+    let contexts = standard_contexts();
+    let dtypes = rapid_dtypes();
+    let mut prev_kv = [0u64; 3];
+
+    for &ctx in &contexts {
+        for (idx, &dtype) in dtypes.iter().enumerate() {
+            let bd = rapid_estimate(&arch, ctx, dtype);
+            assert!(
+                bd.active_kv_bytes > prev_kv[idx],
+                "Standard: {dtype} at {ctx} tokens active_kv ({}) not > prev ({})",
+                bd.active_kv_bytes,
+                prev_kv[idx]
+            );
+            prev_kv[idx] = bd.active_kv_bytes;
+        }
+    }
+}
+
+#[test]
+fn standard_context_160k_all_dtypes() {
+    let arch = standard_arch_rapid();
+    let ctx = 163_840u64;
+    let bf16 = rapid_estimate(&arch, ctx, "bf16").active_kv_bytes;
+    let int8 = rapid_estimate(&arch, ctx, "int8").active_kv_bytes;
+    let int4 = rapid_estimate(&arch, ctx, "int4").active_kv_bytes;
+    assert!(
+        bf16 > int8 && int8 > int4,
+        "Standard 160K: BF16 > INT8 > INT4"
+    );
+}
+
+#[test]
+fn standard_context_200k_all_dtypes() {
+    let arch = standard_arch_rapid();
+    let ctx = 200_000u64;
+    let bf16 = rapid_estimate(&arch, ctx, "bf16").active_kv_bytes;
+    let int8 = rapid_estimate(&arch, ctx, "int8").active_kv_bytes;
+    let int4 = rapid_estimate(&arch, ctx, "int4").active_kv_bytes;
+    assert!(
+        bf16 > int8 && int8 > int4,
+        "Standard 200K: BF16 > INT8 > INT4"
+    );
+}
+
+#[test]
+fn standard_context_262k_all_dtypes() {
+    let arch = standard_arch_rapid();
+    let ctx = 262_144u64;
+    let bf16 = rapid_estimate(&arch, ctx, "bf16").active_kv_bytes;
+    let int8 = rapid_estimate(&arch, ctx, "int8").active_kv_bytes;
+    let int4 = rapid_estimate(&arch, ctx, "int4").active_kv_bytes;
+    assert!(
+        bf16 > int8 && int8 > int4,
+        "Standard 262K: BF16 > INT8 > INT4"
+    );
+}
+
+#[test]
+fn hybrid_uses_attn_layers_not_all_layers() {
+    let arch = qwen36_27b_arch_rapid();
+    assert!(
+        arch.n_attn_layers < arch.n_layers,
+        "Hybrid must have fewer attn layers than total"
+    );
+    let bf16 = rapid_estimate(&arch, 131_072, "bf16").active_kv_bytes;
+    let int8 = rapid_estimate(&arch, 131_072, "int8").active_kv_bytes;
+    let int4 = rapid_estimate(&arch, 131_072, "int4").active_kv_bytes;
+    assert!(
+        bf16 > int8 && int8 > int4,
+        "Hybrid 131K uses n_attn_layers={} not n_layers={}",
+        arch.n_attn_layers,
+        arch.n_layers
+    );
+}
+
+#[test]
+fn sliding_window_uses_global_attn_layers() {
+    let arch = gemma4_26b_arch_rapid();
+    assert!(
+        arch.n_global_attn_layers < arch.n_layers,
+        "Sliding window must have fewer global attn layers than total"
+    );
+    let bf16 = rapid_estimate(&arch, 131_072, "bf16").active_kv_bytes;
+    let int8 = rapid_estimate(&arch, 131_072, "int8").active_kv_bytes;
+    let int4 = rapid_estimate(&arch, 131_072, "int4").active_kv_bytes;
+    assert!(
+        bf16 > int8 && int8 > int4,
+        "Sliding window 131K uses n_global_attn_layers={} not n_layers={}",
+        arch.n_global_attn_layers,
+        arch.n_layers
+    );
+}

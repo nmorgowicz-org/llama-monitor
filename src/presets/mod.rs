@@ -965,7 +965,7 @@ mod tests {
                 completion_batch_size: Some(512),
                 batching_policy: Some("auto".into()),
                 concurrency_policy: Some("single_active".into()),
-                reasoning_mode: Some("auto".into()),
+                reasoning_mode: Some("on".into()),
                 speculative_policy: Some("auto".into()),
                 mllm_vision: Some("auto".into()),
                 embeddings: Some("off".into()),
@@ -1001,7 +1001,7 @@ mod tests {
         assert_eq!(rapid.completion_batch_size, Some(512));
         assert_eq!(rapid.batching_policy, Some("auto".into()));
         assert_eq!(rapid.concurrency_policy, Some("single_active".into()));
-        assert_eq!(rapid.reasoning_mode, Some("auto".into()));
+        assert_eq!(rapid.reasoning_mode, Some("on".into()));
         assert_eq!(rapid.speculative_policy, Some("auto".into()));
         assert_eq!(rapid.mllm_vision, Some("auto".into()));
         assert_eq!(rapid.embeddings, Some("off".into()));

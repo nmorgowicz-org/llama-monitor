@@ -648,6 +648,24 @@ mod tests {
         assert_eq!(policy.effective_kv_dtype, KvCacheDtype::Int4);
     }
 
+    #[test]
+    fn bf16_without_reasoning_honored() {
+        let policy = RapidMlxExecutionPolicy::new(Some(KvCacheDtype::Bf16), false, None);
+        assert_eq!(policy.effective_kv_dtype, KvCacheDtype::Bf16);
+    }
+
+    #[test]
+    fn int8_without_reasoning_honored() {
+        let policy = RapidMlxExecutionPolicy::new(Some(KvCacheDtype::Int8), false, None);
+        assert_eq!(policy.effective_kv_dtype, KvCacheDtype::Int8);
+    }
+
+    #[test]
+    fn int4_explicit_without_reasoning_honored() {
+        let policy = RapidMlxExecutionPolicy::new(Some(KvCacheDtype::Int4), false, None);
+        assert_eq!(policy.effective_kv_dtype, KvCacheDtype::Int4);
+    }
+
     // ── MemoryBreakdown tests ────────────────────────────────────────────────
 
     #[test]

@@ -984,7 +984,19 @@ function _buildLaunchCard(preset, activePresetId) {
 
     const ctxK = preset.context_size ? Math.round(preset.context_size / 1024) : 128;
     const ctxDisplay = ctxK >= 1000 ? `${(ctxK / 1024).toFixed(1)}M context` : `${ctxK}k context`;
-    const ctkDisplay = (preset.ctk || 'q8_0') + '/' + (preset.ctv || 'f16');
+    const isRapidMlx = preset.backend === 'rapid_mlx';
+    let ctkDisplay;
+    if (isRapidMlx) {
+        const rapidKv = (rapidMlx && rapidMlx.kv_cache_dtype) || 'int4';
+        const reasoningOn = rapidMlx && (rapidMlx.reasoning_mode === true || rapidMlx.reasoning_mode === 'on');
+        if (reasoningOn && rapidKv !== 'int8') {
+            ctkDisplay = `${rapidKv.toUpperCase()} → INT8`;
+        } else {
+            ctkDisplay = rapidKv.toUpperCase();
+        }
+    } else {
+        ctkDisplay = (preset.ctk || 'q8_0') + '/' + (preset.ctv || 'f16');
+    }
     const quantTag = extractQuantFromFilename(modelFile);
     const rapidCacheMib = preset.backend === 'rapid_mlx' && rapidMlx?.prefix_cache_enabled !== false
         ? (rapidMlx?.retained_cache_mib ?? 8192) : 0;
@@ -1174,6 +1186,19 @@ async function _fetchCardVramEstimates(availBytes, availRamBytes, isUnified, bud
             if (!data.ok) return;
             // Guard: card may have been re-rendered while awaiting
             if (!document.contains(vramEl)) return;
+            if (isRapidMlx && data.effective_kv_dtype) {
+                const kvChip = card.querySelector('.launch-card-chips .launch-chip:nth-child(2)');
+                if (kvChip && data.execution_policy && data.execution_policy.kv_cache_dtype) {
+                    const requested = data.execution_policy.kv_cache_dtype || 'int4';
+                    const effective = data.effective_kv_dtype;
+                    const reasoningOn = data.execution_policy.reasoning_mode === true;
+                    if (reasoningOn && requested !== effective) {
+                        kvChip.textContent = `${requested.toUpperCase()} → INT8 (reasoning)`;
+                    } else {
+                        kvChip.textContent = effective.toUpperCase();
+                    }
+                }
+            }
             _renderCardVram(vramEl, data, availBytes, availRamBytes, isUnified, budgetIfPurgedBytes);
         } catch {
             // silently skip — VRAM row stays in loading state

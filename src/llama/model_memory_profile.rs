@@ -428,8 +428,18 @@ impl ModelMemoryProfile {
 impl From<&ModelMemoryProfile> for crate::llama::vram_estimator::ModelArch {
     fn from(profile: &ModelMemoryProfile) -> Self {
         let n_layers = profile.weights.n_layers.value;
-        let n_kv_heads = profile.weights.n_head_kv.value.max(1);
         let head_dim = profile.weights.head_dim.value.max(1);
+
+        // For sliding-window models with global/local split (Gemma4), n_kv_heads
+        // is the global KV heads used by full-attention layers at long context.
+        // For other architectures, n_kv_heads is the total from config.
+        let n_kv_heads = if let Some(glh) = &profile.global_local_heads
+            && let Some(gkv) = glh.num_global_key_value_heads
+        {
+            gkv.max(1)
+        } else {
+            profile.weights.n_head_kv.value.max(1)
+        };
 
         // Hybrid attention: full_attention_interval drives KV layers (Qwen3.5/3.6).
         let n_attn_layers = if let Some(interval) = profile.full_attention_interval
@@ -578,5 +588,90 @@ mod tests {
             ..Default::default()
         });
         assert!(profile.is_moe());
+    }
+
+    #[test]
+    fn gemma4_26b_profile_to_arch_uses_global_kv_heads() {
+        // Gemma4-26B has total KV=8 but global KV=2; slope formula needs global.
+        let mut profile = ModelMemoryProfile::default();
+        profile.weights.n_layers.value = 30;
+        profile.weights.n_head_kv.value = 8; // total from config
+        profile.weights.head_dim.value = 256;
+        profile.weights.n_embd.value = 2816;
+        profile.global_local_heads = Some(GlobalLocalHeadGeometry {
+            num_global_key_value_heads: Some(2),
+            global_head_dim: Some(512),
+            num_local_key_value_heads: Some(6),
+            local_head_dim: Some(256),
+            local_attn_window_size: Some(1024),
+            ..Default::default()
+        });
+        profile.sliding_window = Some(1024);
+        profile.layer_groups.push(LayerMemoryGroup {
+            kind: LayerGroupKind::FullAttention,
+            count: 5,
+            field_evidence: "counted from layer_types".into(),
+            ..Default::default()
+        });
+        profile.layer_groups.push(LayerMemoryGroup {
+            kind: LayerGroupKind::LocalAttention,
+            count: 25,
+            field_evidence: "counted from layer_types".into(),
+            ..Default::default()
+        });
+
+        let arch: crate::llama::vram_estimator::ModelArch = (&profile).into();
+
+        // Critical: n_kv_heads must be global KV (2), not total (8).
+        assert_eq!(
+            arch.n_kv_heads, 2,
+            "n_kv_heads must be global KV for sliding window models"
+        );
+        assert_eq!(arch.n_layers, 30);
+        assert_eq!(arch.n_global_attn_layers, 5);
+        assert_eq!(arch.local_attn_window, 1024);
+        assert_eq!(arch.local_kv_heads, 6);
+        assert_eq!(arch.global_head_dim, 512);
+    }
+
+    #[test]
+    fn gemma4_31b_profile_to_arch_uses_global_kv_heads() {
+        // Gemma4-31B has total KV=16 but global KV=4.
+        let mut profile = ModelMemoryProfile::default();
+        profile.weights.n_layers.value = 60;
+        profile.weights.n_head_kv.value = 16; // total from config
+        profile.weights.head_dim.value = 256;
+        profile.weights.n_embd.value = 5376;
+        profile.global_local_heads = Some(GlobalLocalHeadGeometry {
+            num_global_key_value_heads: Some(4),
+            global_head_dim: Some(512),
+            num_local_key_value_heads: Some(12),
+            local_head_dim: Some(256),
+            local_attn_window_size: Some(1024),
+            ..Default::default()
+        });
+        profile.sliding_window = Some(1024);
+        profile.layer_groups.push(LayerMemoryGroup {
+            kind: LayerGroupKind::FullAttention,
+            count: 10,
+            field_evidence: "counted from layer_types".into(),
+            ..Default::default()
+        });
+        profile.layer_groups.push(LayerMemoryGroup {
+            kind: LayerGroupKind::LocalAttention,
+            count: 50,
+            field_evidence: "counted from layer_types".into(),
+            ..Default::default()
+        });
+
+        let arch: crate::llama::vram_estimator::ModelArch = (&profile).into();
+
+        assert_eq!(
+            arch.n_kv_heads, 4,
+            "n_kv_heads must be global KV for sliding window models"
+        );
+        assert_eq!(arch.n_layers, 60);
+        assert_eq!(arch.n_global_attn_layers, 10);
+        assert_eq!(arch.local_kv_heads, 12);
     }
 }

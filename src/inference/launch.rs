@@ -173,9 +173,7 @@ pub fn request_from_preset(
             config.api_key = preset.api_key.clone();
             config.default_temperature = preset.temperature;
             config.default_top_p = preset.top_p;
-            config.default_top_k = preset
-                .top_k
-                .and_then(|value| u64::try_from(value).ok());
+            config.default_top_k = preset.top_k.and_then(|value| u64::try_from(value).ok());
             config.default_min_p = preset.min_p;
             config.default_repetition_penalty = preset.repeat_penalty;
             config.default_presence_penalty = preset.presence_penalty;

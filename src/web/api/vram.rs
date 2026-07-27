@@ -131,7 +131,8 @@ fn api_vram_estimate_breakdown(
                 //
                 // We mirror model_resolver.rs: first try as local directory;
                 // if it fails and looks like an alias, treat it as an HF repo ID.
-                let (model_size_bytes, mut arch, evidence, native_context_limit) = if is_rapid_mlx {
+                let (model_size_bytes, mut arch, evidence, native_context_limit, estimator_hf_repo_id) =
+                    if is_rapid_mlx {
                     // Rapid-MLX is Apple-Silicon/unified-memory only.
                     is_unified_memory = true;
 
@@ -182,7 +183,7 @@ fn api_vram_estimate_breakdown(
                         } else {
                             crate::llama::vram_estimator::EstimateEvidence::Degraded
                         };
-                        (size, arch, ev, profile.model_context_limit.map(u64::from))
+                        (size, arch, ev, profile.model_context_limit.map(u64::from), None)
                     } else if is_mlx_hf_repo_alias(&model_path) {
                         // model_path is not a local directory but looks like an HF-repo-style alias
                         // (e.g. "mlx-community/Qwen3-30B-A3B-4bit"). Treat it as hf_repo_id.
@@ -206,7 +207,7 @@ fn api_vram_estimate_breakdown(
                                 ));
                             }
                         };
-                        (size, arch, ev, native_context_limit)
+                        (size, arch, ev, native_context_limit, Some(effective_repo))
                     } else if !hf_repo_id.is_empty() {
                         // Caller provided explicit hf_repo_id
                         let size = resolve_mlx_hf_size(&hf_repo_id, model_size_override).await;
@@ -225,7 +226,7 @@ fn api_vram_estimate_breakdown(
                                 ));
                             }
                         };
-                        (size, arch, ev, native_context_limit)
+                        (size, arch, ev, native_context_limit, Some(hf_repo_id.clone()))
                     } else {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::json(&serde_json::json!({
@@ -264,7 +265,7 @@ fn api_vram_estimate_breakdown(
                             None,
                         ),
                     };
-                    (size, arch, ev, native_context_limit)
+                    (size, arch, ev, native_context_limit, None)
                 } else if !hf_repo_id.is_empty() && !hf_file_path.is_empty() {
                     // Size must be supplied by the caller (from the HF file listing).
                     let size = model_size_override.unwrap_or(0);
@@ -296,7 +297,7 @@ fn api_vram_estimate_breakdown(
                                 None,
                             ),
                         };
-                    (size, arch, ev, native_context_limit)
+                    (size, arch, ev, native_context_limit, Some(hf_repo_id.clone()))
                 } else {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
@@ -352,6 +353,7 @@ fn api_vram_estimate_breakdown(
                         crate::llama::vram_estimator::Backend::LlamaCpp
                     },
                     evidence,
+                    hf_repo_id: estimator_hf_repo_id,
                     mlx_prefix_cache_bytes: mlx_cache_bytes,
                     turboquant_mode: Some(rapid_execution_policy.effective_turboquant),
                     // Planning context tokens: explicit > scenario > 0 (legacy fallback).

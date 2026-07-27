@@ -3,6 +3,7 @@
 use super::arch_heuristics::*;
 #[allow(unused_imports)]
 use super::quant_table::*;
+use super::rapid_slopes::*;
 
 // ── KV cache formula ──────────────────────────────────────────────────────────
 
@@ -324,6 +325,10 @@ pub enum EstimateEvidence {
 pub struct EstimatorOptions {
     pub backend: Backend,
     pub evidence: EstimateEvidence,
+    /// HuggingFace repo ID (e.g. "mlx-community/Qwen3-30B-A3B-4bit").
+    /// Stored for provenance/debugging; KV slope selection now uses ModelArch fields only.
+    #[allow(dead_code)]
+    pub hf_repo_id: Option<String>,
     /// Rapid-MLX prefix-cache compression (int4/int8) budget, in bytes, computed by the caller
     /// via `mlx_prefix_cache_bytes`. This is a SEPARATE stored-cache budget, not a reduction of
     /// active-context KV: cached entries are decompressed before being reused as active KV, so
@@ -364,6 +369,7 @@ impl Default for EstimatorOptions {
         Self {
             backend: Backend::LlamaCpp,
             evidence: EstimateEvidence::Measured,
+            hf_repo_id: None,
             mlx_prefix_cache_bytes: 0,
             turboquant_mode: None,
             rapid_planning_context_tokens: 0,
@@ -481,6 +487,15 @@ pub fn estimate_param_b_from_size(size_bytes: u64, bpw: f64) -> f64 {
         return 0.0;
     }
     (size_bytes as f64 * 8.0) / 1e9 / bpw
+}
+
+fn kv_dtype_from_estimator_quant(quant: &str) -> super::execution_policy::KvCacheDtype {
+    match quant {
+        "f16" => super::execution_policy::KvCacheDtype::Bf16,
+        "q8_0" => super::execution_policy::KvCacheDtype::Int8,
+        "q4_0" => super::execution_policy::KvCacheDtype::Int4,
+        _ => super::execution_policy::KvCacheDtype::Int4,
+    }
 }
 
 // ── Full VRAM estimate with breakdown ─────────────────────────────────────────
@@ -613,27 +628,42 @@ pub fn full_estimate(
     let is_rapid_with_context =
         matches!(opts.backend, Backend::RapidMlx) && opts.rapid_planning_context_tokens > 0;
 
+    let rapid_kv_dtype = kv_dtype_from_estimator_quant(ctk);
+
+    // Receipt-based slope uses only ModelArch fields — no repo ID needed.
+    let receipt_slope = matches!(opts.backend, Backend::RapidMlx)
+        .then(|| rapid_active_kv_bytes_per_token(arch, rapid_kv_dtype));
+
     let (active_kv, retained_kv_uncompressed) = if is_rapid_with_context {
-        // Active KV: from planning context tokens (scenario target)
-        let active = kv_cache_bytes(
-            arch,
-            opts.rapid_planning_context_tokens,
-            parallel_slots.max(1),
-            ctk,
-            ctv,
-        );
+        let slots = parallel_slots.max(1) as f64;
+        let planning_tokens = opts.rapid_planning_context_tokens as f64;
+
+        // Active KV: use receipt-based slope when available
+        let active = if let Some(slope) = receipt_slope {
+            (slope * planning_tokens * slots) as u64
+        } else {
+            kv_cache_bytes(
+                arch,
+                opts.rapid_planning_context_tokens,
+                parallel_slots.max(1),
+                ctk,
+                ctv,
+            )
+        };
+
         // An explicit --cache-memory-mb ceiling is the admission reservation.
         // Token-derived retained KV is used only when no explicit byte ceiling
         // exists; summing both would reserve the same retained state twice.
         let retained = if opts.mlx_prefix_cache_bytes > 0 {
             0
+        } else if let Some(slope) = receipt_slope {
+            let retained_tokens = opts.rapid_retained_cache_tokens as f64;
+            (slope * retained_tokens) as u64
         } else {
-            // Single "slot" because prefix cache is shared, not per-parallel-slot.
             kv_cache_bytes(arch, opts.rapid_retained_cache_tokens, 1, ctk, ctv)
         };
         (active, retained)
     } else {
-        // Legacy path: unified KV (backward compatible with all existing callers).
         let kv = kv_cache_bytes(arch, context_size, parallel_slots, ctk, ctv);
         (kv, 0)
     };

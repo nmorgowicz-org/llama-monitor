@@ -1,5 +1,5 @@
-use crate::inference::rapid_mlx::compatibility::ServeCapabilities;
 use crate::inference::rapid_mlx::RapidMlxHybridMode;
+use crate::inference::rapid_mlx::compatibility::ServeCapabilities;
 use crate::inference::rapid_mlx::model_resolver::{
     RapidMlxModelSource, ResolvedRapidMlxLaunchModel,
 };
@@ -387,24 +387,25 @@ impl RapidMlxCommandBuilder {
             capabilities.require("--enable-auto-tool-choice")?;
             args.push("--enable-auto-tool-choice".to_string());
         }
-        if self.no_thinking {
+        if self.no_thinking && self.reasoning_mode.as_deref() != Some("on") {
             capabilities.require("--no-thinking")?;
             args.push("--no-thinking".to_string());
         }
 
         // Apply validated escape-hatch flags (already allowlisted at load time).
         // Bool flags are boolean switches: true = presence of flag, false = omitted.
-        let legacy_force_hybrid = self.escape_hatch_flags.iter().any(|(name, value)| {
-            name == "force-hybrid" && value == &serde_json::Value::Bool(true)
-        });
-        let legacy_no_hybrid = self.escape_hatch_flags.iter().any(|(name, value)| {
-            name == "no-hybrid" && value == &serde_json::Value::Bool(true)
-        });
+        let legacy_force_hybrid = self
+            .escape_hatch_flags
+            .iter()
+            .any(|(name, value)| name == "force-hybrid" && value == &serde_json::Value::Bool(true));
+        let legacy_no_hybrid = self
+            .escape_hatch_flags
+            .iter()
+            .any(|(name, value)| name == "no-hybrid" && value == &serde_json::Value::Bool(true));
         if legacy_force_hybrid && legacy_no_hybrid {
             anyhow::bail!("--force-hybrid and --no-hybrid are mutually exclusive");
         }
-        if self.hybrid_mode != RapidMlxHybridMode::Auto
-            && (legacy_force_hybrid || legacy_no_hybrid)
+        if self.hybrid_mode != RapidMlxHybridMode::Auto && (legacy_force_hybrid || legacy_no_hybrid)
         {
             anyhow::bail!(
                 "hybrid_mode cannot be combined with legacy force-hybrid/no-hybrid escape flags"
@@ -546,16 +547,19 @@ impl RapidMlxCommandBuilder {
             args.push("--concurrency-policy".to_string());
             args.push(policy.clone());
         }
-        // Phase 7: reasoning/speculative flags
-        if let Some(ref mode) = self.reasoning_mode {
-            match mode.as_str() {
-                "auto" | "off" => {}
-                "on" => {
-                    capabilities.require("--reasoning")?;
-                    args.push("--reasoning".to_string());
-                }
-                value => anyhow::bail!("reasoning_mode must be auto, on, or off; got {value:?}"),
+        // Phase 7: reasoning/speculative flags (on/off only, no auto; default ON)
+        match self.reasoning_mode.as_deref().unwrap_or("on") {
+            "on" => {
+                capabilities.require("--reasoning")?;
+                args.push("--reasoning".to_string());
             }
+            "off" => {
+                if !self.no_thinking {
+                    capabilities.require("--no-thinking")?;
+                    args.push("--no-thinking".to_string());
+                }
+            }
+            value => anyhow::bail!("reasoning_mode must be on or off; got {value:?}"),
         }
         if let Some(ref policy) = self.speculative_policy {
             capabilities.require("--speculative")?;
@@ -802,7 +806,15 @@ mod tests {
         .unwrap();
         assert_eq!(
             args(&launch),
-            ["serve", "model", "--host", "127.0.0.1", "--port", "8000"]
+            [
+                "serve",
+                "model",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8000",
+                "--reasoning"
+            ]
         );
         assert!(
             launch
@@ -1166,10 +1178,7 @@ mod tests {
         );
         assert!(args.iter().any(|p| p == "--reasoning"));
         assert!(!args.windows(2).any(|p| p == ["--reasoning", "on"]));
-        assert!(
-            args.windows(2)
-                .any(|p| p == ["--prefill-step-size", "512"])
-        );
+        assert!(args.windows(2).any(|p| p == ["--prefill-step-size", "512"]));
         assert!(
             args.windows(2)
                 .any(|p| p == ["--default-temperature", "0.7"])
@@ -1215,7 +1224,7 @@ mod tests {
         )
         .kv_cache_dtype(Some(KvCacheDtypeArg::Auto))
         .turboquant_mode(Some("none".into()))
-        .reasoning_mode(Some("auto".into()))
+        .reasoning_mode(Some("on".into()))
         .mllm_vision(Some("auto".into()))
         .embeddings(Some("auto".into()))
         .web_ui_availability(Some("auto".into()))
@@ -1231,7 +1240,6 @@ mod tests {
         let args = args(&launch);
         assert!(!args.iter().any(|a| a.starts_with("--kv-cache-dtype")));
         assert!(!args.iter().any(|a| a.starts_with("--kv-cache-turboquant")));
-        assert!(!args.iter().any(|a| a.starts_with("--reasoning")));
         assert!(!args.iter().any(|a| a.starts_with("--mllm")));
         assert!(!args.iter().any(|a| a.starts_with("--no-mllm")));
         assert!(!args.iter().any(|a| a.starts_with("--embeddings")));
@@ -1271,7 +1279,7 @@ mod tests {
 
     #[test]
     fn mllm_off_uses_the_real_text_only_flag() {
-        let capabilities = ServeCapabilities::from_help("--host --port --no-mllm");
+        let capabilities = ServeCapabilities::from_help("--host --port --no-mllm --reasoning");
         let launch = RapidMlxCommandBuilder::new(
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         )
@@ -1304,5 +1312,55 @@ mod tests {
         .build("rapid-mlx".into(), &capabilities)
         .unwrap_err();
         assert!(error.to_string().contains("--kv-cache-turboquant"));
+    }
+
+    #[test]
+    fn reasoning_off_emits_no_thinking_flag() {
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .reasoning_mode(Some("off".into()))
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .unwrap();
+        let args = args(&launch);
+        assert!(args.iter().any(|arg| arg == "--no-thinking"));
+        assert!(!args.iter().any(|arg| arg == "--reasoning"));
+    }
+
+    #[test]
+    fn reasoning_default_none_treated_as_on() {
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .unwrap();
+        let args = args(&launch);
+        assert!(args.iter().any(|arg| arg == "--reasoning"));
+        assert!(!args.iter().any(|arg| arg == "--no-thinking"));
+    }
+
+    #[test]
+    fn reasoning_auto_rejected() {
+        let error = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .reasoning_mode(Some("auto".into()))
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .unwrap_err();
+        assert!(error.to_string().contains("on or off"));
+    }
+
+    #[test]
+    fn reasoning_on_blocks_no_thinking_flag() {
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .no_thinking(true)
+        .reasoning_mode(Some("on".into()))
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .unwrap();
+        let args = args(&launch);
+        assert!(args.iter().any(|arg| arg == "--reasoning"));
+        assert!(!args.iter().any(|arg| arg == "--no-thinking"));
     }
 }

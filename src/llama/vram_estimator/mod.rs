@@ -13,6 +13,7 @@ mod arch_heuristics;
 mod estimate;
 pub mod execution_policy;
 mod quant_table;
+mod rapid_slopes;
 mod workload_scenarios;
 
 #[cfg(test)]
