@@ -21,7 +21,7 @@ export function rapidEstimatePolicyFromConfig(rapidMlx = {}) {
     reasoning_mode: reasoning === true || reasoning === 'on' || reasoning === 'enable',
     workload_scenario: rapidMlx.workload_scenario || null,
     concurrency_policy: rapidMlx.concurrency_policy || null,
-    max_cache_blocks: rapidMlx.max_cache_blocks ?? null,
+    retained_cache_mib: rapidMlx.prefix_cache_enabled === false ? 0 : (rapidMlx.retained_cache_mib ?? 8192),
   };
 }
 
@@ -33,7 +33,7 @@ export function rapidEstimatePolicyFromWizardHardware(hardware = {}) {
     workload_scenario: hardware.workloadProfile?.id || hardware.workloadScenario || null,
     concurrency_policy: hardware.concurrencyPolicy || null,
     mtp_config: hardware.mtpConfig || null,
-    max_cache_blocks: hardware.maxCacheBlocks ?? null,
+    retained_cache_mib: Number(hardware.retainedCacheMib ?? 8192),
   };
 }
 
@@ -71,7 +71,6 @@ export function rapidEstimatePolicyFromWizardHardware(hardware = {}) {
 // @param {string|null} params.client_type — 'app' or 'external_client'
 // @param {string|null} params.concurrency_policy — 'single_active' or 'allow_overlap'
 // @param {Object|null} params.mtp_config — MTP configuration object
-// @param {number|null} params.max_cache_blocks — Rapid-MLX max_cache_blocks from preset
 // @param {string|null} params.hf_repo_revision — pinned revision (Phase 8B2)
 // @param {string|null} params.hf_quant_label — quant label/variant name (Phase 8B2)
 // @returns {Object} request body ready for JSON.stringify
@@ -132,7 +131,6 @@ export function buildEstimateBody(params) {
     if (params.concurrency_policy) body.concurrency_policy = params.concurrency_policy;
     if (params.mtp_config) body.mtp_config = params.mtp_config;
     // Phase 5b Part C: max_cache_blocks from preset for prelaunch estimates.
-    if (params.max_cache_blocks != null) body.max_cache_blocks = params.max_cache_blocks;
 
     return body;
 }

@@ -3817,6 +3817,18 @@ button:disabled {
     border-color: var(--acc-60);
 }
 
+.preset-context-pill:disabled,
+.preset-context-pill--advanced {
+    cursor: not-allowed;
+    opacity: 0.48;
+}
+
+.preset-context-pill:disabled:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: var(--color-text-secondary, #94a3b8);
+}
+
 [data-theme="light"] .preset-context-pill {
     background: rgba(0, 0, 0, 0.04);
     color: #64748b;
@@ -3827,6 +3839,12 @@ button:disabled {
     background: var(--acc-08);
     border-color: var(--acc-40);
     color: #1e293b;
+}
+
+[data-theme="light"] .preset-context-pill:disabled:hover {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(17, 24, 39, 0.14);
+    color: #64748b;
 }
 
 .preset-vram-badge {

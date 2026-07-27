@@ -2654,8 +2654,9 @@
                         <div class="pe-section-body">
                             <div class="pe-row pe-row-3" style="margin-bottom: 12px;">
                                 <div class="pe-field" style="flex: 1;">
-                                    <label class="pe-label" for="modal-context-size" title="Maximum context length in tokens. Larger values use more VRAM. Auto-enables YaRN scaling above 262144.">Context Size (-c)</label>
+                                    <label class="pe-label" for="modal-context-size" title="Native model context in tokens. Larger values use more memory. Context extension requires separately qualified advanced controls.">Context Size (-c)</label>
                                     <div id="preset-context-pills" class="preset-context-pills" style="display:none;"></div>
+                                    <div class="pe-field-hint" id="preset-context-native-hint" style="display:none;"></div>
                                     <div style="display: flex; gap: 8px; align-items: center;">
                                         <input type="number" class="pe-input" id="modal-context-size" value="128000" style="flex: 1;">
                                         <button type="button" class="btn-sm btn-preset" id="preset-vram-auto-size" title="Auto-calculate optimal context and KV quantization for available VRAM" style="white-space: nowrap; height: 32px;">Auto-size</button>
@@ -3181,14 +3182,19 @@
                                  </div>
                              </div>
                               <div class="pe-field pe-row-rapid-prefix-cache" id="pe-row-rapid-prefix-cache" style="display:none;">
-                                  <label class="pe-label pe-toggle-label" for="modal-rapid-prefix-cache-enabled" title="Enable prefix caching for Rapid-MLX. When enabled, repeated prompt prefixes reuse cached KV states instead of recomputing. Recommended for multi-turn agents with stable system prompts.">Prefix Cache <span class="pe-toggle-hint" id="pe-prefix-cache-hint"></span></label>
+                                  <label class="pe-label pe-toggle-label" for="modal-rapid-prefix-cache-enabled" title="Retain reusable Rapid-MLX prompt branches in unified memory.">Retained cache <span class="pe-toggle-hint" id="pe-prefix-cache-hint"></span></label>
                                   <div class="pe-toggle">
                                       <input type="checkbox" class="pe-toggle-input" id="modal-rapid-prefix-cache-enabled">
                                       <span class="pe-toggle-slider"></span>
                                   </div>
-                                  <div class="pe-field-hint" id="pe-prefix-cache-hint-detail">When enabled, uses D30 auto-computed budget (10% of configured ceiling) unless explicitly set. Prefix cache is additive and budget-constrained — never unlimited.</div>
+                                  <div class="pe-field-hint" id="pe-prefix-cache-hint-detail">8 GiB is the measured one-user coding baseline. 16 GiB preserves more older branches; it is not a speed mode.</div>
                               </div>
-                               <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-advanced" style="display:none;">
+                              <div class="pe-field pe-row-rapid-prefix-cache" id="pe-row-rapid-cache-memory" style="display:none;">
+                                  <label class="pe-label" for="modal-rapid-cache-memory-mib">Retained cache memory</label>
+                                  <select id="modal-rapid-cache-memory-mib" class="pe-select"><option value="0">Off</option><option value="8192">8 GiB — recommended</option><option value="16384">16 GiB — retain branches</option></select>
+                                  <div class="pe-field-hint">Optional unified-memory growth. Disk checkpoints stay disabled for interactive use.</div>
+                              </div>
+        <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-advanced" style="display:none;">
                                    <div class="pe-field">
                                        <label class="pe-label" for="modal-rapid-kv-cache-dtype" title="KV cache dtype controls memory vs precision for Rapid-MLX. int8 recommended for tool calling.">KV Cache Dtype</label>
                                        <select class="pe-select" id="modal-rapid-kv-cache-dtype">
@@ -3357,6 +3363,55 @@
                 <span class="step-badge" data-step="5" title="Step 6: Start server"><span class="step-num">6</span></span>
             </div>
             <button type="button" class="wizard-close" id="spawn-wizard-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-parser-overrides" style="display:none;">
+            <div class="pe-field">
+                <label class="pe-label" for="modal-rapid-tool-call-parser">Tool-call parser</label>
+                <select class="pe-select" id="modal-rapid-tool-call-parser">
+                    <option value="">Auto — Rapid alias profile</option>
+                    <option value="qwen3">qwen3</option><option value="qwen3_xml">qwen3_xml</option>
+                    <option value="qwen3_coder">qwen3_coder</option><option value="qwen3_coder_xml">qwen3_coder_xml</option>
+                    <option value="gemma4">gemma4</option><option value="hermes">hermes</option>
+                    <option value="mistral">mistral</option><option value="llama3">llama3</option>
+                    <option value="deepseek_v31">deepseek_v31</option><option value="kimi_k2">kimi_k2</option>
+                    <option value="glm4">glm4</option><option value="minimax_m2">minimax_m2</option>
+                    <option value="gpt_oss">gpt_oss</option>
+                </select>
+                <div class="pe-field-hint">Auto uses the detected Rapid alias profile.</div>
+            </div>
+            <div class="pe-field">
+                <label class="pe-label" for="modal-rapid-reasoning-parser">Reasoning parser</label>
+                <select class="pe-select" id="modal-rapid-reasoning-parser">
+                    <option value="">Auto — Rapid alias profile</option>
+                    <option value="qwen3">qwen3</option><option value="gemma4">gemma4</option>
+                    <option value="hy_v3">hy_v3</option><option value="hy3">hy3</option>
+                    <option value="deepseek_r1">deepseek_r1</option><option value="vibethinker">vibethinker</option>
+                    <option value="glm4">glm4</option><option value="gpt_oss">gpt_oss</option>
+                    <option value="harmony">harmony</option><option value="minimax">minimax</option>
+                    <option value="ui_tars">ui_tars</option>
+                </select>
+                <div class="pe-field-hint">Explicit overrides are intended for misdetected finetunes.</div>
+            </div>
+        </div>
+        <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-architecture-overrides" style="display:none;">
+            <div class="pe-field">
+                <label class="pe-label" for="modal-rapid-hybrid-mode">Hybrid architecture</label>
+                <select class="pe-select" id="modal-rapid-hybrid-mode">
+                    <option value="auto">Auto — model/profile detection</option>
+                    <option value="force">Force hybrid</option>
+                    <option value="disable">Disable hybrid</option>
+                </select>
+            </div>
+            <div class="pe-field">
+                <label class="pe-label" for="modal-rapid-prefill-step-size">Prefill step size</label>
+                <select class="pe-select" id="modal-rapid-prefill-step-size">
+                    <option value="512">512 — qualified text default</option>
+                    <option value="1024">1024 — vision fallback</option>
+                    <option value="1536">1536 — vision fallback</option>
+                    <option value="2048">2048 — maximum</option>
+                </select>
+                <div class="pe-field-hint">Never exceeds 2048.</div>
+            </div>
         </div>
 
         <!-- Binary prerequisite banner — shown when llama-server binary is missing -->
@@ -3755,6 +3810,57 @@
                                      </select>
                                      <div class="field-hint">Memory vs precision tradeoff; int8 recommended for tool calling. Locked to int8 when Reasoning mode is enabled.</div>
                                  </div>
+                                 <div class="hardware-field">
+                                     <label for="spawn-retained-cache-mib" title="Optional Rapid retained prefix-cache memory. It is additional unified-memory use, not active KV.">Retained cache</label>
+                                     <select id="spawn-retained-cache-mib"><option value="8192" selected>8 GiB — recommended</option><option value="16384">16 GiB — retain branches</option><option value="0">Off — maximize model/context headroom</option></select>
+                                     <div class="field-hint">8 GiB keeps the newest coding branch fast. 16 GiB preserves more old branches; it is not a speed mode.</div>
+                                 </div>
+                                 <div class="hardware-field">
+                                     <label for="spawn-rapid-tool-call-parser">Tool-call parser</label>
+                                     <select id="spawn-rapid-tool-call-parser">
+                                         <option value="" selected>Auto — Rapid alias profile</option>
+                                         <option value="qwen3">qwen3</option><option value="qwen3_xml">qwen3_xml</option>
+                                         <option value="qwen3_coder">qwen3_coder</option><option value="qwen3_coder_xml">qwen3_coder_xml</option>
+                                         <option value="gemma4">gemma4</option><option value="hermes">hermes</option>
+                                         <option value="mistral">mistral</option><option value="llama3">llama3</option>
+                                         <option value="deepseek_v31">deepseek_v31</option><option value="kimi_k2">kimi_k2</option>
+                                         <option value="glm4">glm4</option><option value="minimax_m2">minimax_m2</option>
+                                         <option value="gpt_oss">gpt_oss</option>
+                                     </select>
+                                     <div class="field-hint">Detected: <span id="spawn-rapid-tool-parser-detected">unknown</span>. An explicit choice overrides Rapid auto-detection.</div>
+                                 </div>
+                                 <div class="hardware-field">
+                                     <label for="spawn-rapid-reasoning-parser">Reasoning parser</label>
+                                     <select id="spawn-rapid-reasoning-parser">
+                                         <option value="" selected>Auto — Rapid alias profile</option>
+                                         <option value="qwen3">qwen3</option><option value="gemma4">gemma4</option>
+                                         <option value="hy_v3">hy_v3</option><option value="hy3">hy3</option>
+                                         <option value="deepseek_r1">deepseek_r1</option><option value="vibethinker">vibethinker</option>
+                                         <option value="glm4">glm4</option><option value="gpt_oss">gpt_oss</option>
+                                         <option value="harmony">harmony</option><option value="minimax">minimax</option>
+                                         <option value="ui_tars">ui_tars</option>
+                                     </select>
+                                     <div class="field-hint">Detected: <span id="spawn-rapid-reasoning-parser-detected">unknown</span>. Auto preserves the model profile.</div>
+                                 </div>
+                                 <div class="hardware-field">
+                                     <label for="spawn-rapid-hybrid-mode">Hybrid architecture</label>
+                                     <select id="spawn-rapid-hybrid-mode">
+                                         <option value="auto" selected>Auto — model/profile detection</option>
+                                         <option value="force">Force hybrid</option>
+                                         <option value="disable">Disable hybrid</option>
+                                     </select>
+                                     <div class="field-hint">Override only when a modified finetune is misdetected.</div>
+                                 </div>
+                                 <div class="hardware-field">
+                                     <label for="spawn-rapid-prefill-step-size">Prefill step size</label>
+                                     <select id="spawn-rapid-prefill-step-size">
+                                         <option value="512" selected>512 — qualified text default</option>
+                                         <option value="1024">1024 — vision fallback</option>
+                                         <option value="1536">1536 — vision fallback</option>
+                                         <option value="2048">2048 — maximum</option>
+                                     </select>
+                                     <div class="field-hint">Never exceeds 2048. Text defaults to the benchmark-qualified 512.</div>
+                                 </div>
                                  <!-- Reusable prompt storage (D31) -->
                                  <div class="hardware-field">
                                      <label for="spawn-turboquant-mode" title="Reusable prompt storage policy. Compresses retained prefix snapshots only — does not reduce active-generation KV or model weights.">Reusable prompt storage</label>
@@ -3858,12 +3964,13 @@
                                 <span id="ctx-model-max-hint" class="ctx-model-max-hint" style="display:none;" title="Maximum context this model was trained on — going beyond this degrades quality"></span>
                             </div>
                             <input type="number" id="spawn-context-size" min="512" step="512" value="8192" title="Type any value. Smaller = less VRAM used by KV cache.">
-                            <div class="field-hint ctx-primary-hint">Primary tradeoff: more context uses more KV memory. Stay within model max for best quality; go beyond it only if you plan to extend with RoPE/YaRN.</div>
+                            <div class="field-hint ctx-primary-hint">Primary tradeoff: more context uses more KV memory. The model’s native context limit is detected from its GGUF or MLX config. Context extension controls are not configured here.</div>
                             <div class="ctx-quick-picks" id="ctx-quick-picks">
+                                <button type="button" class="ctx-pick" data-ctx="32768"  title="32k — focused work">32k <span class="ctx-pick-tag">Focused</span></button>
                                 <button type="button" class="ctx-pick" data-ctx="65536"  title="65k — Roleplay / RP with lorebooks">65k <span class="ctx-pick-tag">RP</span></button>
                                 <button type="button" class="ctx-pick" data-ctx="131072" title="131k — Minimum for agentic work">131k <span class="ctx-pick-tag">Agent</span></button>
                                 <button type="button" class="ctx-pick" data-ctx="163840" title="160k — extra room for long tasks">160k <span class="ctx-pick-tag">Large</span></button>
-                                <button type="button" class="ctx-pick" data-ctx="212000" title="212k — large context for demanding workflows">212k <span class="ctx-pick-tag">Large</span></button>
+                                <button type="button" class="ctx-pick" data-ctx="200000" title="200k — large context for demanding workflows">200k <span class="ctx-pick-tag">Large</span></button>
                                 <button type="button" class="ctx-pick" data-ctx="262144" title="262k — near-max for long-context models">262k <span class="ctx-pick-tag">Max</span></button>
                                 <button type="button" class="ctx-pick ctx-pick-model-max" id="ctx-pick-model-max" style="display:none;" title="This model's training context limit">— <span class="ctx-pick-tag">Model max</span></button>
                             </div>

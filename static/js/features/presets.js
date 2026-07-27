@@ -828,6 +828,7 @@ async function autoSizePreset() {
             : { 'Content-Type': 'application/json' };
         const body = {
             model_path: modelVal,
+            native_context_limit: _presetNativeContextLimit || null,
             n_ctx: parseInt(document.getElementById('modal-context-size')?.value) || 128000,
             ctk: document.getElementById('modal-ctk')?.value || 'q8_0',
             ctv: document.getElementById('modal-ctv')?.value || 'f16',
@@ -1003,7 +1004,30 @@ function _renderPresetVram(el, data) {
     if (overhead > 0) parts.push(`overhead ${fmt(overhead)}`);
     if (avail > 0 && free > 0) parts.push(`${fmt(free)} budget headroom`);
     // Phase 6 Part B: show prefix cache budget as informational (not consumed until active).
-    if (prefixCacheBudget > 0) parts.push(`Prefix cache budget ${fmt(prefixCacheBudget)}`);
+    if (prefixCacheBudget > 0) parts.push(`Rapid retained cache ${fmt(prefixCacheBudget)}`);
+    const nativeContextLimit = Number(data.native_context_limit || 0);
+    const selectedContext = Number(document.getElementById('modal-context-size')?.value || 0);
+    if (_presetNativeContextLimit !== nativeContextLimit) {
+        _presetNativeContextLimit = nativeContextLimit;
+        _renderContextPills();
+    }
+    const nativeHint = document.getElementById('preset-context-native-hint');
+    if (nativeHint) {
+        if (nativeContextLimit > 0) {
+            nativeHint.textContent = selectedContext > nativeContextLimit
+                ? `Native model maximum: ${Math.round(nativeContextLimit / 1024)}k. This selection needs Advanced Context extension controls and is not benchmark-qualified.`
+                : `Native model maximum: ${Math.round(nativeContextLimit / 1024)}k. Higher context requires separately qualified Advanced Context extension controls.`;
+            nativeHint.style.display = '';
+        } else {
+            nativeHint.style.display = 'none';
+        }
+    }
+    if (nativeContextLimit > 0) {
+        const nativeLabel = `${Math.round(nativeContextLimit / 1024)}k native max`;
+        parts.push(selectedContext > nativeContextLimit
+            ? `${nativeLabel} · Advanced Context required`
+            : nativeLabel);
+    }
 
     // Show post-load system RAM projection when we have live metrics
     const sys = lastSystemMetrics;
@@ -1279,11 +1303,12 @@ export function openPresetModal(mode, section, seedPreset = null) {
         numOrEmpty('modal-port', p.backend === 'rapid_mlx' ? p.rapid_mlx?.port : p.port);
         setOpt('modal-rapid-enable-thinking', p.rapid_mlx?.enable_thinking == null ? '' : String(!!p.rapid_mlx.enable_thinking));
         setOpt('modal-rapid-reasoning-effort', p.rapid_mlx?.reasoning_effort || '');
-        // Phase 6 Part B: prefix cache enabled checkbox (safe default: false).
-        const prefixCacheEnabled = p.rapid_mlx?.prefix_cache_enabled ?? false;
+        // Phase 6: 8 GiB retained cache is the qualified interactive default.
+        const prefixCacheEnabled = p.rapid_mlx?.prefix_cache_enabled ?? true;
         if (document.getElementById('modal-rapid-prefix-cache-enabled')) {
             document.getElementById('modal-rapid-prefix-cache-enabled').checked = prefixCacheEnabled;
         }
+        setOpt('modal-rapid-cache-memory-mib', String(p.rapid_mlx?.retained_cache_mib ?? (prefixCacheEnabled ? 8192 : 0)));
         // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
         setOpt('modal-rapid-kv-cache-dtype', p.rapid_mlx?.kv_cache_dtype || '');
         setOpt('modal-rapid-turboquant-mode', p.rapid_mlx?.turboquant_mode || 'auto');
@@ -1697,6 +1722,8 @@ function _configureBackendPresetEditor(preset) {
     });
     const prefixCacheRow = document.getElementById('pe-row-rapid-prefix-cache');
     if (prefixCacheRow) prefixCacheRow.style.display = isRapid ? '' : 'none';
+    const cacheMemoryRow = document.getElementById('pe-row-rapid-cache-memory');
+    if (cacheMemoryRow) cacheMemoryRow.style.display = isRapid ? '' : 'none';
 
     // Phase 7B4: Toggle MTP/concurrency teaching for Rapid-MLX only (D25).
     const mtpTeaching = document.getElementById('pe-mtp-concurrency-teaching');
@@ -1767,7 +1794,11 @@ function _buildFormPreset(existing) {
                     if (re) out.reasoning_effort = re;
                     // Phase 6 Part B: prefix cache enabled toggle.
                     const pceInput = document.getElementById('modal-rapid-prefix-cache-enabled');
-                    if (pceInput) out.prefix_cache_enabled = pceInput.checked;
+                    const cacheMib = Number(document.getElementById('modal-rapid-cache-memory-mib')?.value || 0);
+                    const retainedCacheEnabled = !!pceInput?.checked && cacheMib > 0;
+                    out.prefix_cache_enabled = retainedCacheEnabled;
+                    out.retained_cache_mib = retainedCacheEnabled ? cacheMib : null;
+                    out.disk_checkpoint_interval = 0;
                     // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
                     const kvDtype = strVal('modal-rapid-kv-cache-dtype');
                     const tqMode = strVal('modal-rapid-turboquant-mode');
@@ -2517,6 +2548,7 @@ document.getElementById('modal-model-path')?.addEventListener('input', () => {
 
 let _presetRapidMlxProfileTimer = null;
 let _presetRapidMlxProfile = null;
+let _presetNativeContextLimit = 0;
 
 function _schedulePresetRapidMlxProfile() {
     clearTimeout(_presetRapidMlxProfileTimer);
@@ -2888,10 +2920,11 @@ function _renderContextPills(mode, section) {
     const pillsContainer = document.getElementById('preset-context-pills');
     if (!pillsContainer) return;
     const pills = [
+        { label: '32k', value: 32768 },
         { label: '65k', value: 65536 },
         { label: '131k', value: 131072 },
         { label: '160k', value: 163840 },
-        { label: '212k', value: 212000 },
+        { label: '200k', value: 200000 },
         { label: '262k', value: 262144 },
     ];
     pillsContainer.innerHTML = '';
@@ -2900,8 +2933,15 @@ function _renderContextPills(mode, section) {
         pillEl.type = 'button';
         pillEl.className = 'preset-context-pill';
         pillEl.textContent = pill.label;
+        const advancedOnly = _presetNativeContextLimit > 0 && pill.value > _presetNativeContextLimit;
+        pillEl.disabled = advancedOnly;
+        pillEl.classList.toggle('preset-context-pill--advanced', advancedOnly);
+        if (advancedOnly) {
+            pillEl.title = `${pill.label} exceeds the native ${Math.round(_presetNativeContextLimit / 1024)}k model limit. Advanced Context extension is not configured.`;
+        }
         pillEl.onclick = (e) => {
             e.preventDefault();
+            if (advancedOnly) return;
             const input = document.getElementById('modal-context-size');
             if (input) {
                 input.value = pill.value;

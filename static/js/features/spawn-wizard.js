@@ -424,6 +424,7 @@ export const wizardState = {
     reasoningBudgetMessage: null,
     kvCacheDtype: 'int4',
     turboquantMode: 'auto',
+    retainedCacheMib: 8192,
     workloadScenario: 'interactive_coding_agent',
     workloadProfile: {
       id: 'interactive_coding_agent',
@@ -441,6 +442,10 @@ export const wizardState = {
     },
     workloadProfileConfirmed: false,
     reasoningMode: null,
+    toolCallParser: '',
+    reasoningParser: '',
+    hybridMode: 'auto',
+    prefillStepSize: 512,
     // Phase 7: Web UI (D26/A44)
     webUiAvailability: 'auto',
     webUiStaticPath: '',
@@ -1023,8 +1028,13 @@ function cacheDom() {
    dom.rapidAdvancedFields  = document.getElementById('spawn-rapid-advanced-fields');
    dom.kvCacheDtypeSelect   = document.getElementById('spawn-kv-cache-dtype');
    dom.turboquantModeSelect = document.getElementById('spawn-turboquant-mode');
+   dom.retainedCacheMibSelect = document.getElementById('spawn-retained-cache-mib');
    dom.workloadScenarioSelect = document.getElementById('spawn-workload-scenario'); // hidden select for compat
    dom.reasoningModeCheck   = document.getElementById('spawn-rapid-reasoning-mode');
+   dom.toolCallParserSelect = document.getElementById('spawn-rapid-tool-call-parser');
+   dom.reasoningParserSelect = document.getElementById('spawn-rapid-reasoning-parser');
+   dom.hybridModeSelect = document.getElementById('spawn-rapid-hybrid-mode');
+   dom.prefillStepSizeSelect = document.getElementById('spawn-rapid-prefill-step-size');
    dom.samplingModeSelect   = document.getElementById('spawn-sampling-mode');
   dom.webUiAvailabilitySelect = document.getElementById('spawn-webui-availability');
   dom.webUiConfigJsonInput  = document.getElementById('spawn-webui-config-json');
@@ -1548,9 +1558,14 @@ function _bindRapidMlxAdvancedControls() {
   };
 
    bindSel(dom.kvCacheDtypeSelect, 'kvCacheDtype');
-   bindSel(dom.turboquantModeSelect, 'turboquantMode');
+  bindSel(dom.turboquantModeSelect, 'turboquantMode');
+  bindSel(dom.retainedCacheMibSelect, 'retainedCacheMib');
    // workloadScenarioSelect is hidden; workload profile is managed by _selectWorkloadProfile()
-   bindSel(dom.samplingModeSelect, 'samplingMode');
+  bindSel(dom.samplingModeSelect, 'samplingMode');
+  bindSel(dom.toolCallParserSelect, 'toolCallParser');
+  bindSel(dom.reasoningParserSelect, 'reasoningParser');
+  bindSel(dom.hybridModeSelect, 'hybridMode');
+  bindSel(dom.prefillStepSizeSelect, 'prefillStepSize');
    bindSel(dom.webUiAvailabilitySelect, 'webUiAvailability');
 
    // Web UI config JSON and static path inputs
@@ -3747,11 +3762,15 @@ async function doIntrospect(path) {
       }
     }
 
-      // Store the model's training context ceiling for UX warnings
-    if (m.n_ctx_train) {
-      wizardState.model.nCtxTrain = m.n_ctx_train;
+    // GGUF reports n_ctx_train; local MLX reports config.max_position_embeddings.
+    // Both are native supported ceilings, not an invitation to silently apply
+    // RoPE/YaRN extension parameters.
+    const nativeContextLimit = Number(m.n_ctx_train || m.config?.max_position_embeddings || 0);
+    if (nativeContextLimit > 0) {
+      wizardState.model.nCtxTrain = nativeContextLimit;
       updateCtxTrainWarning();
       updateCtxModelMaxHint();
+      updateCtxQuickPickActive();
     }
 
     // Populate localMeta for the hint card — local browse never pre-populates it
@@ -5233,6 +5252,16 @@ function _renderRapidMlxProfileHints() {
 
   const hasVision = profile.extras && (profile.extras.vision || profile.extras.has_vision_tower);
   const hasEmbeddings = profile.extras && profile.extras.embeddings;
+  const toolDetected = document.getElementById('spawn-rapid-tool-parser-detected');
+  const reasoningDetected = document.getElementById('spawn-rapid-reasoning-parser-detected');
+  if (toolDetected) toolDetected.textContent = profile.tool_format || 'unknown';
+  if (reasoningDetected) reasoningDetected.textContent = profile.reasoning_parser || 'unknown';
+  if (profile.reasoning_parser && wizardState.hardware.reasoningMode == null) {
+    wizardState.hardware.reasoningMode = true;
+    if (dom.reasoningModeCheck) dom.reasoningModeCheck.checked = true;
+    _applyReasoningModeLock();
+    (window.scheduleVramUpdate || (() => {}))();
+  }
 
   // Tool format + reasoning parser row
   if (profile.tool_format || profile.reasoning_parser) {
@@ -6263,6 +6292,14 @@ function updateVramDisplay() {
       return;
     }
 
+    const nativeContextLimit = Number(est.native_context_limit || 0);
+    if (nativeContextLimit > 0 && wizardState.model.nCtxTrain !== nativeContextLimit) {
+      wizardState.model.nCtxTrain = nativeContextLimit;
+      updateCtxModelMaxHint();
+      updateCtxQuickPickActive();
+      updateCtxTrainWarning();
+    }
+
     const total = est.total_bytes;
     const headroom = est.headroom_bytes || 0;
     const free = headroom; // backend headroom_bytes = available - total
@@ -6366,7 +6403,7 @@ function updateVramDisplay() {
     // Phase 6 Part B: show prefix cache budget legend when budget exists.
     if (prefixCacheBudget > 0) {
       if (dom.vLegPrefixCacheItem) dom.vLegPrefixCacheItem.style.display = '';
-      if (dom.vLegPrefixCacheLabel) dom.vLegPrefixCacheLabel.textContent = `Prefix cache budget ${formatGB(prefixCacheBudget)}`;
+      if (dom.vLegPrefixCacheLabel) dom.vLegPrefixCacheLabel.textContent = `Rapid retained cache ${formatGB(prefixCacheBudget)}`;
     } else {
       if (dom.vLegPrefixCacheItem) dom.vLegPrefixCacheItem.style.display = 'none';
     }
@@ -6541,15 +6578,15 @@ function updateContextRailSummary() {
   dom.ctxRailSummaryStatus.classList.remove('warning');
 
   if (nCtxTrain && currentCtx > nCtxTrain) {
-    dom.ctxRailSummaryStatus.textContent = 'Extended beyond trained context';
+    dom.ctxRailSummaryStatus.textContent = 'Outside native context';
     dom.ctxRailSummaryStatus.classList.add('warning');
-    dom.ctxRailSummaryNote.textContent = `Model max is ${formatCtx(nCtxTrain)}. This can still fit in memory, but quality may degrade unless you intentionally extend context with RoPE/YaRN.`;
+    dom.ctxRailSummaryNote.textContent = `Model max is ${formatCtx(nCtxTrain)}. This may fit memory but is untested and requires Advanced Context extension controls, which are not configured.`;
     return;
   }
 
   if (nCtxTrain && currentCtx === nCtxTrain) {
     dom.ctxRailSummaryStatus.textContent = 'At model max';
-    dom.ctxRailSummaryNote.textContent = 'You are using the model’s full trained context. Going higher is possible only as an advanced extension with RoPE/YaRN.';
+    dom.ctxRailSummaryNote.textContent = 'You are using the model’s full native context. Higher values require separately qualified Advanced Context extension controls.';
     return;
   }
 
@@ -6557,7 +6594,7 @@ function updateContextRailSummary() {
     dom.ctxRailSummaryStatus.textContent = 'Within trained context';
     dom.ctxRailSummaryNote.textContent = currentCtx < target
       ? `Use-case target is ${formatCtx(target)}. Lower values save memory, but leave less room for long chats, retrieval, or tool loops.`
-      : `Model max is ${formatCtx(nCtxTrain)}. Use a custom value above that only if you intentionally want extended context with RoPE/YaRN.`;
+      : `Model max is ${formatCtx(nCtxTrain)}. Higher values are advanced-only and untested until context-extension support is qualified.`;
     return;
   }
 
@@ -9052,6 +9089,11 @@ function bindCtxQuickPicks() {
     btn.addEventListener('click', () => {
       const ctx = parseInt(btn.dataset.ctx, 10);
       if (!ctx) return;
+      const nativeCap = wizardState.model.nCtxTrain || 0;
+      if (nativeCap > 0 && ctx > nativeCap) {
+        updateCtxTrainWarning();
+        return;
+      }
       if (dom.contextSizeInput) dom.contextSizeInput.value = ctx;
       wizardState.hardware.contextSize = ctx;
       updateCtxQuickPickActive();
@@ -9075,8 +9117,17 @@ function bindCtxQuickPicks() {
 
 function updateCtxQuickPickActive() {
   const current = parseInt(dom.contextSizeInput?.value || '0', 10);
+  const nativeCap = wizardState.model.nCtxTrain || 0;
   document.querySelectorAll('.ctx-pick').forEach(btn => {
-    btn.classList.toggle('active', parseInt(btn.dataset.ctx, 10) === current);
+    if (!btn.dataset.nativeTitle) btn.dataset.nativeTitle = btn.title;
+    const value = parseInt(btn.dataset.ctx, 10);
+    const advancedOnly = nativeCap > 0 && value > nativeCap;
+    btn.classList.toggle('active', value === current);
+    btn.classList.toggle('ctx-pick-advanced', advancedOnly);
+    btn.setAttribute('aria-disabled', String(advancedOnly));
+    btn.title = advancedOnly
+      ? `${Math.round(value / 1024)}k exceeds this model's native ${Math.round(nativeCap / 1024)}k context. Advanced context extension is not configured.`
+      : btn.dataset.nativeTitle;
   });
 }
 
@@ -9108,8 +9159,9 @@ function updateCtxModelMaxHint() {
   }
 }
 
-// Warn when the selected context exceeds the model's training context length.
-// We still allow it — users may be using RoPE/YaRN extension — but we flag it clearly.
+// Native context is a hard supported ceiling in the standard flow. Extension
+// parameters are intentionally out of scope until their per-model support and
+// memory math are qualified.
 function updateCtxTrainWarning() {
   const el = document.getElementById('ctx-train-warning');
   if (!el) return;
@@ -9120,18 +9172,13 @@ function updateCtxTrainWarning() {
     return;
   }
   const fmtK = n => n >= 1024 ? `${Math.round(n / 1024)}k` : `${n}`;
-  const scale = (1 / (selected / nCtxTrain)).toFixed(3);
   el.textContent = '';
   const strong = document.createElement('strong');
-  strong.textContent = `Context (${fmtK(selected)}) exceeds this model's training window (${fmtK(nCtxTrain)})`;
-  const code = document.createElement('code');
-  code.textContent = `--rope-scaling yarn --rope-freq-scale ${scale}`;
+  strong.textContent = `Context (${fmtK(selected)}) exceeds this model's native window (${fmtK(nCtxTrain)})`;
   el.appendChild(strong);
   el.appendChild(document.createTextNode(
-    `. Generation quality degrades beyond the training limit. To extend safely, enable RoPE scaling (YaRN) — or add `
+    '. This is outside the model’s supported and benchmarked context. Context extension (RoPE/YaRN and its memory validation) requires Advanced Context controls, which are not configured in this release.'
   ));
-  el.appendChild(code);
-  el.appendChild(document.createTextNode(' to Extra Args.'));
   el.className = 'ctx-fit-warning';
   el.style.display = '';
   updateCtxModelMaxHint();
@@ -10486,10 +10533,19 @@ export function buildSpawnPayload() {
         port: wizardState.access.port || 8001,
         api_key: wizardState.access.apiKey || null,
         ...(h.enableThinking != null && { enable_thinking: h.enableThinking }),
+        ...(h.toolCallParser && { tool_call_parser: h.toolCallParser }),
+        ...(h.reasoningParser && { reasoning_parser: h.reasoningParser }),
+        hybrid_mode: h.hybridMode || 'auto',
+        prefill_step_size: Number(h.prefillStepSize || 512),
         ...(escapeHatchFlags.length > 0 && { escape_hatch_flags: escapeHatchFlags }),
         // Phase 7: KV/cache policy (D6 catalog IDs)
         ...(h.kvCacheDtype && h.kvCacheDtype !== 'int4' && { kv_cache_dtype: h.kvCacheDtype }),
         ...(h.turboquantMode && h.turboquantMode !== 'none' && h.turboquantMode !== 'auto' && { turboquant_mode: h.turboquantMode }),
+        prefix_cache_enabled: Number(h.retainedCacheMib ?? 8192) > 0,
+        ...(Number(h.retainedCacheMib ?? 8192) > 0 && {
+          retained_cache_mib: Number(h.retainedCacheMib ?? 8192),
+        }),
+        disk_checkpoint_interval: 0,
         // Phase 7B2: Workload profile with assumptions
         ...(h.workloadProfile?.id && { workload_scenario: h.workloadProfile.id }),
         ...(h.workloadProfile?.assumptions && {
@@ -10514,6 +10570,13 @@ export function buildSpawnPayload() {
         ...(h.webUiConfigJson && { web_ui_config_json: h.webUiConfigJson }),
         // Phase 7: Sampling mode (D27)
         ...(h.samplingMode && h.samplingMode !== 'auto' && { sampling_mode: h.samplingMode }),
+        ...(h.temperature != null && { default_temperature: h.temperature }),
+        ...(h.topP != null && { default_top_p: h.topP }),
+        ...(h.topK != null && { default_top_k: h.topK }),
+        ...(h.minP != null && { default_min_p: h.minP }),
+        ...(h.repeatPenalty != null && { default_repetition_penalty: h.repeatPenalty }),
+        ...(h.presencePenalty != null && { default_presence_penalty: h.presencePenalty }),
+        ...(h.maxTokens != null && { max_tokens: h.maxTokens }),
         // Phase 7: Prompt storage (D31) — turboquant_mode already set above
       },
     };

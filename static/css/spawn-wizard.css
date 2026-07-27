@@ -4877,6 +4877,15 @@
   border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
   color: var(--color-primary-light);
 }
+.ctx-pick.ctx-pick-advanced {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+.ctx-pick.ctx-pick-advanced:hover {
+  background: rgba(255,255,255,0.03);
+  border-color: var(--border-subtle);
+  color: var(--color-text-muted);
+}
 .ctx-pick-tag {
   font-size: 9px;
   font-weight: 700;

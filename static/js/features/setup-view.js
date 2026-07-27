@@ -986,6 +986,10 @@ function _buildLaunchCard(preset, activePresetId) {
     const ctxDisplay = ctxK >= 1000 ? `${(ctxK / 1024).toFixed(1)}M context` : `${ctxK}k context`;
     const ctkDisplay = (preset.ctk || 'q8_0') + '/' + (preset.ctv || 'f16');
     const quantTag = extractQuantFromFilename(modelFile);
+    const rapidCacheMib = preset.backend === 'rapid_mlx' && rapidMlx?.prefix_cache_enabled !== false
+        ? (rapidMlx?.retained_cache_mib ?? 8192) : 0;
+    const rapidCacheChip = rapidCacheMib > 0
+        ? `<span class="launch-chip launch-chip--accent" title="Optional Rapid retained prefix-cache memory">${rapidCacheMib / 1024} GiB cache</span>` : '';
 
     if (isExample) {
         // Example card: dimmed, no edit button, use-wizard CTA only
@@ -1048,6 +1052,7 @@ function _buildLaunchCard(preset, activePresetId) {
                 <span class="launch-chip">${ctxDisplay}</span>
                 <span class="launch-chip">${ctkDisplay}</span>
                 ${quantTag ? `<span class="launch-chip launch-chip--quant" title="File quantization: ${escapeHtml(quantTag)}">${escapeHtml(quantTag)}</span>` : ''}
+                ${rapidCacheChip}
                 ${preset.ngram_spec ? '<span class="launch-chip launch-chip--accent">n-gram</span>' : ''}
             </div>
             ${tagPills}
