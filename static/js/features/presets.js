@@ -1311,7 +1311,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
         setOpt('modal-rapid-cache-memory-mib', String(p.rapid_mlx?.retained_cache_mib ?? (prefixCacheEnabled ? 8192 : 0)));
         // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
         setOpt('modal-rapid-kv-cache-dtype', p.rapid_mlx?.kv_cache_dtype || '');
-        setOpt('modal-rapid-turboquant-mode', p.rapid_mlx?.turboquant_mode || 'auto');
+        setOpt('modal-rapid-turboquant-mode', p.rapid_mlx?.turboquant_mode || 'none');
         setOpt('modal-rapid-workload-scenario', p.rapid_mlx?.workload_scenario || '');
         setOpt('modal-rapid-sampling-mode', p.rapid_mlx?.sampling_mode || 'auto');
         // Phase 7B2: Workload assumptions (for reference display)

@@ -423,7 +423,7 @@ export const wizardState = {
     reasoningBudget: null,
     reasoningBudgetMessage: null,
     kvCacheDtype: 'int4',
-    turboquantMode: 'auto',
+    turboquantMode: 'none',
     retainedCacheMib: 8192,
     workloadScenario: 'interactive_coding_agent',
     workloadProfile: {
@@ -818,7 +818,7 @@ function resetWizardState() {
   wizardState.hardware.reasoningBudget = null;
   wizardState.hardware.reasoningBudgetMessage = null;
   wizardState.hardware.kvCacheDtype = '';
-  wizardState.hardware.turboquantMode = 'auto';
+  wizardState.hardware.turboquantMode = 'none';
   wizardState.hardware.workloadScenario = '';
   wizardState.hardware.workloadProfile = {
     id: '',
@@ -1595,10 +1595,28 @@ function _applyReasoningModeLock() {
   if (!dom.kvCacheDtypeSelect) return;
 
   if (locked) {
-    // Lock KV dtype to int8 visually; show overlay text but keep underlying value
+    // Disable int4 option when reasoning is ON (pins KV to int8)
+    for (const opt of dom.kvCacheDtypeSelect.options) {
+      if (opt.value === 'int4') {
+        opt.disabled = true;
+        opt.setAttribute('data-disabled-by', 'reasoning');
+      }
+    }
+    // If int4 was selected, switch to int8
+    if (dom.kvCacheDtypeSelect.value === 'int4') {
+      dom.kvCacheDtypeSelect.value = 'int8';
+      wizardState.hardware.kvCacheDtype = 'int8';
+    }
     dom.kvCacheDtypeSelect.classList.add('kv-dtype-locked');
-    dom.kvCacheDtypeSelect.title = 'Locked to int8 by reasoning mode';
+    dom.kvCacheDtypeSelect.title = 'Reasoning mode pins KV to int8';
   } else {
+    // Re-enable int4 when reasoning is OFF
+    for (const opt of dom.kvCacheDtypeSelect.options) {
+      if (opt.getAttribute('data-disabled-by') === 'reasoning') {
+        opt.disabled = false;
+        opt.removeAttribute('data-disabled-by');
+      }
+    }
     dom.kvCacheDtypeSelect.classList.remove('kv-dtype-locked');
     dom.kvCacheDtypeSelect.title = '';
   }
@@ -10188,11 +10206,17 @@ function _renderPresetParamsStep() {
       sections.push({ label: 'Speculative Decoding', rows });
     }
 
-   // Rapid-MLX Phase 7 advanced settings summary
-   if (rapid) {
-     const rapidRows = [];
-     const kvLabel = h.kvCacheDtype && h.kvCacheDtype !== 'int4' ? h.kvCacheDtype.toUpperCase() + (h.reasoningMode ? ' (reasoning lock)' : '') : 'int4';
-     rapidRows.push({ label: 'KV cache dtype', value: kvLabel });
+    // Rapid-MLX Phase 7 advanced settings summary
+    if (rapid) {
+      const rapidRows = [];
+      // Show requested vs effective when reasoning overrides the selection
+      const requestedKv = h.kvCacheDtype || 'int4';
+      const effectiveKv = h.reasoningMode ? 'int8' : requestedKv;
+      if (h.reasoningMode && requestedKv !== 'int8') {
+        rapidRows.push({ label: 'KV cache dtype', value: requestedKv.toUpperCase() + ' → INT8 (reasoning profile)' });
+      } else {
+        rapidRows.push({ label: 'KV cache dtype', value: requestedKv.toUpperCase() });
+      }
      rapidRows.push({ label: 'Prompt storage', value: h.turboquantMode === 'auto' ? 'Auto — runtime default' : h.turboquantMode === 'none' ? 'Standard (int4)' : h.turboquantMode === 'k8v4' ? 'TurboQuant K8V4' : 'TurboQuant V-only' });
      if (h.workloadScenario && h.workloadScenario !== 'interactive_chat') {
        rapidRows.push({ label: 'Workload scenario', value: { interactive_chat: 'Interactive Chat', coding_agent: 'Coding Agent', tool_research_agent: 'Tool Research Agent', batch_eval: 'Batch Evaluation', roleplay: 'Roleplay' }[h.workloadScenario] || h.workloadScenario });

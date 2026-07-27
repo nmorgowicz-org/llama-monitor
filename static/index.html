@@ -3205,14 +3205,14 @@
                                        </select>
                                    </div>
                                    <div class="pe-field">
-                                       <label class="pe-label" for="modal-rapid-turboquant-mode" title="Reusable prompt storage policy. Compresses retained prefix snapshots only — does not reduce active-generation KV or model weights.">Reusable Prompt Storage</label>
-                                       <select class="pe-select" id="modal-rapid-turboquant-mode">
-                                           <option value="auto">Auto — runtime default</option>
-                                           <option value="">(unset)</option>
-                                           <option value="none">Standard — int4 retained storage</option>
-                                           <option value="k8v4">TurboQuant K8V4 — Advanced trial</option>
-                                           <option value="v4">TurboQuant V-only — Expert legacy</option>
-                                       </select>
+                                        <label class="pe-label" for="modal-rapid-turboquant-mode" title="Reusable prompt storage policy. Compresses retained prefix snapshots only — does not reduce active-generation KV or model weights. K8V4 showed 40–100% slower TTFT in Phase 6 benchmarks; requires re-validation post rapid-mlx v0.11.0.">Reusable Prompt Storage</label>
+                                        <select class="pe-select" id="modal-rapid-turboquant-mode">
+                                            <option value="auto">Auto — runtime default</option>
+                                            <option value="">(unset)</option>
+                                            <option value="none">Standard — int4 retained storage</option>
+                                            <option value="k8v4">TurboQuant K8V4 — Advanced trial</option>
+                                            <option value="v4">TurboQuant V-only — Expert legacy</option>
+                                        </select>
                                    </div>
                                </div>
                                <div class="pe-row pe-row-rapid-workload" id="pe-row-rapid-workload" style="display:none;">
@@ -3808,7 +3808,7 @@
                                          <option value="int8">int8 — recommended (tool calling)</option>
                                          <option value="bf16">bf16 — highest precision</option>
                                      </select>
-                                     <div class="field-hint">Memory vs precision tradeoff; int8 recommended for tool calling. Locked to int8 when Reasoning mode is enabled.</div>
+                                      <div class="field-hint">Memory vs precision tradeoff; int8 recommended for tool calling. int4 is blocked when Reasoning mode is enabled (pins to int8).</div>
                                  </div>
                                  <div class="hardware-field">
                                      <label for="spawn-retained-cache-mib" title="Optional Rapid retained prefix-cache memory. It is additional unified-memory use, not active KV.">Retained cache</label>
@@ -3863,14 +3863,14 @@
                                  </div>
                                  <!-- Reusable prompt storage (D31) -->
                                  <div class="hardware-field">
-                                     <label for="spawn-turboquant-mode" title="Reusable prompt storage policy. Compresses retained prefix snapshots only — does not reduce active-generation KV or model weights.">Reusable prompt storage</label>
-                                     <select id="spawn-turboquant-mode">
-                                         <option value="auto" selected>Auto — runtime default</option>
-                                         <option value="none">Standard — int4 retained storage</option>
-                                         <option value="k8v4">TurboQuant K8V4 — Advanced trial</option>
-                                         <option value="v4">TurboQuant V-only — Expert legacy</option>
-                                     </select>
-                                     <div class="field-hint">Retained-prefix compression only. Does not save active KV or weights. Coding agents benefit most; Roleplay defaults to Standard.</div>
+                                      <label for="spawn-turboquant-mode" title="Reusable prompt storage policy. Compresses retained prefix snapshots only — does not reduce active-generation KV or model weights.">Reusable prompt storage</label>
+                                      <select id="spawn-turboquant-mode">
+                                          <option value="none" selected>Standard — int4 retained storage</option>
+                                          <option value="auto">Auto — runtime default</option>
+                                          <option value="k8v4">TurboQuant K8V4 — Advanced trial</option>
+                                          <option value="v4">TurboQuant V-only — Expert legacy</option>
+                                      </select>
+                                      <div class="field-hint">Retained-prefix compression only. Does not save active KV or weights. K8V4 showed 40–100% slower TTFT in Phase 6 benchmarks; requires re-validation post rapid-mlx v0.11.0.</div>
                                  </div>
                                  <!-- Sampling mode (D27) -->
                                  <div class="hardware-field">
@@ -3896,7 +3896,7 @@
                                     </label>
                                 </div>
                                  <div class="kv-inline-field" style="flex:999 1 320px;">
-                                     <div class="field-hint" style="margin:0;">Overrides KV dtype to int8 for reasoning models. KV dtype selector is fixed when enabled.</div>
+                                      <div class="field-hint" style="margin:0;">Pins active KV cache to int8 (blocks int4). Required for reasoning-capable models to maintain tool-call and math accuracy.</div>
                                  </div>
                              </div>
                          </div>

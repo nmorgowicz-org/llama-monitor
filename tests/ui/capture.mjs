@@ -3763,12 +3763,28 @@ async function scenarioSpawnWizardEngines(ctx) {
             body.scrollTop = elementTop - viewportCenter + params.offset;
         }, { selector, offset: yOffset });
 
-    // spawn-wizard-workload-profiles.png — All 5 profile cards with Interactive Coding Agent selected (default).
-    // Also shows Rapid-MLX panel header and memory controls notice (so separate hardware screenshot is redundant).
-    await scrollToElement('#workload-profile-cards', -30);
+    // spawn-wizard-reasoning-mode-on.png — Reasoning mode ON with KV dtype locked to int8.
+    // Shows: reasoning toggle enabled, int4 option disabled in KV dtype select.
+    await page.evaluate(() => {
+        const reasoningCheckbox = document.getElementById('spawn-rapid-reasoning-mode');
+        if (reasoningCheckbox && !reasoningCheckbox.checked) {
+            reasoningCheckbox.click();
+        }
+    });
+    await sleep(400);
+    await scrollToElement('#spawn-kv-cache-dtype', 20);
     await sleep(300);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-workload-profiles.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-workload-profiles.png');
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-reasoning-mode-on.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-reasoning-mode-on.png');
+
+    // Reset reasoning mode.
+    await page.evaluate(() => {
+        const reasoningCheckbox = document.getElementById('spawn-rapid-reasoning-mode');
+        if (reasoningCheckbox && reasoningCheckbox.checked) {
+            reasoningCheckbox.click();
+        }
+    });
+    await sleep(300);
 
     // spawn-wizard-workload-roleplay.png — Roleplay profile selected with its assumptions.
     await page.evaluate(() => {
