@@ -1,4 +1,5 @@
 use crate::inference::rapid_mlx::compatibility::ServeCapabilities;
+use crate::inference::rapid_mlx::RapidMlxHybridMode;
 use crate::inference::rapid_mlx::model_resolver::{
     RapidMlxModelSource, ResolvedRapidMlxLaunchModel,
 };
@@ -14,9 +15,9 @@ pub struct RapidMlxCommandBuilder {
     port: u16,
     log_level: Option<String>,
     timeout: Option<u32>,
-    max_cache_blocks: Option<u32>,
     api_key: Option<String>,
     tool_call_parser: Option<String>,
+    reasoning_parser: Option<String>,
     auto_tool_choice: bool,
     no_thinking: bool,
     trust_remote_code_consent: Option<String>,
@@ -24,16 +25,20 @@ pub struct RapidMlxCommandBuilder {
     // Phase 7: KV/cache policy
     kv_cache_dtype: Option<KvCacheDtypeArg>,
     turboquant_mode: Option<String>,
-    prefix_cache_policy: Option<String>,
     hybrid_cache_entries: Option<u64>,
+    hybrid_mode: RapidMlxHybridMode,
     pflash_policy: Option<String>,
     response_cache_policy: Option<String>,
     disk_checkpoint_policy: Option<String>,
+    retained_cache_mib: Option<u32>,
+    prefix_cache_enabled: Option<bool>,
+    disk_checkpoint_interval: Option<u32>,
     // Phase 7: batching/concurrency
     max_num_seqs: Option<u64>,
     max_concurrent_requests: Option<u64>,
     prefill_batch_size: Option<u64>,
     completion_batch_size: Option<u64>,
+    prefill_step_size: Option<u32>,
     batching_policy: Option<String>,
     concurrency_policy: Option<String>,
     // Phase 7: reasoning/speculative
@@ -52,6 +57,14 @@ pub struct RapidMlxCommandBuilder {
     endpoint_compatibility: Option<String>,
     request_safety_policy: Option<String>,
     sampling_mode: Option<String>,
+    default_temperature: Option<f64>,
+    default_top_p: Option<f64>,
+    default_top_k: Option<u64>,
+    default_min_p: Option<f64>,
+    default_repetition_penalty: Option<f64>,
+    default_presence_penalty: Option<f64>,
+    default_frequency_penalty: Option<f64>,
+    max_tokens: Option<u64>,
     parser_policy: Option<String>,
     security_policy: Option<String>,
 }
@@ -72,9 +85,9 @@ impl RapidMlxCommandBuilder {
             port: 8000,
             log_level: None,
             timeout: None,
-            max_cache_blocks: None,
             api_key: None,
             tool_call_parser: None,
+            reasoning_parser: None,
             auto_tool_choice: false,
             no_thinking: false,
             trust_remote_code_consent: None,
@@ -82,15 +95,19 @@ impl RapidMlxCommandBuilder {
             // Phase 7 defaults
             kv_cache_dtype: None,
             turboquant_mode: None,
-            prefix_cache_policy: None,
             hybrid_cache_entries: None,
+            hybrid_mode: RapidMlxHybridMode::Auto,
             pflash_policy: None,
             response_cache_policy: None,
             disk_checkpoint_policy: None,
+            retained_cache_mib: None,
+            prefix_cache_enabled: None,
+            disk_checkpoint_interval: None,
             max_num_seqs: None,
             max_concurrent_requests: None,
             prefill_batch_size: None,
             completion_batch_size: None,
+            prefill_step_size: None,
             batching_policy: None,
             concurrency_policy: None,
             reasoning_mode: None,
@@ -104,6 +121,14 @@ impl RapidMlxCommandBuilder {
             endpoint_compatibility: None,
             request_safety_policy: None,
             sampling_mode: None,
+            default_temperature: None,
+            default_top_p: None,
+            default_top_k: None,
+            default_min_p: None,
+            default_repetition_penalty: None,
+            default_presence_penalty: None,
+            default_frequency_penalty: None,
+            max_tokens: None,
             parser_policy: None,
             security_policy: None,
         }
@@ -134,11 +159,6 @@ impl RapidMlxCommandBuilder {
         self
     }
 
-    pub fn max_cache_blocks(mut self, blocks: u32) -> Self {
-        self.max_cache_blocks = Some(blocks);
-        self
-    }
-
     pub fn api_key(mut self, api_key: String) -> Self {
         self.api_key = Some(api_key);
         self
@@ -146,6 +166,11 @@ impl RapidMlxCommandBuilder {
 
     pub fn tool_call_parser(mut self, parser: Option<String>) -> Self {
         self.tool_call_parser = parser;
+        self
+    }
+
+    pub fn reasoning_parser(mut self, parser: Option<String>) -> Self {
+        self.reasoning_parser = parser;
         self
     }
 
@@ -177,12 +202,12 @@ impl RapidMlxCommandBuilder {
         self.turboquant_mode = mode;
         self
     }
-    pub fn prefix_cache_policy(mut self, policy: Option<String>) -> Self {
-        self.prefix_cache_policy = policy;
-        self
-    }
     pub fn hybrid_cache_entries(mut self, entries: Option<u64>) -> Self {
         self.hybrid_cache_entries = entries;
+        self
+    }
+    pub fn hybrid_mode(mut self, mode: RapidMlxHybridMode) -> Self {
+        self.hybrid_mode = mode;
         self
     }
     pub fn pflash_policy(mut self, policy: Option<String>) -> Self {
@@ -195,6 +220,18 @@ impl RapidMlxCommandBuilder {
     }
     pub fn disk_checkpoint_policy(mut self, policy: Option<String>) -> Self {
         self.disk_checkpoint_policy = policy;
+        self
+    }
+    pub fn retained_cache_mib(mut self, mib: Option<u32>) -> Self {
+        self.retained_cache_mib = mib;
+        self
+    }
+    pub fn prefix_cache_enabled(mut self, enabled: Option<bool>) -> Self {
+        self.prefix_cache_enabled = enabled;
+        self
+    }
+    pub fn disk_checkpoint_interval(mut self, interval: Option<u32>) -> Self {
+        self.disk_checkpoint_interval = interval;
         self
     }
     pub fn max_num_seqs(mut self, seqs: Option<u64>) -> Self {
@@ -211,6 +248,10 @@ impl RapidMlxCommandBuilder {
     }
     pub fn completion_batch_size(mut self, size: Option<u64>) -> Self {
         self.completion_batch_size = size;
+        self
+    }
+    pub fn prefill_step_size(mut self, size: Option<u32>) -> Self {
+        self.prefill_step_size = size;
         self
     }
     pub fn batching_policy(mut self, policy: Option<String>) -> Self {
@@ -265,6 +306,28 @@ impl RapidMlxCommandBuilder {
         self.sampling_mode = mode;
         self
     }
+    #[allow(clippy::too_many_arguments)]
+    pub fn sampling_defaults(
+        mut self,
+        temperature: Option<f64>,
+        top_p: Option<f64>,
+        top_k: Option<u64>,
+        min_p: Option<f64>,
+        repetition_penalty: Option<f64>,
+        presence_penalty: Option<f64>,
+        frequency_penalty: Option<f64>,
+        max_tokens: Option<u64>,
+    ) -> Self {
+        self.default_temperature = temperature;
+        self.default_top_p = top_p;
+        self.default_top_k = top_k;
+        self.default_min_p = min_p;
+        self.default_repetition_penalty = repetition_penalty;
+        self.default_presence_penalty = presence_penalty;
+        self.default_frequency_penalty = frequency_penalty;
+        self.max_tokens = max_tokens;
+        self
+    }
     pub fn parser_policy(mut self, policy: Option<String>) -> Self {
         self.parser_policy = policy;
         self
@@ -308,27 +371,45 @@ impl RapidMlxCommandBuilder {
             args.push(timeout.to_string());
         }
 
-        if let Some(blocks) = self.max_cache_blocks {
-            capabilities.require("--max-cache-blocks")?;
-            args.push("--max-cache-blocks".to_string());
-            args.push(blocks.to_string());
-        }
-
         // Diagnostic fix flags — not guarded by capability checks since they are
         // only activated by the diagnostics panel, never by default.
         if let Some(parser) = self.tool_call_parser {
+            capabilities.require("--tool-call-parser")?;
             args.push("--tool-call-parser".to_string());
             args.push(parser);
         }
+        if let Some(parser) = self.reasoning_parser {
+            capabilities.require("--reasoning-parser")?;
+            args.push("--reasoning-parser".to_string());
+            args.push(parser);
+        }
         if self.auto_tool_choice {
+            capabilities.require("--enable-auto-tool-choice")?;
             args.push("--enable-auto-tool-choice".to_string());
         }
         if self.no_thinking {
+            capabilities.require("--no-thinking")?;
             args.push("--no-thinking".to_string());
         }
 
         // Apply validated escape-hatch flags (already allowlisted at load time).
         // Bool flags are boolean switches: true = presence of flag, false = omitted.
+        let legacy_force_hybrid = self.escape_hatch_flags.iter().any(|(name, value)| {
+            name == "force-hybrid" && value == &serde_json::Value::Bool(true)
+        });
+        let legacy_no_hybrid = self.escape_hatch_flags.iter().any(|(name, value)| {
+            name == "no-hybrid" && value == &serde_json::Value::Bool(true)
+        });
+        if legacy_force_hybrid && legacy_no_hybrid {
+            anyhow::bail!("--force-hybrid and --no-hybrid are mutually exclusive");
+        }
+        if self.hybrid_mode != RapidMlxHybridMode::Auto
+            && (legacy_force_hybrid || legacy_no_hybrid)
+        {
+            anyhow::bail!(
+                "hybrid_mode cannot be combined with legacy force-hybrid/no-hybrid escape flags"
+            );
+        }
         for (name, value) in &self.escape_hatch_flags {
             match value {
                 serde_json::Value::Bool(true) => {
@@ -366,17 +447,35 @@ impl RapidMlxCommandBuilder {
             args.push("--kv-cache-turboquant".to_string());
             args.push(mode.clone());
         }
-        if let Some(ref policy) = self.prefix_cache_policy
-            && policy != "auto"
-        {
-            capabilities.require("--max-cache-blocks")?;
-            args.push("--max-cache-blocks".to_string());
-            args.push(policy.clone());
+        if let Some(enabled) = self.prefix_cache_enabled {
+            let flag = if enabled {
+                "--enable-prefix-cache"
+            } else {
+                "--disable-prefix-cache"
+            };
+            capabilities.require(flag)?;
+            args.push(flag.to_string());
+        }
+        if let Some(mib) = self.retained_cache_mib.filter(|mib| *mib > 0) {
+            capabilities.require("--cache-memory-mb")?;
+            args.push("--cache-memory-mb".to_string());
+            args.push(mib.to_string());
         }
         if let Some(entries) = self.hybrid_cache_entries {
             capabilities.require("--hybrid-cache-entries")?;
             args.push("--hybrid-cache-entries".to_string());
             args.push(entries.to_string());
+        }
+        match self.hybrid_mode {
+            RapidMlxHybridMode::Auto => {}
+            RapidMlxHybridMode::Force => {
+                capabilities.require("--force-hybrid")?;
+                args.push("--force-hybrid".to_string());
+            }
+            RapidMlxHybridMode::Disable => {
+                capabilities.require("--no-hybrid")?;
+                args.push("--no-hybrid".to_string());
+            }
         }
         if let Some(ref policy) = self.pflash_policy
             && policy != "auto"
@@ -399,6 +498,11 @@ impl RapidMlxCommandBuilder {
             args.push("--disk-checkpoint".to_string());
             args.push(policy.clone());
         }
+        if let Some(interval) = self.disk_checkpoint_interval {
+            capabilities.require("--kv-disk-checkpoint-interval")?;
+            args.push("--kv-disk-checkpoint-interval".to_string());
+            args.push(interval.to_string());
+        }
         // Phase 7: batching/concurrency flags
         if let Some(seqs) = self.max_num_seqs {
             capabilities.require("--max-num-seqs")?;
@@ -420,6 +524,14 @@ impl RapidMlxCommandBuilder {
             args.push("--completion-batch-size".to_string());
             args.push(size.to_string());
         }
+        if let Some(size) = self.prefill_step_size {
+            if !(1..=2048).contains(&size) {
+                anyhow::bail!("prefill_step_size must be between 1 and 2048");
+            }
+            capabilities.require("--prefill-step-size")?;
+            args.push("--prefill-step-size".to_string());
+            args.push(size.to_string());
+        }
         if let Some(ref policy) = self.batching_policy
             && policy != "auto"
         {
@@ -435,12 +547,15 @@ impl RapidMlxCommandBuilder {
             args.push(policy.clone());
         }
         // Phase 7: reasoning/speculative flags
-        if let Some(ref mode) = self.reasoning_mode
-            && mode != "auto"
-        {
-            capabilities.require("--reasoning")?;
-            args.push("--reasoning".to_string());
-            args.push(mode.clone());
+        if let Some(ref mode) = self.reasoning_mode {
+            match mode.as_str() {
+                "auto" | "off" => {}
+                "on" => {
+                    capabilities.require("--reasoning")?;
+                    args.push("--reasoning".to_string());
+                }
+                value => anyhow::bail!("reasoning_mode must be auto, on, or off; got {value:?}"),
+            }
         }
         if let Some(ref policy) = self.speculative_policy {
             capabilities.require("--speculative")?;
@@ -517,6 +632,34 @@ impl RapidMlxCommandBuilder {
         // does not turn it into a Rapid argv flag: per-field server-default
         // support is runtime-qualified in Phase 3, and an unqualified selection
         // must never create an unsupported launch argument.
+        for (flag, value) in [
+            (
+                "--default-temperature",
+                self.default_temperature.map(|v| v.to_string()),
+            ),
+            ("--default-top-p", self.default_top_p.map(|v| v.to_string())),
+            ("--default-top-k", self.default_top_k.map(|v| v.to_string())),
+            ("--default-min-p", self.default_min_p.map(|v| v.to_string())),
+            (
+                "--default-repetition-penalty",
+                self.default_repetition_penalty.map(|v| v.to_string()),
+            ),
+            (
+                "--default-presence-penalty",
+                self.default_presence_penalty.map(|v| v.to_string()),
+            ),
+            (
+                "--default-frequency-penalty",
+                self.default_frequency_penalty.map(|v| v.to_string()),
+            ),
+            ("--max-tokens", self.max_tokens.map(|v| v.to_string())),
+        ] {
+            if let Some(value) = value {
+                capabilities.require(flag)?;
+                args.push(flag.to_string());
+                args.push(value);
+            }
+        }
         if let Some(ref policy) = self.parser_policy
             && policy != "auto"
         {
@@ -675,16 +818,12 @@ mod tests {
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         )
         .timeout(90)
-        .max_cache_blocks(200)
         .api_key("do-not-log".into())
         .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
         .unwrap();
         let args = args(&launch);
         assert!(args.windows(2).any(|pair| pair == ["--timeout", "90"]));
-        assert!(
-            args.windows(2)
-                .any(|pair| pair == ["--max-cache-blocks", "200"])
-        );
+        assert!(!args.iter().any(|arg| arg == "--max-cache-blocks"));
         assert!(!args.iter().any(|arg| arg == "--request-timeout"));
         assert!(!args.iter().any(|arg| arg == "--max-blocks"));
         assert!(
@@ -694,6 +833,48 @@ mod tests {
                 .any(|(name, value)| { name == "RAPID_MLX_API_KEY" && value == "do-not-log" })
         );
         assert!(!launch.redacted_summary.contains("do-not-log"));
+    }
+
+    #[test]
+    fn retained_cache_uses_source_native_flags_and_disables_disk_checkpoints() {
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .prefix_cache_enabled(Some(true))
+        .retained_cache_mib(Some(8192))
+        .hybrid_cache_entries(Some(16))
+        .disk_checkpoint_interval(Some(0))
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .unwrap();
+        let args = args(&launch);
+        assert!(args.iter().any(|arg| arg == "--enable-prefix-cache"));
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--cache-memory-mb", "8192"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--hybrid-cache-entries", "16"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|pair| pair == ["--kv-disk-checkpoint-interval", "0"])
+        );
+        assert!(!args.iter().any(|arg| arg == "--max-cache-blocks"));
+    }
+
+    #[test]
+    fn disabled_retained_cache_does_not_emit_a_zero_byte_cap() {
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .prefix_cache_enabled(Some(false))
+        .retained_cache_mib(Some(0))
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .unwrap();
+        let args = args(&launch);
+        assert!(args.iter().any(|arg| arg == "--disable-prefix-cache"));
+        assert!(!args.iter().any(|arg| arg == "--cache-memory-mb"));
     }
 
     #[test]
@@ -906,10 +1087,14 @@ mod tests {
             "--host --port --served-model-name --timeout --max-cache-blocks \
              --kv-cache-dtype --kv-cache-turboquant --max-num-seqs --max-concurrent-requests \
              --prefill-batch-size --completion-batch-size --batching-policy --concurrency-policy \
+             --prefill-step-size --force-hybrid --no-hybrid \
              --reasoning --speculative --mllm --no-mllm --gpu-memory-utilization \
              --ui --no-ui --path --ui-config --pflash --hybrid-cache-entries \
              --response-cache --disk-checkpoint --endpoint-compatibility \
-             --request-safety-policy --sampling-mode --parser-policy --security-policy",
+             --request-safety-policy --sampling-mode --parser-policy --security-policy \
+             --default-temperature --default-top-p --default-top-k --default-min-p \
+             --default-repetition-penalty --default-presence-penalty \
+             --default-frequency-penalty --max-tokens",
         );
         let launch = RapidMlxCommandBuilder::new(
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
@@ -923,6 +1108,7 @@ mod tests {
         .max_concurrent_requests(Some(32))
         .prefill_batch_size(Some(256))
         .completion_batch_size(Some(64))
+        .prefill_step_size(Some(512))
         .batching_policy(Some("fixed".into()))
         .concurrency_policy(Some("allow_overlap".into()))
         .reasoning_mode(Some("on".into()))
@@ -935,6 +1121,16 @@ mod tests {
         .endpoint_compatibility(Some("openai_v1,anthropic".into()))
         .request_safety_policy(Some("strict".into()))
         .sampling_mode(Some("explicit_client".into()))
+        .sampling_defaults(
+            Some(0.7),
+            Some(0.9),
+            Some(40),
+            Some(0.05),
+            Some(1.05),
+            Some(0.0),
+            Some(0.0),
+            Some(32768),
+        )
         .parser_policy(Some("native".into()))
         .security_policy(Some("authenticated".into()))
         .build("rapid-mlx".into(), &capabilities)
@@ -968,7 +1164,20 @@ mod tests {
             args.windows(2)
                 .any(|p| p == ["--concurrency-policy", "allow_overlap"])
         );
-        assert!(args.windows(2).any(|p| p == ["--reasoning", "on"]));
+        assert!(args.iter().any(|p| p == "--reasoning"));
+        assert!(!args.windows(2).any(|p| p == ["--reasoning", "on"]));
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--prefill-step-size", "512"])
+        );
+        assert!(
+            args.windows(2)
+                .any(|p| p == ["--default-temperature", "0.7"])
+        );
+        assert!(args.windows(2).any(|p| p == ["--default-top-p", "0.9"]));
+        assert!(args.windows(2).any(|p| p == ["--default-top-k", "40"]));
+        assert!(args.windows(2).any(|p| p == ["--default-min-p", "0.05"]));
+        assert!(args.windows(2).any(|p| p == ["--max-tokens", "32768"]));
         assert!(args.windows(2).any(|p| p == ["--speculative", "mtp_v1"]));
         assert!(args.iter().any(|arg| arg == "--mllm"));
         assert!(!args.iter().any(|arg| arg == "--vision"));

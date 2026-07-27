@@ -537,11 +537,11 @@ fn api_apply_fix(
                         FixAction::AddNoThinking => config.no_thinking = true,
                         FixAction::DisablePrefixCache => config.prefix_cache_enabled = false,
                         FixAction::AdjustPrefixCacheBudget(bytes) => {
-                            config.prefix_cache_budget_bytes = Some(bytes)
+                            config.retained_cache_mib = Some((bytes / (1024 * 1024)) as u32)
                         }
-                        FixAction::DisableMaxCacheBlocks => config.max_cache_blocks = None,
+                        FixAction::DisableMaxCacheBlocks => config.retained_cache_mib = None,
                         FixAction::SetPrefixCacheBudget(bytes) => {
-                            config.prefix_cache_budget_bytes = Some(bytes)
+                            config.retained_cache_mib = Some((bytes / (1024 * 1024)) as u32)
                         }
                         FixAction::ReclaimBackendAllocatorCache => {
                             // Reclaim action handled via system_tools endpoint;

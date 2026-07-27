@@ -835,13 +835,15 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 
-    // Phase 6 Part B: prefix cache persistence tests.
+    // Phase 6: measured retained-cache defaults.
 
     #[test]
-    fn test_prefix_cache_default_is_false() {
+    fn test_rapid_retained_cache_default_is_qualified_baseline() {
         let config = crate::inference::rapid_mlx::RapidMlxConfig::default();
-        assert!(!config.prefix_cache_enabled);
-        assert!(config.prefix_cache_budget_bytes.is_none());
+        assert!(config.prefix_cache_enabled);
+        assert_eq!(config.retained_cache_mib, Some(8192));
+        assert_eq!(config.hybrid_cache_entries, Some(16));
+        assert_eq!(config.disk_checkpoint_interval, 0);
     }
 
     #[test]
@@ -953,7 +955,6 @@ mod tests {
                 model_path: "/path/to/model".into(),
                 kv_cache_dtype: Some(KvCacheConfig::Int8),
                 turboquant_mode: Some(TurboQuantMode::K8V4),
-                prefix_cache_policy: Some("auto".into()),
                 hybrid_cache_entries: Some(256),
                 pflash_policy: Some("auto".into()),
                 response_cache_policy: Some("on".into()),
@@ -990,7 +991,6 @@ mod tests {
         let rapid = loaded.rapid_mlx.unwrap();
         assert_eq!(rapid.kv_cache_dtype, Some(KvCacheConfig::Int8));
         assert_eq!(rapid.turboquant_mode, Some(TurboQuantMode::K8V4));
-        assert_eq!(rapid.prefix_cache_policy, Some("auto".into()));
         assert_eq!(rapid.hybrid_cache_entries, Some(256));
         assert_eq!(rapid.pflash_policy, Some("auto".into()));
         assert_eq!(rapid.response_cache_policy, Some("on".into()));
@@ -1036,7 +1036,6 @@ mod tests {
         let rapid = preset.rapid_mlx.unwrap();
         assert!(rapid.kv_cache_dtype.is_none());
         assert!(rapid.turboquant_mode.is_none());
-        assert!(rapid.prefix_cache_policy.is_none());
         assert!(rapid.hybrid_cache_entries.is_none());
         assert!(rapid.pflash_policy.is_none());
         assert!(rapid.response_cache_policy.is_none());

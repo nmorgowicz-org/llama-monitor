@@ -98,8 +98,10 @@ async fn collect_cache_findings(state: &crate::state::AppState) -> Vec<DoctorFin
     // Compute cache diagnostic findings
     let params = CacheDiagnosticParams {
         config_prefix_cache_enabled: config.prefix_cache_enabled,
-        config_prefix_cache_budget_bytes: config.prefix_cache_budget_bytes,
-        config_max_cache_blocks: config.max_cache_blocks,
+        config_prefix_cache_budget_bytes: config
+            .retained_cache_mib
+            .map(|mib| u64::from(mib) * 1024 * 1024),
+        config_max_cache_blocks: None,
         snapshot: snapshot.clone(),
         configured_ceiling_bytes: mem_snapshot.configured_ceiling_bytes,
         current_safe_availability_bytes: mem_snapshot.current_safe_availability_bytes,

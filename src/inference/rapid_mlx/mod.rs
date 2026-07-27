@@ -54,12 +54,7 @@ pub struct RapidMlxConfig {
     pub log_level: String,
     #[serde(default)]
     pub timeout: Option<u32>,
-    #[serde(default)]
-    pub max_cache_blocks: Option<u32>,
-    /// Phase 6 Part B: prefix cache persistence display toggle (safe default: false).
-    /// Controls whether prefix cache budget is shown in VRAM breakdowns and whether
-    /// the UI exposes prefix cache configuration. max_cache_blocks and D30 budget
-    /// are applied based on capability guidance regardless of this flag.
+    /// Enables Rapid's retained in-memory prefix cache.
     #[serde(default)]
     pub prefix_cache_enabled: bool,
     /// Phase 6 Part B: explicit prefix cache budget override in bytes.
@@ -67,6 +62,14 @@ pub struct RapidMlxConfig {
     /// User explicit values always win (hard gate).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefix_cache_budget_bytes: Option<u64>,
+    /// Retained prefix-cache capacity in MiB. This is the source-native
+    /// `--cache-memory-mb` contract qualified by Phase 6.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retained_cache_mib: Option<u32>,
+    /// Keep automatic disk snapshots off for interactive launches. They are
+    /// snapshot writes, not transparent cache restoration.
+    #[serde(default = "default_disk_checkpoint_interval")]
+    pub disk_checkpoint_interval: u32,
     /// Accepted only on launch input. Secrets are never serialized into presets,
     /// sessions, or diagnostics.
     #[serde(default, skip_serializing)]
@@ -86,6 +89,8 @@ pub struct RapidMlxConfig {
     /// These are diagnostic helpers only, not general-purpose escape hatches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call_parser: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_parser: Option<String>,
     #[serde(default)]
     pub auto_tool_choice: bool,
     #[serde(default)]
@@ -105,12 +110,13 @@ pub struct RapidMlxConfig {
     /// TurboQuant reusable-prompt storage policy (D31).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turboquant_mode: Option<TurboQuantMode>,
-    /// Prefix cache policy (auto/explicit).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prefix_cache_policy: Option<String>,
     /// Hybrid cache entries limit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hybrid_cache_entries: Option<u64>,
+    /// Architecture override. Auto leaves Rapid's alias/config detection
+    /// authoritative; the other values emit mutually-exclusive switches.
+    #[serde(default)]
+    pub hybrid_mode: RapidMlxHybridMode,
     /// PFlash policy (auto/always/off).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pflash_policy: Option<String>,
@@ -133,6 +139,9 @@ pub struct RapidMlxConfig {
     /// Completion batch size.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_batch_size: Option<u64>,
+    /// Prompt chunk processed per prefill step.
+    #[serde(default = "default_prefill_step_size")]
+    pub prefill_step_size: u32,
     /// Batching policy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub batching_policy: Option<String>,
@@ -177,12 +186,36 @@ pub struct RapidMlxConfig {
     /// Sampling mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sampling_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_temperature: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_top_p: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_top_k: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_min_p: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_repetition_penalty: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_presence_penalty: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_frequency_penalty: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u64>,
     /// Parser policy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parser_policy: Option<String>,
     /// Security policy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub security_policy: Option<String>,
+}
+
+fn default_disk_checkpoint_interval() -> u32 {
+    0
+}
+
+fn default_prefill_step_size() -> u32 {
+    512
 }
 
 fn default_host() -> String {
@@ -235,6 +268,17 @@ impl std::fmt::Display for KvCacheConfig {
             KvCacheConfig::LegacyFp8 => write!(f, "fp8"),
         }
     }
+}
+
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RapidMlxHybridMode {
+    #[default]
+    Auto,
+    Force,
+    Disable,
 }
 
 /// TurboQuant reusable-prompt storage policy (D31).
@@ -298,14 +342,16 @@ impl Default for RapidMlxConfig {
             port: default_port(),
             log_level: default_log_level(),
             timeout: None,
-            max_cache_blocks: None,
-            prefix_cache_enabled: false,
+            prefix_cache_enabled: true,
             prefix_cache_budget_bytes: None,
+            retained_cache_mib: Some(8192),
+            disk_checkpoint_interval: 0,
             api_key: None,
             enable_thinking: None,
             reasoning_effort: None,
             trust_remote_code_consent: None,
             tool_call_parser: None,
+            reasoning_parser: None,
             auto_tool_choice: false,
             no_thinking: false,
             escape_hatch_flags: Vec::new(),
@@ -313,9 +359,9 @@ impl Default for RapidMlxConfig {
             // Phase 7: KV/cache policy
             kv_cache_dtype: None,
             turboquant_mode: None,
-            prefix_cache_policy: None,
-            hybrid_cache_entries: None,
-            pflash_policy: None,
+            hybrid_cache_entries: Some(16),
+            hybrid_mode: RapidMlxHybridMode::Auto,
+            pflash_policy: Some("off".into()),
             response_cache_policy: None,
             disk_checkpoint_policy: None,
             // Phase 7: batching/concurrency
@@ -323,6 +369,7 @@ impl Default for RapidMlxConfig {
             max_concurrent_requests: None,
             prefill_batch_size: None,
             completion_batch_size: None,
+            prefill_step_size: default_prefill_step_size(),
             batching_policy: None,
             concurrency_policy: None,
             // Phase 7: reasoning/speculative
@@ -341,6 +388,14 @@ impl Default for RapidMlxConfig {
             endpoint_compatibility: None,
             request_safety_policy: None,
             sampling_mode: None,
+            default_temperature: None,
+            default_top_p: None,
+            default_top_k: None,
+            default_min_p: None,
+            default_repetition_penalty: None,
+            default_presence_penalty: None,
+            default_frequency_penalty: None,
+            max_tokens: None,
             parser_policy: None,
             security_policy: None,
         }
@@ -395,26 +450,30 @@ pub struct RapidMlxAdapter {
     pub port: u16,
     pub log_level: String,
     pub timeout: Option<u32>,
-    pub max_cache_blocks: Option<u32>,
     pub enable_thinking: Option<bool>,
     pub reasoning_effort: Option<String>,
     pub trust_remote_code_consent: Option<String>,
     pub tool_call_parser: Option<String>,
+    pub reasoning_parser: Option<String>,
     pub auto_tool_choice: bool,
     pub no_thinking: bool,
     pub escape_hatch_flags: Vec<(String, serde_json::Value)>,
     // Phase 7 fields
     pub kv_cache_dtype: Option<KvCacheConfig>,
     pub turboquant_mode: Option<TurboQuantMode>,
-    pub prefix_cache_policy: Option<String>,
     pub hybrid_cache_entries: Option<u64>,
+    pub hybrid_mode: RapidMlxHybridMode,
     pub pflash_policy: Option<String>,
     pub response_cache_policy: Option<String>,
     pub disk_checkpoint_policy: Option<String>,
+    pub prefix_cache_enabled: bool,
+    pub retained_cache_mib: Option<u32>,
+    pub disk_checkpoint_interval: u32,
     pub max_num_seqs: Option<u64>,
     pub max_concurrent_requests: Option<u64>,
     pub prefill_batch_size: Option<u64>,
     pub completion_batch_size: Option<u64>,
+    pub prefill_step_size: u32,
     pub batching_policy: Option<String>,
     pub concurrency_policy: Option<String>,
     pub reasoning_mode: Option<String>,
@@ -428,6 +487,14 @@ pub struct RapidMlxAdapter {
     pub endpoint_compatibility: Option<String>,
     pub request_safety_policy: Option<String>,
     pub sampling_mode: Option<String>,
+    pub default_temperature: Option<f64>,
+    pub default_top_p: Option<f64>,
+    pub default_top_k: Option<u64>,
+    pub default_min_p: Option<f64>,
+    pub default_repetition_penalty: Option<f64>,
+    pub default_presence_penalty: Option<f64>,
+    pub default_frequency_penalty: Option<f64>,
+    pub max_tokens: Option<u64>,
     pub parser_policy: Option<String>,
     pub security_policy: Option<String>,
     api_key: Option<String>,
@@ -467,26 +534,30 @@ impl RapidMlxAdapter {
             port: 8000,
             log_level: "INFO".to_string(),
             timeout: None,
-            max_cache_blocks: None,
             enable_thinking: None,
             reasoning_effort: None,
             trust_remote_code_consent: None,
             tool_call_parser: None,
+            reasoning_parser: None,
             auto_tool_choice: false,
             no_thinking: false,
             escape_hatch_flags: Vec::new(),
             // Phase 7 defaults
             kv_cache_dtype: None,
             turboquant_mode: None,
-            prefix_cache_policy: None,
             hybrid_cache_entries: None,
-            pflash_policy: None,
+            hybrid_mode: RapidMlxHybridMode::Auto,
+            pflash_policy: Some("off".into()),
             response_cache_policy: None,
             disk_checkpoint_policy: None,
+            prefix_cache_enabled: true,
+            retained_cache_mib: Some(8192),
+            disk_checkpoint_interval: 0,
             max_num_seqs: None,
             max_concurrent_requests: None,
             prefill_batch_size: None,
             completion_batch_size: None,
+            prefill_step_size: default_prefill_step_size(),
             batching_policy: None,
             concurrency_policy: None,
             reasoning_mode: None,
@@ -500,6 +571,14 @@ impl RapidMlxAdapter {
             endpoint_compatibility: None,
             request_safety_policy: None,
             sampling_mode: None,
+            default_temperature: None,
+            default_top_p: None,
+            default_top_k: None,
+            default_min_p: None,
+            default_repetition_penalty: None,
+            default_presence_penalty: None,
+            default_frequency_penalty: None,
+            max_tokens: None,
             parser_policy: None,
             security_policy: None,
             api_key: None,
@@ -572,9 +651,10 @@ impl RapidMlxAdapter {
         if let Some(timeout) = self.timeout {
             builder = builder.timeout(timeout);
         }
-        if let Some(blocks) = self.max_cache_blocks {
-            builder = builder.max_cache_blocks(blocks);
-        }
+        builder = builder
+            .prefix_cache_enabled(Some(self.prefix_cache_enabled))
+            .retained_cache_mib(self.retained_cache_mib)
+            .disk_checkpoint_interval(Some(self.disk_checkpoint_interval));
 
         if let Some(key) = &self.api_key {
             builder = builder.api_key(key.clone());
@@ -589,6 +669,7 @@ impl RapidMlxAdapter {
         let builder = builder
             .trust_remote_code_consent(self.trust_remote_code_consent.clone())
             .tool_call_parser(self.tool_call_parser.clone())
+            .reasoning_parser(self.reasoning_parser.clone())
             .auto_tool_choice(self.auto_tool_choice)
             .no_thinking(self.no_thinking)
             .escape_hatch_flags(self.escape_hatch_flags.clone());
@@ -741,8 +822,8 @@ fn apply_phase7_adapter_config(
         // model/revision has a qualified retained-KV path. Keep the requested
         // setting persisted, but omit TurboQuant until a receipt is available.
         .turboquant_mode(None)
-        .prefix_cache_policy(adapter.prefix_cache_policy.clone())
         .hybrid_cache_entries(adapter.hybrid_cache_entries)
+        .hybrid_mode(adapter.hybrid_mode)
         .pflash_policy(adapter.pflash_policy.clone())
         .response_cache_policy(adapter.response_cache_policy.clone())
         .disk_checkpoint_policy(adapter.disk_checkpoint_policy.clone())
@@ -750,6 +831,7 @@ fn apply_phase7_adapter_config(
         .max_concurrent_requests(adapter.max_concurrent_requests)
         .prefill_batch_size(adapter.prefill_batch_size)
         .completion_batch_size(adapter.completion_batch_size)
+        .prefill_step_size(Some(adapter.prefill_step_size))
         .batching_policy(adapter.batching_policy.clone())
         .concurrency_policy(adapter.concurrency_policy.clone())
         .reasoning_mode(adapter.reasoning_mode.clone())
@@ -763,6 +845,16 @@ fn apply_phase7_adapter_config(
         .endpoint_compatibility(adapter.endpoint_compatibility.clone())
         .request_safety_policy(adapter.request_safety_policy.clone())
         .sampling_mode(adapter.sampling_mode.clone())
+        .sampling_defaults(
+            adapter.default_temperature,
+            adapter.default_top_p,
+            adapter.default_top_k,
+            adapter.default_min_p,
+            adapter.default_repetition_penalty,
+            adapter.default_presence_penalty,
+            adapter.default_frequency_penalty,
+            adapter.max_tokens,
+        )
         .parser_policy(adapter.parser_policy.clone())
         .security_policy(adapter.security_policy.clone())
 }
@@ -867,8 +959,8 @@ mod tests {
             model_path: "/model".into(),
             kv_cache_dtype: Some(KvCacheConfig::Int8),
             turboquant_mode: Some(TurboQuantMode::K8V4),
-            prefix_cache_policy: Some("auto".into()),
             hybrid_cache_entries: Some(100),
+            hybrid_mode: RapidMlxHybridMode::Auto,
             pflash_policy: Some("auto".into()),
             response_cache_policy: Some("auto".into()),
             disk_checkpoint_policy: Some("auto".into()),
@@ -876,6 +968,7 @@ mod tests {
             max_concurrent_requests: Some(32),
             prefill_batch_size: Some(256),
             completion_batch_size: Some(64),
+            prefill_step_size: 512,
             batching_policy: Some("auto".into()),
             concurrency_policy: Some("single_active".into()),
             reasoning_mode: Some("auto".into()),
@@ -889,6 +982,14 @@ mod tests {
             endpoint_compatibility: Some("openai_v1".into()),
             request_safety_policy: Some("auto".into()),
             sampling_mode: Some("auto".into()),
+            default_temperature: Some(0.7),
+            default_top_p: Some(0.9),
+            default_top_k: Some(40),
+            default_min_p: Some(0.05),
+            default_repetition_penalty: Some(1.05),
+            default_presence_penalty: Some(0.0),
+            default_frequency_penalty: Some(0.0),
+            max_tokens: Some(32768),
             parser_policy: Some("auto".into()),
             security_policy: Some("loopback_only".into()),
             ..Default::default()
@@ -938,7 +1039,7 @@ mod tests {
             RuntimeMetadata {
                 executable_path: "rapid-mlx".into(),
                 source: RuntimeSource::Managed,
-                version: "0.10.10".into(),
+                version: "0.11.0+git.fixture".into(),
                 capability_snapshot: None,
                 resolved_receipt: None,
                 last_probe_result: None,

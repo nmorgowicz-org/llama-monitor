@@ -130,7 +130,7 @@ pub struct SamplingDefaultFields {
 }
 
 impl SamplingDefaultFields {
-    /// Derive from serve --help flags by probing each --default-* independently.
+    /// Derive from serve --help flags by probing each server-default field independently.
     pub fn from_flags(flags: &[String]) -> Self {
         Self {
             temperature: flag_state(flags, "--default-temperature"),
@@ -141,7 +141,7 @@ impl SamplingDefaultFields {
             repetition_penalty: flag_state(flags, "--default-repetition-penalty"),
             presence_penalty: flag_state(flags, "--default-presence-penalty"),
             frequency_penalty: flag_state(flags, "--default-frequency-penalty"),
-            max_tokens: flag_state(flags, "--default-max-tokens"),
+            max_tokens: flag_state(flags, "--max-tokens"),
         }
     }
 
@@ -2035,7 +2035,7 @@ Options:
         let flags = vec![
             "--default-temperature".into(),
             "--default-top-p".into(),
-            "--default-max-tokens".into(),
+            "--max-tokens".into(),
         ];
         let defaults = SamplingDefaultFields::from_flags(&flags);
         assert!(matches!(defaults.temperature, DefaultFieldState::Supported));
