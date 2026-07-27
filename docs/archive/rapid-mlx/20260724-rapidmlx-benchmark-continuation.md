@@ -4,13 +4,59 @@
 
 This is an operational handoff for a fresh agent continuing the **on-device** Rapid-MLX benchmark campaign on the user's Apple M5 Max with 64 GiB unified memory. It records measured evidence, the exact controls still required, and how to run them safely. Read it together with:
 
-- [`model-runtime-benchmarking.md`](../reference/model-runtime-benchmarking.md) for the reusable runner contract.
-- [`20260718-final_rapidmlx_followups.md`](./20260718-final_rapidmlx_followups.md) for product requirements and future loader abstraction.
-- [`20260718-final_rapidmlx_followups_execution.md`](./20260718-final_rapidmlx_followups_execution.md) for phase routing; this benchmark campaign is evidence gathering, not permission to silently change product behavior.
+- [`model-runtime-benchmarking.md`](../../reference/model-runtime-benchmarking.md) for the reusable runner contract.
+- [`20260718-final_rapidmlx_followups.md`](../../plans/20260718-final_rapidmlx_followups.md) for historical product requirements and future loader abstraction.
+- [`20260718-final_rapidmlx_followups_execution.md`](../../plans/20260718-final_rapidmlx_followups_execution.md) for historical phase routing.
 
 Do not discard or reset the dirty worktree. Do not commit or push without explicit user approval. Benchmark/model commands need to run outside the sandbox. Documentation and runner work may remain in the workspace sandbox.
 
+## Framework quickstart
+
+The shared request runner is `scripts/model-runtime-benchmark.mjs`. It records
+rendered prompt tokens, TTFT, PP/TG, response assertions, metrics before/after
+each request, and the server process footprint. A receipt is authoritative;
+fixture word count and nominal context labels are not.
+
+Rapid-MLX matrix planning/running uses:
+
+```bash
+node scripts/rapid-mlx-benchmark-suite.mjs plan --model REPO --suite cache
+node scripts/rapid-mlx-benchmark-suite.mjs run --model REPO --suite cache --out RECEIPTS --resume
+```
+
+Use `--cache-contexts`, `--cache-memory-mb`, `--cache-dtypes`, and
+`--cache-disk-checkpoint-intervals` to select a narrow resumable matrix. The
+cache workload is `cold → repeat → follow-up → fork`; do not use an
+append-only single-message mutation for Qwen hybrid cache conclusions. Text
+prefill is 512. Keep disk checkpoints at `0` for performance rows.
+
+GGUF / llama.cpp planning/running uses:
+
+```bash
+node scripts/llama-cpp-benchmark-suite.mjs plan --model MODEL.gguf --server LLAMA_SERVER
+node scripts/llama-cpp-benchmark-suite.mjs run --model MODEL.gguf --server LLAMA_SERVER --out RECEIPTS --resume
+```
+
+The cache lane adds `--suite cache --cache-contexts 131072,160000,200000
+--cache-ram-mib 0,8192`. It fixes `-ub 512`, Q8_0 K/V, Flash Attention, one
+slot, and explicit llama context-checkpoint controls so only `-cram` varies.
+Use a fresh server per cell. Do not infer per-request peak from server RSS;
+it is post-request RSS. The full results and product decisions are in
+[`cache-benchmark-results.md`](../../reference/cache-benchmark-results.md).
+
 ## One-paragraph status
+
+**Phase 6 retained-cache calibration update (2026-07-27):** Qwen 3.6 35B
+workspace-fork receipts at 160K/200K now qualify 8 GiB as the baseline
+retained-cache budget: it preserves the newest fork at 1.84–2.34 s across
+INT4/INT8, but evicts older branches at 160K/200K INT8 and 200K INT4. 16 GiB
+removes those evictions but does not materially improve newest-fork TTFT, so
+it is a branch-retention option rather than a speed mode. Evidence and the
+complete matrix live in `20260726-phase6_rapidmlx_cache_benchmarking.md`.
+The isolated `0` versus `8192` disk lane is now complete: at 200K INT4/8 GiB,
+`8192` added 56.5 s (24%) to cold TTFT with no fork-reuse benefit. Keep `0`
+for interactive performance rows; automatic checkpoints are snapshot writes
+only, never transparent disk reuse.
 
 The reusable OpenAI-compatible benchmark runner and profiles are implemented but uncommitted. It is designed to compare Rapid-MLX with llama.cpp, OMLX, or another future OpenAI-compatible runtime. The first Qwen 3.6 35B PFlash evidence is complete enough to establish capacity and a source-retrieval warning: PFlash with a 20% retain ratio fits 131,948 raw tokens on this machine, but it failed exact retrieval of a source-code sentinel at both 63,433 and 131,948 raw tokens. A matched 63,433-token **int8** run failed the same way as int4, so the failure is not explained by int4 alone. A PFlash-off int8 attempt at 63,433 tokens was rejected by Rapid/MLX's single-buffer limit; it was not an OS-level OOM. Do not claim compression is the sole cause until a smaller PFlash-off control is run.
 
@@ -45,6 +91,14 @@ Ordered next work:
 5. Update `20260718-final_rapidmlx_followups_execution.md` and this file after every material result. Phase 6 may begin only with a clear qualified/provisional/refused cache/quant evidence table; a negative result is a valid closure outcome.
 6. **Completed:** source Qwen 3.6 35B now has explicit 160k/200k int4 rows, and the Nightmedia Qwen 3.6 27B Polaris revision `721c71607072ecc0f0904db862d64ea1d0ac59fb` completed its explicit `--force-hybrid` smoke plus full context matrix. Keep the forced-hybrid qualification revision-bound.
 7. After those rows, run a paired text-path comparison of `ailexleon/gemma-4-26B-A4B-it-qat-uncensored-heretic-mlx-vlm-4Bit` revision `cac7f2a31b9dc74517d9e1545db0b9daa9dc8640` and `ailexleon/gemma-4-26B-A4B-it-qat-uncensored-heretic-mlx-lm-4Bit` revision `c6e1fec9d99b6af346dcae14bc0ed29cf55cd7e2`. Hold prompt, parser/template, prefill, KV dtype, and source runtime constant; separately measure base load, text-only prefill/decode/context peak, VLM text route, and VLM image route. The VLM payload is 1,140,973,336 bytes larger, so report that resident overhead separately rather than calling the models equivalent by name.
+8. **Phase 6 is intentionally next, not concurrent:** after the Gemma cold-path rows, execute the telemetry-contract control defined in [`20260726-phase6_rapidmlx_cache_benchmarking.md`](./20260726-phase6_rapidmlx_cache_benchmarking.md): one persistent source-build server, PFlash/speculative decoding off, `cold → exact replay → +512`, and raw `/metrics` snapshots before/after every request. The source plan's cache-field list is analytical vocabulary, not a runtime contract; normalize only emitted, behaviorally validated metrics and label any calculation with its formula. Do not begin cache-policy/UI/estimator work until this control produces an evidence-backed mapping.
+9. **Deferred:** do not run Gemma 4 31B QAT during this Phase 5 closeout. It is a larger dense comparison than the completed Qwen 27B dense track. Add it after the Phase 6 cache protocol is operational, so its cold and cache evidence are captured together under one final methodology.
+
+**MLLM image prefill safety (2026-07-26):** text cold-path calibration remains `--prefill-step-size 512`. Rapid's current MLLM scheduler also uses that flag as a hard rendered-prompt admission width; an 8,288-token text-plus-image request rejects at 512/8192, while increasing it to 65,536 caused a 62.63 GB Metal peak before any request completed and pushed macOS into swap. Image-plus-instruction work starts at `1024`: the selected screenshot alone rendered to roughly 486 tokens, so 512 leaves no realistic instruction headroom. After a specific admission failure, image work may advance only `1024` → `1536` → `2048`—never a larger value. Current long-context MLLM image rows are refused rather than benchmarked under unsafe overrides. Use a short visual smoke with a fixture SHA/dimensions and explicit visible-term assertion; pursue safe chunked MLLM admission upstream before revisiting long image context.
+
+**MLLM representative image-agent result (2026-07-26):** source-build Gemma VLM at MLLM prefill/admission `1024`, with `16,000` reasoning and `16,512` output ceilings, accepted a 393-token screenshot-plus-source-edit request. It correctly identified `Llama Monitor`, produced the requested `brandTitle` typo fix, and passed both visible-term and code-content assertions. It used 691 reported reasoning tokens, reached the full 16,512 completion-token ceiling after already producing the correct unified diff, took 156.56 s total (538.97 ms TTFT; 105.83 tok/s), and peaked at 16.30 GB Metal memory with no server errors. This qualifies image input and the small coding-edit interaction, but **does not** yet demonstrate reliable agent completion/stopping under a normal budget; retain the uncapped result rather than concealing it with an artificial low ceiling. Receipt: `ailexleon-gemma4-26b-vlm-source-5fc6556c-image-agent-1024-v2/`.
+
+**MLLM stop and dependency boundary (2026-07-26):** classify the agent-row behavior as a **completion/stopping anomaly after successful 1024-token MLLM admission**, not a proven EOS bug: the request produced the correct result, then decoded to the configured 16,512-token ceiling. The conversion's standalone `chat_template.jinja` is byte-identical (SHA-256 `ae53464bf3be25802b3a5b37def7fd89667067d7577049b3b2d74c4d8de4c6d4`) to the current `google/gemma-4-31B-it` template, and Rapid gives that standalone file precedence. Google tokenizer `response_template` metadata is newer but not currently read by Rapid; EOS/turn/tool token data relevant to Rapid's stop set matches. Temporary `mlx-vlm 0.6.7` with unchanged `mlx-lm 0.31.3` is not a valid remedy: current Rapid MLLM fails during startup on this Gemma model with `RotatingKVCache` hybrid/linear-attention incompatibility before serving any request. Preserve this as a revision-pinned compatibility finding; do not force-upgrade the normal 0.6.3 environment. Next proof is token-level capture of the rendered prompt and generated terminal token(s), then comparison with Rapid's effective MLLM stop set/parser behavior.
 
 ## Environment pinned for current Qwen rows
 
