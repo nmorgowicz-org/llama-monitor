@@ -1,0 +1,13 @@
+{
+  "model": "ailexleon/gemma-4-26B-A4B-it-qat-uncensored-heretic-mlx-vlm-4Bit",
+  "suite": "image",
+  "receipts": [
+    {
+      "label": "00-image-smoke-8k",
+      "receipt": "00-00-image-smoke-8k.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

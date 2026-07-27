@@ -1,0 +1,48 @@
+{
+  "model": "unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit",
+  "suite": "cache",
+  "receipts": [
+    {
+      "label": "00-cache-160000-ram-8192-int8",
+      "receipt": "00-00-cache-160000-ram-8192-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "01-cache-160000-ram-8192-int4",
+      "receipt": "01-01-cache-160000-ram-8192-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "02-cache-160000-ram-16384-int8",
+      "receipt": "02-02-cache-160000-ram-16384-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "03-cache-160000-ram-16384-int4",
+      "receipt": "03-03-cache-160000-ram-16384-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "04-cache-200000-ram-8192-int8",
+      "receipt": "04-04-cache-200000-ram-8192-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "05-cache-200000-ram-8192-int4",
+      "receipt": "05-05-cache-200000-ram-8192-int4.json",
+      "manifest": null
+    },
+    {
+      "label": "06-cache-200000-ram-16384-int8",
+      "receipt": "06-06-cache-200000-ram-16384-int8.json",
+      "manifest": null
+    },
+    {
+      "label": "07-cache-200000-ram-16384-int4",
+      "receipt": "07-07-cache-200000-ram-16384-int4.json",
+      "manifest": null
+    }
+  ],
+  "complete": true,
+  "failure": null
+}
