@@ -1603,10 +1603,9 @@ Verified Qwen3.5-27B via OS memory delta (Prometheus metal metrics were stale/wr
 - `reasoning_parser`: rapid-mlx info first, then HF architecture pattern, then "not_available"
 - Warnings when sources disagree (e.g., geometry says hybrid but rapid-mlx reports pure attention)
 
-**JS consumption** (spawn-wizard.js):
-- Fetches unified-profile alongside existing profile
-- Auto-populates hybrid_mode, toolCallParser, reasoningParser from recommendations when not user-set
-- Renders warnings from unified profile
+**JS consumption** (spawn-wizard.js + presets.js):
+- Spawn wizard: fetches unified-profile alongside existing profile, auto-populates hybrid_mode, toolCallParser, reasoningParser from recommendations when not user-set, renders warnings from unified profile
+- Preset editor: fetches unified-profile in parallel with existing profile, shows recommendation hints via tooltip on hybrid_mode, tool_call_parser, reasoning_parser selects
 
 **MLX introspection remains binary-independent** — uses existing `read_mlx_local_config()`, `fetch_mlx_model_profile_revision_aware()`. Future MLX loaders (MTPLX) can consume same introspection path.
 
