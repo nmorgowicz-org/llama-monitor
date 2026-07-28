@@ -275,7 +275,7 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .or(unified_profile_route(ctx.clone()))
         .unify()
-        .or(escape_hatch_route())
+        .or(escape_hatch_route(ctx.clone()))
         .unify()
         .or(command_preview_route(ctx.clone()))
         .unify()
@@ -286,10 +286,15 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed()
 }
 
-fn escape_hatch_route() -> ApiRoute {
+fn escape_hatch_route(ctx: ApiCtx) -> ApiRoute {
+    let config = ctx.config;
     warp::path!("api" / "rapid-mlx" / "escape-hatch-flags")
         .and(warp::get())
-        .map(|| {
+        .and(warp::header::optional::<String>("authorization"))
+        .map(move |auth: Option<String>| {
+            if !check_api_token(&auth, &config) {
+                return unauthorized_api_token();
+            }
             Box::new(warp::reply::json(
                 &crate::inference::rapid_mlx::escape_hatch::ALLOWED_ESCAPE_FLAGS,
             )) as ApiReply

@@ -197,13 +197,28 @@ async fn probe_with_policy(
     let help = output_text(&help_output.stdout, &help_output.stderr);
     let capabilities = ServeCapabilities::from_help(&help);
     let required_capabilities: &[&str] = if source == RuntimeSource::Managed {
+        // All verified_baseline flags must be present in Managed runtime upgrades.
+        // --max-cache-blocks removed: replaced by --cache-memory-mb / --enable-prefix-cache.
         &[
             "--host",
             "--port",
             "--log-level",
             "--served-model-name",
             "--timeout",
-            "--max-cache-blocks",
+            "--enable-prefix-cache",
+            "--disable-prefix-cache",
+            "--cache-memory-mb",
+            "--hybrid-cache-entries",
+            "--kv-disk-checkpoint-interval",
+            "--tool-call-parser",
+            "--reasoning-parser",
+            "--enable-auto-tool-choice",
+            "--no-thinking",
+            "--reasoning",
+            "--force-hybrid",
+            "--no-hybrid",
+            "--prefill-step-size",
+            "--pflash",
         ]
     } else {
         &["--host", "--port"]
@@ -467,7 +482,8 @@ mod tests {
     #[tokio::test]
     async fn live_probe_qualifies_healthy_external_profiles_without_global_warning() {
         let required = "--host --port --log-level --served-model-name --timeout --max-cache-blocks";
-        let (_dir, binary) = fixture_runtime("0.10.10", required);
+        let all_managed_flags = "--host --port --log-level --served-model-name --timeout --enable-prefix-cache --disable-prefix-cache --cache-memory-mb --hybrid-cache-entries --kv-disk-checkpoint-interval --tool-call-parser --reasoning-parser --enable-auto-tool-choice --no-thinking --reasoning --force-hybrid --no-hybrid --prefill-step-size --pflash";
+        let (_dir, binary) = fixture_runtime("0.10.10", all_managed_flags);
         let profile = probe(&binary, RuntimeSource::Custom).await.unwrap();
         assert_eq!(profile.state, CompatibilityState::Verified);
         assert!(profile.capabilities.contains("--timeout"));
@@ -476,12 +492,12 @@ mod tests {
         assert_eq!(profile.state, CompatibilityState::Verified);
         assert_eq!(profile.version, "0.10.10");
 
-        let (_dir, binary) = fixture_runtime("0.10.9", required);
+        let (_dir, binary) = fixture_runtime("0.10.9", all_managed_flags);
         let profile = probe(&binary, RuntimeSource::Managed).await.unwrap();
         assert_eq!(profile.state, CompatibilityState::Verified);
         assert_eq!(profile.version, "0.10.9");
 
-        let (_dir, binary) = fixture_runtime("0.10.11", required);
+        let (_dir, binary) = fixture_runtime("0.10.11", all_managed_flags);
         let profile = probe(&binary, RuntimeSource::Managed).await.unwrap();
         assert_eq!(profile.state, CompatibilityState::Verified);
         assert_eq!(profile.version, "0.10.11");
@@ -494,16 +510,17 @@ mod tests {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[tokio::test]
     async fn managed_and_required_capability_probes_fail_closed() {
-        let required = "--host --port --log-level --served-model-name --timeout --max-cache-blocks";
-        let (_dir, binary) = fixture_runtime("0.10.11", required);
+        let all_managed_flags = "--host --port --log-level --served-model-name --timeout --enable-prefix-cache --disable-prefix-cache --cache-memory-mb --hybrid-cache-entries --kv-disk-checkpoint-interval --tool-call-parser --reasoning-parser --enable-auto-tool-choice --no-thinking --reasoning --force-hybrid --no-hybrid --prefill-step-size --pflash";
+        let (_dir, binary) = fixture_runtime("0.10.11", all_managed_flags);
         assert!(probe(&binary, RuntimeSource::Managed).await.is_ok());
 
+        // Missing one required flag → fails
         let (_dir, binary) = fixture_runtime(
             "0.10.11",
-            "--host --port --log-level --served-model-name --timeout",
+            "--host --port --log-level --served-model-name --timeout --enable-prefix-cache --disable-prefix-cache --cache-memory-mb --hybrid-cache-entries --kv-disk-checkpoint-interval --tool-call-parser --reasoning-parser --enable-auto-tool-choice --no-thinking --reasoning --force-hybrid --no-hybrid --prefill-step-size",
         );
         let error = probe(&binary, RuntimeSource::Managed).await.unwrap_err();
-        assert!(format!("{error:#}").contains("--max-cache-blocks"));
+        assert!(format!("{error:#}").contains("--pflash"));
 
         let (_dir, binary) = fixture_runtime("0.10.9", "--host");
         let error = probe(&binary, RuntimeSource::Custom).await.unwrap_err();
@@ -537,8 +554,8 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn published_managed_prerelease_uses_the_full_managed_gate() {
-        let required = "--host --port --log-level --served-model-name --timeout --max-cache-blocks";
-        let (_dir, binary) = fixture_runtime("0.10.11rc1", required);
+        let all_managed_flags = "--host --port --log-level --served-model-name --timeout --enable-prefix-cache --disable-prefix-cache --cache-memory-mb --hybrid-cache-entries --kv-disk-checkpoint-interval --tool-call-parser --reasoning-parser --enable-auto-tool-choice --no-thinking --reasoning --force-hybrid --no-hybrid --prefill-step-size --pflash";
+        let (_dir, binary) = fixture_runtime("0.10.11rc1", all_managed_flags);
         assert!(probe(&binary, RuntimeSource::Managed).await.is_err());
         let profile = probe_published_managed_release(&binary, true)
             .await
@@ -546,7 +563,7 @@ mod tests {
         assert_eq!(profile.state, CompatibilityState::Verified);
         assert_eq!(profile.version, "0.10.11rc1");
 
-        let (_dir, binary) = fixture_runtime("0.10.11+local", required);
+        let (_dir, binary) = fixture_runtime("0.10.11+local", all_managed_flags);
         assert!(
             probe_published_managed_release(&binary, true)
                 .await

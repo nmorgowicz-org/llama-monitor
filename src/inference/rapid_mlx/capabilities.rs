@@ -1387,7 +1387,14 @@ pub async fn run_update_validation_probe(
         );
     }
 
-    // 6. Check for per-feature failures from extras
+    // 6. Validate argv construction for key use cases against capability snapshot
+    if let Err(e) = validate_argv_construction(&snapshot) {
+        return Ok(ProbeResult::CriticalFail {
+            message: format!("argv construction validation failed: {e}"),
+        });
+    }
+
+    // 7. Check for per-feature failures from extras
     let feature_failures = collect_feature_failures(&snapshot);
 
     if feature_failures.is_empty() {
@@ -1567,6 +1574,44 @@ fn collect_feature_failures(snapshot: &CapabilitySnapshot) -> Vec<FeatureProbeFa
     }
 
     failures
+}
+
+/// Validate that argv construction for key use cases succeeds against this snapshot.
+/// This catches flag renames/removals that would only be discovered at launch time otherwise.
+fn validate_argv_construction(snapshot: &CapabilitySnapshot) -> Result<()> {
+    // Core launch flags (always required for Managed runtime)
+    let core_flags = &[
+        "--host", "--port", "--log-level", "--served-model-name", "--timeout",
+        "--enable-prefix-cache", "--disable-prefix-cache", "--cache-memory-mb",
+        "--hybrid-cache-entries", "--kv-disk-checkpoint-interval",
+        "--tool-call-parser", "--reasoning-parser", "--enable-auto-tool-choice",
+        "--no-thinking", "--reasoning", "--force-hybrid", "--no-hybrid",
+        "--prefill-step-size", "--pflash",
+    ];
+
+    for &flag in core_flags {
+        if !snapshot.serve_flags.iter().any(|f| f == flag) {
+            anyhow::bail!("required flag missing: {flag}");
+        }
+    }
+
+    // Reasoning + retained cache (most common Rapid-MLX use case)
+    let reasoning_flags = &["--kv-cache-dtype", "--reasoning", "--cache-memory-mb"];
+    for &flag in reasoning_flags {
+        if !snapshot.serve_flags.iter().any(|f| f == flag) {
+            anyhow::bail!("required flag missing: {flag}");
+        }
+    }
+
+    // Sampling defaults (required for model profiles that set defaults)
+    let sampling_flags = &["--default-temperature", "--default-top-p", "--default-top-k", "--default-min-p", "--max-tokens"];
+    for &flag in sampling_flags {
+        if !snapshot.serve_flags.iter().any(|f| f == flag) {
+            anyhow::bail!("required flag missing: {flag}");
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
