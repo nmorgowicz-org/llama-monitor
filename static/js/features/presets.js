@@ -1312,6 +1312,8 @@ export function openPresetModal(mode, section, seedPreset = null) {
         // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
         setOpt('modal-rapid-kv-cache-dtype', p.rapid_mlx?.kv_cache_dtype || '');
         setOpt('modal-rapid-turboquant-mode', p.rapid_mlx?.turboquant_mode || 'none');
+        setOpt('modal-rapid-tool-call-parser', p.rapid_mlx?.tool_call_parser || '');
+        setOpt('modal-rapid-reasoning-parser', p.rapid_mlx?.reasoning_parser || '');
         setOpt('modal-rapid-workload-scenario', p.rapid_mlx?.workload_scenario || '');
         setOpt('modal-rapid-sampling-mode', p.rapid_mlx?.sampling_mode || 'auto');
         // Phase 7B2: Workload assumptions (for reference display)
@@ -1715,7 +1717,7 @@ function _configureBackendPresetEditor(preset) {
     modal?.classList.toggle('preset-editor--rapid-mlx', isRapid);
 
     // Phase 7: Toggle Rapid-MLX advanced rows based on backend (inline styles override CSS).
-    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-webui', 'pe-row-rapid-webui-expert'];
+    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-webui', 'pe-row-rapid-webui-expert', 'pe-row-rapid-parser-overrides'];
     rapidRows.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = isRapid ? '' : 'none';
@@ -1802,6 +1804,8 @@ function _buildFormPreset(existing) {
                     // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
                     const kvDtype = strVal('modal-rapid-kv-cache-dtype');
                     const tqMode = strVal('modal-rapid-turboquant-mode');
+                    const toolParser = strVal('modal-rapid-tool-call-parser');
+                    const reasoningParser = strVal('modal-rapid-reasoning-parser');
                     const wlScenario = strVal('modal-rapid-workload-scenario');
                     const wlAssumptionsRaw = document.getElementById('modal-rapid-workload-scenario')?.dataset.assumptions;
                     const samplingMode = strVal('modal-rapid-sampling-mode');
@@ -1811,6 +1815,8 @@ function _buildFormPreset(existing) {
                     const rmInput = document.getElementById('modal-rapid-reasoning-mode');
                     if (kvDtype) out.kv_cache_dtype = kvDtype;
                     if (tqMode && tqMode !== 'auto') out.turboquant_mode = tqMode;
+                    if (toolParser) out.tool_call_parser = toolParser;
+                    if (reasoningParser) out.reasoning_parser = reasoningParser;
                     if (wlScenario && wlScenario !== 'interactive_chat') out.workload_scenario = wlScenario;
                     if (wlAssumptionsRaw) {
                       try { out.workload_assumptions = JSON.parse(wlAssumptionsRaw); } catch {}
