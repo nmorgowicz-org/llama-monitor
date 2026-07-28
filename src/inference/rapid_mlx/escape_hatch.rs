@@ -19,7 +19,7 @@ pub const ALLOWED_ESCAPE_FLAGS: &[EscapeFlagDescriptor] = &[
         flag: "pflash",
         value_type: "enum",
         description: "Prefilter cache mode",
-        tooltip: "Controls how Rapid-MLX reuses KV cache across requests. 'auto' lets the runtime decide; 'always' maximizes reuse but uses more memory; 'off' disables it.",
+        tooltip: "Controls how Rapid-MLX reuses KV cache across requests. 'auto' lets the runtime decide; 'always' maximizes reuse but uses more memory and may degrade context recall on long prompts (>60k tokens); 'off' disables it (default).",
         enum_options: Some(&["off", "auto", "always"]),
         default: Some("off (\"always\" for verified aliases)"),
     },
