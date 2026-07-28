@@ -28,6 +28,10 @@ function rapidPreset(id = 'rapid', name = 'Rapid model') {
     rapid_mlx: {
       model_path: '/models/mlx-community/Qwen3-4B-4bit',
       model_source: { kind: 'mlx_directory', path: '/models/mlx-community/Qwen3-4B-4bit' },
+      model_source_view: {
+        canonical_identity: '/models/mlx-community/Qwen3-4B-4bit',
+        display_name: 'Qwen3-4B-4bit',
+      },
       host: '127.0.0.1',
       port: 9123,
       served_model_name: 'qwen3-rapid',
