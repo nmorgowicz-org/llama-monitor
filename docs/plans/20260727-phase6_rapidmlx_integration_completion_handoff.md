@@ -1583,11 +1583,38 @@ Verified Qwen3.5-27B via OS memory delta (Prometheus metal metrics were stale/wr
   - Load wiring: `setOpt('modal-rapid-tool-call-parser', ...)` and `setOpt('modal-rapid-reasoning-parser', ...)` at lines 1315-1316.
   - Save wiring: reads dropdowns and includes in payload at lines 1808-1811.
 
+### DoD Section 20 Item 11 — COMPLETE
+
+**Item 11: Local/HF behavioral metadata and Rapid profile evidence are merged.**
+
+**New: Unified profile endpoint** — `/api/rapid-mlx/models/{id}/unified-profile` (GET, api-token auth) merges three sources:
+1. MLX config (local or HF): geometry, hybrid detection via `full_attention_interval`
+2. Rapid-MLX info profile: behavioral flags (`tool_format`, `reasoning_parser`, `architecture`)
+3. Explicit mappings: fallbacks (qwen→qwen-coder, llama→llama3-tool, gemma→gemma-tool)
+
+**Structs** (mod.rs):
+- `UnifiedProfileRecommended { hybrid_mode, tool_format, reasoning_parser }`
+- `UnifiedProfileSources { hybrid_mode_source, tool_format_source, reasoning_parser_source }`
+- `UnifiedProfile { recommended, sources, warnings: Vec<String> }`
+
+**Priority rules** (verified by 24 unit tests):
+- `hybrid_mode`: HF/local config wins (full_attention_interval > 1 → force, else auto)
+- `tool_format`: rapid-mlx info first, then model_type mapping, then "not_available"
+- `reasoning_parser`: rapid-mlx info first, then HF architecture pattern, then "not_available"
+- Warnings when sources disagree (e.g., geometry says hybrid but rapid-mlx reports pure attention)
+
+**JS consumption** (spawn-wizard.js):
+- Fetches unified-profile alongside existing profile
+- Auto-populates hybrid_mode, toolCallParser, reasoningParser from recommendations when not user-set
+- Renders warnings from unified profile
+
+**MLX introspection remains binary-independent** — uses existing `read_mlx_local_config()`, `fetch_mlx_model_profile_revision_aware()`. Future MLX loaders (MTPLX) can consume same introspection path.
+
 ### Verification
 
 - `cargo build --release` ✓
 - `cargo clippy -- -D warnings` ✓
-- `cargo test` ✓ (916 tests pass)
+- `cargo test` ✓ (940 tests pass, 24 new unified profile tests)
 - `npm run lint` ✓
 - 4 new tests for `resolve_hybrid_mode()` covering nested text_config, top-level interval, and non-hybrid models.
 - 31 new tests for DoD item 6 covering all context/dtype/architecture combinations.
