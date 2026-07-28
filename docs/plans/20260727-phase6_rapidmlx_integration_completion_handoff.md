@@ -1715,9 +1715,23 @@ Part B (runtime safety): command.rs + compatibility.rs: zero unwrap/expect in pr
 
 ### Remaining DoD items
 
-- **Item 24:** Real screenshots are captured and visually reviewed. (NOT STARTED)
-- **Item 25:** Reference docs describe implemented behavior and evidence boundaries. (NOT STARTED)
-- **Item 26:** Mandatory pre-PR checks pass in exact project order. (NOT STARTED)
+- **Item 24:** Real screenshots are captured and visually reviewed. **COMPLETED** (2026-07-28)
+  - All 7 Rapid-specific visual states captured (spawn-wizard-engines, rapid-preset, rapid-mlx-live scenarios)
+  - Artifacts: `docs/screenshots/artifacts/` (129 PNGs), promoted: `docs/screenshots/` (63 PNGs)
+  - Gap fills: `spawn-wizard-parser-detected.png`, re-captured `spawn-wizard-rapid-mlx-review.png` with reasoning ON
+- **Item 25:** Reference docs describe implemented behavior and evidence boundaries. **IN PROGRESS**
+- **Item 26:** Mandatory pre-PR checks pass in exact project order. **PENDING** (after Item 25)
+
+### Phase 7B2 cleanup (completed 2026-07-28)
+
+Removed dead workload profile UI code (dedicated step-3 profile picker + confirmation gate) that was redundant with page-1 use-case selection:
+- `spawn-wizard.js`: Removed `WORKLOAD_PROFILES` constant, `WORKLOAD_SCENARIO_TO_PROFILE` compat map, dead UI functions (~686 lines)
+- `spawn-wizard.css`: Removed all `.wp-*` classes (~643 lines)
+- `modal-premium.css`: Removed dead `#pe-mtp-concurrency-teaching` block
+- `presets.js`: Removed MTP teaching panel import
+- `vram-estimate.js`: Updated `rapidEstimatePolicyFromWizardHardware` to use `workloadScenario` string
+- Preserved: `USE_CASE_TO_PROFILE` mapping, `wizardState.hardware.workloadScenario` field, backend workload_scenario serialization
+- Tests updated: `spawn-wizard.spec.js`, `phase7-presets.spec.js`
 
 ### Phase 6.5+ items (out of scope for Phase 6)
 
