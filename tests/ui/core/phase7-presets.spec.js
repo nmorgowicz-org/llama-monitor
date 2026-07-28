@@ -24,27 +24,15 @@ test.describe('Phase 7 preset serialization', () => {
       wizardState.engine.explicit = true;
       wizardState.model.rapidMlxSource = { kind: 'hugging_face_repo', repo_id: 'mlx-community/Qwen3-0.6B-4bit' };
       wizardState.access.port = 9123;
-      wizardState.hardware.workloadProfile = {
-        id: 'tool_research_agent',
-        assumptions: {
-          streaming: true,
-          toolUse: true,
-          formatOwner: 'backend',
-          stablePrefixLikelihood: 'high',
-          hotSessions: '1_active',
-          concurrency: 1,
-          samplingOwnership: 'backend',
-          responseCacheEligible: false,
-        },
-      };
+      wizardState.hardware.workloadScenario = 'tool_research_agent';
     });
 
-    // Verify wizardState reflects the profile
+    // Verify wizardState reflects the scenario
     const stateInPage = await page.evaluate(async () => {
       const { wizardState } = await import('/js/features/spawn-wizard.js');
-      return wizardState.hardware.workloadProfile;
+      return wizardState.hardware.workloadScenario;
     });
-    expect(stateInPage.id).toBe('tool_research_agent');
+    expect(stateInPage).toBe('tool_research_agent');
 
     // Build and check spawn payload includes workload_scenario
     const spawnPayload = await page.evaluate(async () => {
@@ -52,9 +40,6 @@ test.describe('Phase 7 preset serialization', () => {
       return buildSpawnPayload();
     });
     expect(spawnPayload.rapid_mlx?.workload_scenario).toBe('tool_research_agent');
-    expect(spawnPayload.rapid_mlx?.workload_assumptions?.tool_use).toBe(true);
-    expect(spawnPayload.rapid_mlx?.workload_assumptions?.streaming).toBe(true);
-    expect(spawnPayload.rapid_mlx?.workload_assumptions?.concurrency).toBe(1);
   });
 
   test('@in-memory-test wizard buildPresetPayload preserves Rapid-MLX model_source', async ({ page }) => {
@@ -71,19 +56,7 @@ test.describe('Phase 7 preset serialization', () => {
         revision: 'main',
       };
       wizardState.access.port = 9123;
-      wizardState.hardware.workloadProfile = {
-        id: 'interactive_coding_agent',
-        assumptions: {
-          streaming: true,
-          toolUse: true,
-          formatOwner: 'backend',
-          stablePrefixLikelihood: 'high',
-          hotSessions: '1_active',
-          concurrency: 1,
-          samplingOwnership: 'backend',
-          responseCacheEligible: false,
-        },
-      };
+      wizardState.hardware.workloadScenario = 'interactive_coding_agent';
 
       return buildPresetPayload();
     });
@@ -114,26 +87,13 @@ test.describe('Phase 7 preset serialization', () => {
       wizardState.hardware.reasoningMode = 'enable';
       wizardState.hardware.toolCallParser = 'openai';
       wizardState.hardware.enableAutoToolChoice = true;
-      wizardState.hardware.workloadProfile = {
-        id: 'interactive_coding_agent',
-        assumptions: {
-          streaming: true,
-          toolUse: true,
-          formatOwner: 'backend',
-          stablePrefixLikelihood: 'high',
-          hotSessions: '1_active',
-          concurrency: 1,
-          samplingOwnership: 'backend',
-          responseCacheEligible: false,
-        },
-      };
+      wizardState.hardware.workloadScenario = 'interactive_coding_agent';
 
       return buildSpawnPayload();
     });
 
     expect(payload.backend).toBe('rapid_mlx');
     expect(payload.rapid_mlx.workload_scenario).toBe('interactive_coding_agent');
-    expect(payload.rapid_mlx.workload_assumptions).toBeDefined();
     expect(payload.rapid_mlx.model_source).toEqual({
       kind: 'hugging_face_repo',
       repo_id: 'mlx-community/Qwen3-0.6B-4bit',

@@ -280,6 +280,20 @@ function seedRapidMlxCapturePreset() {
             host: '127.0.0.1',
             port: 9123,
             log_level: 'INFO',
+            kv_cache_dtype: 'int4',
+            reasoning_mode: 'on',
+            enable_thinking: true,
+            prefix_cache_enabled: true,
+            retained_cache_mib: 8192,
+            prefill_step_size: 512,
+            turboquant_mode: 'none',
+            tool_call_parser: '',
+            reasoning_parser: '',
+            workload_scenario: 'interactive_coding_agent',
+            sampling_mode: 'coding',
+            web_ui_availability: 'auto',
+            default_temperature: 0.7,
+            default_top_p: 0.9,
         },
         model_path: '',
         port: 9123,
@@ -298,6 +312,20 @@ function seedRapidMlxCapturePreset() {
             host: '127.0.0.1',
             port: 9124,
             log_level: 'INFO',
+            kv_cache_dtype: 'int4',
+            reasoning_mode: 'on',
+            enable_thinking: true,
+            prefix_cache_enabled: true,
+            retained_cache_mib: 8192,
+            prefill_step_size: 512,
+            turboquant_mode: 'none',
+            tool_call_parser: '',
+            reasoning_parser: '',
+            workload_scenario: 'interactive_coding_agent',
+            sampling_mode: 'coding',
+            web_ui_availability: 'auto',
+            default_temperature: 0.7,
+            default_top_p: 0.9,
         },
         model_path: '',
         port: 9124,
@@ -1022,15 +1050,43 @@ async function waitForRapidTelemetry(page, timeoutMs = 60000) {
 
     while (Date.now() - start < timeoutMs) {
         try {
-            const status = await page.evaluate(async () => {
-                const r = await fetch('/api/rapid-mlx/runtime/status');
-                if (!r.ok) return null;
-                return r.json();
+            const result = await page.evaluate(async () => {
+                const headers = window.authHeaders ? { ...window.authHeaders() } : {};
+
+                // Check llama-monitor's runtime/status endpoint first.
+                try {
+                    const statusResp = await fetch('/api/rapid-mlx/runtime/status', { headers });
+                    if (statusResp.ok) {
+                        const status = await statusResp.json();
+                        if (status?.runtime?.active?.model && status?.runtime?.active?.version) {
+                            return { type: 'manager', status };
+                        }
+                    }
+                } catch {
+                    // Ignore errors from runtime/status
+                }
+
+                // Fall back to checking the active session's rapid-mlx backend via llama-monitor.
+                const activeResp = await fetch('/api/sessions/active', { headers });
+                if (!activeResp.ok) return null;
+                const active = await activeResp.json();
+                if (active.backend !== 'rapid_mlx' || active.status !== 'Running') return null;
+                const port = active.mode?.match(/:(\d+)/)?.[1];
+                if (!port) return null;
+                const model = active.model_identity || null;
+                if (model) {
+                    return { type: 'session', model, port, mode: active.mode };
+                }
+                return null;
             });
 
-            if (status?.runtime?.active?.model && status?.runtime?.active?.version) {
-                console.log('[CAPTURE] waitForRapidTelemetry: active with model:', status.runtime.active.model);
-                return status;
+            if (result?.type === 'manager') {
+                console.log('[CAPTURE] waitForRapidTelemetry: active (via manager) with model:', result.status.runtime.active.model);
+                return result.status;
+            }
+            if (result?.type === 'session') {
+                console.log('[CAPTURE] waitForRapidTelemetry: active (via session) with model:', result.model, 'on port', result.port);
+                return { runtime: { active: { model: result.model, port: result.port, mode: result.mode } } };
             }
         } catch {
             // Keep polling
@@ -3781,6 +3837,19 @@ async function scenarioSpawnWizardEngines(ctx) {
     await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-reasoning-mode-on.png') });
     console.log('[CAPTURE] Saved spawn-wizard-reasoning-mode-on.png');
 
+    // spawn-wizard-parser-detected.png — Parser/hybrid dropdowns with "Detected:" hints.
+    await page.evaluate(() => {
+        const reasoningCheckbox = document.getElementById('spawn-rapid-reasoning-mode');
+        if (reasoningCheckbox && reasoningCheckbox.checked) {
+            reasoningCheckbox.click();
+        }
+    });
+    await sleep(300);
+    await scrollToElement('#spawn-rapid-tool-call-parser', -50);
+    await sleep(400);
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-parser-detected.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-parser-detected.png');
+
     // Reset reasoning mode.
     await page.evaluate(() => {
         const reasoningCheckbox = document.getElementById('spawn-rapid-reasoning-mode');
@@ -3789,75 +3858,6 @@ async function scenarioSpawnWizardEngines(ctx) {
         }
     });
     await sleep(300);
-
-    // spawn-wizard-workload-roleplay.png — Roleplay profile selected with its assumptions.
-    await page.evaluate(() => {
-        const card = document.querySelector('.wp-card[data-profile-id="roleplay_storytelling"]');
-        if (card) card.click();
-    });
-    await page.waitForFunction(
-        () => document.querySelector('.wp-card.selected[data-profile-id="roleplay_storytelling"]') !== null,
-        { timeout: 3000 }
-    );
-    await sleep(400);
-    await scrollToElement('#workload-assumptions-panel', -50);
-    await sleep(300);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-workload-roleplay.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-workload-roleplay.png');
-
-    // spawn-wizard-roleplay-teaching.png — Roleplay-specific teaching panel (Phase 7B3).
-    // Shows: long-context reserve, client-owned samplers/stops, chat-vs-text format owner, prompt-cache guidance.
-    const roleplayTeachingShown = await page.waitForFunction(
-        () => {
-            const el = document.getElementById('wp-roleplay-teaching');
-            return el && el.style.display === 'block';
-        },
-        { timeout: 8000 }
-    ).catch(() => {
-        console.log('[CAPTURE] Roleplay teaching panel did not appear; capturing assumptions panel for reference.');
-        return false;
-    });
-    if (roleplayTeachingShown) {
-        await scrollToElement('#wp-roleplay-teaching', -30);
-        await sleep(300);
-        await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-roleplay-teaching.png') });
-        console.log('[CAPTURE] Saved spawn-wizard-roleplay-teaching.png');
-    } else {
-        await scrollToElement('#workload-assumptions-panel', -50);
-        await sleep(300);
-        await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-roleplay-teaching.png') });
-        console.log('[CAPTURE] Saved spawn-wizard-roleplay-teaching.png (assumptions fallback)');
-    }
-
-    // spawn-wizard-workload-tool-research.png — Tool/research agent profile (non-default).
-    await page.evaluate(() => {
-        const card = document.querySelector('.wp-card[data-profile-id="tool_research_agent"]');
-        if (card) card.click();
-    });
-    await page.waitForFunction(
-        () => document.querySelector('.wp-card.selected[data-profile-id="tool_research_agent"]') !== null,
-        { timeout: 3000 }
-    );
-    await sleep(400);
-    await scrollToElement('#workload-assumptions-panel', -50);
-    await sleep(300);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-workload-tool-research.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-workload-tool-research.png');
-
-    // spawn-wizard-workload-deterministic.png — Deterministic batch/eval ADVANCED profile.
-    await page.evaluate(() => {
-        const card = document.querySelector('.wp-card[data-profile-id="deterministic_batch_eval"]');
-        if (card) card.click();
-    });
-    await page.waitForFunction(
-        () => document.querySelector('.wp-card.selected[data-profile-id="deterministic_batch_eval"]') !== null,
-        { timeout: 3000 }
-    );
-    await sleep(400);
-    await scrollToElement('#workload-assumptions-panel', -50);
-    await sleep(300);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-workload-deterministic.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-workload-deterministic.png');
 
     // spawn-wizard-rapid-mlx-advanced-controls.png — Phase 7 controls: KV dtype, prompt storage, sampling mode, reasoning.
     await scrollToElement('#spawn-kv-cache-dtype', 0);
@@ -3891,59 +3891,8 @@ async function scenarioSpawnWizardEngines(ctx) {
         console.log('[CAPTURE] Escape-hatch capture failed:', e.message);
     }
 
-    // spawn-wizard-mtp-concurrency-teaching.png — Phase 7B4 MTP/concurrency teaching panel expanded.
-    const mtpTeachingShown = await page.waitForFunction(
-        () => {
-            const el = document.getElementById('wp-mtp-concurrency-teaching');
-            return el && el.style.display === 'block';
-        },
-        { timeout: 5000 }
-    ).catch(() => {
-        console.log('[CAPTURE] MTP teaching panel did not appear; capturing advanced controls for reference.');
-        return false;
-    });
-    if (mtpTeachingShown) {
-        await scrollToElement('#wp-mtp-concurrency-teaching', -30);
-        await sleep(300);
-        await page.evaluate(() => {
-            const details = document.querySelector('#wp-mtp-concurrency-teaching details');
-            if (details && !details.open) details.open = true;
-        });
-        await sleep(300);
-        await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-mtp-concurrency-teaching.png') });
-        console.log('[CAPTURE] Saved spawn-wizard-mtp-concurrency-teaching.png');
-    } else {
-        await scrollToElement('#spawn-rapid-advanced-fields', 0);
-        await sleep(300);
-        await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-mtp-concurrency-teaching.png') });
-        console.log('[CAPTURE] Saved spawn-wizard-mtp-concurrency-teaching.png (advanced controls fallback)');
-    }
-
-    // spawn-wizard-endpoint-compatibility.png — Phase 7B4 endpoint compatibility in assumptions panel.
-    await scrollToElement('#workload-assumptions-panel', -50);
-    await sleep(300);
-    await page.evaluate(() => {
-        const details = document.querySelector('#workload-assumptions-panel .wp-endpoint-compat-details');
-        if (details && !details.open) details.open = true;
-    });
-    await sleep(300);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-endpoint-compatibility.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-endpoint-compatibility.png');
-
     // Deterministic Rapid end-to-end path: use the nested MLX fixture served by
-    // the real estimate endpoint, then pass the workload confirmation guardrail.
-    await page.evaluate(() => {
-        document.querySelector('.wp-card[data-profile-id="interactive_coding_agent"]')?.click();
-    });
-    await page.waitForFunction(
-        () => document.querySelector('.wp-card.selected[data-profile-id="interactive_coding_agent"]') !== null,
-        { timeout: 3000 }
-    );
-    await page.evaluate(() => document.getElementById('workload-confirm-check')?.click());
-    await page.waitForFunction(
-        () => document.getElementById('workload-confirm-check')?.checked === true,
-        { timeout: 3000 }
-    );
+    // the real estimate endpoint.
     await page.waitForFunction(
         () => document.getElementById('wizard-next-btn')?.disabled === false,
         { timeout: 3000 }
@@ -3956,6 +3905,12 @@ async function scenarioSpawnWizardEngines(ctx) {
         () => document.getElementById('wizard-step-3')?.classList.contains('active'),
         { timeout: 8000 }
     );
+    // Reasoning mode ON so review step shows "INT4 → INT8 (reasoning profile)".
+    await page.evaluate(() => {
+        const cb = document.getElementById('spawn-rapid-reasoning-mode');
+        if (cb && !cb.checked) cb.click();
+    });
+    await sleep(400);
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
     await page.waitForFunction(
         () => document.getElementById('wizard-step-4')?.classList.contains('active'),
@@ -4611,7 +4566,13 @@ async function scenarioSpawnWizardRapidMlxGif(ctx, _options) {
     });
     await sleep(200);
 
-    // ── Step 2 → Step 3: Summary ──────────────────────────────────────────────
+    // ── Step 2 → Step 3: Summary (reasoning ON → "INT4 → INT8" in summary) ──
+    // Enable reasoning mode so the review summary shows "INT4 → INT8 (reasoning profile)".
+    await page.evaluate(() => {
+        const cb = document.getElementById('spawn-rapid-reasoning-mode');
+        if (cb && !cb.checked) cb.click();
+    });
+    await sleep(400);
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
     await page.waitForFunction(
         () => document.getElementById('wizard-step-3')?.classList.contains('active'),
@@ -4775,6 +4736,17 @@ async function scenarioAppearancePalette(ctx, options) {
 async function scenarioRapidMlxLive(ctx, options) {
     const { page, baseUrl } = ctx;
     const presetId = 'rapid-live-test';
+    // Derive a unique port from the capture harness port to avoid conflicts with fixed 9321.
+    const harnessPort = parseInt(new URL(baseUrl).port || '8892', 10);
+    const rapidPort = 9321 + (harnessPort - 8892);
+
+    // Kill any stale rapid-mlx process that might hold the port.
+    try {
+        const { execSync } = await import('child_process');
+        execSync(`lsof -i :${rapidPort} -t 2>/dev/null | xargs kill -9 2>/dev/null || true`, { stdio: 'ignore' });
+    } catch {
+        // Non-fatal
+    }
 
     // Navigate first so relative fetches inside evaluate resolve correctly.
     await gotoApp(page, baseUrl);
@@ -4801,7 +4773,7 @@ async function scenarioRapidMlxLive(ctx, options) {
     console.log('[CAPTURE] rapid-mlx-live: starting full runtime flow (developer-only)');
 
     // 1. Seed a Rapid-MLX preset with Qwen3-0.6B-4bit (HuggingFaceRepo typed source).
-    await page.evaluate(async (id) => {
+    await page.evaluate(async ({ id, port }) => {
         const preset = {
             id,
             name: 'Qwen3-0.6B-4bit · Live Test',
@@ -4814,37 +4786,86 @@ async function scenarioRapidMlxLive(ctx, options) {
                 },
                 served_model_name: 'qwen3-live',
                 host: '127.0.0.1',
-                port: 9321,
+                port,
                 log_level: 'INFO',
                 workload_scenario: 'interactive_coding_agent',
             },
-            port: 9321,
+            port,
         };
-        await fetch('/api/presets', {
+        const resp = await fetch('/api/presets', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...(window.authHeaders ? window.authHeaders() : {}) },
-            body: JSON.stringify([preset]),
+            body: JSON.stringify(preset),
         });
-    }, presetId);
+        const result = await resp.json();
+        if (!result.ok) throw new Error('Failed to create preset: ' + (result.error || resp.statusText));
+        console.log('[CAPTURE] rapid-mlx-live: preset created:', result.preset?.id);
+    }, { id: presetId, port: rapidPort });
     await sleep(500);
 
-    // 2. Set as active preset.
+    // 2. Reload presets and set as active preset.
     await page.evaluate(async (id) => {
-        await fetch('/api/settings', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', ...(window.authHeaders ? window.authHeaders() : {}) },
-            body: JSON.stringify({ preset_id: id }),
-        });
-        const select = document.getElementById('preset-select');
-        if (select) select.dispatchEvent(new Event('change'));
+        // Refresh sessionState.presets so doStart() finds the new preset.
+        const { loadPresets } = await import('/js/features/presets.js');
+        await loadPresets(id);
     }, presetId);
     await sleep(500);
 
-    // 3. Spawn via doStart().
+    // Verify preset-select is set correctly.
+    const selectedPreset = await page.evaluate(() => {
+        return document.getElementById('preset-select')?.value;
+    });
+    console.log('[CAPTURE] rapid-mlx-live: preset-select value:', selectedPreset);
+
+    // 3. Close wizard if open, then spawn via doStart().
+    await page.evaluate(async () => {
+        const wizard = document.getElementById('spawn-wizard-overlay');
+        if (wizard && wizard.classList.contains('open')) {
+            const { closeSpawnWizard } = await import('/js/features/spawn-wizard.js');
+            closeSpawnWizard();
+        }
+    });
+    await sleep(500);
+
+    // Spawn via doStart().
     await page.evaluate(async () => {
         const { doStart } = await import('/js/features/attach-detach.js');
         await doStart();
     });
+
+    // 4. Check active session status after spawn.
+    await sleep(3000); // Give spawn time to initiate.
+    const activeSession = await page.evaluate(async () => {
+        try {
+            const r = await fetch('/api/sessions/active', {
+                headers: window.authHeaders ? window.authHeaders() : {}
+            });
+            return r.ok ? await r.json() : { error: r.status };
+        } catch (e) {
+            return { error: e.message };
+        }
+    });
+    console.log('[CAPTURE] rapid-mlx-live: active session:', JSON.stringify(activeSession).slice(0, 500));
+
+    // Check for any spawn errors in the UI.
+    const spawnError = await page.evaluate(() => {
+        const toast = document.querySelector('.toast-body')?.textContent || '';
+        const errorEl = document.querySelector('.spawn-error')?.textContent || '';
+        return toast || errorEl;
+    });
+    if (spawnError) {
+        console.log('[CAPTURE] rapid-mlx-live: UI error detected:', spawnError);
+    }
+
+    // Check spawn wizard state for errors.
+    const wizardState = await page.evaluate(() => {
+        return document.getElementById('spawn-wizard-overlay') ? {
+            visible: true,
+            status: document.querySelector('#spawn-status-text')?.textContent || '',
+            error: document.querySelector('.spawn-error')?.textContent || '',
+        } : { visible: false };
+    });
+    console.log('[CAPTURE] rapid-mlx-live: wizard state:', wizardState);
 
     // 4. Wait for health endpoint (up to 120s for model download + load).
     console.log('[CAPTURE] rapid-mlx-live: waiting for health (120s timeout)...');
@@ -4876,7 +4897,7 @@ async function scenarioRapidMlxLive(ctx, options) {
     await switchTab(page, 'chat');
     await createFreshChat(page);
     await sendChatPrompt(page, 'Say hello and stop.');
-    await waitForChatComplete(page, 60000);
+    await waitForChatComplete(page, 180000);
 
     await sleep(1000);
     await captureShot(page, 'rapid-mlx-live-chat-response.png', { fullPage: true });
@@ -5195,10 +5216,33 @@ async function scenarioModelLibrary(ctx, options) {
     await captureShot(page, 'panels-model-library-qualification-badges.png', { fullPage: true });
 
     // Phase 8B3: Switch to MLX-only to show MLX-native view (additive toggle test)
-    const mlxScopeBtn = await page.$('.hf-scope-btn[data-scope-key="mlx"]');
-    if (mlxScopeBtn) {
-        // Click MLX to toggle — on macOS default is MLX+GGUF, so this shows both active
-        await mlxScopeBtn.click();
+    // Default state is MLX+GGUF both active. Click GGUF to deselect it → MLX-only.
+    const toggleResult = await page.evaluate(() => {
+        const scopeContainer = document.getElementById('mm-hf-scope-container');
+        const allWraps = document.querySelectorAll('.hf-scope-selector');
+        const allBtns = document.querySelectorAll('.hf-scope-btn[data-scope-key="gguf"]');
+        console.log('[DEBUG] before click:', {
+            scopeWraps: allWraps.length,
+            ggufBtns: allBtns.length,
+            wrapParents: Array.from(allWraps).map(w => w.parentElement.id),
+        });
+        const ggufBtn = allBtns[allBtns.length - 1]; // Click LAST button (most recent wrap)
+        if (!ggufBtn) return { found: false };
+        ggufBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        const afterWraps = document.querySelectorAll('.hf-scope-selector');
+        const wrapDatasets = Array.from(afterWraps).map(w => ({ mlx: w.dataset.hfScopeMlx, gguf: w.dataset.hfScopeGguf }));
+        return {
+            found: true,
+            mlxActive: document.querySelector('.hf-scope-btn[data-scope-key="mlx"]')?.classList.contains('hf-scope-btn--active'),
+            ggufActive: document.querySelector('.hf-scope-btn[data-scope-key="gguf"]')?.classList.contains('hf-scope-btn--active'),
+            containerMlx: scopeContainer ? scopeContainer.dataset.hfScopeMlx : 'N/A',
+            containerGguf: scopeContainer ? scopeContainer.dataset.hfScopeGguf : 'N/A',
+            wrapCount: afterWraps.length,
+            wrapDatasets,
+        };
+    });
+    console.log('[CAPTURE] MLX-only toggle result:', JSON.stringify(toggleResult));
+    if (toggleResult.found) {
         await sleep(3000); // Wait for refilter with real results
         try {
             await page.waitForSelector('.hf-search-group', { timeout: 8000 });
@@ -5206,6 +5250,8 @@ async function scenarioModelLibrary(ctx, options) {
             // No MLX-only results for this query — acceptable
         }
         await captureShot(page, 'panels-model-library-mlx-only.png', { fullPage: true });
+    } else {
+        console.log('[CAPTURE] GGUF scope button not found');
     }
 
     console.log('[CAPTURE] Scenario "model-library" complete.');

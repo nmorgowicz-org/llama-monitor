@@ -16,7 +16,7 @@ import {
     detectCommunityTemplateFamily,
 } from './chat-template-registry.js';
 import { buildEstimateBody, rapidEstimatePolicyFromConfig } from './vram-estimate.js';
-import { _renderMtpConcurrencyTeaching } from './spawn-wizard.js';
+
 
 let newPresetSeed = null;
 
@@ -1317,14 +1317,6 @@ export function openPresetModal(mode, section, seedPreset = null) {
         setOpt('modal-rapid-reasoning-parser', p.rapid_mlx?.reasoning_parser || '');
         setOpt('modal-rapid-workload-scenario', p.rapid_mlx?.workload_scenario || '');
         setOpt('modal-rapid-sampling-mode', p.rapid_mlx?.sampling_mode || 'auto');
-        // Phase 7B2: Workload assumptions (for reference display)
-        if (p.rapid_mlx?.workload_assumptions) {
-          // Store assumptions for wizard use via data attribute
-          const selector = document.getElementById('modal-rapid-workload-scenario');
-          if (selector) {
-            selector.dataset.assumptions = JSON.stringify(p.rapid_mlx.workload_assumptions);
-          }
-        }
         setOpt('modal-rapid-webui-availability', p.rapid_mlx?.web_ui_availability || 'auto');
         setVal('modal-rapid-webui-config-json', p.rapid_mlx?.web_ui_config_json || '');
         setVal('modal-rapid-webui-static-path', p.rapid_mlx?.web_ui_static_path || '');
@@ -1736,16 +1728,7 @@ function _configureBackendPresetEditor(preset) {
     const cacheMemoryRow = document.getElementById('pe-row-rapid-cache-memory');
     if (cacheMemoryRow) cacheMemoryRow.style.display = isRapid ? '' : 'none';
 
-    // Phase 7B4: Toggle MTP/concurrency teaching for Rapid-MLX only (D25).
-    const mtpTeaching = document.getElementById('pe-mtp-concurrency-teaching');
-    if (mtpTeaching) {
-        if (isRapid) {
-            mtpTeaching.style.display = '';
-            _renderMtpConcurrencyTeaching('rapid_mlx');
-        } else {
-            mtpTeaching.style.display = 'none';
-        }
-    }
+    // MTP/concurrency teaching panel removed (Phase 7B2).
 
     const modelLabel = document.querySelector('label[for="modal-model-path"]');
     const modelInput = document.getElementById('modal-model-path');
@@ -1828,9 +1811,6 @@ function _buildFormPreset(existing) {
                     if (toolParser) out.tool_call_parser = toolParser;
                     if (reasoningParser) out.reasoning_parser = reasoningParser;
                     if (wlScenario && wlScenario !== 'interactive_chat') out.workload_scenario = wlScenario;
-                    if (wlAssumptionsRaw) {
-                      try { out.workload_assumptions = JSON.parse(wlAssumptionsRaw); } catch {}
-                    }
                     if (samplingMode && samplingMode !== 'auto') out.sampling_mode = samplingMode;
                     if (rmInput) out.reasoning_mode = rmInput.checked ? 'on' : 'off';
                     const prefillStepSize = Number(strVal('modal-rapid-prefill-step-size') || 512);

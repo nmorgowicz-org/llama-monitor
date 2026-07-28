@@ -30,7 +30,7 @@ export function rapidEstimatePolicyFromWizardHardware(hardware = {}) {
     kv_cache_dtype: hardware.kvCacheDtype || null,
     turboquant_mode: hardware.turboquantMode || null,
     reasoning_mode: hardware.reasoningMode === true || hardware.reasoningMode === 'on',
-    workload_scenario: hardware.workloadProfile?.id || hardware.workloadScenario || null,
+    workload_scenario: hardware.workloadScenario || null,
     concurrency_policy: hardware.concurrencyPolicy || null,
     mtp_config: hardware.mtpConfig || null,
     retained_cache_mib: Number(hardware.retainedCacheMib ?? 8192),

@@ -1951,6 +1951,7 @@ async function initHfDownloadTab() {
     let searchTimer = null;
     const doSearch = () => {
         const { query, author, sort, workloadProfile } = buildSearchParams();
+        console.log('[HF-SEARCH] mlxActive:', hfState.discoveryScopeMlx, 'ggufActive:', hfState.discoveryScopeGguf, 'query:', query);
         hfSearch({
             query,
             author,

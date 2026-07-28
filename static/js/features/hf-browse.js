@@ -289,7 +289,7 @@ async function detectPlatformBackend() {
 }
 
 // ── Sort resolution (Phase 8B1) ──────────────────────────────────────────────
-// Maps our sort modes to backend params. Auto = workload-profile-aware relevance.
+// Maps our sort modes to backend params. Auto = relevance-based.
 
 function resolveSortParam(legacySort, hfSort) {
   if (hfSort === HF_SORT.NAME) return 'createdAt';
@@ -298,6 +298,182 @@ function resolveSortParam(legacySort, hfSort) {
   if (hfSort === HF_SORT.RELEVANCE) return 'downloads';
   if (hfSort === HF_SORT.AUTO) return 'downloads';
   return legacySort || 'downloads';
+}
+
+// ── Phase 8B2: Create a variant row within a group ───────────────────────────
+function createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel) {
+  const repoIdLower = (m.id || '').toLowerCase();
+  const isMlx = m.format === 'mlx' || repoIdLower.includes('.mlx') || repoIdLower.includes('/mlx/') || repoIdLower.includes('-mlx-') || repoIdLower.endsWith('-mlx') || repoIdLower.includes('.safetensors');
+  const isGguf = m.format === 'gguf' || repoIdLower.includes('.gguf') || repoIdLower.includes('-gguf') || repoIdLower.includes('/gguf/');
+  const format = m.format || (isGguf ? 'gguf' : isMlx ? 'mlx' : 'unknown');
+
+  const variant = document.createElement('div');
+  variant.className = 'hf-sg-variant';
+
+  // Repo name
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'hf-sg-variant-name';
+  nameSpan.textContent = m.id;
+  nameSpan.title = m.id;
+  variant.appendChild(nameSpan);
+
+  // Format badge
+  const fmtBadge = document.createElement('span');
+  fmtBadge.className = `hf-sg-format-badge hf-sg-format-badge--${format}`;
+  fmtBadge.textContent = format.toUpperCase();
+  variant.appendChild(fmtBadge);
+
+  // Role badge
+  const roleInfo = resolveAuthorRole(m.id, m.tags || []);
+  if (roleInfo) {
+    const roleBadge = document.createElement('span');
+    roleBadge.className = `hf-sg-role-badge hf-sg-role-badge--${roleInfo.role}`;
+    roleBadge.textContent = roleInfo.label;
+    variant.appendChild(roleBadge);
+  }
+
+  // Meta (size/downloads)
+  const metaSpan = document.createElement('span');
+  metaSpan.className = 'hf-sg-variant-meta';
+  const metaParts = [];
+  if (format === 'mlx' && m.quant_label) metaParts.push(m.quant_label);
+  if (m.param_b > 0) metaParts.push(`${m.param_b}B`);
+  if (format === 'mlx' && m.model_size_bytes) metaParts.push(formatBytes(m.model_size_bytes));
+  if (m.downloads > 0) {
+    metaParts.push(m.downloads >= 1000 ? `${(m.downloads / 1000).toFixed(1)}k` : `${m.downloads}`);
+  }
+  metaSpan.textContent = metaParts.join(' · ');
+  if (metaParts.length > 0) variant.appendChild(metaSpan);
+
+  // Card link button
+  const cardLink = document.createElement('button');
+  cardLink.type = 'button';
+  cardLink.className = 'hf-sg-card-link';
+  cardLink.title = 'View model card';
+  cardLink.innerHTML = '<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
+  cardLink.addEventListener('click', e => {
+    e.stopPropagation();
+    if (onOpenCardPanel) onOpenCardPanel(m.id);
+    else window.open(`https://huggingface.co/${escHtml(m.id)}`, '_blank', 'noopener');
+  });
+  variant.appendChild(cardLink);
+
+  // Selection handler for MLX variants (direct select)
+  if (format === 'mlx') {
+    const selectVariant = () => {
+      container.querySelectorAll('.hf-sg-variant.selected, .hf-sr-file-item.selected').forEach(el => el.classList.remove('selected'));
+      variant.classList.add('selected');
+      if (onSelectModel) {
+        onSelectModel({
+          repoId: m.id,
+          id: m.id,
+          format: 'mlx',
+          param_b: m.param_b || 0,
+          quant_label: m.quant_label || '',
+          model_size_bytes: m.model_size_bytes || 0,
+        });
+      }
+    };
+    variant.addEventListener('click', selectVariant);
+    variant.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectVariant(); }
+    });
+  } else {
+    // GGUF: expand file list inline within the group body
+    const filesContainer = document.createElement('div');
+    filesContainer.className = 'hf-sr-files';
+    filesContainer.style.display = 'none';
+
+    let filesLoaded = false;
+    const loadFiles = async () => {
+      if (filesLoaded) return;
+      filesLoaded = true;
+      filesContainer.style.display = '';
+      filesContainer.innerHTML = '<div class="hf-file-loading">Loading files…</div>';
+
+      try {
+        const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
+        const resp = await fetch('/api/hf/files', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ repo_id: m.id, format: 'gguf' }),
+        });
+        if (!resp.ok) {
+          filesContainer.innerHTML = '<div class="hf-file-empty">Failed to load files.</div>';
+          return;
+        }
+        const data = await resp.json();
+        const files = (data.files || []).filter(Boolean);
+        filesContainer.innerHTML = '';
+        if (!files.length) {
+          filesContainer.innerHTML = '<div class="hf-file-empty">No files found in this repo.</div>';
+          return;
+        }
+
+        for (const file of files) {
+          const fname = file.path || file.name || '';
+          if (!fname) continue;
+
+          const fileItem = document.createElement('div');
+          fileItem.className = 'hf-file-item hf-sr-file-item';
+          fileItem.setAttribute('tabindex', '0');
+          fileItem.setAttribute('role', 'button');
+          fileItem.dataset.filename = fname;
+          fileItem.dataset.repoId = m.id;
+
+          const fName = document.createElement('span');
+          fName.className = 'hf-file-name';
+          fName.textContent = fname.split('/').pop() || fname;
+          fileItem.appendChild(fName);
+
+          const fMeta = document.createElement('span');
+          fMeta.className = 'hf-file-meta';
+          const fileMeta = [];
+          if (file.size) fileMeta.push(formatBytes(file.size));
+          if (file.label) fileMeta.push(file.label);
+          fMeta.textContent = fileMeta.join(' · ');
+          fileItem.appendChild(fMeta);
+
+          fileItem.addEventListener('click', e => {
+            e.stopPropagation();
+            container.querySelectorAll('.hf-sr-file-item.selected, .hf-sg-variant.selected').forEach(el => el.classList.remove('selected'));
+            fileItem.classList.add('selected');
+            variant.classList.add('selected');
+            if (onSelectModel) {
+              onSelectModel({
+                repoId: m.id,
+                id: m.id,
+                format: 'gguf',
+                param_b: m.param_b || 0,
+                _file: file,
+              });
+            }
+          });
+
+          filesContainer.appendChild(fileItem);
+        }
+      } catch {
+        filesContainer.innerHTML = '<div class="hf-file-empty">Failed to load files.</div>';
+      }
+    };
+
+    variant.addEventListener('click', () => {
+      const wasOpen = filesContainer.style.display !== 'none';
+      bodyEl.querySelectorAll('.hf-sr-files').forEach(fc => {
+        if (fc !== filesContainer) fc.style.display = 'none';
+      });
+      if (!wasOpen) {
+        if (!filesContainer.parentNode) {
+          variant.parentNode.insertBefore(filesContainer, variant.nextSibling);
+        }
+        loadFiles();
+      } else {
+        filesContainer.style.display = 'none';
+      }
+    });
+  }
+
+  return variant;
 }
 
 // ── hfSearch ──────────────────────────────────────────────────────────────────
@@ -448,260 +624,99 @@ export async function hfSearch({
       return bDl - aDl;
     });
 
-    // Render each repo as a simple card — click to expand and show files
+    // Phase 8B2: Group models by base model name for hierarchical display
+    const groups = new Map();
     for (const m of sortedModels) {
-      const card = document.createElement('div');
-      card.className = 'hf-search-result';
-      card.setAttribute('tabindex', '0');
-      card.setAttribute('role', 'button');
+      const baseName = extractBaseModelName(m.id);
+      if (!groups.has(baseName)) {
+        groups.set(baseName, []);
+      }
+      groups.get(baseName).push(m);
+    }
 
-      const repoIdLower = (m.id || '').toLowerCase();
-      const isMlx = m.format === 'mlx' || repoIdLower.includes('.mlx') || repoIdLower.includes('/mlx/') || repoIdLower.includes('-mlx-') || repoIdLower.endsWith('-mlx') || repoIdLower.includes('.safetensors');
-      const isGguf = m.format === 'gguf' || repoIdLower.includes('.gguf') || repoIdLower.includes('-gguf') || repoIdLower.includes('/gguf/');
-      const format = isGguf ? 'gguf' : isMlx ? 'mlx' : 'unknown';
+    // Sort groups by highest downloads within each group (descending)
+    const sortedGroupEntries = [...groups.entries()].sort(([, a], [, b]) => {
+      const aMax = Math.max(...a.map(m => m.downloads || 0));
+      const bMax = Math.max(...b.map(m => m.downloads || 0));
+      return bMax - aMax;
+    });
 
-      // Header line: repo name, format badge, meta
+    // Render grouped results
+    for (const [baseName, groupModels] of sortedGroupEntries) {
+      // ── Group wrapper ──
+      const groupEl = document.createElement('div');
+      groupEl.className = 'hf-search-group';
+
+      // ── Group header ──
       const header = document.createElement('div');
-      header.className = 'hf-sr-header';
+      header.className = 'hf-sg-header';
 
-      const nameEl = document.createElement('span');
-      nameEl.className = 'hf-sr-name';
-      nameEl.textContent = m.id;
-      nameEl.title = m.id;
-      header.appendChild(nameEl);
+      const nameRow = document.createElement('div');
+      nameRow.className = 'hf-sg-header-name';
 
-      const formatBadge = document.createElement('span');
-      formatBadge.className = `hf-sr-format-badge hf-sr-format-badge--${format}`;
-      formatBadge.textContent = format.toUpperCase();
-      header.appendChild(formatBadge);
+      const baseNameSpan = document.createElement('span');
+      baseNameSpan.className = 'hf-sg-base-name';
+      baseNameSpan.textContent = baseName;
+      baseNameSpan.title = baseName;
+      nameRow.appendChild(baseNameSpan);
 
-      // Card link button (right of format badge)
-      const cardLink = document.createElement('button');
-      cardLink.type = 'button';
-      cardLink.className = 'hf-sr-card-link';
-      cardLink.title = 'View model card';
-      cardLink.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>';
-       cardLink.addEventListener('click', e => {
+      // Category badges (union of all model tags in group)
+      const categorySet = new Set();
+      for (const m of groupModels) {
+        for (const cat of resolveCategories(m.tags || [])) {
+          categorySet.add(cat);
+        }
+      }
+      if (categorySet.size > 0) {
+        const catContainer = document.createElement('span');
+        catContainer.className = 'hf-sg-categories';
+        for (const cat of [...categorySet].slice(0, 3)) {
+          const badge = document.createElement('span');
+          badge.className = 'hf-sr-pill hf-sr-pill--category';
+          badge.textContent = cat;
+          catContainer.appendChild(badge);
+        }
+        nameRow.appendChild(catContainer);
+      }
+
+      // Toggle button
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.className = 'hf-sg-toggle';
+      toggleBtn.textContent = `+${groupModels.length} variants`;
+      nameRow.appendChild(toggleBtn);
+      header.appendChild(nameRow);
+      groupEl.appendChild(header);
+
+      // ── Group body (collapsed by default) ──
+      const bodyEl = document.createElement('div');
+      bodyEl.className = 'hf-sg-body';
+      bodyEl.style.display = 'none';
+
+      // Sort group models by downloads within group
+      groupModels.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
+
+      for (const m of groupModels) {
+        const variant = createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel);
+        bodyEl.appendChild(variant);
+      }
+
+      groupEl.appendChild(bodyEl);
+
+      // Toggle expand/collapse
+      toggleBtn.addEventListener('click', e => {
         e.stopPropagation();
-        if (onOpenCardPanel) onOpenCardPanel(m.id);
-        else window.open(`https://huggingface.co/${escHtml(m.id)}`, '_blank', 'noopener');
+        const isExpanded = bodyEl.style.display !== 'none';
+        // Close other groups
+        groupEl.querySelectorAll('.hf-sg-body').forEach(b => { b.style.display = 'none'; });
+        container.querySelectorAll('.hf-search-group .hf-sg-body').forEach(b => {
+          if (b !== bodyEl) b.style.display = 'none';
+        });
+        bodyEl.style.display = isExpanded ? 'none' : '';
+        toggleBtn.textContent = isExpanded ? `+${groupModels.length} variants` : `−${groupModels.length} variants`;
       });
-      header.appendChild(cardLink);
 
-       // Meta pills (quant first for MLX since it's the only one in repo)
-       const metaEl = document.createElement('span');
-       metaEl.className = 'hf-sr-meta';
-       if (format === 'mlx' && m.quant_label) {
-         const pill = document.createElement('span');
-         pill.className = 'hf-sr-pill hf-sr-pill--quant';
-         pill.textContent = m.quant_label;
-         metaEl.appendChild(pill);
-       }
-       if (m.param_b > 0) {
-         const pill = document.createElement('span');
-         pill.className = 'hf-sr-pill hf-sr-pill--params';
-         pill.textContent = `${m.param_b}B`;
-         metaEl.appendChild(pill);
-       }
-       // MLX size from HF tree API (model_size_bytes from search is often null)
-       if (format === 'mlx' && m.model_size_bytes) {
-         const pill = document.createElement('span');
-         pill.className = 'hf-sr-pill hf-sr-pill--size';
-         pill.textContent = formatBytes(m.model_size_bytes);
-         metaEl.appendChild(pill);
-       }
-      if (m.downloads > 0) {
-        const pill = document.createElement('span');
-        pill.className = 'hf-sr-pill hf-sr-pill--downloads';
-        pill.textContent = m.downloads >= 1000 ? `${(m.downloads / 1000).toFixed(1)}k` : `${m.downloads}`;
-        pill.title = `${m.downloads.toLocaleString()} downloads`;
-        metaEl.appendChild(pill);
-      }
-      if (metaEl.children.length > 0) header.appendChild(metaEl);
-
-      card.appendChild(header);
-
-      if (format === 'mlx') {
-        // MLX repos: click directly selects model (no file list)
-        card.addEventListener('click', () => {
-          container.querySelectorAll('.hf-search-result.selected').forEach(c => c.classList.remove('selected'));
-          card.classList.add('selected');
-          if (onSelectModel) {
-            onSelectModel({
-              repoId: m.id,
-              id: m.id,
-              format: 'mlx',
-              param_b: m.param_b || 0,
-              quant_label: m.quant_label || '',
-              model_size_bytes: m.model_size_bytes || 0,
-            });
-          }
-        });
-        card.addEventListener('keydown', e => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            card.click();
-          }
-        });
-
-        // Lineage row: lazily discover sibling MLX quantizations for this repo.
-        const lineageRow = document.createElement('div');
-        lineageRow.className = 'hf-sr-lineage';
-        lineageRow.textContent = 'Other quantizations…';
-        lineageRow.addEventListener('click', async e => {
-          e.stopPropagation();
-          if (lineageRow.dataset.loaded) return;
-          lineageRow.dataset.loaded = '1';
-          lineageRow.textContent = 'Loading…';
-          const lineage = await fetchMlxLineage(m.id);
-          const derivatives = lineage?.nativeMlxDerivatives || [];
-          if (!derivatives.length) {
-            lineageRow.textContent = 'No other quantizations found.';
-            return;
-          }
-          lineageRow.remove();
-          for (const d of derivatives) {
-            const sibling = document.createElement('div');
-            sibling.className = 'hf-sr-lineage-item';
-            sibling.setAttribute('tabindex', '0');
-            sibling.setAttribute('role', 'button');
-
-            const nameSpan = document.createElement('span');
-            nameSpan.className = 'hf-sr-lineage-name';
-            nameSpan.textContent = d.repoId;
-            sibling.appendChild(nameSpan);
-
-            const metaSpan = document.createElement('span');
-            metaSpan.className = 'hf-sr-lineage-meta';
-            const parts = [];
-            if (d.quant?.bits) parts.push(`${d.quant.bits}-bit`);
-            if (d.size) parts.push(formatBytes(d.size));
-            metaSpan.textContent = parts.join(' · ');
-            sibling.appendChild(metaSpan);
-
-            const selectSibling = () => {
-              container.querySelectorAll('.hf-search-result.selected, .hf-sr-lineage-item.selected')
-                .forEach(el => el.classList.remove('selected'));
-              card.classList.add('selected');
-              sibling.classList.add('selected');
-              if (onSelectModel) {
-                onSelectModel({
-                  repoId: d.repoId,
-                  id: d.repoId,
-                  format: 'mlx',
-                  param_b: m.param_b || 0,
-                  quant_label: d.quant?.bits ? `${d.quant.bits}-bit` : '',
-                  model_size_bytes: d.size || 0,
-                });
-              }
-            };
-            sibling.addEventListener('click', ev => { ev.stopPropagation(); selectSibling(); });
-            sibling.addEventListener('keydown', ev => {
-              if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); selectSibling(); }
-            });
-
-            card.appendChild(sibling);
-          }
-        });
-        card.appendChild(lineageRow);
-      } else {
-        // GGUF repos: click expands file list inline
-        const filesContainer = document.createElement('div');
-        filesContainer.className = 'hf-sr-files';
-        filesContainer.style.display = 'none';
-        card.appendChild(filesContainer);
-
-        let filesLoaded = false;
-        const loadFiles = async () => {
-          if (filesLoaded) return;
-          filesLoaded = true;
-          filesContainer.style.display = '';
-          filesContainer.innerHTML = '<div class="hf-file-loading">Loading files…</div>';
-
-          try {
-            const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
-            const resp = await fetch('/api/hf/files', {
-              method: 'POST',
-              headers,
-              body: JSON.stringify({ repo_id: m.id, format: 'gguf' }),
-            });
-            if (!resp.ok) {
-              filesContainer.innerHTML = '<div class="hf-file-empty">Failed to load files.</div>';
-              return;
-            }
-            const data = await resp.json();
-            const files = (data.files || []).filter(Boolean);
-            filesContainer.innerHTML = '';
-            if (!files.length) {
-              filesContainer.innerHTML = '<div class="hf-file-empty">No files found in this repo.</div>';
-              return;
-            }
-
-            for (const file of files) {
-              const fname = file.path || file.name || '';
-              if (!fname) continue;
-
-              const fileItem = document.createElement('div');
-              fileItem.className = 'hf-file-item hf-sr-file-item';
-              fileItem.setAttribute('tabindex', '0');
-              fileItem.setAttribute('role', 'button');
-              fileItem.dataset.filename = fname;
-              fileItem.dataset.repoId = m.id;
-
-              const nameSpan = document.createElement('span');
-              nameSpan.className = 'hf-file-name';
-              nameSpan.textContent = fname.split('/').pop() || fname;
-              fileItem.appendChild(nameSpan);
-
-              const metaSpan = document.createElement('span');
-              metaSpan.className = 'hf-file-meta';
-              const fileMeta = [];
-              if (file.size) fileMeta.push(formatBytes(file.size));
-              if (file.label) fileMeta.push(file.label);
-              metaSpan.textContent = fileMeta.join(' · ');
-              fileItem.appendChild(metaSpan);
-
-              fileItem.addEventListener('click', e => {
-                e.stopPropagation();
-                container.querySelectorAll('.hf-sr-file-item.selected').forEach(f => f.classList.remove('selected'));
-                container.querySelectorAll('.hf-search-result.selected').forEach(c => c.classList.remove('selected'));
-                fileItem.classList.add('selected');
-                card.classList.add('selected');
-                if (onSelectModel) {
-                  onSelectModel({
-                    repoId: m.id,
-                    id: m.id,
-                    format: 'gguf',
-                    param_b: m.param_b || 0,
-                    _file: file,
-                  });
-                }
-              });
-
-              filesContainer.appendChild(fileItem);
-            }
-          } catch {
-            filesContainer.innerHTML = '<div class="hf-file-empty">Failed to load files.</div>';
-          }
-        };
-
-        card.addEventListener('click', () => {
-          const wasOpen = filesContainer.style.display !== 'none';
-          container.querySelectorAll('.hf-search-result .hf-sr-files').forEach(fc => {
-            if (fc !== filesContainer) fc.style.display = 'none';
-          });
-          if (!wasOpen) loadFiles();
-        });
-
-        card.addEventListener('keydown', e => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            card.click();
-          }
-        });
-      }
-
-      container.appendChild(card);
+      container.appendChild(groupEl);
     }
 
     // If appending and we hit the limit, add load-more button
@@ -1331,6 +1346,9 @@ function _dlCancelPoll(panelEl) {
 
 export function hfCreateScopeSelector({ container, onChange }) {
   if (!container) return null;
+  console.log('[SCOPE-SELECTOR] creating, existing wraps:', container.querySelectorAll('.hf-scope-selector').length);
+  // Remove any existing scope selector (initHfDownloadTab is called per tab click)
+  container.querySelectorAll('.hf-scope-selector').forEach(el => el.remove());
 
   const wrap = document.createElement('div');
   wrap.className = 'hf-scope-selector';
@@ -1368,6 +1386,7 @@ export function hfCreateScopeSelector({ container, onChange }) {
       let mlxActive = wrap.dataset.hfScopeMlx === '1';
       let ggufActive = wrap.dataset.hfScopeGguf === '1';
       let allActive = wrap.dataset.hfScopeAll === '1';
+      console.log('[SCOPE-TOGGLE] before:', { key: s.key, mlxActive, ggufActive, allActive });
 
       if (s.key === 'all') {
         // All: toggle everything on/off (exclusive with individual toggles)
@@ -1391,6 +1410,7 @@ export function hfCreateScopeSelector({ container, onChange }) {
       container.dataset.hfScopeMlx = mlxActive ? '1' : '';
       container.dataset.hfScopeGguf = ggufActive ? '1' : '';
       container.dataset.hfScopeAll = allActive ? '1' : '';
+      console.log('[SCOPE-TOGGLE] after:', { key: s.key, mlxActive, ggufActive, allActive, containerMlx: container.dataset.hfScopeMlx, containerGguf: container.dataset.hfScopeGguf });
 
       // Update button visuals
       wrap.querySelectorAll('.hf-scope-btn').forEach(b => {
