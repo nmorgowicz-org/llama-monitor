@@ -1618,6 +1618,22 @@ Verified Qwen3.5-27B via OS memory delta (Prometheus metal metrics were stale/wr
 - 4 new tests for `resolve_hybrid_mode()` covering nested text_config, top-level interval, and non-hybrid models.
 - 31 new tests for DoD item 6 covering all context/dtype/architecture combinations.
 
+### DoD Section 20 Items 12-14 — COMPLETE
+
+**Item 12: Explicit overrides survive async enrichment.**
+- spawn-wizard.js:5364-5385: `wizardState.hardware.<field> ?? wizardState.hardware.<field>` preserves user-set values when profile arrives.
+- spawn-wizard.js:9440-9469: `_fetchAndApplyModelSamplingDefaults`: each field guarded by `if (wizardState.hardware.<field> === null)`.
+- presets.js:2240-2306: `_suggestGenerationDefaults`: `fillEmpty` only writes when field is nullish.
+- presets.js:1780-1833: `_buildFormPreset`: spreads `existing.rapid_mlx` first, overrides only what editor manages.
+
+**Item 13: Sampling fields map to `--default-*` flags, capability-gated.**
+- Backend COMPLETE: mod.rs fields, SamplingAdapter reads them, command.rs wires to `--default-*` with capability gating.
+- Preset Editor FIXED: Added save wiring (floatOrNull/intOrNull for temperature/top-p/top-k/min-p/repeat-penalty/presence-penalty/max-tokens → default_* fields) and load wiring (numOrEmpty from p.rapid_mlx.default_* to form fields).
+
+**Item 14: max_tokens maps to `--max-tokens` (NOT `--default-max-tokens`), capability-gated.**
+- command.rs:408-409: correct flag with capability gate.
+- tests/auth_routing.rs:2700: explicit test confirms `--max-tokens` vs `--default-max-tokens`.
+
 ### DoD Section 20 Items 15-18 — COMPLETE
 
 **Item 15: Auto-think/reasoning-mode selection is deterministic and visible.**
@@ -1641,6 +1657,32 @@ Verified Qwen3.5-27B via OS memory delta (Prometheus metal metrics were stale/wr
 - Backup: chat_storage.rs:950-966 checkpoints WAL, uses `rusqlite::backup::Backup`.
 - Restore: chat_storage.rs:1174-1208 closes connection before file copy, removes stale WAL/SHM sidecars.
 - No raw reads/writes of SQLite file while open.
+
+### DoD Section 20 Items 19-22 — COMPLETE
+
+**Item 19: `--reasoning` boolean flag emits correctly.**
+- command.rs:551-562: emits bare `--reasoning` (no value) when "on", `--no-thinking` when "off". Rejects "auto", "enable", any other value.
+- Flag in verified_baseline. 6 tests covering all paths.
+
+**Item 20: No direct file reads on live SQLite WAL/SHM.**
+- restore_from_path (chat_storage.rs:1174-1208): checkpoints WAL, closes connection, copies only main DB, removes stale WAL/SHM.
+- backup (chat_storage.rs:950-966): uses rusqlite::backup API.
+- No code reads/writes WAL/SHM directly.
+
+**Item 21: All Rapid-MLX endpoints require api-token.**
+- Gap found: `/api/rapid-mlx/escape-hatch-flags` had no auth.
+- Fixed: added ctx parameter and check_api_token(). Low severity (exposes only static flag metadata), now consistent with all 16 other endpoints.
+
+**Item 22: Zero runtime panics on unknown config fields or Rapid-MLX versions.**
+
+Part A (serde safety): All structs deserializing external data (RapidMlxConfig, MlxConfig, ModelProfile, etc.) use `#[serde(default)]` on fields. No unwrap/expect on deserialized optional fields.
+
+Part B (runtime safety): command.rs + compatibility.rs: zero unwrap/expect in production code. All invalid values use anyhow::bail!. Version probing fails gracefully (timeout, output cap, malformed version handling). Capabilities parsing tolerant of unknown flags.
+
+**Upgrade validation enhancements** (extending existing stage_and_activate_locked):
+- probe_published_managed_release() now requires all 19 verified_baseline flags (was 6).
+- run_update_validation_probe() now includes argv construction validation: checks core launch flags, reasoning+cache flags, sampling defaults all exist in capability snapshot.
+- Either failure → upgrade rejected, old version stays active.
 
 ### Remaining items (Phase 6.5+)
 
