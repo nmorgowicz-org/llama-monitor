@@ -692,6 +692,13 @@ Architecture-aware, backend-aware VRAM breakdown endpoint.
     option. Disk checkpoints are excluded because they are snapshot writes,
     not automatic RAM-cache restoration.
   - Rapid-native policy fields are `kv_cache_dtype` (`bf16`, `int8`, or `int4`), `reasoning_mode`, and `turboquant_mode` (`v4`, `k8v4`, or `none`). The estimator never accepts llama.cpp's `ctk`/`ctv` vocabulary for a Rapid result. Reasoning resolves the active KV dtype to `int8`.
+   - Optional `workload_scenario` maps page-1 use-case selection to backend memory policy. Valid keys and their memory policies:
+     - `interactive_coding_agent` — coding agent workload (default, 80% priority), 128K planning context, 32K retained cache, TurboQuant eligible.
+     - `general_chat` — standard chat, 32K planning context, 8K retained cache.
+     - `roleplay_storytelling` — long-context narrative, 64K planning context, 32K retained cache.
+     - `tool_research_agent` — multi-session tool/research, 128K planning context, 48K retained cache, 2 parallel slots.
+     - `batch_eval` — batch/evaluation, 8K planning context, 0 retained cache, 4 parallel slots.
+   - The workload scenario affects: recommended KV dtype, TurboQuant eligibility, MTP eligibility, parallel slot recommendations, and retained-cache sizing.
   - TurboQuant is retained-prefix storage only. It never reduces model weights, recurrent state, MTP, prefill, or the transient decompression peak. A local Rapid 0.10.17 receipt showed that `--kv-cache-turboquant k8v4` owns the active cache path: the runtime reports its active compute KV as `bf16` and does not apply a simultaneously requested `--kv-cache-dtype int4`. `k8v4` is an Advanced trial: it becomes effective only after exact model/revision qualification; an unknown community finetune is estimated as Standard retained storage and receives an explicit fallback reason. The Rapid argv is `--kv-cache-turboquant {v4,k8v4,none}`.
 - Output fields: `weights_bytes`, `kv_cache_bytes`, `linear_attn_state_bytes`, `mmproj_bytes`, `mtp_bytes`, `overhead_bytes`, `total_bytes`, `available_bytes`, `headroom_bytes`, `ram_bytes`, `available_ram_bytes`, `ram_headroom_bytes`, `recommendation`, `note`
 - Additional output fields (both backends; zero/"measured" for GGUF llama.cpp):

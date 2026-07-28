@@ -2,23 +2,70 @@
 
 The Spawn Wizard is the guided flow for creating a model server. It provides:
 
-- Profile and use-case selection (agentic / general / roleplay)
+- Profile selection (Speed / Balanced / Quality) and use-case selection (agentic / general / roleplay)
 - Engine selection between llama.cpp and Rapid-MLX
 - Model source input (local GGUF, Hugging Face, or import)
 - Architecture-aware VRAM breakdown and context fit modes
 - Auto-size recommendations and MoE tuning
 - Per-backend settings isolation
+- Workload scenario mapping (page-1 use-case selection drives backend VRAM policy)
 
 ## Steps
 
 | Step | Purpose |
 |------|---------|
-| 1. How it works | Choose profile (speed / balanced / quality) and use case |
-| 2. Choose model | Select engine, choose model source, set model-specific options |
-| 3. Hardware & memory | Tune context, offload, batching, speculative decoding, VRAM |
-| 4. Settings | Review network, security, and advanced launch flags |
-| 5. Review settings | Summary of the configuration before launch |
-| 6. Start server | Launch and monitor start-up |
+| 0. Profile | Choose Speed / Balanced / Quality profile and use case (agentic / general / roleplay) |
+| 1. Model | Select engine, choose model source, set model-specific options |
+| 2. Hardware & memory | Tune context, offload, batching, speculative decoding, VRAM, Rapid-MLX controls |
+| 3. Settings | Review network, security, and advanced launch flags |
+| 4. Review | Summary of the configuration before launch |
+| 5. Start server | Launch and monitor start-up |
+
+### Step 0: Profile
+
+The wizard opens with a profile + use-case selection screen (wizard-step-0):
+
+- **Profile cards**: Speed, Balanced, Quality — influence the default hardware policy.
+- **Use-case cards**: agentic, general, roleplay — maps to a `workload_scenario` string sent to the backend VRAM estimator (see below).
+
+The use-case selection drives the backend's memory policy:
+- `agentic` → `interactive_coding_agent` (coding agent workload, 80% priority)
+- `general` → `general_chat` (standard chat, moderate context)
+- `roleplay` → `roleplay_storytelling` (long-context narrative)
+
+### Step 1: Model
+
+Engine selection, model source input, and model-specific options. See [Engine selection](#engine-selection) below.
+
+### Step 2: Hardware & Memory
+
+Backend-specific hardware controls. The controls shown depend on the selected engine.
+
+For llama.cpp: GPU layers, KV cache types, MoE offload, mlock, threads, speculative decoding, MTP, mmproj, flash attention, fit-to-memory, priority.
+
+For Rapid-MLX: a dedicated `rapid-hardware-panel` is shown with:
+
+- **KV cache dtype**: int4 / int8 / bf16 selection. When reasoning mode is ON, int4 is blocked and KV is pinned to int8 (effective "reasoning profile"). The review step (step 4) shows "INT4 → INT8 (reasoning profile)" to make the override visible.
+- **Retained cache**: 8 GiB (recommended), 16 GiB (retain branches), or Off.
+- **Tool-call parser**: Auto (Rapid alias profile) with explicit override options (qwen3, qwen3_xml, qwen3_coder, qwen3_coder_xml, gemma4, hermes, mistral, llama3, deepseek_v31, kimi_k2, glm4, minimax_m2, gpt_oss). Shows "Detected: <value>" hint when the Rapid-MLX profile auto-detects a parser.
+- **Reasoning parser**: Auto (Rapid alias profile) with explicit override options (qwen3, gemma4, hy_v3, hy3, deepseek_r1, vibethinker, glm4, gpt_oss, harmony, minimax, ui_tars). Shows "Detected: <value>" hint when the profile auto-detects a parser.
+- **Hybrid architecture**: Auto (model/profile detection), Force hybrid, Disable hybrid. For hybrid DeltaNet models (Qwen3-Coder-Next, Qwen3.6).
+- **Prefill step size**: 512 (qualified text default), 1024/1536 (vision fallback).
+- **TurboQuant mode**: None (standard), K8V4, V-only.
+- **Reasoning mode**: Toggle ON for reasoning models (pins KV to int8).
+- **Web UI availability**: Auto, On, Off.
+
+### Step 3: Settings
+
+Network, security, and advanced launch flags.
+
+### Step 4: Review
+
+Summary of the full configuration before launch. Shows Rapid-MLX advanced settings (KV dtype, prompt storage, workload scenario, sampling mode, reasoning mode, Web UI) when applicable. When reasoning mode is ON and requested KV dtype is not int8, the summary shows "INT4 → INT8 (reasoning profile)" to make the override visible.
+
+### Step 5: Start Server
+
+Launch and monitor start-up. Preset save/load options are available here.
 
 ## Engine selection
 
@@ -27,7 +74,7 @@ The wizard supports two inference backends:
 - llama.cpp — native for GGUF models
 - Rapid-MLX — optimized for MLX-ecosystem models on Apple Silicon
 
-Engine selection appears on Step 2 (Choose model) as two cards.
+Engine selection appears on Step 1 (Model) as two cards.
 
 ![Engine selection](../screenshots/spawn-wizard-engines-dark.png)
 
@@ -90,7 +137,7 @@ The classification is used both by the UI (to show appropriate hints) and by the
 
 ## Rapid-MLX wizard UX
 
-When Rapid-MLX is selected, the wizard adapts the Step 2 and Step 3 UI:
+When Rapid-MLX is selected, the wizard adapts the Step 1 and Step 2 UI:
 
 - Model source description:
   - Switches to "Choose a validated MLX directory or a Rapid-MLX Hugging Face repository."
@@ -111,7 +158,7 @@ When Rapid-MLX is selected, the wizard adapts the Step 2 and Step 3 UI:
 
 ![Rapid-MLX hardware panel](../screenshots/spawn-wizard-rapid-mlx-hardware.png)
 - Launch guard:
-  - Step 2 validation:
+  - Step 1 validation:
     - Blocks if Rapid-MLX is selected but not Apple Silicon.
     - Blocks if Rapid-MLX is recommended-ready but a GGUF was chosen under it;
       instructs switching engines or choosing a validated MLX source.
@@ -130,7 +177,7 @@ Wizard behavior tied to runtime state:
   - If Apple Silicon and runtime is active, the Rapid-MLX card shows "Runtime ready".
   - If Apple Silicon but runtime is missing, it shows "Runtime setup required".
   - On non-Apple Silicon, the card is marked "Local launch · Apple Silicon only".
-- Step 2 validation:
+- Step 1 validation:
   - If Rapid-MLX is selected but runtime_required:
     - User cannot proceed; hint points to Settings → Rapid-MLX to install a version.
 - Engine badge:
@@ -173,6 +220,19 @@ are no local VRAM formulas.
 - The backend returns a normalized breakdown (weights, KV cache, overhead, free)
   for the selected backend.
 
+### Workload scenario
+
+The page-1 use-case selection (agentic / general / roleplay) maps to a `workload_scenario`
+string sent to the VRAM estimator via the `/api/vram-estimate` endpoint. The estimator
+uses this to determine memory policy:
+
+- `interactive_coding_agent` — coding agent workload, 80% priority, 128K planning context, 32K retained cache. Default when no explicit selection.
+- `general_chat` — standard chat, moderate context, 32K planning context, 8K retained cache.
+- `roleplay_storytelling` — long-context narrative, 64K planning context, 32K retained cache.
+
+The workload scenario also affects TurboQuant eligibility, MTP eligibility, parallel
+slot recommendations, and the recommended KV dtype.
+
 Behavior per backend:
 
 - llama.cpp:
@@ -180,6 +240,7 @@ Behavior per backend:
   - Reflects GPU layers, context size, KV cache type, speculation, mmproj, etc.
 - Rapid-MLX:
   - Uses Rapid-MLX-specific memory modeling based on the selected model.
+  - Incorporates workload_scenario for memory policy (KV dtype, retained cache, TurboQuant).
   - Reflects backend-specific overhead and any Rapid-MLX-native memory considerations.
 
 The VRAM bar and side panel always use the same visual layout regardless of engine,
@@ -200,6 +261,7 @@ The wizard isolates settings per backend:
 - Rapid-MLX-only settings:
   - Exposed via a dedicated Rapid-MLX hardware panel
   - No llama.cpp flags; Rapid-MLX models do not send llama.cpp args.
+  - Includes KV dtype, retained cache, parser overrides, hybrid mode, reasoning mode, TurboQuant, Web UI.
 
 This ensures generated launch commands only include parameters valid for the chosen backend.
 
