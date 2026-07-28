@@ -22,8 +22,9 @@
  *   node tests/ui/capture.mjs --scenario rapid-preset
  *   SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario chat
  *   SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario guided-gen
- *   SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
- *   SCREENSHOT_PORT=8910 node tests/ui/capture.mjs --scenario rapid-mlx-live
+  *   SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
+  *   SCREENSHOT_PORT=8997 node tests/ui/capture.mjs --scenario spawn-wizard-rapid-mlx-gif
+  *   SCREENSHOT_PORT=8910 node tests/ui/capture.mjs --scenario rapid-mlx-live
  *
  * SCENARIO REQUIREMENTS SUMMARY:
  *   | Scenario              | llama-server | rapid-mlx | remote-agent | HF internet | Fetch-mocked endpoints           |
@@ -45,8 +46,9 @@
  *   | dashboard-rapid-mlx   | no           | no        | no           | no          | none (fake via renderRapidMlxCards) |
  *   | spawn-wizard          | no           | no        | no           | no          | none                             |
  *   | spawn-wizard-engines  | no           | no        | no           | no          | none                             |
- *   | spawn-wizard-gif      | no           | no        | no           | no          | none                             |
- *   | spawn-wizard-hf-dl    | no           | no        | no           | no          | simulated progress only          |
+  *   | spawn-wizard-gif      | no           | no        | no           | no          | none                             |
+  *   | spawn-wizard-rapid-mlx-gif | no       | no        | no           | no          | mocked runtime/profile endpoints |
+  *   | spawn-wizard-hf-dl    | no           | no        | no           | no          | simulated progress only          |
  *   | tune-panel            | yes          | no        | no           | no          | none                             |
  *   | benchmark-results     | yes          | no        | no           | no          | none                             |
  *   | llama-updater         | no           | no        | no           | yes         | none (real GitHub API)           |
@@ -182,9 +184,10 @@ Scenarios:
 
   Setup wizard
      spawn-wizard           Steps 1–6: profiles, model, VRAM, parameters, summary, start/close
-     spawn-wizard-engines   llama.cpp/Rapid-MLX engine cards and Rapid-MLX hardware handoff
-     spawn-wizard-gif       Animated GIF walking through all setup wizard steps (1→2→3→4→5→6)
-     spawn-wizard-hf-download  HF download panel: idle options and simulated progress
+      spawn-wizard-engines      llama.cpp/Rapid-MLX engine cards and Rapid-MLX hardware handoff
+      spawn-wizard-gif          Animated GIF walking through all setup wizard steps (llama.cpp path)
+      spawn-wizard-rapid-mlx-gif  Animated GIF: Rapid-MLX engine, hardware controls, profile hints, spawn
+      spawn-wizard-hf-download  HF download panel: idle options and simulated progress
 
    Performance & Updates
     tune-panel          Performance benchmark dropdown (pill + panel) on server tab
@@ -220,6 +223,7 @@ Examples:
   SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario spawn-wizard --no-attach
   SCREENSHOT_PORT=8898 node tests/ui/capture.mjs --scenario spawn-wizard-engines --no-attach
   SCREENSHOT_PORT=8897 node tests/ui/capture.mjs --scenario spawn-wizard-gif --no-attach
+  SCREENSHOT_PORT=8997 node tests/ui/capture.mjs --scenario spawn-wizard-rapid-mlx-gif --no-attach
   SCREENSHOT_PORT=8900 node tests/ui/capture.mjs --scenario tune-panel
   SCREENSHOT_PORT=8901 node tests/ui/capture.mjs --scenario llama-updater
   SCREENSHOT_PORT=8902 node tests/ui/capture.mjs --scenario chat-history-qa
@@ -4203,23 +4207,23 @@ async function scenarioSpawnWizardGif(ctx, _options) {
     }
 
     // Inject the full model state now so validation passes on Next.
-    // Using Llama-3.3-70B Q4_K_M: weights ~39.6 GB fills the 64 GB VRAM bar at ~60%,
-    // which makes a visually impressive and realistic demo.
+    // Using Qwen3.6-35B-A3B Q4_K_M (MoE, ~20.6 GB file). On a 24 GB GPU this loads fully
+    // on GPU with ~3–4 GB headroom — realistic for a high-end laptop (RTX 4080/4090).
     await page.evaluate(async () => {
         const { wizardState } = await import('/js/features/spawn-wizard.js');
         wizardState.model.source   = 'hf';
         wizardState.model.delivery = 'stream_hf';
-        wizardState.model.hfRepo   = 'bartowski/Meta-Llama-3.3-70B-Instruct-GGUF';
-        wizardState.model.hfFile   = 'Meta-Llama-3.3-70B-Instruct-Q4_K_M.gguf';
-        wizardState.model.paramB   = 70;
-        wizardState.model.modelBytes = 39_600_000_000; // Q4_K_M ~39.6 GB
-        // Fallback VRAM if fetchGpuVram fails (matches a 64 GB M4 Max).
-        wizardState.vram.available = 64 * 1024 * 1024 * 1024;
+        wizardState.model.hfRepo   = 'unsloth/Qwen3.6-35B-A3B-GGUF';
+        wizardState.model.hfFile   = 'Qwen3.6-35B-A3B-UD-Q4_K_M.gguf';
+        wizardState.model.paramB   = 35;
+        wizardState.model.modelBytes = 20_600_000_000; // Q4_K_M ~20.6 GB
+        // Fallback VRAM if fetchGpuVram fails (matches an RTX 4080/4090 mobile).
+        wizardState.vram.available = 24 * 1024 * 1024 * 1024;
     });
 
     // Show the repo input filled in for visual context.
     await page.$eval('#spawn-hf-repo', el => {
-        el.value = 'bartowski/Meta-Llama-3.3-70B-Instruct-GGUF';
+        el.value = 'unsloth/Qwen3.6-35B-A3B-GGUF';
         el.dispatchEvent(new Event('input', { bubbles: true }));
     }).catch(() => {});
     await sleep(200);
@@ -4355,6 +4359,320 @@ async function scenarioSpawnWizardGif(ctx, _options) {
     ], { stdio: 'inherit' });
     cleanupFrames();
     console.log('[CAPTURE] spawn-wizard-flow.gif complete.');
+}
+
+// Rapid-MLX variant of the spawn wizard GIF — demonstrates the full wizard flow
+// with Rapid-MLX engine selection, Rapid-specific hardware controls (KV dtype,
+// retained cache, reasoning mode, parsers, hybrid mode), profile hints, and summary.
+// Uses mocked runtime status and an MLX model fixture to keep the path fully deterministic.
+async function scenarioSpawnWizardRapidMlxGif(ctx, _options) {
+    const { page, baseUrl } = ctx;
+    const fps = 10;
+    let frameIdx = 0;
+
+    await gotoApp(page, baseUrl);
+    fs.mkdirSync(FRAME_DIR, { recursive: true });
+    console.log('[CAPTURE] Starting spawn-wizard-rapid-mlx-gif sequential capture...');
+
+    // Capture N milliseconds of the current page state.
+    const capture = async (durationMs) => {
+        const frameMs = 1000 / fps;
+        const n = Math.max(1, Math.round(durationMs / frameMs));
+        for (let i = 0; i < n; i++) {
+            const path = join(FRAME_DIR, `spawn-wizard-rapid-mlx-gif_${String(frameIdx).padStart(3, '0')}.png`);
+            await page.screenshot({ path });
+            frameIdx++;
+            if (i < n - 1) await sleep(frameMs);
+        }
+    };
+
+    // Mock Rapid-MLX runtime endpoints so the engine is shown as available.
+    await page.evaluate(() => {
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = (input, init) => {
+            const url = new URL(typeof input === 'string' ? input : input.url, window.location.origin);
+            if (url.pathname === '/api/rapid-mlx/runtime/status') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    runtime: { supported: true, active: { version: '0.10.10' } },
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname === '/api/rapid-mlx/recommend') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    recommended_backend: 'rapid_mlx',
+                    state: 'ready',
+                    reason: 'Rapid-MLX is available for MLX models on this system.',
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            if (url.pathname.startsWith('/api/rapid-mlx/models/') && url.pathname.endsWith('/profile')) {
+                return Promise.resolve(new Response(JSON.stringify({
+                    profile: {
+                        extras: { has_reasoning: true },
+                        aliases: { tool_call_parser: 'qwen3_coder', reasoning_parser: 'qwen3' },
+                    },
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
+            return originalFetch(input, init);
+        };
+    });
+
+    // ── Welcome screen ────────────────────────────────────────────────────────
+    await capture(1500);
+
+    // ── Open wizard ───────────────────────────────────────────────────────────
+    await page.evaluate(async () => {
+        const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+        openSpawnWizard();
+    });
+    await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 8000 });
+    await page.evaluate(() => {
+        const banner = document.getElementById('wizard-binary-prereq');
+        if (banner) banner.style.display = 'none';
+    });
+    await sleep(400);
+    await capture(800);
+
+    // ── Step 0: Profile ───────────────────────────────────────────────────────
+    await capture(600);
+
+    await page.evaluate(() => {
+        (document.querySelector('.profile-card[data-profile="power"]')
+            || document.querySelector('.profile-card'))?.click();
+    });
+    await sleep(200);
+    await capture(700);
+
+    await page.evaluate(() => {
+        (document.querySelector('.usecase-card[data-usecase="general"]')
+            || document.querySelector('.usecase-card'))?.click();
+    });
+    await sleep(200);
+    await capture(1000);
+
+    // ── Step 0 → Step 1: Engine + Model ───────────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 1 wait timed out; continuing.'));
+    await sleep(300);
+    await capture(600);
+
+    // ── Step 1: Select Rapid-MLX engine ───────────────────────────────────────
+    await page.evaluate(() => {
+        document.querySelector('.wizard-engine-card[data-engine="rapid_mlx"]')?.click();
+    });
+    await page.waitForFunction(
+        () => document.querySelector('.wizard-engine-card[data-engine="rapid_mlx"].selected') !== null,
+        { timeout: 5000 }
+    );
+    await sleep(400);
+    await capture(1200); // Dwell on Rapid-MLX engine card selected.
+
+    // ── Step 1: Select HuggingFace model source ───────────────────────────────
+    await page.evaluate(() => {
+        document.querySelector('.model-source-card[data-source="hf"]')?.click();
+    });
+    await sleep(300);
+    await capture(700);
+
+    // Inject a Rapid-MLX-compatible HF model state (MLX directory on HF).
+    // Using Qwen3.6-35B-A3B UD MLX 4bit: ~20.2 GB file. On a 64 GB Mac this leaves
+    // plenty of headroom for KV cache and runtime overhead.
+    await page.evaluate(async () => {
+        const { wizardState } = await import('/js/features/spawn-wizard.js');
+        wizardState.model.source   = 'hf';
+        wizardState.model.delivery = 'stream_hf';
+        wizardState.model.hfRepo   = 'unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit';
+        wizardState.model.hfFile   = '';
+        wizardState.model.paramB   = 35;
+        wizardState.model.modelBytes = 20_200_000_000; // ~20.2 GB
+        wizardState.model.model_source = {
+            kind: 'hf_mlx_directory',
+            hf_repo: wizardState.model.hfRepo,
+        };
+        wizardState.engine.selected = 'rapid_mlx';
+        wizardState.vram.available = 64 * 1024 * 1024 * 1024;
+    });
+
+    await page.$eval('#spawn-hf-repo', el => {
+        el.value = 'unsloth/Qwen3.6-35B-A3B-UD-MLX-4bit';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+    }).catch(() => {});
+    await sleep(400);
+    await capture(1000);
+
+    // ── Step 1 → Step 2: Rapid-MLX Hardware ──────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 2 wait timed out; continuing.'));
+    await sleep(400);
+
+    // Ensure Rapid-MLX hardware panel and advanced fields are visible.
+    await page.evaluate(async () => {
+        const panel = document.getElementById('rapid-hardware-panel');
+        const fields = document.getElementById('spawn-rapid-advanced-fields');
+        if (panel && panel.hidden) panel.hidden = false;
+        if (fields) fields.style.display = 'block';
+    });
+    await sleep(300);
+    await capture(600);
+
+    // ── Step 2: Rapid-MLX hardware panel — initial state ─────────────────────
+    // Scroll to the KV cache dtype control at the top of the advanced fields.
+    await page.evaluate(() => {
+        const el = document.getElementById('spawn-kv-cache-dtype');
+        if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' });
+        else {
+            const body = document.querySelector('.wizard-body');
+            if (body) body.scrollTop = 300;
+        }
+    });
+    await sleep(300);
+    await capture(2000); // Dwell on KV dtype, retained cache, parsers.
+
+    // ── Step 2: Rapid-MLX hardware panel — retained cache selector ───────────
+    await page.evaluate(() => {
+        const el = document.getElementById('spawn-retained-cache-mib');
+        if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' });
+    });
+    await sleep(300);
+    await capture(1000);
+
+    // ── Step 2: Show parsers and hybrid mode ─────────────────────────────────
+    await page.evaluate(() => {
+        const el = document.getElementById('spawn-rapid-tool-call-parser');
+        if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' });
+    });
+    await sleep(300);
+    await capture(1000);
+
+    await page.evaluate(() => {
+        const el = document.getElementById('spawn-rapid-hybrid-mode');
+        if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' });
+    });
+    await sleep(300);
+    await capture(1000);
+
+    // ── Step 2: Reasoning mode toggle ────────────────────────────────────────
+    await page.evaluate(() => {
+        const el = document.getElementById('spawn-rapid-reasoning-mode');
+        if (el) el.scrollIntoView({ behavior: 'instant', block: 'center' });
+    });
+    await sleep(300);
+    await capture(800);
+
+    // Enable reasoning mode to show the KV dtype lock (int4 blocked).
+    await page.evaluate(() => {
+        const checkbox = document.getElementById('spawn-rapid-reasoning-mode');
+        if (checkbox && !checkbox.checked) checkbox.click();
+    });
+    await sleep(400);
+    await capture(1500); // Show reasoning mode ON with KV dtype pinned.
+
+    // Disable reasoning mode to show full KV dtype options restored.
+    await page.evaluate(() => {
+        const checkbox = document.getElementById('spawn-rapid-reasoning-mode');
+        if (checkbox && checkbox.checked) checkbox.click();
+    });
+    await sleep(400);
+    await capture(1000);
+
+    // ── Step 2: Profile hints (auto-detected parsers) ────────────────────────
+    await page.evaluate(() => {
+        const hintsEl = document.getElementById('rapid-mlx-profile-hints');
+        if (hintsEl) {
+            hintsEl.style.display = 'block';
+            const rect = hintsEl.getBoundingClientRect();
+            const body = document.querySelector('.wizard-body');
+            if (body && rect.top > 300) {
+                hintsEl.scrollIntoView({ behavior: 'instant', block: 'center' });
+            }
+        }
+    });
+    await sleep(300);
+    const hintsVisible = await page.evaluate(() => {
+        const el = document.getElementById('rapid-mlx-profile-hints');
+        return el && el.style.display !== 'none' && el.textContent.length > 10;
+    });
+    if (hintsVisible) {
+        await capture(1500); // Show profile hints if they appeared.
+    }
+
+    // Scroll back to top of hardware panel.
+    await page.evaluate(() => {
+        const panel = document.getElementById('rapid-hardware-panel');
+        if (panel) panel.scrollIntoView({ behavior: 'instant', block: 'start' });
+        else {
+            const body = document.querySelector('.wizard-body');
+            if (body) body.scrollTop = 0;
+        }
+    });
+    await sleep(200);
+
+    // ── Step 2 → Step 3: Summary ──────────────────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-3')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 3 wait timed out; continuing.'));
+    await sleep(800);
+    await capture(1000);
+
+    // Scroll to the config summary list.
+    await page.evaluate(() => {
+        const list = document.getElementById('spawn-summary-list');
+        if (list) list.scrollIntoView({ behavior: 'instant', block: 'start' });
+        else {
+            const main = document.querySelector('#wizard-step-3 .wizard-main');
+            if (main) main.scrollTop = main.scrollHeight;
+        }
+    });
+    await sleep(300);
+    await capture(2500); // Hold on the summary list (Rapid-MLX config, KV cache dtype).
+
+    // ── Step 3 → Step 4: Preset Parameters ───────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-4')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 4 wait timed out; continuing.'));
+    await sleep(400);
+    await capture(1500);
+
+    // Scroll to the Save Preset row.
+    await page.evaluate(() => {
+        const row = document.getElementById('spawn-save-preset-row');
+        if (row) row.scrollIntoView({ behavior: 'instant', block: 'center' });
+        else {
+            const main = document.querySelector('#wizard-step-4 .wizard-main');
+            if (main) main.scrollTop = main.scrollHeight;
+        }
+    });
+    await sleep(250);
+    await capture(2000);
+
+    // ── Step 4 → Step 5: Ready to Launch / Spawn ─────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-5')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 5 wait timed out; continuing.'));
+    await sleep(600);
+    await capture(2500); // Hold on the Spawn step — Rapid-MLX config card + Spawn Server button.
+
+    // ── Convert frames → GIF ──────────────────────────────────────────────────
+    console.log(`[CAPTURE] Converting ${frameIdx} frames to GIF at ${fps} fps (scaled to 900 px)...`);
+    execFileSync('ffmpeg', [
+        '-y',
+        '-framerate', String(fps),
+        '-i', join(FRAME_DIR, `spawn-wizard-rapid-mlx-gif_%03d.png`),
+        '-vf', 'scale=900:-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5',
+        join(ARTIFACTS_DIR, 'spawn-wizard-rapid-mlx-flow.gif'),
+    ], { stdio: 'inherit' });
+    cleanupFrames();
+    console.log('[CAPTURE] spawn-wizard-rapid-mlx-flow.gif complete.');
 }
 
 async function scenarioAppearancePalette(ctx, options) {
@@ -4919,6 +5237,7 @@ const SCENARIOS = {
     'spawn-wizard': scenarioSpawnWizard,
     'spawn-wizard-engines': scenarioSpawnWizardEngines,
     'spawn-wizard-gif': scenarioSpawnWizardGif,
+    'spawn-wizard-rapid-mlx-gif': scenarioSpawnWizardRapidMlxGif,
     'spawn-wizard-hf-download': scenarioSpawnWizardHfDownload,
     // New features (spawn-llama-server-v2)
     'tune-panel': scenarioTunePanel,
