@@ -1302,7 +1302,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
         setOpt('modal-bind-host', p.bind_host || '');
         numOrEmpty('modal-port', p.backend === 'rapid_mlx' ? p.rapid_mlx?.port : p.port);
         setOpt('modal-rapid-enable-thinking', p.rapid_mlx?.enable_thinking == null ? '' : String(!!p.rapid_mlx.enable_thinking));
-        setOpt('modal-rapid-reasoning-effort', p.rapid_mlx?.reasoning_effort || '');
+        // reasoning_effort removed: config field exists but argv builder does not emit --reasoning-effort.
         // Phase 6: 8 GiB retained cache is the qualified interactive default.
         const prefixCacheEnabled = p.rapid_mlx?.prefix_cache_enabled ?? true;
         if (document.getElementById('modal-rapid-prefix-cache-enabled')) {
@@ -1802,7 +1802,7 @@ function _buildFormPreset(existing) {
                     const re = strVal('modal-rapid-reasoning-effort');
                     const out = {};
                     if (et != null) out.enable_thinking = et;
-                    if (re) out.reasoning_effort = re;
+                    // reasoning_effort removed: config field exists but argv builder does not emit --reasoning-effort.
                     // Phase 6 Part B: prefix cache enabled toggle.
                     const pceInput = document.getElementById('modal-rapid-prefix-cache-enabled');
                     const cacheMib = Number(document.getElementById('modal-rapid-cache-memory-mib')?.value || 0);
