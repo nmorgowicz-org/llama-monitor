@@ -14,6 +14,7 @@ use super::{ApiCtx, ApiReply, ApiRoute, unauthorized_api_token, unauthorized_db_
 use crate::inference::backend::{
     BackendRecommendationInput, RecommendationArtifactKind, recommend_backend,
 };
+use crate::inference::rapid_mlx::capabilities::{self, CapabilitySnapshot, ExecutableIdentity};
 use crate::inference::rapid_mlx::changelog;
 use crate::inference::rapid_mlx::command::RapidMlxCommandBuilder;
 use crate::inference::rapid_mlx::compatibility;
@@ -1781,7 +1782,11 @@ fn flag_advisor_route(ctx: ApiCtx) -> ApiRoute {
                     _ => return Ok(empty_findings()),
                 };
 
-                let findings = build_flag_advisor_findings(&profile, &rapid_config);
+                let snapshot = ExecutableIdentity::from_path(&binary)
+                    .ok()
+                    .and_then(|identity| capabilities::cached_snapshot(&identity));
+
+                let findings = build_flag_advisor_findings(&profile, &rapid_config, &snapshot);
                 Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(&serde_json::json!({
                     "ok": true,
                     "findings": findings
@@ -1820,6 +1825,7 @@ fn model_id_for_info(config: &RapidMlxConfig) -> Option<String> {
 fn build_flag_advisor_findings(
     profile: &info_query::ModelProfile,
     config: &RapidMlxConfig,
+    snapshot: &Option<CapabilitySnapshot>,
 ) -> Vec<DoctorFinding> {
     let mut findings = Vec::new();
 
@@ -1874,6 +1880,44 @@ fn build_flag_advisor_findings(
             section: "Preset Flags".to_string(),
             fix: Some(FixAction::AddNoThinking),
         });
+    }
+
+    // Check sampling defaults against capability snapshot
+    if let Some(snapshot) = snapshot {
+        // f64 fields
+        for (flag, configured, supported) in [
+            ("--default-temperature", &config.default_temperature, &snapshot.sampling_defaults.temperature),
+            ("--default-top-p", &config.default_top_p, &snapshot.sampling_defaults.top_p),
+            ("--default-min-p", &config.default_min_p, &snapshot.sampling_defaults.min_p),
+            ("--default-repetition-penalty", &config.default_repetition_penalty, &snapshot.sampling_defaults.repetition_penalty),
+            ("--default-presence-penalty", &config.default_presence_penalty, &snapshot.sampling_defaults.presence_penalty),
+            ("--default-frequency-penalty", &config.default_frequency_penalty, &snapshot.sampling_defaults.frequency_penalty),
+        ] {
+            if configured.is_some() && *supported == capabilities::DefaultFieldState::Unsupported {
+                findings.push(DoctorFinding {
+                    finding_type: DoctorFindingType::Preset,
+                    severity: DoctorSeverity::Warning,
+                    message: format!("Sampling default '{}' is configured but not supported by this Rapid-MLX version", flag),
+                    section: "Sampling Defaults".to_string(),
+                    fix: None,
+                });
+            }
+        }
+        // u64 fields
+        for (flag, configured, supported) in [
+            ("--default-top-k", &config.default_top_k, &snapshot.sampling_defaults.top_k),
+            ("--max-tokens", &config.max_tokens, &snapshot.sampling_defaults.max_tokens),
+        ] {
+            if configured.is_some() && *supported == capabilities::DefaultFieldState::Unsupported {
+                findings.push(DoctorFinding {
+                    finding_type: DoctorFindingType::Preset,
+                    severity: DoctorSeverity::Warning,
+                    message: format!("Sampling default '{}' is configured but not supported by this Rapid-MLX version", flag),
+                    section: "Sampling Defaults".to_string(),
+                    fix: None,
+                });
+            }
+        }
     }
 
     findings
@@ -2293,7 +2337,7 @@ Run with `--verbose` for details on each check.
             security_policy: None,
         };
 
-        let findings = build_flag_advisor_findings(&profile, &config);
+        let findings = build_flag_advisor_findings(&profile, &config, &None);
 
         assert_eq!(findings.len(), 2);
         assert!(
@@ -2385,7 +2429,7 @@ Run with `--verbose` for details on each check.
             security_policy: None,
         };
 
-        let findings = build_flag_advisor_findings(&profile, &config);
+        let findings = build_flag_advisor_findings(&profile, &config, &None);
 
         assert!(findings.is_empty());
     }
@@ -2457,7 +2501,7 @@ Run with `--verbose` for details on each check.
             security_policy: None,
         };
 
-        let findings = build_flag_advisor_findings(&profile, &config);
+        let findings = build_flag_advisor_findings(&profile, &config, &None);
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].fix, Some(FixAction::AddNoThinking));
