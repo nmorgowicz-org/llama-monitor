@@ -1992,7 +1992,7 @@ export async function savePreset(event) {
     }
     const rapidMlx = preset.rapid_mlx;
     const hasModelSource = preset.backend === 'rapid_mlx'
-        ? !!rapidMlx?.model_source_view
+        ? !!(rapidMlx?.model_source || rapidMlx?.model_source_view)
         : !!(preset.model_path || preset.hf_repo);
     if (!hasModelSource) {
         markFieldError('modal-model-path', 'Model path or HuggingFace repo is required.');

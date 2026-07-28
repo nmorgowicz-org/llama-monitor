@@ -115,17 +115,26 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
             };
         });
 
-        expect(payloads.spawn).toEqual({
-            backend: 'rapid_mlx',
-            rapid_mlx: {
-                model_source: { kind: 'mlx_directory', path: '/models/Qwen-MLX' },
-                served_model_name: null,
-                host: '127.0.0.1',
-                port: 9123,
-                api_key: 'rapid-secret',
-                workload_scenario: 'interactive_coding_agent',
-            },
-        });
+        expect(payloads.spawn.backend).toBe('rapid_mlx');
+        expect(payloads.spawn.rapid_mlx.model_source).toEqual({ kind: 'mlx_directory', path: '/models/Qwen-MLX' });
+        expect(payloads.spawn.rapid_mlx.served_model_name).toBeNull();
+        expect(payloads.spawn.rapid_mlx.host).toBe('127.0.0.1');
+        expect(payloads.spawn.rapid_mlx.port).toBe(9123);
+        expect(payloads.spawn.rapid_mlx.api_key).toBe('rapid-secret');
+        expect(payloads.spawn.rapid_mlx.reasoning_mode).toBe('on');
+        expect(payloads.spawn.rapid_mlx.hybrid_mode).toBe('auto');
+        expect(payloads.spawn.rapid_mlx.prefill_step_size).toBe(512);
+        expect(payloads.spawn.rapid_mlx.prefix_cache_enabled).toBe(true);
+        expect(payloads.spawn.rapid_mlx.retained_cache_mib).toBe(8192);
+        expect(payloads.spawn.rapid_mlx.disk_checkpoint_interval).toBe(0);
+        // Phase 7 sampling defaults should be serialized when set
+        expect(payloads.spawn.rapid_mlx.default_temperature).toBe(0.42);
+        expect(payloads.spawn.rapid_mlx.default_top_p).toBe(0.88);
+        expect(payloads.spawn.rapid_mlx.default_top_k).toBe(32);
+        expect(payloads.spawn.rapid_mlx.default_min_p).toBe(0.06);
+        expect(payloads.spawn.rapid_mlx.default_repetition_penalty).toBe(1.07);
+        expect(payloads.spawn.rapid_mlx.default_presence_penalty).toBe(0.15);
+        expect(payloads.spawn.rapid_mlx.max_tokens).toBe(2048);
         expect(payloads.spawn).not.toHaveProperty('gpu_layers');
         expect(payloads.spawn).not.toHaveProperty('context_size');
         expect(payloads.spawn).not.toHaveProperty('ctk');

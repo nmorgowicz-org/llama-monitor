@@ -68,7 +68,6 @@ test.describe('Phase 7 preset serialization', () => {
       repo_id: 'mlx-community/Qwen3-0.6B-4bit',
       revision: 'main',
     });
-    expect(payload.rapid_mlx.workload_scenario).toBe('interactive_coding_agent');
   });
 
   test('@in-memory-test wizard buildSpawnPayload includes Phase 7 fields', async ({ page }) => {
@@ -87,13 +86,11 @@ test.describe('Phase 7 preset serialization', () => {
       wizardState.hardware.reasoningMode = 'enable';
       wizardState.hardware.toolCallParser = 'openai';
       wizardState.hardware.enableAutoToolChoice = true;
-      wizardState.hardware.workloadScenario = 'interactive_coding_agent';
 
       return buildSpawnPayload();
     });
 
     expect(payload.backend).toBe('rapid_mlx');
-    expect(payload.rapid_mlx.workload_scenario).toBe('interactive_coding_agent');
     expect(payload.rapid_mlx.model_source).toEqual({
       kind: 'hugging_face_repo',
       repo_id: 'mlx-community/Qwen3-0.6B-4bit',

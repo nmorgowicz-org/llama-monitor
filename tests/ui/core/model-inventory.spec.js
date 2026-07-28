@@ -153,7 +153,7 @@ test.describe('typed model inventory', () => {
 
   test('@fake-data-bypass creates a typed Rapid-MLX preset from a ready inventory entry', async ({ page }) => {
     let savedPreset = null;
-    await page.route('**/api/presets', async route => {
+    await page.route(/\/api\/presets/, async route => {
       if (route.request().method() === 'POST') {
         savedPreset = route.request().postDataJSON();
         await route.fulfill({

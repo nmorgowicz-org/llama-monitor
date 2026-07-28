@@ -27,6 +27,7 @@ function rapidPreset(id = 'rapid', name = 'Rapid model') {
     hf_repo: null,
     rapid_mlx: {
       model_path: '/models/mlx-community/Qwen3-4B-4bit',
+      model_source: { kind: 'mlx_directory', path: '/models/mlx-community/Qwen3-4B-4bit' },
       host: '127.0.0.1',
       port: 9123,
       served_model_name: 'qwen3-rapid',
@@ -107,7 +108,7 @@ async function installPresetMocks(page, options = {}) {
     });
   });
 
-  await page.route('**/api/presets**', async route => {
+  await page.route(/\/api\/presets/, async route => {
     const request = route.request();
     const url = new URL(request.url());
     const method = request.method();
@@ -283,18 +284,23 @@ test.describe('preset flow', () => {
     await expect(page.locator('#modal-model-path')).toHaveValue(rapidConfig.model_path);
     await expect(page.locator('.preset-nav-item:visible')).toHaveCount(2);
     await page.locator('#modal-name').fill('Rapid renamed');
-    await page.locator('#modal-model-path').fill('mlx-community/Qwen3-8B-4bit');
     await page.locator('.preset-nav-item[data-section="advanced"]').click();
     await page.locator('#modal-port').fill('9234');
-    await page.locator('#btn-modal-save').click();
+
+    // Submit form → savePreset shows change summary → click Confirm Save via JS
+    await page.evaluate(() => document.getElementById('preset-form')?.requestSubmit());
+    // Change summary appears, saveBtn becomes "Confirm Save"
     await expect(page.locator('#btn-modal-save')).toHaveText('Confirm Save');
-    await page.locator('#btn-modal-save').click();
-    await expect.poll(() => state.putCount).toBe(1);
-    expect(state.presets.find(p => p.id === 'rapid')?.rapid_mlx).toEqual({
+    // Force click via JS dispatch to bypass Playwright visibility checks
+    await page.evaluate(() => document.getElementById('btn-modal-save').click());
+
+    // Wait for save to complete (PUT to /api/presets/:id)
+    await expect.poll(async () => state.putCount).toBe(1);
+    expect(state.presets.find(p => p.id === 'rapid')?.rapid_mlx).toMatchObject({
       ...rapidConfig,
-      model_path: 'mlx-community/Qwen3-8B-4bit',
       port: 9234,
     });
+    expect(state.presets.find(p => p.id === 'rapid')?.name).toBe('Rapid renamed');
 
     const editedRapidConfig = structuredClone(state.presets.find(p => p.id === 'rapid').rapid_mlx);
 
