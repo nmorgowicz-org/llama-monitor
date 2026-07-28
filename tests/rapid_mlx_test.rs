@@ -318,7 +318,7 @@ fn fixture_binary(script_body: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let binary = dir.path().join("rapid-mlx");
     let script = format!(
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'rapid-mlx 0.11.0+git.fixture'; exit 0; fi\nif [ \"$1\" = \"serve\" ] && [ \"$2\" = \"--help\" ]; then echo '--host --port --log-level --served-model-name --timeout --enable-prefix-cache --disable-prefix-cache --cache-memory-mb --hybrid-cache-entries --kv-disk-checkpoint-interval'; exit 0; fi\n{script_body}\n"
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'rapid-mlx 0.11.0+git.fixture'; exit 0; fi\nif [ \"$1\" = \"serve\" ] && [ \"$2\" = \"--help\" ]; then echo '--host --port --log-level --served-model-name --timeout --enable-prefix-cache --disable-prefix-cache --cache-memory-mb --hybrid-cache-entries --kv-disk-checkpoint-interval --tool-call-parser --reasoning-parser --enable-auto-tool-choice --no-thinking --reasoning --force-hybrid --no-hybrid --prefill-step-size --pflash'; exit 0; fi\n{script_body}\n"
     );
     std::fs::write(&binary, script).unwrap();
     std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
