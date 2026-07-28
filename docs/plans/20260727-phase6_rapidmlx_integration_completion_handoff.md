@@ -1559,6 +1559,30 @@ Verified Qwen3.5-27B via OS memory delta (Prometheus metal metrics were stale/wr
   - Verified Hybrid uses n_attn_layers, Sliding Window uses n_global_attn_layers
 - Fixed API mapping: kv_dtype_from_estimator_quant maps bf16→f16, int8→q8_0, int4→q4_0.
 
+### DoD Section 20 Items 7-10 — COMPLETE
+
+**Item 7: Retained-cache accounting cannot double count cap and retained tokens.**
+- estimate.rs:657-664: mutual exclusion — when `mlx_prefix_cache_bytes > 0`, token-derived `retained` is 0.
+- Total (line 738-746) adds `mlx_cache` and `retained_kv_compressed`, but the if-block ensures only one is non-zero.
+
+**Item 8: Off/8/16 GiB cache choices produce exact, explainable memory deltas.**
+- vram.rs:318: `retained_cache_mib × 1024 × 1024` exact conversion.
+- Off→8 GiB: 8,589,934,592 bytes. 8→16 GiB: delta exactly 8 GiB.
+- UI selectors wired: index.html (spawn-retained-cache-mib, modal-rapid-cache-memory-mib), spawn-wizard.js, presets.js.
+
+**Item 9: Disk checkpoints remain off/rejected as a normal cache tier recommendation.**
+- mod.rs:213-215: default `disk_checkpoint_interval = 0`.
+- command.rs:502-506: emits `--kv-disk-checkpoint-interval 0` when set.
+- spawn-wizard.js:10572, presets.js:1801: hardcoded to 0 in payload/save.
+- No UI element recommends or enables disk checkpoints.
+
+**Item 10: Tool-call and reasoning parser Auto/override controls exist in Wizard and Editor.**
+- Wizard: COMPLETE — index.html:3820-3842 dropdowns, spawn-wizard.js:10560-10561 payload wiring.
+- Preset Editor: FIXED — HTML existed but JS wiring missing. Added:
+  - Visibility toggle: presets.js `rapidRows` array now includes `pe-row-rapid-parser-overrides`.
+  - Load wiring: `setOpt('modal-rapid-tool-call-parser', ...)` and `setOpt('modal-rapid-reasoning-parser', ...)` at lines 1315-1316.
+  - Save wiring: reads dropdowns and includes in payload at lines 1808-1811.
+
 ### Verification
 
 - `cargo build --release` ✓
