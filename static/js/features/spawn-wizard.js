@@ -441,7 +441,8 @@ export const wizardState = {
       modifiedAssumptions: new Set(),
     },
     workloadProfileConfirmed: false,
-    reasoningMode: null,
+    reasoningMode: null,         // llama.cpp thinking/reasoning select
+    rapidReasoningMode: 'on',    // Rapid-MLX checkbox (defaults to on)
     toolCallParser: '',
     reasoningParser: '',
     hybridMode: 'auto',
@@ -1580,18 +1581,18 @@ function _bindRapidMlxAdvancedControls() {
    bindInput(dom.webUiConfigJsonInput, 'webUiConfigJson');
    bindInput(dom.webUiStaticPathInput, 'webUiStaticPath');
 
-   if (dom.reasoningModeCheck && !dom.reasoningModeCheck.dataset.bound) {
-    dom.reasoningModeCheck.dataset.bound = '1';
-    dom.reasoningModeCheck.addEventListener('change', () => {
-      wizardState.hardware.reasoningMode = !!dom.reasoningModeCheck.checked;
-      _applyReasoningModeLock();
-      scheduleVramUpdate();
-    });
-  }
+    if (dom.reasoningModeCheck && !dom.reasoningModeCheck.dataset.bound) {
+     dom.reasoningModeCheck.dataset.bound = '1';
+     dom.reasoningModeCheck.addEventListener('change', () => {
+       wizardState.hardware.rapidReasoningMode = dom.reasoningModeCheck.checked ? 'on' : 'off';
+       _applyReasoningModeLock();
+       scheduleVramUpdate();
+     });
+   }
 }
 
 function _applyReasoningModeLock() {
-  const locked = !!wizardState.hardware.reasoningMode;
+  const locked = wizardState.hardware.rapidReasoningMode === 'on';
   if (!dom.kvCacheDtypeSelect) return;
 
   if (locked) {
@@ -5345,8 +5346,8 @@ function _renderRapidMlxProfileHints() {
   const reasoningDetected = document.getElementById('spawn-rapid-reasoning-parser-detected');
   if (toolDetected) toolDetected.textContent = profile.tool_format || 'unknown';
   if (reasoningDetected) reasoningDetected.textContent = profile.reasoning_parser || 'unknown';
-  if (profile.reasoning_parser && wizardState.hardware.reasoningMode == null) {
-    wizardState.hardware.reasoningMode = true;
+  if (profile.reasoning_parser && wizardState.hardware.rapidReasoningMode == null) {
+    wizardState.hardware.rapidReasoningMode = 'on';
     if (dom.reasoningModeCheck) dom.reasoningModeCheck.checked = true;
     _applyReasoningModeLock();
     (window.scheduleVramUpdate || (() => {}))();
@@ -9875,8 +9876,10 @@ function _syncThinkingFields() {
   chk('spawn-enable-thinking');
   chk('spawn-preserve-thinking');
 
-  const sel = document.getElementById('spawn-reasoning-mode');
-  if (sel) sel.value = h.reasoningMode || '';
+  // Sync Rapid-MLX checkbox from rapidReasoningMode
+  if (dom.reasoningModeCheck) {
+    dom.reasoningModeCheck.checked = h.rapidReasoningMode === 'on';
+  }
   const budgetEl = document.getElementById('spawn-reasoning-budget');
   if (budgetEl) budgetEl.value = h.reasoningBudget != null ? String(h.reasoningBudget) : '';
    const msgEl = document.getElementById('spawn-reasoning-budget-message');
@@ -10280,10 +10283,10 @@ function _renderPresetParamsStep() {
     // Rapid-MLX Phase 7 advanced settings summary
     if (rapid) {
       const rapidRows = [];
-      // Show requested vs effective when reasoning overrides the selection
-      const requestedKv = h.kvCacheDtype || 'int4';
-      const effectiveKv = h.reasoningMode ? 'int8' : requestedKv;
-      if (h.reasoningMode && requestedKv !== 'int8') {
+       // Show requested vs effective when reasoning overrides the selection
+       const requestedKv = h.kvCacheDtype || 'int4';
+       const effectiveKv = h.rapidReasoningMode === 'on' ? 'int8' : requestedKv;
+       if (h.rapidReasoningMode === 'on' && requestedKv !== 'int8') {
         rapidRows.push({ label: 'KV cache dtype', value: requestedKv.toUpperCase() + ' → INT8 (reasoning profile)' });
       } else {
         rapidRows.push({ label: 'KV cache dtype', value: requestedKv.toUpperCase() });
@@ -10295,9 +10298,9 @@ function _renderPresetParamsStep() {
      if (h.samplingMode && h.samplingMode !== 'auto') {
        rapidRows.push({ label: 'Sampling mode', value: { general: 'General', coding: 'Coding/Agentic', precise: 'Precise/Deterministic', creative: 'Creative/Roleplay', custom: 'Custom' }[h.samplingMode] || h.samplingMode });
      }
-     if (h.reasoningMode) {
-       rapidRows.push({ label: 'Reasoning mode', value: 'On' });
-     }
+      if (h.rapidReasoningMode) {
+        rapidRows.push({ label: 'Reasoning mode', value: h.rapidReasoningMode === 'on' ? 'On' : 'Off' });
+      }
      if (h.webUiAvailability && h.webUiAvailability !== 'auto') {
        rapidRows.push({ label: 'Web UI', value: h.webUiAvailability === 'on' ? 'On' : 'Off' });
      }
@@ -10655,7 +10658,7 @@ export function buildSpawnPayload() {
             response_cache_eligible: h.workloadProfile.assumptions.responseCacheEligible,
           },
         }),
-        ...(h.reasoningMode && { reasoning_mode: 'on' }),
+        reasoning_mode: h.rapidReasoningMode || 'on',
         // Auto deliberately omits a flag; Off maps to Rapid's real
         // --no-mllm escape hatch for incomplete vision-tower checkpoints.
         ...(m.rapidMlxMllm === false && { mllm_vision: 'off' }),

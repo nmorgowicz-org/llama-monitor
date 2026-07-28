@@ -1618,9 +1618,32 @@ Verified Qwen3.5-27B via OS memory delta (Prometheus metal metrics were stale/wr
 - 4 new tests for `resolve_hybrid_mode()` covering nested text_config, top-level interval, and non-hybrid models.
 - 31 new tests for DoD item 6 covering all context/dtype/architecture combinations.
 
+### DoD Section 20 Items 15-18 — COMPLETE
+
+**Item 15: Auto-think/reasoning-mode selection is deterministic and visible.**
+- Root cause bug: Two controls (`spawn-rapid-reasoning-mode` checkbox and `spawn-reasoning-mode` select) both bound to same `h.reasoningMode` field with incompatible types → collision.
+- Fix: Separate state fields. Added `rapidReasoningMode: 'on'` (defaults ON). Checkbox binds to `rapidReasoningMode`, select uses `reasoningMode` for llama.cpp only.
+- Checkbox now sets `'on'/'off'` strings, always emitted in Rapid-MLX payload as `reasoning_mode: h.rapidReasoningMode || 'on'`.
+- Preset editor already correct (separate fields), but had duplicate ID bug (`pe-row-rapid-reasoning` appeared twice — checkbox row never shown). Fixed by renaming to `pe-row-rapid-reasoning-mode` and adding to toggle array.
+- E2E test fixed: `'enable'` → `'on'`.
+
+**Item 16: TurboQuant defaults to none/standard in managed presets and cannot be auto-enabled.**
+- Backend forces disabled: mod.rs:875 `.turboquant_mode(None)` with comment: "Keep the requested setting persisted, but omit TurboQuant until a receipt is available."
+- JS defaults: spawn-wizard.js:426 `turboquantMode: 'none'`, presets.js:1314 loads with `|| 'none'`.
+- Payload: only sends when non-none/non-auto. Never auto-enabled for any model.
+
+**Item 17: No `==` on secrets and no timestamp/PID randomness.**
+- All token comparisons use `ConstantTimeEq`: common.rs:152-164, 170-182.
+- Token generation uses `SysRng`: config.rs:650-654, web/mod.rs:456-461 (CSP nonces).
+- No `thread_rng()`, `StdRng::from`, or timestamp/PID-based seeding anywhere in src/.
+
+**Item 18: No direct file ops on live SQLite; backup/restore uses ChatStorage.**
+- Backup: chat_storage.rs:950-966 checkpoints WAL, uses `rusqlite::backup::Backup`.
+- Restore: chat_storage.rs:1174-1208 closes connection before file copy, removes stale WAL/SHM sidecars.
+- No raw reads/writes of SQLite file while open.
+
 ### Remaining items (Phase 6.5+)
 
 - TurboQuant: UI wired but launch disables pending model qualification (intentional)
 - MTP config: backend/API complete; no wizard UI
 - Client type: backend/API complete; no wizard UI
-- Reasoning selector: checkbox (on/off) instead of Auto/On/Off

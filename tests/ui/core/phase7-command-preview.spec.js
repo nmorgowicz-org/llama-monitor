@@ -68,7 +68,7 @@ test.describe('Rapid-MLX command preview endpoint', () => {
       host: '127.0.0.1',
       port: 9123,
       kv_cache_dtype: 'int8',
-      reasoning_mode: 'enable',
+      reasoning_mode: 'on',
       tool_call_parser: 'openai',
       enable_auto_tool_choice: true,
       workload_scenario: 'tool_research_agent',

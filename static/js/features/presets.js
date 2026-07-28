@@ -1725,7 +1725,7 @@ function _configureBackendPresetEditor(preset) {
     modal?.classList.toggle('preset-editor--rapid-mlx', isRapid);
 
     // Phase 7: Toggle Rapid-MLX advanced rows based on backend (inline styles override CSS).
-    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-webui', 'pe-row-rapid-webui-expert', 'pe-row-rapid-parser-overrides'];
+    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-reasoning-mode', 'pe-row-rapid-webui', 'pe-row-rapid-webui-expert', 'pe-row-rapid-parser-overrides'];
     rapidRows.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = isRapid ? '' : 'none';
@@ -1830,7 +1830,7 @@ function _buildFormPreset(existing) {
                       try { out.workload_assumptions = JSON.parse(wlAssumptionsRaw); } catch {}
                     }
                     if (samplingMode && samplingMode !== 'auto') out.sampling_mode = samplingMode;
-                    if (rmInput) out.reasoning_mode = rmInput.checked ? 'on' : null;
+                    if (rmInput) out.reasoning_mode = rmInput.checked ? 'on' : 'off';
                     // Web UI (D26/A44)
                     if (webUiAvail && webUiAvail !== 'auto') out.web_ui_availability = webUiAvail;
                     if (webUiConfig) out.web_ui_config_json = webUiConfig;
