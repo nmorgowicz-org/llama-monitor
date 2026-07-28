@@ -246,6 +246,61 @@ Behavior per backend:
 The VRAM bar and side panel always use the same visual layout regardless of engine,
 but the underlying numbers differ because the `backend` field is respected server-side.
 
+### MLX VRAM for Hugging Face downloads
+
+When browsing models on the HuggingFace tab (Step 1), the wizard shows VRAM estimates
+for MLX models directly on each model card:
+
+- **VRAM bar**: Shows the estimated VRAM required to run the model, based on the
+  selected quantization (INT4/INT8/BF16). The VRAM estimation uses the backend
+  `/api/vram-estimate` endpoint with the model's GGUF/MLX metadata.
+- **Context pills**: Show the native context ceiling from the model's metadata.
+  Selecting a context pill triggers a VRAM recalculation.
+- **Format badges**: Display the model format (MLX, GGUF, etc.) based on HF tags
+  and repository analysis.
+- **Quantization pills**: Show available quantization levels with purple MLX-themed
+  styling. Clicking a quant pill updates the VRAM estimate.
+- **Download button**: Appears on MLX model cards; initiates the download and
+  validates the model directory after download completes.
+
+## Hugging Face model search
+
+The Spawn Wizard integrates a full Hugging Face model search and discovery interface
+on the HF tab (Step 1). This replaces the simple repo ID input with a rich search
+experience:
+
+- **Discovery scopes**: Users can filter models by scope (e.g., MLX, GGUF, All).
+  Scope toggles are additive (MLX + GGUF + All) with platform-smart defaults.
+- **Sorting**: Models can be sorted by downloads, likes, or creation date.
+- **Categories**: Models are categorized (e.g., text-generation, image-text-to-text).
+- **Quantization-only filter**: A "Quants only" toggle filters to quantized models.
+- **Format badges**: Each model card shows a format badge (MLX, GGUF) based on
+  repository tags and analysis.
+- **Lineage cards** (Phase 8B2): Model cards display lineage information, showing
+  the model's ancestry (base model, quantization source, etc.) and qualification
+  badges (verified quantizer, community-verified, etc.).
+- **CommunitySourceCatalog** (Phase 8A): The wizard integrates the community source
+  catalog which provides HF qualification and identity information for models. This
+  allows the wizard to show author roles, quantizer verification status, and
+  community-qualified model information.
+
+## CommunitySourceCatalog integration
+
+The CommunitySourceCatalog (Phase 8A) provides structured information about model
+sources, authors, and quantizers from Hugging Face:
+
+- **Author roles**: Identifies model authors vs. uploaders vs. quantizers.
+- **Quantizer verification**: Shows whether a quantizer is verified (by the community
+  or the model author).
+- **Qualification badges**: Models receive badges based on community verification
+  and lineage.
+- **Local MLX introspection**: For locally downloaded MLX models, the wizard performs
+  introspection of the model directory to extract metadata (config.json, weight files,
+  etc.) and display VRAM estimates.
+
+This catalog is consumed by the Spawn Wizard's HF tab and the models inventory view
+to provide richer model information than raw HF API data alone.
+
 ## Backend-aware settings
 
 The wizard isolates settings per backend:
