@@ -3861,6 +3861,32 @@ async function scenarioSpawnWizardEngines(ctx) {
     await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-rapid-mlx-advanced-controls.png') });
     console.log('[CAPTURE] Saved spawn-wizard-rapid-mlx-advanced-controls.png');
 
+    // spawn-wizard-rapid-mlx-escape-hatch.png — Advanced escape-hatch flags expanded.
+    try {
+        await page.evaluate(() => {
+            const section = document.getElementById('rapid-mlx-advanced-section');
+            if (section && section.style.display !== 'none' && !section.open) {
+                section.open = true;
+            }
+        });
+        await sleep(400);
+        const sectionVisible = await page.evaluate(() => {
+            const section = document.getElementById('rapid-mlx-advanced-section');
+            const flags = document.getElementById('rapid-mlx-advanced-flags');
+            return section && section.open && flags && flags.children.length > 0;
+        });
+        if (sectionVisible) {
+            await scrollToElement('#rapid-mlx-advanced-section', -30);
+            await sleep(300);
+            await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-rapid-mlx-escape-hatch.png') });
+            console.log('[CAPTURE] Saved spawn-wizard-rapid-mlx-escape-hatch.png');
+        } else {
+            console.log('[CAPTURE] Escape-hatch section not visible, skipping.');
+        }
+    } catch (e) {
+        console.log('[CAPTURE] Escape-hatch capture failed:', e.message);
+    }
+
     // spawn-wizard-mtp-concurrency-teaching.png — Phase 7B4 MTP/concurrency teaching panel expanded.
     const mtpTeachingShown = await page.waitForFunction(
         () => {
@@ -4689,6 +4715,27 @@ async function scenarioRapidMlxRuntime(ctx, options) {
             await sleep(200);
             await captureShot(page, 'rapid-mlx-runtime-manager-reduced.png', { fullPage: true });
 
+            // Changelog expanded state
+            await page.evaluate(() => {
+                const changelog = document.getElementById('rapid-mlx-changelog');
+                const toggle = document.getElementById('rapid-mlx-changelog-toggle');
+                const body = document.getElementById('rapid-mlx-changelog-body');
+                if (changelog && changelog.style.display !== 'none' && body && body.style.display === 'none') {
+                    toggle?.click();
+                }
+            });
+            await sleep(500);
+            const changelogExpanded = await page.evaluate(() => {
+                const body = document.getElementById('rapid-mlx-changelog-body');
+                return body && getComputedStyle(body).display !== 'none';
+            });
+            if (changelogExpanded) {
+                await captureShot(page, 'rapid-mlx-runtime-changelog-expanded.png', { fullPage: true });
+                console.log('[CAPTURE] Saved rapid-mlx-runtime-changelog-expanded.png');
+            } else {
+                console.log('[CAPTURE] Changelog not available or not expanded, skipping.');
+            }
+
             // Reset viewport
             await page.setViewport(DEFAULT_VIEWPORT);
             await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
@@ -4732,6 +4779,15 @@ async function scenarioRapidMlxRuntime(ctx, options) {
             const navBar = await page.$('#top-bar');
             if (navBar) {
                 await captureCloseUp(page, '#top-bar', 'nav-engine-indicator.png', options);
+            }
+
+            // Check for separate Rapid-MLX engine pill.
+            const pillVisible = await page.evaluate(() => {
+                const pill = document.getElementById('rapid-mlx-pill');
+                return pill && getComputedStyle(pill).display !== 'none';
+            });
+            if (pillVisible) {
+                await captureCloseUp(page, '#rapid-mlx-pill', 'nav-rapid-mlx-pill.png', options);
             }
         }
     } catch (e) {
