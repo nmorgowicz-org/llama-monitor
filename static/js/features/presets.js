@@ -1311,6 +1311,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
         setOpt('modal-rapid-cache-memory-mib', String(p.rapid_mlx?.retained_cache_mib ?? (prefixCacheEnabled ? 8192 : 0)));
         // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
         setOpt('modal-rapid-kv-cache-dtype', p.rapid_mlx?.kv_cache_dtype || '');
+        setOpt('modal-rapid-prefill-step-size', String(p.rapid_mlx?.prefill_step_size || 512));
         setOpt('modal-rapid-turboquant-mode', p.rapid_mlx?.turboquant_mode || 'none');
         setOpt('modal-rapid-tool-call-parser', p.rapid_mlx?.tool_call_parser || '');
         setOpt('modal-rapid-reasoning-parser', p.rapid_mlx?.reasoning_parser || '');
@@ -1831,6 +1832,8 @@ function _buildFormPreset(existing) {
                     }
                     if (samplingMode && samplingMode !== 'auto') out.sampling_mode = samplingMode;
                     if (rmInput) out.reasoning_mode = rmInput.checked ? 'on' : 'off';
+                    const prefillStepSize = Number(strVal('modal-rapid-prefill-step-size') || 512);
+                    if (prefillStepSize && prefillStepSize !== 512) out.prefill_step_size = prefillStepSize;
                     // Web UI (D26/A44)
                     if (webUiAvail && webUiAvail !== 'auto') out.web_ui_availability = webUiAvail;
                     if (webUiConfig) out.web_ui_config_json = webUiConfig;
