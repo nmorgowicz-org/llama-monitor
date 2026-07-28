@@ -1684,6 +1684,27 @@ Part B (runtime safety): command.rs + compatibility.rs: zero unwrap/expect in pr
 - run_update_validation_probe() now includes argv construction validation: checks core launch flags, reasoning+cache flags, sampling defaults all exist in capability snapshot.
 - Either failure → upgrade rejected, old version stays active.
 
+### DoD Section 20 Items 19-22 (handoff) — COMPLETE
+
+**Item 19: Unsupported sampling defaults are reported, not silently dropped.**
+- argv builder: each `--default-*` already capability-gated, hard error at launch.
+- FIXED: Extended flag-advisor to check all 8 sampling default fields against capability snapshot, emits Warning when configured but unsupported.
+
+**Item 20: Text prefill is explicitly 512 in config, argv, estimator, Wizard, and Editor.**
+- Config/argv/Wizard: already correct (default 512, always emitted).
+- Estimator: correctly unused (llama.cpp concept only).
+- Editor FIXED: Added load/save wiring (presets.js), HTML `selected` attribute on 512 option.
+
+**Item 21: PFlash policy is explicit and benchmark evidence is not misrepresented.**
+- Config defaults `"off"`, argv emits `--pflash off`, docs record recall issues.
+- FIXED: PFlash tooltip updated with quality degradation warning (recall collapse above ~63k).
+
+**Item 22: Wizard, Editor, launch argv, estimator, and cards share one config contract.**
+- Cross-surface audit found 3 gaps:
+  - Gap 1 (`reasoning_effort`): FIXED — removed dead save/load wiring (argv never emits).
+  - Gap 2 (`prefix_cache_budget_bytes` orphaned in RapidMlxConfig): FIXED — removed from RapidMlxConfig, renamed RuntimeMetadata/VramBreakdown/EstimatorOptions fields to `mlx_prefix_cache_bytes` for clarity.
+  - Gap 3 (`model_path` legacy): Left as-is — legacy fallback, harmless.
+
 ### DoD Section 20 Item 23 — COMPLETE
 
 **Item 23: Rapid-specific JS, Rust, API, and E2E tests pass.**
@@ -1692,8 +1713,14 @@ Part B (runtime safety): command.rs + compatibility.rs: zero unwrap/expect in pr
 - JS validate: `npm run validate-js` → all files validated successfully
 - Clippy: `cargo clippy --lib -- -D warnings` → clean
 
-### Remaining items (Phase 6.5+)
+### Remaining DoD items
 
-- TurboQuant: UI wired but launch disables pending model qualification (intentional)
-- MTP config: backend/API complete; no wizard UI
+- **Item 24:** Real screenshots are captured and visually reviewed. (NOT STARTED)
+- **Item 25:** Reference docs describe implemented behavior and evidence boundaries. (NOT STARTED)
+- **Item 26:** Mandatory pre-PR checks pass in exact project order. (NOT STARTED)
+
+### Phase 6.5+ items (out of scope for Phase 6)
+
+- TurboQuant: UI wired but launch disables pending model qualification (intentional, documented)
+- MTP config: backend/API complete; no wizard UI (planned for later phase)
 - Client type: backend/API complete; no wizard UI
