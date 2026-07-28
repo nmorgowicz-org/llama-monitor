@@ -1398,7 +1398,9 @@ pub async fn build_unified_profile(model_id: &str) -> Result<UnifiedProfile> {
 }
 
 /// Fetch MLX geometry profile from HF (if HF-style ID) or local config.
-async fn fetch_geometry_profile(model_id: &str) -> Option<crate::llama::model_memory_profile::ModelMemoryProfile> {
+async fn fetch_geometry_profile(
+    model_id: &str,
+) -> Option<crate::llama::model_memory_profile::ModelMemoryProfile> {
     // Determine source type
     if is_local_path(model_id) {
         fetch_local_geometry(model_id).await
@@ -1411,16 +1413,16 @@ async fn fetch_geometry_profile(model_id: &str) -> Option<crate::llama::model_me
 }
 
 /// Fetch geometry from a local MLX config.json.
-async fn fetch_local_geometry(model_id: &str) -> Option<crate::llama::model_memory_profile::ModelMemoryProfile> {
+async fn fetch_local_geometry(
+    model_id: &str,
+) -> Option<crate::llama::model_memory_profile::ModelMemoryProfile> {
     let path = std::path::PathBuf::from(model_id);
-    tokio::task::spawn_blocking(move || {
-        match info_query::read_mlx_local_config(&path) {
-            Ok(Some(config)) => {
-                let raw = serde_json::to_vec(&config).ok()?;
-                mlx_meta::parse_mlx_config_bytes_to_profile(&raw).ok()
-            }
-            _ => None,
+    tokio::task::spawn_blocking(move || match info_query::read_mlx_local_config(&path) {
+        Ok(Some(config)) => {
+            let raw = serde_json::to_vec(&config).ok()?;
+            mlx_meta::parse_mlx_config_bytes_to_profile(&raw).ok()
         }
+        _ => None,
     })
     .await
     .ok()
@@ -1428,7 +1430,9 @@ async fn fetch_local_geometry(model_id: &str) -> Option<crate::llama::model_memo
 }
 
 /// Fetch geometry from HF with timeout.
-async fn fetch_hf_geometry(model_id: &str) -> Option<crate::llama::model_memory_profile::ModelMemoryProfile> {
+async fn fetch_hf_geometry(
+    model_id: &str,
+) -> Option<crate::llama::model_memory_profile::ModelMemoryProfile> {
     // Parse repo_id and revision
     let (repo_id, revision) = match parse_hf_repo_revision(model_id) {
         Some(r) => r,
@@ -1444,7 +1448,9 @@ async fn fetch_hf_geometry(model_id: &str) -> Option<crate::llama::model_memory_
 }
 
 /// Fetch Rapid-MLX info profile for behavioral flags.
-async fn fetch_rapid_mlx_profile(model_id: &str) -> Option<crate::inference::rapid_mlx::info_query::ModelProfile> {
+async fn fetch_rapid_mlx_profile(
+    model_id: &str,
+) -> Option<crate::inference::rapid_mlx::info_query::ModelProfile> {
     // Try to resolve a rapid-mlx binary
     let binary = match resolve_rapid_mlx_binary().await {
         Some(b) => b,
@@ -1501,7 +1507,10 @@ fn geometry_source_label(
 
 fn parse_hf_repo_revision(model_id: &str) -> Option<(String, String)> {
     let (repo_id, revision) = if let Some(at_pos) = model_id.find('@') {
-        (model_id[..at_pos].to_string(), model_id[at_pos + 1..].to_string())
+        (
+            model_id[..at_pos].to_string(),
+            model_id[at_pos + 1..].to_string(),
+        )
     } else {
         (model_id.to_string(), "main".to_string())
     };
@@ -1555,12 +1564,14 @@ fn merge_recommendations(
 
     // Check for conflicts between rapid-mlx and geometry
     if let Some(r) = rapid {
-        if r.architecture.as_ref()
-            .is_some_and(|a| a.to_lowercase().contains("hybrid") || a.to_lowercase().contains("delta"))
-            && hybrid_mode == "auto"
+        if r.architecture.as_ref().is_some_and(|a| {
+            a.to_lowercase().contains("hybrid") || a.to_lowercase().contains("delta")
+        }) && hybrid_mode == "auto"
         {
             warnings.push("Rapid-MLX info reports hybrid/delta architecture, but MLX config does not confirm full_attention_interval; geometry is authoritative.".to_string());
-        } else if r.architecture.as_ref()
+        } else if r
+            .architecture
+            .as_ref()
             .is_some_and(|a| a.to_lowercase().contains("pure attention"))
             && hybrid_mode == "force"
         {
@@ -1611,7 +1622,8 @@ fn derive_reasoning_parser_from_geometry(
     }
 
     // Architecture-based pattern matching
-    let arch_str = p.architectures
+    let arch_str = p
+        .architectures
         .as_ref()
         .and_then(|a| a.first().map(|s| s.as_str()))
         .unwrap_or("");
@@ -1639,9 +1651,10 @@ fn build_sources(
 
     let reasoning_parser = if rapid.as_ref().is_some_and(|r| r.reasoning_parser.is_some()) {
         "rapid_mlx".to_string()
-    } else if geometry.as_ref().is_some_and(|g| {
-        g.architectures.as_ref().is_some_and(|a| !a.is_empty())
-    }) {
+    } else if geometry
+        .as_ref()
+        .is_some_and(|g| g.architectures.as_ref().is_some_and(|a| !a.is_empty()))
+    {
         "hf_architecture".to_string()
     } else {
         "not_available".to_string()
@@ -1927,7 +1940,11 @@ mod unified_profile_tests {
         let hybrid = "auto".to_string();
 
         let _rec = merge_recommendations(&geometry, &rapid, &mut warnings, hybrid);
-        assert!(warnings.iter().any(|w| w.contains("hybrid") || w.contains("delta")));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("hybrid") || w.contains("delta"))
+        );
     }
 
     #[test]
@@ -1974,7 +1991,11 @@ mod unified_profile_tests {
         let rapid: Option<info_query::ModelProfile> = None;
         let mut warnings = Vec::new();
         add_missing_source_warnings(&mut warnings, &geometry, &rapid);
-        assert!(warnings.iter().any(|w| w.contains("Rapid-MLX info query unavailable")));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("Rapid-MLX info query unavailable"))
+        );
     }
 
     #[test]
@@ -1983,19 +2004,29 @@ mod unified_profile_tests {
         let rapid = Some(rapid_profile_with_flags());
         let mut warnings = Vec::new();
         add_missing_source_warnings(&mut warnings, &geometry, &rapid);
-        assert!(warnings.iter().any(|w| w.contains("MLX config geometry unavailable")));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("MLX config geometry unavailable"))
+        );
     }
 
     #[test]
     fn hf_repo_id_parsing_with_revision() {
         let result = parse_hf_repo_revision("mlx-community/Qwen3-0.6B-4bit@main");
-        assert_eq!(result, Some(("mlx-community/Qwen3-0.6B-4bit".into(), "main".into())));
+        assert_eq!(
+            result,
+            Some(("mlx-community/Qwen3-0.6B-4bit".into(), "main".into()))
+        );
     }
 
     #[test]
     fn hf_repo_id_parsing_defaults_revision_to_main() {
         let result = parse_hf_repo_revision("mlx-community/Qwen3-0.6B-4bit");
-        assert_eq!(result, Some(("mlx-community/Qwen3-0.6B-4bit".into(), "main".into())));
+        assert_eq!(
+            result,
+            Some(("mlx-community/Qwen3-0.6B-4bit".into(), "main".into()))
+        );
     }
 
     #[test]
@@ -2023,13 +2054,19 @@ mod unified_profile_tests {
     #[test]
     fn derive_tool_format_qwen() {
         let geometry = Some(geometry_hybrid_qwen36());
-        assert_eq!(derive_tool_format_from_geometry(&geometry), Some("qwen-coder".into()));
+        assert_eq!(
+            derive_tool_format_from_geometry(&geometry),
+            Some("qwen-coder".into())
+        );
     }
 
     #[test]
     fn derive_tool_format_llama() {
         let geometry = Some(geometry_pure_attention_llama());
-        assert_eq!(derive_tool_format_from_geometry(&geometry), Some("llama3-tool".into()));
+        assert_eq!(
+            derive_tool_format_from_geometry(&geometry),
+            Some("llama3-tool".into())
+        );
     }
 
     #[test]

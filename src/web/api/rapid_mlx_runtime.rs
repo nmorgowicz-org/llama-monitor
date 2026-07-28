@@ -1600,10 +1600,7 @@ fn unified_profile_route(ctx: ApiCtx) -> ApiRoute {
                 }
 
                 if model_id.is_empty() {
-                    return Ok(json_error(
-                        StatusCode::BAD_REQUEST,
-                        "Model ID is required",
-                    ));
+                    return Ok(json_error(StatusCode::BAD_REQUEST, "Model ID is required"));
                 }
                 if model_id.contains("..") {
                     return Ok(json_error(
@@ -1612,20 +1609,24 @@ fn unified_profile_route(ctx: ApiCtx) -> ApiRoute {
                     ));
                 }
 
-                let unified = match crate::inference::rapid_mlx::build_unified_profile(&model_id).await {
-                    Ok(profile) => profile,
-                    Err(error) => {
-                        let msg = error.to_string();
-                        return Ok(json_error(
-                            if msg.contains("timed out") || msg.contains("timeout") {
-                                StatusCode::REQUEST_TIMEOUT
-                            } else {
-                                StatusCode::INTERNAL_SERVER_ERROR
-                            },
-                            format!("Unified profile build failed: {}", msg.chars().take(200).collect::<String>()),
-                        ));
-                    }
-                };
+                let unified =
+                    match crate::inference::rapid_mlx::build_unified_profile(&model_id).await {
+                        Ok(profile) => profile,
+                        Err(error) => {
+                            let msg = error.to_string();
+                            return Ok(json_error(
+                                if msg.contains("timed out") || msg.contains("timeout") {
+                                    StatusCode::REQUEST_TIMEOUT
+                                } else {
+                                    StatusCode::INTERNAL_SERVER_ERROR
+                                },
+                                format!(
+                                    "Unified profile build failed: {}",
+                                    msg.chars().take(200).collect::<String>()
+                                ),
+                            ));
+                        }
+                    };
 
                 Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(&serde_json::json!({
                     "ok": true,
@@ -1886,12 +1887,36 @@ fn build_flag_advisor_findings(
     if let Some(snapshot) = snapshot {
         // f64 fields
         for (flag, configured, supported) in [
-            ("--default-temperature", &config.default_temperature, &snapshot.sampling_defaults.temperature),
-            ("--default-top-p", &config.default_top_p, &snapshot.sampling_defaults.top_p),
-            ("--default-min-p", &config.default_min_p, &snapshot.sampling_defaults.min_p),
-            ("--default-repetition-penalty", &config.default_repetition_penalty, &snapshot.sampling_defaults.repetition_penalty),
-            ("--default-presence-penalty", &config.default_presence_penalty, &snapshot.sampling_defaults.presence_penalty),
-            ("--default-frequency-penalty", &config.default_frequency_penalty, &snapshot.sampling_defaults.frequency_penalty),
+            (
+                "--default-temperature",
+                &config.default_temperature,
+                &snapshot.sampling_defaults.temperature,
+            ),
+            (
+                "--default-top-p",
+                &config.default_top_p,
+                &snapshot.sampling_defaults.top_p,
+            ),
+            (
+                "--default-min-p",
+                &config.default_min_p,
+                &snapshot.sampling_defaults.min_p,
+            ),
+            (
+                "--default-repetition-penalty",
+                &config.default_repetition_penalty,
+                &snapshot.sampling_defaults.repetition_penalty,
+            ),
+            (
+                "--default-presence-penalty",
+                &config.default_presence_penalty,
+                &snapshot.sampling_defaults.presence_penalty,
+            ),
+            (
+                "--default-frequency-penalty",
+                &config.default_frequency_penalty,
+                &snapshot.sampling_defaults.frequency_penalty,
+            ),
         ] {
             if configured.is_some() && *supported == capabilities::DefaultFieldState::Unsupported {
                 findings.push(DoctorFinding {
@@ -1905,8 +1930,16 @@ fn build_flag_advisor_findings(
         }
         // u64 fields
         for (flag, configured, supported) in [
-            ("--default-top-k", &config.default_top_k, &snapshot.sampling_defaults.top_k),
-            ("--max-tokens", &config.max_tokens, &snapshot.sampling_defaults.max_tokens),
+            (
+                "--default-top-k",
+                &config.default_top_k,
+                &snapshot.sampling_defaults.top_k,
+            ),
+            (
+                "--max-tokens",
+                &config.max_tokens,
+                &snapshot.sampling_defaults.max_tokens,
+            ),
         ] {
             if configured.is_some() && *supported == capabilities::DefaultFieldState::Unsupported {
                 findings.push(DoctorFinding {

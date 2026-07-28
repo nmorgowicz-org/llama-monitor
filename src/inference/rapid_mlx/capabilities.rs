@@ -1581,12 +1581,25 @@ fn collect_feature_failures(snapshot: &CapabilitySnapshot) -> Vec<FeatureProbeFa
 fn validate_argv_construction(snapshot: &CapabilitySnapshot) -> Result<()> {
     // Core launch flags (always required for Managed runtime)
     let core_flags = &[
-        "--host", "--port", "--log-level", "--served-model-name", "--timeout",
-        "--enable-prefix-cache", "--disable-prefix-cache", "--cache-memory-mb",
-        "--hybrid-cache-entries", "--kv-disk-checkpoint-interval",
-        "--tool-call-parser", "--reasoning-parser", "--enable-auto-tool-choice",
-        "--no-thinking", "--reasoning", "--force-hybrid", "--no-hybrid",
-        "--prefill-step-size", "--pflash",
+        "--host",
+        "--port",
+        "--log-level",
+        "--served-model-name",
+        "--timeout",
+        "--enable-prefix-cache",
+        "--disable-prefix-cache",
+        "--cache-memory-mb",
+        "--hybrid-cache-entries",
+        "--kv-disk-checkpoint-interval",
+        "--tool-call-parser",
+        "--reasoning-parser",
+        "--enable-auto-tool-choice",
+        "--no-thinking",
+        "--reasoning",
+        "--force-hybrid",
+        "--no-hybrid",
+        "--prefill-step-size",
+        "--pflash",
     ];
 
     for &flag in core_flags {
@@ -1604,7 +1617,13 @@ fn validate_argv_construction(snapshot: &CapabilitySnapshot) -> Result<()> {
     }
 
     // Sampling defaults (required for model profiles that set defaults)
-    let sampling_flags = &["--default-temperature", "--default-top-p", "--default-top-k", "--default-min-p", "--max-tokens"];
+    let sampling_flags = &[
+        "--default-temperature",
+        "--default-top-p",
+        "--default-top-k",
+        "--default-min-p",
+        "--max-tokens",
+    ];
     for &flag in sampling_flags {
         if !snapshot.serve_flags.iter().any(|f| f == flag) {
             anyhow::bail!("required flag missing: {flag}");
