@@ -963,7 +963,7 @@ function _renderPresetVram(el, data) {
     const linearState = data.linear_attn_state_bytes || 0;
     const tqTransient = data.turboquant_transient_peak_bytes || 0;
     // Phase 6 Part B: prefix cache budget display (informational, not consumed until active).
-    const prefixCacheBudget = data.prefix_cache_budget_bytes || 0;
+    const prefixCacheBudget = data.mlx_prefix_cache_bytes || 0;
 
     // Bar 100% = budget so free headroom is visible; fall back to used if no budget
     const barTotal = avail > 0 ? avail : used;

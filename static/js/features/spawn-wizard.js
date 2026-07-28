@@ -6411,7 +6411,7 @@ function updateVramDisplay() {
     const recommendation = est.recommendation || 'risk';
     // Phase 6 Part B: prefix cache budget display (informational, not consumed until active).
     // Show when budget exists (backend returns > 0 when configured_ceiling_bytes > 0).
-    const prefixCacheBudget = est.prefix_cache_budget_bytes || 0;
+    const prefixCacheBudget = est.mlx_prefix_cache_bytes || 0;
     // Rapid-MLX overhead is a documented formula-based approximation (not yet calibrated
     // against real Apple Silicon measurements); surface that in the tooltip rather than
     // presenting it as precisely measured. Backend-driven — no local VRAM math here.

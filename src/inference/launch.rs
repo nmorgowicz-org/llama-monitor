@@ -419,7 +419,8 @@ pub async fn construct_adapter(
                     .as_ref()
                     .and_then(|entry| entry.last_probe_result.clone()),
                 prefix_cache_enabled: config.prefix_cache_enabled,
-                prefix_cache_budget_bytes: config.prefix_cache_budget_bytes,
+                // mlx_prefix_cache_bytes populated from estimator breakdown, not from config.
+                mlx_prefix_cache_bytes: None,
             };
             let models_dir = state
                 .models_dir

@@ -890,7 +890,7 @@ mod tests {
 
     #[test]
     fn test_prefix_cache_roundtrip_preserves_values() {
-        // Test that prefix_cache_enabled and prefix_cache_budget_bytes survive save/load.
+        // Test that prefix_cache_enabled and retained_cache_mib survive save/load.
         let mut preset = ModelPreset {
             id: "test".into(),
             name: "Test".into(),
@@ -898,7 +898,7 @@ mod tests {
             rapid_mlx: Some(crate::inference::rapid_mlx::RapidMlxConfig {
                 model_path: "/path/to/model".into(),
                 prefix_cache_enabled: true,
-                prefix_cache_budget_bytes: Some(1073741824), // 1 GiB
+                retained_cache_mib: Some(1024), // 1 GiB in MiB
                 ..Default::default()
             }),
             ..Default::default()
@@ -911,34 +911,14 @@ mod tests {
         assert!(loaded.rapid_mlx.is_some());
         let rapid = loaded.rapid_mlx.unwrap();
         assert!(rapid.prefix_cache_enabled);
-        assert_eq!(rapid.prefix_cache_budget_bytes, Some(1073741824));
-    }
-
-    #[test]
-    fn test_prefix_cache_explicit_overrides_d30() {
-        // User explicit prefix_cache_budget_bytes should be preserved and used over D30 auto-compute.
-        let json = serde_json::json!({
-            "id": "test",
-            "name": "Test",
-            "schema_version": 2,
-            "backend": "rapid_mlx",
-            "rapid_mlx": {
-                "model_path": "/path/to/model",
-                "prefix_cache_enabled": true,
-                "prefix_cache_budget_bytes": 1572864000
-            }
-        });
-        let preset: ModelPreset = serde_json::from_value(json).unwrap();
-        let rapid = preset.rapid_mlx.unwrap();
-        assert!(rapid.prefix_cache_enabled);
-        assert_eq!(rapid.prefix_cache_budget_bytes, Some(1572864000u64));
+        assert_eq!(rapid.retained_cache_mib, Some(1024));
     }
 
     #[test]
     fn test_runtime_metadata_prefix_cache_defaults() {
         let meta = crate::inference::rapid_mlx::runtime::RuntimeMetadata::default();
         assert!(!meta.prefix_cache_enabled);
-        assert!(meta.prefix_cache_budget_bytes.is_none());
+        assert!(meta.mlx_prefix_cache_bytes.is_none());
     }
 
     // Phase 7A: command-preview and preset migration tests.

@@ -356,11 +356,6 @@ pub struct EstimatorOptions {
     pub client_type: super::workload_scenarios::ClientType,
     /// D25: Concurrency policy for MTP admission.
     pub concurrency_policy: super::workload_scenarios::ConcurrencyPolicy,
-    /// Phase 6 Part A: D30 prefix cache budget from MemoryAvailabilitySnapshot.
-    /// Budget = configured_ceiling_bytes × prefix_cache_fraction.
-    /// Used to derive prefix_cache_budget_bytes in VramBreakdown.
-    /// Zero means not computed (no snapshot or not Rapid-MLX).
-    pub prefix_cache_budget_bytes: u64,
 }
 
 impl Default for EstimatorOptions {
@@ -378,7 +373,6 @@ impl Default for EstimatorOptions {
             mtp_config: None,
             client_type: Default::default(),
             concurrency_policy: Default::default(),
-            prefix_cache_budget_bytes: 0,
         }
     }
 }
@@ -563,11 +557,6 @@ pub struct VramBreakdown {
     /// Used to distinguish external_client_fit vs app_fit variants.
     #[serde(default)]
     pub client_type: super::workload_scenarios::ClientType,
-    /// Phase 6 Part A: D30 prefix cache budget in bytes, derived from configured_ceiling_bytes.
-    /// Separate from active/retained KV — prefix cache is additive but budget-constrained.
-    /// Zero for llama.cpp or when not computed.
-    #[serde(default)]
-    pub prefix_cache_budget_bytes: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -855,7 +844,6 @@ pub fn full_estimate(
         external_companion,
         mtp_admission,
         client_type: opts.client_type,
-        prefix_cache_budget_bytes: opts.prefix_cache_budget_bytes,
     }
 }
 

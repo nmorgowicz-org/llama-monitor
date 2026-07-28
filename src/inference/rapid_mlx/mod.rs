@@ -57,11 +57,8 @@ pub struct RapidMlxConfig {
     /// Enables Rapid's retained in-memory prefix cache.
     #[serde(default)]
     pub prefix_cache_enabled: bool,
-    /// Phase 6 Part B: explicit prefix cache budget override in bytes.
-    /// When set, overrides the D30 auto-computed budget (configured_ceiling_bytes × 0.10).
-    /// User explicit values always win (hard gate).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prefix_cache_budget_bytes: Option<u64>,
+    // prefix_cache_budget_bytes removed (Gap 2): was always None in config; the value is
+    // computed from retained_cache_mib (mlx_cache_bytes) in the estimator/runtime, not configured.
     /// Retained prefix-cache capacity in MiB. This is the source-native
     /// `--cache-memory-mb` contract qualified by Phase 6.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -341,7 +338,6 @@ impl Default for RapidMlxConfig {
             log_level: default_log_level(),
             timeout: None,
             prefix_cache_enabled: true,
-            prefix_cache_budget_bytes: None,
             retained_cache_mib: Some(8192),
             disk_checkpoint_interval: 0,
             api_key: None,
@@ -1095,7 +1091,7 @@ mod tests {
                 resolved_receipt: None,
                 last_probe_result: None,
                 prefix_cache_enabled: false,
-                prefix_cache_budget_bytes: None,
+                mlx_prefix_cache_bytes: None,
             },
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         );
@@ -1688,7 +1684,7 @@ mod chat_tests {
                 resolved_receipt: None,
                 last_probe_result: None,
                 prefix_cache_enabled: false,
-                prefix_cache_budget_bytes: None,
+                mlx_prefix_cache_bytes: None,
             },
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         )

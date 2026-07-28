@@ -62,9 +62,10 @@ pub struct RuntimeMetadata {
     /// Phase 6 Part B: prefix cache configuration active for this runtime.
     #[serde(default)]
     pub prefix_cache_enabled: bool,
-    /// Phase 6 Part B: prefix cache budget in bytes (explicit or D30-computed).
+    /// Configured MLX prefix cache size in bytes (retained_cache_mib × 1024 × 1024).
+    /// Populated from estimator breakdown, not user-configured directly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prefix_cache_budget_bytes: Option<u64>,
+    pub mlx_prefix_cache_bytes: Option<u64>,
 }
 
 /// Resolved receipt of dependency installation for a managed environment.
@@ -96,7 +97,7 @@ impl Default for RuntimeMetadata {
             resolved_receipt: None,
             last_probe_result: None,
             prefix_cache_enabled: false,
-            prefix_cache_budget_bytes: None,
+            mlx_prefix_cache_bytes: None,
         }
     }
 }

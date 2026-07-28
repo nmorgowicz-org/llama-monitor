@@ -342,8 +342,6 @@ fn api_vram_estimate_breakdown(
                         serde_json::from_value::<crate::llama::vram_estimator::MtpConfig>(serde_json::Value::Object(obj.clone())).ok()
                     });
 
-                let prefix_cache_budget_bytes = mlx_cache_bytes;
-
                 // Use the execution policy's effective TurboQuant mode for the estimator.
                 // Per D31: effective_turboquant already has eligibility applied.
                 let opts = crate::llama::vram_estimator::EstimatorOptions {
@@ -374,7 +372,6 @@ fn api_vram_estimate_breakdown(
                             serde_json::from_str::<crate::llama::vram_estimator::ConcurrencyPolicy>(&format!("\"{s}\"")).ok()
                         })
                         .unwrap_or_default(),
-                    prefix_cache_budget_bytes,
                 };
 
                 // `ctk` / `ctv` are llama.cpp vocabulary. Rapid uses its
@@ -452,7 +449,7 @@ fn api_vram_estimate_breakdown(
                          "execution_policy": execution_policy_json,
                          "workload_scenario": workload_scenario_json,
                          "effective_kv_dtype": effective_kv_dtype_json,
-                        "prefix_cache_budget_bytes": breakdown.prefix_cache_budget_bytes,
+                        "mlx_prefix_cache_bytes": breakdown.mlx_prefix_cache_bytes,
                         "native_context_limit": native_context_limit,
                         "context_extension_required": native_context_limit.is_some_and(|limit| n_ctx > limit),
                        }))),
