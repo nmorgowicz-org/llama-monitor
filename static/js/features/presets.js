@@ -1331,6 +1331,14 @@ export function openPresetModal(mode, section, seedPreset = null) {
         if (document.getElementById('modal-rapid-reasoning-mode')) {
             document.getElementById('modal-rapid-reasoning-mode').checked = reasoningModeChecked;
         }
+        // Load Rapid-MLX sampling defaults into shared form fields
+        if (p.rapid_mlx?.default_temperature != null) numOrEmpty('modal-temperature', p.rapid_mlx.default_temperature);
+        if (p.rapid_mlx?.default_top_p != null) numOrEmpty('modal-top-p', p.rapid_mlx.default_top_p);
+        if (p.rapid_mlx?.default_top_k != null) numOrEmpty('modal-top-k', p.rapid_mlx.default_top_k);
+        if (p.rapid_mlx?.default_min_p != null) numOrEmpty('modal-min-p', p.rapid_mlx.default_min_p);
+        if (p.rapid_mlx?.default_repetition_penalty != null) numOrEmpty('modal-repeat-penalty', p.rapid_mlx.default_repetition_penalty);
+        if (p.rapid_mlx?.default_presence_penalty != null) numOrEmpty('modal-presence-penalty', p.rapid_mlx.default_presence_penalty);
+        if (p.rapid_mlx?.max_tokens != null) numOrEmpty('modal-max-tokens', p.rapid_mlx.max_tokens);
         setVal('modal-api-key', p.api_key || '');
         numOrEmpty('modal-max-tokens', p.max_tokens);
         numOrEmpty('modal-seed', p.seed);
@@ -1827,6 +1835,21 @@ function _buildFormPreset(existing) {
                     if (webUiAvail && webUiAvail !== 'auto') out.web_ui_availability = webUiAvail;
                     if (webUiConfig) out.web_ui_config_json = webUiConfig;
                     if (webUiStatic) out.web_ui_static_path = webUiStatic;
+                    // Sampling defaults (--default-* flags for Rapid-MLX)
+                    const temp = floatOrNull('modal-temperature');
+                    const topP = floatOrNull('modal-top-p');
+                    const topK = intOrNull('modal-top-k');
+                    const minP = floatOrNull('modal-min-p');
+                    const repeatPen = floatOrNull('modal-repeat-penalty');
+                    const presencePen = floatOrNull('modal-presence-penalty');
+                    const maxTok = intOrNull('modal-max-tokens');
+                    if (temp != null) out.default_temperature = temp;
+                    if (topP != null) out.default_top_p = topP;
+                    if (topK != null) out.default_top_k = topK;
+                    if (minP != null) out.default_min_p = minP;
+                    if (repeatPen != null) out.default_repetition_penalty = repeatPen;
+                    if (presencePen != null) out.default_presence_penalty = presencePen;
+                    if (maxTok != null) out.max_tokens = maxTok;
                     return out;
                 })(),
             } : null,
