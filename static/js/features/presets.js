@@ -1795,7 +1795,8 @@ function _buildFormPreset(existing) {
             port: rapidPort,
             rapid_mlx: existing.rapid_mlx ? {
                 ...existing.rapid_mlx,
-                model_path: strVal('modal-model-path'),
+                // model_source preserved via spread above; input is display-only for Rapid-MLX.
+                // Writing model_path from display_name creates stale noise (DoD item 22, gap 3).
                 port: rapidPort,
                 ...(function() {
                     const et = nullableBoolOpt('modal-rapid-enable-thinking');
