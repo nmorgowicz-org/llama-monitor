@@ -5225,25 +5225,45 @@ let _rapidMlxProfileTimer = null;
 async function _fetchRapidMlxModelProfile(modelId) {
   if (!modelId || modelId.trim().length < 2) {
     wizardState.model.rapidMlxProfile = null;
+    wizardState.model.rapidMlxUnifiedProfile = null;
     return;
   }
   if (wizardState.engine.selected !== 'rapid_mlx') {
     wizardState.model.rapidMlxProfile = null;
+    wizardState.model.rapidMlxUnifiedProfile = null;
     return;
   }
   try {
     const headers = window.authHeaders ? window.authHeaders() : {};
-    const url = `/api/rapid-mlx/models/${encodeURIComponent(modelId)}/profile`;
-    const res = await fetch(url, { headers });
-    if (!res.ok) {
+    const [profileUrl, unifiedUrl] = [
+      `/api/rapid-mlx/models/${encodeURIComponent(modelId)}/profile`,
+      `/api/rapid-mlx/models/${encodeURIComponent(modelId)}/unified-profile`,
+    ];
+
+    const [profileRes, unifiedRes] = await Promise.all([
+      fetch(profileUrl, { headers }).catch(() => null),
+      fetch(unifiedUrl, { headers }).catch(() => null),
+    ]);
+
+    if (profileRes && profileRes.ok) {
+      const data = await profileRes.json().catch(() => ({}));
+      wizardState.model.rapidMlxProfile = data.profile || null;
+    } else {
       wizardState.model.rapidMlxProfile = null;
-      return;
     }
-    const data = await res.json().catch(() => ({}));
-    wizardState.model.rapidMlxProfile = data.profile || null;
+
+    if (unifiedRes && unifiedRes.ok) {
+      const data = await unifiedRes.json().catch(() => ({}));
+      wizardState.model.rapidMlxUnifiedProfile = data.profile || null;
+      _applyUnifiedProfileRecommendations();
+    } else {
+      wizardState.model.rapidMlxUnifiedProfile = null;
+    }
+
     _renderRapidMlxProfileHints();
   } catch {
     wizardState.model.rapidMlxProfile = null;
+    wizardState.model.rapidMlxUnifiedProfile = null;
   }
 }
 
@@ -5253,6 +5273,57 @@ function _scheduleRapidMlxProfileFetch(modelId) {
   _rapidMlxProfileTimer = setTimeout(() => {
     _fetchRapidMlxModelProfile(modelId);
   }, 350);
+}
+
+// Apply recommendations from the unified profile to wizard controls.
+// Only sets values if the user hasn't explicitly overridden them.
+function _applyUnifiedProfileRecommendations() {
+  const unified = wizardState.model.rapidMlxUnifiedProfile;
+  if (!unified || !unified.recommended) return;
+
+  const rec = unified.recommended;
+
+  // Apply hybrid_mode recommendation if not already set by user
+  if (rec.hybrid_mode && wizardState.hardware.hybridMode == null) {
+    wizardState.hardware.hybridMode = rec.hybrid_mode;
+    if (dom.hybridModeSelect) {
+      dom.hybridModeSelect.value = rec.hybrid_mode;
+    }
+  }
+
+  // Apply tool_format recommendation if not already set by user
+  if (rec.tool_format && wizardState.hardware.toolCallParser == null) {
+    wizardState.hardware.toolCallParser = rec.tool_format;
+    if (dom.toolCallParserInput) {
+      dom.toolCallParserInput.value = rec.tool_format;
+    }
+  }
+
+  // Apply reasoning_parser recommendation if not already set by user
+  if (rec.reasoning_parser && wizardState.hardware.reasoningParser == null) {
+    wizardState.hardware.reasoningParser = rec.reasoning_parser;
+    if (dom.reasoningParserInput) {
+      dom.reasoningParserInput.value = rec.reasoning_parser;
+    }
+  }
+
+  // Show warnings from unified profile
+  _renderUnifiedProfileWarnings(unified);
+}
+
+// Render warnings from the unified profile (source conflicts, missing data).
+function _renderUnifiedProfileWarnings(unified) {
+  const hintsEl = document.getElementById('rapid-mlx-profile-hints');
+  if (!hintsEl || !unified.warnings || unified.warnings.length === 0) return;
+
+  for (const warning of unified.warnings) {
+    const row = document.createElement('div');
+    row.className = 'rapid-mlx-hint-row rapid-mlx-hint-row--warning';
+    row.textContent = `⚠ ${warning}`;
+    row.style.color = 'var(--accent-warning, #f59e0b)';
+    row.style.fontSize = '0.82em';
+    hintsEl.appendChild(row);
+  }
 }
 
 // Render contextual hints from the live Rapid-MLX profile.

@@ -273,6 +273,8 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .or(profile_route(ctx.clone(), state.clone()))
         .unify()
+        .or(unified_profile_route(ctx.clone()))
+        .unify()
         .or(escape_hatch_route())
         .unify()
         .or(command_preview_route(ctx.clone()))
@@ -1574,6 +1576,55 @@ fn profile_route(ctx: ApiCtx, state: RuntimeApiState) -> ApiRoute {
                         }
                     }
                 }
+            }
+        })
+        .boxed()
+}
+
+fn unified_profile_route(ctx: ApiCtx) -> ApiRoute {
+    let config = ctx.config;
+    warp::path!("api" / "rapid-mlx" / "models" / String / "unified-profile")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |model_id: String, auth: Option<String>| {
+            let config = config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                if model_id.is_empty() {
+                    return Ok(json_error(
+                        StatusCode::BAD_REQUEST,
+                        "Model ID is required",
+                    ));
+                }
+                if model_id.contains("..") {
+                    return Ok(json_error(
+                        StatusCode::BAD_REQUEST,
+                        "Model ID contains invalid path traversal",
+                    ));
+                }
+
+                let unified = match crate::inference::rapid_mlx::build_unified_profile(&model_id).await {
+                    Ok(profile) => profile,
+                    Err(error) => {
+                        let msg = error.to_string();
+                        return Ok(json_error(
+                            if msg.contains("timed out") || msg.contains("timeout") {
+                                StatusCode::REQUEST_TIMEOUT
+                            } else {
+                                StatusCode::INTERNAL_SERVER_ERROR
+                            },
+                            format!("Unified profile build failed: {}", msg.chars().take(200).collect::<String>()),
+                        ));
+                    }
+                };
+
+                Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(&serde_json::json!({
+                    "ok": true,
+                    "profile": unified,
+                }))))
             }
         })
         .boxed()

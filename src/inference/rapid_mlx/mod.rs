@@ -1335,6 +1335,345 @@ fn verified_chat_fields() -> BTreeSet<&'static str> {
     fields
 }
 
+// ── Unified Profile (Section 20 Item 11) ─────────────────────────────────────────
+
+/// Merged profile combining MLX config geometry, Rapid-MLX info behavioral flags,
+/// and explicit fallbacks into a single recommendation with source provenance.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct UnifiedProfile {
+    pub recommended: UnifiedProfileRecommended,
+    pub sources: UnifiedProfileSources,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct UnifiedProfileRecommended {
+    pub hybrid_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_parser: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct UnifiedProfileSources {
+    pub hybrid_mode: String,
+    pub tool_format: String,
+    pub reasoning_parser: String,
+}
+
+/// Build a unified profile by merging three sources:
+/// 1. MLX config (local or HF) → geometry and hybrid detection
+/// 2. Rapid-MLX info profile → behavioral flags (tool_format, reasoning_parser, architecture)
+/// 3. Explicit mappings → fallbacks when sources are incomplete
+pub async fn build_unified_profile(model_id: &str) -> Result<UnifiedProfile> {
+    let mut warnings = Vec::new();
+
+    // Fetch MLX geometry from appropriate source
+    let geometry_profile = fetch_geometry_profile(model_id).await;
+    let hybrid_from_geometry = derive_hybrid_mode_from_geometry(&geometry_profile);
+
+    // Fetch Rapid-MLX info profile (may fail gracefully if rapid-mlx not installed)
+    let rapid_profile = fetch_rapid_mlx_profile(model_id).await;
+
+    // Merge recommendations with priority rules
+    let recommended = merge_recommendations(
+        &geometry_profile,
+        &rapid_profile,
+        &mut warnings,
+        hybrid_from_geometry,
+    );
+
+    // Build source provenance
+    let sources = build_sources(&geometry_profile, &rapid_profile);
+
+    // Add warnings for missing data or source conflicts
+    add_missing_source_warnings(&mut warnings, &geometry_profile, &rapid_profile);
+
+    Ok(UnifiedProfile {
+        recommended,
+        sources,
+        warnings,
+    })
+}
+
+/// Fetch MLX geometry profile from HF (if HF-style ID) or local config.
+async fn fetch_geometry_profile(model_id: &str) -> Option<crate::llama::model_memory_profile::ModelMemoryProfile> {
+    // Determine source type
+    if is_local_path(model_id) {
+        fetch_local_geometry(model_id).await
+    } else if is_hf_repo_id(model_id) {
+        fetch_hf_geometry(model_id).await
+    } else {
+        // Alias: try local path first, then treat as unknown
+        fetch_local_geometry(model_id).await
+    }
+}
+
+/// Fetch geometry from a local MLX config.json.
+async fn fetch_local_geometry(model_id: &str) -> Option<crate::llama::model_memory_profile::ModelMemoryProfile> {
+    let path = std::path::PathBuf::from(model_id);
+    tokio::task::spawn_blocking(move || {
+        match info_query::read_mlx_local_config(&path) {
+            Ok(Some(config)) => {
+                let raw = serde_json::to_vec(&config).ok()?;
+                mlx_meta::parse_mlx_config_bytes_to_profile(&raw).ok()
+            }
+            _ => None,
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// Fetch geometry from HF with timeout.
+async fn fetch_hf_geometry(model_id: &str) -> Option<crate::llama::model_memory_profile::ModelMemoryProfile> {
+    // Parse repo_id and revision
+    let (repo_id, revision) = match parse_hf_repo_revision(model_id) {
+        Some(r) => r,
+        None => return None,
+    };
+
+    let future = crate::hf::fetch_mlx_model_profile_revision_aware(&repo_id, &revision);
+    tokio::time::timeout(std::time::Duration::from_secs(10), future)
+        .await
+        .ok()
+        .unwrap_or(Err("timeout".to_string()))
+        .ok()
+}
+
+/// Fetch Rapid-MLX info profile for behavioral flags.
+async fn fetch_rapid_mlx_profile(model_id: &str) -> Option<crate::inference::rapid_mlx::info_query::ModelProfile> {
+    // Try to resolve a rapid-mlx binary
+    let binary = match resolve_rapid_mlx_binary().await {
+        Some(b) => b,
+        None => return None,
+    };
+
+    let future = info_query::fetch_model_profile(&binary, model_id);
+    tokio::time::timeout(std::time::Duration::from_secs(10), future)
+        .await
+        .ok()
+        .unwrap_or(Err(anyhow::anyhow!("timeout")))
+        .ok()
+        .flatten()
+}
+
+async fn resolve_rapid_mlx_binary() -> Option<std::path::PathBuf> {
+    // Use discovery to find binary (checks managed runtime first, then PATH)
+    discovery::Discovery::resolve_binary(None, None)
+        .await
+        .ok()
+        .map(|(binary, _)| binary)
+}
+
+fn derive_hybrid_mode_from_geometry(
+    profile: &Option<crate::llama::model_memory_profile::ModelMemoryProfile>,
+) -> String {
+    if let Some(p) = profile {
+        if let Some(interval) = p.full_attention_interval
+            && interval > 1
+        {
+            return "force".to_string();
+        }
+        if p.is_hybrid_attention() {
+            return "force".to_string();
+        }
+    }
+    "auto".to_string()
+}
+
+fn geometry_source_label(
+    profile: &Option<crate::llama::model_memory_profile::ModelMemoryProfile>,
+) -> String {
+    match profile {
+        Some(p) => {
+            if p.source_revision.is_some() {
+                "hf_config".to_string()
+            } else {
+                "mlx_local".to_string()
+            }
+        }
+        None => "fallback".to_string(),
+    }
+}
+
+fn parse_hf_repo_revision(model_id: &str) -> Option<(String, String)> {
+    let (repo_id, revision) = if let Some(at_pos) = model_id.find('@') {
+        (model_id[..at_pos].to_string(), model_id[at_pos + 1..].to_string())
+    } else {
+        (model_id.to_string(), "main".to_string())
+    };
+
+    if repo_id.is_empty() || !repo_id.contains('/') {
+        return None;
+    }
+
+    Some((repo_id, revision))
+}
+
+fn is_local_path(model_id: &str) -> bool {
+    std::path::Path::new(model_id).is_absolute()
+}
+
+fn is_hf_repo_id(model_id: &str) -> bool {
+    !is_local_path(model_id)
+        && model_id.contains('/')
+        && !model_id.starts_with('.')
+        && !model_id.contains(' ')
+}
+
+fn merge_recommendations(
+    geometry: &Option<crate::llama::model_memory_profile::ModelMemoryProfile>,
+    rapid: &Option<crate::inference::rapid_mlx::info_query::ModelProfile>,
+    warnings: &mut Vec<String>,
+    hybrid_from_geometry: String,
+) -> UnifiedProfileRecommended {
+    // hybrid_mode: HF/local config is authoritative (hard gate)
+    let hybrid_mode = hybrid_from_geometry;
+
+    // tool_format: rapid-mlx info first, then model_type mapping
+    let tool_format = if let Some(r) = rapid
+        && let Some(tf) = r.tool_format.as_deref()
+        && !tf.is_empty()
+    {
+        Some(tf.to_string())
+    } else {
+        derive_tool_format_from_geometry(geometry)
+    };
+
+    // reasoning_parser: rapid-mlx info first, then HF architecture pattern
+    let reasoning_parser = if let Some(r) = rapid
+        && let Some(rp) = r.reasoning_parser.as_deref()
+        && !rp.is_empty()
+    {
+        Some(rp.to_string())
+    } else {
+        derive_reasoning_parser_from_geometry(geometry)
+    };
+
+    // Check for conflicts between rapid-mlx and geometry
+    if let Some(r) = rapid {
+        if r.architecture.as_ref()
+            .is_some_and(|a| a.to_lowercase().contains("hybrid") || a.to_lowercase().contains("delta"))
+            && hybrid_mode == "auto"
+        {
+            warnings.push("Rapid-MLX info reports hybrid/delta architecture, but MLX config does not confirm full_attention_interval; geometry is authoritative.".to_string());
+        } else if r.architecture.as_ref()
+            .is_some_and(|a| a.to_lowercase().contains("pure attention"))
+            && hybrid_mode == "force"
+        {
+            warnings.push("Rapid-MLX info reports pure attention, but MLX config indicates hybrid mode via full_attention_interval; geometry is authoritative.".to_string());
+        }
+    }
+
+    UnifiedProfileRecommended {
+        hybrid_mode,
+        tool_format,
+        reasoning_parser,
+    }
+}
+
+fn derive_tool_format_from_geometry(
+    geometry: &Option<crate::llama::model_memory_profile::ModelMemoryProfile>,
+) -> Option<String> {
+    let model_type = geometry.as_ref()?.model_type.as_ref()?;
+    let lower = model_type.to_lowercase();
+
+    if lower.contains("qwen") {
+        Some("qwen-coder".to_string())
+    } else if lower.contains("llama") || lower.contains("llawa") {
+        Some("llama3-tool".to_string())
+    } else if lower.contains("gemma") {
+        Some("gemma-tool".to_string())
+    } else {
+        None
+    }
+}
+
+fn derive_reasoning_parser_from_geometry(
+    geometry: &Option<crate::llama::model_memory_profile::ModelMemoryProfile>,
+) -> Option<String> {
+    let p = geometry.as_ref()?;
+
+    // Check architectures for ForConditionalGeneration pattern with long context
+    if let Some(archs) = &p.architectures {
+        let has_conditional = archs.iter().any(|a| a.contains("ForConditionalGeneration"));
+        let has_long_context = p.model_context_limit.unwrap_or(0) > 32768
+            || p.weights.max_position_embeddings.value > 32768;
+        if has_conditional && has_long_context {
+            let model_type = p.model_type.as_deref().unwrap_or("");
+            if model_type.to_lowercase().contains("qwen") {
+                return Some("qwen".to_string());
+            }
+        }
+    }
+
+    // Architecture-based pattern matching
+    let arch_str = p.architectures
+        .as_ref()
+        .and_then(|a| a.first().map(|s| s.as_str()))
+        .unwrap_or("");
+
+    if arch_str.contains("Qwen3") || arch_str.contains("Qwen2") {
+        return Some("qwen".to_string());
+    }
+
+    None
+}
+
+fn build_sources(
+    geometry: &Option<crate::llama::model_memory_profile::ModelMemoryProfile>,
+    rapid: &Option<crate::inference::rapid_mlx::info_query::ModelProfile>,
+) -> UnifiedProfileSources {
+    let hybrid_mode = geometry_source_label(geometry);
+
+    let tool_format = if rapid.as_ref().is_some_and(|r| r.tool_format.is_some()) {
+        "rapid_mlx".to_string()
+    } else if geometry.as_ref().is_some_and(|g| g.model_type.is_some()) {
+        "model_type_mapping".to_string()
+    } else {
+        "not_available".to_string()
+    };
+
+    let reasoning_parser = if rapid.as_ref().is_some_and(|r| r.reasoning_parser.is_some()) {
+        "rapid_mlx".to_string()
+    } else if geometry.as_ref().is_some_and(|g| {
+        g.architectures.as_ref().is_some_and(|a| !a.is_empty())
+    }) {
+        "hf_architecture".to_string()
+    } else {
+        "not_available".to_string()
+    };
+
+    UnifiedProfileSources {
+        hybrid_mode,
+        tool_format,
+        reasoning_parser,
+    }
+}
+
+fn add_missing_source_warnings(
+    warnings: &mut Vec<String>,
+    geometry: &Option<crate::llama::model_memory_profile::ModelMemoryProfile>,
+    rapid: &Option<crate::inference::rapid_mlx::info_query::ModelProfile>,
+) {
+    // Warning when rapid-mlx unavailable
+    if rapid.is_none() {
+        warnings.push("Rapid-MLX info query unavailable (runtime not installed or query failed); behavioral flags fall back to heuristic mappings.".to_string());
+    }
+
+    // Warning when geometry unavailable
+    if geometry.is_none() {
+        warnings.push("MLX config geometry unavailable; hybrid_mode uses fallback.".to_string());
+    }
+}
+
 #[cfg(test)]
 mod chat_tests {
     use super::*;
@@ -1449,5 +1788,289 @@ mod chat_tests {
     fn rapid_mapping_rejects_malformed_or_message_less_requests() {
         assert!(adapter().map_chat_request(b"not json").is_err());
         assert!(adapter().map_chat_request(br#"{"stream":true}"#).is_err());
+    }
+}
+
+#[cfg(test)]
+mod unified_profile_tests {
+    use super::*;
+    use crate::llama::model_memory_profile::*;
+
+    fn geometry_hybrid_qwen36() -> ModelMemoryProfile {
+        let mut p = ModelMemoryProfile::default();
+        p.model_type = Some("qwen3_5".into());
+        p.architectures = Some(vec!["Qwen3ForConditionalGeneration".into()]);
+        p.full_attention_interval = Some(4);
+        p.model_context_limit = Some(262144);
+        p.layer_groups.push(LayerMemoryGroup {
+            kind: LayerGroupKind::FullAttention,
+            count: 16,
+            field_evidence: "counted".into(),
+            kv_heads: Some(4),
+            head_dim: Some(128),
+            ..Default::default()
+        });
+        p.layer_groups.push(LayerMemoryGroup {
+            kind: LayerGroupKind::LinearRecurrent,
+            count: 48,
+            field_evidence: "counted".into(),
+            ..Default::default()
+        });
+        p
+    }
+
+    fn geometry_pure_attention_llama() -> ModelMemoryProfile {
+        let mut p = ModelMemoryProfile::default();
+        p.model_type = Some("llama".into());
+        p.architectures = Some(vec!["LlamaForCausalLM".into()]);
+        p.layer_groups.push(LayerMemoryGroup {
+            kind: LayerGroupKind::FullAttention,
+            count: 32,
+            field_evidence: "flat config".into(),
+            kv_heads: Some(8),
+            head_dim: Some(128),
+            ..Default::default()
+        });
+        p
+    }
+
+    fn rapid_profile_with_flags() -> info_query::ModelProfile {
+        let mut r = info_query::ModelProfile::default();
+        r.tool_format = Some("hermes".into());
+        r.reasoning_parser = Some("qwen3".into());
+        r.architecture = Some("pure attention".into());
+        r
+    }
+
+    fn rapid_profile_hybrid_arch() -> info_query::ModelProfile {
+        let mut r = info_query::ModelProfile::default();
+        r.tool_format = Some("hermes".into());
+        r.reasoning_parser = Some("qwen3".into());
+        r.architecture = Some("hybrid delta".into());
+        r
+    }
+
+    #[test]
+    fn hybrid_mode_authoritative_from_geometry_full_attention_interval() {
+        // HF/local config wins for hybrid_mode when full_attention_interval > 1
+        let geometry = Some(geometry_hybrid_qwen36());
+        let rapid = Some(rapid_profile_with_flags());
+
+        let hybrid = derive_hybrid_mode_from_geometry(&geometry);
+        assert_eq!(hybrid, "force", "full_attention_interval=4 → force");
+    }
+
+    #[test]
+    fn hybrid_mode_auto_for_pure_attention_model() {
+        let geometry = Some(geometry_pure_attention_llama());
+        let rapid = Some(rapid_profile_with_flags());
+
+        let hybrid = derive_hybrid_mode_from_geometry(&geometry);
+        assert_eq!(hybrid, "auto", "no interval + pure attention → auto");
+    }
+
+    #[test]
+    fn hybrid_mode_fallback_when_no_geometry() {
+        let geometry: Option<ModelMemoryProfile> = None;
+        let hybrid = derive_hybrid_mode_from_geometry(&geometry);
+        assert_eq!(hybrid, "auto", "missing geometry → fallback auto");
+    }
+
+    #[test]
+    fn rapid_mlx_wins_for_tool_format() {
+        // rapid-mlx info is authoritative for tool_format when available
+        let geometry = Some(geometry_hybrid_qwen36());
+        let rapid = Some(rapid_profile_with_flags());
+        let mut warnings = Vec::new();
+        let hybrid = "force".to_string();
+
+        let rec = merge_recommendations(&geometry, &rapid, &mut warnings, hybrid);
+        assert_eq!(rec.tool_format, Some("hermes".into()));
+    }
+
+    #[test]
+    fn model_type_mapping_fallback_for_tool_format() {
+        // When rapid-mlx unavailable, use model_type mapping
+        let geometry = Some(geometry_hybrid_qwen36());
+        let rapid: Option<info_query::ModelProfile> = None;
+        let mut warnings = Vec::new();
+        let hybrid = "force".to_string();
+
+        let rec = merge_recommendations(&geometry, &rapid, &mut warnings, hybrid);
+        assert_eq!(rec.tool_format, Some("qwen-coder".into()));
+    }
+
+    #[test]
+    fn rapid_mlx_wins_for_reasoning_parser() {
+        let geometry = Some(geometry_hybrid_qwen36());
+        let rapid = Some(rapid_profile_with_flags());
+        let mut warnings = Vec::new();
+        let hybrid = "force".to_string();
+
+        let rec = merge_recommendations(&geometry, &rapid, &mut warnings, hybrid);
+        assert_eq!(rec.reasoning_parser, Some("qwen3".into()));
+    }
+
+    #[test]
+    fn hf_architecture_fallback_for_reasoning_parser() {
+        let geometry = Some(geometry_hybrid_qwen36());
+        let rapid: Option<info_query::ModelProfile> = None;
+        let mut warnings = Vec::new();
+        let hybrid = "force".to_string();
+
+        let rec = merge_recommendations(&geometry, &rapid, &mut warnings, hybrid);
+        assert_eq!(rec.reasoning_parser, Some("qwen".into()));
+    }
+
+    #[test]
+    fn warning_when_rapid_reports_hybrid_but_geometry_does_not_confirm() {
+        // rapid-mlx says hybrid, but geometry has no full_attention_interval → warning
+        let geometry = Some(geometry_pure_attention_llama());
+        let rapid = Some(rapid_profile_hybrid_arch());
+        let mut warnings = Vec::new();
+        let hybrid = "auto".to_string();
+
+        let _rec = merge_recommendations(&geometry, &rapid, &mut warnings, hybrid);
+        assert!(warnings.iter().any(|w| w.contains("hybrid") || w.contains("delta")));
+    }
+
+    #[test]
+    fn warning_when_geometry_force_but_rapid_reports_pure_attention() {
+        // Geometry says force (interval > 1), rapid says pure attention → warning
+        let geometry = Some(geometry_hybrid_qwen36());
+        let rapid = Some(rapid_profile_with_flags());
+        let mut warnings = Vec::new();
+        let hybrid = "force".to_string();
+
+        let _rec = merge_recommendations(&geometry, &rapid, &mut warnings, hybrid);
+        assert!(warnings.iter().any(|w| w.contains("pure attention")));
+    }
+
+    #[test]
+    fn source_labels_rapid_mlx_for_tool_format() {
+        let geometry = Some(geometry_hybrid_qwen36());
+        let rapid = Some(rapid_profile_with_flags());
+        let sources = build_sources(&geometry, &rapid);
+        assert_eq!(sources.tool_format, "rapid_mlx");
+    }
+
+    #[test]
+    fn source_labels_model_type_mapping_for_tool_format() {
+        let geometry = Some(geometry_hybrid_qwen36());
+        let rapid: Option<info_query::ModelProfile> = None;
+        let sources = build_sources(&geometry, &rapid);
+        assert_eq!(sources.tool_format, "model_type_mapping");
+    }
+
+    #[test]
+    fn source_labels_not_available_when_no_sources() {
+        let geometry: Option<ModelMemoryProfile> = None;
+        let rapid: Option<info_query::ModelProfile> = None;
+        let sources = build_sources(&geometry, &rapid);
+        assert_eq!(sources.tool_format, "not_available");
+        assert_eq!(sources.reasoning_parser, "not_available");
+        assert_eq!(sources.hybrid_mode, "fallback");
+    }
+
+    #[test]
+    fn warning_when_rapid_mlx_unavailable() {
+        let geometry = Some(geometry_hybrid_qwen36());
+        let rapid: Option<info_query::ModelProfile> = None;
+        let mut warnings = Vec::new();
+        add_missing_source_warnings(&mut warnings, &geometry, &rapid);
+        assert!(warnings.iter().any(|w| w.contains("Rapid-MLX info query unavailable")));
+    }
+
+    #[test]
+    fn warning_when_geometry_unavailable() {
+        let geometry: Option<ModelMemoryProfile> = None;
+        let rapid = Some(rapid_profile_with_flags());
+        let mut warnings = Vec::new();
+        add_missing_source_warnings(&mut warnings, &geometry, &rapid);
+        assert!(warnings.iter().any(|w| w.contains("MLX config geometry unavailable")));
+    }
+
+    #[test]
+    fn hf_repo_id_parsing_with_revision() {
+        let result = parse_hf_repo_revision("mlx-community/Qwen3-0.6B-4bit@main");
+        assert_eq!(result, Some(("mlx-community/Qwen3-0.6B-4bit".into(), "main".into())));
+    }
+
+    #[test]
+    fn hf_repo_id_parsing_defaults_revision_to_main() {
+        let result = parse_hf_repo_revision("mlx-community/Qwen3-0.6B-4bit");
+        assert_eq!(result, Some(("mlx-community/Qwen3-0.6B-4bit".into(), "main".into())));
+    }
+
+    #[test]
+    fn hf_repo_id_parsing_rejects_non_hf_style() {
+        let result = parse_hf_repo_revision("qwen3-0.6b-4bit");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn local_path_detection() {
+        assert!(is_local_path("/Users/me/models/Qwen3"));
+        assert!(is_local_path("/tmp/test-model"));
+        assert!(!is_local_path("mlx-community/Qwen3-0.6B"));
+        assert!(!is_local_path("qwen3-0.6b-4bit"));
+    }
+
+    #[test]
+    fn hf_repo_id_detection() {
+        assert!(is_hf_repo_id("mlx-community/Qwen3-0.6B-4bit"));
+        assert!(is_hf_repo_id("org/model@main"));
+        assert!(!is_hf_repo_id("/Users/me/models/test"));
+        assert!(!is_hf_repo_id("qwen3-0.6b"));
+    }
+
+    #[test]
+    fn derive_tool_format_qwen() {
+        let geometry = Some(geometry_hybrid_qwen36());
+        assert_eq!(derive_tool_format_from_geometry(&geometry), Some("qwen-coder".into()));
+    }
+
+    #[test]
+    fn derive_tool_format_llama() {
+        let geometry = Some(geometry_pure_attention_llama());
+        assert_eq!(derive_tool_format_from_geometry(&geometry), Some("llama3-tool".into()));
+    }
+
+    #[test]
+    fn derive_tool_format_none_for_unknown() {
+        let mut p = ModelMemoryProfile::default();
+        p.model_type = Some("unknown_model".into());
+        assert!(derive_tool_format_from_geometry(&Some(p)).is_none());
+    }
+
+    #[test]
+    fn unified_profile_serialization_roundtrip() {
+        let profile = UnifiedProfile {
+            recommended: UnifiedProfileRecommended {
+                hybrid_mode: "force".into(),
+                tool_format: Some("hermes".into()),
+                reasoning_parser: Some("qwen3".into()),
+            },
+            sources: UnifiedProfileSources {
+                hybrid_mode: "hf_config".into(),
+                tool_format: "rapid_mlx".into(),
+                reasoning_parser: "rapid_mlx".into(),
+            },
+            warnings: vec!["test warning".into()],
+        };
+        let json = serde_json::to_string(&profile).unwrap();
+        let restored: UnifiedProfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.recommended.hybrid_mode, "force");
+        assert_eq!(restored.recommended.tool_format, Some("hermes".into()));
+        assert_eq!(restored.sources.hybrid_mode, "hf_config");
+    }
+
+    #[test]
+    fn unified_profile_handles_missing_optional_fields() {
+        let json = r#"{"recommended":{"hybrid_mode":"auto"},"sources":{"hybrid_mode":"fallback","tool_format":"not_available","reasoning_parser":"not_available"},"warnings":[]}"#;
+        let profile: UnifiedProfile = serde_json::from_str(json).unwrap();
+        assert_eq!(profile.recommended.hybrid_mode, "auto");
+        assert!(profile.recommended.tool_format.is_none());
+        assert!(profile.recommended.reasoning_parser.is_none());
     }
 }
