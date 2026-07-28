@@ -2577,6 +2577,7 @@ document.getElementById('modal-model-path')?.addEventListener('input', () => {
 
 let _presetRapidMlxProfileTimer = null;
 let _presetRapidMlxProfile = null;
+let _presetUnifiedProfile = null;
 let _presetNativeContextLimit = 0;
 
 function _schedulePresetRapidMlxProfile() {
@@ -2585,6 +2586,7 @@ function _schedulePresetRapidMlxProfile() {
         const preset = _currentModalPreset();
         if (!preset || preset.backend !== 'rapid_mlx') {
             _presetRapidMlxProfile = null;
+            _presetUnifiedProfile = null;
             return;
         }
         const rapidMlx = preset.rapid_mlx;
@@ -2592,26 +2594,78 @@ function _schedulePresetRapidMlxProfile() {
             || rapidMlx?.model_source_view?.display_name || '';
         if (!modelId || modelId.trim().length < 2) {
             _presetRapidMlxProfile = null;
+            _presetUnifiedProfile = null;
             return;
         }
         try {
             const headers = window.authHeaders ? window.authHeaders() : {};
-            const url = `/api/rapid-mlx/models/${encodeURIComponent(modelId)}/profile`;
-            const res = await fetch(url, { headers });
-            if (!res.ok) {
+
+            // Fetch both profiles in parallel
+            const [profileRes, unifiedRes] = await Promise.allSettled([
+                fetch(`/api/rapid-mlx/models/${encodeURIComponent(modelId)}/profile`, { headers }),
+                fetch(`/api/rapid-mlx/models/${encodeURIComponent(modelId)}/unified-profile`, { headers })
+            ]);
+
+            if (profileRes.status === 'fulfilled' && profileRes.value.ok) {
+                const pdata = await profileRes.value.json().catch(() => ({}));
+                _presetRapidMlxProfile = pdata.profile || null;
+            } else {
                 _presetRapidMlxProfile = null;
-                return;
             }
-            const data = await res.json().catch(() => ({}));
-            _presetRapidMlxProfile = data.profile || null;
+
+            if (unifiedRes.status === 'fulfilled' && unifiedRes.value.ok) {
+                const udata = await unifiedRes.value.json().catch(() => ({}));
+                _presetUnifiedProfile = udata || null;
+            } else {
+                _presetUnifiedProfile = null;
+            }
+
+            // Apply unified profile recommendations as hints
+            if (_presetUnifiedProfile) {
+                _applyPresetUnifiedProfileHints(_presetUnifiedProfile);
+            }
         } catch {
             _presetRapidMlxProfile = null;
+            _presetUnifiedProfile = null;
         }
     }, 350);
 }
 
+function _applyPresetUnifiedProfileHints(up) {
+    const rec = up.recommended;
+    if (!rec) return;
+
+    // Hybrid mode recommendation hint
+    if (rec.hybrid_mode && rec.hybrid_mode !== 'auto') {
+        const hybridSel = document.getElementById('modal-rapid-hybrid-mode');
+        if (hybridSel) {
+            hybridSel.title = `Recommended: ${rec.hybrid_mode} (${up.sources?.hybrid_mode || 'unknown'} source)`;
+        }
+    }
+
+    // Tool-call parser recommendation hint
+    if (rec.tool_format) {
+        const toolSel = document.getElementById('modal-rapid-tool-call-parser');
+        if (toolSel) {
+            toolSel.title = `Recommended: ${rec.tool_format} (${up.sources?.tool_format || 'unknown'} source)`;
+        }
+    }
+
+    // Reasoning parser recommendation hint
+    if (rec.reasoning_parser) {
+        const reasonSel = document.getElementById('modal-rapid-reasoning-parser');
+        if (reasonSel) {
+            reasonSel.title = `Recommended: ${rec.reasoning_parser} (${up.sources?.reasoning_parser || 'unknown'} source)`;
+        }
+    }
+}
+
 export function getPresetRapidMlxProfile() {
     return _presetRapidMlxProfile;
+}
+
+export function getPresetUnifiedProfile() {
+    return _presetUnifiedProfile;
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────────
