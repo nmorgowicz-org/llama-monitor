@@ -57,11 +57,12 @@ Models receive badges based on verification status:
 
 ## CommunitySourceCatalog (Phase 8A)
 
-The CommunitySourceCatalog provides structured information about model sources:
+The CommunitySourceCatalog is a user-editable, role-based catalog of HuggingFace model sources. For full details — data model, roles, bundled entries, hard gates, and migration — see [community-source-catalog.md](community-source-catalog.md).
 
-- **HF qualification/identity APIs**: Endpoint `/api/hf/qualify` and `/api/hf/identity` provide qualification data
-- **Author roles**: Distinguishes model authors, uploaders, and quantizers
-- **Quantizer verification**: Shows whether a quantizer is verified
+Summary:
+- **HF qualification/identity APIs**: `/api/hf/qualify` and `/api/hf/identity` consume the catalog to resolve author/converter roles
+- **Author roles**: Distinguishes original author, dataset author, quantizer, converter, curator, merger/distiller
+- **Quantizer verification**: Shows whether a quantizer is verified via catalog lookup
 - **Community-qualified models**: Models with community verification badges
 
 ### API endpoints

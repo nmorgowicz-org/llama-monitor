@@ -1763,11 +1763,12 @@ The branch contains 240 commits implementing Rapid-MLX integration and surroundi
 The following features are implemented but not covered in reference docs:
 - HF/MLX model search (discovery scopes, quant detection, format badges, Quants-only toggle)
 - MLX VRAM for HF downloads (context pills, VRAM bar, download button)
-- CommunitySourceCatalog (Phase 8A)
 - Model library with lineage/qualification badges (Phase 8B2)
 - Memory management (wired-limit reserves, Metal GPU cap, reclaim guidance)
 - Rapid-MLX telemetry and dynamic dashboard cards
 - Chat conversation routing for Rapid-MLX
 - Backend-neutral inference orchestration
+
+> `community-source-catalog.md` was created in this session (Phase 8A). `chat-streaming.md` may be needed for chat conversation routing but is out of scope for this PR.
 
 New reference docs should be created for these areas. The 5 Phase 6 reference docs (spawn-wizard.md, vram-estimator.md, rapid-mlx-runtime.md, cache-benchmark-results.md, model-runtime-benchmarking.md) cover the Rapid-MLX core integration but not the full branch scope.
