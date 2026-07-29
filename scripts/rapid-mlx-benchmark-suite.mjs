@@ -30,6 +30,10 @@ const MODEL_PREFIX = 'models--';
 // Qualification still needs explicit K=1 and requested-K=2 cells; the observed
 // K histogram, not this value, is authoritative.
 const DEFAULT_SPECULATIVE_TOKENS = 2;
+// Set to catch a dead draft head (the stale-extractor failure mode measured
+// ~0%), not to assert a performance target. Observed healthy acceptance on
+// this family is 59-97%, so the floor sits far below any real result.
+const DEFAULT_CONTROL_ACCEPT_FLOOR = 0.3;
 // Qwen3.5/3.6 think by default. Without a bounded reasoning_max_tokens, a
 // 128-token probe cap is spent entirely on <think> preamble and the model
 // never reaches the CHECK_* answer, corrupting the fidelity check (not the
@@ -88,6 +92,7 @@ function parseArgs(argv) {
     else if (key === '--spec-decode-lane') options.specDecodeLane = value;
     else if (key === '--trials') options.trials = Number(value);
     else if (key === '--settle-seconds') options.settleSeconds = Number(value);
+    else if (key === '--control-accept-floor') options.controlAcceptFloor = Number(value);
     else die(`Unknown option: ${key}`);
   }
   if (!['plan', 'run'].includes(command)) die('Use plan or run.');
@@ -924,11 +929,24 @@ async function sidecarIdentity(reference, baseIdentity) {
       if (error.code !== 'ENOENT') throw error;
     }
 
+    // Guard the invariant directly rather than trusting the resolver: whatever
+    // reaches --speculative-config must still look like a safetensors file to
+    // mx.load. Preflight reads go through realpath and would not catch this.
+    if (!requestedSidecarPath.endsWith('.safetensors')) {
+      die(`Sidecar path handed to the server must end in .safetensors, got: ${requestedSidecarPath}`);
+    }
+
     const fileStats = await stat(resolvedFilePath);
     return {
       reference,
       revision: resolvedSidecar.revision,
-      resolved_file: resolvedFilePath,
+      // The *requested* path, not the realpath. Inside an HF cache the snapshot
+      // entry is a symlink into blobs/<sha256>, a bare hash with no extension,
+      // and mx.load dispatches on extension -- handing the server the realpath
+      // fails the sidecar load with "Unknown file format". realpath stays in
+      // use below for containment checks and byte reads, where it is correct.
+      resolved_file: requestedSidecarPath,
+      realpath: resolvedFilePath,
       sha256: await sha256File(resolvedFilePath),
       bytes: fileStats.size,
       config_sha256: sidecarConfigSha256,
@@ -1144,6 +1162,58 @@ async function stopServer(server, settleSeconds = 0) {
   }
 }
 
+// Metric names carry a label set (family, method, ...) that varies between
+// cells -- a symlinked trunk dir yields family="unknown" where a sibling cell
+// yields family="qwen3.6" -- so keys cannot be matched literally.
+function sumMetricsByPrefix(bag, prefix) {
+  let total = null;
+  for (const [key, value] of Object.entries(bag ?? {})) {
+    if (!key.startsWith(prefix)) continue;
+    if (typeof value !== 'number') continue;
+    total = (total ?? 0) + value;
+  }
+  return total;
+}
+
+// Acceptance is computed from the accepts/attempts counters rather than read
+// off rapid_mlx_spec_decode_accept_ratio. That metric is a gauge: its "delta"
+// across a phase equals its "after" value, so treating it as a per-phase rate
+// silently reports the server's lifetime ratio instead of this cell's.
+function cellAcceptRatio(cell) {
+  let accepts = 0;
+  let attempts = 0;
+  for (const attempt of cell.attempts ?? []) {
+    accepts += sumMetricsByPrefix(attempt.metrics_delta, 'rapid_mlx_spec_decode_accepts_total') ?? 0;
+    attempts += sumMetricsByPrefix(attempt.metrics_delta, 'rapid_mlx_spec_decode_attempts_total') ?? 0;
+  }
+  if (attempts <= 0) return { ratio: null, accepts, attempts };
+  return { ratio: accepts / attempts, accepts, attempts };
+}
+
+// A matrix without a passing positive control cannot tell "this pairing does
+// not work" from "the harness does not work". That is exactly the confusion
+// that produced the void receipts and the wrong "MTP is unviable for this
+// family" verdict, so a failing control invalidates the whole run rather than
+// being recorded as one bad cell among many.
+function assertPositiveControl(receiptCells, floor) {
+  const controls = receiptCells.filter((cell) => cell.configuration?.speculative_role === 'control');
+  if (!controls.length) {
+    return { ok: false, reason: 'No control-role cell ran. Pass --speculative-control-model so the matrix carries a known-good positive control.' };
+  }
+  const failures = [];
+  for (const cell of controls) {
+    const { ratio, accepts, attempts } = cellAcceptRatio(cell);
+    if (ratio === null) {
+      failures.push(`${cell.id}: no speculative attempts recorded (MTP never installed?)`);
+    } else if (ratio < floor) {
+      failures.push(`${cell.id}: acceptance ${(ratio * 100).toFixed(1)}% (${accepts}/${attempts}) below floor ${(floor * 100).toFixed(1)}%`);
+    }
+  }
+  return failures.length
+    ? { ok: false, reason: `Positive control failed:\n  ${failures.join('\n  ')}` }
+    : { ok: true, controls: controls.length };
+}
+
 // A single pass over the matrix cannot separate a real effect from position in
 // the run. Machine state drifts monotonically across a long suite -- die
 // temperature climbs, the page cache fills, the HF cache warms -- so whichever
@@ -1275,6 +1345,24 @@ async function runSuite(options, manifests, tempDir) {
     }
     if (failure) break;
   }
+  // Only meaningful once the matrix ran to completion -- a run that aborted
+  // early has no control cell yet, and reporting that as a control failure
+  // would mask the real error.
+  let controlGate = null;
+  if (!failure && options.suite.startsWith('spec-decode')) {
+    const receiptCells = [];
+    for (const entry of receipts) {
+      try {
+        const receipt = JSON.parse(await readFile(join(outputDir, entry.receipt), 'utf8'));
+        receiptCells.push(...(receipt.cells ?? []));
+      } catch { /* a receipt that will not parse is caught by the loop above */ }
+    }
+    const floor = options.controlAcceptFloor ?? DEFAULT_CONTROL_ACCEPT_FLOOR;
+    controlGate = { floor, ...assertPositiveControl(receiptCells, floor) };
+    if (!controlGate.ok) {
+      failure = new Error(`${controlGate.reason}\nThe positive control is what separates "this sidecar does not work" from "the harness does not work". Every subject number in this run is uninterpretable.`);
+    }
+  }
   await writeFile(join(outputDir, 'suite-index.json'), `${JSON.stringify({
     model: options.model,
     suite: options.suite,
@@ -1287,6 +1375,7 @@ async function runSuite(options, manifests, tempDir) {
     },
     speculative_lane: options.specDecodeLane ?? null,
     qualification_eligible: (options.specDecodeLane ?? null) !== 'forced',
+    positive_control: controlGate,
     receipts,
     complete: failure === null,
     failure: failure?.message ?? null,
