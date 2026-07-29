@@ -108,7 +108,8 @@ node scripts/rapid-mlx-benchmark-suite.mjs plan \
   --suite spec-decode \
   --cell spec-control-mtp-8000-int8 \
   --speculative-control-model mlx-community/Qwen3.6-27B-MTP-4bit \
-  --speculative-tokens 2
+  --speculative-tokens 2 \
+  --spec-decode-lane forced
 ```
 
 For an extracted head, use `--speculative-model PATH_OR_REPO`; when both
@@ -165,6 +166,34 @@ cell is silent on effective depth. Because the clamp is a per-request
 read from the persisted log — an in-memory tail is evicted long before a cell
 finishes. The driver passes `--log-level INFO`, which Rapid needs to emit it.
 
+### Eligibility lanes
+
+`--spec-decode-lane` is required for every spec-decode suite and has no
+default. It selects which eligibility rules produced the run:
+
+- **`forced`** passes `--force-spec-decode`, which flips the profile's
+  `supports_spec_decode` verdict to true in `engine_core`. Every Qwen3.6-27B
+  alias currently declares `supports_spec_decode: false`, so this is the only
+  way to exercise MTP on them at all. It is a legitimate research probe and an
+  illegitimate basis for enabling anything in the product.
+- **`natural`** omits the flag and lets Rapid apply its own rules. On a model
+  the profile rejects, the server still starts but MTP is never installed, and
+  the receipt shows that honestly rather than failing.
+
+The driver previously passed `--force-spec-decode` unconditionally whenever a
+speculative config was present, so every spec-decode number produced before
+this option existed came from the forced lane without saying so. None of them
+can gate exposure.
+
+The lane is stamped on every cell (baselines included) and recorded in
+`suite-index.json` alongside `qualification_eligible`, which is false for the
+forced lane. It is also verified rather than trusted: `engine_core` logs
+`Routing override: supports_spec_decode forced True via --force-spec-decode`,
+so `runtime.backend_log` carries `declared_lane`, `observed_lane`, and
+`lane_agrees`. A mismatch in either direction fails the run — a receipt
+labelled with the wrong lane is worse than a missing one, because it invites a
+forced-lane number into an enablement decision.
+
 ### Repeated trials
 
 A single pass over the matrix is screening evidence, not a qualification
@@ -191,6 +220,7 @@ repeat from a single pass.
 node scripts/rapid-mlx-benchmark-suite.mjs run \
   --model unsloth/Qwen3.6-27B-MLX-8bit \
   --suite spec-decode --trials 4 --settle-seconds 60 \
+  --spec-decode-lane forced \
   --speculative-control-model mlx-community/Qwen3.6-27B-MTP-4bit \
   --speculative-model PATH_OR_REPO \
   --speculative-tokens 2 \

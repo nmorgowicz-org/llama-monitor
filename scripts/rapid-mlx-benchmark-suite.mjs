@@ -85,6 +85,7 @@ function parseArgs(argv) {
     // supply the same values the model's repo alias would have produced.
     else if (key === '--tool-call-parser') options.toolCallParser = value;
     else if (key === '--reasoning-parser') options.reasoningParser = value;
+    else if (key === '--spec-decode-lane') options.specDecodeLane = value;
     else if (key === '--trials') options.trials = Number(value);
     else if (key === '--settle-seconds') options.settleSeconds = Number(value);
     else die(`Unknown option: ${key}`);
@@ -113,6 +114,13 @@ function parseArgs(argv) {
     if (unknownWorkloads.length) die(`Unknown speculative workload(s): ${unknownWorkloads.join(', ')}; use code and/or prose.`);
     const unknownMethods = (options.speculativeMethods ?? ['mtp']).filter((name) => name !== 'mtp');
     if (unknownMethods.length) die(`This sidecar-qualified suite currently supports only method=mtp; got ${unknownMethods.join(', ')}.`);
+    // Deliberately has no default. The driver used to pass --force-spec-decode
+    // unconditionally, so every existing spec-decode number came from the
+    // forced lane without ever saying so. Making the lane explicit is what
+    // stops a research override from silently becoming a qualification result.
+    if (!['forced', 'natural'].includes(options.specDecodeLane)) {
+      die('Spec-decode suites require --spec-decode-lane forced|natural. "forced" passes --force-spec-decode, overriding the profile\'s supports_spec_decode verdict; results from it are research evidence and can never gate enablement. "natural" lets Rapid apply its own eligibility rules.');
+    }
   }
   return { command, options };
 }
@@ -201,6 +209,12 @@ function configuration({
     speculative_method: speculativeMethod,
     speculative_model: speculativeMethod === 'off' ? null : (speculative?.model ?? null),
     speculative_role: speculativeMethod === 'off' ? 'baseline' : (speculative?.role ?? 'subject'),
+    // Which eligibility lane produced this cell. 'forced' passes
+    // --force-spec-decode, overriding the profile's own supports_spec_decode
+    // verdict; that is a legitimate research probe and an illegitimate basis
+    // for enabling anything. 'natural' lets Rapid decide. Stamped per run
+    // after cell construction; see the --spec-decode-lane option.
+    speculative_lane: null,
     speculative_workload: speculative?.workload ?? null,
     num_speculative_tokens: speculativeMethod === 'off' ? null : (speculative?.numSpeculativeTokens ?? DEFAULT_SPECULATIVE_TOKENS),
     speculative_disable_auto_k: speculativeMethod === 'off' ? null : Boolean(speculative?.disableAutoK),
@@ -668,7 +682,7 @@ function argvFor(model, config, port, utilization, servedModelName = null, profi
       disable_auto_k: Boolean(config.speculative_disable_auto_k),
     })
     : null;
-  return ['--no-telemetry', 'serve', model, ...(servedModelName ? ['--served-model-name', servedModelName] : []), '--port', String(port), '--host', '127.0.0.1', '--max-num-seqs', '1', '--max-concurrent-requests', '1', cache ? '--enable-prefix-cache' : '--disable-prefix-cache', ...(cache ? ['--cache-memory-mb', String(config.cache_memory_mb ?? 8192), '--hybrid-cache-entries', String(config.hybrid_cache_entries ?? 16)] : []), '--kv-disk-checkpoint-interval', String(config.disk_checkpoint_interval ?? 0), '--pflash', config.pflash, ...(config.pflash === 'auto' ? ['--pflash-threshold', '32768'] : []), '--prefill-step-size', String(prefillStepSize), '--max-tokens', String(config.server_max_tokens ?? 128), '--kv-cache-dtype', config.kv_cache_dtype_requested, '--kv-cache-turboquant', config.turboquant_requested, config.mllm ? '--mllm' : '--no-mllm', '--gpu-memory-utilization', String(utilization), ...(profile.tool_call_parser ? ['--tool-call-parser', profile.tool_call_parser, '--enable-auto-tool-choice'] : []), ...(profile.reasoning_parser ? ['--reasoning-parser', profile.reasoning_parser] : []), ...(profile.force_hybrid ? ['--force-hybrid'] : []), ...(speculativeConfig ? ['--force-spec-decode', '--speculative-config', speculativeConfig] : []), '--log-level', 'INFO'];
+  return ['--no-telemetry', 'serve', model, ...(servedModelName ? ['--served-model-name', servedModelName] : []), '--port', String(port), '--host', '127.0.0.1', '--max-num-seqs', '1', '--max-concurrent-requests', '1', cache ? '--enable-prefix-cache' : '--disable-prefix-cache', ...(cache ? ['--cache-memory-mb', String(config.cache_memory_mb ?? 8192), '--hybrid-cache-entries', String(config.hybrid_cache_entries ?? 16)] : []), '--kv-disk-checkpoint-interval', String(config.disk_checkpoint_interval ?? 0), '--pflash', config.pflash, ...(config.pflash === 'auto' ? ['--pflash-threshold', '32768'] : []), '--prefill-step-size', String(prefillStepSize), '--max-tokens', String(config.server_max_tokens ?? 128), '--kv-cache-dtype', config.kv_cache_dtype_requested, '--kv-cache-turboquant', config.turboquant_requested, config.mllm ? '--mllm' : '--no-mllm', '--gpu-memory-utilization', String(utilization), ...(profile.tool_call_parser ? ['--tool-call-parser', profile.tool_call_parser, '--enable-auto-tool-choice'] : []), ...(profile.reasoning_parser ? ['--reasoning-parser', profile.reasoning_parser] : []), ...(profile.force_hybrid ? ['--force-hybrid'] : []), ...(speculativeConfig ? [...(config.speculative_lane === 'forced' ? ['--force-spec-decode'] : []), '--speculative-config', speculativeConfig] : []), '--log-level', 'INFO'];
 }
 
 async function localModelIdentity(model, requestedRevision) {
@@ -1046,8 +1060,12 @@ function launchServer(command, args, env, logPath) {
 // never fire, so the run yields no evidence about depth either way -- which is
 // a distinct outcome from "no clamp", and is reported as such.
 const CLAMP_PATTERN = /\[MTP-chain-of-K\][^\n]*clamping max_k from (\d+) to (\d+)/g;
+// engine_core logs this when --force-spec-decode flips the profile's
+// supports_spec_decode verdict to true. It makes the lane self-evidencing:
+// the receipt no longer has to be believed about which lane it ran in.
+const FORCE_OVERRIDE_PATTERN = /Routing override: supports_spec_decode forced True via --force-spec-decode/;
 
-function analyzeBackendLog(text, requestedK) {
+function analyzeBackendLog(text, requestedK, declaredLane = null) {
   const clamps = [...text.matchAll(CLAMP_PATTERN)].map((match) => ({
     line: match[0],
     from: Number(match[1]),
@@ -1067,6 +1085,8 @@ function analyzeBackendLog(text, requestedK) {
     verdict = 'clamp_absent';
     effectiveMaxK = requested;
   }
+  const forcedObserved = FORCE_OVERRIDE_PATTERN.test(text);
+  const observedLane = forcedObserved ? 'forced' : 'natural';
   return {
     captured: true,
     requested_max_k: requested,
@@ -1075,6 +1095,11 @@ function analyzeBackendLog(text, requestedK) {
     clamp_verdict: verdict,
     clamp_events: clamps.length,
     clamp_lines: clamps.slice(0, 3).map((clamp) => clamp.line),
+    declared_lane: declaredLane,
+    observed_lane: observedLane,
+    // A mismatch means the receipt's own lane label is wrong, so nothing in it
+    // can be trusted to be on the side of the line it claims.
+    lane_agrees: declaredLane === null ? null : declaredLane === observedLane,
   };
 }
 
@@ -1162,9 +1187,12 @@ async function attachBackendLog(receiptPath, serverLogPath, manifest) {
   const requestedK = manifest.cells
     .map((cell) => cell.configuration?.num_speculative_tokens)
     .find((tokens) => tokens !== undefined) ?? null;
+  const declaredLane = manifest.cells
+    .map((cell) => cell.configuration?.speculative_lane)
+    .find((lane) => lane) ?? null;
   let analysis;
   try {
-    analysis = analyzeBackendLog(await readFile(serverLogPath, 'utf8'), requestedK);
+    analysis = analyzeBackendLog(await readFile(serverLogPath, 'utf8'), requestedK, declaredLane);
   } catch (error) {
     analysis = { captured: false, capture_error: error.message, clamp_verdict: 'uncaptured' };
   }
@@ -1226,7 +1254,17 @@ async function runSuite(options, manifests, tempDir) {
       await started.flushed();
       if (!failure) backendLog = await attachBackendLog(receiptPath, serverLogPath, manifest);
     }
-    if (backendLog) receipts[receipts.length - 1].clamp_verdict = backendLog.clamp_verdict;
+    if (backendLog) {
+      Object.assign(receipts[receipts.length - 1], {
+        clamp_verdict: backendLog.clamp_verdict,
+        observed_lane: backendLog.observed_lane,
+      });
+      // A receipt labelled with the wrong lane is worse than a missing one:
+      // it invites a forced-lane number into an enablement decision. Stop.
+      if (backendLog.lane_agrees === false) {
+        failure = new Error(`Lane mismatch for ${label}: manifest declared "${backendLog.declared_lane}" but the backend log shows "${backendLog.observed_lane}". Full log: ${serverLogPath}`);
+      }
+    }
     if (failure) break;
   }
   await writeFile(join(outputDir, 'suite-index.json'), `${JSON.stringify({
@@ -1239,6 +1277,8 @@ async function runSuite(options, manifests, tempDir) {
       ordering: (options.trials ?? 1) > 1 ? 'counterbalanced-abba' : 'single-pass',
       settle_seconds: options.settleSeconds ?? 0,
     },
+    speculative_lane: options.specDecodeLane ?? null,
+    qualification_eligible: (options.specDecodeLane ?? null) !== 'forced',
     receipts,
     complete: failure === null,
     failure: failure?.message ?? null,
@@ -1277,6 +1317,14 @@ if (options.cells) {
 }
 // After --cell validation, which is expressed against unsuffixed cell ids.
 cells = expandTrials(cells, options.trials ?? 1);
+if (options.specDecodeLane) {
+  // Stamped on every cell, baselines included, so a receipt cannot be read
+  // without knowing which eligibility lane produced the run it belongs to.
+  cells = cells.map((cell) => ({
+    ...cell,
+    configuration: { ...cell.configuration, speculative_lane: options.specDecodeLane },
+  }));
+}
 const speculativeSidecars = new Map();
 for (const reference of new Set(cells.map((cell) => cell.configuration.speculative_model).filter(Boolean))) {
   speculativeSidecars.set(reference, await sidecarIdentity(reference, identity));
