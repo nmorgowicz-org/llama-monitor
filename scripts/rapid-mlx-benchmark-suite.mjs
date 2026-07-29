@@ -1065,7 +1065,7 @@ const CLAMP_PATTERN = /\[MTP-chain-of-K\][^\n]*clamping max_k from (\d+) to (\d+
 // the receipt no longer has to be believed about which lane it ran in.
 const FORCE_OVERRIDE_PATTERN = /Routing override: supports_spec_decode forced True via --force-spec-decode/;
 
-function analyzeBackendLog(text, requestedK, declaredLane = null) {
+function analyzeBackendLog(text, requestedK, declaredLane = null, speculativeRequested = true) {
   const clamps = [...text.matchAll(CLAMP_PATTERN)].map((match) => ({
     line: match[0],
     from: Number(match[1]),
@@ -1086,7 +1086,11 @@ function analyzeBackendLog(text, requestedK, declaredLane = null) {
     effectiveMaxK = requested;
   }
   const forcedObserved = FORCE_OVERRIDE_PATTERN.test(text);
-  const observedLane = forcedObserved ? 'forced' : 'natural';
+  // An off/baseline cell carries no speculative config, so the driver never
+  // passes --force-spec-decode and engine_core never logs the override. Its
+  // absence there is correct behaviour, not a mislabelled lane -- comparing
+  // anyway fails every baseline cell in a forced-lane run.
+  const observedLane = speculativeRequested ? (forcedObserved ? 'forced' : 'natural') : 'not_applicable';
   return {
     captured: true,
     requested_max_k: requested,
@@ -1099,7 +1103,7 @@ function analyzeBackendLog(text, requestedK, declaredLane = null) {
     observed_lane: observedLane,
     // A mismatch means the receipt's own lane label is wrong, so nothing in it
     // can be trusted to be on the side of the line it claims.
-    lane_agrees: declaredLane === null ? null : declaredLane === observedLane,
+    lane_agrees: (declaredLane === null || !speculativeRequested) ? null : declaredLane === observedLane,
   };
 }
 
@@ -1190,9 +1194,13 @@ async function attachBackendLog(receiptPath, serverLogPath, manifest) {
   const declaredLane = manifest.cells
     .map((cell) => cell.configuration?.speculative_lane)
     .find((lane) => lane) ?? null;
+  const speculativeRequested = manifest.cells.some((cell) => {
+    const method = cell.configuration?.speculative_method;
+    return method && method !== 'off';
+  });
   let analysis;
   try {
-    analysis = analyzeBackendLog(await readFile(serverLogPath, 'utf8'), requestedK, declaredLane);
+    analysis = analyzeBackendLog(await readFile(serverLogPath, 'utf8'), requestedK, declaredLane, speculativeRequested);
   } catch (error) {
     analysis = { captured: false, capture_error: error.message, clamp_verdict: 'uncaptured' };
   }

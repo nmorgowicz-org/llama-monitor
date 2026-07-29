@@ -658,7 +658,10 @@ async function runManifest(manifest, selectedCells, serverPid = null) {
       if (phase === 'cold') coldAttempt = attempt;
     }
     for (const attempt of attempts) delete attempt.conversation_assistant_content;
-    results.push({ id: cell.id, model: cell.model, target_tokens: cell.target_tokens, configuration: cell.configuration, workload: cell.workload, attempts });
+    // trial/base_cell_id are backend-neutral repeat-measurement identity, not
+    // Rapid-specific: without them a receipt from a counterbalanced run cannot
+    // be grouped back to the cell it repeats.
+    results.push({ id: cell.id, model: cell.model, target_tokens: cell.target_tokens, trial: cell.trial ?? null, base_cell_id: cell.base_cell_id ?? cell.id, configuration: cell.configuration, workload: cell.workload, attempts });
   }
   return {
     schema_version: 1,
