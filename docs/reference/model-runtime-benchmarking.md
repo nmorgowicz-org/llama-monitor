@@ -144,6 +144,27 @@ Rapid's SSM limitation. For current Rapid qualification, compare:
 - auto K<=1 (`--speculative-tokens 1`);
 - requested maximum K=2 (`--speculative-tokens 2`) as a clamp proof.
 
+The clamp proof is read from captured backend output, not inferred from the K
+histogram — a histogram containing only K∈{0,1} is equally consistent with a
+hardware clamp and with a controller that simply preferred shallow drafts. The
+driver streams each server's full stdout/stderr to
+`<NN>-<label>.server.log` beside the receipt, then folds a `runtime.backend_log`
+block into the receipt itself:
+
+| `clamp_verdict` | Meaning |
+|---|---|
+| `clamp_observed` | Rapid logged `[MTP-chain-of-K] … clamping max_k from N to M`. `effective_max_k` is `M`, taken from the line. |
+| `clamp_absent` | Requested K>1 and no clamp line. The clamp did not apply; `effective_max_k` is the requested value. |
+| `not_probed` | Requested K<=1, so the line can never fire. The run says nothing about depth either way. |
+| `uncaptured` | Log missing or unreadable, including receipts resumed from a run predating this capture. |
+
+Only `clamp_observed` and `clamp_absent` are evidence. `not_probed` is the
+reason a requested-K=2 cell has to be in the matrix at all: without it, every
+cell is silent on effective depth. Because the clamp is a per-request
+`logger.info` from `mtp_generate_step` rather than a startup line, it must be
+read from the persisted log — an in-memory tail is evicted long before a cell
+finishes. The driver passes `--log-level INFO`, which Rapid needs to emit it.
+
 Label the last result `requested max K=2, effective max K=1`, unless its
 observed histogram actually contains K=2. Use a fresh server for every cell
 because the controller registry persists by model identity within a process.

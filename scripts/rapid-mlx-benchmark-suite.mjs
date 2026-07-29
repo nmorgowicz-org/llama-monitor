@@ -7,7 +7,7 @@
  * OpenAI-compatible runner, and writes an index of the resulting receipts.
  * This deliberately keeps the generic runner reusable for llama.cpp/OMLX.
  */
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -1009,16 +1009,65 @@ function runProcess(command, args, options = {}) {
   });
 }
 
-function launchServer(command, args, env) {
+// The in-memory tail exists only for failure messages. Everything is also
+// streamed to disk verbatim: the MTP depth-clamp line is a per-request
+// logger.info emitted from mtp_generate_step, so on a long cell the rolling
+// tail evicts it long before the cell ends. Effective draft depth has to be
+// read from captured backend output, never inferred from a K histogram.
+function launchServer(command, args, env, logPath) {
   const output = [];
   const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], env });
+  const sink = logPath ? createWriteStream(logPath) : null;
   const append = (chunk) => {
+    if (sink) sink.write(chunk);
     output.push(chunk.toString());
     while (output.join('').length > 12000) output.shift();
   };
   child.stdout.on('data', append);
   child.stderr.on('data', append);
-  return { child, logs: () => output.join('') };
+  const closed = sink
+    ? new Promise((resolvePromise) => { child.once('close', () => sink.end(resolvePromise)); })
+    : Promise.resolve();
+  return { child, logs: () => output.join(''), flushed: () => closed };
+}
+
+// Rapid clamps MTP chain-of-K to 1 whenever the model cache contains an SSM
+// slot, and only logs when the requested K exceeds 1. That asymmetry is the
+// whole point: with K>1 requested, the presence of the line proves a clamp and
+// its absence proves the clamp did not apply. With K<=1 requested the line can
+// never fire, so the run yields no evidence about depth either way -- which is
+// a distinct outcome from "no clamp", and is reported as such.
+const CLAMP_PATTERN = /\[MTP-chain-of-K\][^\n]*clamping max_k from (\d+) to (\d+)/g;
+
+function analyzeBackendLog(text, requestedK) {
+  const clamps = [...text.matchAll(CLAMP_PATTERN)].map((match) => ({
+    line: match[0],
+    from: Number(match[1]),
+    to: Number(match[2]),
+  }));
+  const requested = Number.isFinite(requestedK) ? requestedK : null;
+  let verdict;
+  let effectiveMaxK = null;
+  if (clamps.length) {
+    // A clamp line is self-evidencing: it carries both the requested and the
+    // effective depth, so it outranks whatever the manifest claimed.
+    verdict = 'clamp_observed';
+    effectiveMaxK = clamps[0].to;
+  } else if (requested === null || requested <= 1) {
+    verdict = 'not_probed';
+  } else {
+    verdict = 'clamp_absent';
+    effectiveMaxK = requested;
+  }
+  return {
+    captured: true,
+    requested_max_k: requested,
+    effective_max_k: effectiveMaxK,
+    effective_max_k_source: verdict === 'not_probed' ? null : 'backend_log',
+    clamp_verdict: verdict,
+    clamp_events: clamps.length,
+    clamp_lines: clamps.slice(0, 3).map((clamp) => clamp.line),
+  };
 }
 
 async function waitForHealth(baseUrl, processHandle) {
@@ -1052,6 +1101,33 @@ async function stopServer(server) {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 5000));
 }
 
+// The receipt is written by the generic runner in a separate process, which
+// knows nothing about the server it talked to. Backend-log evidence is folded
+// in here, after the server has exited, so the depth claim travels with the
+// numbers it qualifies rather than living in a loose file beside them.
+async function attachBackendLog(receiptPath, serverLogPath, manifest) {
+  const requestedK = manifest.cells
+    .map((cell) => cell.configuration?.num_speculative_tokens)
+    .find((tokens) => tokens !== undefined) ?? null;
+  let analysis;
+  try {
+    analysis = analyzeBackendLog(await readFile(serverLogPath, 'utf8'), requestedK);
+  } catch (error) {
+    analysis = { captured: false, capture_error: error.message, clamp_verdict: 'uncaptured' };
+  }
+  analysis.path = basename(serverLogPath);
+  try {
+    const receipt = JSON.parse(await readFile(receiptPath, 'utf8'));
+    receipt.runtime.backend_log = analysis;
+    await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  } catch (error) {
+    // A receipt that cannot be annotated is still a valid receipt; the log
+    // file itself remains on disk as the primary artifact.
+    process.stderr.write(`Warning: could not attach backend log to ${basename(receiptPath)}: ${error.message}\n`);
+  }
+  return analysis;
+}
+
 async function runSuite(options, manifests, tempDir) {
   const outputDir = resolve(options.out);
   await mkdir(outputDir, { recursive: true });
@@ -1062,8 +1138,17 @@ async function runSuite(options, manifests, tempDir) {
     const receiptPath = join(outputDir, `${String(index).padStart(2, '0')}-${label}.json`);
     if (options.resume) {
       try {
-        await readFile(receiptPath);
-        receipts.push({ label, receipt: basename(receiptPath), manifest: null, resumed: true });
+        // A resumed cell never launches a server, so it contributes no backend
+        // log. Carry forward whatever verdict the prior run recorded rather
+        // than leaving the field absent, which reads as "not checked".
+        const prior = JSON.parse(await readFile(receiptPath, 'utf8'));
+        receipts.push({
+          label,
+          receipt: basename(receiptPath),
+          manifest: null,
+          resumed: true,
+          clamp_verdict: prior.runtime?.backend_log?.clamp_verdict ?? 'uncaptured',
+        });
         continue;
       } catch { /* no durable receipt for this cell */ }
     }
@@ -1072,17 +1157,23 @@ async function runSuite(options, manifests, tempDir) {
     const cacheHome = join(tempDir, 'cache-homes', label);
     await mkdir(cacheHome, { recursive: true });
     const hfHome = process.env.HF_HOME ?? join(process.env.HOME ?? '', '.cache', 'huggingface');
-    const started = launchServer(command, args, { ...process.env, HOME: cacheHome, HF_HOME: hfHome });
+    const serverLogPath = join(outputDir, `${String(index).padStart(2, '0')}-${label}.server.log`);
+    const started = launchServer(command, args, { ...process.env, HOME: cacheHome, HF_HOME: hfHome }, serverLogPath);
     const server = started.child;
+    let backendLog = null;
     try {
       await waitForHealth(manifest.runtime.base_url, server);
       await runProcess(process.execPath, [resolve('scripts/model-runtime-benchmark.mjs'), 'run', '--manifest', manifestPath, '--out', receiptPath, '--server-pid', String(server.pid)], { cwd: process.cwd() });
-      receipts.push({ label, receipt: basename(receiptPath), manifest: options.keepManifests ? manifestPath : null });
+      receipts.push({ label, receipt: basename(receiptPath), server_log: basename(serverLogPath), manifest: options.keepManifests ? manifestPath : null });
     } catch (error) {
-      failure = new Error(`${error.message}\nRapid-MLX log tail for ${label}:\n${started.logs()}`);
+      failure = new Error(`${error.message}\nRapid-MLX log tail for ${label} (full log: ${serverLogPath}):\n${started.logs()}`);
     } finally {
       await stopServer(server);
+      // Only safe to read the log after the process closed and the sink drained.
+      await started.flushed();
+      if (!failure) backendLog = await attachBackendLog(receiptPath, serverLogPath, manifest);
     }
+    if (backendLog) receipts[receipts.length - 1].clamp_verdict = backendLog.clamp_verdict;
     if (failure) break;
   }
   await writeFile(join(outputDir, 'suite-index.json'), `${JSON.stringify({
