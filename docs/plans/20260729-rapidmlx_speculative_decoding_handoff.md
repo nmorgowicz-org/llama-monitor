@@ -107,31 +107,45 @@ positive control (239 MB standalone sidecar).
 
 ---
 
-## 6. Uncommitted work in the tree
+## 6. Harness state
 
-```
- M docs/reference/model-runtime-benchmarking.md
- M scripts/model-runtime-benchmark.mjs          (+215)
- M scripts/rapid-mlx-benchmark-suite.mjs        (+502)
-?? tmp/                                          (receipts)
-```
+Committed on `feat/rapid-mlx-integration`:
 
-Harness repairs already landed in the working tree: accept-ratio now prefers the per-phase
-delta over the cumulative gauge; control/subject roles; sidecar hashes and revisions;
-tensor-derived quantization; shifted-RMSNorm preflight; in-trunk-sidecar rejection;
-configured vs observed K separated; paired TG/TTFT/end-to-end/park/tokens-saved reporting.
-Not committed.
+| Commit | What |
+|---|---|
+| `c54615f` | Accept-ratio per-phase delta, control/subject roles, sidecar hashes/revisions, tensor-derived quantization, shifted-RMSNorm preflight, in-trunk-sidecar rejection, paired TG/TTFT/end-to-end/park reporting |
+| `8217f55` | Full server stdout/stderr persisted per cell; `runtime.backend_log` with `clamp_verdict` / `effective_max_k` |
+| `e74d841` | `--trials N` counterbalanced ABBA ordering, `--settle-seconds`, `trial_protocol` in the suite index |
+| `f4c2b5f` | `--spec-decode-lane forced\|natural`, required and defaultless; lane verified against the backend log, mismatch fails the run |
+
+`tmp/` holds the surviving `-v2` receipts and is untracked. The void receipt
+directories are deleted.
+
+⚠️ Two consequences for anyone re-running: spec-decode invocations now **require**
+`--spec-decode-lane`, and the evidence record cites `tmp/…` paths that will not survive a
+clean checkout.
 
 ---
 
 ## 7. Next action
 
-Phase 6.5 sub-phase **6.5a** — see the plan for gates. In dependency order:
+Phase 6.5 sub-phase **6.5a**. Harness items 1–3 are done and unexercised — the tooling to
+resolve §3.1 and §3.2 exists but has not been pointed at a model yet.
 
-1. Capture server stderr in the harness and grep for the clamp log. One line; resolves §3.2.
-2. Add repeated trials with counterbalanced ordering, then re-run the three-trunk matrix.
-   This resolves or confirms §3.1, the inversion.
-3. Split forced vs naturally-eligible lanes in the suite.
+**The run is the next action.** Re-run the three-trunk matrix with `--trials 4`,
+`--spec-decode-lane forced` (the aliases still declare `supports_spec_decode: false`, so
+`natural` will not install MTP), `--speculative-tokens 2` so the clamp line can fire at
+all, and a settle window. Then read `backend_log.clamp_verdict` — it should say
+`clamp_observed`, which closes §3.2 — and check whether the inversion survives
+counterbalancing, which closes or confirms §3.1.
+
+Also run one `--spec-decode-lane natural` cell. It should show MTP never installing. That
+is the evidence that natural eligibility is currently unavailable on this family, which is
+itself a Phase 7 input.
+
+Remaining 6.5a harness items before the gate: positive-control-fails-the-run enforcement,
+65k/131k tiers, non-512 completions, tool-call warm/repeat/extension, greedy-lossless
+parity, the `family="unknown"` label audit, and fact-derived capability.
 
 Do **not** start artifact management, API wiring, or UI work until 6.5a's gate passes —
 those are 6.5b and Phase 7, and they consume qualification output that does not exist yet.
