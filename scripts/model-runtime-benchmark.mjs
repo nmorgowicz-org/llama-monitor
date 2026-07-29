@@ -277,6 +277,14 @@ async function streamRequest(baseUrl, request) {
     // unnecessarily large and may retain user-like prompt material.
     completion_text: completion,
     completion_preview: completion.slice(0, 2000),
+    // Speculative decoding claims to be lossless at temperature 0: the
+    // accepted token stream must be identical to what the target model would
+    // have produced alone. Checking that needs the whole completion, but the
+    // full text is dropped after scoring (see above), so hash it here. The
+    // digest survives into the receipt at fixed size and retains no prompt-like
+    // material, and an off-vs-MTP comparison is then an equality test.
+    completion_sha256: createHash('sha256').update(completion).digest('hex'),
+    completion_characters: completion.length,
     server_errors: errors,
     tool_calls: mergedToolCalls,
   };
@@ -434,6 +442,14 @@ async function requestFor(cell, extension = false) {
     max_tokens: workload.max_tokens ?? 128,
     messages: [{ role: 'user', content }],
   };
+  // Only sent when the workload asks for them, so the greedy default stays a
+  // clean temperature-0 request rather than one carrying inert nucleus
+  // parameters. A model's recommended sampling settings are top_p/top_k as
+  // much as temperature, and a run that can only vary temperature cannot
+  // reproduce the shipped configuration.
+  for (const key of ['top_p', 'top_k', 'min_p', 'presence_penalty', 'repetition_penalty', 'seed']) {
+    if (workload[key] !== undefined) request[key] = workload[key];
+  }
   if (workload.tools) request.tools = workload.tools;
   if (workload.extra_body) Object.assign(request, workload.extra_body);
   return request;
@@ -444,6 +460,15 @@ function receiptRequest(request) {
   return {
     model: request.model,
     temperature: request.temperature,
+    // A receipt that records only temperature cannot be read back as "these
+    // are the model's recommended settings" or "these are not".
+    top_p: request.top_p ?? null,
+    top_k: request.top_k ?? null,
+    min_p: request.min_p ?? null,
+    presence_penalty: request.presence_penalty ?? null,
+    repetition_penalty: request.repetition_penalty ?? null,
+    seed: request.seed ?? null,
+    sampling_mode: (request.temperature ?? 0) === 0 ? 'greedy' : 'sampled',
     max_tokens: request.max_tokens,
     reasoning_max_tokens: request.reasoning_max_tokens ?? null,
     reasoning_effort: request.reasoning_effort ?? null,

@@ -93,6 +93,11 @@ function parseArgs(argv) {
     else if (key === '--trials') options.trials = Number(value);
     else if (key === '--settle-seconds') options.settleSeconds = Number(value);
     else if (key === '--control-accept-floor') options.controlAcceptFloor = Number(value);
+    else if (key === '--sampling') options.sampling = value;
+    else if (key === '--sampling-variant') options.samplingVariant = value;
+    else if (key === '--temperature') options.temperature = Number(value);
+    else if (key === '--top-p') options.topP = Number(value);
+    else if (key === '--top-k') options.topK = Number(value);
     else die(`Unknown option: ${key}`);
   }
   if (!['plan', 'run'].includes(command)) die('Use plan or run.');
@@ -900,6 +905,155 @@ async function trunkDraftDepthFacts(baseIdentity, requestedK) {
   };
 }
 
+// Greedy decoding is not the configuration these models ship. nightmedia's
+// Qwen3.6-27B declares do_sample=true, temperature=1.0, top_k=20, top_p=0.95;
+// measuring only at temperature 0 reports a configuration nobody serves.
+//
+// This matters specifically for speculative decoding, because the acceptance
+// rule is not the same test in the two regimes: at temperature 0 a draft is
+// accepted on exact match with the target's argmax, while at temperature > 0 it
+// is accepted by rejection sampling on min(1, p_target/p_draft). Greedy is the
+// easier test, so greedy acceptance and speedup are an optimistic bound rather
+// than the shipped result.
+//
+// Vendor recommendations do not live in any one place, and most checkpoints
+// publish none at all. Rather than assume a source exists, the lane resolves
+// through an ordered list and records which source answered -- so a reader can
+// tell "the vendor recommends this" from "nobody said, we picked".
+//
+// Keyed on config.json model_type, which is a fact about the weights. Keying on
+// the served path would repeat the family="unknown" defect in §10b of the
+// evidence record, where a symlinked trunk silently lost its label.
+const VENDOR_SAMPLING_PROFILES = [
+  {
+    family: 'qwen3.5/3.6',
+    matches: (modelType) => modelType === 'qwen3_5' || modelType === 'qwen3_6',
+    citation: 'Qwen/Unsloth published settings for Qwen3.5 and Qwen3.6 (identical across both), reasoning enabled',
+    reasoning: 'on',
+    variants: {
+      default: {
+        temperature: 1.0, top_p: 0.95, top_k: 20, min_p: 0.0, presence_penalty: 0.0, repetition_penalty: 1.0,
+      },
+      // Published for "precise coding tasks". Never A/B'd here, which is why it
+      // is a selectable variant rather than an automatic choice for code cells.
+      coding: {
+        temperature: 0.6, top_p: 0.95, top_k: 20, min_p: 0.0, presence_penalty: 0.0, repetition_penalty: 1.0,
+      },
+    },
+  },
+  {
+    family: 'gemma4',
+    matches: (modelType) => modelType === 'gemma4' || modelType === 'gemma4_text' || modelType.startsWith('gemma4_'),
+    citation: "Google's default Gemma 4 parameters, as republished by Unsloth, reasoning enabled",
+    reasoning: 'on',
+    variants: {
+      default: { temperature: 1.0, top_p: 0.95, top_k: 64 },
+    },
+  },
+];
+
+function vendorSamplingProfile(modelType, variant) {
+  const profile = VENDOR_SAMPLING_PROFILES.find((entry) => entry.matches(modelType));
+  if (!profile) return null;
+  const params = profile.variants[variant];
+  if (!params) {
+    die(`Vendor profile ${profile.family} has no "${variant}" variant; available: ${Object.keys(profile.variants).join(', ')}.`);
+  }
+  return {
+    source: 'vendor profile', vendor_family: profile.family, variant, citation: profile.citation, reasoning: profile.reasoning, ...params,
+  };
+}
+
+// generation_config.json is the checkpoint's own statement of its settings, so
+// it outranks the curated table. Most quantized republishes omit it entirely --
+// absence is normal, not an error.
+async function checkpointSampling(baseIdentity) {
+  let config;
+  try {
+    config = JSON.parse(await readFile(join(baseIdentity.snapshot_path, 'generation_config.json'), 'utf8'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    return null;
+  }
+  // do_sample=false means greedy IS this checkpoint's recommendation.
+  if (config.do_sample === false) return { source: 'generation_config.json', do_sample: false, temperature: 0 };
+  if (config.temperature === undefined) return null;
+  const sampling = { source: 'generation_config.json', do_sample: true, temperature: config.temperature };
+  for (const key of ['top_p', 'top_k', 'min_p', 'presence_penalty', 'repetition_penalty']) {
+    if (config[key] !== undefined) sampling[key] = config[key];
+  }
+  return sampling;
+}
+
+// A profile can recommend reasoning-on, but only the chat template decides
+// whether enable_thinking is a variable it reads. Sending the kwarg to a
+// template that ignores it produces a run labelled reasoning-on that is not.
+async function reasoningControlFacts(baseIdentity) {
+  let template = null;
+  try {
+    template = await readFile(join(baseIdentity.snapshot_path, 'chat_template.jinja'), 'utf8');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  if (template === null) {
+    try {
+      template = JSON.parse(await readFile(join(baseIdentity.snapshot_path, 'tokenizer_config.json'), 'utf8')).chat_template ?? null;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+  if (typeof template !== 'string') return { control: 'unknown', evidence: 'no chat template found in snapshot' };
+  if (template.includes('enable_thinking')) return { control: 'enable_thinking', evidence: 'chat template references enable_thinking' };
+  return { control: 'unsupported', evidence: 'chat template does not reference enable_thinking' };
+}
+
+async function resolveSamplingLane(baseIdentity, mode, variant, flags) {
+  if (mode === 'greedy') {
+    return { mode: 'greedy', source: 'harness default', temperature: 0, reasoning: 'off', recommendation_known: false };
+  }
+  if (mode === 'explicit') {
+    if (flags.temperature === undefined) die('--sampling explicit requires --temperature.');
+    return {
+      mode: 'explicit',
+      source: 'operator flags',
+      temperature: flags.temperature,
+      ...(flags.topP !== undefined ? { top_p: flags.topP } : {}),
+      ...(flags.topK !== undefined ? { top_k: flags.topK } : {}),
+      recommendation_known: true,
+    };
+  }
+  const modelType = JSON.parse(await readFile(join(baseIdentity.snapshot_path, 'config.json'), 'utf8')).model_type ?? '';
+  const checkpoint = await checkpointSampling(baseIdentity);
+  const vendor = vendorSamplingProfile(modelType, variant);
+  const chosen = checkpoint ?? vendor;
+  if (!chosen) {
+    // Legal, recorded state: no source knows. The run proceeds so correctness
+    // work is not blocked, but it cannot carry a performance claim.
+    return {
+      mode: 'recommended',
+      source: 'none',
+      recommendation_known: false,
+      model_type: modelType,
+      temperature: 0,
+      reasoning: 'off',
+      note: `No recommended settings are knowable for model_type="${modelType}": the checkpoint ships no usable generation_config.json and no vendor profile matches. Falling back to greedy; pass --sampling explicit to state settings from the model card.`,
+    };
+  }
+  // When both sources answer, a disagreement is the interesting fact, not a
+  // tiebreak to resolve silently.
+  const disagreements = checkpoint && vendor
+    ? ['temperature', 'top_p', 'top_k'].filter((key) => vendor[key] !== undefined && checkpoint[key] !== undefined && vendor[key] !== checkpoint[key])
+    : [];
+  return {
+    mode: 'recommended',
+    recommendation_known: true,
+    model_type: modelType,
+    reasoning: chosen.reasoning ?? vendor?.reasoning ?? 'unspecified',
+    ...chosen,
+    ...(vendor && checkpoint ? { vendor_alternative: vendor, disagrees_with_vendor_on: disagreements } : {}),
+  };
+}
+
 async function assertSpecDecodeTrunkSafe(baseIdentity) {
   const inTrunkSidecar = join(baseIdentity.snapshot_path, 'model-mtp.safetensors');
   try {
@@ -1288,6 +1442,75 @@ function assertPositiveControl(receiptCells, floor) {
     : { ok: true, controls: controls.length };
 }
 
+// Speculative decoding claims losslessness at temperature 0: accepted drafts
+// must reproduce the target model's own token stream exactly. Attempts are
+// joined on request.message_sha256 so only identical prompts are ever
+// compared.
+//
+// Reported, not enforced. Two reasons. First, baseline reproducibility is a
+// precondition -- if the same prompt through the same off-lane server yields
+// two different completions across trials, the runtime is nondeterministic and
+// an off-vs-MTP difference proves nothing, so that is measured first and
+// reported separately. Second, a late single-token divergence from batching
+// numerics is plausible without being a violation, and failing a long
+// qualification run on a criterion that fuzzy would block more than it caught.
+function checkGreedyLosslessParity(receiptCells) {
+  const byPrompt = new Map();
+  for (const cell of receiptCells) {
+    const role = cell.configuration?.speculative_role ?? 'unknown';
+    for (const attempt of cell.attempts ?? []) {
+      const promptHash = attempt.request?.message_sha256;
+      const digest = attempt.response?.completion_sha256;
+      if (!promptHash || !digest) continue;
+      // Temperature is the whole basis of the lossless claim; a sampled
+      // attempt would produce meaningless "mismatches".
+      if (attempt.request?.temperature !== 0) continue;
+      const key = `${attempt.phase ?? 'default'}|${promptHash}`;
+      if (!byPrompt.has(key)) byPrompt.set(key, []);
+      byPrompt.get(key).push({ role, cell: cell.id, trial: cell.trial ?? null, digest });
+    }
+  }
+
+  const baselineDigests = new Set();
+  const baselineGroups = [];
+  const comparisons = [];
+  for (const [key, entries] of byPrompt) {
+    const baselines = entries.filter((entry) => entry.role === 'baseline');
+    const speculative = entries.filter((entry) => entry.role === 'control' || entry.role === 'subject');
+    if (baselines.length > 1) {
+      const distinct = new Set(baselines.map((entry) => entry.digest));
+      baselineGroups.push({ prompt: key, runs: baselines.length, distinct_digests: distinct.size });
+    }
+    for (const entry of baselines) baselineDigests.add(entry.digest);
+    if (!baselines.length) continue;
+    const expected = new Set(baselines.map((entry) => entry.digest));
+    for (const entry of speculative) {
+      comparisons.push({
+        cell: entry.cell, trial: entry.trial, role: entry.role,
+        matches_baseline: expected.has(entry.digest),
+      });
+    }
+  }
+
+  const baselineDeterministic = baselineGroups.length
+    ? baselineGroups.every((group) => group.distinct_digests === 1)
+    : null;
+  const mismatches = comparisons.filter((comparison) => !comparison.matches_baseline);
+
+  return {
+    // Without a reproducible baseline every downstream comparison is
+    // uninterpretable, so this is stated before the parity verdict.
+    baseline_deterministic: baselineDeterministic,
+    baseline_repeat_groups: baselineGroups,
+    comparisons_total: comparisons.length,
+    mismatches: mismatches.length,
+    mismatch_cells: mismatches.slice(0, 10),
+    verdict: comparisons.length === 0 ? 'not_measured'
+      : baselineDeterministic === false ? 'baseline_nondeterministic'
+        : mismatches.length === 0 ? 'parity_held' : 'parity_violated',
+  };
+}
+
 // A single pass over the matrix cannot separate a real effect from position in
 // the run. Machine state drifts monotonically across a long suite -- die
 // temperature climbs, the page cache fills, the HF cache warms -- so whichever
@@ -1446,6 +1669,7 @@ async function runSuite(options, manifests, tempDir) {
   // early has no control cell yet, and reporting that as a control failure
   // would mask the real error.
   let controlGate = null;
+  let greedyParity = null;
   if (!failure && options.suite.startsWith('spec-decode')) {
     const receiptCells = [];
     for (const entry of receipts) {
@@ -1454,6 +1678,9 @@ async function runSuite(options, manifests, tempDir) {
         receiptCells.push(...(receipt.cells ?? []));
       } catch { /* a receipt that will not parse is caught by the loop above */ }
     }
+    greedyParity = checkGreedyLosslessParity(receiptCells);
+    process.stderr.write(`Greedy-lossless parity: ${greedyParity.verdict} (${greedyParity.comparisons_total - greedyParity.mismatches}/${greedyParity.comparisons_total} match, baseline_deterministic=${greedyParity.baseline_deterministic})\n`);
+
     const floor = options.controlAcceptFloor ?? DEFAULT_CONTROL_ACCEPT_FLOOR;
     controlGate = { floor, ...assertPositiveControl(receiptCells, floor) };
     if (!controlGate.ok) {
@@ -1473,6 +1700,15 @@ async function runSuite(options, manifests, tempDir) {
     speculative_lane: options.specDecodeLane ?? null,
     qualification_eligible: (options.specDecodeLane ?? null) !== 'forced',
     positive_control: controlGate,
+    greedy_parity: greedyParity,
+    // Performance claims belong to the recommended lane. A greedy run measures
+    // an optimistic bound, because temperature-0 acceptance is exact-match
+    // rather than rejection sampling.
+    sampling_lane: options.samplingLane ?? null,
+    // Not merely "did we set a temperature". A lane that fell back to greedy
+    // because no source knew the recommendation is still an optimistic bound.
+    performance_claim_eligible: (options.samplingLane?.recommendation_known ?? false)
+      && (options.samplingLane?.temperature ?? 0) !== 0,
     receipts,
     complete: failure === null,
     failure: failure?.message ?? null,
@@ -1489,9 +1725,50 @@ if (options.suite.startsWith('spec-decode')) {
   process.stderr.write(`Draft depth: predicted effective K=${options.draftDepthFacts.predicted_effective_max_k} (${options.draftDepthFacts.evidence})\n`);
 }
 const allCells = await suiteCells(options.model, options.suite, options.image, options.expectedVisualTerms, options.mllmPrefillStepSize ?? 1024, options.workspacePack, options.speculativeModel ?? null, options.speculativeControlModel ?? null, options.speculativeTokens ?? DEFAULT_SPECULATIVE_TOKENS, options.speculativeMethods ?? ['mtp'], options.speculativeWorkloads ?? ['code'], options.disableSpeculativeAutoK ?? false);
-let cells = options.cells
+// Applied after the matrix is built so the sampling lane is orthogonal to cell
+// selection: the same cells run in both lanes and stay comparable by id.
+const samplingMode = options.sampling ?? 'greedy';
+if (!['greedy', 'recommended', 'explicit'].includes(samplingMode)) {
+  die(`--sampling must be greedy, recommended, or explicit; got ${samplingMode}.`);
+}
+const samplingLane = await resolveSamplingLane(identity, samplingMode, options.samplingVariant ?? 'default', options);
+// A profile asking for reasoning-on is a request, not an outcome; the chat
+// template decides. Record both so a receipt cannot claim a mode it never ran.
+samplingLane.reasoning_control = await reasoningControlFacts(identity);
+const reasoningRequested = samplingLane.reasoning === 'on' && samplingLane.reasoning_control.control === 'enable_thinking';
+samplingLane.reasoning_effective = reasoningRequested ? 'on' : 'off';
+if (samplingLane.reasoning === 'on' && !reasoningRequested) {
+  process.stderr.write(`Sampling lane requests reasoning-on, but ${samplingLane.reasoning_control.evidence}. Running reasoning-off and recording it.\n`);
+}
+if (samplingLane.note) process.stderr.write(`${samplingLane.note}\n`);
+process.stderr.write(`Sampling lane: ${samplingLane.mode} (source=${samplingLane.source}, temperature=${samplingLane.temperature}, top_p=${samplingLane.top_p ?? 'unset'}, top_k=${samplingLane.top_k ?? 'unset'}, reasoning=${samplingLane.reasoning_effective})\n`);
+// Greedy-lossless parity is only defined at temperature 0 -- above it,
+// speculative decoding is distribution-preserving rather than token-identical,
+// so completions cannot be compared. Say so once here rather than letting the
+// parity verdict be silently misread.
+if (samplingLane.temperature !== 0 && options.suite.startsWith('spec-decode')) {
+  process.stderr.write('Greedy-lossless parity is not measurable in this lane.\n');
+}
+options.samplingLane = samplingLane;
+// Neutral values are still worth sending: rapid-mlx defaulting to them is an
+// assumption, whereas sending them makes the receipt self-describing.
+const SAMPLING_PASSTHROUGH = ['top_p', 'top_k', 'min_p', 'presence_penalty', 'repetition_penalty'];
+let cells = (options.cells
   ? allCells.filter((cell) => options.cells.includes(cell.id))
-  : allCells;
+  : allCells
+).map((cell) => (samplingMode === 'greedy' ? cell : {
+  ...cell,
+  workload: {
+    ...cell.workload,
+    temperature: samplingLane.temperature,
+    ...Object.fromEntries(SAMPLING_PASSTHROUGH
+      .filter((key) => samplingLane[key] !== undefined)
+      .map((key) => [key, samplingLane[key]])),
+    ...(samplingLane.reasoning_control.control === 'enable_thinking'
+      ? { extra_body: { chat_template_kwargs: { enable_thinking: reasoningRequested } } }
+      : {}),
+  },
+}));
 if (options.cacheContexts || options.cacheMemoryMb || options.cacheDtypes || options.cacheDiskCheckpointIntervals) {
   if (options.suite !== 'cache') die('cache selectors require --suite cache.');
   cells = cells.filter((cell) => (
