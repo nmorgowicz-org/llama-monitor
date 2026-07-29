@@ -243,11 +243,23 @@ Sources:
 [scheduler mapping](https://github.com/raullenchai/Rapid-MLX/blob/206ed0e03b7b6fc7b3b2e6f68a7b60467f6e5abe/vllm_mlx/scheduler.py#L2626-L2637) ·
 [clamp](https://github.com/raullenchai/Rapid-MLX/blob/206ed0e03b7b6fc7b3b2e6f68a7b60467f6e5abe/vllm_mlx/spec_decode/mtp/generator.py#L600-L641)
 
-**Not yet observed directly.** The clamp emits
-`[MTP-chain-of-K] … clamping max_k from 4 to 1` when it fires. That string appears nowhere
-in the captured receipts, because server stderr was not retained. The K∈{0,1} histograms
-are equally consistent with the controller simply preferring K=1 on EV grounds. The clamp
-is proven from source, **inferred** for these specific runs.
+### Directly observed, 2026-07-29
+
+No longer an inference. With backend stdout/stderr persisted per cell (harness commit
+`8217f55`) and `--speculative-tokens 2` so the line can fire at all, the clamp was captured
+verbatim on `unsloth/Qwen3.6-27B-MLX-8bit`:
+
+```
+[MTP-chain-of-K] … clamping max_k from 2 to 1
+```
+
+`runtime.backend_log.clamp_verdict` records `clamp_observed` with `effective_max_k: 1`.
+This closes the ambiguity noted below: the K∈{0,1} histograms are the clamp, not an EV
+controller preferring K=1.
+
+> Superseded. Previously read: *"Not yet observed directly … The clamp is proven from
+> source, inferred for these specific runs."* True when written — server stderr was not
+> retained at that time.
 
 ### Unsloth's depth-2 guidance does not contradict this
 
@@ -407,6 +419,46 @@ user-owned trunk or an HF cache snapshot.
 
 ---
 
+## 10b. The `family` metric label is path-derived, not fact-derived
+
+Audited in `routes/metrics.py`. The label on every `rapid_mlx_spec_decode_*` series is:
+
+```python
+family = getattr(cfg, "model_alias", None) or _derive_mtp_family(cfg)
+```
+
+Neither branch reports a model family:
+
+- **With an alias set**, the alias is used *verbatim*. The upstream docstring's own
+  example is `"qwen3.5-9b-4bit" → "qwen3.5-9b-4bit"` — a quantization-specific alias,
+  not a family.
+- **Without an alias**, `_derive_mtp_family` substring-matches `model_name` /
+  `model_path` / `model` against a six-row hint table (`gemma-4`, `gemma4`, `qwen3.5`,
+  `qwen3_5`, `qwen3.6`, `qwen3_6`) and returns `"unknown"` on no match.
+
+So the label is a function of **the served path string**, and a directory rename changes it.
+
+**The `family="unknown"` in the MXFP8 receipts is not a model property.** Audited across
+every receipt on disk:
+
+| `family` | Served path | Receipts |
+|---|---|---|
+| `qwen3.6` | `…/models--unsloth--Qwen3.6-27B-MLX-8bit/snapshots/…` | served-off, positive-control, fixed-k4 |
+| `qwen3.6` | `…/models--nightmedia--Qwen3.6-…-qx64-hi-mlx/snapshots/…` | qx64 off, subject, prose-pair, code-32k-pair |
+| `unknown` | `…/scratchpad/nm-trunk-only` | mxfp8 off, mxfp8 subject |
+
+Both HF-cache paths carry `Qwen3.6` in the repo directory and sniff correctly. The MXFP8
+cells were served through a sanitized scratchpad directory whose name contains no family
+substring — the harness caused the label, the model did not.
+
+**Consequence.** Never key an aggregation, alert, or capability decision on `family`. It
+splits on operator path layout and collapses to `unknown` for any locally-managed model
+directory, which is precisely the layout Phase 6.5b's managed sidecar store will use. The
+benchmark harness's control gate therefore sums `rapid_mlx_spec_decode_{accepts,attempts}_total`
+by **metric-name prefix** across all label sets, and is immune by construction.
+
+---
+
 ## 11. Known-unknowns
 
 Carried forward to Phase 6.5. Nothing below has been measured.
@@ -414,7 +466,8 @@ Carried forward to Phase 6.5. Nothing below has been measured.
 1. Repeated-trial variance, thermal drift, and cell-ordering effects (everything above is n=1).
 2. The §4.3 speedup inversion.
 3. Why the depth controller barely parks at 72% acceptance (§4.1).
-4. Direct observation of the K=1 clamp log (§5).
+4. ~~Direct observation of the K=1 clamp log (§5).~~ **Closed 2026-07-29** — observed,
+   `clamping max_k from 2 to 1`. See §5.
 5. Tool-call warm/repeat/extension behaviour under MTP.
 6. 65k and 131k prompt tiers; completion lengths other than 512.
 7. Whether a same-shape wrong-parent sidecar is detectable before serving.
