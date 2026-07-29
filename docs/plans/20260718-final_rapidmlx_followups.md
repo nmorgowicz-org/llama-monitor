@@ -1670,7 +1670,8 @@ Rules:
 | 4 | Normalized MLX architecture metadata | 0, 2 | A25, A53 | 170k | Not started |
 | 5 | Backend execution policies and first-class estimator (formal sub-phases 5a → 5b, §E5) | 3–4 (5b also needs 5a Verified) | A1, A3–A5, A21–A22, A42–A43, A46–A48, A53–A54, A58 | two sub-phases, each <=120k, each own gate + fresh Verifier | Not started |
 | 6 | Cross-backend cache policies, recommendations, and teaching | 5 | A6–A9, A21, A23, A31–A37, A41 | 170k | Not started |
-| 7 | Critical settings and shared wizard/editor component | 2–3, 5–6 | A2, A5, A7–A8, A26, A30, A33, A38–A40, A43, A45, A47–A49, A51 | two Builder packets, each <=120k | Not started |
+| 6.5 | Speculative decoding / MTP runtime qualification and managed sidecar artifacts (formal sub-phases 6.5a → 6.5b, §E6.5) | 3, 5 (6.5b also needs 6.5a Verified) | A2, A14, A17–A19, A22, A26, A51–A52 | two sub-phases, each <=120k, each own gate + fresh Verifier | Not started |
+| 7 | Critical settings and shared wizard/editor component | 2–3, 5–6, 6.5 | A2, A5, A7–A8, A26, A30, A33, A38–A40, A43, A45, A47–A49, A51 | two Builder packets, each <=120k | Not started |
 | 8 | HF discovery and Model Library convergence | 2–5 | A15, A17, A25, A29, A45–A46, A51–A57 | two Builder packets, each <=120k | Not started |
 | 9 | Conversation formatting, client routes, and revision-pinned chat-template substitution (tool-call reliability) | 2–3 | A10, A27 (both resolved by E1), A38–A40 | 120k | Not started |
 | 10 | Screenshot-driven wizard/preset/library/HF IA | 7–9 | A16, A28, A32–A33, A50–A51 | 170k | Not started |
@@ -1909,16 +1910,53 @@ _— Phase 5a gate falls here; 5b begins. A fresh Verifier must pass Phase 5a (i
 
 **Handoff emphasis:** recommendation examples, refusal cases, exact copy, memory math, argv/round-trip tests, capture paths.
 
-### Phase 6.5 — Speculative decoding / MTP runtime qualification
+### Phase 6.5 — Speculative decoding / MTP runtime qualification and managed sidecar artifacts
 
-Before Phase 7 exposes speculative controls, qualify the selected Rapid source
-and current llama build end to end. This phase supersedes stale Phase 3/5 MTP
-assumptions with revision-pinned source inventory, acceptance/correctness and
-memory benchmarks, exact requested/effective/fallback evidence, and a fresh
-estimator ownership audit. Cover Qwen embedded/extracted/external candidates
-only when the source admits them, and GGUF embedded/`-md` draft-model paths
-including Gemma 4. Rapid fixes `738a44e`, `eab126d`, and `a79997e` are inputs,
-not a basis for UI exposure by themselves.
+**Objective and outcome:** Before Phase 7 exposes speculative controls, qualify the selected Rapid source and current llama build end to end, and give the app a safe way to obtain and place MTP sidecar artifacts. This phase supersedes stale Phase 3/5 MTP assumptions with revision-pinned source inventory, acceptance/correctness and memory benchmarks, exact requested/effective/fallback evidence, and a fresh estimator ownership audit. Cover Qwen embedded/extracted/external candidates only when the source admits them, and GGUF embedded/`-md` draft-model paths including Gemma 4. Rapid fixes `738a44e`, `eab126d`, and `a79997e` are inputs, not a basis for UI exposure by themselves.
+
+The measurement history that motivates this phase — two stacked tooling bugs, the served three-trunk screening matrix, the K=1 SSM clamp, and the `aliases.json` reliability findings — lives in `docs/reference/rapid-mlx-mtp-evidence.md`. Do not restate its numbers here; cite it. `docs/plans/20260729-rapidmlx_speculative_decoding_handoff.md` carries live state and open questions between working sessions. Note that every served figure in the evidence record is `n=1` screening evidence, explicitly not qualification: 6.5a exists to replace it.
+
+**Formal sub-phase split (E6.5).** Phase 6.5 is executed as two formal sub-phases on the §E5 pattern, each with its own hard gate and its own **fresh Verifier pass**. The split is not a token-fit measure; it exists because 6.5b's artifact-management decisions are only answerable once 6.5a has produced qualification results, and a single packet would let unqualified evidence leak into placement and eligibility logic:
+
+- **Phase 6.5a — qualification and benchmark validity (Builder brief items 1–11):** captured-stderr effective-depth proof, repeated counterbalanced trials, forced-vs-natural lane separation, mandatory positive control, sidecar preflight, paired-metric reporting, tier/tool-call/greedy-parity coverage, label-safety audit, fact-derived capability, symmetric llama.cpp draft coverage, and estimator ownership. 6.5a must pass its own gate before 6.5b starts.
+- **Phase 6.5b — managed sidecar artifacts (Builder brief items 12–15):** app-managed acquisition and out-of-trunk placement, per-artifact provenance, in-trunk-layout refusal, and qualification-gated eligibility.
+
+**Budget:** two sub-phases, each <=120k. **Prerequisites:** Phase 3 (runtime capability qualification), Phase 5 (estimator and memory ownership); A2, A14, A17–A19, A22, A26, A51–A52. **Files:** `scripts/rapid-mlx-benchmark-suite.mjs`, `scripts/model-runtime-benchmark.mjs`, `docs/reference/model-runtime-benchmarking.md`, Rapid capability/qualification modules, `tests/fixtures/calibration/`, MTP artifact resolution and companion-download paths, memory estimator MTP components.
+
+**Builder brief — 6.5a (qualification and benchmark validity):**
+
+1. Capture and retain backend stderr per benchmark attempt and assert on it. The `[MTP-chain-of-K] … clamping max_k` line must be observed directly, not inferred, before any effective-depth claim is recorded. Separate *requested*, *effective*, and *observed* K in every receipt; the current histogram alone cannot distinguish a hardware clamp from a controller preference.
+2. Add repeated trials with counterbalanced ordering and a thermal settle between cells, then re-run the trunk matrix. The unresolved inversion — highest acceptance producing the smallest throughput gain — must either reproduce or disappear. It is the single most likely thing to invalidate a product claim, so it gates everything downstream.
+3. Split forced from naturally-eligible lanes. The suite currently passes `--force-spec-decode` unconditionally whenever a speculative config is present, because the tested aliases advertise `supports_spec_decode=false`. That is a legitimate research override and an illegitimate qualification basis. Record which lane produced each number, and never let a forced-lane result reach an enablement decision.
+4. Require a known-good positive control in every matrix (`mlx-community/Qwen3.6-27B-MTP-4bit`) and fail the run if it does not clear its acceptance floor. A run without a positive control cannot distinguish "this pairing does not work" from "the harness does not work" — precisely the failure that produced the void receipts.
+5. Add a sidecar preflight: shifted-RMSNorm norm-mean check, parent-model identity, tensor-shape and quantization-mode compatibility, and rejection of a sidecar living inside the trunk directory. A same-shape wrong-parent sidecar must be refused before serving, not diagnosed from a bad accept ratio.
+6. Report acceptance, generation throughput, TTFT, and end-to-end latency as a paired set, with the prompt length and completion length that produced them. Acceptance alone is not a benefit signal; the recorded 32k cell pairs 95.3% acceptance with +1.6% end-to-end. State the speedup convention (`new/old - 1`) in the harness output itself so downstream readers cannot mistake it for fraction-of-time-saved.
+7. Extend coverage to the tiers Phase 7 will actually expose: 65k and 131k contexts, completion lengths other than 512, and tool-call warm/repeat/extension behaviour under MTP. Verify greedy-lossless token parity between MTP-off and MTP-on runs; a speculative path that changes greedy output is a correctness failure regardless of speed.
+8. Audit metric labelling for aggregation safety — symlinked trunk directories currently emit `family="unknown"` where sibling cells emit `family="qwen3.6"`, which silently drops series from any label-keyed rollup.
+9. Re-derive Rapid MTP capability from checkable model facts (`layer_types`, config-declared MTP layers, tensor presence) rather than `aliases.json`, which has now been wrong twice, including on a directly verifiable architectural fact. Record alias metadata as an observation, never as a source of truth.
+10. Cover the llama.cpp side symmetrically: embedded and `-md` draft-model paths including Gemma 4, against the pinned build, with the same paired-metric and positive-control discipline.
+11. Audit estimator ownership for speculative state — draft weights, MTP cache/recurrent state, and sidecar resident bytes must be additive in Phase 5's estimator and attributable to a named owner.
+
+_— Phase 6.5a gate falls here; 6.5b begins. A fresh Verifier must pass 6.5a before the following items start. —_
+
+**Builder brief — 6.5b (managed sidecar artifacts):**
+
+12. Implement app-managed MTP sidecar acquisition and placement for qualified pairings only. Placement must be outside the trunk directory by construction; upstream's own extractor defaults to writing inside it, which silently corrupts an already-converted MLX trunk, so the app cannot inherit that default.
+13. Record provenance per artifact — source repository, revision, extraction script revision, hash, parent trunk, quantization mode and bit width — and surface it. Sidecar bit width is independent of trunk bit width; do not reintroduce a trunk-width coupling rule.
+14. Detect and refuse the corrupting in-trunk sidecar layout on any model the app is asked to launch, whether or not the app created it, with an explanation and a remediation path.
+15. Make qualification results the input to eligibility: a pairing is offered only where a naturally-eligible lane produced a passing paired-metric result. Unqualified pairings may remain reachable behind an explicit research override, labelled as such.
+
+**Verifier brief:** Re-run the matrix independently and confirm the inversion's disposition; confirm the clamp log is present in captured stderr and that recorded effective K matches it; confirm forced and natural lanes are separable in stored receipts and that no enablement decision reads a forced result; confirm the positive control fails the run when deliberately broken; feed a same-shape wrong-parent sidecar, a stale-extractor sidecar, and an in-trunk sidecar and confirm each is refused with a distinguishable reason; diff greedy output between MTP-off and MTP-on; confirm speculative memory components appear additively in the Phase 5 estimator; confirm no capability decision reads `aliases.json`.
+
+**Hard gates — Phase 6.5a (items 1–11):** effective draft depth is proven from captured backend output, never inferred; no single-trial number is recorded as a qualification result; forced-override and naturally-eligible lanes are stored distinctly and only the latter can gate exposure; every matrix carries a passing positive control; acceptance is never reported without its paired TTFT and end-to-end figures; the speedup convention is stated in the artifact that carries the numbers; greedy-lossless parity holds between MTP-off and MTP-on or the pairing is disqualified; capability derives from model facts rather than alias metadata; speculative memory is additive and owned in the estimator; llama.cpp draft paths meet the same bar as Rapid.
+
+**Hard gates — Phase 6.5b (items 12–15):** the app never writes a sidecar into a trunk directory and refuses to launch a trunk that contains one; every managed artifact carries full provenance including extraction-script revision and hash; no trunk-width/sidecar-width coupling rule is reintroduced; only 6.5a-qualified pairings are offered by default, and research overrides are labelled and cannot be reached accidentally.
+
+**Stop/escalate:** the throughput inversion reproduces and cannot be explained; the clamp cannot be observed in backend output at all; upstream changes the sidecar layout or extraction contract mid-phase; a qualified pairing fails greedy parity; qualification would require modifying installed runtime source.
+
+**Non-goals:** speculative controls in the wizard/preset UI (Phase 7); Model Library and HF discovery surfacing of MTP companions (Phase 8); IA placement (Phase 10); diagnostics dashboards for speculative metrics (Phase 11); any MTP claim for vision or audio paths.
+
+**Handoff emphasis:** captured stderr paths, the trial protocol and its ordering, which lane produced which number, positive-control results, refusal cases and their reasons, greedy-parity diffs, artifact provenance records.
 
 ### Phase 7 — Critical launch settings and shared backend-settings UI
 
