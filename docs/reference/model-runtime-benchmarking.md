@@ -72,9 +72,88 @@ node scripts/rapid-mlx-benchmark-suite.mjs run \
   --out tests/fixtures/calibration/rapid-mlx-receipts/unsloth-context
 ```
 
-Suites: `smoke`, `context`, `pflash`, `cache`, `tools`, `image --image PATH`, and `all`. Use `plan` instead of `run` to print the generated cells/argv without loading a model. `--resume` preserves valid prior receipts and runs only missing cells; a `suite-index.json` is always written, including partial receipts and an error log tail if a server cell fails. The driver deliberately waits after every server shutdown for Metal/file-backed model pages to settle before starting the next fresh cell. It gives every server an isolated temporary home directory while retaining the real Hugging Face cache, so persistent prefix-cache entries cannot contaminate a cold cache row or overwrite user cache data. The driver is Rapid-specific; `model-runtime-benchmark.mjs` remains the runtime-neutral execution and reporting contract for llama.cpp, OMLX, and future backends.
+Suites: `smoke`, `context`, `pflash`, `cache`, `tools`, `image --image PATH`,
+`prefill`, `quant-baseline`, `turboquant-scale`, `ubatch`, `spec-decode`,
+`spec-decode-warm`, and `all`. Use `plan` instead of `run` to print the
+generated cells/argv without loading a model. `--resume` preserves valid prior
+receipts and runs only missing cells; a `suite-index.json` is always written,
+including partial receipts and an error log tail if a server cell fails. The
+driver deliberately waits after every server shutdown for Metal/file-backed
+model pages to settle before starting the next fresh cell. It gives every
+server an isolated temporary home directory while retaining the real Hugging
+Face cache, so persistent prefix-cache entries cannot contaminate a cold cache
+row or overwrite user cache data. The driver is Rapid-specific;
+`model-runtime-benchmark.mjs` remains the runtime-neutral execution and
+reporting contract for llama.cpp, OMLX, and future backends.
 
 The runner records actual server-reported prompt/completion tokens, raw prompt throughput (raw prompt tokens divided by TTFT), generation tokens per second, selected Prometheus metrics before/after each request, and a bounded fidelity result. When a runtime exports PFlash compressed-token metrics, the receipt also records compressed and retained-token estimates. Raw PP includes compression/scoring time; it is not interchangeable with a native full-prefill kernel rate. Context cells scatter five numeric `CHECK_*` markers across the corpus (10/30/50/70/90% of context) and score fidelity as graduated recall (`marker_recall.recall_rate`) instead of a single verbatim string match, so results stay meaningful across sampling/temperature variation and cannot be satisfied by pattern-completing repeated filler text. Cache cells may use `cold`, `repeat`, and `extension` phases. Tool cells can declare tools and an expected tool name; image cells should be added only after the runtime has independently passed an image-input smoke test.
+
+### MTP speculative-decoding qualification
+
+Never put `model-mtp.safetensors` in an already-converted MLX trunk directory.
+Pass a separate sidecar file, directory, or HF repo. The `spec-decode` suite
+refuses an implicit trunk-directory fallback, a selected sidecar path inside
+the trunk, or a trunk that already contains `model-mtp.safetensors`. It then
+performs a preflight before launch: it records the exact sidecar
+revision/SHA-256, checks core tensors, rejects the stale RMSNorm convention,
+infers affine packing from the sidecar tensors, and checks trunk
+architecture/hidden-size/MoE layout compatibility. Rapid performs the final
+full key/shape/dtype validation while injecting.
+
+Start with the official sidecar as a positive control:
+
+```bash
+node scripts/rapid-mlx-benchmark-suite.mjs plan \
+  --model unsloth/Qwen3.6-27B-MLX-8bit \
+  --suite spec-decode \
+  --cell spec-control-mtp-8000-int8 \
+  --speculative-control-model mlx-community/Qwen3.6-27B-MTP-4bit \
+  --speculative-tokens 2
+```
+
+For an extracted head, use `--speculative-model PATH_OR_REPO`; when both
+control and subject are supplied, cells are named `spec-control-mtp-*` and
+`spec-subject-mtp-*`. `--speculative-workloads code,prose` adds both bounded
+512-token workload classes. The default is `code`. `--disable-speculative-auto-k`
+selects Rapid's legacy fixed-K=1 diagnostic; it does **not** force the
+configured maximum K. `--speculative-tokens` sets only the configured maximum;
+the report's observed K histogram is authoritative. In Rapid-MLX 0.11.1,
+Qwen3.5/3.6 hybrid SSM caches are hard-clamped to K=1 because chained-K
+rollback snapshots are not implemented for SSM state. Auto mode therefore
+chooses only K=0/K=1 for these models even when the configured maximum is 2 or higher.
+Chained K>=2 is currently available only to compatible non-SSM model caches.
+This is enforced from the real cache type, so `--force-spec-decode`,
+`--no-hybrid`, legacy MTP depth flags, profile overrides, and direct scheduler
+configuration do not bypass it. Removing the source guard is unsafe: the
+current GatedDeltaNet patch saves only one recurrent-state rollback boundary,
+while K=2 needs distinct restore points after the target token and first
+accepted draft. See the pinned
+[Rapid generator](https://github.com/raullenchai/Rapid-MLX/blob/206ed0e03b7b6fc7b3b2e6f68a7b60467f6e5abe/vllm_mlx/spec_decode/mtp/generator.py#L600-L635)
+and
+[cache patch](https://github.com/raullenchai/Rapid-MLX/blob/206ed0e03b7b6fc7b3b2e6f68a7b60467f6e5abe/vllm_mlx/spec_decode/mtp/cache_patch.py#L284-L340).
+
+Unsloth's recommended depth 2 is backend-specific: its
+[Qwen3.6 card](https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/blob/82d411acf4a06cfb8d9b073a5211bf410bfc29bf/README.md#L169-L173)
+targets vLLM's `qwen3_next_mtp`, and the
+[dedicated MTP GGUF card](https://huggingface.co/unsloth/Qwen3.6-27B-MTP-GGUF/blob/5cb35eb3dcbf52dbce5f87dbc64df6aaffadcace/README.md#L48-L55)
+targets llama.cpp. It is not an intrinsic model constant and does not override
+Rapid's SSM limitation. For current Rapid qualification, compare:
+
+- no speculative decoding;
+- fixed K=1 (`--speculative-tokens 1 --disable-speculative-auto-k`);
+- auto K<=1 (`--speculative-tokens 1`);
+- requested maximum K=2 (`--speculative-tokens 2`) as a clamp proof.
+
+Label the last result `requested max K=2, effective max K=1`, unless its
+observed histogram actually contains K=2. Use a fresh server for every cell
+because the controller registry persists by model identity within a process.
+
+Generate a paired report by passing the matching off/control/subject receipt
+files to `model-runtime-benchmark.mjs report`. Its speculative section uses
+per-request labeled counter deltas and reports chosen-K distribution,
+acceptance, parking, tokens saved, TG change, TTFT change, and end-to-end
+change. Do not recommend enablement from acceptance or TG alone: long-prefill
+rows can gain decode throughput while losing most of that benefit to TTFT.
 
 ### Cache qualification
 

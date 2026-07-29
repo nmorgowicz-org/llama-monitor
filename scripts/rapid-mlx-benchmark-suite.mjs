@@ -7,11 +7,12 @@
  * OpenAI-compatible runner, and writes an index of the resulting receipts.
  * This deliberately keeps the generic runner reusable for llama.cpp/OMLX.
  */
-import { mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 
 const DEFAULT_PORT = 18087;
 // Matches rapid-mlx serve --help's own documented default (0.0-1.0, default: 0.90).
@@ -23,6 +24,12 @@ const DEFAULT_UTILIZATION = '0.90';
 // target more.
 const CONTEXT_WORDS = { 8000: 3000, 16000: 6000, 32000: 12500, 65536: 25000, 131072: 52000, 160000: 63500, 200000: 79500 };
 const MODEL_PREFIX = 'models--';
+// This is only the requested ceiling, not proof that K=2 executes. It is the
+// smallest useful clamp probe above K=1 for Qwen3.5/3.6 and matches the common
+// vLLM/llama.cpp recommendation operators are likely to compare against.
+// Qualification still needs explicit K=1 and requested-K=2 cells; the observed
+// K histogram, not this value, is authoritative.
+const DEFAULT_SPECULATIVE_TOKENS = 2;
 // Qwen3.5/3.6 think by default. Without a bounded reasoning_max_tokens, a
 // 128-token probe cap is spent entirely on <think> preamble and the model
 // never reaches the CHECK_* answer, corrupting the fidelity check (not the
@@ -45,6 +52,7 @@ function parseArgs(argv) {
     if (key === '--keep-manifests') { options.keepManifests = true; continue; }
     if (key === '--resume') { options.resume = true; continue; }
     if (key === '--force-hybrid') { options.forceHybrid = true; continue; }
+    if (key === '--disable-speculative-auto-k') { options.disableSpeculativeAutoK = true; continue; }
     const value = rest[index + 1];
     if (value === undefined) die(`Missing value for ${key}`);
     index += 1;
@@ -66,13 +74,37 @@ function parseArgs(argv) {
     else if (key === '--cache-disk-checkpoint-intervals') options.cacheDiskCheckpointIntervals = value.split(',').map((item) => Number(item));
     else if (key === '--revision') options.revision = value;
     else if (key === '--chat-template') options.chatTemplate = value;
+    else if (key === '--speculative-model') options.speculativeModel = value;
+    else if (key === '--speculative-control-model') options.speculativeControlModel = value;
+    else if (key === '--speculative-tokens') options.speculativeTokens = Number(value);
+    else if (key === '--speculative-methods') options.speculativeMethods = value.split(',');
+    else if (key === '--speculative-workloads') options.speculativeWorkloads = value.split(',');
+    // `rapid-mlx info` only recognizes HF-repo-alias models; a plain local
+    // --model directory (e.g. an MTP sidecar diagnostic path) comes back
+    // "(none)"/"(none)" from profileOverridesFor, so these let the operator
+    // supply the same values the model's repo alias would have produced.
+    else if (key === '--tool-call-parser') options.toolCallParser = value;
+    else if (key === '--reasoning-parser') options.reasoningParser = value;
     else die(`Unknown option: ${key}`);
   }
   if (!['plan', 'run'].includes(command)) die('Use plan or run.');
   if (!options.model) die('--model is required.');
   if (command === 'run' && !options.out) die('run requires --out RECEIPT_DIRECTORY.');
-  if (!['smoke', 'context', 'pflash', 'cache', 'tools', 'image', 'prefill', 'quant-baseline', 'turboquant-scale', 'ubatch', 'all'].includes(options.suite)) {
+  if (!['smoke', 'context', 'pflash', 'cache', 'tools', 'image', 'prefill', 'quant-baseline', 'turboquant-scale', 'ubatch', 'spec-decode', 'spec-decode-warm', 'all'].includes(options.suite)) {
     die(`Unknown suite: ${options.suite}`);
+  }
+  if (options.suite.startsWith('spec-decode')) {
+    if (!options.speculativeModel && !options.speculativeControlModel) {
+      die('Spec-decode suites require --speculative-model and/or --speculative-control-model; the trunk directory is never used as an implicit sidecar.');
+    }
+    const speculativeTokens = options.speculativeTokens ?? DEFAULT_SPECULATIVE_TOKENS;
+    if (!Number.isInteger(speculativeTokens) || speculativeTokens < 1) {
+      die('--speculative-tokens must be an integer >= 1. This is a configured ceiling; the observed K histogram is authoritative.');
+    }
+    const unknownWorkloads = (options.speculativeWorkloads ?? ['code']).filter((name) => !['code', 'prose'].includes(name));
+    if (unknownWorkloads.length) die(`Unknown speculative workload(s): ${unknownWorkloads.join(', ')}; use code and/or prose.`);
+    const unknownMethods = (options.speculativeMethods ?? ['mtp']).filter((name) => name !== 'mtp');
+    if (unknownMethods.length) die(`This sidecar-qualified suite currently supports only method=mtp; got ${unknownMethods.join(', ')}.`);
   }
   return { command, options };
 }
@@ -122,6 +154,7 @@ function configuration({
   mllm = false,
   prefillStepSize = DEFAULT_PREFILL_STEP_SIZE,
   mllmPrefillStepSize = null,
+  speculative = null,
 }) {
   if (mllm && pflash !== 'off') die('MLLM benchmark cells must disable PFlash.');
   if (mllm && !SAFE_MLLM_PREFILL_STEPS.has(mllmPrefillStepSize)) {
@@ -134,6 +167,7 @@ function configuration({
   // label is the authoritative assertion for that A/B, not the pre-transform
   // `--kv-cache-dtype` request.
   if (turboquant === 'none') expectedMetrics[`rapid_mlx_kv_cache_dtype{dtype="${dtype}"}`] = 1;
+  const speculativeMethod = speculative?.method ?? 'off';
   return {
     kv_cache_dtype_requested: dtype,
     turboquant_requested: turboquant,
@@ -152,6 +186,16 @@ function configuration({
     // above 2048: larger values caused unsafe unified-memory spikes on M5
     // Max before request processing began.
     mllm_prefill_step_size: mllmPrefillStepSize,
+    // 'off' omits --speculative-config entirely (baseline control row).
+    // Non-off methods require an explicit external sidecar file/directory/repo.
+    // Never fall back to the trunk directory: an in-dir model-mtp.safetensors
+    // can be globbed as a trunk shard by mlx-lm and corrupt model loading.
+    speculative_method: speculativeMethod,
+    speculative_model: speculativeMethod === 'off' ? null : (speculative?.model ?? null),
+    speculative_role: speculativeMethod === 'off' ? 'baseline' : (speculative?.role ?? 'subject'),
+    speculative_workload: speculative?.workload ?? null,
+    num_speculative_tokens: speculativeMethod === 'off' ? null : (speculative?.numSpeculativeTokens ?? DEFAULT_SPECULATIVE_TOKENS),
+    speculative_disable_auto_k: speculativeMethod === 'off' ? null : Boolean(speculative?.disableAutoK),
     expected_metrics: expectedMetrics,
   };
 }
@@ -175,7 +219,7 @@ async function imageFixtureMetadata(imagePath) {
   };
 }
 
-async function suiteCells(model, suite, imagePath, expectedVisualTerms = [], mllmPrefillStepSize = 1024, workspacePackPath = 'tests/fixtures/calibration/workspace-cache/project-pack.json') {
+async function suiteCells(model, suite, imagePath, expectedVisualTerms = [], mllmPrefillStepSize = 1024, workspacePackPath = 'tests/fixtures/calibration/workspace-cache/project-pack.json', speculativeModel = null, speculativeControlModel = null, speculativeTokens = DEFAULT_SPECULATIVE_TOKENS, speculativeMethods = ['mtp'], speculativeWorkloads = ['code'], disableSpeculativeAutoK = false) {
   const include = (name) => suite === 'all' || suite === name;
   const cells = [];
   let workspacePack = null;
@@ -238,6 +282,131 @@ async function suiteCells(model, suite, imagePath, expectedVisualTerms = [], mll
     for (const prefillStepSize of ['512', '2048']) {
       for (const tokens of [32000, 65536, 131072, 160000, 200000]) {
         cells.push(cell(model, `ubatch-${prefillStepSize}-context-${tokens}`, tokens, configuration({ dtype: 'int8', prefillStepSize })));
+      }
+    }
+  }
+  // Diagnostic pass for spec-decode/MTP draft acceptance: an 'off' control
+  // row plus one row per requested --speculative-methods entry, at each
+  // context tier, so accept-ratio/tokens-saved/park-rate (captured
+  // automatically via metrics_delta in model-runtime-benchmark.mjs) can be
+  // compared against a same-config, non-speculative baseline instead of a
+  // bare pass/fail read of a single run. Fixed at dtype int8 and the
+  // prefill-step-size winner (512): this suite isolates the spec-decode
+  // variable, not a KV-dtype or prefill sweep. Deliberately NOT folded into
+  // 'all' for the same reason as 'prefill'/'quant-baseline': a one-time
+  // diagnostic pass, not the recurring model matrix.
+  if (suite === 'spec-decode') {
+    const workloadProfiles = {
+      code: {
+        suffix: '',
+        overrides: {
+          corpus: 'code',
+          markers: null,
+          instruction: 'Continue the TypeScript reference with additional typed validation functions. Output TypeScript code only and continue until the token budget is exhausted.',
+          max_tokens: 512,
+          minimum_completion_tokens: 256,
+          extra_body: { chat_template_kwargs: { enable_thinking: false } },
+        },
+      },
+      prose: {
+        suffix: '-prose',
+        overrides: {
+          corpus: 'prose',
+          markers: null,
+          instruction: 'Write a coherent technical essay about reliable local inference systems. Use the reference for themes, do not quote it, and continue until the token budget is exhausted.',
+          max_tokens: 512,
+          minimum_completion_tokens: 256,
+          extra_body: { chat_template_kwargs: { enable_thinking: false } },
+        },
+      },
+    };
+    const sidecars = [
+      ...(speculativeControlModel ? [{ role: 'control', model: speculativeControlModel }] : []),
+      ...(speculativeModel && speculativeModel !== speculativeControlModel ? [{ role: 'subject', model: speculativeModel }] : []),
+    ];
+    for (const workloadName of speculativeWorkloads) {
+      const profile = workloadProfiles[workloadName];
+      for (const tokens of [8000, 32000, 65536, 131072]) {
+        cells.push(cell(model, `spec-off${profile.suffix}-${tokens}-int8`, tokens, configuration({
+          dtype: 'int8',
+          prefillStepSize: '512',
+          maxTokens: profile.overrides.max_tokens,
+          speculative: { method: 'off', workload: workloadName },
+        }), profile.overrides));
+        for (const { role, model: sidecarModel } of sidecars) {
+          for (const method of speculativeMethods) {
+            cells.push(cell(model, `spec-${role}-${method}${profile.suffix}-${tokens}-int8`, tokens, configuration({
+              dtype: 'int8',
+              prefillStepSize: '512',
+              maxTokens: profile.overrides.max_tokens,
+              speculative: {
+                method,
+                model: sidecarModel,
+                role,
+                workload: workloadName,
+                numSpeculativeTokens: speculativeTokens,
+                disableAutoK: disableSpeculativeAutoK,
+              },
+            }), profile.overrides));
+          }
+        }
+      }
+    }
+  }
+  // Warm, code-pattern control for the cold spec-decode cells above: those
+  // only ever probe a fresh session, but the acceptance rates the operator
+  // actually observes come from warm, multi-turn coding sessions (persisted
+  // server, repeated tool-call rounds), not an isolated single-shot request.
+  // Reuses the 'tools' suite's cold->repeat->extension sequence and
+  // read_file/apply_patch tool_trace so each phase exercises a genuine warm
+  // prefix-cache + tool-call round-trip. One off/mtp pair at the tools
+  // suite's own 8k tier is enough to discriminate benchmark-methodology from
+  // genuine model/draft-quality causes; this is a diagnostic control, not a
+  // sweep. Its own suite name so it can be re-run in isolation from the full
+  // (slow, already-run) cold spec-decode sweep above.
+  if (suite === 'spec-decode' || suite === 'spec-decode-warm') {
+    const specToolWorkload = (overrides = {}) => ({
+      max_tokens: 4096,
+      instruction: 'Use read_file on src/example.ts. After seeing the file result, use apply_patch to replace the marked value.',
+      markers: null,
+      extension_words: 500,
+      tools: toolDefinitions(),
+      extra_body: { tool_choice: 'required', reasoning_max_tokens: 2048 },
+      expected_tool_name: 'read_file',
+      expected_tool_arguments: { path: 'src/example.ts' },
+      tool_trace: { steps: [{
+        tool_name: 'read_file',
+        tool_result: 'export const MARKED_VALUE = "before";\n',
+        expected_tool_name: 'apply_patch',
+        expected_tool_arguments: { path: 'src/example.ts' },
+      }] },
+      ...overrides,
+    });
+    const specWarmOff = cell(model, 'spec-warm-off-8000-int8', 8000, configuration({ dtype: 'int8', prefillStepSize: '512', cache: true, maxTokens: 4096, speculative: { method: 'off', workload: 'tools' } }), specToolWorkload());
+    specWarmOff.sequence = ['cold', 'repeat', 'extension'];
+    cells.push(specWarmOff);
+    const sidecars = [
+      ...(speculativeControlModel ? [{ role: 'control', model: speculativeControlModel }] : []),
+      ...(speculativeModel && speculativeModel !== speculativeControlModel ? [{ role: 'subject', model: speculativeModel }] : []),
+    ];
+    for (const { role, model: sidecarModel } of sidecars) {
+      for (const method of speculativeMethods) {
+        const specWarm = cell(model, `spec-warm-${role}-${method}-8000-int8`, 8000, configuration({
+          dtype: 'int8',
+          prefillStepSize: '512',
+          cache: true,
+          maxTokens: 4096,
+          speculative: {
+            method,
+            model: sidecarModel,
+            role,
+            workload: 'tools',
+            numSpeculativeTokens: speculativeTokens,
+            disableAutoK: disableSpeculativeAutoK,
+          },
+        }), specToolWorkload());
+        specWarm.sequence = ['cold', 'repeat', 'extension'];
+        cells.push(specWarm);
       }
     }
   }
@@ -480,20 +649,284 @@ function argvFor(model, config, port, utilization, servedModelName = null, profi
   const prefillStepSize = config.mllm
     ? config.mllm_prefill_step_size
     : (config.prefill_step_size ?? DEFAULT_PREFILL_STEP_SIZE);
-  return ['--no-telemetry', 'serve', model, ...(servedModelName ? ['--served-model-name', servedModelName] : []), '--port', String(port), '--host', '127.0.0.1', '--max-num-seqs', '1', '--max-concurrent-requests', '1', cache ? '--enable-prefix-cache' : '--disable-prefix-cache', ...(cache ? ['--cache-memory-mb', String(config.cache_memory_mb ?? 8192), '--hybrid-cache-entries', String(config.hybrid_cache_entries ?? 16)] : []), '--kv-disk-checkpoint-interval', String(config.disk_checkpoint_interval ?? 0), '--pflash', config.pflash, ...(config.pflash === 'auto' ? ['--pflash-threshold', '32768'] : []), '--prefill-step-size', String(prefillStepSize), '--max-tokens', String(config.server_max_tokens ?? 128), '--kv-cache-dtype', config.kv_cache_dtype_requested, '--kv-cache-turboquant', config.turboquant_requested, config.mllm ? '--mllm' : '--no-mllm', '--gpu-memory-utilization', String(utilization), ...(profile.tool_call_parser ? ['--tool-call-parser', profile.tool_call_parser, '--enable-auto-tool-choice'] : []), ...(profile.reasoning_parser ? ['--reasoning-parser', profile.reasoning_parser] : []), ...(profile.force_hybrid ? ['--force-hybrid'] : []), '--log-level', 'INFO'];
+  // The sidecar's "model" field must be an explicit path/repo id: the
+  // injector refuses to guess a random-init head from method name alone
+  // (see vllm_mlx/spec_decode/mtp/qwen3_5_inject.py's mtp_sidecar contract).
+  const speculativeConfig = config.speculative_method && config.speculative_method !== 'off'
+    ? JSON.stringify({
+      method: config.speculative_method,
+      model: config.speculative_model,
+      num_speculative_tokens: config.num_speculative_tokens ?? DEFAULT_SPECULATIVE_TOKENS,
+      disable_auto_k: Boolean(config.speculative_disable_auto_k),
+    })
+    : null;
+  return ['--no-telemetry', 'serve', model, ...(servedModelName ? ['--served-model-name', servedModelName] : []), '--port', String(port), '--host', '127.0.0.1', '--max-num-seqs', '1', '--max-concurrent-requests', '1', cache ? '--enable-prefix-cache' : '--disable-prefix-cache', ...(cache ? ['--cache-memory-mb', String(config.cache_memory_mb ?? 8192), '--hybrid-cache-entries', String(config.hybrid_cache_entries ?? 16)] : []), '--kv-disk-checkpoint-interval', String(config.disk_checkpoint_interval ?? 0), '--pflash', config.pflash, ...(config.pflash === 'auto' ? ['--pflash-threshold', '32768'] : []), '--prefill-step-size', String(prefillStepSize), '--max-tokens', String(config.server_max_tokens ?? 128), '--kv-cache-dtype', config.kv_cache_dtype_requested, '--kv-cache-turboquant', config.turboquant_requested, config.mllm ? '--mllm' : '--no-mllm', '--gpu-memory-utilization', String(utilization), ...(profile.tool_call_parser ? ['--tool-call-parser', profile.tool_call_parser, '--enable-auto-tool-choice'] : []), ...(profile.reasoning_parser ? ['--reasoning-parser', profile.reasoning_parser] : []), ...(profile.force_hybrid ? ['--force-hybrid'] : []), ...(speculativeConfig ? ['--force-spec-decode', '--speculative-config', speculativeConfig] : []), '--log-level', 'INFO'];
 }
 
 async function localModelIdentity(model, requestedRevision) {
-  const modelPath = join(process.env.HF_HOME ?? join(process.env.HOME ?? '', '.cache/huggingface'), 'hub', `${MODEL_PREFIX}${model.replace('/', '--')}`, 'snapshots');
+  // Manually-maintained model directories (MTP sidecar extraction/patching
+  // targets, e.g. nightmedia diagnostics) don't live in HF hub cache layout
+  // at all, so an absolute --model path is read directly rather than
+  // resolved through the models--org--repo/snapshots/<rev> convention.
+  if (model.startsWith('/')) {
+    const config = await readFile(join(model, 'config.json'));
+    return { revision: requestedRevision ?? 'local', snapshot_path: model, config_sha256: createHash('sha256').update(config).digest('hex') };
+  }
+  const modelRoot = join(process.env.HF_HOME ?? join(process.env.HOME ?? '', '.cache/huggingface'), 'hub', `${MODEL_PREFIX}${model.replace('/', '--')}`);
+  const modelPath = join(modelRoot, 'snapshots');
   const snapshots = await readdir(modelPath);
-  const revision = requestedRevision ?? snapshots.sort().at(-1);
+  const mainRef = await readFile(join(modelRoot, 'refs', 'main'), 'utf8').catch(() => null);
+  const revision = requestedRevision ?? mainRef?.trim() ?? snapshots.sort().at(-1);
   if (!revision) die(`No local snapshot found for ${model}. Run rapid-mlx pull first.`);
   const config = await readFile(join(modelPath, revision, 'config.json'));
   return { revision, snapshot_path: join(modelPath, revision), config_sha256: createHash('sha256').update(config).digest('hex') };
 }
 
+async function sha256File(path) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest('hex');
+}
+
+async function resolveSidecarReference(reference) {
+  const localPath = resolve(reference);
+  let localStats = null;
+  try { localStats = await stat(localPath); } catch { /* treat as an HF repo id */ }
+
+  let root;
+  let revision;
+  if (localStats?.isFile()) {
+    return { file: localPath, root: resolve(localPath, '..'), revision: 'local-file' };
+  }
+  if (localStats?.isDirectory()) {
+    root = localPath;
+    revision = 'local-directory';
+  } else {
+    const repoRoot = join(
+      process.env.HF_HOME ?? join(process.env.HOME ?? '', '.cache', 'huggingface'),
+      'hub',
+      `${MODEL_PREFIX}${reference.replace('/', '--')}`,
+    );
+    const repoPath = join(repoRoot, 'snapshots');
+    const snapshots = await readdir(repoPath).catch(() => []);
+    const mainRef = await readFile(join(repoRoot, 'refs', 'main'), 'utf8').catch(() => null);
+    revision = mainRef?.trim() || snapshots.sort().at(-1);
+    if (!revision) die(`No local sidecar snapshot found for ${reference}. Pull it before benchmarking.`);
+    root = join(repoPath, revision);
+  }
+
+  for (const name of ['model-mtp.safetensors', 'model.safetensors']) {
+    const candidate = join(root, name);
+    try {
+      if ((await stat(candidate)).isFile()) return { file: candidate, root, revision };
+    } catch { /* try the next well-known filename */ }
+  }
+  die(`Sidecar ${reference} has neither model-mtp.safetensors nor model.safetensors.`);
+}
+
+function fp16ToNumber(bits) {
+  const sign = (bits & 0x8000) ? -1 : 1;
+  const exponent = (bits >> 10) & 0x1f;
+  const fraction = bits & 0x03ff;
+  if (exponent === 0) return sign * (fraction / 1024) * 2 ** -14;
+  if (exponent === 0x1f) return fraction ? Number.NaN : sign * Number.POSITIVE_INFINITY;
+  return sign * (1 + fraction / 1024) * 2 ** (exponent - 15);
+}
+
+async function readSafetensorsHeader(path) {
+  const fileStats = await stat(path);
+  if (!fileStats.isFile() || fileStats.size < 10) die(`Invalid or empty safetensors file: ${path}`);
+  const handle = await open(path, 'r');
+  try {
+    const prefix = Buffer.alloc(8);
+    const prefixRead = await handle.read(prefix, 0, prefix.length, 0);
+    if (prefixRead.bytesRead !== prefix.length) die(`Truncated safetensors length prefix in ${path}.`);
+    const headerLength = Number(prefix.readBigUInt64LE());
+    if (!Number.isSafeInteger(headerLength) || headerLength <= 0 || headerLength > 64 * 1024 * 1024 || headerLength > fileStats.size - 8) {
+      die(`Invalid safetensors header length in ${path}: ${headerLength}`);
+    }
+    const encoded = Buffer.alloc(headerLength);
+    const headerRead = await handle.read(encoded, 0, encoded.length, 8);
+    if (headerRead.bytesRead !== encoded.length) die(`Truncated safetensors header in ${path}.`);
+    return { handle, header: JSON.parse(encoded.toString('utf8')), dataStart: 8 + headerLength, fileSize: fileStats.size };
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
+}
+
+async function tensorMean(handle, dataStart, fileSize, tensor, path, key) {
+  const [start, end] = tensor.data_offsets ?? [];
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start || end > fileSize - dataStart) {
+    die(`Invalid data offsets for ${key} in ${path}.`);
+  }
+  const bytesPerValue = { BF16: 2, F16: 2, F32: 4 }[tensor.dtype];
+  if (!bytesPerValue) die(`Unsupported ${key} dtype ${tensor.dtype}; expected BF16, F16, or F32.`);
+  if (!Array.isArray(tensor.shape) || tensor.shape.length === 0 || tensor.shape.some((value) => !Number.isSafeInteger(value) || value <= 0)) {
+    die(`Invalid shape for ${key} in ${path}.`);
+  }
+  const valueCount = tensor.shape.reduce((product, value) => product * value, 1);
+  const byteLength = end - start;
+  if (!Number.isSafeInteger(valueCount) || valueCount * bytesPerValue !== byteLength || byteLength > 16 * 1024 * 1024) {
+    die(`Shape/byte-length mismatch or oversized norm tensor for ${key} in ${path}.`);
+  }
+  const bytes = Buffer.alloc(byteLength);
+  const tensorRead = await handle.read(bytes, 0, bytes.length, dataStart + start);
+  if (tensorRead.bytesRead !== bytes.length) die(`Truncated tensor data for ${key} in ${path}.`);
+  let sum = 0;
+  let count = 0;
+  if (tensor.dtype === 'BF16') {
+    for (let offset = 0; offset < bytes.length; offset += 2) {
+      const word = bytes.readUInt16LE(offset);
+      const fp32 = Buffer.allocUnsafe(4);
+      fp32.writeUInt32LE(word * 65536);
+      sum += fp32.readFloatLE();
+      count += 1;
+    }
+  } else if (tensor.dtype === 'F16') {
+    for (let offset = 0; offset < bytes.length; offset += 2) {
+      sum += fp16ToNumber(bytes.readUInt16LE(offset));
+      count += 1;
+    }
+  } else if (tensor.dtype === 'F32') {
+    for (let offset = 0; offset < bytes.length; offset += 4) {
+      sum += bytes.readFloatLE(offset);
+      count += 1;
+    }
+  }
+  const mean = sum / count;
+  if (!Number.isFinite(mean)) die(`${key} in ${path} has a non-finite mean.`);
+  return mean;
+}
+
+async function assertSpecDecodeTrunkSafe(baseIdentity) {
+  const inTrunkSidecar = join(baseIdentity.snapshot_path, 'model-mtp.safetensors');
+  try {
+    if ((await stat(inTrunkSidecar)).isFile()) {
+      die(`Refusing trunk containing model-mtp.safetensors: ${inTrunkSidecar}. mlx-lm may glob it as a trunk shard; move the sidecar to a separate managed location before benchmarking.`);
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
+async function sidecarIdentity(reference, baseIdentity) {
+  const resolvedSidecar = await resolveSidecarReference(reference);
+  const requestedSidecarPath = resolve(resolvedSidecar.file);
+  const requestedTrunkPath = resolve(baseIdentity.snapshot_path);
+  const requestedRelativePath = relative(requestedTrunkPath, requestedSidecarPath);
+  if (requestedRelativePath === '' || (!requestedRelativePath.startsWith('..') && !isAbsolute(requestedRelativePath))) {
+    die(`Refusing sidecar inside trunk directory: ${requestedSidecarPath}. Keep MTP sidecars in a separate managed location.`);
+  }
+  const resolvedFilePath = await realpath(resolvedSidecar.file);
+  const resolvedTrunkPath = await realpath(baseIdentity.snapshot_path);
+  if (resolvedFilePath === resolvedTrunkPath || resolvedFilePath.startsWith(`${resolvedTrunkPath}/`)) {
+    die(`Refusing sidecar inside trunk directory: ${resolvedFilePath}. Keep MTP sidecars in a separate managed location.`);
+  }
+  const { handle, header, dataStart, fileSize } = await readSafetensorsHeader(resolvedFilePath);
+  try {
+    const tensors = new Map(
+      Object.entries(header)
+        .filter(([key]) => key !== '__metadata__')
+        .map(([key, value]) => [key.startsWith('mtp.') ? key.slice(4) : key, value]),
+    );
+    const required = [
+      'fc.weight',
+      'pre_fc_norm_embedding.weight',
+      'pre_fc_norm_hidden.weight',
+      'norm.weight',
+    ];
+    const missing = required.filter((key) => !tensors.has(key));
+    if (missing.length) die(`Sidecar ${reference} is missing required MTP tensors: ${missing.join(', ')}`);
+
+    const normMeans = {};
+    const normRanges = {
+      'pre_fc_norm_embedding.weight': [0.25, 0.9],
+      'pre_fc_norm_hidden.weight': [0.4, 1.25],
+    };
+    for (const [key, [minimum, maximum]] of Object.entries(normRanges)) {
+      const mean = await tensorMean(handle, dataStart, fileSize, tensors.get(key), resolvedFilePath, key);
+      normMeans[key] = mean;
+      if (mean <= minimum || mean >= maximum) {
+        die(`Sidecar ${reference} failed the shifted-RMSNorm sanity gate: ${key} mean=${mean.toFixed(4)} (expected ${minimum} < mean < ${maximum}).`);
+      }
+    }
+
+    const baseConfigBytes = await readFile(join(baseIdentity.snapshot_path, 'config.json'));
+    const baseConfig = JSON.parse(baseConfigBytes);
+    const textConfig = baseConfig.text_config ?? baseConfig;
+    const modelType = baseConfig.model_type;
+    if (!['qwen3_5', 'qwen3_5_moe'].includes(modelType)) {
+      die(`Sidecar preflight currently supports qwen3_5/qwen3_5_moe trunks; got ${modelType ?? 'missing'}.`);
+    }
+    if (Number(textConfig.mtp_num_hidden_layers ?? baseConfig.mtp_num_hidden_layers ?? 0) < 1) {
+      die(`Trunk config for ${baseIdentity.snapshot_path} does not declare mtp_num_hidden_layers >= 1.`);
+    }
+    const numExperts = Number(textConfig.num_experts ?? 0);
+    if (numExperts > 0) {
+      const hasCanonicalMoe = [...tensors.keys()].some((key) => key.includes('.mlp.switch_mlp.gate_proj.weight'));
+      const hasUnconvertedExperts = [...tensors.keys()].some((key) => key.includes('.mlp.experts.'));
+      if (!hasCanonicalMoe || hasUnconvertedExperts) {
+        die(`MoE sidecar ${reference} is not in the canonical switch_mlp layout required by Rapid-MLX.`);
+      }
+    }
+    let inferredAffineQuantization = null;
+    const fcScales = tensors.get('fc.scales');
+    if (fcScales) {
+      if (!tensors.has('fc.biases')) die(`Quantized sidecar ${reference} has fc.scales but no fc.biases.`);
+      const hiddenSize = Number(textConfig.hidden_size);
+      const fcWeightShape = tensors.get('fc.weight').shape;
+      const fcScalesShape = fcScales.shape;
+      const packedColumns = Number(fcWeightShape?.[1]);
+      const scaleColumns = Number(fcScalesShape?.[1]);
+      const inputSize = hiddenSize * 2;
+      const bits = packedColumns * 32 / inputSize;
+      const groupSize = inputSize / scaleColumns;
+      if (![2, 3, 4, 5, 6, 8].includes(bits) || ![32, 64, 128].includes(groupSize)) {
+        die(`Sidecar ${reference} has unsupported affine fc packing: bits=${bits}, group_size=${groupSize}.`);
+      }
+      inferredAffineQuantization = { bits, group_size: groupSize, mode: 'affine' };
+    }
+
+    let sidecarConfigSha256 = null;
+    let sidecarConfig = null;
+    try {
+      const configBytes = await readFile(join(resolvedSidecar.root, 'config.json'));
+      sidecarConfigSha256 = createHash('sha256').update(configBytes).digest('hex');
+      sidecarConfig = JSON.parse(configBytes);
+      const sidecarText = sidecarConfig.text_config ?? sidecarConfig;
+      if (sidecarText.hidden_size && textConfig.hidden_size && sidecarText.hidden_size !== textConfig.hidden_size) {
+        die(`Sidecar hidden_size=${sidecarText.hidden_size} does not match trunk hidden_size=${textConfig.hidden_size}.`);
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+
+    const fileStats = await stat(resolvedFilePath);
+    return {
+      reference,
+      revision: resolvedSidecar.revision,
+      resolved_file: resolvedFilePath,
+      sha256: await sha256File(resolvedFilePath),
+      bytes: fileStats.size,
+      config_sha256: sidecarConfigSha256,
+      quantization: sidecarConfig?.quantization ?? null,
+      preflight: {
+        core_tensors_present: true,
+        shifted_norm_means: normMeans,
+        trunk_model_type: modelType,
+        trunk_hidden_size: textConfig.hidden_size ?? null,
+        trunk_num_experts: numExperts,
+        inferred_sidecar_quantization: inferredAffineQuantization ?? { mode: 'full-precision' },
+      },
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
 async function patchChatTemplateInSnapshot(identity, templatePath) {
-  if (!templatePath) return { metadata: null, restore: async () => {} };
+  if (!templatePath) return { modelPath: identity.snapshot_path, metadata: null, restore: async () => {} };
   const template = await readFile(resolve(templatePath));
   const snapshotConfigPath = join(identity.snapshot_path, 'tokenizer_config.json');
   const originalConfig = await readFile(snapshotConfigPath);
@@ -525,6 +958,7 @@ async function patchChatTemplateInSnapshot(identity, templatePath) {
     await writeFile(item.path, item.contents);
   }
   return {
+    modelPath: identity.snapshot_path,
     metadata: {
       mode: 'temporary snapshot tokenizer_config.json replacement; exact original restored after run',
       source_path: resolve(templatePath),
@@ -542,15 +976,28 @@ async function patchChatTemplateInSnapshot(identity, templatePath) {
   };
 }
 
-function manifestFor(model, identity, runtimeVersion, rapidMlxBin, config, cells, port, utilization, serverModelPath, chatTemplate, profile = {}, tokenizerPython = null) {
+function manifestFor(model, identity, runtimeVersion, rapidMlxBin, config, cells, port, utilization, serverModelPath, chatTemplate, profile = {}, tokenizerPython = null, speculativeSidecar = null) {
   const argv = [rapidMlxBin, ...argvFor(serverModelPath ?? model, config, port, utilization, model, profile)];
   return {
     schema_version: 1,
     benchmark: { name: `Rapid-MLX generated ${cells[0].id}`, purpose: 'Generated by rapid-mlx-benchmark-suite.mjs; do not hand-edit.' },
     runtime: { backend: 'rapid-mlx', version: runtimeVersion, base_url: `http://127.0.0.1:${port}`, health_path: '/health', metrics_path: '/metrics', fresh_server_per_cell: true, exact_argv: argv, ...(tokenizerPython ? { tokenizer_python: tokenizerPython } : {}) },
     hardware: { cpu: 'recorded by operator', unified_memory_bytes: null },
-    model: { hf_repo_id: model, revision: identity.revision, config_sha256: identity.config_sha256, tokenizer_snapshot_path: identity.snapshot_path, profile_overrides: profile, ...(chatTemplate ? { chat_template_override: chatTemplate } : {}) },
+    model: { hf_repo_id: model, revision: identity.revision, config_sha256: identity.config_sha256, tokenizer_snapshot_path: identity.snapshot_path, profile_overrides: profile, ...(chatTemplate ? { chat_template_override: chatTemplate } : {}), ...(speculativeSidecar ? { speculative_sidecar: speculativeSidecar } : {}) },
     cells,
+  };
+}
+
+function materializeSpeculativeCell(cell, speculativeSidecars) {
+  const sidecar = speculativeSidecars.get(cell.configuration.speculative_model);
+  if (!sidecar) return cell;
+  return {
+    ...cell,
+    configuration: {
+      ...cell.configuration,
+      speculative_model_reference: cell.configuration.speculative_model,
+      speculative_model: sidecar.resolved_file,
+    },
   };
 }
 
@@ -651,7 +1098,8 @@ async function runSuite(options, manifests, tempDir) {
 const { command, options } = parseArgs(process.argv);
 const rapidMlxBin = options.rapidMlxBin ?? 'rapid-mlx';
 const identity = await localModelIdentity(options.model, options.revision);
-const allCells = await suiteCells(options.model, options.suite, options.image, options.expectedVisualTerms, options.mllmPrefillStepSize ?? 1024, options.workspacePack);
+if (options.suite.startsWith('spec-decode')) await assertSpecDecodeTrunkSafe(identity);
+const allCells = await suiteCells(options.model, options.suite, options.image, options.expectedVisualTerms, options.mllmPrefillStepSize ?? 1024, options.workspacePack, options.speculativeModel ?? null, options.speculativeControlModel ?? null, options.speculativeTokens ?? DEFAULT_SPECULATIVE_TOKENS, options.speculativeMethods ?? ['mtp'], options.speculativeWorkloads ?? ['code'], options.disableSpeculativeAutoK ?? false);
 let cells = options.cells
   ? allCells.filter((cell) => options.cells.includes(cell.id))
   : allCells;
@@ -676,24 +1124,38 @@ if (options.cells) {
   const unknown = options.cells.filter((cell) => !known.has(cell));
   if (unknown.length) die(`Unknown cells for ${options.suite}: ${unknown.join(', ')}`);
 }
+const speculativeSidecars = new Map();
+for (const reference of new Set(cells.map((cell) => cell.configuration.speculative_model).filter(Boolean))) {
+  speculativeSidecars.set(reference, await sidecarIdentity(reference, identity));
+}
 const profile = await profileOverridesFor(options.model, rapidMlxBin);
+if (options.toolCallParser) profile.tool_call_parser = options.toolCallParser;
+if (options.reasoningParser) profile.reasoning_parser = options.reasoningParser;
 if (options.forceHybrid) profile.force_hybrid = true;
 const runtimeVersion = installedRapidMlxVersion(rapidMlxBin);
 
 if (command === 'plan') {
-  const manifests = cells.map((item, index) => ({
-    label: `${String(index).padStart(2, '0')}-${item.id}`,
-    manifest: manifestFor(options.model, identity, runtimeVersion, rapidMlxBin, item.configuration, [item], options.port, options.utilization, null, options.chatTemplate ? { source_path: resolve(options.chatTemplate), note: 'materialized as an isolated overlay at run time' } : null, profile, options.tokenizerPython ?? null),
-  }));
-  process.stdout.write(`${JSON.stringify({ model: options.model, identity, suite: options.suite, manifests: manifests.map(({ label, manifest }) => ({ label, cells: manifest.cells.map((item) => item.id), argv: manifest.runtime.exact_argv })) }, null, 2)}\n`);
+  const manifests = cells.map((item, index) => {
+    const sidecar = speculativeSidecars.get(item.configuration.speculative_model) ?? null;
+    const materialized = materializeSpeculativeCell(item, speculativeSidecars);
+    return {
+      label: `${String(index).padStart(2, '0')}-${item.id}`,
+      manifest: manifestFor(options.model, identity, runtimeVersion, rapidMlxBin, materialized.configuration, [materialized], options.port, options.utilization, identity.snapshot_path, options.chatTemplate ? { source_path: resolve(options.chatTemplate), note: 'materialized as an isolated overlay at run time' } : null, profile, options.tokenizerPython ?? null, sidecar),
+    };
+  });
+  process.stdout.write(`${JSON.stringify({ model: options.model, identity, suite: options.suite, manifests: manifests.map(({ label, manifest }) => ({ label, cells: manifest.cells.map((item) => item.id), speculative_sidecar: manifest.model.speculative_sidecar ?? null, argv: manifest.runtime.exact_argv })) }, null, 2)}\n`);
 } else {
   const tempDir = await mkdtemp(join(tmpdir(), 'rapid-mlx-benchmark-suite-'));
   try {
     const template = await patchChatTemplateInSnapshot(identity, options.chatTemplate);
-    const manifests = cells.map((item, index) => ({
-      label: `${String(index).padStart(2, '0')}-${item.id}`,
-      manifest: manifestFor(options.model, identity, runtimeVersion, rapidMlxBin, item.configuration, [item], options.port, options.utilization, template.modelPath, template.metadata, profile, options.tokenizerPython ?? null),
-    }));
+    const manifests = cells.map((item, index) => {
+      const sidecar = speculativeSidecars.get(item.configuration.speculative_model) ?? null;
+      const materialized = materializeSpeculativeCell(item, speculativeSidecars);
+      return {
+        label: `${String(index).padStart(2, '0')}-${item.id}`,
+        manifest: manifestFor(options.model, identity, runtimeVersion, rapidMlxBin, materialized.configuration, [materialized], options.port, options.utilization, template.modelPath, template.metadata, profile, options.tokenizerPython ?? null, sidecar),
+      };
+    });
     try { await runSuite(options, manifests, tempDir); } finally { await template.restore(); }
   } finally { if (!options.keepManifests) await rm(tempDir, { recursive: true, force: true }); }
 }

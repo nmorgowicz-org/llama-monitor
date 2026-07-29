@@ -193,6 +193,11 @@ function metricSumByPrefix(metrics, prefix) {
     .reduce((sum, [, value]) => sum + value, 0);
 }
 
+function metricSumByPrefixOrNull(metrics, prefix) {
+  const matches = Object.entries(metrics).filter(([name]) => name.startsWith(prefix));
+  return matches.length ? matches.reduce((sum, [, value]) => sum + value, 0) : null;
+}
+
 async function getMetrics(baseUrl, path) {
   const response = await fetch(`${baseUrl}${path}`);
   if (!response.ok) die(`GET ${path} failed: ${response.status}`);
@@ -513,20 +518,6 @@ async function runAttempt(baseUrl, metricsPath, cell, phase, extension = false, 
   verifyExpectedMetrics(cell, before);
   const request = requestOverride ?? await requestFor(cell, extension);
   const response = await streamRequest(baseUrl, request);
-  const after = await getMetrics(baseUrl, metricsPath);
-  const osMemoryAfter = sampleOsMemory(serverPid);
-  const delta = metricDelta(before, after);
-  const compressed = metricSumByPrefix(delta, 'rapid_mlx_pflash_compressed_tokens_total');
-  response.pflash_compressed_tokens = compressed;
-  response.pflash_retained_tokens_estimate = response.usage?.prompt_tokens
-    ? Math.max(0, response.usage.prompt_tokens - compressed)
-    : null;
-  response.raw_prompt_tokens_per_second = response.usage?.prompt_tokens && response.first_token_ms
-    ? Math.round((response.usage.prompt_tokens * 100000) / response.first_token_ms) / 100
-    : null;
-  response.retained_prompt_tokens_per_second = response.pflash_retained_tokens_estimate && response.first_token_ms
-    ? Math.round((response.pflash_retained_tokens_estimate * 100000) / response.first_token_ms) / 100
-    : null;
   const trace = [];
   let traceMessages = request.messages;
   let traceResponse = response;
@@ -559,6 +550,30 @@ async function runAttempt(baseUrl, metricsPath, cell, phase, extension = false, 
     });
     traceResponse = followupResponse;
   }
+  const after = await getMetrics(baseUrl, metricsPath);
+  const osMemoryAfter = sampleOsMemory(serverPid);
+  const delta = metricDelta(before, after);
+  const compressed = metricSumByPrefix(delta, 'rapid_mlx_pflash_compressed_tokens_total');
+  response.pflash_compressed_tokens = compressed;
+  response.pflash_retained_tokens_estimate = response.usage?.prompt_tokens
+    ? Math.max(0, response.usage.prompt_tokens - compressed)
+    : null;
+  response.raw_prompt_tokens_per_second = response.usage?.prompt_tokens && response.first_token_ms
+    ? Math.round((response.usage.prompt_tokens * 100000) / response.first_token_ms) / 100
+    : null;
+  response.retained_prompt_tokens_per_second = response.pflash_retained_tokens_estimate && response.first_token_ms
+    ? Math.round((response.pflash_retained_tokens_estimate * 100000) / response.first_token_ms) / 100
+    : null;
+  const allResponses = [response, ...trace.map((item) => item.response).filter(Boolean)];
+  const roundTripCompletionTokens = allResponses.reduce((sum, item) => sum + (item.usage?.completion_tokens ?? 0), 0);
+  const roundTripGenerationMs = allResponses.reduce((sum, item) => sum + (item.generation_ms ?? 0), 0);
+  response.round_trip_request_count = allResponses.length;
+  response.round_trip_total_ms = allResponses.reduce((sum, item) => sum + (item.total_ms ?? 0), 0);
+  response.round_trip_first_token_ms = allResponses.reduce((sum, item) => sum + (item.first_token_ms ?? 0), 0);
+  response.round_trip_completion_tokens = roundTripCompletionTokens;
+  response.round_trip_generation_tokens_per_second = roundTripGenerationMs > 0
+    ? Math.round((roundTripCompletionTokens * 100000) / roundTripGenerationMs) / 100
+    : null;
   const fidelity = scoreFidelity(cell.workload, response);
   const conversationAssistantContent = response.completion_text;
   // Full completions are needed for scoring but are deliberately kept out of
@@ -580,6 +595,32 @@ async function runAttempt(baseUrl, metricsPath, cell, phase, extension = false, 
     os_memory_before: osMemoryBefore,
     os_memory_after: osMemoryAfter,
   };
+}
+
+function assertAttemptQualified(cell, attempt) {
+  if (!attempt.fidelity.request_succeeded) {
+    die(`${cell.id}/${attempt.phase} request failed qualification: ${attempt.fidelity.failure_reason ?? 'unknown'}`);
+  }
+  if (attempt.fidelity.completion_length_passed === false) {
+    die(`${cell.id}/${attempt.phase} completed fewer than the required ${cell.workload.minimum_completion_tokens} tokens.`);
+  }
+  if (attempt.fidelity.tool_call_observed === false || attempt.fidelity.tool_arguments_passed === false) {
+    die(`${cell.id}/${attempt.phase} failed the initial tool-call fidelity gate.`);
+  }
+  for (const [index, item] of attempt.tool_trace.entries()) {
+    if (item.fidelity.tool_call_observed === false || item.fidelity.tool_arguments_passed === false) {
+      die(`${cell.id}/${attempt.phase} failed tool-trace step ${index + 1} fidelity.`);
+    }
+  }
+  const method = cell.configuration?.speculative_method;
+  if (method && method !== 'off') {
+    const attempts = metricSumByPrefix(attempt.metrics_delta, 'rapid_mlx_spec_decode_attempts_total');
+    const parks = metricSumByPrefix(attempt.metrics_delta, 'rapid_mlx_spec_decode_park_total');
+    const rounds = metricSumByPrefix(attempt.metrics_delta, 'rapid_mlx_spec_decode_k_chosen_rounds_total');
+    if (attempts <= 0 && parks <= 0 && rounds <= 0) {
+      die(`${cell.id}/${attempt.phase} requested ${method} but observed zero speculative activity.`);
+    }
+  }
 }
 
 async function runManifest(manifest, selectedCells, serverPid = null) {
@@ -612,11 +653,12 @@ async function runManifest(manifest, selectedCells, serverPid = null) {
         requestOverride = { ...baseRequest, messages: [...priorMessages, { role: 'user', content: `${instruction}\n\n${suffix}` }] };
       }
       const attempt = await runAttempt(runtime.base_url, runtime.metrics_path, cell, phase, phase === 'extension', serverPid, requestOverride);
+      assertAttemptQualified(cell, attempt);
       attempts.push(attempt);
       if (phase === 'cold') coldAttempt = attempt;
     }
     for (const attempt of attempts) delete attempt.conversation_assistant_content;
-    results.push({ id: cell.id, model: cell.model, configuration: cell.configuration, workload: cell.workload, attempts });
+    results.push({ id: cell.id, model: cell.model, target_tokens: cell.target_tokens, configuration: cell.configuration, workload: cell.workload, attempts });
   }
   return {
     schema_version: 1,
@@ -636,29 +678,71 @@ async function runManifest(manifest, selectedCells, serverPid = null) {
 }
 
 function rowsFromReceipt(receipt) {
-  return receipt.cells.flatMap((cell) => cell.attempts.map((attempt) => ({
-    receipt,
-    cell,
-    attempt,
-    promptTokens: attempt.response.usage?.prompt_tokens ?? null,
-    ttft: attempt.response.first_token_ms,
-    tg: attempt.response.generation_tokens_per_second,
-    serverPeak: attempt.metrics_after.rapid_mlx_metal_peak_memory_bytes ?? null,
-    newServerPeak: Math.max(0,
-      (attempt.metrics_after.rapid_mlx_metal_peak_memory_bytes ?? 0)
-      - (attempt.metrics_before.rapid_mlx_metal_peak_memory_bytes ?? 0)),
-    peak: receipt.runtime?.fresh_server_per_cell
-      ? attempt.metrics_after.rapid_mlx_metal_peak_memory_bytes ?? null
-      : null,
-    compressed: attempt.metrics_delta.rapid_mlx_pflash_compressed_tokens_total ?? null,
-    prefixHits: attempt.metrics_delta.rapid_mlx_prefix_cache_hits_total ?? null,
-    prefixTokensSaved: attempt.metrics_delta.rapid_mlx_prefix_cache_tokens_saved_total ?? null,
-    serverRss: attempt.os_memory_after?.server_rss_bytes ?? null,
-  })));
+  return receipt.cells.flatMap((cell) => cell.attempts.map((attempt) => {
+    const specAttempts = metricSumByPrefixOrNull(attempt.metrics_delta, 'rapid_mlx_spec_decode_attempts_total');
+    const specAccepts = metricSumByPrefixOrNull(attempt.metrics_delta, 'rapid_mlx_spec_decode_accepts_total');
+    const specParked = metricSumByPrefixOrNull(attempt.metrics_delta, 'rapid_mlx_spec_decode_park_total');
+    const specRounds = metricSumByPrefixOrNull(attempt.metrics_delta, 'rapid_mlx_spec_decode_k_chosen_rounds_total');
+    const specKHistogram = Object.fromEntries(
+      Object.entries(attempt.metrics_delta)
+        .filter(([name, value]) => name.startsWith('rapid_mlx_spec_decode_k_chosen_total') && value > 0)
+        .map(([name, value]) => [name.match(/k="(\d+)"/)?.[1] ?? 'unknown', value]),
+    );
+    return {
+      receipt,
+      cell,
+      attempt,
+      targetTokens: (cell.target_tokens ?? Number(cell.id.match(/(?:^|-)(\d{4,6})(?:-|$)/)?.[1])) || null,
+      promptTokens: attempt.response.usage?.prompt_tokens ?? null,
+      ttft: attempt.response.round_trip_first_token_ms ?? attempt.response.first_token_ms,
+      totalMs: attempt.response.round_trip_total_ms ?? attempt.response.total_ms,
+      tg: attempt.response.round_trip_generation_tokens_per_second ?? attempt.response.generation_tokens_per_second,
+      serverPeak: attempt.metrics_after.rapid_mlx_metal_peak_memory_bytes ?? null,
+      newServerPeak: Math.max(0,
+        (attempt.metrics_after.rapid_mlx_metal_peak_memory_bytes ?? 0)
+        - (attempt.metrics_before.rapid_mlx_metal_peak_memory_bytes ?? 0)),
+      peak: receipt.runtime?.fresh_server_per_cell
+        ? attempt.metrics_after.rapid_mlx_metal_peak_memory_bytes ?? null
+        : null,
+      compressed: metricSumByPrefixOrNull(attempt.metrics_delta, 'rapid_mlx_pflash_compressed_tokens_total'),
+      prefixHits: metricSumByPrefixOrNull(attempt.metrics_delta, 'rapid_mlx_prefix_cache_hits_total'),
+      prefixTokensSaved: metricSumByPrefixOrNull(attempt.metrics_delta, 'rapid_mlx_prefix_cache_tokens_saved_total'),
+      serverRss: attempt.os_memory_after?.server_rss_bytes ?? null,
+      specAttempts,
+      specAccepts,
+      specTokensSaved: metricSumByPrefixOrNull(attempt.metrics_delta, 'rapid_mlx_spec_decode_tokens_saved_total'),
+      specParked,
+      specRounds,
+      specKHistogram,
+      // The gauge is cumulative for the server lifetime. Prefer labeled
+      // counter deltas so repeat/extension phases report only their window.
+      specAcceptRatio: specAttempts > 0
+        ? (specAccepts ?? 0) / specAttempts
+        : metricSumByPrefixOrNull(attempt.metrics_after, 'rapid_mlx_spec_decode_accept_ratio'),
+      specParkRate: specRounds > 0
+        ? (specParked ?? 0) / specRounds
+        : (specAttempts > 0 && specParked === 0 ? 0 : null),
+    };
+  }));
+}
+
+function rowQualificationFailure(row) {
+  const fidelity = row.attempt.fidelity;
+  if (!fidelity.request_succeeded) return fidelity.failure_reason ?? 'request_failed';
+  if (fidelity.completion_length_passed === false) return 'minimum_completion_tokens_not_met';
+  if (fidelity.tool_call_observed === false || fidelity.tool_arguments_passed === false) return 'initial_tool_fidelity_failed';
+  if (row.attempt.tool_trace?.some((item) => item.fidelity.tool_call_observed === false || item.fidelity.tool_arguments_passed === false)) {
+    return 'tool_trace_fidelity_failed';
+  }
+  const method = row.cell.configuration?.speculative_method;
+  if (method && method !== 'off' && !(row.specAttempts > 0 || row.specRounds > 0 || row.specParked > 0)) {
+    return 'zero_speculative_activity';
+  }
+  return null;
 }
 
 function linearPredict(rows, target, field) {
-  const usable = rows.filter((row) => Number.isFinite(row.promptTokens) && Number.isFinite(row[field]));
+  const usable = rows.filter((row) => rowQualificationFailure(row) === null && Number.isFinite(row.promptTokens) && Number.isFinite(row[field]));
   if (usable.length < 2) return null;
   const meanX = usable.reduce((sum, row) => sum + row.promptTokens, 0) / usable.length;
   const meanY = usable.reduce((sum, row) => sum + row[field], 0) / usable.length;
@@ -671,17 +755,66 @@ function linearPredict(rows, target, field) {
 function markdownReport(receipts) {
   const rows = receipts.flatMap(rowsFromReceipt);
   const output = ['# Model Runtime Benchmark Report', '', 'Measured rows only; estimates are explicitly labelled below.', ''];
-  output.push('| Model | Cell | Phase | Raw prompt tokens | Raw PP tok/s | TTFT | TG tok/s | Server RSS after | Native peak after | Prefix hits | Prefix tokens saved | PFlash compressed | Request | Fidelity |');
-  output.push('|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|');
+  output.push('| Model | Cell | Phase | Raw prompt tokens | Raw PP tok/s | TTFT | TG tok/s | Server RSS after | Native peak after | Prefix hits | Prefix tokens saved | PFlash compressed | Spec attempts | Spec accepts | Spec accept ratio | Spec tokens saved | Spec park rate | Request | Fidelity |');
+  output.push('|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|');
   for (const row of rows) {
     const recall = row.attempt.fidelity.marker_recall;
     const fidelity = recall === null
       ? 'not scored'
       : `${recall.markers_correct}/${recall.markers_expected} (${(recall.recall_rate * 100).toFixed(0)}%)`;
-    const request = row.attempt.fidelity.request_succeeded
-      ? 'success'
-      : `failed: ${row.attempt.fidelity.failure_reason ?? 'unknown'}`;
-    output.push(`| ${row.receipt.model?.hf_repo_id ?? row.receipt.model?.filename ?? row.cell.model} | ${row.cell.id} | ${row.attempt.phase} | ${row.promptTokens ?? 'n/a'} | ${row.attempt.response.raw_prompt_tokens_per_second ?? 'n/a'} | ${row.ttft ?? 'n/a'} ms | ${row.tg ?? 'n/a'} | ${row.serverRss ? `${(row.serverRss / 1e9).toFixed(2)} GB` : 'n/a'} | ${row.serverPeak ? `${(row.serverPeak / 1e9).toFixed(2)} GB` : 'n/a'} | ${row.prefixHits ?? 'n/a'} | ${row.prefixTokensSaved ?? 'n/a'} | ${row.compressed ?? 'n/a'} | ${request} | ${fidelity} |`);
+    const qualificationFailure = rowQualificationFailure(row);
+    const request = qualificationFailure === null ? 'success' : `failed: ${qualificationFailure}`;
+    output.push(`| ${row.receipt.model?.hf_repo_id ?? row.receipt.model?.filename ?? row.cell.model} | ${row.cell.id} | ${row.attempt.phase} | ${row.promptTokens ?? 'n/a'} | ${row.attempt.response.raw_prompt_tokens_per_second ?? 'n/a'} | ${row.ttft ?? 'n/a'} ms | ${row.tg ?? 'n/a'} | ${row.serverRss ? `${(row.serverRss / 1e9).toFixed(2)} GB` : 'n/a'} | ${row.serverPeak ? `${(row.serverPeak / 1e9).toFixed(2)} GB` : 'n/a'} | ${row.prefixHits ?? 'n/a'} | ${row.prefixTokensSaved ?? 'n/a'} | ${row.compressed ?? 'n/a'} | ${row.specAttempts ?? 'n/a'} | ${row.specAccepts ?? 'n/a'} | ${row.specAcceptRatio === null ? 'n/a' : `${(row.specAcceptRatio * 100).toFixed(1)}%`} | ${row.specTokensSaved ?? 'n/a'} | ${row.specParkRate === null ? 'n/a' : `${(row.specParkRate * 100).toFixed(1)}%`} | ${request} | ${fidelity} |`);
+  }
+  const speculativeRows = rows.filter((row) => {
+    const method = row.cell.configuration.speculative_method;
+    return Boolean(method) && method !== 'off' && rowQualificationFailure(row) === null;
+  });
+  const pairedSpeculativeRows = speculativeRows.flatMap((row) => {
+    const config = row.cell.configuration;
+    const baselines = rows.filter((candidate) => (
+      rowQualificationFailure(candidate) === null
+      && candidate.receipt.model?.hf_repo_id === row.receipt.model?.hf_repo_id
+      && candidate.receipt.model?.revision === row.receipt.model?.revision
+      && candidate.receipt.model?.config_sha256 === row.receipt.model?.config_sha256
+      && candidate.receipt.runtime?.backend === row.receipt.runtime?.backend
+      && candidate.receipt.runtime?.version === row.receipt.runtime?.version
+      && JSON.stringify(candidate.receipt.hardware ?? null) === JSON.stringify(row.receipt.hardware ?? null)
+      && candidate.targetTokens === row.targetTokens
+      && candidate.attempt.phase === row.attempt.phase
+      && candidate.attempt.request?.message_sha256 === row.attempt.request?.message_sha256
+      && candidate.attempt.request?.max_tokens === row.attempt.request?.max_tokens
+      && candidate.cell.configuration.speculative_method === 'off'
+      && candidate.cell.configuration.kv_cache_dtype_requested === config.kv_cache_dtype_requested
+      && candidate.cell.configuration.prefill_step_size === config.prefill_step_size
+      && candidate.cell.configuration.prefix_cache === config.prefix_cache
+      && candidate.cell.configuration.speculative_workload === config.speculative_workload
+      && (candidate.cell.configuration.trial_id ?? null) === (config.trial_id ?? null)
+    ));
+    return baselines.length === 1 ? [{ row, baseline: baselines[0] }] : [];
+  });
+  if (pairedSpeculativeRows.length) {
+    output.push('', '## Paired speculative throughput', '');
+    output.push('Each row compares a speculative cell with the same model, context target, workload, phase, KV dtype, prefill step, and cache setting against its non-speculative control.', '');
+    output.push('| Model | Context target | Workload | Phase | Sidecar role | Configured max K | Controller mode | Observed K histogram | Off TG tok/s | Spec TG tok/s | TG change | TTFT change | End-to-end change | Accept ratio | Park rate | Tokens saved |');
+    output.push('|---|---:|---|---|---|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|');
+    for (const { row, baseline } of pairedSpeculativeRows) {
+      const config = row.cell.configuration;
+      const offTg = baseline.tg;
+      const change = Number.isFinite(offTg) && Number.isFinite(row.tg) && offTg > 0
+        ? ((row.tg / offTg) - 1) * 100
+        : null;
+      const ttftChange = Number.isFinite(baseline.ttft) && Number.isFinite(row.ttft) && baseline.ttft > 0
+        ? ((row.ttft / baseline.ttft) - 1) * 100
+        : null;
+      const endToEndChange = Number.isFinite(baseline.totalMs) && Number.isFinite(row.totalMs) && row.totalMs > 0
+        ? ((baseline.totalMs / row.totalMs) - 1) * 100
+        : null;
+      const kHistogram = Object.entries(row.specKHistogram)
+        .map(([k, rounds]) => `K${k}:${rounds}`)
+        .join(', ') || (config.speculative_disable_auto_k ? 'fixed K1 (controller bypassed)' : 'n/a');
+      output.push(`| ${row.receipt.model?.hf_repo_id ?? row.cell.model} | ${row.targetTokens ?? 'n/a'} | ${config.speculative_workload ?? 'unspecified'} | ${row.attempt.phase} | ${config.speculative_role ?? 'subject'} | ${config.num_speculative_tokens ?? 'n/a'} | ${config.speculative_disable_auto_k ? 'fixed K1' : 'auto'} | ${kHistogram} | ${offTg ?? 'n/a'} | ${row.tg ?? 'n/a'} | ${change === null ? 'n/a' : `${change >= 0 ? '+' : ''}${change.toFixed(1)}%`} | ${ttftChange === null ? 'n/a' : `${ttftChange >= 0 ? '+' : ''}${ttftChange.toFixed(1)}%`} | ${endToEndChange === null ? 'n/a' : `${endToEndChange >= 0 ? '+' : ''}${endToEndChange.toFixed(1)}%`} | ${row.specAcceptRatio === null ? 'n/a' : `${(row.specAcceptRatio * 100).toFixed(1)}%`} | ${row.specParkRate === null ? 'n/a' : `${(row.specParkRate * 100).toFixed(1)}%`} | ${row.specTokensSaved ?? 'n/a'} |`);
+    }
   }
   const targets = [160000, 200000];
   const groups = new Map();
