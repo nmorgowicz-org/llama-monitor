@@ -85,11 +85,19 @@ function parseArgs(argv) {
     // supply the same values the model's repo alias would have produced.
     else if (key === '--tool-call-parser') options.toolCallParser = value;
     else if (key === '--reasoning-parser') options.reasoningParser = value;
+    else if (key === '--trials') options.trials = Number(value);
+    else if (key === '--settle-seconds') options.settleSeconds = Number(value);
     else die(`Unknown option: ${key}`);
   }
   if (!['plan', 'run'].includes(command)) die('Use plan or run.');
   if (!options.model) die('--model is required.');
   if (command === 'run' && !options.out) die('run requires --out RECEIPT_DIRECTORY.');
+  if (options.trials !== undefined && (!Number.isInteger(options.trials) || options.trials < 1)) {
+    die('--trials must be an integer >= 1.');
+  }
+  if (options.settleSeconds !== undefined && (!Number.isFinite(options.settleSeconds) || options.settleSeconds < 0)) {
+    die('--settle-seconds must be a non-negative number.');
+  }
   if (!['smoke', 'context', 'pflash', 'cache', 'tools', 'image', 'prefill', 'quant-baseline', 'turboquant-scale', 'ubatch', 'spec-decode', 'spec-decode-warm', 'all'].includes(options.suite)) {
     die(`Unknown suite: ${options.suite}`);
   }
@@ -1083,7 +1091,7 @@ async function waitForHealth(baseUrl, processHandle) {
   die('Timed out waiting for Rapid-MLX health endpoint.');
 }
 
-async function stopServer(server) {
+async function stopServer(server, settleSeconds = 0) {
   if (server.exitCode !== null) return;
   const exited = new Promise((resolvePromise) => server.once('exit', resolvePromise));
   server.kill('SIGTERM');
@@ -1099,6 +1107,51 @@ async function stopServer(server) {
   // exit. Starting the next fresh cell immediately makes Rapid's own pressure
   // guard mistake teardown residue for a second live model.
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 5000));
+  // Separate concern from the teardown wait above: this one lets the die shed
+  // heat so a late cell is not measured on a hotter machine than an early one.
+  // Counterbalanced ordering bounds that drift; a settle window shrinks it.
+  if (settleSeconds > 0) {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, settleSeconds * 1000));
+  }
+}
+
+// A single pass over the matrix cannot separate a real effect from position in
+// the run. Machine state drifts monotonically across a long suite -- die
+// temperature climbs, the page cache fills, the HF cache warms -- so whichever
+// arm runs last is systematically penalised. Repeating the matrix with the cell
+// order reversed on alternate trials (ABBA) cancels that drift to first order:
+// each cell occupies both an early and a late slot, and the paired difference
+// keeps its meaning. Random shuffling would not; it re-rolls the confound
+// rather than balancing it, and with n=2 or 3 it can easily land every trial of
+// one arm late in the run.
+//
+// This is the mechanism the throughput inversion has to be tested against
+// before any of it counts as qualification: the arm with the highest acceptance
+// produced the smallest gain, which is what an uncontrolled ordering effect
+// would look like.
+function expandTrials(cells, trials) {
+  if (trials <= 1) return cells.map((cell) => ({ ...cell, trial: 1, base_cell_id: cell.id }));
+  if (trials % 2 === 1) {
+    // With an odd trial count one direction runs once more than the other, so
+    // mean run position still correlates with cell index and the drift is only
+    // partly cancelled. Usable, but not the clean paired design.
+    process.stderr.write(`Warning: --trials ${trials} is odd; counterbalancing is only exact for an even number of trials.\n`);
+  }
+  const expanded = [];
+  for (let trial = 1; trial <= trials; trial += 1) {
+    const ordered = trial % 2 === 1 ? cells : [...cells].reverse();
+    for (const cell of ordered) {
+      expanded.push({
+        ...cell,
+        // The label must stay unique per receipt file, and must remain
+        // groupable back to the cell it repeats.
+        id: `${cell.id}-t${trial}`,
+        base_cell_id: cell.id,
+        trial,
+      });
+    }
+  }
+  return expanded;
 }
 
 // The receipt is written by the generic runner in a separate process, which
@@ -1168,7 +1221,7 @@ async function runSuite(options, manifests, tempDir) {
     } catch (error) {
       failure = new Error(`${error.message}\nRapid-MLX log tail for ${label} (full log: ${serverLogPath}):\n${started.logs()}`);
     } finally {
-      await stopServer(server);
+      await stopServer(server, options.settleSeconds ?? 0);
       // Only safe to read the log after the process closed and the sink drained.
       await started.flushed();
       if (!failure) backendLog = await attachBackendLog(receiptPath, serverLogPath, manifest);
@@ -1179,6 +1232,13 @@ async function runSuite(options, manifests, tempDir) {
   await writeFile(join(outputDir, 'suite-index.json'), `${JSON.stringify({
     model: options.model,
     suite: options.suite,
+    // A reader cannot otherwise tell a counterbalanced repeat from a single
+    // pass, and a single pass is not a qualification result.
+    trial_protocol: {
+      trials: options.trials ?? 1,
+      ordering: (options.trials ?? 1) > 1 ? 'counterbalanced-abba' : 'single-pass',
+      settle_seconds: options.settleSeconds ?? 0,
+    },
     receipts,
     complete: failure === null,
     failure: failure?.message ?? null,
@@ -1215,6 +1275,8 @@ if (options.cells) {
   const unknown = options.cells.filter((cell) => !known.has(cell));
   if (unknown.length) die(`Unknown cells for ${options.suite}: ${unknown.join(', ')}`);
 }
+// After --cell validation, which is expressed against unsuffixed cell ids.
+cells = expandTrials(cells, options.trials ?? 1);
 const speculativeSidecars = new Map();
 for (const reference of new Set(cells.map((cell) => cell.configuration.speculative_model).filter(Boolean))) {
   speculativeSidecars.set(reference, await sidecarIdentity(reference, identity));

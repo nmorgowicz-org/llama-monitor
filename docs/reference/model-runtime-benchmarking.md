@@ -165,6 +165,38 @@ cell is silent on effective depth. Because the clamp is a per-request
 read from the persisted log — an in-memory tail is evicted long before a cell
 finishes. The driver passes `--log-level INFO`, which Rapid needs to emit it.
 
+### Repeated trials
+
+A single pass over the matrix is screening evidence, not a qualification
+result. Machine state drifts monotonically across a long suite — die
+temperature climbs, the page cache fills, the HF cache warms — so whichever arm
+runs last is systematically penalised, and a one-pass difference between arms
+cannot be separated from their position in the run.
+
+`--trials N` repeats the whole selected matrix N times, reversing cell order on
+alternate trials (ABBA). Every cell then occupies both an early and a late
+slot, cancelling linear drift to first order. Random shuffling would not: it
+re-rolls the confound rather than balancing it, and at n=2 or 3 it can land
+every trial of one arm late in the run. Counterbalancing is exact only for an
+even N; an odd N prints a warning. `--settle-seconds S` adds an idle window
+after each server teardown, on top of the existing allocation-settle wait.
+
+Repeated cells are suffixed `-t1`, `-t2`, … and each carries `trial` and
+`base_cell_id` so receipts group back to the cell they repeat.
+`suite-index.json` records a `trial_protocol` block (`trials`, `ordering`,
+`settle_seconds`), because a reader otherwise cannot tell a counterbalanced
+repeat from a single pass.
+
+```bash
+node scripts/rapid-mlx-benchmark-suite.mjs run \
+  --model unsloth/Qwen3.6-27B-MLX-8bit \
+  --suite spec-decode --trials 4 --settle-seconds 60 \
+  --speculative-control-model mlx-community/Qwen3.6-27B-MTP-4bit \
+  --speculative-model PATH_OR_REPO \
+  --speculative-tokens 2 \
+  --out tmp/spec-decode-trials
+```
+
 Label the last result `requested max K=2, effective max K=1`, unless its
 observed histogram actually contains K=2. Use a fresh server for every cell
 because the controller registry persists by model identity within a process.
