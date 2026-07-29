@@ -826,6 +826,80 @@ async function tensorMean(handle, dataStart, fileSize, tensor, path, key) {
   return mean;
 }
 
+// Effective draft depth is decided by whether the model's cache list contains
+// an SSM slot (generator.py: `any(hasattr(c, "rollback_state") ...)` clamps to
+// K=1). That is a property of the architecture, so it is knowable from
+// config.json before anything is served -- and unlike aliases.json, which
+// declares is_hybrid=false for a model that is 48/64 linear-attention layers,
+// config.json states it as a checkable fact. Predicting here rather than only
+// observing afterwards is what lets a mismatch be caught instead of shipped.
+async function trunkDraftDepthFacts(baseIdentity, requestedK) {
+  const config = JSON.parse(await readFile(join(baseIdentity.snapshot_path, 'config.json'), 'utf8'));
+  const textConfig = config.text_config ?? config;
+  const layerTypes = Array.isArray(textConfig.layer_types) ? textConfig.layer_types : null;
+
+  const layerTypeCounts = {};
+  for (const layerType of layerTypes ?? []) {
+    layerTypeCounts[layerType] = (layerTypeCounts[layerType] ?? 0) + 1;
+  }
+  // Only recurrent slots carry rollback state. Attention variants do not, no
+  // matter how they window -- Gemma 4 is {sliding_attention: 25,
+  // full_attention: 5}, and treating "not full_attention" as recurrent would
+  // wrongly predict K=1 for the one family that runs MTP at real depth. An
+  // unrecognised label yields no prediction rather than a guess in either
+  // direction.
+  const RECURRENT_LAYER_TYPES = new Set(['linear_attention', 'mamba', 'mamba2', 'gated_delta_net', 'recurrent']);
+  const ATTENTION_LAYER_TYPES = new Set(['full_attention', 'sliding_attention', 'global_attention', 'chunked_attention', 'attention']);
+
+  const recurrentLayers = Object.entries(layerTypeCounts)
+    .filter(([layerType]) => RECURRENT_LAYER_TYPES.has(layerType))
+    .reduce((total, [, count]) => total + count, 0);
+  const unrecognizedLayerTypes = Object.keys(layerTypeCounts)
+    .filter((layerType) => !RECURRENT_LAYER_TYPES.has(layerType) && !ATTENTION_LAYER_TYPES.has(layerType));
+
+  // Secondary signals, used only when layer_types is absent entirely.
+  const hybridConfigKeys = Object.keys(textConfig)
+    .filter((key) => key.startsWith('linear_') || key === 'mamba_ssm_dtype');
+
+  let source;
+  let isHybrid;
+  let evidence;
+  if (layerTypes) {
+    source = 'config.json layer_types';
+    isHybrid = recurrentLayers > 0;
+    evidence = `layer_types: ${JSON.stringify(layerTypeCounts)}`;
+    if (unrecognizedLayerTypes.length) evidence += `; unrecognised: ${unrecognizedLayerTypes.join(', ')}`;
+  } else if (hybridConfigKeys.length) {
+    source = 'config.json key sniff';
+    isHybrid = true;
+    evidence = `no layer_types; recurrent config keys: ${hybridConfigKeys.join(', ')}`;
+  } else {
+    source = 'none';
+    isHybrid = false;
+    evidence = 'no layer_types and no recurrent config keys';
+  }
+
+  // A prediction is withheld when the evidence cannot support one: no
+  // layer_types and no key hints, or a recurrent-free layer list that still
+  // contains a label we do not recognise. The verifier reads null as "nothing
+  // to contradict" rather than as agreement.
+  const canPredict = source !== 'none' && (isHybrid || !unrecognizedLayerTypes.length);
+
+  return {
+    source,
+    model_type: config.model_type ?? null,
+    num_hidden_layers: textConfig.num_hidden_layers ?? null,
+    layer_type_counts: layerTypes ? layerTypeCounts : null,
+    recurrent_layers: layerTypes ? recurrentLayers : null,
+    unrecognized_layer_types: unrecognizedLayerTypes,
+    hybrid_config_keys: hybridConfigKeys,
+    is_hybrid: isHybrid,
+    evidence,
+    predicted_effective_max_k: !canPredict ? null
+      : (isHybrid ? 1 : (Number.isFinite(requestedK) ? requestedK : null)),
+  };
+}
+
 async function assertSpecDecodeTrunkSafe(baseIdentity) {
   const inTrunkSidecar = join(baseIdentity.snapshot_path, 'model-mtp.safetensors');
   try {
@@ -1257,7 +1331,7 @@ function expandTrials(cells, trials) {
 // knows nothing about the server it talked to. Backend-log evidence is folded
 // in here, after the server has exited, so the depth claim travels with the
 // numbers it qualifies rather than living in a loose file beside them.
-async function attachBackendLog(receiptPath, serverLogPath, manifest) {
+async function attachBackendLog(receiptPath, serverLogPath, manifest, draftDepthFacts = null) {
   const requestedK = manifest.cells
     .map((cell) => cell.configuration?.num_speculative_tokens)
     .find((tokens) => tokens !== undefined) ?? null;
@@ -1275,6 +1349,23 @@ async function attachBackendLog(receiptPath, serverLogPath, manifest) {
     analysis = { captured: false, capture_error: error.message, clamp_verdict: 'uncaptured' };
   }
   analysis.path = basename(serverLogPath);
+  // A capability prediction that is never checked against what the backend
+  // actually did is how aliases.json came to declare is_hybrid=false on a
+  // hybrid model and go unnoticed. Record the prediction next to the
+  // observation so any disagreement is visible in the receipt itself.
+  if (draftDepthFacts && speculativeRequested) {
+    const predicted = draftDepthFacts.predicted_effective_max_k;
+    const observed = analysis.effective_max_k;
+    analysis.draft_depth_prediction = {
+      ...draftDepthFacts,
+      observed_effective_max_k: observed,
+      // Only a clamp line is a real observation; clamp_absent infers the
+      // effective depth from the manifest and cannot confirm anything.
+      prediction_agrees: (predicted === null || analysis.clamp_verdict !== 'clamp_observed')
+        ? null
+        : predicted === observed,
+    };
+  }
   try {
     const receipt = JSON.parse(await readFile(receiptPath, 'utf8'));
     receipt.runtime.backend_log = analysis;
@@ -1330,7 +1421,7 @@ async function runSuite(options, manifests, tempDir) {
       await stopServer(server, options.settleSeconds ?? 0);
       // Only safe to read the log after the process closed and the sink drained.
       await started.flushed();
-      if (!failure) backendLog = await attachBackendLog(receiptPath, serverLogPath, manifest);
+      if (!failure) backendLog = await attachBackendLog(receiptPath, serverLogPath, manifest, options.draftDepthFacts ?? null);
     }
     if (backendLog) {
       Object.assign(receipts[receipts.length - 1], {
@@ -1339,6 +1430,12 @@ async function runSuite(options, manifests, tempDir) {
       });
       // A receipt labelled with the wrong lane is worse than a missing one:
       // it invites a forced-lane number into an enablement decision. Stop.
+      // Same discipline as the lane check: a capability claim contradicted by
+      // the backend must not be recorded as a passing measurement.
+      if (backendLog.draft_depth_prediction?.prediction_agrees === false) {
+        const prediction = backendLog.draft_depth_prediction;
+        failure = new Error(`Draft-depth prediction contradicted for ${label}: predicted effective K=${prediction.predicted_effective_max_k} from ${prediction.source} (${prediction.evidence}), backend clamped to K=${prediction.observed_effective_max_k}. Fix the predictor before trusting any capability claim derived from it.`);
+      }
       if (backendLog.lane_agrees === false) {
         failure = new Error(`Lane mismatch for ${label}: manifest declared "${backendLog.declared_lane}" but the backend log shows "${backendLog.observed_lane}". Full log: ${serverLogPath}`);
       }
@@ -1386,7 +1483,11 @@ async function runSuite(options, manifests, tempDir) {
 const { command, options } = parseArgs(process.argv);
 const rapidMlxBin = options.rapidMlxBin ?? 'rapid-mlx';
 const identity = await localModelIdentity(options.model, options.revision);
-if (options.suite.startsWith('spec-decode')) await assertSpecDecodeTrunkSafe(identity);
+if (options.suite.startsWith('spec-decode')) {
+  await assertSpecDecodeTrunkSafe(identity);
+  options.draftDepthFacts = await trunkDraftDepthFacts(identity, options.speculativeTokens ?? DEFAULT_SPECULATIVE_TOKENS);
+  process.stderr.write(`Draft depth: predicted effective K=${options.draftDepthFacts.predicted_effective_max_k} (${options.draftDepthFacts.evidence})\n`);
+}
 const allCells = await suiteCells(options.model, options.suite, options.image, options.expectedVisualTerms, options.mllmPrefillStepSize ?? 1024, options.workspacePack, options.speculativeModel ?? null, options.speculativeControlModel ?? null, options.speculativeTokens ?? DEFAULT_SPECULATIVE_TOKENS, options.speculativeMethods ?? ['mtp'], options.speculativeWorkloads ?? ['code'], options.disableSpeculativeAutoK ?? false);
 let cells = options.cells
   ? allCells.filter((cell) => options.cells.includes(cell.id))
