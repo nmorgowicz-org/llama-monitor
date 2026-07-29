@@ -100,6 +100,15 @@ infers affine packing from the sidecar tensors, and checks trunk
 architecture/hidden-size/MoE layout compatibility. Rapid performs the final
 full key/shape/dtype validation while injecting.
 
+The path handed to the server keeps its `.safetensors` extension and is
+deliberately **not** resolved through `realpath`. Inside an HF cache the
+snapshot entry is a symlink to `blobs/<sha256>` — a bare hash with no extension
+— and `mx.load` dispatches on extension, so passing the resolved path fails the
+sidecar load with `Unknown file format` and rapid-mlx then refuses to boot
+rather than serving with MTP silently disabled. Preflight reads go through
+`realpath` (correct for hashing and header parsing) and so cannot catch this;
+the extension is asserted directly instead.
+
 Start with the official sidecar as a positive control:
 
 ```bash
@@ -237,6 +246,54 @@ per-request labeled counter deltas and reports chosen-K distribution,
 acceptance, parking, tokens saved, TG change, TTFT change, and end-to-end
 change. Do not recommend enablement from acceptance or TG alone: long-prefill
 rows can gain decode throughput while losing most of that benefit to TTFT.
+
+### The positive control gates the run
+
+A spec-decode matrix without a working positive control cannot tell *"this
+sidecar does not work"* from *"the harness does not work"*. Those were confused
+once already, and the resulting receipts had to be discarded wholesale.
+
+So a spec-decode run **fails** unless a `speculative_role: control` cell clears
+an acceptance floor — `--control-accept-floor`, default `0.30`. The floor is set
+to catch a dead draft head (the stale-extractor failure mode measured ~0%), not
+to assert a performance target: healthy acceptance on this family runs 59–97%,
+far above it. A run with no control cell at all also fails; pass
+`--speculative-control-model`.
+
+Acceptance is computed from the `rapid_mlx_spec_decode_accepts_total` /
+`attempts_total` counter deltas, **not** from
+`rapid_mlx_spec_decode_accept_ratio`. That metric is a gauge, so its "delta"
+across a phase equals its lifetime value — reading it as a per-phase rate
+silently reports the whole server's history instead of the cell's. Counters are
+summed by metric-name **prefix** across every label set, because the `family`
+label is path-derived and varies between cells (`family="unknown"` for a
+locally-managed directory vs `family="qwen3.6"` for an HF cache path). Never key
+an aggregation on that label.
+
+`suite-index.json` records the outcome under `positive_control`.
+
+### Draft depth is predicted, then verified
+
+Effective draft depth is not a tuning knob on hybrid models: a model whose cache
+list contains a recurrent slot is clamped to K=1 regardless of what was
+requested. That is an architectural property, so the harness predicts it from
+`config.json` **before** serving and checks the prediction against the backend
+log afterwards.
+
+`runtime.backend_log.draft_depth_prediction` records the prediction, its
+evidence, and the observed value. If the backend clamps to a depth the predictor
+did not expect, **the run fails** — the same discipline as a lane mismatch. A
+capability claim that is never checked against backend behaviour is exactly how
+`aliases.json` came to declare `is_hybrid: false` for a model whose own
+`config.json` says `linear_attention: 48, full_attention: 16`.
+
+The predictor matches recurrent layer types by name (`linear_attention`,
+`mamba`, `mamba2`, `gated_delta_net`, `recurrent`) rather than treating
+"anything that is not `full_attention`" as recurrent. Gemma 4 is
+`{sliding_attention: 25, full_attention: 5}`, and the complement rule would
+wrongly predict K=1 for the family that runs MTP at real depth. An unrecognised
+layer label withholds a prediction rather than guessing, and
+`prediction_agrees` is then `null` — nothing to contradict, not agreement.
 
 ### Cache qualification
 
