@@ -20,6 +20,7 @@ pub mod models;
 pub mod platform;
 pub mod presets;
 pub mod remote_ssh;
+pub mod repo_context;
 pub mod state;
 pub mod system;
 #[cfg(feature = "native-tray")]

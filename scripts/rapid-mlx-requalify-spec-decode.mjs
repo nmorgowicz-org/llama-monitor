@@ -421,16 +421,26 @@ const reportPath = join(outRoot, 'requalification.json');
 await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 
 process.stderr.write(`\nOverall: ${overall}\n`);
+// Either verdict is worth recording: the app resolves spec_decode from a measurement
+// against this exact install before it consults any shipped prior, so a still-blocked
+// result is a fact about this box, not a no-op.
+process.stderr.write(
+  '\nRecord this verdict against the installed runtime:\n'
+  + `  llama-monitor --ingest-spec-decode-report ${reportPath}\n`,
+);
 if (report.promotes_capability) {
   process.stderr.write(
-    'All gates pass. Remove this version from SPEC_DECODE_GREEDY_ONLY_VERSIONS in '
-    + 'src/inference/rapid_mlx/capabilities.rs and record the evidence in '
-    + 'docs/reference/rapid-mlx-mtp-evidence.md before promoting spec_decode.\n',
+    'All gates pass. Ingesting turns multi-token prediction on for this install. '
+    + 'Because scheduler behaviour is a property of the build rather than the machine, '
+    + 'also add this version to SPEC_DECODE_VERSION_PRIORS in '
+    + 'src/inference/rapid_mlx/capabilities.rs as SchedulerEvidence::Engages and record '
+    + 'the evidence in docs/reference/rapid-mlx-mtp-evidence.md, so users who never run '
+    + 'this lane benefit too.\n',
   );
 } else if (overall === 'still-blocked') {
   process.stderr.write(
-    'Upstream has not fixed the greedy-only / logits-processor limitation. Keep '
-    + 'spec_decode Unavailable; nothing in the app needs to change.\n',
+    'Upstream has not fixed the greedy-only / logits-processor limitation. Speculative '
+    + 'decoding stays unavailable, and ingesting records why against this build.\n',
   );
 }
 process.stderr.write(`Report: ${reportPath}\n`);

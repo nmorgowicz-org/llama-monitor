@@ -595,6 +595,7 @@ mod tests {
             sampling_cascade: Default::default(),
             evidence_timestamp: 0,
             source: Default::default(),
+            measured_spec_decode: None,
         }
     }
 

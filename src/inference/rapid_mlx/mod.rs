@@ -10,6 +10,7 @@ pub mod model_resolver;
 pub mod poller;
 pub mod runtime;
 pub mod settings;
+pub mod spec_decode_store;
 // The managed-updater module is complete and unit-tested but has no caller in the
 // running binary yet; its wiring belongs to the Phase 12 dependency/watchlist work.
 #[allow(dead_code)]
@@ -1263,8 +1264,11 @@ fn capabilities_from_snapshot(snapshot: &self::capabilities::CapabilitySnapshot)
         guided_generation: is_available(&snapshot.qualified_features.guided_generation),
         vision: is_available(&snapshot.qualified_features.vision),
         embeddings: is_available(&snapshot.qualified_features.embeddings),
-        // Evidence-backed: false until the requalification lane promotes
-        // spec_decode to Available, rather than permanently false by default.
+        // Evidence-backed: false until a full gate sweep promotes spec_decode to
+        // Available, either as a shipped version prior or as a measurement recorded
+        // against this exact install. Until 2026-07-30 no source could return
+        // Available at all, so this was permanently false for every user on every
+        // build; see capabilities::apply_measured_spec_decode for the resolution order.
         mtp: is_available(&snapshot.qualified_features.spec_decode),
         // Core capabilities always available when runtime is validated
         status_memory_telemetry: true,

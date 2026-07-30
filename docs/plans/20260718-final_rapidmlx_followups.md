@@ -1953,9 +1953,12 @@ gates, exit codes, artifact locations, harness invocation prerequisites, and the
 `--profile-alias` requirement: §12 of the evidence record.
 
 **Standing action on every upstream bump.** Run the requalification lane. Exit `20`
-(still blocked) changes nothing in the app. Exit `0` means: remove that version from
-`SPEC_DECODE_GREEDY_ONLY_VERSIONS` in `src/inference/rapid_mlx/capabilities.rs`, record the
-evidence, and only then resume 6.5a. Exit `1` means the harness is broken, not that upstream is
+(still blocked) changes nothing in the app, but is still worth ingesting: it records a fact about
+this box. Exit `0` means: ingest the report with
+`llama-monitor --ingest-spec-decode-report <report>` so the measurement applies to this install,
+add that version to `SPEC_DECODE_VERSION_PRIORS` in `src/inference/rapid_mlx/capabilities.rs` as
+`SchedulerEvidence::Engages` so users who never run the lane benefit, record the evidence, and only
+then resume 6.5a. Exit `1` means the harness is broken, not that upstream is
 limited; those two must never be conflated.
 
 **Capability wiring — landed 2026-07-29, upstream-independent.** Because upstream commits
@@ -1965,7 +1968,7 @@ discharges item 9 for Rapid, and is the app-side half of item 11's honesty requi
 
 - `spec_decode` is now a tri-state `FeatureQualification` in the Rapid `CapabilitySnapshot`,
   reaching `CapabilitySet.mtp`. Flag presence can only produce `Indeterminate`;
-  `SPEC_DECODE_GREEDY_ONLY_VERSIONS` records `0.11.1` as behaviorally `Unavailable`. This is
+  `SPEC_DECODE_VERSION_PRIORS` records `0.11.1` as behaviorally `Unavailable`. This is
   item 9's "derive capability from checkable facts, never from alias metadata" applied to the
   runtime rather than the model.
 - A live estimator defect was fixed: `MtpAdmissionResult` recommended MTP for `CodingAgent`,
@@ -1999,7 +2002,7 @@ discharges item 9 for Rapid, and is the app-side half of item 11's honesty requi
   11's honesty requirement: a scenario-defaulted admission must not be reported as a measured
   one.
 - **`derive_mtp_concurrency` is no longer a stub.** It returns `SingleActiveGreedy` for a
-  version in `SPEC_DECODE_GREEDY_ONLY_VERSIONS` that exposes `--speculative`, and `Unknown`
+  version priored `GreedyOnly` in `SPEC_DECODE_VERSION_PRIORS` that exposes `--speculative`, and `Unknown`
   otherwise. Concurrency is a scheduler property, not a model property, and on those builds the
   scheduler states its own constraint in the backend log at install time (`single-request greedy
   K=1 chain-of-1; falls through on B>1 / non-greedy / logits-processors` — verbatim

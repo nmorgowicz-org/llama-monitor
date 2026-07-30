@@ -30,10 +30,18 @@ pub enum ProbeResult {
 }
 
 /// Actionable diagnosis for a single optional capability.
+///
+/// Two audiences read this. `message` is what anyone running the app should see: what
+/// is off, and what it costs them. `maintainer_detail` is the repo-side follow-up —
+/// harness invocations, source constants, evidence docs — which is actionable only if
+/// you have a checkout, and is noise (or worse, a dead end) to everyone else.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FeatureProbeFailure {
     pub feature: String,
     pub message: String,
+    /// Follow-up that requires a repo checkout. Omitted for failures a user can act on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maintainer_detail: Option<String>,
 }
 
 impl Default for ProbeResult {

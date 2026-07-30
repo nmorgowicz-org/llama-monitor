@@ -42,6 +42,16 @@ pub struct AppArgs {
     #[arg(long)]
     pub form_auth: Option<String>,
 
+    /// Record a speculative-decoding requalification report and exit.
+    ///
+    /// Takes the requalification.json written by
+    /// scripts/rapid-mlx-requalify-spec-decode.mjs and stores its verdict against the
+    /// installed Rapid-MLX runtime, which is what lets multi-token prediction turn on
+    /// for a build the gates actually passed on. The report is refused if it was
+    /// measured on a different build.
+    #[arg(long, value_name = "REPORT_JSON")]
+    pub ingest_spec_decode_report: Option<PathBuf>,
+
     /// Clear the persisted dashboard auth config and exit.
     ///
     /// Use this for local password recovery when form/basic auth is managed

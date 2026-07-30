@@ -29,6 +29,7 @@ mod models;
 mod platform;
 mod presets;
 mod remote_ssh;
+mod repo_context;
 mod state;
 mod system;
 #[cfg(feature = "native-tray")]
@@ -293,6 +294,15 @@ fn main() -> Result<()> {
     #[cfg(windows)]
     if args.config_dir.is_none() {
         migrate_legacy_config_dir(&app_config.config_dir);
+    }
+
+    // Measured speculative-decoding verdicts live beside the managed runtimes, so the
+    // store has to learn the resolved config directory before any capability snapshot is
+    // generated.
+    inference::rapid_mlx::spec_decode_store::set_store_root(&app_config.config_dir);
+
+    if let Some(report) = args.ingest_spec_decode_report.clone() {
+        return ingest_spec_decode_report(&report);
     }
 
     // Initialize at-rest encryption (auto-generates key if needed)
@@ -1148,6 +1158,43 @@ fn main() -> Result<()> {
     }
 }
 
+/// Record a speculative-decoding requalification report against the installed
+/// Rapid-MLX runtime, then exit.
+///
+/// The measurement is keyed by a capability snapshot's fingerprint, so this discovers
+/// and probes the runtime exactly as the app would rather than trusting the report's own
+/// version string alone. That is also what makes the mismatch check meaningful: the
+/// report is refused unless it describes the build actually installed here.
+fn ingest_spec_decode_report(report: &std::path::Path) -> Result<()> {
+    use inference::rapid_mlx::capabilities;
+    use inference::rapid_mlx::spec_decode_store;
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let snapshot = runtime.block_on(capabilities::generate_snapshot_from_discovery())?;
+    let store = spec_decode_store::process_store();
+    let verdict = store.ingest_requalification_report(&snapshot, report)?;
+
+    println!(
+        "[info] Recorded {outcome:?} for Rapid-MLX {version} in {store_path}",
+        outcome = verdict.outcome,
+        version = verdict.rapid_mlx_version,
+        store_path = store.path().display(),
+    );
+    println!(
+        "[info] Gates run: {gates}; model: {model}; tool parser: {tools}",
+        gates = verdict.gates_run.join(", "),
+        model = verdict.model,
+        tools = verdict.tool_call_parser.as_deref().unwrap_or("none"),
+    );
+    println!(
+        "[info] Speculative decoding on this install is now: {qualification:?}",
+        qualification = verdict.qualification(),
+    );
+    Ok(())
+}
+
 fn migrate_legacy_dashboard_auth(
     config_dir: &std::path::Path,
     auth_config_file: &std::path::Path,
@@ -1252,6 +1299,7 @@ mod tests {
                 host: "127.0.0.1".to_string(),
                 basic_auth: None,
                 form_auth: None,
+                ingest_spec_decode_report: None,
                 clear_auth_config: false,
                 agent_port: 7779,
                 agent_token: None,
@@ -1296,6 +1344,7 @@ mod tests {
             host: "127.0.0.1".to_string(),
             basic_auth: None,
             form_auth: None,
+            ingest_spec_decode_report: None,
             clear_auth_config: false,
             agent_port: 7779,
             agent_token: None,
@@ -1332,6 +1381,7 @@ mod tests {
             host: "127.0.0.1".to_string(),
             basic_auth: None,
             form_auth: None,
+            ingest_spec_decode_report: None,
             clear_auth_config: false,
             agent_port: 7779,
             agent_token: None,
@@ -1369,6 +1419,7 @@ mod tests {
             host: "127.0.0.1".to_string(),
             basic_auth: None,
             form_auth: None,
+            ingest_spec_decode_report: None,
             clear_auth_config: false,
             agent_port: 7779,
             agent_token: None,
@@ -1407,6 +1458,7 @@ mod tests {
             host: "127.0.0.1".to_string(),
             basic_auth: None,
             form_auth: None,
+            ingest_spec_decode_report: None,
             clear_auth_config: false,
             agent_port: 7779,
             agent_token: None,
@@ -1445,6 +1497,7 @@ mod tests {
             host: "127.0.0.1".to_string(),
             basic_auth: None,
             form_auth: None,
+            ingest_spec_decode_report: None,
             clear_auth_config: false,
             agent_port: 7779,
             agent_token: None,

@@ -546,7 +546,7 @@ Items 5 and 9, plus the constrained-tool case, are now the three gates of
 `scripts/rapid-mlx-requalify-spec-decode.mjs`. Run it against a new upstream build rather than
 re-deriving them by hand; it exits `20` while upstream is still blocked, and only a full sweep
 with every gate passing may promote `spec_decode` out of `Unavailable`. If it ever exits `0`,
-record the measurements here **before** editing `SPEC_DECODE_GREEDY_ONLY_VERSIONS` in
+record the measurements here **before** adding a `SchedulerEvidence::Engages` entry to `SPEC_DECODE_VERSION_PRIORS` in
 `src/inference/rapid_mlx/capabilities.rs` — the version list is a claim about this document.
 
 ## 12. Procedure — requalifying a future build

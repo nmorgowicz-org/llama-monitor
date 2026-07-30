@@ -1,6 +1,8 @@
 #![allow(clippy::collapsible_if)]
 
 use crate::inference::rapid_mlx::runtime::{FeatureProbeFailure, ProbeResult, RuntimeSource};
+use crate::inference::rapid_mlx::spec_decode_store::{MeasuredSpecDecode, SpecDecodeVerdictStore};
+use crate::repo_context::RepoContext;
 use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -338,6 +340,12 @@ pub struct CapabilitySnapshot {
     /// Timestamp when this snapshot was generated.
     pub evidence_timestamp: u64,
     pub source: CapabilitySnapshotSource,
+    /// The measurement behind `qualified_features.spec_decode`, when one exists for
+    /// this exact install. Carried so a reader can see which gates ran, against which
+    /// model, with which parsers installed — a bare `Available` is not reviewable.
+    /// `None` means the verdict came from a shipped prior or from flag presence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub measured_spec_decode: Option<MeasuredSpecDecode>,
 }
 
 impl CapabilitySnapshot {
@@ -348,9 +356,14 @@ impl CapabilitySnapshot {
             && self.help_hash == hash_help(&self.serve_flags.join(" "))
     }
 
-    // Snapshot identity, intended for cache invalidation across upgrades. No caller yet.
-    #[allow(dead_code)]
     /// Generate fingerprint that uniquely identifies this snapshot's subject.
+    ///
+    /// Hashes the install path, the binary's own hash, the help text, and every
+    /// dependency version, so it changes whenever anything about the runtime changes.
+    /// That is what makes it the join key for
+    /// [`SpecDecodeVerdictStore`](super::spec_decode_store::SpecDecodeVerdictStore): a
+    /// measured verdict keyed this way is exact for one install and can never be
+    /// misapplied to another build or another machine.
     pub fn fingerprint(&self) -> String {
         let mut hasher = Sha256::new();
         hasher.update(self.executable_identity.path.as_bytes());
@@ -452,7 +465,7 @@ pub async fn generate_snapshot(binary: &Path, source: RuntimeSource) -> Result<C
         .unwrap_or_default()
         .as_secs();
 
-    let snapshot = CapabilitySnapshot {
+    let mut snapshot = CapabilitySnapshot {
         executable_identity: identity,
         rapid_mlx_version: version,
         help_hash,
@@ -465,7 +478,20 @@ pub async fn generate_snapshot(binary: &Path, source: RuntimeSource) -> Result<C
         sampling_cascade,
         evidence_timestamp: now,
         source: CapabilitySnapshotSource::AutoProbed,
+        // Probing the binary cannot produce a measurement; only
+        // `apply_measured_spec_decode` can fill this, from the verdict store.
+        measured_spec_decode: None,
     };
+
+    // Step 1 of the resolution order: a measurement for this exact install outranks
+    // everything the flags and priors above could settle. It runs here, once, so every
+    // caller of `generate_snapshot` gets the same answer -- a store that only some code
+    // paths consult is a store that reports different capabilities depending on who
+    // asked.
+    apply_measured_spec_decode(
+        &mut snapshot,
+        &crate::inference::rapid_mlx::spec_decode_store::process_store(),
+    );
 
     cache_snapshot(snapshot.clone());
     Ok(snapshot)
@@ -861,36 +887,117 @@ fn derive_qualified_features(
     }
 }
 
-/// Rapid-MLX versions where the speculative scheduler was directly observed to
-/// be greedy-only and to bail whenever a logits processor is installed.
-///
-/// Under those conditions it cannot serve a sampled or tool-constrained
-/// request, which is every shipping agentic workload. Evidence:
-/// `docs/reference/rapid-mlx-mtp-evidence.md`.
-const SPEC_DECODE_GREEDY_ONLY_VERSIONS: &[&str] = &["0.11.1"];
+/// What a full gate sweep recorded about one Rapid-MLX version's speculative
+/// scheduler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchedulerEvidence {
+    /// Directly observed greedy-only, and bailing whenever a logits processor is
+    /// installed. Under those two conditions it cannot serve a sampled or
+    /// tool-constrained request, which is every shipping agentic workload.
+    GreedyOnly,
+    /// A full gate sweep passed on this version: speculation engaged at
+    /// temperature > 0, engaged under a tool grammar, and left greedy output
+    /// token-identical.
+    ///
+    /// No shipping Rapid-MLX version has earned this yet, so nothing constructs it
+    /// outside the resolution tests. It is not aspirational: the day a sweep passes,
+    /// adding one line to [`SPEC_DECODE_VERSION_PRIORS`] is the whole change, and the
+    /// tests prove that line would work.
+    #[allow(dead_code)]
+    Engages,
+}
 
-/// Derive speculative-decoding qualification.
+/// Shipped priors: scheduler behavior observed on specific Rapid-MLX versions.
 ///
-/// Flag presence proves a scheduler is reachable, never that it engages, so the
-/// best this can return is `Indeterminate`. A version with recorded negative
-/// behavioral evidence returns `Unavailable`.
+/// A scheduler's engage/bail logic is a property of the build, not of the machine it
+/// runs on, which is what makes this knowledge portable and worth shipping. A user who
+/// never runs the requalification lane still gets the right answer for a version
+/// somebody has already measured — that is the whole reason this table carries
+/// known-*good* entries and not only known-bad ones.
+///
+/// A local measurement for the exact install always outranks a prior. Evidence for
+/// every entry: `docs/reference/rapid-mlx-mtp-evidence.md`.
+const SPEC_DECODE_VERSION_PRIORS: &[(&str, SchedulerEvidence)] =
+    &[("0.11.1", SchedulerEvidence::GreedyOnly)];
+
+/// Look up the shipped prior for a version.
+///
+/// Takes the table as a parameter so the resolution order can be tested against a
+/// known-good entry: no shipping version has passed the gates yet, and a mechanism
+/// whose only reachable branch is the negative one is a mechanism nobody has checked.
+fn spec_decode_prior(
+    version: &str,
+    priors: &[(&str, SchedulerEvidence)],
+) -> Option<SchedulerEvidence> {
+    priors
+        .iter()
+        .find(|(known, _)| *known == version)
+        .map(|(_, evidence)| *evidence)
+}
+
+/// Derive speculative-decoding qualification from flags and shipped priors alone.
+///
+/// This is the no-measurement path. Flag presence proves a scheduler is reachable,
+/// never that it engages, so without a prior the best this can return is
+/// `Indeterminate`. [`apply_measured_spec_decode`] overrides the result when a local
+/// measurement exists for this exact install.
 fn derive_spec_decode(flags: &[String], version: &str) -> FeatureQualification {
+    resolve_spec_decode(flags, version, SPEC_DECODE_VERSION_PRIORS)
+}
+
+fn resolve_spec_decode(
+    flags: &[String],
+    version: &str,
+    priors: &[(&str, SchedulerEvidence)],
+) -> FeatureQualification {
     let has_speculative = flags.iter().any(|f| f == "--speculative");
     if !has_speculative {
         return FeatureQualification::Unavailable("Missing --speculative flag".into());
     }
-    if SPEC_DECODE_GREEDY_ONLY_VERSIONS.contains(&version) {
-        return FeatureQualification::Unavailable(format!(
+    match spec_decode_prior(version, priors) {
+        Some(SchedulerEvidence::GreedyOnly) => FeatureQualification::Unavailable(format!(
             "Rapid-MLX {version} speculative scheduler is greedy-only and bails when a \
              logits processor is installed; sampled and tool-constrained requests fall \
              through to plain decode"
-        ));
+        )),
+        Some(SchedulerEvidence::Engages) => FeatureQualification::Available,
+        None => FeatureQualification::Indeterminate(format!(
+            "Rapid-MLX {version} exposes --speculative, but no gate sweep has been \
+             recorded for this build, so it is unknown whether the scheduler engages"
+        )),
     }
-    FeatureQualification::Indeterminate(
-        "--speculative is present; run the spec-decode requalification lane \
-         (scripts/rapid-mlx-requalify-spec-decode.mjs) to qualify"
-            .into(),
-    )
+}
+
+/// Overlay a locally measured verdict onto a finished snapshot.
+///
+/// Resolution order for `spec_decode`, most specific first:
+///
+/// 1. a measurement for this exact install, from [`SpecDecodeVerdictStore`];
+/// 2. the shipped prior for this version ([`SPEC_DECODE_VERSION_PRIORS`]);
+/// 3. flag presence, which can only reach `Indeterminate`;
+/// 4. `Unavailable`, when no scheduler is exposed at all.
+///
+/// Steps 2–4 are settled during [`generate_snapshot`]; this applies step 1. It has to
+/// run afterwards rather than inside, because the store's key is
+/// [`CapabilitySnapshot::fingerprint`], which is not computable until the snapshot is
+/// complete. The snapshot looks a measurement up; it never infers one.
+///
+/// Returns whether a measured verdict was found and applied.
+pub fn apply_measured_spec_decode(
+    snapshot: &mut CapabilitySnapshot,
+    store: &SpecDecodeVerdictStore,
+) -> bool {
+    // Nothing to override when no scheduler is exposed: a verdict about a flag this
+    // build does not have would be about some other build.
+    if !snapshot.serve_flags.iter().any(|f| f == "--speculative") {
+        return false;
+    }
+    let Some(measured) = store.verdict_for(&snapshot.fingerprint()) else {
+        return false;
+    };
+    snapshot.qualified_features.spec_decode = measured.qualification();
+    snapshot.measured_spec_decode = Some(measured);
+    true
 }
 
 fn is_broken_vision_version(package_versions: &[DependencyVersion]) -> bool {
@@ -914,9 +1021,15 @@ fn is_broken_vision_version(package_versions: &[DependencyVersion]) -> bool {
 /// eligibility, companion ownership, or mid-stream fallback behaviour, and an
 /// unrecognised version has no observed scheduler evidence behind it — only the
 /// requalification lane can settle those.
+///
+/// A [`SchedulerEvidence::Engages`] prior does not settle this either: the three gates
+/// all run one request at a time, so passing them says nothing about `B > 1`.
 fn derive_mtp_concurrency(flags: &[String], version: &str) -> MtpConcurrencyState {
     let has_speculative = flags.iter().any(|flag| flag == "--speculative");
-    if has_speculative && SPEC_DECODE_GREEDY_ONLY_VERSIONS.contains(&version) {
+    if has_speculative
+        && spec_decode_prior(version, SPEC_DECODE_VERSION_PRIORS)
+            == Some(SchedulerEvidence::GreedyOnly)
+    {
         return MtpConcurrencyState::SingleActiveGreedy;
     }
     MtpConcurrencyState::Unknown
@@ -1463,7 +1576,7 @@ pub async fn run_update_validation_probe(
 }
 
 /// Check if version output matches expected version (major.minor.patch must match).
-fn version_matches(actual: &str, expected: &str) -> bool {
+pub(crate) fn version_matches(actual: &str, expected: &str) -> bool {
     // Strip any leading 'v'
     let clean_actual = extract_version_text(actual).unwrap_or_else(|| actual.to_string());
     let clean_expected = expected.trim_start_matches('v');
@@ -1528,6 +1641,7 @@ async fn probe_self_import(binary: &Path) -> Result<ProbeResult> {
                 feature: "self-import".into(),
                 message: "Python interpreter not found in environment; self-import check skipped"
                     .into(),
+                maintainer_detail: None,
             }],
         });
     };
@@ -1597,6 +1711,7 @@ fn collect_feature_failures(snapshot: &CapabilitySnapshot) -> Vec<FeatureProbeFa
         failures.push(FeatureProbeFailure {
             feature: "guided".into(),
             message: format!("[guided] extra import failed: {reason}"),
+            maintainer_detail: None,
         });
     }
 
@@ -1605,6 +1720,7 @@ fn collect_feature_failures(snapshot: &CapabilitySnapshot) -> Vec<FeatureProbeFa
         failures.push(FeatureProbeFailure {
             feature: "vision".into(),
             message: format!("Vision extra import failed: {reason}"),
+            maintainer_detail: None,
         });
     }
 
@@ -1613,6 +1729,7 @@ fn collect_feature_failures(snapshot: &CapabilitySnapshot) -> Vec<FeatureProbeFa
         failures.push(FeatureProbeFailure {
             feature: "embeddings".into(),
             message: format!("Embeddings extra import failed: {reason}"),
+            maintainer_detail: None,
         });
     }
 
@@ -1626,6 +1743,7 @@ fn collect_feature_failures(snapshot: &CapabilitySnapshot) -> Vec<FeatureProbeFa
             failures.push(FeatureProbeFailure {
                 feature: "guided".into(),
                 message: "Guided extra installed but capability probe failed".into(),
+                maintainer_detail: None,
             });
         }
         // Missing is informational, not a failure
@@ -1634,7 +1752,12 @@ fn collect_feature_failures(snapshot: &CapabilitySnapshot) -> Vec<FeatureProbeFa
     // Speculative decoding: flag presence cannot qualify it, so an update that
     // exposes --speculative on a version we have no behavioral evidence for
     // needs the requalification lane run before MTP can be recommended.
-    failures.extend(collect_spec_decode_failures(snapshot));
+    // Detected once, here, so the caller's audience is decided in one place rather than
+    // guessed at per feature.
+    failures.extend(collect_spec_decode_failures(
+        snapshot,
+        crate::repo_context::detect(),
+    ));
 
     failures
 }
@@ -1651,31 +1774,78 @@ pub const SPEC_DECODE_GATES: &[&str] = &[
     "parity: greedy output is token-identical with speculation on and off",
 ];
 
+/// The lane that answers the gates. Repo-relative: it only exists in a checkout, and
+/// [`RepoContext::file`] confirms it is still there before anyone is told to run it.
+pub const SPEC_DECODE_LANE_SCRIPT: &str = "scripts/rapid-mlx-requalify-spec-decode.mjs";
+
+/// Just the gate names, in order, derived from [`SPEC_DECODE_GATES`].
+///
+/// The store checks an ingested report's `gates_defined` against this. Deriving the
+/// names rather than listing them twice is the point: if the two lists could drift, a
+/// report could claim a full sweep of gates this build never asked for.
+pub fn spec_decode_gate_names() -> Vec<&'static str> {
+    SPEC_DECODE_GATES
+        .iter()
+        .map(|gate| gate.split(':').next().unwrap_or(gate).trim())
+        .collect()
+}
+
 /// Per-feature notes for speculative decoding, derived from the snapshot.
-fn collect_spec_decode_failures(snapshot: &CapabilitySnapshot) -> Vec<FeatureProbeFailure> {
+///
+/// Split by audience. Anyone running the app gets the consequence — speculative
+/// decoding is off, so MTP stays off, and here is why. The requalification lane lives
+/// in this repo and cannot be run from an installed build, so naming it in `message`
+/// would hand most readers an instruction they cannot follow; it goes in
+/// `maintainer_detail` instead.
+///
+/// `repo` decides whether that half is produced at all, and it is passed in rather than
+/// detected here so the two audiences can both be tested. It has to gate construction,
+/// not just display: this failure is serialized to the web API, so a detail that exists
+/// is a detail that reaches the browser.
+fn collect_spec_decode_failures(
+    snapshot: &CapabilitySnapshot,
+    repo: Option<&RepoContext>,
+) -> Vec<FeatureProbeFailure> {
     let mut failures = Vec::new();
     // No scheduler exposed means there is nothing to requalify.
     if !snapshot.serve_flags.iter().any(|f| f == "--speculative") {
         return failures;
     }
     match snapshot.qualified_features.spec_decode {
-        // Nothing outstanding: the lane already promoted this.
+        // Nothing outstanding: a full gate sweep settled this, locally or upstream.
         FeatureQualification::Available => {}
         // Known-blocked version, or a version with no behavioral evidence yet.
         // Either way the user needs to know why MTP stays off and what would
         // change it.
         FeatureQualification::Unavailable(ref reason)
         | FeatureQualification::Indeterminate(ref reason) => {
+            let measured = snapshot.measured_spec_decode.is_some();
             failures.push(FeatureProbeFailure {
                 feature: "spec_decode".into(),
                 message: format!(
-                    "Speculative decoding is not qualified on Rapid-MLX {version}: {reason}. \
-                     Outstanding gates: {gates}. Run \
-                     `node scripts/rapid-mlx-requalify-spec-decode.mjs` \
-                     to re-test on this build.",
+                    "Speculative decoding is not qualified on Rapid-MLX {version}, so \
+                     multi-token prediction stays off and generation runs at plain \
+                     decode speed. {reason}. {provenance}",
                     version = snapshot.rapid_mlx_version,
-                    gates = SPEC_DECODE_GATES.join("; "),
+                    provenance = if measured {
+                        "This was measured on your own installation."
+                    } else {
+                        "Nothing is broken and nothing needs fixing on your side: a \
+                         future Rapid-MLX update may lift this."
+                    },
                 ),
+                maintainer_detail: repo
+                    .and_then(|repo| repo.file(SPEC_DECODE_LANE_SCRIPT))
+                    .map(|lane| {
+                        format!(
+                            "Gates that must all pass: {gates}. Re-test this build with \
+                             `node {lane}`, then record the result — a passing sweep for a \
+                             version everyone shares belongs in SPEC_DECODE_VERSION_PRIORS, \
+                             not only in the local verdict store.",
+                            gates = SPEC_DECODE_GATES.join("; "),
+                            lane = lane.display(),
+                        )
+                    }),
             });
         }
     }
@@ -1812,6 +1982,7 @@ Options:
             sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
+            measured_spec_decode: None,
         };
         assert!(snap.is_valid_for(&identity1));
         assert!(!snap.is_valid_for(&identity2));
@@ -1840,6 +2011,7 @@ Options:
             sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
+            measured_spec_decode: None,
         };
         let fp1 = snap1.fingerprint();
         snap1.package_versions.push(DependencyVersion {
@@ -2003,7 +2175,8 @@ Options:
         );
         match features.spec_decode {
             FeatureQualification::Indeterminate(ref reason) => {
-                assert!(reason.contains("requalification"), "reason: {reason}");
+                assert!(reason.contains("no gate sweep"), "reason: {reason}");
+                assert!(reason.contains("0.99.0"), "reason: {reason}");
             }
             ref other => panic!("expected Indeterminate, got {other:?}"),
         }
@@ -2028,6 +2201,173 @@ Options:
             }
             ref other => panic!("expected Unavailable, got {other:?}"),
         }
+    }
+
+    /// Priors with a known-good entry. No shipping version has passed the gates yet, so
+    /// without an injected table the `Engages` branch would never be exercised — and a
+    /// branch nobody has run is exactly how "MTP is off for everyone, permanently"
+    /// survived being written down as intentional.
+    const TEST_PRIORS: &[(&str, SchedulerEvidence)] = &[
+        ("0.11.1", SchedulerEvidence::GreedyOnly),
+        ("0.12.0", SchedulerEvidence::Engages),
+    ];
+
+    #[test]
+    fn a_known_good_version_qualifies_without_any_local_measurement() {
+        // This is the whole point of shipping priors: a user who never runs the harness
+        // still gets speculation on a build somebody else already measured.
+        let flags: Vec<String> = vec!["--speculative".into()];
+        assert_eq!(
+            resolve_spec_decode(&flags, "0.12.0", TEST_PRIORS),
+            FeatureQualification::Available
+        );
+    }
+
+    #[test]
+    fn a_missing_flag_outranks_a_known_good_prior() {
+        // A prior describes a scheduler. A build with no --speculative has no scheduler
+        // to describe, whatever the version string says.
+        assert!(matches!(
+            resolve_spec_decode(&[], "0.12.0", TEST_PRIORS),
+            FeatureQualification::Unavailable(_)
+        ));
+    }
+
+    fn measured_snapshot_and_store(
+        version: &str,
+        flags: Vec<String>,
+        overall: &str,
+    ) -> (
+        CapabilitySnapshot,
+        SpecDecodeVerdictStore,
+        tempfile::TempDir,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SpecDecodeVerdictStore::at(dir.path());
+        let mut snapshot = CapabilitySnapshot {
+            executable_identity: ExecutableIdentity {
+                path: "/opt/rapid-mlx/bin/rapid-mlx".into(),
+                file_hash: "abc123".into(),
+                file_mtime_unix: 1,
+            },
+            rapid_mlx_version: version.to_string(),
+            serve_flags: flags.clone(),
+            ..Default::default()
+        };
+        snapshot.qualified_features.spec_decode = resolve_spec_decode(&flags, version, TEST_PRIORS);
+
+        let gates: Vec<String> = spec_decode_gate_names()
+            .into_iter()
+            .map(|name| format!("\"{name}\""))
+            .collect();
+        let verdict = if overall == "qualified" {
+            "pass"
+        } else {
+            "blocked"
+        };
+        let results: Vec<String> = spec_decode_gate_names()
+            .into_iter()
+            .map(|name| {
+                format!("{{\"gate\":\"{name}\",\"verdict\":\"{verdict}\",\"reason\":\"observed\"}}")
+            })
+            .collect();
+        let report = dir.path().join("requalification.json");
+        std::fs::write(
+            &report,
+            format!(
+                "{{\"rapid_mlx_version\":\"{version}\",\"model\":\"/models/trunk\",\
+                 \"parser_source\":\"explicit flags\",\"gates_run\":[{gates}],\
+                 \"gates_defined\":[{gates}],\"overall\":\"{overall}\",\
+                 \"results\":[{results}],\"generated_at\":\"2026-07-30T09:00:00Z\"}}",
+                gates = gates.join(","),
+                results = results.join(","),
+            ),
+        )
+        .unwrap();
+        store
+            .ingest_requalification_report(&snapshot, &report)
+            .unwrap();
+        (snapshot, store, dir)
+    }
+
+    #[test]
+    fn a_local_measurement_outranks_a_known_good_prior() {
+        // The prior says this build engages; this machine measured otherwise. The
+        // machine wins: a portable claim cannot overrule the install in front of us.
+        let (mut snapshot, store, _dir) =
+            measured_snapshot_and_store("0.12.0", vec!["--speculative".into()], "still-blocked");
+        assert_eq!(
+            snapshot.qualified_features.spec_decode,
+            FeatureQualification::Available,
+            "precondition: the prior alone qualifies this version"
+        );
+
+        assert!(apply_measured_spec_decode(&mut snapshot, &store));
+        match snapshot.qualified_features.spec_decode {
+            FeatureQualification::Unavailable(ref reason) => {
+                assert!(reason.contains("Measured on this build"), "{reason}");
+            }
+            ref other => panic!("expected Unavailable, got {other:?}"),
+        }
+        assert!(
+            snapshot.measured_spec_decode.is_some(),
+            "the measurement itself must travel with the verdict, or an Available is \
+             not reviewable"
+        );
+    }
+
+    #[test]
+    fn a_local_measurement_qualifies_a_version_with_no_prior() {
+        let (mut snapshot, store, _dir) =
+            measured_snapshot_and_store("0.99.0", vec!["--speculative".into()], "qualified");
+        assert!(matches!(
+            snapshot.qualified_features.spec_decode,
+            FeatureQualification::Indeterminate(_)
+        ));
+
+        assert!(apply_measured_spec_decode(&mut snapshot, &store));
+        assert_eq!(
+            snapshot.qualified_features.spec_decode,
+            FeatureQualification::Available
+        );
+    }
+
+    #[test]
+    fn no_measurement_leaves_the_prior_verdict_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SpecDecodeVerdictStore::at(dir.path());
+        let mut snapshot = CapabilitySnapshot {
+            rapid_mlx_version: "0.11.1".into(),
+            serve_flags: vec!["--speculative".into()],
+            ..Default::default()
+        };
+        snapshot.qualified_features.spec_decode =
+            resolve_spec_decode(&snapshot.serve_flags.clone(), "0.11.1", TEST_PRIORS);
+
+        assert!(!apply_measured_spec_decode(&mut snapshot, &store));
+        assert!(matches!(
+            snapshot.qualified_features.spec_decode,
+            FeatureQualification::Unavailable(_)
+        ));
+        assert!(snapshot.measured_spec_decode.is_none());
+    }
+
+    #[test]
+    fn a_measurement_cannot_qualify_a_build_that_exposes_no_scheduler() {
+        // The store is keyed by fingerprint, and the fingerprint covers the help text,
+        // so this should be unreachable. Refuse anyway: the failure mode is claiming a
+        // capability whose flag does not exist, which would fail at launch.
+        let (mut snapshot, store, _dir) =
+            measured_snapshot_and_store("0.12.0", vec!["--speculative".into()], "qualified");
+        snapshot.serve_flags.clear();
+        snapshot.qualified_features.spec_decode =
+            FeatureQualification::Unavailable("Missing --speculative flag".into());
+
+        assert!(!apply_measured_spec_decode(&mut snapshot, &store));
+        assert!(matches!(
+            snapshot.qualified_features.spec_decode,
+            FeatureQualification::Unavailable(_)
+        ));
     }
 
     #[test]
@@ -2136,6 +2476,7 @@ Options:
             sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
+            measured_spec_decode: None,
         };
         let failures = collect_feature_failures(&snapshot);
         assert_eq!(failures.len(), 2);
@@ -2170,6 +2511,7 @@ Options:
             sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
+            measured_spec_decode: None,
         };
         let failures = collect_feature_failures(&snapshot);
         // Missing is not a failure; only Broken is; installed+available means no failure
@@ -2207,6 +2549,7 @@ Options:
             sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
+            measured_spec_decode: None,
         }
     }
 
@@ -2219,24 +2562,77 @@ Options:
     }
 
     #[test]
-    fn spec_decode_probe_names_outstanding_gates() {
+    fn spec_decode_probe_tells_a_user_the_consequence_and_names_no_harness() {
         let snapshot = spec_decode_snapshot(
             "0.11.1",
             vec!["--speculative".into()],
             FeatureQualification::Unavailable("greedy-only".into()),
         );
-        let failures = collect_feature_failures(&snapshot);
+        // No repo: this is the installed-build audience.
+        let failures = collect_spec_decode_failures(&snapshot, None);
         assert_eq!(failures.len(), 1);
         assert_eq!(failures[0].feature, "spec_decode");
         let message = &failures[0].message;
         assert!(message.contains("0.11.1"), "message: {message}");
         assert!(
-            message.contains("rapid-mlx-requalify-spec-decode"),
-            "{message}"
+            message.contains("multi-token prediction stays off"),
+            "a user needs the consequence, not just the verdict: {message}"
+        );
+        assert!(
+            !message.contains("scripts/") && !message.contains(".mjs"),
+            "a repo harness is not actionable from an installed build: {message}"
+        );
+        assert!(
+            failures[0].maintainer_detail.is_none(),
+            "detail must be withheld at construction, since it is serialized to the API"
+        );
+    }
+
+    #[test]
+    fn spec_decode_probe_adds_the_lane_invocation_inside_a_checkout() {
+        let snapshot = spec_decode_snapshot(
+            "0.11.1",
+            vec!["--speculative".into()],
+            FeatureQualification::Unavailable("greedy-only".into()),
+        );
+        // The test binary lives in target/debug/deps, so the real checkout resolves.
+        let repo = crate::repo_context::detect().expect("tests run from a checkout");
+        let failures = collect_spec_decode_failures(&snapshot, Some(repo));
+        let detail = failures[0]
+            .maintainer_detail
+            .as_ref()
+            .expect("a checkout gets the lane");
+        assert!(detail.contains(SPEC_DECODE_LANE_SCRIPT), "{detail}");
+        assert!(
+            detail.contains("SPEC_DECODE_VERSION_PRIORS"),
+            "a passing local sweep on a shared version belongs in the shipped priors: {detail}"
         );
         for gate in SPEC_DECODE_GATES {
-            assert!(message.contains(gate), "missing gate {gate} in: {message}");
+            assert!(detail.contains(gate), "missing gate {gate} in: {detail}");
         }
+    }
+
+    #[test]
+    fn spec_decode_probe_says_so_when_the_verdict_was_measured_here() {
+        let mut snapshot = spec_decode_snapshot(
+            "0.12.0",
+            vec!["--speculative".into()],
+            FeatureQualification::Unavailable("measured".into()),
+        );
+        let (measured, store, _dir) =
+            measured_snapshot_and_store("0.12.0", vec!["--speculative".into()], "still-blocked");
+        snapshot.measured_spec_decode = store.verdict_for(&measured.fingerprint());
+
+        let failures = collect_spec_decode_failures(&snapshot, None);
+        let message = &failures[0].message;
+        assert!(
+            message.contains("measured on your own installation"),
+            "a measured verdict must not read as somebody else's finding: {message}"
+        );
+        assert!(
+            !message.contains("future Rapid-MLX update may lift this"),
+            "that line is for an unmeasured build: {message}"
+        );
     }
 
     #[test]
@@ -2260,6 +2656,7 @@ Options:
             feature_failures: vec![FeatureProbeFailure {
                 feature: "guided".into(),
                 message: "extra import failed".into(),
+                maintainer_detail: None,
             }],
         };
         assert!(matches!(result, ProbeResult::PerFeatureFail { .. }));
@@ -2431,6 +2828,7 @@ Options:
             sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
+            measured_spec_decode: None,
         };
         // 48GB ceiling, 40GB safe, 20GB model overhead → 20GB available for cache
         // D30 budget = 48GB × 0.10 = 4.8GB
@@ -2470,6 +2868,7 @@ Options:
             sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
+            measured_spec_decode: None,
         };
         let guidance = PrefixCacheGuidance::derive(
             &snapshot,
@@ -2507,6 +2906,7 @@ Options:
             sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
+            measured_spec_decode: None,
         };
         let guidance = PrefixCacheGuidance::derive(
             &snapshot,
@@ -2543,6 +2943,7 @@ Options:
             sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
+            measured_spec_decode: None,
         };
         // 48GB ceiling, 10GB safe, 20GB model overhead → negative available
         let guidance = PrefixCacheGuidance::derive(
@@ -2581,6 +2982,7 @@ Options:
             sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
+            measured_spec_decode: None,
         };
         let ceiling = 64 * 1024 * 1024 * 1024u64;
         let guidance =
@@ -2610,6 +3012,7 @@ Options:
             sampling_cascade: SamplingCascade::default(),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
+            measured_spec_decode: None,
         };
         let guidance = PrefixCacheGuidance::derive(
             &snapshot,
@@ -2647,6 +3050,7 @@ Options:
             sampling_cascade: SamplingCascade::from_flags(&flags),
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
+            measured_spec_decode: None,
         };
         assert_eq!(snapshot.mtp_concurrency, MtpConcurrencyState::Unknown);
         assert!(matches!(
