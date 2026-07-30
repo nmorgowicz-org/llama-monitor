@@ -110,7 +110,8 @@ let hfState = {
     // Discovery scope + sort (Phase 8B1) — additive toggles: MLX and GGUF can both be active
     discoveryScopeMlx: false,
     discoveryScopeGguf: true, // default: GGUF always active; macOS will also activate MLX below
-    discoverySort: HF_SORT.DOWNLOADS,
+    // Matches the ui-settings.json default; the persisted choice overrides it once loaded.
+    discoverySort: HF_SORT.LAST_UPDATED,
     discoveryQuantsOnly: false, // filter to show only quantized variants
     previewCtx: 65536, // default context for VRAM calculation
 };
@@ -2273,7 +2274,7 @@ async function initHfDownloadTab() {
     if (sortContainer) {
         hfCreateSortSelector({
             container: sortContainer,
-            defaultSort: HF_SORT.DOWNLOADS,
+            defaultSort: HF_SORT.LAST_UPDATED,
             onChange: (sort) => {
                 hfState.discoverySort = sort;
                 clearTimeout(searchTimer);

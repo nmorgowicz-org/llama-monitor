@@ -254,6 +254,10 @@ pub struct UiSettings {
     pub explicit_mode_policy: String,
     #[serde(default = "default_context_card_view")]
     pub context_card_view: String,
+    /// Last sort mode chosen in HF discovery, so it survives a restart instead of snapping
+    /// back to the default on every visit. One of the `HF_SORT` values in `hf-browse.js`.
+    #[serde(default = "default_hf_discovery_sort")]
+    pub hf_discovery_sort: String,
     /// WebSocket dashboard push interval in milliseconds.
     /// Presets: 500 (Normal), 1000 (Balanced), 2000 (Battery Saver), 5000 (Slow Connection).
     #[serde(default = "default_ws_push_interval_ms")]
@@ -591,6 +595,12 @@ fn default_context_card_view() -> String {
     "gauge".to_string()
 }
 
+/// Quant repos are re-uploaded long after they are created, so recency is the signal that
+/// actually tracks "is this worth looking at" — a better opening view than raw download count.
+fn default_hf_discovery_sort() -> String {
+    "last_updated".to_string()
+}
+
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
@@ -609,6 +619,7 @@ impl Default for UiSettings {
             remote_agent_ssh_command: String::new(),
             explicit_mode_policy: String::new(),
             context_card_view: default_context_card_view(),
+            hf_discovery_sort: default_hf_discovery_sort(),
             ws_push_interval_ms: default_ws_push_interval_ms(),
             chat_input_height: String::new(),
             enabled_context_notes: default_true(),

@@ -130,12 +130,16 @@ fn api_hf_search(
                 let sort = match body["sort"].as_str().unwrap_or("downloads") {
                     "likes"     => crate::hf::HfSort::Likes,
                     "newest"    | "createdAt" => crate::hf::HfSort::CreatedAt,
+                    "lastModified" | "last_modified" => crate::hf::HfSort::LastModified,
+                    "relevance" => crate::hf::HfSort::Relevance,
                     "trending"  => crate::hf::HfSort::Trending,
                     _           => crate::hf::HfSort::Downloads,
                 };
 
                 // Require at least a query or an author — unless sorting by trending or
                 // downloads (in which case empty query returns a global popular/trending list).
+                // Relevance is deliberately not exempt: with nothing to be relevant to, HF
+                // returns an arbitrary page.
                 if query.is_empty()
                     && author.is_none()
                     && sort != crate::hf::HfSort::Trending

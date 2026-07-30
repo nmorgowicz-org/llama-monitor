@@ -289,15 +289,67 @@ async function detectPlatformBackend() {
 }
 
 // ── Sort resolution (Phase 8B1) ──────────────────────────────────────────────
-// Maps our sort modes to backend params. Auto = relevance-based.
+// Two different jobs, and conflating them is what made this dropdown inert.
+//
+// resolveSortParam picks which *page* of results HF hands back. HF can only order by
+// downloads, likes, creation, last-modified, trending, or relevance — it cannot order by
+// name or by repo size. For those two we ask for the widest useful pool (downloads) and do
+// the ordering ourselves, because `SimpleModelInfo` already carries `last_modified` and
+// `model_size_bytes`.
+//
+// compareModels then decides the order the user actually sees. Previously that was hardcoded
+// to downloads-descending for both variants and groups, so every one of the five options
+// rendered identically no matter what HF had been asked for.
 
 function resolveSortParam(legacySort, hfSort) {
-  if (hfSort === HF_SORT.NAME) return 'createdAt';
-  if (hfSort === HF_SORT.SIZE) return 'downloads';
-  if (hfSort === HF_SORT.LAST_UPDATED) return 'createdAt';
-  if (hfSort === HF_SORT.RELEVANCE) return 'downloads';
-  if (hfSort === HF_SORT.AUTO) return 'downloads';
-  return legacySort || 'downloads';
+  switch (hfSort) {
+    case HF_SORT.RELEVANCE:    return 'relevance';
+    case HF_SORT.LAST_UPDATED: return 'lastModified';
+    case HF_SORT.DOWNLOADS:    return 'downloads';
+    // No server-side equivalent; ordered client-side below.
+    case HF_SORT.NAME:
+    case HF_SORT.SIZE:         return 'downloads';
+    default:                   return legacySort || 'downloads';
+  }
+}
+
+// HF only reports repo bytes for MLX repos; a GGUF search result has `model_size_bytes:
+// null` for every row. Sorting those by raw bytes puts every GGUF at zero and leaves the
+// list in server order while claiming to be sorted by size — the same silent no-op this fix
+// exists to remove. Fall back to parameter count, which is populated for GGUF and is the
+// size the user is actually choosing between. Scaled to bytes-ish so the two never interleave
+// wrongly when a mixed MLX+GGUF scope returns both kinds.
+function sizeRank(m) {
+  if (m.model_size_bytes) return m.model_size_bytes;
+  return (m.param_b || 0) * 1e9;
+}
+
+// Comparator for the chosen sort mode. Returns null when the server's own ordering should
+// stand — relevance has no client-side equivalent, so re-sorting it would discard the only
+// ranking that mode exists to show.
+function modelComparator(hfSort) {
+  switch (hfSort) {
+    case HF_SORT.NAME:
+      return (a, b) => (a.id || '').localeCompare(b.id || '', undefined, { sensitivity: 'base' });
+    case HF_SORT.SIZE:
+      return (a, b) => sizeRank(b) - sizeRank(a);
+    case HF_SORT.LAST_UPDATED:
+      return (a, b) => String(b.last_modified || '').localeCompare(String(a.last_modified || ''));
+    case HF_SORT.DOWNLOADS:
+      return (a, b) => (b.downloads || 0) - (a.downloads || 0);
+    case HF_SORT.RELEVANCE:
+      return null;
+    default:
+      return (a, b) => (b.downloads || 0) - (a.downloads || 0);
+  }
+}
+
+// A group's rank is its best-ranked member under the same comparator, so groups and the
+// variants inside them agree about what "first" means.
+function groupComparator(hfSort) {
+  const cmp = modelComparator(hfSort);
+  if (!cmp) return null;
+  return ([, a], [, b]) => cmp([...a].sort(cmp)[0], [...b].sort(cmp)[0]);
 }
 
 // ── Phase 8B2: Create a variant row within a group ───────────────────────────
@@ -617,12 +669,9 @@ export async function hfSearch({
       return;
     }
 
-    // Sort models by downloads (descending)
-    const sortedModels = [...models].sort((a, b) => {
-      const aDl = a.downloads || 0;
-      const bDl = b.downloads || 0;
-      return bDl - aDl;
-    });
+    // Order by the sort the user picked. Relevance keeps the server's ranking untouched.
+    const variantCmp = modelComparator(hfSort);
+    const sortedModels = variantCmp ? [...models].sort(variantCmp) : models;
 
     // Phase 8B2: Group models by base model name for hierarchical display
     const groups = new Map();
@@ -634,12 +683,12 @@ export async function hfSearch({
       groups.get(baseName).push(m);
     }
 
-    // Sort groups by highest downloads within each group (descending)
-    const sortedGroupEntries = [...groups.entries()].sort(([, a], [, b]) => {
-      const aMax = Math.max(...a.map(m => m.downloads || 0));
-      const bMax = Math.max(...b.map(m => m.downloads || 0));
-      return bMax - aMax;
-    });
+    // Rank groups by their best member under the same comparator. Insertion order already
+    // follows the server's ranking, which is what relevance wants preserved.
+    const groupCmp = groupComparator(hfSort);
+    const sortedGroupEntries = groupCmp
+      ? [...groups.entries()].sort(groupCmp)
+      : [...groups.entries()];
 
     // Render grouped results
     for (const [baseName, groupModels] of sortedGroupEntries) {
@@ -1450,8 +1499,12 @@ function setScopeBtnState(btn, active) {
 //
 // params:
 //   container            – DOM element to append the selector into
-//   defaultSort          – HF_SORT value (default HF_SORT.AUTO)
+//   defaultSort          – HF_SORT value used until the persisted choice arrives
 //   onChange             – (sort) => void  called when sort changes
+//
+// The chosen mode is persisted to ui-settings.json, because a sort you have to re-pick on
+// every visit is a sort you fight rather than use. The persisted value arrives after first
+// paint, so the selector renders with `defaultSort` and corrects itself once settings load.
 
 export function hfCreateSortSelector({ container, defaultSort = HF_SORT.DOWNLOADS, onChange }) {
   if (!container) return null;
@@ -1490,6 +1543,7 @@ export function hfCreateSortSelector({ container, defaultSort = HF_SORT.DOWNLOAD
   select.value = sorts.some(s => s.value === defaultSort) ? defaultSort : HF_SORT.DOWNLOADS;
   select.addEventListener('change', () => {
     container.dataset.hfSearchSort = select.value;
+    persistDiscoverySort(select.value);
     if (onChange) onChange(select.value);
   });
 
@@ -1497,7 +1551,50 @@ export function hfCreateSortSelector({ container, defaultSort = HF_SORT.DOWNLOAD
   wrap.appendChild(select);
   container.appendChild(wrap);
 
+  // Adopt the persisted choice when it arrives. Only re-search if it actually differs, so
+  // the common case of the persisted value matching the default costs nothing.
+  loadDiscoverySort().then(saved => {
+    if (!saved || saved === select.value) return;
+    if (!sorts.some(s => s.value === saved)) return;
+    select.value = saved;
+    container.dataset.hfSearchSort = saved;
+    if (onChange) onChange(saved);
+  });
+
   return wrap;
+}
+
+// ── Sort persistence ──────────────────────────────────────────────────────────
+// Stored in ui-settings.json alongside the other UI preferences, read-modify-written the
+// same way the context card does it. Failures are swallowed: losing a sort preference is
+// not worth interrupting a search over.
+
+async function loadDiscoverySort() {
+  try {
+    const resp = await fetch('/api/settings', { headers: getAuthHeaders() });
+    if (!resp.ok) return null;
+    const settings = await resp.json();
+    return settings?.hf_discovery_sort || null;
+  } catch {
+    return null;
+  }
+}
+
+async function persistDiscoverySort(sort) {
+  try {
+    const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
+    const resp = await fetch('/api/settings', { headers: getAuthHeaders() });
+    if (!resp.ok) return;
+    const settings = await resp.json();
+    if (settings?.hf_discovery_sort === sort) return;
+    await fetch('/api/settings', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ ...settings, hf_discovery_sort: sort }),
+    });
+  } catch {
+    // non-fatal
+  }
 }
 
 // ── Format toggle chip (deprecated: use hfCreateScopeSelector) ────────────────

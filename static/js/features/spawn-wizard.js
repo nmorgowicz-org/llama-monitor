@@ -293,7 +293,7 @@ const hfBrowseState = {
   mlxActive: false,
   ggufActive: true,
   allActive: false,
-  sort: HF_SORT.DOWNLOADS,
+  sort: HF_SORT.LAST_UPDATED,
   quantsOnly: false,
 };
 let pendingHardwareScrollReset = false;

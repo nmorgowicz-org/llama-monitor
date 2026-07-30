@@ -104,19 +104,29 @@ fn safetensors_total_bytes(item: &serde_json::Value) -> Option<u64> {
 #[serde(rename_all = "camelCase")]
 pub enum HfSort {
     #[default]
-    Downloads, // most downloaded (best signal for quality community quants)
-    Likes,     // most liked
-    CreatedAt, // newest first
+    Downloads,    // most downloaded (best signal for quality community quants)
+    Likes,        // most liked
+    CreatedAt,    // newest first
+    LastModified, // most recently updated — the useful one for quant repos, which are
+    // re-uploaded long after they were created
     Trending,  // HF trending score
+    Relevance, // whatever the search query scores highest; only meaningful with a query
 }
 
 impl HfSort {
-    fn as_api_str(self) -> &'static str {
+    /// The `sort` value to send to the HF API, or `None` to send no `sort` at all.
+    ///
+    /// Relevance is not a sort key on HF's side: it is what you get back when you supply a
+    /// `search` term and *omit* `sort`. Passing any explicit key replaces the relevance
+    /// ordering, so the only way to honour "Relevance" is to send nothing.
+    fn as_api_str(self) -> Option<&'static str> {
         match self {
-            HfSort::Downloads => "downloads",
-            HfSort::Likes => "likes",
-            HfSort::CreatedAt => "createdAt",
-            HfSort::Trending => "trendingScore",
+            HfSort::Downloads => Some("downloads"),
+            HfSort::Likes => Some("likes"),
+            HfSort::CreatedAt => Some("createdAt"),
+            HfSort::LastModified => Some("lastModified"),
+            HfSort::Trending => Some("trendingScore"),
+            HfSort::Relevance => None,
         }
     }
 }
@@ -952,8 +962,11 @@ async fn hf_search_single(
             p.append_pair("author", author);
         }
         p.append_pair("limit", &limit.to_string());
-        p.append_pair("sort", params.sort.as_api_str());
-        p.append_pair("direction", "-1");
+        // Relevance yields no key: HF ranks by the search term only when `sort` is absent.
+        if let Some(sort_key) = params.sort.as_api_str() {
+            p.append_pair("sort", sort_key);
+            p.append_pair("direction", "-1");
+        }
         if let Some(ref cursor) = params.cursor {
             p.append_pair("cursor", cursor);
         }
@@ -1040,8 +1053,11 @@ async fn hf_search_both(
             p.append_pair("author", author);
         }
         p.append_pair("limit", &limit.to_string());
-        p.append_pair("sort", params.sort.as_api_str());
-        p.append_pair("direction", "-1");
+        // Relevance yields no key: HF ranks by the search term only when `sort` is absent.
+        if let Some(sort_key) = params.sort.as_api_str() {
+            p.append_pair("sort", sort_key);
+            p.append_pair("direction", "-1");
+        }
         if let Some(ref cursor) = params.cursor {
             p.append_pair("cursor", cursor);
         }
@@ -2880,6 +2896,53 @@ pub async fn list_repo_siblings(repo_id: &str) -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every sort the UI offers must reach HF as a key HF actually understands, or as a
+    /// deliberate absence. The shipped version mapped Name to `createdAt` and Size to
+    /// `downloads`, so five visible options produced two orderings and the dropdown was
+    /// decorative. Nothing caught it because nothing asserted the mapping.
+    #[test]
+    fn every_sort_maps_to_a_real_hf_key_or_a_deliberate_absence() {
+        // The keys HF's /api/models endpoint accepts for `sort`.
+        let hf_accepts = ["downloads", "likes", "createdAt", "lastModified", "trendingScore"];
+
+        for sort in [
+            HfSort::Downloads,
+            HfSort::Likes,
+            HfSort::CreatedAt,
+            HfSort::LastModified,
+            HfSort::Trending,
+        ] {
+            let key = sort
+                .as_api_str()
+                .unwrap_or_else(|| panic!("{sort:?} must send a sort key"));
+            assert!(hf_accepts.contains(&key), "{sort:?} sends unknown key {key:?}");
+        }
+
+        // Relevance is the one mode defined by sending nothing: HF ranks by the search term
+        // only when `sort` is absent, so giving it any key would silently replace the very
+        // ordering the mode exists to show.
+        assert_eq!(HfSort::Relevance.as_api_str(), None);
+    }
+
+    /// Distinct sorts must stay distinct. Collapsing two modes onto one key is precisely how
+    /// the previous mapping became a no-op, and it reads as harmless at the call site.
+    #[test]
+    fn distinct_sorts_do_not_collapse_onto_one_key() {
+        let keys: Vec<_> = [
+            HfSort::Downloads,
+            HfSort::Likes,
+            HfSort::CreatedAt,
+            HfSort::LastModified,
+            HfSort::Trending,
+        ]
+        .iter()
+        .map(|s| s.as_api_str().unwrap())
+        .collect();
+
+        let unique: std::collections::BTreeSet<_> = keys.iter().collect();
+        assert_eq!(unique.len(), keys.len(), "two sorts share an API key: {keys:?}");
+    }
 
     #[test]
     fn mlx_revision_and_text_config_references_are_bounded_and_safe() {
