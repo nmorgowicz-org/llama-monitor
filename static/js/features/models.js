@@ -71,6 +71,18 @@ const BACKEND_LABELS = {
     rapid_mlx: 'Rapid-MLX',
 };
 
+// Which directory-shaped models the Library tab offers to delete in place. Both sets must
+// match for a Delete button to appear: `hugging_face` is deliberately absent from the sources
+// because a cache snapshot is only links into a shared blob store, so deleting the snapshot
+// frees nothing — those are reclaimed per repo on the Disk tab instead.
+const MANAGED_DIRECTORY_FORMATS = new Set(['mlx', 'transformers']);
+const MANAGED_DIRECTORY_SOURCES = new Set([
+    'local',
+    'official_conversion',
+    'recovered_gguf',
+    'requantized_mlx',
+]);
+
 let modelCardSequence = 0;
 let rapidMlxLocalAvailable = false;
 let rapidMlxLocalRequirement = 'Rapid-MLX local execution requires macOS on Apple Silicon';
@@ -695,16 +707,27 @@ function buildModelCard(m) {
     });
     if (pathToCopy) actions.appendChild(copyBtn);
 
-    // The current delete endpoint is deliberately file-only and validates a
-    // .gguf suffix. Do not advertise directory deletion for MLX/Transformers.
-    if (inventory.format === 'gguf' && (m.path || '').toLowerCase().endsWith('.gguf')) {
+    // Two delete paths, because a single-file model and a directory-shaped one have
+    // different endpoints and different safety arguments. A GGUF goes through the
+    // suffix-validated file delete; MLX and Transformers directories go through the
+    // library's managed-directory delete, which only accepts an immediate child of a
+    // managed root. Anything else — notably HF cache snapshots, whose bytes live in a
+    // shared blob store — gets no button here, and is reclaimed per repo on the Disk tab.
+    const isGgufFile = inventory.format === 'gguf' && (m.path || '').toLowerCase().endsWith('.gguf');
+    const isManagedDirectory = MANAGED_DIRECTORY_FORMATS.has(inventory.format)
+        && MANAGED_DIRECTORY_SOURCES.has(inventory.source);
+    if (isGgufFile || isManagedDirectory) {
         const deleteBtn = document.createElement('button');
         deleteBtn.type = 'button';
         deleteBtn.className = 'mm-action-btn mm-action-delete';
-        deleteBtn.title = 'Delete this model from library';
-        deleteBtn.setAttribute('aria-label', 'Delete this model from library');
+        deleteBtn.title = isGgufFile
+            ? 'Delete this model from library'
+            : 'Delete this model directory from library';
+        deleteBtn.setAttribute('aria-label', deleteBtn.title);
         deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
-        deleteBtn.addEventListener('click', () => deleteModel(m.path, m.filename || name));
+        deleteBtn.addEventListener('click', () => (isGgufFile
+            ? deleteModel(m.path, m.filename || name)
+            : deleteModelDirectory(m.path, m.filename || name, m.size_display)));
         actions.appendChild(deleteBtn);
     }
 
@@ -1034,12 +1057,230 @@ async function deleteModel(path, filename) {
                 : { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path }),
         });
-        if (!resp.ok) {
-            const err = await resp.text().catch(() => 'Unknown error');
-            showToast('Delete failed: ' + err, 'error');
+        // A refusal comes back as 200 with ok:false — the endpoint reports a rejected path
+        // as an answer, not as a server fault — so resp.ok alone would call it a success.
+        const data = await resp.json().catch(() => ({ ok: false, error: 'Malformed response' }));
+        if (!resp.ok || !data.ok) {
+            showToast('Delete failed: ' + (data.error || resp.statusText || 'unknown'), 'error');
             return;
         }
         showToast('Model deleted', 'success');
+        invalidateModelInventory();
+        await loadModels({ refresh: true });
+    } catch (err) {
+        showToast('Delete failed: ' + err.message, 'error');
+    }
+}
+
+// A path + optional-name prompt. `_showConfirm` is confirm-only and there is no shared
+// prompt helper, so this mirrors its structure to stay visually consistent. Resolves to
+// `{ path, name }` or null if dismissed.
+async function _promptForLocalModelPath() {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '2000';
+    overlay.style.display = 'grid';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'modal';
+    dialog.style.width = '480px';
+    dialog.style.padding = '14px 16px';
+
+    const titleEl = document.createElement('div');
+    titleEl.style.fontSize = '15px';
+    titleEl.style.fontWeight = '600';
+    titleEl.style.marginBottom = '8px';
+    titleEl.textContent = 'Add local model';
+
+    const msg = document.createElement('div');
+    msg.style.fontSize = '13px';
+    msg.style.color = 'var(--color-text-muted)';
+    msg.style.marginBottom = '10px';
+    msg.textContent = 'Path to an MLX or Transformers model directory — one holding config.json, '
+        + 'a tokenizer, and .safetensors weights. It is copied into the library, or hard-linked '
+        + 'if it is already on the same volume, so nothing is moved or removed.';
+
+    const pathInput = document.createElement('input');
+    pathInput.type = 'text';
+    pathInput.className = 'mm-lib-search-input';
+    pathInput.style.width = '100%';
+    pathInput.style.marginBottom = '8px';
+    pathInput.placeholder = '~/Downloads/some-model-4bit';
+    pathInput.setAttribute('aria-label', 'Model directory path');
+    pathInput.setAttribute('autocomplete', 'off');
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'mm-lib-search-input';
+    nameInput.style.width = '100%';
+    nameInput.style.marginBottom = '12px';
+    nameInput.placeholder = 'Library name (optional — defaults to the directory name)';
+    nameInput.setAttribute('aria-label', 'Library name');
+    nameInput.setAttribute('autocomplete', 'off');
+
+    const actions = document.createElement('div');
+    actions.style.display = 'flex';
+    actions.style.justifyContent = 'flex-end';
+    actions.style.gap = '8px';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn btn-modal-cancel';
+    cancelBtn.textContent = 'Cancel';
+
+    const nextBtn = document.createElement('button');
+    nextBtn.type = 'button';
+    nextBtn.className = 'btn btn-modal-save';
+    nextBtn.textContent = 'Check';
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(nextBtn);
+    dialog.appendChild(titleEl);
+    dialog.appendChild(msg);
+    dialog.appendChild(pathInput);
+    dialog.appendChild(nameInput);
+    dialog.appendChild(actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    pathInput.focus();
+
+    return new Promise(resolve => {
+        let decided = false;
+        const finish = (value) => {
+            if (decided) return;
+            decided = true;
+            overlay.remove();
+            resolve(value);
+        };
+        const submit = () => {
+            const path = pathInput.value.trim();
+            if (!path) {
+                pathInput.focus();
+                return;
+            }
+            finish({ path, name: nameInput.value.trim() || null });
+        };
+        cancelBtn.addEventListener('click', () => finish(null));
+        nextBtn.addEventListener('click', submit);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) finish(null);
+        });
+        [pathInput, nameInput].forEach(el => el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') submit();
+            if (e.key === 'Escape') finish(null);
+        }));
+    });
+}
+
+// Preview first, then execute. The preview is what makes this decidable: whether the bytes
+// will be copied or hard-linked changes both how long it takes and whether deleting the
+// import later frees any disk, and neither is guessable from the path alone.
+async function importLocalModelDirectory() {
+    const asked = await _promptForLocalModelPath();
+    if (!asked) return;
+
+    const headers = window.authHeaders
+        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' };
+
+    let plan;
+    try {
+        const resp = await fetch('/api/models/library/adopt/preview', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ path: asked.path, name: asked.name }),
+        });
+        const data = await resp.json().catch(() => ({ ok: false, error: 'Malformed response' }));
+        if (!resp.ok) {
+            showToast('Cannot import: ' + (data.error || resp.statusText || 'unknown'), 'error');
+            return;
+        }
+        plan = data;
+    } catch (err) {
+        showToast('Cannot import: ' + err.message, 'error');
+        return;
+    }
+
+    const method = plan.method === 'hardlink'
+        ? 'Hard-linked (instant; the bytes are shared with the source, so deleting either one '
+          + 'will not free disk until both are gone)'
+        : 'Copied (this can take several minutes for a large model)';
+    const symlinks = plan.resolved_symlinks
+        ? `\n${plan.resolved_symlinks} symlink(s) will be resolved to their real files.`
+        : '';
+    const warnings = (plan.warnings || []).length
+        ? '\n\n' + plan.warnings.map(w => '• ' + w).join('\n')
+        : '';
+    const confirmed = await _showConfirm(
+        'Import model into library',
+        `${escapeHtml(plan.source)}\n→ ${escapeHtml(plan.destination)}\n\n`
+        + `${plan.file_count} file(s), ${formatBytes(plan.bytes)}\n${method}${symlinks}${warnings}`
+    );
+    if (!confirmed) return;
+
+    showToast('Importing ' + plan.slug + '…', 'info');
+    try {
+        const resp = await fetch('/api/models/library/adopt', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ path: asked.path, name: asked.name }),
+        });
+        const data = await resp.json().catch(() => ({ ok: false, error: 'Malformed response' }));
+        if (!resp.ok || !data.ok) {
+            showToast('Import failed: ' + (data.error || resp.statusText || 'unknown'), 'error');
+            return;
+        }
+        const model = data.model || {};
+        showToast(
+            `Imported ${model.slug || plan.slug} — ${formatBytes(model.bytes || plan.bytes)}`,
+            'success'
+        );
+        invalidateModelInventory();
+        await loadModels({ refresh: true });
+    } catch (err) {
+        showToast('Import failed: ' + err.message, 'error');
+    }
+}
+
+// Directory-shaped models (MLX, Transformers) go through their own endpoint rather than a
+// widened /api/models/file, because that one's containment rule allows anything under $HOME.
+// The server only lets a request select from the managed directories it found on disk.
+async function deleteModelDirectory(path, name, sizeDisplay) {
+    const presets = findPresetsForModel({ path });
+    const extra = presets.length
+        ? `\nThis will break presets that use this model:\n- ${presets.map(p => p.name || 'Unnamed preset').join('\n- ')}\n`
+        : '';
+    const size = sizeDisplay ? ` (${escapeHtml(sizeDisplay)})` : '';
+    const confirmed = await _showConfirm(
+        'Delete model directory',
+        `"${escapeHtml(name)}"${size}\nPath: ${escapeHtml(path)}\n\nThis will permanently remove the directory and everything in it.${extra}\nThis action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+        const resp = await fetch('/api/models/library/directory', {
+            method: 'DELETE',
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path }),
+        });
+        const data = await resp.json().catch(() => ({ ok: false, error: 'Malformed response' }));
+        if (!resp.ok || !data.ok) {
+            showToast('Delete failed: ' + (data.error || resp.statusText || 'unknown'), 'error');
+            return;
+        }
+        const removed = data.removed || {};
+        // Two things the user cannot infer from having clicked Delete: an experimental cache
+        // entry deletes the wrapper it lives in, not the path on the card; and hard-linked
+        // bytes are shared with an import source, so the disk will not actually shrink.
+        const notes = [];
+        if (removed.path && removed.path !== path) notes.push(`removed ${removed.path}`);
+        if (removed.shared_links) notes.push('some files were hard-linked, so disk usage may not drop');
+        showToast(
+            'Model directory deleted' + (notes.length ? ' — ' + notes.join('; ') : ''),
+            'success'
+        );
         invalidateModelInventory();
         await loadModels({ refresh: true });
     } catch (err) {
@@ -1293,6 +1534,21 @@ function ensureLibraryToolbar() {
     });
 
     right.appendChild(viewBtn);
+
+    // Add local model. Sits next to the view toggle rather than on the Disk tab: the Disk tab
+    // reclaims the shared Hugging Face cache, whereas this brings in a directory from anywhere
+    // on the machine, which is how MLX models tend to arrive during development.
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'mm-lib-btn mm-lib-btn--labeled';
+    addBtn.id = 'mm-lib-add-local';
+    addBtn.title = 'Import an MLX or Transformers model directory from elsewhere on this machine';
+    addBtn.innerHTML =
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>'
+        + '<span>Add local</span>';
+    addBtn.addEventListener('click', () => { importLocalModelDirectory(); });
+    right.appendChild(addBtn);
+
     container.appendChild(right);
 }
 

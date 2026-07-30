@@ -11,6 +11,7 @@ pub mod import_lab;
 #[cfg_attr(not(test), allow(dead_code))]
 pub mod gguf_recovery;
 pub mod library;
+pub mod local_adopt;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DiscoveredModel {

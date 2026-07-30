@@ -331,6 +331,203 @@ fn api_external_model_cache_delete(
         )
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct AdoptDirectoryRequest {
+    /// The directory to bring into the library.
+    path: String,
+    /// Optional library name. Slugged server-side; a caller cannot choose the destination
+    /// path, only influence its last component.
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// Describe what adopting a local model directory would cost, without writing anything.
+///
+/// Separate from the execute call because the honest answer is sometimes "copy 27 GB", and
+/// a user is entitled to see that, plus whether the files will be linked or duplicated,
+/// before agreeing to it.
+fn api_adopt_directory_preview(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "library" / "adopt" / "preview")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<AdoptDirectoryRequest>())
+        .and_then(
+            move |auth: Option<String>, request: AdoptDirectoryRequest| {
+                let state = state.clone();
+                let config = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &config) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let models_dir = get_effective_models_dir(&state)
+                        .unwrap_or_else(|| config.default_models_dir.clone());
+                    let source = expand_user_path(&request.path);
+                    let name = request.name.clone();
+                    let planned = tokio::task::spawn_blocking(move || {
+                        crate::models::local_adopt::plan_adoption(
+                            &models_dir,
+                            &source,
+                            name.as_deref(),
+                        )
+                    })
+                    .await;
+                    match planned {
+                        Ok(Ok(plan)) => Ok::<_, warp::Rejection>(
+                            Box::new(warp::reply::json(&plan)) as Box<dyn warp::reply::Reply>,
+                        ),
+                        // A directory that is not a model, or a name already taken, is the
+                        // user's answer to give — not a server fault.
+                        Ok(Err(error)) => Ok(error_reply(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            format!("{error:#}"),
+                        )),
+                        Err(error) => Ok(error_reply(
+                            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            error,
+                        )),
+                    }
+                }
+            },
+        )
+}
+
+/// Adopt a local model directory into `mlx/native`.
+///
+/// Re-plans server-side rather than accepting a plan from the client. The preview exists to
+/// inform a decision, not to authorize one, and the directory may have changed since.
+fn api_adopt_directory_execute(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "library" / "adopt")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<AdoptDirectoryRequest>())
+        .and_then(
+            move |auth: Option<String>, request: AdoptDirectoryRequest| {
+                let state = state.clone();
+                let config = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &config) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let models_dir = get_effective_models_dir(&state)
+                        .unwrap_or_else(|| config.default_models_dir.clone());
+                    let source = expand_user_path(&request.path);
+                    let name = request.name.clone();
+                    // No timeout. Copying a 27 GB model across filesystems legitimately takes
+                    // minutes, and a timeout here would abandon a half-written staging
+                    // directory rather than let the cleanup path run.
+                    let adopted = tokio::task::spawn_blocking(move || {
+                        crate::models::local_adopt::adopt_directory(
+                            &models_dir,
+                            &source,
+                            name.as_deref(),
+                        )
+                    })
+                    .await;
+                    match adopted {
+                        Ok(Ok(model)) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                            &serde_json::json!({"ok": true, "model": model}),
+                        ))
+                            as Box<dyn warp::reply::Reply>),
+                        Ok(Err(error)) => Ok(error_reply(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            format!("{error:#}"),
+                        )),
+                        Err(error) => Ok(error_reply(
+                            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            error,
+                        )),
+                    }
+                }
+            },
+        )
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DeleteDirectoryRequest {
+    path: String,
+}
+
+/// Delete a directory-shaped model the library manages.
+///
+/// The pre-existing `DELETE /api/models/file` validates a `.gguf` suffix and removes a
+/// single file, which left MLX and Transformers models undeletable from the UI entirely.
+/// This is the directory counterpart rather than a relaxation of that suffix check: the two
+/// have genuinely different safety arguments, and widening the file endpoint to accept
+/// directories would have inherited its much broader containment rule, which allows
+/// anything under `$HOME`.
+fn api_delete_model_directory(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "library" / "directory")
+        .and(warp::delete())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<DeleteDirectoryRequest>())
+        .and_then(
+            move |auth: Option<String>, request: DeleteDirectoryRequest| {
+                let state = state.clone();
+                let config = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &config) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let models_dir = get_effective_models_dir(&state)
+                        .unwrap_or_else(|| config.default_models_dir.clone());
+                    let target = expand_user_path(&request.path);
+                    let removed = tokio::task::spawn_blocking(move || {
+                        crate::models::local_adopt::remove_managed_directory(&models_dir, &target)
+                    })
+                    .await;
+                    match removed {
+                        Ok(Ok(removed)) => {
+                            // Drop the entry from the running discovery list so the UI does not
+                            // keep offering a model that is gone.
+                            if let Ok(mut models) = state.discovered_models.lock() {
+                                models.retain(|m| !m.path.starts_with(&removed.path));
+                            }
+                            Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                                &serde_json::json!({"ok": true, "removed": removed}),
+                            ))
+                                as Box<dyn warp::reply::Reply>)
+                        }
+                        Ok(Err(error)) => Ok(error_reply(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            format!("{error:#}"),
+                        )),
+                        Err(error) => Ok(error_reply(
+                            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            error,
+                        )),
+                    }
+                }
+            },
+        )
+}
+
+/// Expand a leading `~` so a user can type the path they see in a shell.
+///
+/// Only the leading component, and only `~` alone: `~other` is left untouched rather than
+/// guessed at, because resolving another user's home is not something a model-library
+/// import should be doing.
+fn expand_user_path(raw: &str) -> PathBuf {
+    let trimmed = raw.trim();
+    if trimmed == "~" {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from(trimmed));
+    }
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(trimmed)
+}
+
 fn api_rapid_model_resolver_preview(
     state: AppState,
     app_config: Arc<AppConfig>,
@@ -1932,6 +2129,18 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
             state.clone(),
             config.clone(),
         ))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_adopt_directory_preview(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_adopt_directory_execute(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_delete_model_directory(state.clone(), config.clone()))
         .unify()
         .boxed();
     r = r
