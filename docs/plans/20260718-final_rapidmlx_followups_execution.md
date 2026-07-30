@@ -552,21 +552,45 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 - **Commit:** f3d0153 (2026-07-21)
 - **Work:** SCENARIO_REQUIREMENTS table documenting mock vs real per scenario; extended spawn-wizard-engines with tool-research and deterministic profile captures; mock note on dashboard-rapid-mlx
 
-##### Phase 7B3 — Roleplay-specific controls — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
+##### Phase 7B3 — Roleplay-specific controls — Verified complete (Coordinator, 2026-07-30), feature removed
 
-- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
-- **Commit:** 91468fb (2026-07-21)
-- **Screenshots:** spawn-wizard-roleplay-teaching.png
-- **Features:** Roleplay teaching panel explains long-context reserve, client-owned samplers/stops, chat-vs-text formatting owner, prompt-cache behavior without SillyTavern-specific server facts
-- **Tests:** 3 roleplay teaching tests in spawn-wizard.spec.js (all pass)
+- **State:** Verified complete — Coordinator, 2026-07-30. The feature no longer exists; the row is corrected rather
+  than re-verified.
+- **Commit:** 91468fb (2026-07-21), removed by 712c261 / 58cfa42
+- **What happened:** the roleplay teaching panel rendered inside the step-3 workload-profile picker. When 7B2 deleted
+  that step, the panel became unreachable and `58cfa42` deleted it along with the rest of `WORKLOAD_PROFILES` (686
+  lines out of `spawn-wizard.js`, 643 out of `spawn-wizard.css`, 424 out of `spawn-wizard.spec.js`). The three
+  roleplay teaching tests went with it. `spawn-wizard-roleplay-teaching.png` documents a deleted screen.
+- **Verified:** no `roleplay-teaching` identifier survives anywhere in `static/` or `tests/ui/`. The removal is
+  complete, not partial.
+- **Gap recorded, not rebuilt:** the teaching content itself (long-context reserve, client-owned samplers and stops,
+  chat-vs-text formatting ownership, prompt-cache behaviour) is release-gating material under the teaching pillar and
+  now has no home. Rebuilding it is feature work; see the gap register.
 
-##### Phase 7B4 — Parallel slots/MTP teaching + endpoint compatibility — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
+##### Phase 7B4 — Parallel slots/MTP teaching + endpoint compatibility — Verified complete (Coordinator, 2026-07-30), feature removed
 
-- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
-- **Commit:** 3b96564 (2026-07-21)
-- **Screenshots:** spawn-wizard-mtp-concurrency-teaching.png, spawn-wizard-endpoint-compatibility.png
-- **Tests:** 5 @in-memory-test tests added to spawn-wizard.spec.js (tests 16-20)
-- **Features:** MTP/concurrency teaching (4 cards from D25), endpoint compatibility per workload in assumptions panel
+- **State:** Verified complete — Coordinator, 2026-07-30. UI removed with 7B3; the backend behind it was checked and
+  one defect fixed.
+- **Commit:** 3b96564 (2026-07-21), removed by 712c261 / 58cfa42, backend reconciled by `f1e323e` (2026-07-30)
+- **What happened:** both the four D25 MTP/concurrency cards and the per-workload endpoint-compatibility display lived
+  in the profile step and were deleted with it. The five `@in-memory-test` tests (16–20) are gone. An orphan container
+  `#pe-mtp-concurrency-teaching` remains in `static/index.html`, permanently `display:none` and never filled;
+  `presets.js` carries the matching note "MTP/concurrency teaching panel removed (Phase 7B2)".
+- **The backend survived intact and is live-verified.** `/api/vram-estimate` returns a full `mtp_admission` object —
+  `eligible`, `recommended_for_workload`, `engages_for_workload`, `fallthroughs`, `warnings`, and the effective
+  `concurrency_policy`. Confirmed against a running instance: an embedded-MTP request returns
+  `fallthroughs: [non_greedy_sampling, logits_processor_installed]`, which is the 6.5a upstream capability gate
+  restated per estimate. **No frontend code reads `mtp_admission`.** Same shape as the 7B1 finding: an honest backend
+  and a silent UI.
+- **Defect found and fixed:** `/api/vram-estimate` read `parallel_slots` from the request body, defaulted to 1 on
+  absence, and never consulted the scenario, so a multi-slot workload was estimated and admitted as single-slot and
+  the D25 `multi_slot_conflicts_with_single_stream_mtp` warning was unreachable from a scenario alone.
+  `d25_multi_slot_conflicts_with_mtp` passed the whole time because it hands `compute` a slot count of 2 directly.
+  Slots now follow the same explicit > scenario > default rule as the token counts. Live-verified: the warning fires
+  for `tool_research_agent` and an explicit `parallel_slots: 1` still suppresses it.
+- **Recorded:** no shipping UI path reaches a multi-slot scenario — all three use-case cards map to single-slot
+  workloads — so the D25 teaching is unreachable twice over, once by deleted UI and once by unreachable input.
+
 
 ##### Phase 7B5 — GPU memory utilization welcome-screen control — NOT STARTED
 
@@ -859,8 +883,8 @@ Only the Coordinator updates this table after independent verification.
 | 7A3 | Verified complete | Coordinator, 2026-07-30 | PASS — route/auth reachable, live 401 without token; v2→v3 migration verified live on a planted pre-Phase-7 preset. One defect found and fixed: a single unreadable preset failed the whole-file parse and the loader then wrote defaults over the file, silently destroying every other preset. Now parsed entry by entry; a partial read never writes back; an unparseable file is preserved rather than overwritten. Reproduced and re-verified live. 1033 tests | 774b611 + HEAD | Earlier 7A2 note about the `4096` clamp was wrong; corrected in place |
 | 7B1 | Verified complete | Coordinator, 2026-07-30 | FAIL-with-fixes — four defects found live, all invisible to the suite. (1) `pflash_policy` never reached any deserialized config, so llama-monitor shipped rapid-mlx's `always` default on Qwen3.5/3.6 against a measured 0–40% recall collapse; (2) `check_mutual_exclusions` fired on any single participant, so `reasoning_mode=on` alone reported a conflict with an unsubmitted setting; (3) `effective_policy`/`requested_vs_effective` echoed the requested KV dtype instead of the int8 `--reasoning` pins; (4) two 7B2-removal leftovers in the wizard (dead `workload_scenario` in the spawn payload, Review row using a vocabulary the wizard never produces). All fixed and re-verified against a running binary. 1040 tests | 31af56b + `a1f77fe` | Frontend never calls `/api/rapid-mlx/command-preview` and never reads `requested_vs_effective` or `effective_policy`, so the Prompt storage selector is a visible no-op while the backend honestly reports `k8v4 → none`; 19 of 57 config fields have no UI at all (see section) |
 | 7B2 | Verified complete — rescoped | Coordinator, 2026-07-30 | PASS with one defect fixed. The row's promised UI (5 profiles, editable assumptions, required confirmation checkbox) no longer exists: the step-3 picker was deleted as redundant with the page-1 use-case cards, and the broken confirmation gate — the trigger for the whole UNVERIFIED flag — was removed rather than repaired. The surviving path is live-verified: three use-case cards map onto the estimator and move the number (29.6 GB no scenario / 44.4 agentic / 33.3 general / 38.5 roleplay at 27B mxfp8, 32K). Defect: the preset editor kept a Workload Scenario dropdown that serde dropped on save, since `RapidMlxConfig` has no such field; reproduced live and removed. 1040 tests, eslint and validate-js clean | 5d00ee0 + `0a0a9a0` | `/api/vram-estimate` silently ignores an unknown scenario rather than rejecting it |
-| 7B3 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (roleplay teaching panel, 3 tests) | 91468fb | None |
-| 7B4 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (MTP/concurrency teaching, endpoint compatibility, 5 tests, screenshots verified) | 3b96564 | None |
+| 7B3 | Verified complete — feature removed | Coordinator, 2026-07-30 | Corrected, not re-verified. The roleplay teaching panel rendered inside the step-3 workload picker; deleting that step made it unreachable and `58cfa42` removed it with the rest of `WORKLOAD_PROFILES`, along with its three tests. No `roleplay-teaching` identifier survives in `static/` or `tests/ui/`; the removal is complete | 91468fb, removed by 712c261 / 58cfa42 | The teaching content has no home and is release-gating under the teaching pillar — see the gap register |
+| 7B4 | Verified complete — feature removed, backend fixed | Coordinator, 2026-07-30 | UI removed with 7B3 (4 D25 cards, endpoint compatibility, 5 tests); orphan `#pe-mtp-concurrency-teaching` container left behind. Backend intact and live-verified: `/api/vram-estimate` returns a full `mtp_admission` with warnings and fallthroughs, and no frontend reads it. Defect fixed: `parallel_slots` defaulted to 1 and never consulted the scenario, putting the D25 multi-slot warning out of reach; the existing unit test passed because it supplies the slot count itself. 1041 tests, 29 UI tests, clippy clean | 3b96564, removed by 712c261 / 58cfa42, backend reconciled by `f1e323e` | `mtp_admission` has no UI consumer; no use-case card maps to a multi-slot scenario |
 | 8A | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (CommunitySourceCatalog, HF qualify/identity APIs, MLX discovery/introspection, 825 tests) | 0fe6105 | None |
 | 8B1 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (discovery scopes, sorting, categories, author roles, workload-start) | f290273 | None |
 | 8B2 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (cards with lineage, MLX lineage, qualification badges, model card wiring, real HF screenshots) | 7011f5c+0f0b575 | None |
