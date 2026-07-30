@@ -3216,17 +3216,10 @@
                                    </div>
                                </div>
                                <div class="pe-row pe-row-rapid-workload" id="pe-row-rapid-workload" style="display:none;">
-                                   <div class="pe-field">
-                                       <label class="pe-label" for="modal-rapid-workload-scenario" title="Workload scenario for Rapid-MLX tuning. Affects VRAM defaults and KV precision recommendations.">Workload Scenario</label>
-                                       <select class="pe-select" id="modal-rapid-workload-scenario">
-                                           <option value="">(unset)</option>
-                                           <option value="interactive_chat">Interactive Chat</option>
-                                           <option value="coding_agent">Coding Agent</option>
-                                           <option value="tool_research_agent">Tool Research Agent</option>
-                                           <option value="batch_eval">Batch Evaluation</option>
-                                           <option value="roleplay">Roleplay</option>
-                                       </select>
-                                   </div>
+                                   <!-- No Workload Scenario picker here: a preset stores a RapidMlxConfig, which has no
+                                        workload_scenario field, so the control saved nothing and always reopened at "(unset)".
+                                        Workload scenario is a VRAM-estimation input; the spawn wizard derives it from the
+                                        page-1 use-case cards. -->
                                    <div class="pe-field">
                                        <label class="pe-label" for="modal-rapid-sampling-mode" title="Sampling mode sets server-level defaults for temperature, top_p, etc. Explicit client values always override.">Sampling Mode</label>
                                        <select class="pe-select" id="modal-rapid-sampling-mode">

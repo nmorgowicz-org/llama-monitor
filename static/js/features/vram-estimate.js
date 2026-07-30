@@ -19,7 +19,9 @@ export function rapidEstimatePolicyFromConfig(rapidMlx = {}) {
     kv_cache_dtype: rapidMlx.kv_cache_dtype || null,
     turboquant_mode: rapidMlx.turboquant_mode || null,
     reasoning_mode: reasoning === true || reasoning === 'on' || reasoning === 'enable',
-    workload_scenario: rapidMlx.workload_scenario || null,
+    // No workload_scenario: a persisted RapidMlxConfig has no such field, so reading one here
+    // only ever produced null. Scenario is a wizard-side input, derived from the page-1
+    // use-case cards; every other surface takes the estimator default.
     concurrency_policy: rapidMlx.concurrency_policy || null,
     retained_cache_mib: rapidMlx.prefix_cache_enabled === false ? 0 : (rapidMlx.retained_cache_mib ?? 8192),
   };

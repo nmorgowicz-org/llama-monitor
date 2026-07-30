@@ -1315,7 +1315,6 @@ export function openPresetModal(mode, section, seedPreset = null) {
         setOpt('modal-rapid-turboquant-mode', p.rapid_mlx?.turboquant_mode || 'none');
         setOpt('modal-rapid-tool-call-parser', p.rapid_mlx?.tool_call_parser || '');
         setOpt('modal-rapid-reasoning-parser', p.rapid_mlx?.reasoning_parser || '');
-        setOpt('modal-rapid-workload-scenario', p.rapid_mlx?.workload_scenario || '');
         setOpt('modal-rapid-sampling-mode', p.rapid_mlx?.sampling_mode || 'auto');
         setOpt('modal-rapid-webui-availability', p.rapid_mlx?.web_ui_availability || 'auto');
         setVal('modal-rapid-webui-config-json', p.rapid_mlx?.web_ui_config_json || '');
@@ -1799,8 +1798,6 @@ function _buildFormPreset(existing) {
                     const tqMode = strVal('modal-rapid-turboquant-mode');
                     const toolParser = strVal('modal-rapid-tool-call-parser');
                     const reasoningParser = strVal('modal-rapid-reasoning-parser');
-                    const wlScenario = strVal('modal-rapid-workload-scenario');
-                    const wlAssumptionsRaw = document.getElementById('modal-rapid-workload-scenario')?.dataset.assumptions;
                     const samplingMode = strVal('modal-rapid-sampling-mode');
                     const webUiAvail = strVal('modal-rapid-webui-availability');
                     const webUiConfig = strVal('modal-rapid-webui-config-json');
@@ -1810,7 +1807,6 @@ function _buildFormPreset(existing) {
                     if (tqMode && tqMode !== 'auto') out.turboquant_mode = tqMode;
                     if (toolParser) out.tool_call_parser = toolParser;
                     if (reasoningParser) out.reasoning_parser = reasoningParser;
-                    if (wlScenario && wlScenario !== 'interactive_chat') out.workload_scenario = wlScenario;
                     if (samplingMode && samplingMode !== 'auto') out.sampling_mode = samplingMode;
                     if (rmInput) out.reasoning_mode = rmInput.checked ? 'on' : 'off';
                     const prefillStepSize = Number(strVal('modal-rapid-prefill-step-size') || 512);
