@@ -251,6 +251,11 @@ impl EmbeddedMtpComponent {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct VisionComponent {
     pub has_vision_config: bool,
+    /// Set when the vision tower was found in the *weights* rather than in
+    /// `config.json`. A checkpoint can ship a tower without naming one, so
+    /// `has_vision_config == false` alone does not mean text-only.
+    #[serde(default)]
+    pub has_vision_tensors: bool,
     pub field_evidence: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_type: Option<String>,
@@ -264,7 +269,7 @@ pub struct VisionComponent {
 
 impl VisionComponent {
     pub fn is_some(&self) -> bool {
-        self.has_vision_config
+        self.has_vision_config || self.has_vision_tensors
     }
 }
 

@@ -15,6 +15,7 @@ pub mod lhm_persistence;
 pub mod llama;
 pub mod memory_availability;
 pub mod model_download;
+pub mod model_vision;
 pub mod models;
 pub mod platform;
 pub mod presets;

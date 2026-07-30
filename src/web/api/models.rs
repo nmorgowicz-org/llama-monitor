@@ -1128,6 +1128,22 @@ fn api_models_mlx_introspect(
                                 if config.vision_config.is_some() {
                                     config_obj.insert("has_vision_config".into(), serde_json::json!(true));
                                 }
+                                // `vision_config` is not the only way a checkpoint carries a
+                                // tower: older wrappers name `mm_vision_tower`, and some ship
+                                // the tensors without naming anything. Report the artifact
+                                // verdict alongside, and say when the artifacts did not
+                                // settle it rather than reporting a bare `false`.
+                                match crate::inference::rapid_mlx::mlx_meta::read_local_vision_evidence(&canon) {
+                                    Some(evidence) => {
+                                        config_obj.insert("vision".into(), serde_json::json!(evidence.vision));
+                                        config_obj.insert("vision_source".into(), serde_json::json!(evidence.source));
+                                        config_obj.insert("vision_confidence".into(), serde_json::json!("confirmed"));
+                                    }
+                                    None => {
+                                        config_obj.insert("vision_source".into(), serde_json::json!("no readable config.json or safetensors index"));
+                                        config_obj.insert("vision_confidence".into(), serde_json::json!("undetermined"));
+                                    }
+                                }
                                 if let Some(quant) = config.quantization {
                                     let mut qobj = serde_json::Map::new();
                                     if let Some(bits) = quant.bits {

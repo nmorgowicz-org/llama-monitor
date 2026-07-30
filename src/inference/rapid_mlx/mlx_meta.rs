@@ -266,7 +266,46 @@ pub fn parse_mlx_config_to_profile(config_path: &Path) -> Result<ModelMemoryProf
 /// Read a local MLX directory through the normalized geometry path used by
 /// Rapid estimates. GGUF metadata deliberately has no dependency on this.
 pub fn read_mlx_model_profile(dir: &Path) -> Result<ModelMemoryProfile, String> {
-    parse_mlx_config_to_profile(&dir.join("config.json"))
+    let mut profile = parse_mlx_config_to_profile(&dir.join("config.json"))?;
+    // config.json is not the last word on a vision tower: some checkpoints ship
+    // one without naming it. The index is only available once the model is on
+    // disk, which is why this lives here and not in the bytes-only parser.
+    if profile.vision.is_none()
+        && let Some(marker) = local_vision_tensor_marker(dir)
+    {
+        profile.vision = Some(VisionComponent {
+            has_vision_tensors: true,
+            field_evidence: format!("model.safetensors.index.json:{marker}"),
+            ..Default::default()
+        });
+    }
+    Ok(profile)
+}
+
+/// Resolve a vision verdict for a local model directory from its own artifacts.
+///
+/// Thin wrapper over [`crate::model_vision::resolve_from_artifacts`] that supplies
+/// the two on-disk artifacts. `None` means the artifacts did not settle it — a
+/// single-shard model has no index, and no index means an absence cannot be
+/// confirmed. Callers that report vision to a user should say which of the three
+/// answers they got rather than collapsing `None` into "no".
+pub fn read_local_vision_evidence(dir: &Path) -> Option<crate::model_vision::VisionEvidence> {
+    let config = bounded_read(&dir.join("config.json"), MAX_CONFIG_BYTES)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    let index = bounded_read(&dir.join("model.safetensors.index.json"), MAX_INDEX_BYTES)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    crate::model_vision::resolve_from_artifacts(config.as_ref(), index.as_ref())
+}
+
+/// The vision tensor marker in a local safetensors index, if the index is
+/// readable and carries one. A single-shard model has no index; that is not
+/// evidence of absence, so it simply yields `None`.
+fn local_vision_tensor_marker(dir: &Path) -> Option<&'static str> {
+    let bytes = bounded_read(&dir.join("model.safetensors.index.json"), MAX_INDEX_BYTES).ok()?;
+    let index: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    crate::model_vision::vision_tensor_marker(&index)
 }
 
 /// Parse MLX config bytes into a normalized [`ModelMemoryProfile`].
@@ -773,6 +812,12 @@ fn extract_model_identity(profile: &mut ModelMemoryProfile, raw: &serde_json::Va
 }
 
 fn extract_vision_component(profile: &mut ModelMemoryProfile, raw: &serde_json::Value) {
+    // Any of the recognised config keys establishes a vision component, not just
+    // `vision_config`: older wrappers name `mm_vision_tower` instead, and this
+    // path used to miss them while the HF path did not.
+    let Some(key) = crate::model_vision::vision_config_key(raw) else {
+        return;
+    };
     if let Some(vc) = raw.get("vision_config").and_then(|v| v.as_object()) {
         let mut vision = VisionComponent {
             has_vision_config: true,
@@ -790,14 +835,23 @@ fn extract_vision_component(profile: &mut ModelMemoryProfile, raw: &serde_json::
             .and_then(|v| v.as_u64())
         {
             vision.encoder_layers = Some(layers as u32);
-            let key = if vc.get("num_hidden_layers").is_some() {
+            let layers_key = if vc.get("num_hidden_layers").is_some() {
                 "vision_config.num_hidden_layers"
             } else {
                 "vision_config.depth"
             };
-            vision.encoder_layers_evidence = Some(key.into());
+            vision.encoder_layers_evidence = Some(layers_key.into());
         }
         profile.vision = Some(vision);
+    } else {
+        // A key like `mm_vision_tower` names the tower without carrying its
+        // geometry, so record its presence with no encoder layers rather than
+        // reporting the model as text-only.
+        profile.vision = Some(VisionComponent {
+            has_vision_config: true,
+            field_evidence: key.into(),
+            ..Default::default()
+        });
     }
 }
 
@@ -1094,6 +1148,65 @@ mod tests {
         let mut f = std::fs::File::create(dir.join("model.safetensors.index.json")).unwrap();
         f.write_all(json.as_bytes()).unwrap();
         f.flush().unwrap();
+    }
+
+    #[test]
+    fn local_vision_detection_matches_the_hf_path() {
+        // `mm_vision_tower` names a tower without carrying its geometry. This path
+        // recognised only `vision_config` and reported such a model as text-only.
+        let dir = tempfile::tempdir().unwrap();
+        write_config(
+            dir.path(),
+            r#"{"model_type": "llava", "num_hidden_layers": 32,
+                "mm_vision_tower": "openai/clip-vit-large-patch14"}"#,
+        );
+        let named = read_mlx_model_profile(dir.path()).unwrap();
+        let vision = named.vision.as_ref().expect("tower is named in the config");
+        assert!(vision.is_some());
+        assert_eq!(vision.field_evidence, "mm_vision_tower");
+        // Named but not described: no encoder geometry to report.
+        assert_eq!(vision.encoder_layers, None);
+
+        // A checkpoint can ship a tower without naming one in config.json, so the
+        // weights get the second word. Only available on local disk.
+        let weights_only = tempfile::tempdir().unwrap();
+        write_config(
+            weights_only.path(),
+            r#"{"model_type": "qwen3", "num_hidden_layers": 32}"#,
+        );
+        std::fs::write(
+            weights_only.path().join("model.safetensors.index.json"),
+            r#"{"weight_map": {"visual.blocks.0.attn.qkv.weight": "model-00001.safetensors"}}"#,
+        )
+        .unwrap();
+        let found = weights_only.path();
+        let profile = read_mlx_model_profile(found).unwrap();
+        let vision = profile.vision.as_ref().expect("tower is in the weights");
+        assert!(vision.is_some());
+        assert!(!vision.has_vision_config);
+        assert!(vision.has_vision_tensors);
+        assert_eq!(
+            vision.field_evidence,
+            "model.safetensors.index.json:visual."
+        );
+
+        // Text-only stays text-only: neither artifact carries a tower.
+        let text = tempfile::tempdir().unwrap();
+        write_config(
+            text.path(),
+            r#"{"model_type": "qwen3", "num_hidden_layers": 32}"#,
+        );
+        std::fs::write(
+            text.path().join("model.safetensors.index.json"),
+            r#"{"weight_map": {"model.layers.0.self_attn.q_proj.weight": "model-00001.safetensors"}}"#,
+        )
+        .unwrap();
+        assert!(
+            read_mlx_model_profile(text.path())
+                .unwrap()
+                .vision
+                .is_none()
+        );
     }
 
     #[test]

@@ -694,21 +694,6 @@ struct VisionVerdict {
     confidence: String,
 }
 
-/// Tensor-name prefixes that only exist when a vision tower is actually present
-/// in the weights. Matched against the safetensors index, so this reads the
-/// model's own artifact rather than its packaging.
-const VISION_TENSOR_MARKERS: &[&str] = &[
-    "vision_tower",
-    "vision_model",
-    "visual.",
-    "mm_projector",
-    "multi_modal_projector",
-    "image_newline",
-];
-
-/// Config keys that establish a vision component.
-const VISION_CONFIG_KEYS: &[&str] = &["vision_config", "vision_tower", "mm_vision_tower"];
-
 /// Resolve whether a repo has a vision component, preferring artifacts over names.
 ///
 /// Order: `config.json`, then the safetensors index, then filename/tag
@@ -732,16 +717,6 @@ async fn resolve_vision_evidence(
     };
 
     let config = fetch_json_at(repo_id, revision, "config.json", 512 * 1024).await;
-    if let Some(ref value) = config
-        && let Some(key) = vision_config_key(value)
-    {
-        return VisionVerdict {
-            vision: true,
-            source: format!("config.json:{key}"),
-            confidence: "confirmed".into(),
-        };
-    }
-
     let index = fetch_json_at(
         repo_id,
         revision,
@@ -749,21 +724,15 @@ async fn resolve_vision_evidence(
         8 * 1024 * 1024,
     )
     .await;
-    if let Some(ref value) = index
-        && let Some(marker) = vision_tensor_marker(value)
+
+    // Shared with the local-disk path so a repo cannot be read one way before
+    // download and another way after.
+    if let Some(evidence) =
+        crate::model_vision::resolve_from_artifacts(config.as_ref(), index.as_ref())
     {
         return VisionVerdict {
-            vision: true,
-            source: format!("model.safetensors.index.json:{marker}"),
-            confidence: "confirmed".into(),
-        };
-    }
-
-    // Both artifacts read cleanly and neither carries a vision component.
-    if config.is_some() && index.is_some() {
-        return VisionVerdict {
-            vision: false,
-            source: "config.json + model.safetensors.index.json show no vision component".into(),
+            vision: evidence.vision,
+            source: evidence.source,
             confidence: "confirmed".into(),
         };
     }
@@ -796,27 +765,6 @@ async fn resolve_vision_evidence(
         },
         confidence: "heuristic".into(),
     }
-}
-
-/// Which vision key a config carries, if any. Checked at the top level and one
-/// level down, because wrappers nest the text model's config under `text_config`
-/// and keep the vision block beside it.
-fn vision_config_key(value: &serde_json::Value) -> Option<&'static str> {
-    let object = value.as_object()?;
-    VISION_CONFIG_KEYS
-        .iter()
-        .find(|key| object.contains_key(**key))
-        .copied()
-}
-
-/// The first vision tensor marker present in a safetensors index weight map.
-fn vision_tensor_marker(value: &serde_json::Value) -> Option<&'static str> {
-    let weight_map = value.get("weight_map")?.as_object()?;
-    VISION_TENSOR_MARKERS.iter().copied().find(|marker| {
-        weight_map
-            .keys()
-            .any(|tensor| tensor.to_ascii_lowercase().contains(*marker))
-    })
 }
 
 /// Fetch and parse a small JSON artifact. `None` means "could not read it",
@@ -1648,37 +1596,6 @@ fn identity_minimal(repo_id: &str, revision: String, errors: Vec<String>) -> HfI
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn vision_config_key_finds_nested_and_top_level() {
-        let config =
-            serde_json::json!({ "model_type": "gemma4", "vision_config": { "depth": 27 } });
-        assert_eq!(vision_config_key(&config), Some("vision_config"));
-
-        let legacy = serde_json::json!({ "mm_vision_tower": "openai/clip-vit-large" });
-        assert_eq!(vision_config_key(&legacy), Some("mm_vision_tower"));
-
-        let text_only = serde_json::json!({ "model_type": "qwen3", "num_hidden_layers": 64 });
-        assert_eq!(vision_config_key(&text_only), None);
-    }
-
-    #[test]
-    fn vision_tensor_marker_reads_the_weight_map() {
-        let index = serde_json::json!({ "weight_map": {
-            "model.layers.0.self_attn.q_proj.weight": "model-00001.safetensors",
-            "vision_tower.encoder.layers.0.mlp.fc1.weight": "model-00002.safetensors",
-        } });
-        assert_eq!(vision_tensor_marker(&index), Some("vision_tower"));
-
-        // A repo whose *name* says vision but whose weights do not.
-        let text_only = serde_json::json!({ "weight_map": {
-            "model.layers.0.self_attn.q_proj.weight": "model-00001.safetensors",
-        } });
-        assert_eq!(vision_tensor_marker(&text_only), None);
-
-        // Not an index at all: absent, not falsely positive.
-        assert_eq!(vision_tensor_marker(&serde_json::json!({})), None);
-    }
 
     #[test]
     fn test_detect_format_gguf() {

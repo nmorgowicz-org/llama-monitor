@@ -269,16 +269,33 @@ Verdict and per-cell numbers: `docs/reference/rapid-mlx-mtp-evidence.md` §12. N
 - `command.rs:565` still gates on `--speculative` flag existence rather than the behavioral
   verdict. Left deliberately: a user may want to launch with MTP to test it. Admission
   warnings carry the message instead.
-- `RAPID_MLX_CONSTRAIN_TOOLS` appears nowhere in `src/`. The app has no representation of the
-  tool-grammar axis as a runtime setting, only as a modelled request property, so it cannot
-  currently *choose* to drop the grammar in exchange for speculation.
+- `RAPID_MLX_CONSTRAIN_TOOLS` appears nowhere in `src/` and **will not be added**. Dropping the
+  tool grammar to make the speculative scheduler engage trades tool-call correctness for
+  throughput, which is the wrong trade for an agentic workload — a faster wrong tool call is
+  worthless. It stays a manual diagnostic bypass for measurement only, never a product setting.
+  This is a closed decision, not an open item; do not "finish" it.
 - `EstimatorOptions` **now carries `workload_scenario: Option<WorkloadScenario>`**, and
   `/api/vram` passes the scenario the request already stated (it was parsed and then dropped).
   `None` still falls back to `WorkloadScenario::default()` (`CodingAgent`), so an unstated
   scenario behaves as before; the difference is that a stated one is no longer ignored. Covered
   by `mtp_admission_follows_the_callers_workload_scenario`.
-- The vision tensor check is wired into `hf_qualify_repo` only. Local-disk vision detection
-  (`extract_vision_component` in `mlx_meta.rs`) remains a separate path.
+- **Closed (2026-07-29): vision detection is one shared, backend-neutral detector.**
+  `src/model_vision.rs` owns the config keys, the tensor markers, and the evidence order
+  (config.json → safetensors index → confirmed absence when both were readable → `None` when
+  the artifacts did not settle it). Detection is deliberately decoupled from any runtime's
+  *support* for vision: rapid-mlx's vision path is currently unusable, but "does this
+  checkpoint have a tower" is a fact about the checkpoint, and MTPLX and other MLX loaders need
+  the same answer from the same artifacts.
+  - `hf/qualify.rs` (pre-download, over HTTP) and `mlx_meta.rs` (post-download, local disk) now
+    call it instead of disagreeing. The local path previously recognised only `vision_config`
+    and never read the weights at all, so `mm_vision_tower` models and unnamed-tower
+    checkpoints were reported as text-only.
+  - `VisionComponent` gained `has_vision_tensors`, so `is_some()` no longer means
+    "config.json named it"; `/api/models` reports `vision` / `vision_source` /
+    `vision_confidence` and distinguishes *undetermined* from *absent*.
+  - Still open: nothing *acts* on the verdict yet — no loader refuses a vision model or
+    accounts for tower memory on the strength of it. That is deliberate while the rapid-mlx
+    vision runtime is broken.
 
 ---
 
