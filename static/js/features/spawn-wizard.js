@@ -9682,8 +9682,13 @@ function _renderPresetParamsStep() {
         rapidRows.push({ label: 'KV cache dtype', value: requestedKv.toUpperCase() });
       }
      rapidRows.push({ label: 'Prompt storage', value: h.turboquantMode === 'auto' ? 'Auto — runtime default' : h.turboquantMode === 'none' ? 'Standard (int4)' : h.turboquantMode === 'k8v4' ? 'TurboQuant K8V4' : 'TurboQuant V-only' });
-     if (h.workloadScenario && h.workloadScenario !== 'interactive_chat') {
-       rapidRows.push({ label: 'Workload scenario', value: { interactive_chat: 'Interactive Chat', coding_agent: 'Coding Agent', tool_research_agent: 'Tool Research Agent', batch_eval: 'Batch Evaluation', roleplay: 'Roleplay' }[h.workloadScenario] || h.workloadScenario });
+     // Vocabulary here must match USE_CASE_TO_PROFILE, which is what the page-1 use-case
+     // cards actually set. This row was written against the canonical estimator keys
+     // (coding_agent, batch_eval, ...) that the wizard never produces, so every lookup
+     // missed and the review step printed the raw snake_case key — for the default
+     // selection too, since the guard compared against a value nothing sets.
+     if (h.workloadScenario && h.workloadScenario !== 'interactive_coding_agent') {
+       rapidRows.push({ label: 'Workload scenario', value: { interactive_coding_agent: 'Interactive Coding Agent', general_chat: 'General Chat', roleplay_storytelling: 'Roleplay / Storytelling' }[h.workloadScenario] || h.workloadScenario });
      }
      if (h.samplingMode && h.samplingMode !== 'auto') {
        rapidRows.push({ label: 'Sampling mode', value: { general: 'General', coding: 'Coding/Agentic', precise: 'Precise/Deterministic', creative: 'Creative/Roleplay', custom: 'Custom' }[h.samplingMode] || h.samplingMode });
@@ -10034,8 +10039,11 @@ export function buildSpawnPayload() {
           retained_cache_mib: Number(h.retainedCacheMib ?? 8192),
         }),
         disk_checkpoint_interval: 0,
-        // Workload scenario from page-1 use-case selection (or backend default).
-        ...(h.workloadScenario && h.workloadScenario !== 'interactive_coding_agent' && { workload_scenario: h.workloadScenario }),
+        // No workload_scenario here: `RapidMlxConfig` has no such field, so serde dropped it
+        // on arrival and the spawn path never saw it. The scenario reaches the server where
+        // it is actually consumed — top level of the `/api/vram` body, sent by
+        // vram-estimate.js — and it steers the wizard's own KV-dtype and context choices,
+        // which do get sent. Left over from the workload-profile picker removed in 712c261.
         reasoning_mode: h.rapidReasoningMode || 'on',
         // Auto deliberately omits a flag; Off maps to Rapid's real
         // --no-mllm escape hatch for incomplete vision-tower checkpoints.

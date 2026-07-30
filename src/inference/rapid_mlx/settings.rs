@@ -508,11 +508,41 @@ pub fn all_settings() -> &'static [RapidMlxSetting] {
     ]
 }
 
+/// How one participant in a mutual-exclusion rule is recognized.
+#[derive(Debug, Clone)]
+pub enum ExclusionMatch {
+    /// Participates only at these exact values.
+    OneOf(&'static [&'static str]),
+    /// Participates whenever the user set it at all, whatever the value. For numeric
+    /// settings, which have no "on" value to compare a string against.
+    Present,
+}
+
+impl ExclusionMatch {
+    fn matches(&self, value: &serde_json::Value) -> bool {
+        match self {
+            Self::OneOf(allowed) => value.as_str().is_some_and(|found| allowed.contains(&found)),
+            Self::Present => true,
+        }
+    }
+}
+
 /// Mutual exclusion rules for settings.
+///
+/// Each participant carries the values that make it part of the conflict. The rule fires
+/// only when *every* participant matches — a rule that fires on any one of them is not an
+/// exclusion, it is a ban on that single setting.
 #[derive(Debug, Clone)]
 pub struct MutualExclusionRule {
-    pub settings: &'static [&'static str],
+    pub participants: &'static [(&'static str, ExclusionMatch)],
     pub error: &'static str,
+}
+
+impl MutualExclusionRule {
+    /// The setting ids this rule concerns, for API responses and error attribution.
+    pub fn setting_ids(&self) -> Vec<&'static str> {
+        self.participants.iter().map(|(id, _)| *id).collect()
+    }
 }
 
 /// All mutual exclusion rules.
@@ -520,15 +550,25 @@ pub struct MutualExclusionRule {
 pub fn mutual_exclusion_rules() -> &'static [MutualExclusionRule] {
     &[
         MutualExclusionRule {
-            settings: &["reasoning_mode", "sampling_mode"],
+            participants: &[
+                ("reasoning_mode", ExclusionMatch::OneOf(&["on"])),
+                ("sampling_mode", ExclusionMatch::OneOf(&["model_default"])),
+            ],
             error: "reasoning_mode=on and sampling_mode=model_default are mutually exclusive",
         },
         MutualExclusionRule {
-            settings: &["pflash_policy", "turboquant_mode"],
+            participants: &[
+                ("pflash_policy", ExclusionMatch::OneOf(&["on"])),
+                // "auto" and "none" do not request TurboQuant, so they cannot collide.
+                ("turboquant_mode", ExclusionMatch::OneOf(&["v4", "k8v4"])),
+            ],
             error: "pflash_policy bypasses TurboQuant; these policies cannot be combined",
         },
         MutualExclusionRule {
-            settings: &["speculative_policy", "max_num_seqs"],
+            participants: &[
+                ("speculative_policy", ExclusionMatch::OneOf(&["on"])),
+                ("max_num_seqs", ExclusionMatch::Present),
+            ],
             error: "speculative_decoding requires dedicated runtime qualification; explicit max_num_seqs may conflict with MTP scheduling",
         },
     ]
@@ -539,18 +579,17 @@ pub fn check_mutual_exclusions(
     settings: &BTreeMap<&'static str, serde_json::Value>,
 ) -> Result<(), ValidationError> {
     for rule in mutual_exclusion_rules() {
-        let mut triggered = false;
-        for setting_id in rule.settings {
-            if let Some(value) = settings.get(setting_id)
-                && (value.as_str().unwrap_or("") == "on"
-                    || value.as_str().unwrap_or("") == "model_default")
-            {
-                triggered = true;
-            }
-        }
+        // Every participant must be present and at a conflicting value. The previous
+        // any-match reading meant `reasoning_mode=on` alone reported a conflict with a
+        // `sampling_mode` the caller had not even submitted.
+        let triggered = rule.participants.iter().all(|(setting_id, how)| {
+            settings
+                .get(setting_id)
+                .is_some_and(|value| how.matches(value))
+        });
         if triggered {
             return Err(ValidationError {
-                setting_id: rule.settings[0],
+                setting_id: rule.participants[0].0,
                 message: rule.error.into(),
                 code: "mutual_exclusion",
             });
@@ -562,6 +601,80 @@ pub fn check_mutual_exclusions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn values(
+        pairs: &[(&'static str, serde_json::Value)],
+    ) -> BTreeMap<&'static str, serde_json::Value> {
+        pairs.iter().cloned().collect()
+    }
+
+    #[test]
+    fn one_setting_alone_is_not_a_mutual_exclusion() {
+        // `reasoning_mode=on` is an ordinary choice. It used to report a conflict with a
+        // `sampling_mode` the caller had not submitted, because the rule fired when any one
+        // participant matched — which made the settings-validate endpoint answer
+        // `valid: false` for a perfectly normal configuration.
+        for lone in [
+            ("reasoning_mode", serde_json::json!("on")),
+            ("sampling_mode", serde_json::json!("model_default")),
+            ("pflash_policy", serde_json::json!("on")),
+            ("speculative_policy", serde_json::json!("on")),
+            ("max_num_seqs", serde_json::json!(8)),
+        ] {
+            let id = lone.0;
+            assert!(
+                check_mutual_exclusions(&values(&[lone])).is_ok(),
+                "{id} alone should not trigger any exclusion"
+            );
+        }
+    }
+
+    #[test]
+    fn the_full_conflicting_combination_still_fails() {
+        let error = check_mutual_exclusions(&values(&[
+            ("reasoning_mode", serde_json::json!("on")),
+            ("sampling_mode", serde_json::json!("model_default")),
+        ]))
+        .expect_err("both participants at conflicting values must fail");
+        assert_eq!(error.code, "mutual_exclusion");
+        assert_eq!(error.setting_id, "reasoning_mode");
+    }
+
+    #[test]
+    fn a_participant_at_a_harmless_value_does_not_conflict() {
+        // TurboQuant `auto` and `none` do not request TurboQuant, so PFlash cannot collide
+        // with them; only an explicit v4/k8v4 is a real conflict.
+        for mode in ["auto", "none"] {
+            assert!(
+                check_mutual_exclusions(&values(&[
+                    ("pflash_policy", serde_json::json!("on")),
+                    ("turboquant_mode", serde_json::json!(mode)),
+                ]))
+                .is_ok(),
+                "pflash + turboquant_mode={mode} is not a conflict"
+            );
+        }
+        assert!(
+            check_mutual_exclusions(&values(&[
+                ("pflash_policy", serde_json::json!("on")),
+                ("turboquant_mode", serde_json::json!("k8v4")),
+            ]))
+            .is_err(),
+            "pflash + an explicit TurboQuant mode is a conflict"
+        );
+    }
+
+    #[test]
+    fn a_numeric_participant_conflicts_by_being_set_at_all() {
+        // `max_num_seqs` has no "on" value to compare against, so its presence is the signal.
+        assert!(
+            check_mutual_exclusions(&values(&[
+                ("speculative_policy", serde_json::json!("on")),
+                ("max_num_seqs", serde_json::json!(4)),
+            ]))
+            .is_err()
+        );
+    }
 
     fn test_snapshot() -> CapabilitySnapshot {
         CapabilitySnapshot {

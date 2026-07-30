@@ -481,9 +481,14 @@ impl RapidMlxCommandBuilder {
         if let Some(ref policy) = self.pflash_policy
             && policy != "auto"
         {
-            capabilities.require("--pflash")?;
-            args.push("--pflash".to_string());
-            args.push(policy.clone());
+            // A runtime with no `--pflash` flag has no PFlash to switch off, so the request is
+            // already satisfied. Requiring the flag there would fail launches on older builds
+            // for a setting that now defaults to "off" on every config.
+            if policy != "off" || capabilities.contains("--pflash") {
+                capabilities.require("--pflash")?;
+                args.push("--pflash".to_string());
+                args.push(policy.clone());
+            }
         }
         if let Some(ref policy) = self.response_cache_policy
             && policy != "auto"
@@ -788,6 +793,45 @@ fn serde_value_to_flag_arg(value: &serde_json::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_config_from_json_still_turns_pflash_off() {
+        // rapid-mlx 0.11.1 defaults --pflash to "always" for the verified Qwen3.5/Qwen3.6
+        // aliases, and the 2026-07-24 benchmark verdict is that needle recall collapses
+        // 0-40% above the 32768-token threshold there. The `off` default used to live only
+        // in `RapidMlxConfig::default()`, so every preset read off disk and every API
+        // request deserialized to None, emitted no flag, and inherited "always".
+        let config: crate::inference::rapid_mlx::RapidMlxConfig =
+            serde_json::from_str(r#"{"model_path": "/models/thing"}"#).unwrap();
+        assert_eq!(config.pflash_policy.as_deref(), Some("off"));
+    }
+
+    #[test]
+    fn turning_pflash_off_does_not_require_a_runtime_that_has_it() {
+        // Now that every config carries "off", a runtime predating --pflash must still
+        // launch: it has no PFlash to disable, so the request is already satisfied.
+        let capabilities =
+            ServeCapabilities::from_help("--host --port --served-model-name --reasoning");
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .pflash_policy(Some("off".into()))
+        .build("rapid-mlx".into(), &capabilities)
+        .expect("an unsupported PFlash must not block a request to disable it");
+        assert!(!args(&launch).iter().any(|a| a == "--pflash"));
+    }
+
+    #[test]
+    fn an_explicit_pflash_mode_still_requires_the_flag() {
+        let capabilities = ServeCapabilities::from_help("--host --port --served-model-name");
+        let error = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .pflash_policy(Some("always".into()))
+        .build("rapid-mlx".into(), &capabilities)
+        .expect_err("asking to enable PFlash on a runtime without it must fail clearly");
+        assert!(error.to_string().contains("--pflash"), "got: {error}");
+    }
 
     fn args(launch: &SupervisedLaunch) -> Vec<String> {
         launch

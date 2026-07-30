@@ -353,7 +353,9 @@ fn settings_catalog_route(ctx: ApiCtx) -> ApiRoute {
                     .collect();
                 let rules: Vec<_> = settings::mutual_exclusion_rules()
                     .iter()
-                    .map(|rule| serde_json::json!({"settings": rule.settings, "error": rule.error}))
+                    .map(|rule| {
+                        serde_json::json!({"settings": rule.setting_ids(), "error": rule.error})
+                    })
                     .collect();
                 Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(&serde_json::json!({
                     "ok": true,
@@ -702,8 +704,19 @@ fn build_effective_policy(config: &RapidMlxConfig) -> serde_json::Value {
         }
         ref other => other.clone(),
     };
+    // `--reasoning` pins the KV cache to int8 inside the runtime, whatever `--kv-cache-dtype`
+    // says (rapid-mlx `serve --help`: "pins --kv-cache-dtype to int8 regardless of the dtype
+    // flag"). The VRAM estimator already models this as `reasoning_mode_overrides_kv_to_int8`;
+    // reporting the requested dtype here would make this snapshot the one surface that
+    // disagrees, on the interaction that matters most for memory.
+    let reasoning_on = config.reasoning_mode.as_deref() == Some("on");
+    let effective_kv_cache_dtype = if reasoning_on {
+        Some(crate::inference::rapid_mlx::KvCacheConfig::Int8)
+    } else {
+        config.kv_cache_dtype.clone()
+    };
     serde_json::json!({
-        "kv_cache_dtype": config.kv_cache_dtype,
+        "kv_cache_dtype": effective_kv_cache_dtype,
         "turboquant_mode": effective_turboquant_mode,
         "prefix_cache_enabled": config.prefix_cache_enabled,
         "retained_cache_mib": config.retained_cache_mib,
@@ -771,9 +784,32 @@ fn build_requested_vs_effective(
         };
     }
 
+    // Reasoning outranks the dtype flag inside the runtime, so say so rather than let the
+    // operator read a dtype the server will not use. Recorded even when the requested dtype
+    // is already int8-compatible only if it actually differs.
+    if config.reasoning_mode.as_deref() == Some("on") {
+        let requested = config
+            .kv_cache_dtype
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "auto".to_string());
+        if requested != "int8" {
+            diff.insert(
+                "kv_cache_dtype".to_string(),
+                serde_json::json!({
+                    "requested": requested,
+                    "effective": "int8",
+                    "reason": "reasoning_mode=on pins the KV cache to int8 regardless of the requested dtype"
+                }),
+            );
+        }
+    }
+
     // PFlash: may be unavailable if runtime lacks flag
     if let Some(ref policy) = config.pflash_policy
         && policy != "auto"
+        // "off" against a runtime with no PFlash is already satisfied, not a downgrade.
+        && policy != "off"
         && !capabilities.contains("--pflash")
     {
         diff.insert(

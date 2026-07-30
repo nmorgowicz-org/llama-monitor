@@ -1192,7 +1192,11 @@ mod tests {
         assert!(rapid.kv_cache_dtype.is_none());
         assert!(rapid.turboquant_mode.is_none());
         assert!(rapid.hybrid_cache_entries.is_none());
-        assert!(rapid.pflash_policy.is_none());
+        // Deliberately not None: "safe defaults" for PFlash means `off`, not "let the runtime
+        // decide". rapid-mlx 0.11.1 turns --pflash on by default for the verified Qwen3.5/3.6
+        // aliases, and the 2026-07-24 verdict measured needle recall collapsing 0-40% above
+        // the 32768-token threshold there. A legacy preset must not inherit that.
+        assert_eq!(rapid.pflash_policy.as_deref(), Some("off"));
         assert!(rapid.response_cache_policy.is_none());
         assert!(rapid.disk_checkpoint_policy.is_none());
         assert!(rapid.max_num_seqs.is_none());

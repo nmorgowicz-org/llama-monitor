@@ -36,6 +36,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+/// The launch-safe PFlash policy. See `RapidMlxConfig::pflash_policy`.
+fn default_pflash_policy() -> Option<String> {
+    Some("off".into())
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RapidMlxConfig {
     #[serde(default)]
@@ -118,7 +123,18 @@ pub struct RapidMlxConfig {
     #[serde(default)]
     pub hybrid_mode: RapidMlxHybridMode,
     /// PFlash policy (auto/always/off).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ///
+    /// Defaults to `off` on deserialization, not just in `RapidMlxConfig::default()`. Plain
+    /// `#[serde(default)]` on an `Option` yields `None`, which emits no `--pflash` flag and
+    /// leaves the runtime's own default in force — and rapid-mlx 0.11.1 defaults `--pflash`
+    /// to `always` for the verified Qwen3.5/Qwen3.6 aliases. The 2026-07-24 benchmark verdict
+    /// is that `auto`/`always` are not recommended on 0.11.x: needle recall collapses 0-40%
+    /// above the 32768-token threshold across both TurboQuant settings. So every preset
+    /// loaded from disk and every API request has to carry the `off` explicitly.
+    #[serde(
+        default = "default_pflash_policy",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub pflash_policy: Option<String>,
     /// Response cache policy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
