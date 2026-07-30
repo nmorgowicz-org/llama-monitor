@@ -1,7 +1,9 @@
 #![allow(clippy::collapsible_if)]
 
 use crate::inference::rapid_mlx::runtime::{FeatureProbeFailure, ProbeResult, RuntimeSource};
-use crate::inference::rapid_mlx::spec_decode_store::{MeasuredSpecDecode, SpecDecodeVerdictStore};
+use crate::inference::rapid_mlx::spec_decode_store::{
+    MeasuredSpecDecode, SpecDecodeOutcome, SpecDecodeVerdictStore,
+};
 use crate::repo_context::RepoContext;
 use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha256};
@@ -346,6 +348,12 @@ pub struct CapabilitySnapshot {
     /// `None` means the verdict came from a shipped prior or from flag presence.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub measured_spec_decode: Option<MeasuredSpecDecode>,
+    /// A sweep of some *other* runtime, present only when this one has none of its own.
+    /// This is the upgraded-past-your-evidence case: the lane was run once, then a new
+    /// version landed and the old verdict stopped applying without anything saying so.
+    /// Diagnostics use it to ask for a re-run instead of going quiet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub superseded_spec_decode: Option<MeasuredSpecDecode>,
 }
 
 impl CapabilitySnapshot {
@@ -481,6 +489,7 @@ pub async fn generate_snapshot(binary: &Path, source: RuntimeSource) -> Result<C
         // Probing the binary cannot produce a measurement; only
         // `apply_measured_spec_decode` can fill this, from the verdict store.
         measured_spec_decode: None,
+        superseded_spec_decode: None,
     };
 
     // Step 1 of the resolution order: a measurement for this exact install outranks
@@ -993,6 +1002,9 @@ pub fn apply_measured_spec_decode(
         return false;
     }
     let Some(measured) = store.verdict_for(&snapshot.fingerprint()) else {
+        // No measurement for what is installed. Note an older one if it exists, so the
+        // absence can be reported as "your evidence is stale" rather than as silence.
+        snapshot.superseded_spec_decode = store.superseded_verdict(&snapshot.fingerprint());
         return false;
     };
     snapshot.qualified_features.spec_decode = measured.qualification();
@@ -1790,6 +1802,53 @@ pub fn spec_decode_gate_names() -> Vec<&'static str> {
         .collect()
 }
 
+/// Leading sentence for the maintainer detail when the lane has been run on this
+/// machine, but not on the runtime that is installed now.
+///
+/// This is the case the whole nudge exists for. An upstream release claiming a
+/// speculative-decoding fix arrives as a new fingerprint, so the previous verdict stops
+/// applying — correctly, since it describes a different build — and nothing else in the
+/// app would mention that the evidence went stale. Saying which version was swept, what
+/// it found, and when, is what turns "run the lane" into an obviously worthwhile
+/// instruction rather than a chore of unknown value.
+///
+/// Empty string when there is nothing stale to report, so it composes into the message
+/// without a branch at the call site.
+fn stale_sweep_note(snapshot: &CapabilitySnapshot) -> String {
+    let Some(previous) = snapshot.superseded_spec_decode.as_ref() else {
+        return String::new();
+    };
+    let found = match previous.outcome {
+        SpecDecodeOutcome::Qualified if previous.promotes_capability => "qualified",
+        SpecDecodeOutcome::Qualified => "passed a partial sweep",
+        SpecDecodeOutcome::StillBlocked => "still blocked",
+        SpecDecodeOutcome::Uninterpretable => "uninterpretable",
+    };
+    // Same version, different fingerprint: a reinstall or a dependency bump. Worth
+    // distinguishing, because "you are on a newer version" and "your runtime was rebuilt"
+    // call for the same re-run but for visibly different reasons.
+    let subject = if version_matches(&previous.rapid_mlx_version, &snapshot.rapid_mlx_version) {
+        format!(
+            "The last sweep here measured Rapid-MLX {measured} too, but a different build \
+             of it — the runtime was reinstalled or its dependencies moved — so that \
+             verdict no longer applies",
+            measured = previous.rapid_mlx_version,
+        )
+    } else {
+        format!(
+            "The last sweep here measured Rapid-MLX {measured}, not the {installed} that \
+             is installed now",
+            measured = previous.rapid_mlx_version,
+            installed = snapshot.rapid_mlx_version,
+        )
+    };
+    format!(
+        "{subject}; it found {found} on {when}. If this version's release notes claim \
+         anything about speculative decoding, this is the run that would settle it. ",
+        when = previous.measured_at,
+    )
+}
+
 /// Per-feature notes for speculative decoding, derived from the snapshot.
 ///
 /// Split by audience. Anyone running the app gets the consequence — speculative
@@ -1838,10 +1897,12 @@ fn collect_spec_decode_failures(
                     .and_then(|repo| repo.file(SPEC_DECODE_LANE_SCRIPT))
                     .map(|lane| {
                         format!(
-                            "Gates that must all pass: {gates}. Re-test this build with \
-                             `node {lane}`, then record the result — a passing sweep for a \
-                             version everyone shares belongs in SPEC_DECODE_VERSION_PRIORS, \
-                             not only in the local verdict store.",
+                            "{stale}Gates that must all pass: {gates}. Re-test this build \
+                             with `node {lane}`, then record the result — a passing sweep \
+                             for a version everyone shares belongs in \
+                             SPEC_DECODE_VERSION_PRIORS, not only in the local verdict \
+                             store.",
+                            stale = stale_sweep_note(snapshot),
                             gates = SPEC_DECODE_GATES.join("; "),
                             lane = lane.display(),
                         )
@@ -1983,6 +2044,7 @@ Options:
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
             measured_spec_decode: None,
+            superseded_spec_decode: None,
         };
         assert!(snap.is_valid_for(&identity1));
         assert!(!snap.is_valid_for(&identity2));
@@ -2012,6 +2074,7 @@ Options:
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
             measured_spec_decode: None,
+            superseded_spec_decode: None,
         };
         let fp1 = snap1.fingerprint();
         snap1.package_versions.push(DependencyVersion {
@@ -2477,6 +2540,7 @@ Options:
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
             measured_spec_decode: None,
+            superseded_spec_decode: None,
         };
         let failures = collect_feature_failures(&snapshot);
         assert_eq!(failures.len(), 2);
@@ -2512,6 +2576,7 @@ Options:
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
             measured_spec_decode: None,
+            superseded_spec_decode: None,
         };
         let failures = collect_feature_failures(&snapshot);
         // Missing is not a failure; only Broken is; installed+available means no failure
@@ -2550,6 +2615,7 @@ Options:
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
             measured_spec_decode: None,
+            superseded_spec_decode: None,
         }
     }
 
@@ -2610,6 +2676,57 @@ Options:
         for gate in SPEC_DECODE_GATES {
             assert!(detail.contains(gate), "missing gate {gate} in: {detail}");
         }
+    }
+
+    #[test]
+    fn spec_decode_probe_nudges_a_re_run_when_the_only_sweep_was_of_an_older_build() {
+        let mut snapshot = spec_decode_snapshot(
+            "0.12.0",
+            vec!["--speculative".into()],
+            FeatureQualification::Indeterminate("no sweep for this build".into()),
+        );
+        // The stale evidence: a still-blocked sweep of the version before this one.
+        let (old, store, _dir) =
+            measured_snapshot_and_store("0.11.1", vec!["--speculative".into()], "still-blocked");
+        snapshot.superseded_spec_decode = store.verdict_for(&old.fingerprint());
+
+        let repo = crate::repo_context::detect().expect("tests run from a checkout");
+        let failures = collect_spec_decode_failures(&snapshot, Some(repo));
+        let detail = failures[0].maintainer_detail.as_ref().unwrap();
+        assert!(
+            detail.contains("0.11.1") && detail.contains("0.12.0"),
+            "must name both the version that was swept and the one installed: {detail}"
+        );
+        assert!(
+            detail.contains("still blocked"),
+            "a re-run is worth making partly because of what the last one found: {detail}"
+        );
+        assert!(
+            detail.contains("release notes"),
+            "this is the sentence that fires when an upstream changelog claims a fix: {detail}"
+        );
+    }
+
+    #[test]
+    fn a_stale_sweep_reaches_no_ordinary_user() {
+        let mut snapshot = spec_decode_snapshot(
+            "0.12.0",
+            vec!["--speculative".into()],
+            FeatureQualification::Indeterminate("no sweep for this build".into()),
+        );
+        let (old, store, _dir) =
+            measured_snapshot_and_store("0.11.1", vec!["--speculative".into()], "still-blocked");
+        snapshot.superseded_spec_decode = store.verdict_for(&old.fingerprint());
+
+        // Negative control on the audience gate: outside a checkout there is no detail at
+        // all, so the note cannot leak to the web API of an installed build.
+        let failures = collect_spec_decode_failures(&snapshot, None);
+        assert!(failures[0].maintainer_detail.is_none());
+        assert!(
+            !failures[0].message.contains("0.11.1"),
+            "the user-facing message is about consequence, not our measurement history: {}",
+            failures[0].message
+        );
     }
 
     #[test]
@@ -2829,6 +2946,7 @@ Options:
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
             measured_spec_decode: None,
+            superseded_spec_decode: None,
         };
         // 48GB ceiling, 40GB safe, 20GB model overhead → 20GB available for cache
         // D30 budget = 48GB × 0.10 = 4.8GB
@@ -2869,6 +2987,7 @@ Options:
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
             measured_spec_decode: None,
+            superseded_spec_decode: None,
         };
         let guidance = PrefixCacheGuidance::derive(
             &snapshot,
@@ -2907,6 +3026,7 @@ Options:
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
             measured_spec_decode: None,
+            superseded_spec_decode: None,
         };
         let guidance = PrefixCacheGuidance::derive(
             &snapshot,
@@ -2944,6 +3064,7 @@ Options:
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
             measured_spec_decode: None,
+            superseded_spec_decode: None,
         };
         // 48GB ceiling, 10GB safe, 20GB model overhead → negative available
         let guidance = PrefixCacheGuidance::derive(
@@ -2983,6 +3104,7 @@ Options:
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
             measured_spec_decode: None,
+            superseded_spec_decode: None,
         };
         let ceiling = 64 * 1024 * 1024 * 1024u64;
         let guidance =
@@ -3013,6 +3135,7 @@ Options:
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
             measured_spec_decode: None,
+            superseded_spec_decode: None,
         };
         let guidance = PrefixCacheGuidance::derive(
             &snapshot,
@@ -3051,6 +3174,7 @@ Options:
             evidence_timestamp: 0,
             source: CapabilitySnapshotSource::AutoProbed,
             measured_spec_decode: None,
+            superseded_spec_decode: None,
         };
         assert_eq!(snapshot.mtp_concurrency, MtpConcurrencyState::Unknown);
         assert!(matches!(

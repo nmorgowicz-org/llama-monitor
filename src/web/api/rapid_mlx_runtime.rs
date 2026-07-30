@@ -862,6 +862,7 @@ fn prefix_cache_guidance_route(ctx: ApiCtx) -> ApiRoute {
                 evidence_timestamp: 0,
                 source: Default::default(),
                 measured_spec_decode: None,
+                superseded_spec_decode: None,
             };
 
             let guidance = crate::inference::rapid_mlx::capabilities::PrefixCacheGuidance::derive(

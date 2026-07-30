@@ -192,6 +192,26 @@ impl SpecDecodeVerdictStore {
         self.load().ok()?.verdicts.get(fingerprint).cloned()
     }
 
+    /// The most recent measurement recorded against some *other* runtime.
+    ///
+    /// Only meaningful when [`Self::verdict_for`] came back empty: it answers "you have
+    /// swept this lane before, but not on what is installed now". That is the shape the
+    /// upstream-changelog case takes — a new version lands, its fingerprint is new, and
+    /// the old verdict silently stops applying. Without this the app would go quiet at
+    /// exactly the moment the answer might have changed.
+    ///
+    /// Ordered by `measured_at` string comparison, which is correct because the lane
+    /// writes ISO-8601 UTC. Ties fall to whichever the map yields last; a tie means two
+    /// sweeps in the same millisecond and either is equally true.
+    pub fn superseded_verdict(&self, fingerprint: &str) -> Option<MeasuredSpecDecode> {
+        let file = self.load().ok()?;
+        file.verdicts
+            .values()
+            .filter(|verdict| verdict.fingerprint != fingerprint)
+            .max_by(|a, b| a.measured_at.cmp(&b.measured_at))
+            .cloned()
+    }
+
     /// Record a measurement against a fingerprint, replacing any earlier one.
     ///
     /// Later measurements win outright: a build that was blocked and now qualifies (or
@@ -633,6 +653,70 @@ mod tests {
                 .unwrap()
                 .qualification(),
             FeatureQualification::Available
+        );
+    }
+
+    #[test]
+    fn a_sweep_of_an_older_runtime_is_reported_as_superseded() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SpecDecodeVerdictStore::at(dir.path());
+        let all: Vec<&str> = spec_decode_gate_names();
+
+        let old = snapshot("0.11.1");
+        let path = write_report(dir.path(), &report_json("still-blocked", &all, "0.11.1"));
+        store.ingest_requalification_report(&old, &path).unwrap();
+
+        // The upgrade: same install path, new binary, so a new fingerprint.
+        let mut new = snapshot("0.12.0");
+        new.executable_identity.file_hash = "newhash".into();
+        assert!(store.verdict_for(&new.fingerprint()).is_none());
+
+        let superseded = store.superseded_verdict(&new.fingerprint()).unwrap();
+        assert_eq!(superseded.rapid_mlx_version, "0.11.1");
+        assert_eq!(superseded.outcome, SpecDecodeOutcome::StillBlocked);
+    }
+
+    #[test]
+    fn the_runtimes_own_verdict_is_never_reported_as_superseded() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SpecDecodeVerdictStore::at(dir.path());
+        let snap = snapshot("0.12.0");
+        let all: Vec<&str> = spec_decode_gate_names();
+        let path = write_report(dir.path(), &report_json("still-blocked", &all, "0.12.0"));
+        store.ingest_requalification_report(&snap, &path).unwrap();
+
+        assert!(
+            store.superseded_verdict(&snap.fingerprint()).is_none(),
+            "a runtime's own measurement is current, not superseded"
+        );
+    }
+
+    #[test]
+    fn the_newest_of_several_older_sweeps_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = SpecDecodeVerdictStore::at(dir.path());
+        let all: Vec<&str> = spec_decode_gate_names();
+
+        for (version, hash, when) in [
+            ("0.10.0", "h10", "2026-05-01T00:00:00.000Z"),
+            ("0.11.1", "h11", "2026-07-30T09:00:00.000Z"),
+        ] {
+            let mut snap = snapshot(version);
+            snap.executable_identity.file_hash = hash.into();
+            let body = report_json("still-blocked", &all, version)
+                .replace("2026-07-30T09:00:00.000Z", when);
+            let path = write_report(dir.path(), &body);
+            store.ingest_requalification_report(&snap, &path).unwrap();
+        }
+
+        let mut current = snapshot("0.12.0");
+        current.executable_identity.file_hash = "h12".into();
+        assert_eq!(
+            store
+                .superseded_verdict(&current.fingerprint())
+                .unwrap()
+                .rapid_mlx_version,
+            "0.11.1"
         );
     }
 

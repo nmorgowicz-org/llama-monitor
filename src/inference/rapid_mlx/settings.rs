@@ -596,6 +596,7 @@ mod tests {
             evidence_timestamp: 0,
             source: Default::default(),
             measured_spec_decode: None,
+            superseded_spec_decode: None,
         }
     }
 
