@@ -1,8 +1,35 @@
-# Rapid-MLX MTP — Working Handoff
+# ARCHIVED — Rapid-MLX MTP Working Handoff (2026-07-29)
 
-**Purpose.** This is the context-relay doc for passing MTP speculative-decoding work
-between frontier models across hourly quota boundaries. It is deliberately short enough to
-read into a fresh context in full. It carries *state and open questions only*.
+> **This document is not current and must not be used to decide anything.** It is retained
+> for narrative history: how the two stacked tooling bugs were found, and why MTP
+> qualification was suspended rather than abandoned.
+>
+> **Retired 2026-07-30.** Its live content was folded out:
+>
+> | What | Now lives in |
+> |---|---|
+> | State, disposition, open items, closed decisions | Phase 6.5 of `docs/plans/20260718-final_rapidmlx_followups.md` |
+> | Sub-phase state and gate | Phase 6.5a / 6.5b rows in `docs/plans/20260718-final_rapidmlx_followups_execution.md` §8 |
+> | Harness invocation prerequisites (§6 below) | §12.3a of `docs/reference/rapid-mlx-mtp-evidence.md` |
+> | Measurements, artifact state, requalification procedure | `docs/reference/rapid-mlx-mtp-evidence.md` (already there when this was written) |
+>
+> It existed because MTP work was being passed between frontier models across hourly quota
+> boundaries and needed one short doc that read into a fresh context whole. Once the state it
+> carried stopped changing daily, a fourth living document was a liability: it was already
+> drifting from the plan it was supposed to summarize.
+>
+> **Known-stale statements below, flagged rather than edited:**
+>
+> - §7.1's ⚠️ correction says `cargo clippy --all-targets` reports 21 warnings on committed
+>   code. Those were fixed 2026-07-30; `--all-targets` is clean and `cargo test --lib` reports
+>   961 passed / 0 failed / 13 ignored.
+> - §7.2's "still open" items are superseded by the consolidated list in Phase 6.5. Two of them
+>   (`derive_mtp_concurrency` as a stub, vision detection split across two paths) were closed
+>   after this doc's last update.
+> - Absolute paths under `/Users/nick/` and `tmp/` reflect one operator's machine on
+>   2026-07-29. `tmp/` was untracked and does not survive a clean checkout.
+
+**Original front matter, as written:**
 
 | | |
 |---|---|
@@ -11,9 +38,6 @@ read into a fresh context in full. It carries *state and open questions only*.
 | Evidence record | `docs/reference/rapid-mlx-mtp-evidence.md` — every measurement, source citation, and artifact hash |
 | Runtime comparison | `docs/reference/apple-silicon-mtp-runtime-comparison.md` — Rapid 0.11.1 vs MTPLX 2.3.0 vs llama.cpp |
 | Product plan | Phase 6.5 in `docs/plans/20260718-final_rapidmlx_followups.md` — roadmap, gates, integration contract |
-
-> Do not add measurements, source quotes, or roadmap material to this file. They belong in
-> the evidence record and Phase 6.5 respectively. Keep this under ~200 lines.
 
 ## 1. Where things stand
 
@@ -300,6 +324,13 @@ Verdict and per-cell numbers: `docs/reference/rapid-mlx-mtp-evidence.md` §12. N
 ---
 
 ## 8. Handoff protocol
+
+> ⚠️ **Superseded 2026-07-30.** Do **not** follow the instruction below to update this file —
+> it is archived. Picking up MTP work now means: read Phase 6.5 of
+> `docs/plans/20260718-final_rapidmlx_followups.md`, then §11 (known-unknowns) and §12
+> (requalification procedure) of `docs/reference/rapid-mlx-mtp-evidence.md`. State changes go in
+> the plan, measurements in the evidence record. The original three-document protocol is kept
+> below because the reasoning behind the split still applies to the remaining two.
 
 When picking this up in a fresh context:
 

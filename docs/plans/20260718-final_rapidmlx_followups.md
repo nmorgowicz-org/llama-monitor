@@ -1919,7 +1919,7 @@ _— Phase 5a gate falls here; 5b begins. A fresh Verifier must pass Phase 5a (i
 
 **Objective and outcome:** Before Phase 7 exposes speculative controls, qualify the selected Rapid source and current llama build end to end, and give the app a safe way to obtain and place MTP sidecar artifacts. This phase supersedes stale Phase 3/5 MTP assumptions with revision-pinned source inventory, acceptance/correctness and memory benchmarks, exact requested/effective/fallback evidence, and a fresh estimator ownership audit. Cover Qwen embedded/extracted/external candidates only when the source admits them, and GGUF embedded/`-md` draft-model paths including Gemma 4. Rapid fixes `738a44e`, `eab126d`, and `a79997e` are inputs, not a basis for UI exposure by themselves.
 
-The measurement history that motivates this phase — two stacked tooling bugs, the served three-trunk screening matrix, the K=1 SSM clamp, and the `aliases.json` reliability findings — lives in `docs/reference/rapid-mlx-mtp-evidence.md`. Do not restate its numbers here; cite it. `docs/plans/20260729-rapidmlx_speculative_decoding_handoff.md` carries live state and open questions between working sessions. Note that every served figure in the evidence record is `n=1` screening evidence, explicitly not qualification: 6.5a exists to replace it.
+The measurement history that motivates this phase — two stacked tooling bugs, the served three-trunk screening matrix, the K=1 SSM clamp, and the `aliases.json` reliability findings — lives in `docs/reference/rapid-mlx-mtp-evidence.md`. Do not restate its numbers here; cite it. Live state and open questions used to live in a separate working-handoff doc; as of 2026-07-30 they are folded into this section and into §12 of the evidence record, and the handoff is archived at `docs/archive/rapid-mlx/20260729-rapidmlx_speculative_decoding_handoff.md` for its narrative history only. Do not treat the archived copy as current. Note that every served figure in the evidence record is `n=1` screening evidence, explicitly not qualification: 6.5a exists to replace it.
 
 **Disposition — 2026-07-29:** Phase 6.5 is suspended at a valid upstream capability gate,
 not abandoned and not awaiting more benchmark volume. Rapid-MLX 0.11.1 permits MTP only
@@ -1948,8 +1948,15 @@ exactly the three conditions above as gates named `sampled`, `constrained`, and 
 them at the 8k tier in the `natural` lane with the mandatory positive control, and exits `0`
 qualified / `20` still blocked / `1` uninterpretable. It never uses the forced lane. The same
 three gate names appear in `SPEC_DECODE_GATES` in `src/inference/rapid_mlx/capabilities.rs`,
-so the post-upgrade probe tells the user which gate is outstanding and what to run. Details in
-§6.1 of the handoff doc.
+so the post-upgrade probe tells the user which gate is outstanding and what to run. Procedure,
+gates, exit codes, artifact locations, harness invocation prerequisites, and the
+`--profile-alias` requirement: §12 of the evidence record.
+
+**Standing action on every upstream bump.** Run the requalification lane. Exit `20`
+(still blocked) changes nothing in the app. Exit `0` means: remove that version from
+`SPEC_DECODE_GREEDY_ONLY_VERSIONS` in `src/inference/rapid_mlx/capabilities.rs`, record the
+evidence, and only then resume 6.5a. Exit `1` means the harness is broken, not that upstream is
+limited; those two must never be conflated.
 
 **Capability wiring — landed 2026-07-29, upstream-independent.** Because upstream commits
 daily, the app-side work that a future fix would need was completed while 6.5 stayed
@@ -1971,12 +1978,62 @@ discharges item 9 for Rapid, and is the app-side half of item 11's honesty requi
   discovery-side counterpart to §3.8a's revision-bound runnable-capability receipt: it does
   not prove a model *runs*, it stops the app claiming vision from a repo name.
 
-Deliberately still open: `derive_mtp_concurrency` remains a stub returning `Unknown` (help
-output cannot prove model eligibility — the requalification lane should populate it);
-`command.rs` still gates on `--speculative` existence rather than the behavioral verdict, so a
-user can still launch MTP to test it; and `RAPID_MLX_CONSTRAIN_TOOLS` has no representation in
-`src/`, so the app cannot yet offer "drop the tool grammar in exchange for speculation" as a
-choice. Full list in §7.2 of the handoff doc.
+**Second wiring increment — landed 2026-07-30.** Same rule: no MTP is enabled anywhere.
+
+- **Vision detection is one shared, backend-neutral detector.** `src/model_vision.rs` owns the
+  config keys, the tensor markers, and the evidence order (`config.json` → safetensors index →
+  confirmed absence only when both artifacts were readable → `None` when they did not settle
+  it). `hf/qualify.rs` (pre-download, over HTTP) and `mlx_meta.rs` (post-download, local disk)
+  both call it instead of disagreeing: the local path previously recognised only
+  `vision_config` and never read the weights, so `mm_vision_tower` models and unnamed-tower
+  checkpoints were reported text-only once downloaded. `VisionComponent` gained
+  `has_vision_tensors`, and `/api/models` reports `vision` / `vision_source` /
+  `vision_confidence`, keeping *undetermined* distinct from *absent*. Detection is deliberately
+  decoupled from any runtime's vision *support* — Rapid's vision path is currently unusable,
+  but "does this checkpoint carry a tower" is a fact about the checkpoint, and MTPLX and other
+  MLX loaders need the same answer from the same artifacts.
+- **`EstimatorOptions` carries `workload_scenario: Option<WorkloadScenario>`**, and `/api/vram`
+  now passes the scenario the request already stated — it was parsed and then dropped, so MTP
+  admission silently evaluated every request against the `CodingAgent` default. `None` still
+  falls back to that default, so an unstated scenario behaves as before. This is part of item
+  11's honesty requirement: a scenario-defaulted admission must not be reported as a measured
+  one.
+- **`derive_mtp_concurrency` is no longer a stub.** It returns `SingleActiveGreedy` for a
+  version in `SPEC_DECODE_GREEDY_ONLY_VERSIONS` that exposes `--speculative`, and `Unknown`
+  otherwise. Concurrency is a scheduler property, not a model property, and on those builds the
+  scheduler states its own constraint in the backend log at install time (`single-request greedy
+  K=1 chain-of-1; falls through on B>1 / non-greedy / logits-processors` — verbatim
+  `SingleActiveGreedy`). The version table, not the flag list, is therefore the evidence.
+- **Item 14 is discharged ahead of 6.5b** — see the note on item 14 below. 6.5b as a whole
+  stays parked.
+
+**Open after both wiring increments** (this list replaces the one previously kept in the
+working-handoff doc):
+
+- An *unrecognised* runtime version stays `Unknown`, and there is still no path for a measured
+  requalification verdict to reach a `CapabilitySnapshot`, which is derived from `serve --help`.
+  That is a design change, not a gap to patch: do **not** bolt backend-log scraping onto the
+  install-time probe.
+- Nothing consumes `mtp_concurrency` except the runtime API's JSON
+  (`src/web/api/rapid_mlx_runtime.rs`). It is reported, not acted on. Low priority by decision:
+  single-slot is the correct home-user default (A48), so acting on it waits for a real
+  multi-slot feature.
+- `command.rs` still gates on `--speculative` flag existence rather than the behavioral verdict.
+  Deliberate: a user may want to launch MTP precisely to test it, and admission warnings carry
+  the message instead. Do not "fix" this into a hard refusal without a decision.
+- Nothing *acts* on the vision verdict — no loader refuses a vision model and no tower memory is
+  accounted on the strength of it. Deliberate while the Rapid vision runtime is unusable; the
+  detection layer exists because other MLX loaders consume it.
+- `RAPID_MLX_CONSTRAIN_TOOLS` appears nowhere in `src/` and **will not be added.** Dropping the
+  tool grammar so the speculative scheduler engages trades tool-call correctness for throughput,
+  which is the wrong trade for an agentic workload — a faster wrong tool call is worthless. It
+  remains a manual diagnostic bypass for measurement only, never a product setting. **This is a
+  closed decision, not an open item; do not "finish" it.**
+- Latent, not yet fixed: `/api/vram` applies its `mmproj_bytes` / `mmproj_path` override after
+  the backend branch, so it also applies to Rapid. MLX unified-memory weights already contain
+  the in-safetensors vision tower, so a stale `mmprojPath` on a model entry would be added twice.
+  `ModelArch::from(&ModelMemoryProfile)` never sets the field, so the default path is correct;
+  the frontend nevertheless sends both fields regardless of backend.
 
 **Formal sub-phase split (E6.5).** Phase 6.5 is executed as two formal sub-phases on the §E5 pattern, each with its own hard gate and its own **fresh Verifier pass**. The split is not a token-fit measure; it exists because 6.5b's artifact-management decisions are only answerable once 6.5a has produced qualification results, and a single packet would let unqualified evidence leak into placement and eligibility logic:
 
@@ -1988,12 +2045,12 @@ choice. Full list in §7.2 of the handoff doc.
 **Builder brief — 6.5a (qualification and benchmark validity):**
 
 1. Capture and retain backend stderr per benchmark attempt and assert on it. The `[MTP-chain-of-K] … clamping max_k` line must be observed directly, not inferred, before any effective-depth claim is recorded. Separate *requested*, *effective*, and *observed* K in every receipt; the current histogram alone cannot distinguish a hardware clamp from a controller preference.
-2. Add repeated trials with counterbalanced ordering and a thermal settle between cells, then re-run the trunk matrix. The unresolved inversion — highest acceptance producing the smallest throughput gain — must either reproduce or disappear. It is the single most likely thing to invalidate a product claim, so it gates everything downstream.
+2. Add repeated trials with counterbalanced ordering and a thermal settle between cells, then re-run the trunk matrix. The unresolved inversion — highest acceptance producing the smallest throughput gain — must either reproduce or disappear. It is the single most likely thing to invalidate a product claim, so it gates everything downstream. Record the depth controller's park rate in the same pass: it is flat at 3–4% whether acceptance is 72% or 97%, and slightly *higher* at high acceptance, which is the opposite of how an expected-value controller should behave. Either the controller is close to inert or the park metric does not mean what its name implies; a tuning recommendation cannot be made until that is settled.
 3. Split forced from naturally-eligible lanes. The suite currently passes `--force-spec-decode` unconditionally whenever a speculative config is present, because the tested aliases advertise `supports_spec_decode=false`. That is a legitimate research override and an illegitimate qualification basis. Record which lane produced each number, and never let a forced-lane result reach an enablement decision.
 4. Require a known-good positive control in every matrix (`mlx-community/Qwen3.6-27B-MTP-4bit`) and fail the run if it does not clear its acceptance floor. A run without a positive control cannot distinguish "this pairing does not work" from "the harness does not work" — precisely the failure that produced the void receipts.
 5. Add a sidecar preflight: shifted-RMSNorm norm-mean check, parent-model identity, tensor-shape and quantization-mode compatibility, and rejection of a sidecar living inside the trunk directory. A same-shape wrong-parent sidecar must be refused before serving, not diagnosed from a bad accept ratio.
 6. Report acceptance, generation throughput, TTFT, and end-to-end latency as a paired set, with the prompt length and completion length that produced them. Acceptance alone is not a benefit signal; the recorded 32k cell pairs 95.3% acceptance with +1.6% end-to-end. State the speedup convention (`new/old - 1`) in the harness output itself so downstream readers cannot mistake it for fraction-of-time-saved.
-7. Extend coverage to the tiers Phase 7 will actually expose: 65k and 131k contexts, completion lengths other than 512, and tool-call warm/repeat/extension behaviour under MTP. Verify greedy-lossless token parity between MTP-off and MTP-on runs; a speculative path that changes greedy output is a correctness failure regardless of speed.
+7. Extend coverage to the tiers Phase 7 will actually expose: 65k and 131k contexts, completion lengths other than 512, and tool-call warm/repeat/extension behaviour under MTP. Verify greedy-lossless token parity between MTP-off and MTP-on runs; a speculative path that changes greedy output is a correctness failure regardless of speed. Treat reasoning mode as an explicit second axis rather than a constant: spec-decode workloads previously hardcoded `enable_thinking: false` while published guidance for both families is reasoning-**on**, and reasoning traces are long and structurally repetitive — exactly the token stream a draft head does best on. The direction of that bias is **not known** and, unlike temperature, could cut either way, so every receipt must record the resolved reasoning state and its source rather than assuming one.
 8. Audit metric labelling for aggregation safety — symlinked trunk directories currently emit `family="unknown"` where sibling cells emit `family="qwen3.6"`, which silently drops series from any label-keyed rollup.
 9. Re-derive Rapid MTP capability from checkable model facts (`layer_types`, config-declared MTP layers, tensor presence) rather than `aliases.json`, which has now been wrong twice, including on a directly verifiable architectural fact. Record alias metadata as an observation, never as a source of truth.
 10. Cover the llama.cpp side symmetrically: embedded and `-md` draft-model paths including Gemma 4, against the pinned build, with the same paired-metric and positive-control discipline.
@@ -2008,6 +2065,7 @@ following items start. —_
 12. Implement app-managed MTP sidecar acquisition and placement for qualified pairings only. Placement must be outside the trunk directory by construction; upstream's own extractor defaults to writing inside it, which silently corrupts an already-converted MLX trunk, so the app cannot inherit that default.
 13. Record provenance per artifact — source repository, revision, extraction script revision, hash, parent trunk, quantization mode and bit width — and surface it. Sidecar bit width is independent of trunk bit width; do not reintroduce a trunk-width coupling rule.
 14. Detect and refuse the corrupting in-trunk sidecar layout on any model the app is asked to launch, whether or not the app created it, with an explanation and a remediation path.
+    **Discharged 2026-07-29, ahead of 6.5b** (the rest of 6.5b stays parked). `reject_in_trunk_mtp_sidecar` in `src/inference/rapid_mlx/model_resolver.rs` reads the safetensors *header* of every file matching mlx_lm's own `model*.safetensors` glob and refuses launch when a file's tensor keys are entirely `mtp.*`, naming the file, the mechanism, and the remediation. It is wired into both the `MlxDirectory` launch path and `validate_model_directory_assets`, so it covers models the app never created — which is the common case, because the layout arrives by following upstream's own documented extractor usage. The discriminator is deliberately "every tensor is `mtp.*`" and never the file name: a shard *mixing* MTP with trunk tensors is a legitimately embedded-MTP checkpoint and must still launch. Five tests, including that case and a sidecar named outside the glob. This was taken early because it prevents silent trunk corruption on models the user already has; it does not qualify anything and does not unpark 6.5b.
 15. Make qualification results the input to eligibility: a pairing is offered only where a naturally-eligible lane produced a passing paired-metric result. Unqualified pairings may remain reachable behind an explicit research override, labelled as such.
 
 **Verifier brief:** Re-run the matrix independently and confirm the inversion's disposition; confirm the clamp log is present in captured stderr and that recorded effective K matches it; confirm forced and natural lanes are separable in stored receipts and that no enablement decision reads a forced result; confirm the positive control fails the run when deliberately broken; feed a same-shape wrong-parent sidecar, a stale-extractor sidecar, and an in-trunk sidecar and confirm each is refused with a distinguishable reason; diff greedy output between MTP-off and MTP-on; confirm speculative memory components appear additively in the Phase 5 estimator; confirm no capability decision reads `aliases.json`.

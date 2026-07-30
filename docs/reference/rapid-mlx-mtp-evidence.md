@@ -7,7 +7,7 @@
 | Stack | mlx 0.32.0, mlx_lm 0.31.3, Python 3.11 |
 | Hardware | Apple Silicon M5 Max (single machine, single operator) |
 | First captured | 2026-07-29 |
-| Companions | Working state: `docs/plans/20260729-rapidmlx_speculative_decoding_handoff.md`. Product plan: Phase 6.5 of `docs/plans/20260718-final_rapidmlx_followups.md`. Cross-runtime audit: `docs/reference/apple-silicon-mtp-runtime-comparison.md`. |
+| Companions | Product plan, live state, and open items: Phase 6.5 of `docs/plans/20260718-final_rapidmlx_followups.md`. Cross-runtime audit: `docs/reference/apple-silicon-mtp-runtime-comparison.md`. Retired working handoff (history only, not current): `docs/archive/rapid-mlx/20260729-rapidmlx_speculative_decoding_handoff.md`. |
 
 This document holds what was **measured** and what the **source says**. It deliberately
 contains no roadmap, no UI design, and no enablement policy. Those live in Phase 6.5.
@@ -637,6 +637,38 @@ because the post-upgrade probe message names the outstanding gates. Keep the two
 The `-mtp-fixed` and `control-unsloth8bit-official-mtp` directories under `~/mlx-models/` are
 symlink farms over the trunk and the HF cache with their own `config.json`; neither currently
 holds a head.
+
+⚠️ **The `tmp/…` receipt paths cited throughout this record are untracked** and will not survive
+a clean checkout. Treat a missing receipt directory as absent evidence, not as a contradiction of
+a recorded number; re-running the lane regenerates it.
+
+### 12.3a Harness invocation prerequisites
+
+Facts a re-runner needs before invoking the fuller benchmark suite directly rather than through
+the requalification lane. Folded here 2026-07-30 from the retired working-handoff doc; the
+per-commit history of how the harness reached this state is in
+`docs/archive/rapid-mlx/20260729-rapidmlx_speculative_decoding_handoff.md` §6 and in git log.
+
+- **`--spec-decode-lane forced|natural` is required and has no default** on any spec-decode
+  invocation. The lane is verified against the backend log and a mismatch fails the run. This
+  exists because the suite passes `--force-spec-decode` unconditionally whenever a speculative
+  config is present — the tested aliases advertise `supports_spec_decode=false` — which is a
+  legitimate research override and an illegitimate qualification basis. A forced-lane number must
+  never reach an enablement decision.
+- **`--trials N`** runs counterbalanced ABBA ordering with `--settle-seconds` between cells and
+  records `trial_protocol` in the suite index. A single-trial number is not a qualification
+  result.
+- **`--sampling greedy|recommended|explicit`** with `--sampling-variant` resolves through ordered
+  sources (operator flags → checkpoint → curated vendor profile) and records which source
+  answered. "No published settings" is a legal state that clears `performance_claim_eligible`;
+  it is not an error. The unsloth trunk ships no `generation_config.json` at all, so nothing may
+  assume a model publishes its settings.
+- **`--spec-completion-tokens`** defaults to 8192 with a 4096 floor. 512 tokens cannot produce a
+  stable accept ratio, and with reasoning on the model can spend the entire budget inside
+  `<think>` and fail the completion floor — which reads as a gate failure rather than the harness
+  limitation it is.
+- The sidecar must resolve to the **snapshot** path, not the realpath: HF blobs have no extension
+  and `mx.load` dispatches on it, so a realpath sidecar makes rapid-mlx refuse to boot.
 
 ### 12.4 Zero speculative activity is an answer, not a crash
 
