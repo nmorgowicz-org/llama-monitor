@@ -315,7 +315,13 @@ where
     Ok(bytes)
 }
 
-fn output_text(stdout: &[u8], stderr: &[u8]) -> String {
+/// Joins both streams because which one carries `--help` is not a stable contract.
+///
+/// `rapid-mlx 0.11.1` writes all 27 KB of `serve --help` to stdout and nothing to stderr.
+/// Reading only one stream yields an empty capability set that looks like "this runtime
+/// supports nothing" rather than like a failed probe — see `capabilities_probe_reads_the`
+/// `_stream_help_actually_uses` in `rapid_mlx_runtime`.
+pub(crate) fn output_text(stdout: &[u8], stderr: &[u8]) -> String {
     let stdout = String::from_utf8_lossy(stdout);
     let stderr = String::from_utf8_lossy(stderr);
     match (stdout.trim().is_empty(), stderr.trim().is_empty()) {

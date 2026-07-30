@@ -354,11 +354,64 @@ Two defects surfaced by the wiring, both pre-existing:
 
 **Still open in the catalog:** `ValidationContext`'s `capabilities` and `workload_scenario` fields are populated by callers and read by nobody — `validate` takes `_context` and ignores it, so every rule is context-free. The remaining `#[allow(dead_code)]` marks it. The fix is to decide which rules are genuinely capability- or workload-dependent; note that an unsupported setting is *not* such a case, since `effective_policy` already downgrades it gracefully and erroring in `validate` would contradict that.
 
-##### Phase 7A2 — Command builder + launch wiring — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
+##### Phase 7A2 — Command builder + launch wiring — Verified complete
 
-- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
-- **Files:** command.rs (26 setters, all Phase 7 flags in build()), launch.rs (wire-through), capabilities.rs (register flags)
-- **Commit:** 774b611
+- **State:** Verified complete (2026-07-30, Coordinator). The July PASS was reinstated only
+  after the defects below were fixed and the endpoint was exercised against the installed
+  runtime; the original verdict is not what is being trusted here.
+- **Files:** command.rs (26 setters, all Phase 7 flags in build()), `inference/launch.rs`
+  (wire-through — the ledger previously said `launch.rs`, which reads as
+  `rapid_mlx/launch.rs`; no such file exists), capabilities.rs (register flags)
+- **Commit:** 774b611, reconciled in HEAD
+
+**Reachability: clean.** `cargo check --bin llama-monitor` after touching command.rs emits no
+dead-code warnings, and command.rs carries no `#[allow(dead_code)]`. All 26 setters are reached
+from the running binary, so 7A2 does not have 7A1's defect.
+
+**The config → argv mapping was written three times, and the copies had diverged.** The chain
+was `config → (hand copy in inference/launch.rs) → adapter → (apply_phase7_adapter_config) →
+builder` for a real launch, but `config → (apply_phase7_config) → builder` for the
+command-preview endpoint. The launch-side copies were complete. The preview's was not, so the
+command shown to the operator was not the command the supervisor would run:
+
+- **Dropped, though configurable and applied at launch:** `--served-model-name`,
+  `--reasoning-parser`, the hybrid switches, all eight sampling defaults
+  (`--default-temperature`/`-top-p`/`-top-k`/`-min-p`/`-repetition-penalty`/
+  `-presence-penalty`/`-frequency-penalty`/`--max-tokens`), and `--prefill-step-size`.
+  The last is the worst of them: the launcher emits it on *every* launch, and it is the
+  control that keeps long-context prefill under the Metal single-buffer ceiling.
+- **Invented, though the launcher omits them:** `--log-level INFO` (launch skips the default),
+  `--timeout 60` (launch omits when unset), and an empty `--api-key`.
+
+Fixed by deleting the second mapping rather than syncing it. `build_launch_argv` and
+`apply_phase7_adapter_config` are now the only adapter → argv path; the preview drives both
+through `RapidMlxAdapter::for_settings_preview`, a settings-carrier adapter that never
+launches anything. The launch.rs copy became `RapidMlxAdapter::apply_config`. There is no
+longer a second list to drift.
+
+**The endpoint was also broken against every real runtime — a live-only defect.** Capability
+probing read `output.stderr`, but `rapid-mlx 0.11.1` writes all 27,066 bytes of
+`serve --help` to stdout and nothing to stderr. `from_help("")` yields an empty capability
+set, so *every* flag came back unsupported and the endpoint could not build a command at all
+unless the caller passed a `capabilities` override. Every unit test passes such an override,
+which is exactly why 817 green tests said nothing about it. It now uses the same
+`compatibility::output_text(stdout, stderr)` helper as every other probe in the tree, and
+treats an empty parse as a failed probe (fall back to `verified_baseline`) rather than as a
+runtime that supports nothing.
+
+**Evidence.** `command_preview_shows_the_settings_the_launcher_applies` and
+`command_preview_does_not_invent_defaults_the_launcher_omits` pin both directions of the
+argv defect. Live check against installed `rapid-mlx 0.11.1` with no capabilities override,
+real model `nightmedia-27b-mxfp8-mlx`: argv contains `--served-model-name live-preview`,
+`--reasoning-parser deepseek_r1`, `--prefill-step-size 2048`, `--default-temperature 0.7`,
+`--max-tokens 4096`, and none of the three invented defaults. 1030 lib tests pass;
+`cargo fmt --check` and `cargo clippy --all-targets` are silent on lib and bin.
+
+**Noted, not changed:** `command.rs` clamps `prefill_step_size` to `1..=2048`. That is a
+deliberate crash guard — the 2026-07-24 investigation overflowed Metal's single-buffer cap at
+`32768`, and the standing default is `512` — but it also makes the documented `4096` rescue
+value unreachable through the product. Left alone; reopen with an advanced-only path if a
+model ever needs it.
 
 ##### Phase 7A3 — API endpoint + preset migration — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
@@ -711,7 +764,7 @@ Only the Coordinator updates this table after independent verification.
 | 6.5a | Blocked — upstream capability gate (2026-07-29) | — | — | `ca3cffb`, `209f6bd`, `27243c7` (upstream-independent wiring only) | Rapid-MLX permits MTP only for greedy requests with no logits processor, so normal sampled and constrained-tool requests record zero speculative activity. Resume only when the requalification lane (`scripts/rapid-mlx-requalify-spec-decode.mjs`) exits `0` on a pinned build. Suspension is **not** a passing verdict; no downstream phase may read it as one |
 | 6.5b | Not started — parked behind 6.5a | — | — | Item 14 discharged early (`ca3cffb`) | Fresh 6.5a Verifier PASS required before items 12, 13, 15 begin. Item 14 (refuse the corrupting in-trunk sidecar layout) was taken early because it prevents silent trunk corruption on models the user already has; it qualifies nothing and does not unpark the sub-phase |
 | 7A1 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug). Catalog reachability defect discharged 2026-07-30; awaiting Verifier | — | PASS (settings.rs validated, mod.rs validated, 814 tests pass) — note this PASS predates the reachability finding | HEAD pending | `ValidationContext` fields still unread; prefix-cache model differs between catalog and API |
-| 7A2 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (command.rs validated, launch.rs validated, mutual exclusions wired, 817 tests) | HEAD pending | None |
+| 7A2 | Verified complete | Coordinator, 2026-07-30 | PASS — reachability clean; two defects found and fixed: the preview kept a second config→argv mapping that dropped 12 flags and invented 3, and capability probing read the wrong stream so the endpoint failed against every real runtime. Live-checked against installed 0.11.1 with no capabilities override. 1030 tests | 774b611 + HEAD | `prefill_step_size` clamp keeps the documented 4096 value unreachable (recorded, deliberate) |
 | 7A3 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (command-preview endpoint with auth, preset migration v3, 820 tests) | 774b611 | None |
 | 7B1 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (existing controls wired to catalog, Web UI group, sampling selector, prompt storage, screenshots verified) | 31af56b | None |
 | 7B2 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (workload profiles with editable assumptions, confirmation flow, screenshots verified) | 5d00ee0 | None |

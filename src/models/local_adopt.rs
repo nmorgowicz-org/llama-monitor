@@ -125,9 +125,9 @@ fn slugify(name: &str) -> String {
     for ch in name.chars() {
         if ch.is_ascii_alphanumeric() {
             out.push(ch.to_ascii_lowercase());
-        } else if matches!(ch, '-' | '_') {
-            out.push(ch);
-        } else if ch == '.' && out.ends_with(|c: char| c.is_ascii_alphanumeric()) {
+        } else if matches!(ch, '-' | '_')
+            || (ch == '.' && out.ends_with(|c: char| c.is_ascii_alphanumeric()))
+        {
             out.push(ch);
         } else if !out.ends_with('-') {
             out.push('-');

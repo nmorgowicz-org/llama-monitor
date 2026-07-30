@@ -463,22 +463,6 @@ pub async fn construct_adapter(
             )
             .await?;
             let resolved_display_name = resolved_model.display_name.clone();
-            let mut adapter = RapidMlxAdapter::from_resolved(runtime, resolved_model);
-            adapter.served_model_name = config
-                .served_model_name
-                .clone()
-                .or(Some(resolved_display_name));
-            adapter.host = config.host.clone();
-            adapter.port = config.port;
-            adapter.log_level = config.log_level.clone();
-            adapter.timeout = config.timeout;
-            adapter.enable_thinking = config.enable_thinking;
-            adapter.reasoning_effort = config.reasoning_effort.clone();
-            adapter.trust_remote_code_consent = config.trust_remote_code_consent.clone();
-            adapter.tool_call_parser = config.tool_call_parser.clone();
-            adapter.reasoning_parser = config.reasoning_parser.clone();
-            adapter.auto_tool_choice = config.auto_tool_choice;
-            adapter.no_thinking = config.no_thinking;
             if let Err(invalid) = crate::inference::rapid_mlx::escape_hatch::validate_escape_flags(
                 &config.escape_hatch_flags,
             ) {
@@ -487,46 +471,13 @@ pub async fn construct_adapter(
                     invalid.join(", ")
                 );
             }
-            adapter.escape_hatch_flags = config.escape_hatch_flags.clone();
-            // Phase 7 config wiring
-            adapter.kv_cache_dtype = config.kv_cache_dtype.clone();
-            adapter.turboquant_mode = config.turboquant_mode.clone();
-            adapter.hybrid_cache_entries = config.hybrid_cache_entries;
-            adapter.hybrid_mode = config.hybrid_mode;
-            adapter.pflash_policy = config.pflash_policy.clone();
-            adapter.response_cache_policy = config.response_cache_policy.clone();
-            adapter.disk_checkpoint_policy = config.disk_checkpoint_policy.clone();
-            adapter.prefix_cache_enabled = config.prefix_cache_enabled;
-            adapter.retained_cache_mib = config.retained_cache_mib;
-            adapter.disk_checkpoint_interval = config.disk_checkpoint_interval;
-            adapter.max_num_seqs = config.max_num_seqs;
-            adapter.max_concurrent_requests = config.max_concurrent_requests;
-            adapter.prefill_batch_size = config.prefill_batch_size;
-            adapter.completion_batch_size = config.completion_batch_size;
-            adapter.prefill_step_size = config.prefill_step_size;
-            adapter.batching_policy = config.batching_policy.clone();
-            adapter.concurrency_policy = config.concurrency_policy.clone();
-            adapter.reasoning_mode = config.reasoning_mode.clone();
-            adapter.speculative_policy = config.speculative_policy.clone();
-            adapter.mllm_vision = config.mllm_vision.clone();
-            adapter.embeddings = config.embeddings.clone();
-            adapter.gpu_memory_utilization = config.gpu_memory_utilization;
-            adapter.web_ui_availability = config.web_ui_availability.clone();
-            adapter.web_ui_static_path = config.web_ui_static_path.clone();
-            adapter.web_ui_config_json = config.web_ui_config_json.clone();
-            adapter.endpoint_compatibility = config.endpoint_compatibility.clone();
-            adapter.request_safety_policy = config.request_safety_policy.clone();
-            adapter.sampling_mode = config.sampling_mode.clone();
-            adapter.default_temperature = config.default_temperature;
-            adapter.default_top_p = config.default_top_p;
-            adapter.default_top_k = config.default_top_k;
-            adapter.default_min_p = config.default_min_p;
-            adapter.default_repetition_penalty = config.default_repetition_penalty;
-            adapter.default_presence_penalty = config.default_presence_penalty;
-            adapter.default_frequency_penalty = config.default_frequency_penalty;
-            adapter.max_tokens = config.max_tokens;
-            adapter.parser_policy = config.parser_policy.clone();
-            adapter.security_policy = config.security_policy.clone();
+            let mut adapter = RapidMlxAdapter::from_resolved(runtime, resolved_model);
+            adapter.apply_config(config);
+            // Only the launch path has a resolved model to fall back on, so the name default
+            // stays here rather than in `apply_config`.
+            if adapter.served_model_name.is_none() {
+                adapter.served_model_name = Some(resolved_display_name);
+            }
             adapter.configure_runtime(profile, config.api_key.clone());
             Ok(BackendAdapter::RapidMlx(Arc::new(adapter)))
         }

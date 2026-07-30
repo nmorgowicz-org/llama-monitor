@@ -16,7 +16,6 @@ use crate::inference::backend::{
 };
 use crate::inference::rapid_mlx::capabilities::{self, CapabilitySnapshot, ExecutableIdentity};
 use crate::inference::rapid_mlx::changelog;
-use crate::inference::rapid_mlx::command::RapidMlxCommandBuilder;
 use crate::inference::rapid_mlx::compatibility;
 use crate::inference::rapid_mlx::discovery::Discovery;
 use crate::inference::rapid_mlx::info_query;
@@ -614,30 +613,47 @@ async fn build_command_preview(req: CommandPreviewRequest) -> ApiReply {
                 .await
             {
                 Ok(output) if output.status.success() => {
-                    let help = String::from_utf8_lossy(&output.stderr).into_owned();
-                    ServeCapabilities::from_help(&help)
+                    // Read both streams, the way every other capability probe in the tree
+                    // does. Reading only stderr made this endpoint useless against a real
+                    // runtime: 0.11.1 puts the whole help text on stdout, so the parse
+                    // returned an empty capability set and every flag was reported
+                    // unsupported. An empty parse is a failed probe, not a runtime that
+                    // supports nothing, so it falls back rather than fails closed.
+                    let help = crate::inference::rapid_mlx::compatibility::output_text(
+                        &output.stdout,
+                        &output.stderr,
+                    );
+                    if help.trim().is_empty() {
+                        ServeCapabilities::verified_baseline()
+                    } else {
+                        ServeCapabilities::from_help(&help)
+                    }
                 }
                 _ => ServeCapabilities::verified_baseline(),
             }
         }
     };
 
-    let builder = RapidMlxCommandBuilder::new(model)
-        .host(config.host.clone())
-        .port(config.port)
-        .log_level(config.log_level.clone())
-        .timeout(config.timeout.unwrap_or(60))
-        .api_key(config.api_key.clone().unwrap_or_default())
-        .prefix_cache_enabled(Some(config.prefix_cache_enabled))
-        .retained_cache_mib(config.retained_cache_mib)
-        .disk_checkpoint_interval(Some(config.disk_checkpoint_interval))
-        .trust_remote_code_consent(config.trust_remote_code_consent.clone())
-        .escape_hatch_flags(config.escape_hatch_flags.clone())
-        .tool_call_parser(config.tool_call_parser.clone())
-        .auto_tool_choice(config.auto_tool_choice)
-        .no_thinking(config.no_thinking);
+    // Drive the supervisor's own argv mapping through a throwaway adapter rather than
+    // restating it here. A preview that fills in its own defaults is worse than no preview:
+    // it shows the operator a command the launcher will not run, which is exactly how this
+    // endpoint had drifted before the Phase 7A2 reconciliation.
+    //
+    // The adapter is a settings carrier only — nothing downstream reads its runtime metadata,
+    // compatibility profile, or pollers, and `capabilities` below stays the caller's.
+    let adapter = crate::inference::rapid_mlx::RapidMlxAdapter::for_settings_preview(
+        binary_path.clone(),
+        model,
+        &config,
+    );
 
-    let builder = apply_phase7_config(builder, &config);
+    // One correspondence the preview cannot reproduce: `build_launch` re-resolves `hybrid_mode`
+    // from the model's own config, so a model whose metadata forces hybrid may launch with a
+    // switch the preview does not show. The preview reports the configured value.
+    let builder = crate::inference::rapid_mlx::apply_phase7_adapter_config(
+        crate::inference::rapid_mlx::build_launch_argv(&adapter),
+        &adapter,
+    );
 
     let launch = match builder.build(binary_path, &capabilities) {
         Ok(l) => l,
@@ -809,66 +825,6 @@ fn build_requested_vs_effective(
     }
 
     serde_json::Value::Object(diff)
-}
-
-fn apply_phase7_config(
-    builder: RapidMlxCommandBuilder,
-    config: &RapidMlxConfig,
-) -> RapidMlxCommandBuilder {
-    builder
-        .kv_cache_dtype(config.kv_cache_dtype.as_ref().map(|kv| {
-            use crate::inference::rapid_mlx::command::KvCacheDtypeArg;
-            match kv {
-                crate::inference::rapid_mlx::KvCacheConfig::Auto => KvCacheDtypeArg::Auto,
-                crate::inference::rapid_mlx::KvCacheConfig::Bf16 => {
-                    KvCacheDtypeArg::Explicit("bf16".into())
-                }
-                crate::inference::rapid_mlx::KvCacheConfig::Int8 => {
-                    KvCacheDtypeArg::Explicit("int8".into())
-                }
-                crate::inference::rapid_mlx::KvCacheConfig::Int4 => {
-                    KvCacheDtypeArg::Explicit("int4".into())
-                }
-                crate::inference::rapid_mlx::KvCacheConfig::LegacyFp16 => {
-                    KvCacheDtypeArg::Explicit("fp16".into())
-                }
-                crate::inference::rapid_mlx::KvCacheConfig::LegacyFp8 => {
-                    KvCacheDtypeArg::Explicit("fp8".into())
-                }
-            }
-        }))
-        .turboquant_mode(config.turboquant_mode.as_ref().and_then(|t| match t {
-            crate::inference::rapid_mlx::TurboQuantMode::Auto
-            | crate::inference::rapid_mlx::TurboQuantMode::Off => None,
-            crate::inference::rapid_mlx::TurboQuantMode::V4
-            | crate::inference::rapid_mlx::TurboQuantMode::K8V4 => None,
-        }))
-        .prefix_cache_enabled(Some(config.prefix_cache_enabled))
-        .retained_cache_mib(config.retained_cache_mib)
-        .disk_checkpoint_interval(Some(config.disk_checkpoint_interval))
-        .hybrid_cache_entries(config.hybrid_cache_entries)
-        .pflash_policy(config.pflash_policy.clone())
-        .response_cache_policy(config.response_cache_policy.clone())
-        .disk_checkpoint_policy(config.disk_checkpoint_policy.clone())
-        .max_num_seqs(config.max_num_seqs)
-        .max_concurrent_requests(config.max_concurrent_requests)
-        .prefill_batch_size(config.prefill_batch_size)
-        .completion_batch_size(config.completion_batch_size)
-        .batching_policy(config.batching_policy.clone())
-        .concurrency_policy(config.concurrency_policy.clone())
-        .reasoning_mode(config.reasoning_mode.clone())
-        .speculative_policy(config.speculative_policy.clone())
-        .mllm_vision(config.mllm_vision.clone())
-        .embeddings(config.embeddings.clone())
-        .gpu_memory_utilization(config.gpu_memory_utilization)
-        .web_ui_availability(config.web_ui_availability.clone())
-        .web_ui_static_path(config.web_ui_static_path.clone())
-        .web_ui_config_json(config.web_ui_config_json.clone())
-        .endpoint_compatibility(config.endpoint_compatibility.clone())
-        .request_safety_policy(config.request_safety_policy.clone())
-        .sampling_mode(config.sampling_mode.clone())
-        .parser_policy(config.parser_policy.clone())
-        .security_policy(config.security_policy.clone())
 }
 
 fn check_setting_warnings(_config: &RapidMlxConfig, warnings: &mut Vec<String>) {
@@ -2863,5 +2819,129 @@ Run with `--verbose` for details on each check.
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].fix, Some(FixAction::AddNoThinking));
+    }
+}
+
+#[cfg(test)]
+mod command_preview_parity_tests {
+    use crate::inference::rapid_mlx::compatibility::ServeCapabilities;
+    use crate::inference::rapid_mlx::model_resolver::ResolvedRapidMlxLaunchModel;
+    use crate::inference::rapid_mlx::{
+        RapidMlxAdapter, RapidMlxConfig, RapidMlxHybridMode, apply_phase7_adapter_config,
+        build_launch_argv,
+    };
+
+    /// Every flag the settings below can emit. A missing entry makes `build` fail the
+    /// capability check rather than silently drop the flag, so this list is part of the
+    /// assertion.
+    const ALL_SERVE_FLAGS: &str = "--host --port --served-model-name --timeout --log-level \
+        --api-key --tool-call-parser --reasoning-parser --enable-auto-tool-choice \
+        --enable-prefix-cache --max-cache-blocks --cache-memory-mb \
+        --kv-disk-checkpoint-interval \
+        --kv-cache-dtype --kv-cache-turboquant --max-num-seqs --max-concurrent-requests \
+        --prefill-batch-size --completion-batch-size --batching-policy --concurrency-policy \
+        --prefill-step-size --force-hybrid --no-hybrid \
+        --reasoning --speculative --mllm --no-mllm --gpu-memory-utilization \
+        --ui --no-ui --path --ui-config --pflash --hybrid-cache-entries \
+        --response-cache --disk-checkpoint --endpoint-compatibility \
+        --request-safety-policy --sampling-mode --parser-policy --security-policy \
+        --default-temperature --default-top-p --default-top-k --default-min-p \
+        --default-repetition-penalty --default-presence-penalty \
+        --default-frequency-penalty --max-tokens";
+
+    /// Renders argv exactly the way the command-preview handler does.
+    fn preview_argv(config: &RapidMlxConfig) -> Vec<String> {
+        let adapter = RapidMlxAdapter::for_settings_preview(
+            "rapid-mlx".into(),
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+            config,
+        );
+        apply_phase7_adapter_config(build_launch_argv(&adapter), &adapter)
+            .build(
+                "rapid-mlx".into(),
+                &ServeCapabilities::from_help(ALL_SERVE_FLAGS),
+            )
+            .expect("preview argv builds")
+            .args
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn value_after<'a>(argv: &'a [String], flag: &str) -> Option<&'a str> {
+        argv.iter()
+            .position(|arg| arg == flag)
+            .and_then(|index| argv.get(index + 1))
+            .map(String::as_str)
+    }
+
+    /// The preview used to carry its own copy of the adapter → argv mapping, and it had
+    /// drifted: these settings were configurable, were applied at launch, and were absent
+    /// from the command the operator was shown. `--prefill-step-size` is the one that
+    /// mattered most, since it is what keeps long-context prefill inside the attention
+    /// budget and the launcher emits it on every launch.
+    #[test]
+    fn command_preview_shows_the_settings_the_launcher_applies() {
+        let config = RapidMlxConfig {
+            served_model_name: Some("preview-name".into()),
+            reasoning_parser: Some("deepseek_r1".into()),
+            hybrid_mode: RapidMlxHybridMode::Force,
+            // The builder clamps this to 1..=2048 on purpose: a full-attention prefill
+            // materializes an O(step × context × heads) score buffer, and the 2026-07-24
+            // investigation crashed Metal's single-buffer cap at 32768. 512 is the standing
+            // default; 2048 is the top of the supported range, so test the boundary.
+            prefill_step_size: 2048,
+            default_temperature: Some(0.7),
+            default_top_p: Some(0.9),
+            default_top_k: Some(40),
+            default_min_p: Some(0.05),
+            default_repetition_penalty: Some(1.05),
+            default_presence_penalty: Some(0.1),
+            default_frequency_penalty: Some(0.2),
+            max_tokens: Some(4096),
+            ..RapidMlxConfig::default()
+        };
+
+        let argv = preview_argv(&config);
+
+        assert_eq!(
+            value_after(&argv, "--served-model-name"),
+            Some("preview-name")
+        );
+        assert_eq!(
+            value_after(&argv, "--reasoning-parser"),
+            Some("deepseek_r1")
+        );
+        assert!(argv.iter().any(|arg| arg == "--force-hybrid"), "{argv:?}");
+        assert_eq!(value_after(&argv, "--prefill-step-size"), Some("2048"));
+        assert_eq!(value_after(&argv, "--default-temperature"), Some("0.7"));
+        assert_eq!(value_after(&argv, "--default-top-p"), Some("0.9"));
+        assert_eq!(value_after(&argv, "--default-top-k"), Some("40"));
+        assert_eq!(value_after(&argv, "--default-min-p"), Some("0.05"));
+        assert_eq!(
+            value_after(&argv, "--default-repetition-penalty"),
+            Some("1.05")
+        );
+        assert_eq!(
+            value_after(&argv, "--default-presence-penalty"),
+            Some("0.1")
+        );
+        assert_eq!(
+            value_after(&argv, "--default-frequency-penalty"),
+            Some("0.2")
+        );
+        assert_eq!(value_after(&argv, "--max-tokens"), Some("4096"));
+    }
+
+    /// The mirror-image defect: the preview filled in defaults of its own, so it showed
+    /// three flags the launcher never passes. An invented flag is as misleading as a
+    /// dropped one.
+    #[test]
+    fn command_preview_does_not_invent_defaults_the_launcher_omits() {
+        let argv = preview_argv(&RapidMlxConfig::default());
+
+        assert!(!argv.iter().any(|arg| arg == "--log-level"), "{argv:?}");
+        assert!(!argv.iter().any(|arg| arg == "--timeout"), "{argv:?}");
+        assert!(!argv.iter().any(|arg| arg == "--api-key"), "{argv:?}");
     }
 }

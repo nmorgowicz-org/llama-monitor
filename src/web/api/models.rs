@@ -520,10 +520,10 @@ fn expand_user_path(raw: &str) -> PathBuf {
     if trimmed == "~" {
         return dirs::home_dir().unwrap_or_else(|| PathBuf::from(trimmed));
     }
-    if let Some(rest) = trimmed.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
+    if let Some(rest) = trimmed.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
     }
     PathBuf::from(trimmed)
 }

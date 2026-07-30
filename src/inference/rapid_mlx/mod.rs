@@ -588,6 +588,98 @@ impl RapidMlxAdapter {
         }
     }
 
+    /// Copies every launch-affecting field off a preset config.
+    ///
+    /// This lived inline in `inference::launch` until the Phase 7A2 reconciliation found that
+    /// the command-preview endpoint reproduced the same mapping by hand and had drifted from
+    /// it. Keeping the copy here lets `command_preview_settings_match_the_live_launch_path`
+    /// exercise the real mapping instead of a test-local restatement of it. `api_key` is not
+    /// copied: it is applied through `configure_runtime`, which drops empty strings.
+    pub fn apply_config(&mut self, config: &RapidMlxConfig) {
+        self.served_model_name = config.served_model_name.clone();
+        self.host = config.host.clone();
+        self.port = config.port;
+        self.log_level = config.log_level.clone();
+        self.timeout = config.timeout;
+        self.enable_thinking = config.enable_thinking;
+        self.reasoning_effort = config.reasoning_effort.clone();
+        self.trust_remote_code_consent = config.trust_remote_code_consent.clone();
+        self.tool_call_parser = config.tool_call_parser.clone();
+        self.reasoning_parser = config.reasoning_parser.clone();
+        self.auto_tool_choice = config.auto_tool_choice;
+        self.no_thinking = config.no_thinking;
+        self.escape_hatch_flags = config.escape_hatch_flags.clone();
+        // Phase 7 config wiring
+        self.kv_cache_dtype = config.kv_cache_dtype.clone();
+        self.turboquant_mode = config.turboquant_mode.clone();
+        self.hybrid_cache_entries = config.hybrid_cache_entries;
+        self.hybrid_mode = config.hybrid_mode;
+        self.pflash_policy = config.pflash_policy.clone();
+        self.response_cache_policy = config.response_cache_policy.clone();
+        self.disk_checkpoint_policy = config.disk_checkpoint_policy.clone();
+        self.prefix_cache_enabled = config.prefix_cache_enabled;
+        self.retained_cache_mib = config.retained_cache_mib;
+        self.disk_checkpoint_interval = config.disk_checkpoint_interval;
+        self.max_num_seqs = config.max_num_seqs;
+        self.max_concurrent_requests = config.max_concurrent_requests;
+        self.prefill_batch_size = config.prefill_batch_size;
+        self.completion_batch_size = config.completion_batch_size;
+        self.prefill_step_size = config.prefill_step_size;
+        self.batching_policy = config.batching_policy.clone();
+        self.concurrency_policy = config.concurrency_policy.clone();
+        self.reasoning_mode = config.reasoning_mode.clone();
+        self.speculative_policy = config.speculative_policy.clone();
+        self.mllm_vision = config.mllm_vision.clone();
+        self.embeddings = config.embeddings.clone();
+        self.gpu_memory_utilization = config.gpu_memory_utilization;
+        self.web_ui_availability = config.web_ui_availability.clone();
+        self.web_ui_static_path = config.web_ui_static_path.clone();
+        self.web_ui_config_json = config.web_ui_config_json.clone();
+        self.endpoint_compatibility = config.endpoint_compatibility.clone();
+        self.request_safety_policy = config.request_safety_policy.clone();
+        self.sampling_mode = config.sampling_mode.clone();
+        self.default_temperature = config.default_temperature;
+        self.default_top_p = config.default_top_p;
+        self.default_top_k = config.default_top_k;
+        self.default_min_p = config.default_min_p;
+        self.default_repetition_penalty = config.default_repetition_penalty;
+        self.default_presence_penalty = config.default_presence_penalty;
+        self.default_frequency_penalty = config.default_frequency_penalty;
+        self.max_tokens = config.max_tokens;
+        self.parser_policy = config.parser_policy.clone();
+        self.security_policy = config.security_policy.clone();
+    }
+
+    /// Builds an adapter that exists only to carry a config into the shared argv mapping.
+    ///
+    /// The command-preview endpoint uses this so it renders argv through
+    /// [`build_launch_argv`] / [`apply_phase7_adapter_config`] — the supervisor's own mapping —
+    /// instead of restating it. The runtime metadata is a stub because neither of those reads
+    /// it; this adapter is not launchable and is dropped once the preview is rendered.
+    pub fn for_settings_preview(
+        executable_path: PathBuf,
+        model: ResolvedRapidMlxLaunchModel,
+        config: &RapidMlxConfig,
+    ) -> Self {
+        let mut adapter = Self::from_resolved(
+            RuntimeMetadata {
+                executable_path,
+                source: runtime::RuntimeSource::Managed,
+                version: compatibility::LATEST_QUALIFIED_VERSION_TEXT.into(),
+                capability_snapshot: None,
+                resolved_receipt: None,
+                last_probe_result: None,
+                prefix_cache_enabled: false,
+                mlx_prefix_cache_bytes: None,
+            },
+            model,
+        );
+        adapter.apply_config(config);
+        // `configure_runtime` is what normally lands the key, and it drops empty strings.
+        adapter.api_key = config.api_key.clone().filter(|key| !key.is_empty());
+        adapter
+    }
+
     pub fn configure_runtime(
         &mut self,
         compatibility: CompatibilityProfile,
@@ -686,41 +778,7 @@ impl RapidMlxAdapter {
 
     pub async fn build_launch(&self) -> Result<SupervisedLaunch> {
         let hybrid_mode = self.resolve_hybrid_mode();
-        let mut builder = RapidMlxCommandBuilder::new(self.resolved_model.clone())
-            .host(self.host.clone())
-            .port(self.port);
-
-        if self.log_level != "INFO" {
-            builder = builder.log_level(self.log_level.clone());
-        }
-        if let Some(timeout) = self.timeout {
-            builder = builder.timeout(timeout);
-        }
-        builder = builder
-            .prefix_cache_enabled(Some(self.prefix_cache_enabled))
-            .retained_cache_mib(self.retained_cache_mib)
-            .disk_checkpoint_interval(Some(self.disk_checkpoint_interval));
-
-        if let Some(key) = &self.api_key {
-            builder = builder.api_key(key.clone());
-        }
-
-        let builder = if let Some(name) = &self.served_model_name {
-            builder.served_model_name(name.clone())
-        } else {
-            builder
-        };
-
-        let builder = builder
-            .trust_remote_code_consent(self.trust_remote_code_consent.clone())
-            .tool_call_parser(self.tool_call_parser.clone())
-            .reasoning_parser(self.reasoning_parser.clone())
-            .auto_tool_choice(self.auto_tool_choice)
-            .no_thinking(self.no_thinking)
-            .escape_hatch_flags(self.escape_hatch_flags.clone());
-
-        // Phase 7 config wiring
-        let builder = apply_phase7_adapter_config(builder, self);
+        let builder = apply_phase7_adapter_config(build_launch_argv(self), self);
 
         // Override hybrid_mode if resolved differently (e.g. Hybrid DeltaNet auto-detection)
         let builder = if hybrid_mode != self.hybrid_mode {
@@ -854,7 +912,50 @@ impl RapidMlxAdapter {
     }
 }
 
-fn apply_phase7_adapter_config(
+/// Seeds a command builder with the non-Phase-7 launch settings.
+///
+/// Split out of `build_launch` during the Phase 7A2 reconciliation. Together with
+/// [`apply_phase7_adapter_config`] this is the *only* adapter → argv mapping; the
+/// command-preview endpoint drives the same two functions through a throwaway adapter so a
+/// preview cannot describe a command the supervisor would not run. It used to keep its own
+/// copy, which had drifted: the preview invented `--log-level INFO`, `--timeout 60` and an
+/// empty `--api-key`, and dropped `--served-model-name`, `--reasoning-parser`, the eight
+/// sampling defaults, the hybrid switches, and `--prefill-step-size`.
+pub(crate) fn build_launch_argv(adapter: &RapidMlxAdapter) -> command::RapidMlxCommandBuilder {
+    let mut builder = RapidMlxCommandBuilder::new(adapter.resolved_model.clone())
+        .host(adapter.host.clone())
+        .port(adapter.port);
+
+    if adapter.log_level != "INFO" {
+        builder = builder.log_level(adapter.log_level.clone());
+    }
+    if let Some(timeout) = adapter.timeout {
+        builder = builder.timeout(timeout);
+    }
+    builder = builder
+        .prefix_cache_enabled(Some(adapter.prefix_cache_enabled))
+        .retained_cache_mib(adapter.retained_cache_mib)
+        .disk_checkpoint_interval(Some(adapter.disk_checkpoint_interval));
+
+    if let Some(key) = &adapter.api_key {
+        builder = builder.api_key(key.clone());
+    }
+    if let Some(name) = &adapter.served_model_name {
+        builder = builder.served_model_name(name.clone());
+    }
+
+    builder
+        .trust_remote_code_consent(adapter.trust_remote_code_consent.clone())
+        .tool_call_parser(adapter.tool_call_parser.clone())
+        .reasoning_parser(adapter.reasoning_parser.clone())
+        .auto_tool_choice(adapter.auto_tool_choice)
+        .no_thinking(adapter.no_thinking)
+        .escape_hatch_flags(adapter.escape_hatch_flags.clone())
+}
+
+/// `pub(crate)` for the same reason as [`build_launch_argv`]: the command-preview endpoint
+/// applies the supervisor's own mapping rather than a copy of it.
+pub(crate) fn apply_phase7_adapter_config(
     builder: command::RapidMlxCommandBuilder,
     adapter: &RapidMlxAdapter,
 ) -> command::RapidMlxCommandBuilder {
