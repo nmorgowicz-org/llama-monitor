@@ -1809,11 +1809,13 @@ mod unified_profile_tests {
     use crate::llama::model_memory_profile::*;
 
     fn geometry_hybrid_qwen36() -> ModelMemoryProfile {
-        let mut p = ModelMemoryProfile::default();
-        p.model_type = Some("qwen3_5".into());
-        p.architectures = Some(vec!["Qwen3ForConditionalGeneration".into()]);
-        p.full_attention_interval = Some(4);
-        p.model_context_limit = Some(262144);
+        let mut p = ModelMemoryProfile {
+            model_type: Some("qwen3_5".into()),
+            architectures: Some(vec!["Qwen3ForConditionalGeneration".into()]),
+            full_attention_interval: Some(4),
+            model_context_limit: Some(262144),
+            ..Default::default()
+        };
         p.layer_groups.push(LayerMemoryGroup {
             kind: LayerGroupKind::FullAttention,
             count: 16,
@@ -1832,9 +1834,11 @@ mod unified_profile_tests {
     }
 
     fn geometry_pure_attention_llama() -> ModelMemoryProfile {
-        let mut p = ModelMemoryProfile::default();
-        p.model_type = Some("llama".into());
-        p.architectures = Some(vec!["LlamaForCausalLM".into()]);
+        let mut p = ModelMemoryProfile {
+            model_type: Some("llama".into()),
+            architectures: Some(vec!["LlamaForCausalLM".into()]),
+            ..Default::default()
+        };
         p.layer_groups.push(LayerMemoryGroup {
             kind: LayerGroupKind::FullAttention,
             count: 32,
@@ -1847,26 +1851,27 @@ mod unified_profile_tests {
     }
 
     fn rapid_profile_with_flags() -> info_query::ModelProfile {
-        let mut r = info_query::ModelProfile::default();
-        r.tool_format = Some("hermes".into());
-        r.reasoning_parser = Some("qwen3".into());
-        r.architecture = Some("pure attention".into());
-        r
+        info_query::ModelProfile {
+            tool_format: Some("hermes".into()),
+            reasoning_parser: Some("qwen3".into()),
+            architecture: Some("pure attention".into()),
+            ..Default::default()
+        }
     }
 
     fn rapid_profile_hybrid_arch() -> info_query::ModelProfile {
-        let mut r = info_query::ModelProfile::default();
-        r.tool_format = Some("hermes".into());
-        r.reasoning_parser = Some("qwen3".into());
-        r.architecture = Some("hybrid delta".into());
-        r
+        info_query::ModelProfile {
+            tool_format: Some("hermes".into()),
+            reasoning_parser: Some("qwen3".into()),
+            architecture: Some("hybrid delta".into()),
+            ..Default::default()
+        }
     }
 
     #[test]
     fn hybrid_mode_authoritative_from_geometry_full_attention_interval() {
         // HF/local config wins for hybrid_mode when full_attention_interval > 1
         let geometry = Some(geometry_hybrid_qwen36());
-        let rapid = Some(rapid_profile_with_flags());
 
         let hybrid = derive_hybrid_mode_from_geometry(&geometry);
         assert_eq!(hybrid, "force", "full_attention_interval=4 → force");
@@ -1875,7 +1880,6 @@ mod unified_profile_tests {
     #[test]
     fn hybrid_mode_auto_for_pure_attention_model() {
         let geometry = Some(geometry_pure_attention_llama());
-        let rapid = Some(rapid_profile_with_flags());
 
         let hybrid = derive_hybrid_mode_from_geometry(&geometry);
         assert_eq!(hybrid, "auto", "no interval + pure attention → auto");
@@ -2074,8 +2078,10 @@ mod unified_profile_tests {
 
     #[test]
     fn derive_tool_format_none_for_unknown() {
-        let mut p = ModelMemoryProfile::default();
-        p.model_type = Some("unknown_model".into());
+        let p = ModelMemoryProfile {
+            model_type: Some("unknown_model".into()),
+            ..Default::default()
+        };
         assert!(derive_tool_format_from_geometry(&Some(p)).is_none());
     }
 

@@ -356,6 +356,11 @@ pub struct EstimatorOptions {
     pub client_type: super::workload_scenarios::ClientType,
     /// D25: Concurrency policy for MTP admission.
     pub concurrency_policy: super::workload_scenarios::ConcurrencyPolicy,
+    /// Workload the estimate is being admitted against. `None` means the caller did
+    /// not state one, and admission falls back to `WorkloadScenario::default()`
+    /// (`CodingAgent`) — a defensible shape, but an assumption rather than a fact, so
+    /// the resulting admission is reported as scenario-defaulted rather than measured.
+    pub workload_scenario: Option<super::workload_scenarios::WorkloadScenario>,
 }
 
 impl Default for EstimatorOptions {
@@ -373,6 +378,7 @@ impl Default for EstimatorOptions {
             mtp_config: None,
             client_type: Default::default(),
             concurrency_policy: Default::default(),
+            workload_scenario: None,
         }
     }
 }
@@ -796,11 +802,10 @@ pub fn full_estimate(
 
         // Compute admission result when MTP is enabled.
         let admission = if mode != super::workload_scenarios::MtpMode::Disabled {
-            // Use default scenario for admission when none provided explicitly.
-            // The caller can refine this with actual workload info; the decode
-            // shape follows the scenario via `compute`, and a caller holding the
-            // real request parameters should use `compute_with_shape` instead.
-            let scenario = super::workload_scenarios::WorkloadScenario::default();
+            // A caller holding the real request parameters should use
+            // `compute_with_shape` instead; the decode shape otherwise follows the
+            // scenario via `compute`.
+            let scenario = opts.workload_scenario.unwrap_or_default();
             Some(super::workload_scenarios::MtpAdmissionResult::compute(
                 mode,
                 &scenario,

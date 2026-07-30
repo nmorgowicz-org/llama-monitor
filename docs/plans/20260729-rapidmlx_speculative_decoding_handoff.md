@@ -31,7 +31,8 @@ The two bugs, both *around* the model rather than in Rapid's decode path:
 2. **Writing the sidecar into the model directory silently corrupts the trunk.** `mlx_lm`
    globs `model*.safetensors`; the presence of `model-mtp.safetensors` flips a heuristic
    that shifts every trunk norm by `+1.0`, double-shifting an already-converted MLX repo
-   into gibberish. Upstream's own extractor writes there by default. **Not fixed upstream.**
+   into gibberish. Upstream's own extractor writes there by default. **Not fixed upstream**,
+   but **now refused app-side** — see the `reject_in_trunk_mtp_sidecar` entry in §7.2.
 
 Served, with both fixed: **72–97% acceptance** and **+22% to +59% generation throughput**
 across three trunk quantizations. The nightmedia MXFP8 model is **not** broken.
@@ -240,26 +241,42 @@ Verdict and per-cell numbers: `docs/reference/rapid-mlx-mtp-evidence.md` §12. N
 
 ### 7.2 What is still open after the wiring
 
+- **Closed (2026-07-29): the in-trunk sidecar layout is refused at launch.**
+  `reject_in_trunk_mtp_sidecar` in `src/inference/rapid_mlx/model_resolver.rs` reads the
+  safetensors *header* of every file matching mlx_lm's own `model*.safetensors` glob and bails
+  when a file's tensor keys are entirely `mtp.*`, with the remediation in the message. It is
+  wired into both the `MlxDirectory` launch path and `validate_model_directory_assets`, so it
+  covers models the app never created — the layout arrives by following upstream's documented
+  extractor usage. The discriminator is deliberately "every tensor is `mtp.*`", not the file
+  name: a shard mixing MTP with trunk tensors is a legitimately embedded-MTP checkpoint and
+  must still launch. Five tests, including that case and the outside-the-glob case.
+
 - Run the requalification lane against the next upstream bump. If it exits `20`, nothing in
   the app changes. If it exits `0`, remove the version from
   `SPEC_DECODE_GREEDY_ONLY_VERSIONS`, record the evidence, and only then resume 6.5a.
-- `derive_mtp_concurrency` is still a deliberate stub returning `Unknown`. Help output cannot
-  prove model eligibility; the requalification lane is what should populate it. The blocker is
-  now smaller than it looks: the live run showed the scheduler *states* its own constraints in
-  the backend log at install time (`single-request greedy K=1 chain-of-1; falls through on
-  B>1 / non-greedy / logits-processors` — verbatim `SingleActiveGreedy`), and the lane already
-  persists that log per cell. What is missing is a path for a measured verdict to reach a
-  `CapabilitySnapshot`, which today is derived from `serve --help` at install time. That is a
-  design change, not a transcription — do not bolt log-scraping onto the install-time probe.
+- `derive_mtp_concurrency` **now returns `SingleActiveGreedy`** for a version in
+  `SPEC_DECODE_GREEDY_ONLY_VERSIONS` that exposes `--speculative`, and `Unknown` otherwise.
+  Concurrency is a scheduler property, not a model property, and on those builds the scheduler
+  states its own constraints in the backend log at install time
+  (`single-request greedy K=1 chain-of-1; falls through on B>1 / non-greedy /
+  logits-processors` — verbatim `SingleActiveGreedy`). That makes the version table, not the
+  flag list, the evidence. No log-scraping was added to the install-time probe.
+  - Still open: an *unrecognised* version stays `Unknown`, and there is still no path for a
+    measured lane verdict to reach a `CapabilitySnapshot` (which is derived from
+    `serve --help`). That remains a design change — do not bolt log-scraping onto the probe.
+  - Also still open: nothing consumes `mtp_concurrency` except the runtime API's JSON
+    (`src/web/api/rapid_mlx_runtime.rs:805`). It is reported, not acted on.
 - `command.rs:565` still gates on `--speculative` flag existence rather than the behavioral
   verdict. Left deliberately: a user may want to launch with MTP to test it. Admission
   warnings carry the message instead.
 - `RAPID_MLX_CONSTRAIN_TOOLS` appears nowhere in `src/`. The app has no representation of the
   tool-grammar axis as a runtime setting, only as a modelled request property, so it cannot
   currently *choose* to drop the grammar in exchange for speculation.
-- `EstimatorOptions` carries no workload scenario, so `estimate.rs` still admits against
-  `WorkloadScenario::default()` (`CodingAgent`). Correct now that the default shape is
-  modelled, but a caller-supplied scenario would be better.
+- `EstimatorOptions` **now carries `workload_scenario: Option<WorkloadScenario>`**, and
+  `/api/vram` passes the scenario the request already stated (it was parsed and then dropped).
+  `None` still falls back to `WorkloadScenario::default()` (`CodingAgent`), so an unstated
+  scenario behaves as before; the difference is that a stated one is no longer ignored. Covered
+  by `mtp_admission_follows_the_callers_workload_scenario`.
 - The vision tensor check is wired into `hf_qualify_repo` only. Local-disk vision detection
   (`extract_vision_component` in `mlx_meta.rs`) remains a separate path.
 

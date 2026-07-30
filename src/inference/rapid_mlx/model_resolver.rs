@@ -616,6 +616,9 @@ pub async fn resolve(
                 let canonical = canonical_model_directory(&path, &local_model_allowed_root(&path))?;
                 reject_app_staging_directory(&canonical, &validation_context.models_dir)?;
                 validate_if_app_conversion(&canonical, &validation_context.models_dir)?;
+                // Applies to directories the app never created: the sidecar may have
+                // been written by upstream's extractor long before this launch.
+                reject_in_trunk_mtp_sidecar(&canonical)?;
                 Ok(canonical)
             })
             .await?,
@@ -935,6 +938,98 @@ fn validate_transformers_directory(path: &Path) -> Result<()> {
     validate_model_directory(path, path)
 }
 
+/// Tensor names in a safetensors file, read from its header only.
+///
+/// Layout is `u64 little-endian header length`, then that many bytes of JSON
+/// whose top-level keys are tensor names (plus an optional `__metadata__`). The
+/// weights themselves are never read, so this stays cheap on a 27 GB trunk.
+fn safetensors_tensor_names(path: &Path) -> Result<Vec<String>> {
+    let mut file = fs::File::open(path)?;
+    let mut length = [0u8; 8];
+    file.read_exact(&mut length)?;
+    let header_len = u64::from_le_bytes(length);
+    // A real header is kilobytes to low megabytes. The bound stops a corrupt or
+    // hostile length field from turning a preflight check into an OOM.
+    if header_len == 0 || header_len > 64 * 1024 * 1024 {
+        bail!(
+            "Safetensors header length is implausible ({header_len} bytes) in {}",
+            path.display()
+        );
+    }
+    let mut header = vec![0u8; header_len as usize];
+    file.read_exact(&mut header)?;
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&header).context("Safetensors header is invalid JSON")?;
+    let object = parsed
+        .as_object()
+        .ok_or_else(|| anyhow!("Safetensors header is not a JSON object"))?;
+    Ok(object
+        .keys()
+        .filter(|key| key.as_str() != "__metadata__")
+        .cloned()
+        .collect())
+}
+
+/// Refuse a trunk directory that contains an MTP draft-head sidecar.
+///
+/// `mlx_lm` loads a trunk by globbing `model*.safetensors`, so a sidecar sitting
+/// in the model directory is picked up as if it were a trunk shard. The `mtp.*`
+/// keys are then stripped again, but their mere presence flips
+/// `should_shift_norm_weights`, which adds +1.0 to every trunk RMSNorm weight.
+/// That shift is correct for a raw HF checkpoint and destroys an already-
+/// converted MLX one: the backbone degrades to gibberish with no error at all.
+///
+/// Upstream's own extractor defaults to writing `model-mtp.safetensors` into the
+/// model directory, so this layout arrives by following upstream's documented
+/// usage — which is why it is refused for any model the app is asked to launch,
+/// not merely for sidecars the app created.
+///
+/// The discriminator is deliberately "every tensor in the file is `mtp.*`", not
+/// the file name and not "any mtp tensor anywhere". A checkpoint that genuinely
+/// ships MTP weights interleaved with its own layers is a legitimate embedded-MTP
+/// model and must still launch; a file that is *only* draft-head tensors is a
+/// sidecar in the wrong place, whatever it happens to be called.
+fn reject_in_trunk_mtp_sidecar(dir: &Path) -> Result<()> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        // Exactly mlx_lm's glob: a file the trunk loader would pick up.
+        if !(name.starts_with("model") && name.ends_with(".safetensors")) {
+            continue;
+        }
+        if !path.is_file() {
+            continue;
+        }
+        // An unreadable or malformed candidate is not evidence of this defect;
+        // the asset validators own that complaint.
+        let Ok(names) = safetensors_tensor_names(&path) else {
+            continue;
+        };
+        if names.is_empty() {
+            continue;
+        }
+        if names.iter().all(|tensor| tensor.starts_with("mtp.")) {
+            bail!(
+                "Refusing to launch {}: it contains the MTP draft-head sidecar {name}, whose \
+                 {} tensors are all mtp.*. mlx_lm globs model*.safetensors, so this file is \
+                 loaded as a trunk shard and silently adds +1.0 to every trunk RMSNorm weight, \
+                 corrupting an already-converted MLX model into gibberish with no error. \
+                 Remediation: move {name} out of the model directory (a sibling directory is \
+                 fine), then point the speculative config at its new path. Never store a draft \
+                 head inside the trunk.",
+                dir.display(),
+                names.len()
+            );
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_model_directory(path: &Path, allowed_symlink_root: &Path) -> Result<()> {
     validate_model_directory_assets(path, allowed_symlink_root).map(|_| ())
 }
@@ -978,6 +1073,7 @@ fn validate_model_directory_assets(
     ) {
         validate_child(path, &asset, allowed_symlink_root)?;
     }
+    reject_in_trunk_mtp_sidecar(path)?;
     safetensors_files(path, allowed_symlink_root)
 }
 
@@ -1770,6 +1866,86 @@ mod tests {
         assert!(validate_transformers_directory(temp.path()).is_err());
         fs::write(temp.path().join("model-00002-of-00002.safetensors"), b"two").unwrap();
         assert!(validate_transformers_directory(temp.path()).is_ok());
+    }
+
+    /// Minimal safetensors file: only the header is ever parsed, so the tensor
+    /// bodies are omitted entirely.
+    fn write_safetensors(path: &Path, tensors: &[&str]) {
+        let entries: Vec<String> = tensors
+            .iter()
+            .map(|name| format!(r#""{name}":{{"dtype":"F32","shape":[1],"data_offsets":[0,4]}}"#))
+            .collect();
+        let header = format!(r#"{{{}}}"#, entries.join(","));
+        let mut bytes = (header.len() as u64).to_le_bytes().to_vec();
+        bytes.extend_from_slice(header.as_bytes());
+        fs::write(path, bytes).unwrap();
+    }
+
+    fn trunk_directory() -> tempfile::TempDir {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("config.json"), r#"{"model_type":"test"}"#).unwrap();
+        fs::write(temp.path().join("tokenizer.json"), "{}").unwrap();
+        write_safetensors(
+            &temp.path().join("model.safetensors"),
+            &["model.layers.0.mlp.gate_proj.weight"],
+        );
+        temp
+    }
+
+    #[test]
+    fn clean_trunk_directory_is_accepted() {
+        let temp = trunk_directory();
+        reject_in_trunk_mtp_sidecar(temp.path()).unwrap();
+        assert!(validate_transformers_directory(temp.path()).is_ok());
+    }
+
+    #[test]
+    fn in_trunk_mtp_sidecar_is_refused_with_remediation() {
+        let temp = trunk_directory();
+        write_safetensors(
+            &temp.path().join("model-mtp.safetensors"),
+            &["mtp.pre_fc_norm_embedding.weight", "mtp.fc.weight"],
+        );
+        let error = reject_in_trunk_mtp_sidecar(temp.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("model-mtp.safetensors"), "{error}");
+        assert!(error.contains("Remediation"), "{error}");
+        // The launch path must inherit the refusal, not just the helper.
+        assert!(validate_transformers_directory(temp.path()).is_err());
+    }
+
+    #[test]
+    fn embedded_mtp_checkpoint_still_launches() {
+        let temp = trunk_directory();
+        // A shard that mixes draft-head and trunk tensors is a legitimate
+        // embedded-MTP checkpoint, not a misplaced sidecar.
+        write_safetensors(
+            &temp.path().join("model-00002-of-00002.safetensors"),
+            &["mtp.fc.weight", "model.layers.1.mlp.gate_proj.weight"],
+        );
+        reject_in_trunk_mtp_sidecar(temp.path()).unwrap();
+    }
+
+    #[test]
+    fn mtp_weights_outside_the_trunk_glob_are_ignored() {
+        let temp = trunk_directory();
+        // Not matched by mlx_lm's `model*.safetensors` glob, so the trunk loader
+        // never sees it and the norm shift is never triggered.
+        write_safetensors(&temp.path().join("mtp.safetensors"), &["mtp.fc.weight"]);
+        reject_in_trunk_mtp_sidecar(temp.path()).unwrap();
+    }
+
+    #[test]
+    fn implausible_safetensors_header_length_does_not_allocate() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("model.safetensors");
+        let mut bytes = u64::MAX.to_le_bytes().to_vec();
+        bytes.extend_from_slice(b"junk");
+        fs::write(&path, bytes).unwrap();
+        assert!(safetensors_tensor_names(&path).is_err());
+        // An unreadable candidate is not evidence of this defect.
+        reject_in_trunk_mtp_sidecar(temp.path()).unwrap();
     }
 
     #[test]

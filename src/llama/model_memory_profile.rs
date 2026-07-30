@@ -579,14 +579,16 @@ mod tests {
 
     #[test]
     fn moe_detection() {
-        let mut profile = ModelMemoryProfile::default();
-        profile.experts = Some(ExpertTopology {
-            n_experts: 128,
-            field_evidence: "text_config.num_experts".into(),
-            top_k: Some(8),
-            top_k_evidence: Some("text_config.top_k_experts".into()),
+        let profile = ModelMemoryProfile {
+            experts: Some(ExpertTopology {
+                n_experts: 128,
+                field_evidence: "text_config.num_experts".into(),
+                top_k: Some(8),
+                top_k_evidence: Some("text_config.top_k_experts".into()),
+                ..Default::default()
+            }),
             ..Default::default()
-        });
+        };
         assert!(profile.is_moe());
     }
 

@@ -1540,7 +1540,7 @@ mod tests {
         assert_eq!(profile.weights.n_head_kv.value, 2);
 
         // Wrapper-field conflicts documented.
-        assert!(profile.warnings.wrapper_field_conflicts.len() >= 1);
+        assert!(!profile.warnings.wrapper_field_conflicts.is_empty());
     }
 
     #[test]

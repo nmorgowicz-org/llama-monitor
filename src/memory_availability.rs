@@ -338,9 +338,11 @@ mod tests {
 
     #[test]
     fn current_safe_availability_leq_configured_ceiling() {
-        let mut snapshot = MemoryAvailabilitySnapshot::default();
-        snapshot.configured_ceiling_bytes = 48 * 1024 * 1024 * 1024;
-        snapshot.current_safe_availability_bytes = 36 * 1024 * 1024 * 1024;
+        let snapshot = MemoryAvailabilitySnapshot {
+            configured_ceiling_bytes: 48 * 1024 * 1024 * 1024,
+            current_safe_availability_bytes: 36 * 1024 * 1024 * 1024,
+            ..Default::default()
+        };
         assert!(
             snapshot.current_safe_availability_bytes <= snapshot.configured_ceiling_bytes,
             "current_safe_availability must be ≤ configured_ceiling"
@@ -349,19 +351,23 @@ mod tests {
 
     #[test]
     fn state_safe_now_when_sufficient() {
-        let mut snapshot = MemoryAvailabilitySnapshot::default();
-        snapshot.configured_ceiling_bytes = 48 * 1024 * 1024 * 1024;
-        snapshot.current_safe_availability_bytes = 30 * 1024 * 1024 * 1024; // >50% of ceiling
-        snapshot.state = MemoryAvailabilityState::SafeNow;
+        let snapshot = MemoryAvailabilitySnapshot {
+            configured_ceiling_bytes: 48 * 1024 * 1024 * 1024,
+            current_safe_availability_bytes: 30 * 1024 * 1024 * 1024, // >50% of ceiling
+            state: MemoryAvailabilityState::SafeNow,
+            ..Default::default()
+        };
         assert_eq!(snapshot.state, MemoryAvailabilityState::SafeNow);
     }
 
     #[test]
     fn state_conditional_when_free_but_less_than_availability() {
-        let mut snapshot = MemoryAvailabilitySnapshot::default();
-        snapshot.current_safe_availability_bytes = 20 * 1024 * 1024 * 1024;
-        snapshot.free_bytes = 10 * 1024 * 1024 * 1024; // free < availability
-        snapshot.state = MemoryAvailabilityState::ConditionalAfterReclaim;
+        let snapshot = MemoryAvailabilitySnapshot {
+            current_safe_availability_bytes: 20 * 1024 * 1024 * 1024,
+            free_bytes: 10 * 1024 * 1024 * 1024, // free < availability
+            state: MemoryAvailabilityState::ConditionalAfterReclaim,
+            ..Default::default()
+        };
         assert_eq!(
             snapshot.state,
             MemoryAvailabilityState::ConditionalAfterReclaim
@@ -371,7 +377,10 @@ mod tests {
     #[test]
     fn build_snapshot_returns_valid_shape() {
         let snapshot = build_snapshot();
-        assert!(snapshot.total_unified_bytes > 0 || snapshot.total_unified_bytes == 0); // may be 0 on CI/containers
+        // total_unified_bytes is deliberately unasserted: it is 0 on CI and in
+        // containers where sysctl reports nothing, and any nonzero bound would
+        // make this test host-dependent. `x > 0 || x == 0` used to stand here,
+        // which is a tautology on u64 and checked nothing at all.
         // Validate that pressure can reduce availability below ceiling
         assert!(
             snapshot.current_safe_availability_bytes <= snapshot.configured_ceiling_bytes

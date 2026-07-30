@@ -443,7 +443,7 @@ pub async fn generate_snapshot(binary: &Path, source: RuntimeSource) -> Result<C
     );
 
     // 6. Derive MTP concurrency state and sampling default fields from flags
-    let mtp_concurrency = derive_mtp_concurrency(&serve_flags);
+    let mtp_concurrency = derive_mtp_concurrency(&serve_flags, &version);
     let sampling_defaults = SamplingDefaultFields::from_flags(&serve_flags);
     let sampling_cascade = SamplingCascade::from_flags(&serve_flags);
 
@@ -901,11 +901,24 @@ fn is_broken_vision_version(package_versions: &[DependencyVersion]) -> bool {
     })
 }
 
-/// Derive MTP concurrency qualification from serve --help flags.
-/// Uses flag presence to detect Rapid's single-live-greedy fast-path.
-fn derive_mtp_concurrency(_flags: &[String]) -> MtpConcurrencyState {
-    // Help output cannot prove model eligibility, companion ownership, or
-    // mid-stream fallback. Preserve unknown until model qualification does.
+/// Derive MTP concurrency qualification for the installed scheduler.
+///
+/// Concurrency is a property of the scheduler, not of the model, so a known
+/// greedy-only version does settle it: on those builds the vendored MTP hook
+/// says so itself at install time, verbatim —
+/// `single-request greedy K=1 chain-of-1; falls through on B>1 / non-greedy /
+/// logits-processors`. That is exactly [`MtpConcurrencyState::SingleActiveGreedy`]:
+/// one live request, greedy only, silent fallback otherwise.
+///
+/// Everything else stays `Unknown`. Flag presence alone cannot prove model
+/// eligibility, companion ownership, or mid-stream fallback behaviour, and an
+/// unrecognised version has no observed scheduler evidence behind it — only the
+/// requalification lane can settle those.
+fn derive_mtp_concurrency(flags: &[String], version: &str) -> MtpConcurrencyState {
+    let has_speculative = flags.iter().any(|flag| flag == "--speculative");
+    if has_speculative && SPEC_DECODE_GREEDY_ONLY_VERSIONS.contains(&version) {
+        return MtpConcurrencyState::SingleActiveGreedy;
+    }
     MtpConcurrencyState::Unknown
 }
 
@@ -2298,19 +2311,36 @@ Options:
     }
 
     #[test]
-    fn mtp_concurrency_is_unknown_without_model_qualification() {
+    fn mtp_concurrency_is_unknown_without_a_speculative_flag() {
         let flags = vec![
             "--host".into(),
             "--port".into(),
             "--tool-call-parser".into(),
         ];
-        assert_eq!(derive_mtp_concurrency(&flags), MtpConcurrencyState::Unknown);
+        assert_eq!(
+            derive_mtp_concurrency(&flags, "0.11.1"),
+            MtpConcurrencyState::Unknown
+        );
     }
 
     #[test]
-    fn mtp_concurrency_is_not_inferred_from_speculative_flags() {
+    fn mtp_concurrency_is_single_active_greedy_on_known_greedy_only_versions() {
         let flags = vec!["--host".into(), "--port".into(), "--speculative".into()];
-        assert_eq!(derive_mtp_concurrency(&flags), MtpConcurrencyState::Unknown);
+        assert_eq!(
+            derive_mtp_concurrency(&flags, "0.11.1"),
+            MtpConcurrencyState::SingleActiveGreedy
+        );
+    }
+
+    #[test]
+    fn mtp_concurrency_is_unknown_on_unrecognised_versions() {
+        // No observed scheduler evidence for this build, so the flag alone
+        // must not be read as a concurrency verdict either way.
+        let flags = vec!["--host".into(), "--port".into(), "--speculative".into()];
+        assert_eq!(
+            derive_mtp_concurrency(&flags, "0.12.0"),
+            MtpConcurrencyState::Unknown
+        );
     }
 
     // Sampling default fields tests
@@ -2609,7 +2639,7 @@ Options:
             package_versions: vec![],
             installed_extras: InstalledExtras::default(),
             qualified_features: QualifiedFeatures::default(),
-            mtp_concurrency: derive_mtp_concurrency(&flags),
+            mtp_concurrency: derive_mtp_concurrency(&flags, "0.10.10"),
             sampling_defaults: SamplingDefaultFields::from_flags(&flags),
             sampling_cascade: SamplingCascade::from_flags(&flags),
             evidence_timestamp: 0,

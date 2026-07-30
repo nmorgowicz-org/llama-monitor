@@ -481,7 +481,6 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn live_probe_qualifies_healthy_external_profiles_without_global_warning() {
-        let required = "--host --port --log-level --served-model-name --timeout --max-cache-blocks";
         let all_managed_flags = "--host --port --log-level --served-model-name --timeout --enable-prefix-cache --disable-prefix-cache --cache-memory-mb --hybrid-cache-entries --kv-disk-checkpoint-interval --tool-call-parser --reasoning-parser --enable-auto-tool-choice --no-thinking --reasoning --force-hybrid --no-hybrid --prefill-step-size --pflash";
         let (_dir, binary) = fixture_runtime("0.10.10", all_managed_flags);
         let profile = probe(&binary, RuntimeSource::Custom).await.unwrap();

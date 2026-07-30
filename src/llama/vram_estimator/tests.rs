@@ -895,6 +895,78 @@ fn estimate_vram_too_large_for_vram() {
     ));
 }
 
+#[test]
+fn mtp_admission_follows_the_callers_workload_scenario() {
+    use super::workload_scenarios::{MtpConfig, MtpMode, WorkloadScenario};
+
+    let arch = ModelArch {
+        mtp_depth: 1,
+        ..Default::default()
+    };
+
+    let admission_for = |scenario: Option<WorkloadScenario>| {
+        let opts = EstimatorOptions {
+            mtp_config: Some(MtpConfig {
+                mode: MtpMode::Embedded,
+                ..Default::default()
+            }),
+            workload_scenario: scenario,
+            ..Default::default()
+        };
+        full_estimate(
+            4_000_000_000,
+            &arch,
+            32_000,
+            "q8_0",
+            "q8_0",
+            1,
+            1024,
+            0,
+            -1,
+            64 * 1024 * 1024 * 1024,
+            0,
+            true,
+            opts,
+        )
+        .mtp_admission
+        .expect("MTP config was supplied, so admission must be computed")
+    };
+
+    use super::workload_scenarios::MtpWarning;
+
+    // A multi-slot scenario conflicts with MTP's single-active constraint, so it
+    // is told so — the point of passing the scenario through.
+    let research = admission_for(Some(WorkloadScenario::ToolResearchAgent {
+        planning_context_tokens: 128_000,
+        retained_cache_tokens: 48_000,
+        parallel_slots: 2,
+    }));
+    assert!(research.eligible);
+    assert!(
+        research
+            .warnings
+            .contains(&MtpWarning::MtpEligibleButNotRecommended)
+    );
+
+    // The single-slot coding agent reaches a different verdict: it is the right
+    // shape for MTP and is warned instead about the scheduler falling through
+    // (it samples and installs a tool grammar). Passing no scenario yields
+    // exactly this reading, which is why an unstated one must not be mistaken
+    // for a stated one.
+    let coding = admission_for(None);
+    assert!(
+        coding
+            .warnings
+            .contains(&MtpWarning::SchedulerFallsThroughForWorkload)
+    );
+    assert!(
+        !coding
+            .warnings
+            .contains(&MtpWarning::MtpEligibleButNotRecommended)
+    );
+    assert_eq!(coding, admission_for(Some(WorkloadScenario::default())));
+}
+
 // ── Phase 6B2: Rapid-MLX backend-neutral estimator ─────────────────────────────
 
 // Architecture fields verified against
@@ -1851,7 +1923,7 @@ fn llama_slot_context_math_matches_pinned_runtime_semantics() {
 
     // Single slot, 8192 ctx, q8_0 KV: 32 × 8 × 128 × 8192 × 1 × (1+1) = 536,870,912 bytes
     let kv_single = kv_cache_bytes(&arch, 8192, 1, "q8_0", "q8_0");
-    let expected_single = (32u64 * 8 * 128 * 8192 * 2) as u64;
+    let expected_single = 32u64 * 8 * 128 * 8192 * 2;
     assert_eq!(
         kv_single, expected_single,
         "Single-slot KV must match exact formula"
@@ -1945,14 +2017,14 @@ fn llama_hybrid_attention_uses_n_attn_layers_for_kv() {
 
     let kv = kv_cache_bytes(&arch, 8192, 1, "q8_0", "q8_0");
     // Must use 16 layers, not 64
-    let expected = (16u64 * 4 * 256 * 8192 * 2) as u64;
+    let expected = 16u64 * 4 * 256 * 8192 * 2;
     assert_eq!(
         kv, expected,
         "Hybrid DeltaNet must use n_attn_layers (16), not n_layers (64), for KV"
     );
 
     // Would be 4× larger if using all layers (wrong)
-    let wrong = (64u64 * 4 * 256 * 8192 * 2) as u64;
+    let wrong = 64u64 * 4 * 256 * 8192 * 2;
     assert_ne!(kv, wrong, "Must NOT use n_layers for KV on hybrid models");
 }
 
@@ -1977,7 +2049,7 @@ fn llama_sliding_window_kv_capped_at_window() {
     // Global layers: 48 × 16 × 256 × 128000 × 2
     // Local layers: 14 × 1 × 256 × 4096 × 2
     let global = (48u64 * 16 * 256 * 128_000 * 2) as f64;
-    let local = (14u64 * 1 * 256 * 4096 * 2) as f64;
+    let local = (14u64 * 256 * 4096 * 2) as f64;
     let expected = (global + local) as u64;
     assert_eq!(
         kv, expected,
@@ -2483,7 +2555,7 @@ fn llama_moe_kv_correctly_uses_n_kv_heads_not_n_experts() {
     let kv = kv_cache_bytes(&arch, 8192, 1, "q8_0", "q8_0");
 
     // KV depends on n_kv_heads=2, NOT n_experts=128
-    let expected = (48u64 * 2 * 128 * 8192 * 2) as u64;
+    let expected = 48u64 * 2 * 128 * 8192 * 2;
     assert_eq!(
         kv, expected,
         "MoE KV cache must use n_kv_heads, not n_experts"

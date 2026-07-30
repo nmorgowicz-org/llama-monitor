@@ -90,7 +90,10 @@ fn is_mla_pattern(arch: &ModelArch) -> bool {
 /// Only Hybrid DeltaNet models have prefix cache data from receipts.
 /// Slope derived from Qwen3.5/3.6-35B-A3B (MoE): INT8 = 23400, INT4 = 12700.
 /// Formula scales with n_attn_layers × n_kv_heads; applied to all Hybrid DeltaNet models.
-#[expect(dead_code)]
+// Not yet called from the estimator; its own tests are the only callers, so the
+// expectation holds for the lib build and would be unfulfilled under
+// --all-targets if applied unconditionally.
+#[cfg_attr(not(test), expect(dead_code))]
 pub fn rapid_prefix_cache_bytes_per_token(arch: &ModelArch, dtype: KvCacheDtype) -> Option<f64> {
     // Only Hybrid DeltaNet has measured prefix cache data.
     if !arch.is_hybrid_attn() {
