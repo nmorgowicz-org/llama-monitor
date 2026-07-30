@@ -4298,3 +4298,51 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 }
+
+/* Disk tab: the shared Hugging Face cache the library does not manage.
+   Borrows the Import Lab's hero and empty-state language so the two
+   secondary tabs read as siblings rather than as separate products. */
+.mm-tab-panel--disk { padding: 22px; overflow-y: auto; background: radial-gradient(circle at 85% 0%, rgba(75, 120, 180, .12), transparent 34%), var(--color-bg-primary); }
+.mm-disk-hero { display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; padding: 22px; border: 1px solid rgba(129, 150, 210, .22); border-radius: 18px; background: linear-gradient(145deg, rgba(28, 33, 52, .94), rgba(21, 22, 31, .96)); box-shadow: 0 18px 50px rgba(0, 0, 0, .24); }
+.mm-disk-hero h3 { margin: 4px 0 7px; font-size: 18px; color: var(--color-text); }
+.mm-disk-hero p { margin: 0; max-width: 720px; color: var(--color-text-muted); line-height: 1.55; }
+.mm-disk-hero code { padding: 1px 4px; border-radius: 4px; background: rgba(128, 128, 150, .16); font-size: 11px; }
+.mm-disk-totals { flex-shrink: 0; min-width: 220px; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-bg-primary); color: var(--color-text-muted); font-size: 11px; line-height: 1.7; text-align: right; }
+.mm-disk-totals strong { font-size: 15px; color: var(--color-text); }
+.mm-disk-breakdown { color: var(--color-text-muted); }
+.mm-disk-dupe { color: #f0c674; }
+.mm-disk-note { color: var(--color-text-muted); opacity: .8; }
+
+.mm-disk-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 16px 0 10px; }
+.mm-disk-filters { display: flex; gap: 12px; flex-wrap: wrap; }
+.mm-disk-filters label { display: inline-flex; align-items: center; gap: 5px; color: var(--color-text-muted); font-size: 11px; cursor: pointer; }
+.mm-disk-selection { margin-left: auto; color: var(--color-text); font-size: 11px; font-weight: 650; }
+.mm-lib-btn--danger { color: #f2b6b2; border-color: rgba(215, 74, 65, .35); }
+.mm-lib-btn--danger:disabled { color: var(--color-text-muted); border-color: var(--color-border); }
+
+.mm-disk-rows { display: flex; flex-direction: column; gap: 6px; }
+.mm-disk-row { display: grid; grid-template-columns: 20px 82px minmax(200px, 1fr) auto; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-bg-primary); cursor: pointer; }
+.mm-disk-row:hover { border-color: rgba(129, 150, 210, .4); }
+.mm-disk-size { font-variant-numeric: tabular-nums; font-weight: 650; font-size: 12px; color: var(--color-text); text-align: right; }
+.mm-disk-id { font-size: 12px; color: var(--color-text); word-break: break-all; }
+.mm-disk-badges { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+.mm-disk-meta { grid-column: 3 / -1; color: var(--color-text-muted); font-size: 10px; }
+.mm-disk-warn { grid-column: 2 / -1; color: #f0c674; font-size: 10px; }
+.mm-disk-badge { padding: 2px 7px; border-radius: 999px; font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; background: rgba(128, 128, 150, .16); color: var(--color-text-muted); }
+.mm-disk-badge--text { color: #b9d5ff; background: rgba(78, 130, 214, .18); }
+.mm-disk-badge--vision { color: #d8ccff; background: rgba(129, 92, 246, .18); }
+.mm-disk-badge--audio { color: #9fe3c5; background: rgba(47, 158, 116, .18); }
+.mm-disk-badge--embedding { color: #f5d59b; background: rgba(207, 132, 31, .16); }
+.mm-disk-badge--weak { color: var(--color-text-muted); background: rgba(128, 128, 150, .14); text-transform: none; letter-spacing: 0; }
+.mm-disk-badge--cap { color: #cfd8ff; background: rgba(99, 110, 190, .18); text-transform: none; letter-spacing: 0; }
+.mm-disk-badge--dupe { color: #f0c674; background: rgba(207, 165, 31, .18); }
+
+[data-theme="light"] .mm-disk-hero { background: linear-gradient(145deg, #f2f6ff, #fff); box-shadow: 0 16px 42px rgba(48, 64, 110, .1); }
+[data-theme="light"] .mm-disk-dupe, [data-theme="light"] .mm-disk-warn { color: #9a6b00; }
+
+@media (max-width: 900px) {
+  .mm-disk-hero { flex-direction: column; }
+  .mm-disk-totals { text-align: left; min-width: 0; }
+  .mm-disk-row { grid-template-columns: 20px 82px 1fr; }
+  .mm-disk-badges { grid-column: 2 / -1; justify-content: flex-start; }
+}

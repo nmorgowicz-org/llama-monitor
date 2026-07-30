@@ -4778,6 +4778,11 @@
                     Import Lab
                     <span class="mm-tab-beta">Experimental</span>
                 </button>
+                <button class="mm-tab" type="button" data-tab="disk">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>
+                    Disk
+                    <span class="mm-tab-count" id="mm-disk-tab-count"></span>
+                </button>
             </div>
             <div class="models-manager-header-right">
                 <button class="mm-refresh-btn" type="button" id="models-refresh-btn" title="Rescan models directory">
@@ -4986,6 +4991,34 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Disk tab: the Hugging Face cache the app does not manage -->
+        <div class="mm-tab-panel mm-tab-panel--disk" data-tab="disk">
+            <div class="mm-disk-hero">
+                <div>
+                    <span class="mm-import-kicker">Outside the library</span>
+                    <h3>Models on disk that this app did not put there.</h3>
+                    <p>Anything downloaded by <code>hf download</code>, <code>mlx_lm.convert</code>, or a Python script lands in a shared cache the library never scans. Import what you still want, delete what you do not.</p>
+                </div>
+                <div class="mm-disk-totals" id="mm-disk-totals" role="status">Not scanned yet.</div>
+            </div>
+            <div class="mm-disk-toolbar">
+                <button type="button" class="mm-action-btn mm-action-btn--switch" id="mm-disk-scan">Scan cache</button>
+                <div class="mm-disk-filters" id="mm-disk-filters" hidden>
+                    <label><input type="checkbox" data-kind="text" checked> Text</label>
+                    <label><input type="checkbox" data-kind="vision" checked> Vision</label>
+                    <label><input type="checkbox" data-kind="audio" checked> Audio</label>
+                    <label><input type="checkbox" data-kind="embedding" checked> Embedding</label>
+                    <label><input type="checkbox" data-kind="unknown" checked> Unknown</label>
+                </div>
+                <span class="mm-disk-selection" id="mm-disk-selection"></span>
+                <button type="button" class="mm-lib-btn mm-lib-btn--labeled" id="mm-disk-import" disabled>Import to library</button>
+                <button type="button" class="mm-lib-btn mm-lib-btn--labeled mm-lib-btn--danger" id="mm-disk-delete" disabled>Delete</button>
+            </div>
+            <div class="mm-disk-rows" id="mm-disk-rows" aria-live="polite">
+                <div class="mm-import-empty-state">Scan to see what is in the shared cache. Nothing is read from your models until you ask.</div>
             </div>
         </div>
 

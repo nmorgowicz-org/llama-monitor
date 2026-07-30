@@ -80,10 +80,12 @@ fn migration_import_roots(state: &AppState, models_dir: &std::path::Path) -> Vec
         .unwrap_or_default()
 }
 
+/// Where the user-wide Hugging Face cache lives, when it exists at all.
+///
+/// One definition, in the module that audits it. Migration and the audit tab must agree
+/// on which directory they mean, or the tab would report a cache the importer cannot read.
 fn shared_hf_hub() -> Option<PathBuf> {
-    dirs::home_dir()
-        .map(|home| home.join(".cache/huggingface/hub"))
-        .filter(|path| path.is_dir())
+    crate::models::external_cache::shared_hub()
 }
 
 fn api_model_inventory(
@@ -135,6 +137,198 @@ fn api_model_inventory(
                 }
             }
         })
+}
+
+/// Read-only audit of the Hugging Face cache the app does not manage.
+///
+/// Separate from `api_model_inventory` because it answers the opposite question: the
+/// inventory reports what the library can serve, this reports what is taking up disk
+/// *outside* it. A machine that has ever run `hf download` by hand has both, and until
+/// now nothing in the app could see the second one.
+///
+/// Shares [`InventoryScanGuard`] with the inventory scan. Both walk large model trees on
+/// the same disk, and running them at once buys nothing but contention.
+fn api_external_model_cache(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "external-cache")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let state = state.clone();
+            let config = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                let models_dir = get_effective_models_dir(&state)
+                    .unwrap_or_else(|| config.default_models_dir.clone());
+                let library_hub = models_dir.join("cache/huggingface/hub");
+                let Some(root) = shared_hf_hub() else {
+                    // No user-wide cache at all, which is the healthy state. Reported as a
+                    // fact rather than an error so the UI can say so instead of showing a
+                    // failure for a machine that has nothing to clean up.
+                    return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({
+                            "present": false,
+                            "library_hub": library_hub,
+                        }),
+                    ))
+                        as Box<dyn warp::reply::Reply>);
+                };
+                let Some(scan_guard) = InventoryScanGuard::acquire() else {
+                    return Ok(error_reply(
+                        warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        "A model inventory scan is already running",
+                    ));
+                };
+                // Generous next to the inventory's 10 s: this walks every file of a cache
+                // that can hold hundreds of gigabytes, and a cold one has no page cache
+                // behind it. Timing out here would leave the tab permanently blank on the
+                // machines that need it most.
+                let result = tokio::time::timeout(
+                    std::time::Duration::from_secs(120),
+                    tokio::task::spawn_blocking(move || {
+                        let _scan_guard = scan_guard;
+                        crate::models::external_cache::audit(&root, Some(&library_hub))
+                            .map(|audit| (audit, library_hub))
+                    }),
+                )
+                .await;
+                match result {
+                    Ok(Ok(Ok((audit, library_hub)))) => {
+                        Ok(Box::new(warp::reply::json(&serde_json::json!({
+                            "present": true,
+                            "library_hub": library_hub,
+                            "audit": audit,
+                        }))) as Box<dyn warp::reply::Reply>)
+                    }
+                    Ok(Ok(Err(error))) => {
+                        Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error))
+                    }
+                    Ok(Err(error)) => Ok(error_reply(
+                        warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                        error,
+                    )),
+                    Err(_) => Ok(error_reply(
+                        warp::http::StatusCode::REQUEST_TIMEOUT,
+                        "External cache audit timed out",
+                    )),
+                }
+            }
+        })
+}
+
+/// Repos the caller wants removed from the external cache, named the way the audit named
+/// them. Ids, not paths, so the request cannot describe a directory the audit never offered.
+#[derive(Debug, serde::Deserialize)]
+struct ExternalCacheDeleteRequest {
+    repo_ids: Vec<String>,
+}
+
+/// Cap per request. The UI confirms a selection before sending, and a thousand-item body is
+/// a bug or an abuse rather than a user decision.
+const MAX_EXTERNAL_CACHE_DELETIONS: usize = 64;
+
+/// Delete selected repos from the external cache.
+///
+/// Reports every id separately and keeps going after a failure, because a partial success
+/// is the normal outcome — a repo may have been removed by hand between audit and confirm,
+/// and that should not abort the rest of a selection the user already approved.
+fn api_external_model_cache_delete(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "external-cache" / "delete")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<ExternalCacheDeleteRequest>())
+        .and_then(
+            move |auth: Option<String>, request: ExternalCacheDeleteRequest| {
+                let state = state.clone();
+                let config = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &config) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    if request.repo_ids.is_empty() {
+                        return Ok(error_reply(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            "No repos selected for deletion",
+                        ));
+                    }
+                    if request.repo_ids.len() > MAX_EXTERNAL_CACHE_DELETIONS {
+                        return Ok(error_reply(
+                            warp::http::StatusCode::BAD_REQUEST,
+                            format!(
+                                "Too many repos in one request ({} > {MAX_EXTERNAL_CACHE_DELETIONS})",
+                                request.repo_ids.len()
+                            ),
+                        ));
+                    }
+                    let models_dir = get_effective_models_dir(&state)
+                        .unwrap_or_else(|| config.default_models_dir.clone());
+                    let library_hub = models_dir.join("cache/huggingface/hub");
+                    let Some(root) = shared_hf_hub() else {
+                        return Ok(error_reply(
+                            warp::http::StatusCode::NOT_FOUND,
+                            "There is no external Hugging Face cache on this machine",
+                        ));
+                    };
+                    let removed = tokio::task::spawn_blocking(move || {
+                        request
+                            .repo_ids
+                            .into_iter()
+                            .map(|repo_id| {
+                                match crate::models::external_cache::remove_repo(
+                                    &root,
+                                    &repo_id,
+                                    Some(&library_hub),
+                                ) {
+                                    Ok(removed) => serde_json::json!({
+                                        "repo_id": removed.repo_id,
+                                        "ok": true,
+                                        "bytes": removed.bytes,
+                                        "file_count": removed.file_count,
+                                    }),
+                                    Err(error) => serde_json::json!({
+                                        "repo_id": repo_id,
+                                        "ok": false,
+                                        "error": error.to_string(),
+                                    }),
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .await;
+                    match removed {
+                        Ok(results) => {
+                            let freed: u64 = results
+                                .iter()
+                                .filter_map(|row| row.get("bytes").and_then(|b| b.as_u64()))
+                                .sum();
+                            let failed = results
+                                .iter()
+                                .filter(|row| row["ok"] != serde_json::Value::Bool(true))
+                                .count();
+                            Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                                &serde_json::json!({
+                                    "ok": failed == 0,
+                                    "freed_bytes": freed,
+                                    "failed": failed,
+                                    "results": results,
+                                }),
+                            )) as Box<dyn warp::reply::Reply>)
+                        }
+                        Err(error) => Ok(error_reply(
+                            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            error,
+                        )),
+                    }
+                }
+            },
+        )
 }
 
 fn api_rapid_model_resolver_preview(
@@ -1727,6 +1921,17 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r
         .or(api_model_inventory(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_external_model_cache(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_external_model_cache_delete(
+            state.clone(),
+            config.clone(),
+        ))
         .unify()
         .boxed();
     r = r

@@ -8,8 +8,9 @@
 //!
 //! This module answers the only questions that make that number actionable: what is in
 //! there, how big is each repo, is it already in the library, and what kind of model is
-//! it. Nothing here deletes or moves anything — an audit that also mutates is an audit
-//! nobody can safely run twice.
+//! it. [`audit`] itself never mutates — an audit that also deletes is an audit nobody can
+//! safely run twice — so reclaiming space is a separate, explicit call ([`remove_repo`])
+//! that a caller has to mean.
 //!
 //! Every judgement carries where it came from. A `kind` read out of `config.json` and a
 //! `kind` guessed from a repo name are not the same claim, and a caller deciding what to
@@ -122,6 +123,82 @@ pub struct ExternalCacheAudit {
     pub repos: Vec<CachedRepo>,
     /// True when [`MAX_REPOS`] was hit and the listing is incomplete.
     pub truncated: bool,
+}
+
+/// What a single [`remove_repo`] call reclaimed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemovedRepo {
+    pub repo_id: String,
+    pub path: PathBuf,
+    /// Measured immediately before the delete, so it is what was actually freed rather
+    /// than a figure from an audit that may be minutes stale.
+    pub bytes: u64,
+    pub file_count: usize,
+}
+
+/// Delete one `models--*` repo directory from an external hub.
+///
+/// Takes a repo id, never a path, and resolves it by listing the root and matching against
+/// what [`audit`] would have reported. That inverts the usual validate-then-trust order:
+/// instead of checking a caller-supplied path for traversal, the set of deletable
+/// directories is enumerated from disk and the request can only select from it. A `..`, an
+/// absolute path, or a symlink pointing out of the cache has nothing to match.
+///
+/// All the refusals in [`audit`] apply — a symlinked root, and the managed library cache,
+/// which must never be deletable through the door marked "external".
+pub fn remove_repo(root: &Path, repo_id: &str, library_hub: Option<&Path>) -> Result<RemovedRepo> {
+    let meta = fs::symlink_metadata(root)?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        bail!(
+            "Refusing to delete inside {}: not a directory, or a symlink whose target is \
+             what would actually be removed",
+            root.display()
+        );
+    }
+    let canonical = root.canonicalize()?;
+    if library_hub
+        .and_then(|path| path.canonicalize().ok())
+        .as_deref()
+        == Some(canonical.as_path())
+    {
+        bail!(
+            "{} is the managed library cache; delete models there through the library, not \
+             the external-cache audit",
+            canonical.display()
+        );
+    }
+
+    let mut matches = Vec::new();
+    for entry in fs::read_dir(&canonical)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if file_type.is_symlink() || !file_type.is_dir() || !name.starts_with("models--") {
+            continue;
+        }
+        if repo_id_from_dir(&name) == repo_id {
+            matches.push(entry.path());
+        }
+    }
+    let target = match matches.len() {
+        0 => bail!("No cached repo named {repo_id} in {}", canonical.display()),
+        1 => matches.remove(0),
+        // Two directory names collapsing to one repo id means the id is not enough to say
+        // what to delete. Guessing here would delete the wrong model.
+        count => bail!(
+            "{count} directories in {} map to {repo_id}; refusing to guess which to delete",
+            canonical.display()
+        ),
+    };
+
+    let stats = walk_files(&target).unwrap_or_default();
+    fs::remove_dir_all(&target)?;
+    Ok(RemovedRepo {
+        repo_id: repo_id.to_string(),
+        path: target,
+        bytes: stats.bytes,
+        file_count: stats.files,
+    })
 }
 
 /// Default user-wide hub, when it exists.
@@ -278,11 +355,13 @@ fn walk_files(root: &Path) -> Result<WalkStats> {
             let meta = entry.metadata()?;
             stats.bytes += meta.len();
             stats.files += 1;
-            if let Ok(modified) = meta.modified() {
-                if let Ok(since) = modified.duration_since(std::time::UNIX_EPOCH) {
-                    let secs = since.as_secs();
-                    stats.newest_mtime = Some(stats.newest_mtime.map_or(secs, |t| t.max(secs)));
-                }
+            let since_epoch = meta
+                .modified()
+                .ok()
+                .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok());
+            if let Some(since) = since_epoch {
+                let secs = since.as_secs();
+                stats.newest_mtime = Some(stats.newest_mtime.map_or(secs, |t| t.max(secs)));
             }
         }
     }
@@ -702,5 +781,70 @@ mod tests {
         let link = dir.path().join("link");
         std::os::unix::fs::symlink(&real, &link).unwrap();
         assert!(audit(&link, None).is_err());
+    }
+
+    #[test]
+    fn removing_a_repo_reports_what_it_freed_and_leaves_its_neighbours_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = dir.path().join("hub");
+        fs::create_dir_all(&hub).unwrap();
+        write_repo(&hub, "acme--doomed", &[("a", 4096), ("b", 2048)], None);
+        write_repo(&hub, "acme--keeper", &[("a", 1024)], None);
+
+        let removed = remove_repo(&hub, "acme/doomed", None).unwrap();
+        assert_eq!(removed.bytes, 4096 + 2048);
+        assert_eq!(removed.file_count, 2);
+        assert!(!hub.join("models--acme--doomed").exists());
+        assert!(hub.join("models--acme--keeper").exists());
+    }
+
+    #[test]
+    fn a_repo_id_that_is_really_a_path_matches_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = dir.path().join("hub");
+        fs::create_dir_all(&hub).unwrap();
+        write_repo(&hub, "acme--keeper", &[("a", 1024)], None);
+        let outside = dir.path().join("precious");
+        fs::create_dir_all(&outside).unwrap();
+
+        // Ids are matched against directories found on disk, so traversal has nothing to
+        // resolve against: these are simply repos that do not exist.
+        for attempt in ["../precious", "/etc", "..", "acme/keeper/../../precious"] {
+            let error = remove_repo(&hub, attempt, None).unwrap_err().to_string();
+            assert!(error.contains("No cached repo named"), "{attempt}: {error}");
+        }
+        assert!(outside.exists());
+        assert!(hub.join("models--acme--keeper").exists());
+    }
+
+    #[test]
+    fn deleting_from_the_managed_cache_through_this_door_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = dir.path().join("hub");
+        fs::create_dir_all(&hub).unwrap();
+        write_repo(&hub, "acme--served", &[("a", 1024)], None);
+
+        let error = remove_repo(&hub, "acme/served", Some(&hub))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("managed library cache"), "{error}");
+        assert!(hub.join("models--acme--served").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_repo_directory_is_not_deletable() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = dir.path().join("hub");
+        fs::create_dir_all(&hub).unwrap();
+        let elsewhere = dir.path().join("elsewhere");
+        fs::create_dir_all(elsewhere.join("blobs")).unwrap();
+        fs::write(elsewhere.join("blobs/a"), vec![0u8; 32]).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, hub.join("models--acme--linked")).unwrap();
+
+        // A link in the cache is someone else's storage borrowed, and `remove_dir_all`
+        // through it would take the target with it.
+        assert!(remove_repo(&hub, "acme/linked", None).is_err());
+        assert!(elsewhere.join("blobs/a").exists());
     }
 }

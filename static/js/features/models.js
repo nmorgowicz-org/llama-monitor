@@ -1843,6 +1843,8 @@ export function initModels() {
                 initHfDownloadTab();
             } else if (target === 'import-lab') {
                 initImportLab();
+            } else if (target === 'disk') {
+                initDiskTab();
             } else if (target === 'library' && !inventoryCache) {
                 loadModels();
             }
@@ -2872,6 +2874,301 @@ async function detectMmprojCompanion(repoId) {
 function hideMmprojSection() {
     const el = document.getElementById('mm-mmproj-section');
     if (el) el.style.display = 'none';
+}
+
+// ── Disk tab: the Hugging Face cache the app does not manage ─────────────────
+//
+// The library tab reports what can be launched. This one reports what is merely
+// taking up space: repos downloaded by hand, by `mlx_lm.convert`, or by a script,
+// all of which land in ~/.cache/huggingface and are invisible to every other tab.
+//
+// Never scans on open. A cold walk of a few hundred gigabytes is not something to
+// start because someone clicked a tab, so the first render is an empty state with a
+// button, and every later render reuses what that button fetched.
+
+let diskAudit = null;
+const diskSelection = new Set();
+
+const DISK_KIND_LABELS = {
+    text: 'Text',
+    vision: 'Vision',
+    audio: 'Audio',
+    embedding: 'Embedding',
+    unknown: 'Unknown',
+};
+
+function initDiskTab() {
+    const scanBtn = document.getElementById('mm-disk-scan');
+    if (!scanBtn || scanBtn.dataset.wired === '1') return;
+    scanBtn.dataset.wired = '1';
+    scanBtn.addEventListener('click', () => scanDiskCache());
+    document.getElementById('mm-disk-delete')?.addEventListener('click', deleteSelectedDiskRepos);
+    document.getElementById('mm-disk-import')?.addEventListener('click', importSelectedDiskRepos);
+    document.getElementById('mm-disk-filters')?.addEventListener('change', renderDiskRows);
+    document.getElementById('mm-disk-rows')?.addEventListener('change', (event) => {
+        const box = event.target.closest('input[data-repo]');
+        if (!box) return;
+        if (box.checked) diskSelection.add(box.dataset.repo);
+        else diskSelection.delete(box.dataset.repo);
+        renderDiskSelection();
+    });
+}
+
+async function scanDiskCache() {
+    const rows = document.getElementById('mm-disk-rows');
+    const scanBtn = document.getElementById('mm-disk-scan');
+    if (rows) rows.innerHTML = '<div class="mm-loading">Walking the shared cache…</div>';
+    if (scanBtn) scanBtn.disabled = true;
+    try {
+        const resp = await fetch('/api/models/external-cache', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || 'Scan failed');
+        if (!data.present) {
+            diskAudit = null;
+            if (rows) {
+                rows.innerHTML = '<div class="mm-import-empty-state">No shared Hugging Face cache on this machine. Everything the app can see is already in the library.</div>';
+            }
+            setDiskTotals('Nothing outside the library.');
+            return;
+        }
+        diskAudit = data.audit;
+        diskSelection.clear();
+        renderDiskTotals();
+        renderDiskRows();
+    } catch (error) {
+        if (rows) rows.innerHTML = `<div class="mm-import-empty-state">${escapeHtml(error.message || String(error))}</div>`;
+    } finally {
+        if (scanBtn) scanBtn.disabled = false;
+    }
+}
+
+function setDiskTotals(text) {
+    const totals = document.getElementById('mm-disk-totals');
+    if (totals) totals.textContent = text;
+}
+
+function renderDiskTotals() {
+    if (!diskAudit) return;
+    const byKind = new Map();
+    let duplicateBytes = 0;
+    for (const repo of diskAudit.repos) {
+        byKind.set(repo.kind, (byKind.get(repo.kind) || 0) + repo.bytes);
+        if (repo.in_library) duplicateBytes += repo.bytes;
+    }
+    const parts = [...byKind.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([kind, bytes]) => `${DISK_KIND_LABELS[kind] || kind} ${formatBytes(bytes)}`);
+    const totals = document.getElementById('mm-disk-totals');
+    if (totals) {
+        // The duplicate line is the actionable one: those bytes exist twice on this
+        // machine, so reclaiming them costs nothing.
+        // eslint-disable-next-line no-unsanitized/property -- only formatBytes numerics and escapeHtml'd text
+        totals.innerHTML = [
+            `<strong>${formatBytes(diskAudit.total_bytes)}</strong> in ${diskAudit.repos.length} repos`,
+            parts.length ? `<span class="mm-disk-breakdown">${escapeHtml(parts.join(' · '))}</span>` : '',
+            duplicateBytes ? `<span class="mm-disk-dupe">${formatBytes(duplicateBytes)} already in your library</span>` : '',
+            diskAudit.unaccounted_bytes ? `<span class="mm-disk-note">${formatBytes(diskAudit.unaccounted_bytes)} not in a model repo, not listed below</span>` : '',
+            diskAudit.truncated ? '<span class="mm-disk-note">Listing was truncated; some repos are not shown.</span>' : '',
+        ].filter(Boolean).join('<br>');
+    }
+    const count = document.getElementById('mm-disk-tab-count');
+    if (count) count.textContent = String(diskAudit.repos.length);
+    document.getElementById('mm-disk-filters')?.removeAttribute('hidden');
+}
+
+function diskKindFilter() {
+    const boxes = document.querySelectorAll('#mm-disk-filters input[data-kind]');
+    const allowed = new Set();
+    boxes.forEach(box => { if (box.checked) allowed.add(box.dataset.kind); });
+    return allowed;
+}
+
+function renderDiskRows() {
+    const rows = document.getElementById('mm-disk-rows');
+    if (!rows || !diskAudit) return;
+    const allowed = diskKindFilter();
+    const visible = diskAudit.repos.filter(repo => allowed.has(repo.kind));
+    if (!visible.length) {
+        rows.innerHTML = '<div class="mm-import-empty-state">No repos match the selected kinds.</div>';
+        renderDiskSelection();
+        return;
+    }
+    // eslint-disable-next-line no-unsanitized/property -- every interpolated repo field goes through escapeHtml
+    rows.innerHTML = visible.map(repo => {
+        const badges = [];
+        badges.push(`<span class="mm-disk-badge mm-disk-badge--${escapeHtml(repo.kind)}">${escapeHtml(DISK_KIND_LABELS[repo.kind] || repo.kind)}</span>`);
+        // Where the verdict came from, always shown: "the config says so" and "the
+        // folder name says so" are different levels of confidence and the next button
+        // on this row is Delete.
+        if (repo.kind_source === 'repo-name') badges.push('<span class="mm-disk-badge mm-disk-badge--weak" title="No config.json was readable; this is a guess from the repo name">name only</span>');
+        if (repo.kind_source === 'none') badges.push('<span class="mm-disk-badge mm-disk-badge--weak" title="Nothing readable said what this is">unidentified</span>');
+        if (repo.has_vision) badges.push('<span class="mm-disk-badge mm-disk-badge--cap" title="Config declares a vision tower">+vision</span>');
+        if (repo.has_audio) badges.push('<span class="mm-disk-badge mm-disk-badge--cap" title="Config declares an audio tower">+audio</span>');
+        if (repo.name_hint) badges.push(`<span class="mm-disk-badge mm-disk-badge--weak" title="The repo name suggests ${escapeHtml(DISK_KIND_LABELS[repo.name_hint] || repo.name_hint)}, the config does not">name says ${escapeHtml(DISK_KIND_LABELS[repo.name_hint] || repo.name_hint)}</span>`);
+        if (repo.in_library) badges.push('<span class="mm-disk-badge mm-disk-badge--dupe" title="Your library already has this repo cached; this copy is redundant">duplicate</span>');
+        const meta = [`${repo.file_count} files`];
+        if (repo.revisions.length > 1) meta.push(`${repo.revisions.length} revisions`);
+        if (repo.last_modified_unix) meta.push(`touched ${new Date(repo.last_modified_unix * 1000).toLocaleDateString()}`);
+        const warn = repo.partial_reason
+            ? `<div class="mm-disk-warn">${escapeHtml(repo.partial_reason)}</div>`
+            : '';
+        return `<label class="mm-disk-row">
+            <input type="checkbox" data-repo="${escapeHtml(repo.repo_id)}"${diskSelection.has(repo.repo_id) ? ' checked' : ''}>
+            <span class="mm-disk-size">${formatBytes(repo.bytes)}</span>
+            <span class="mm-disk-id">${escapeHtml(repo.repo_id)}</span>
+            <span class="mm-disk-badges">${badges.join('')}</span>
+            <span class="mm-disk-meta">${escapeHtml(meta.join(' · '))}</span>
+            ${warn}
+        </label>`;
+    }).join('');
+    renderDiskSelection();
+}
+
+function renderDiskSelection() {
+    const label = document.getElementById('mm-disk-selection');
+    const selected = diskAudit
+        ? diskAudit.repos.filter(repo => diskSelection.has(repo.repo_id))
+        : [];
+    const bytes = selected.reduce((sum, repo) => sum + repo.bytes, 0);
+    if (label) {
+        label.textContent = selected.length
+            ? `${selected.length} selected · ${formatBytes(bytes)}`
+            : '';
+    }
+    const disabled = selected.length === 0;
+    const deleteBtn = document.getElementById('mm-disk-delete');
+    const importBtn = document.getElementById('mm-disk-import');
+    if (deleteBtn) deleteBtn.disabled = disabled;
+    if (importBtn) importBtn.disabled = disabled;
+    return selected;
+}
+
+async function deleteSelectedDiskRepos() {
+    const selected = renderDiskSelection();
+    if (!selected.length) return;
+    const bytes = selected.reduce((sum, repo) => sum + repo.bytes, 0);
+    // Spelled out per repo rather than summarised. A wrong bulk delete here is
+    // unrecoverable and the sizes involved are large enough to be worth re-reading.
+    const lines = selected.map(repo => `${formatBytes(repo.bytes)}  ${repo.repo_id}${repo.in_library ? '  (duplicate of a library copy)' : ''}`);
+    const confirmed = await _showConfirm(
+        'Delete from the shared cache',
+        `${selected.length} repo(s), ${formatBytes(bytes)}:\n\n${lines.join('\n')}\n\nThese are deleted from disk, not from the library. Anything not marked duplicate would have to be downloaded again.\nThis cannot be undone.`
+    );
+    if (!confirmed) return;
+    try {
+        const resp = await fetch('/api/models/external-cache/delete', {
+            method: 'POST',
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ repo_ids: selected.map(repo => repo.repo_id) }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || 'Delete failed');
+        const failures = (data.results || []).filter(row => !row.ok);
+        if (failures.length) {
+            showToast(`Freed ${formatBytes(data.freed_bytes)}; ${failures.length} failed: ${failures[0].error}`, 'warning');
+        } else {
+            showToast(`Freed ${formatBytes(data.freed_bytes)}`, 'success');
+        }
+    } catch (error) {
+        showToast(error.message || String(error), 'error');
+        return;
+    }
+    // Re-scan rather than patching the rows: sizes and duplicate flags are now stale,
+    // and this screen is the wrong place to be showing a guess.
+    diskSelection.clear();
+    await scanDiskCache();
+}
+
+/// Repos per import. Mirrors the backend's own cap; checked here so an oversized
+/// selection is a message instead of a whole-batch rejection after the round trip.
+const DISK_IMPORT_LIMIT = 32;
+
+async function importSelectedDiskRepos() {
+    const selected = renderDiskSelection();
+    if (!selected.length) return;
+
+    // The migration planner refuses the entire batch on the first problem, so anything
+    // it would reject is filtered out here and named, rather than taking the rest down
+    // with it. A duplicate would collide with the library copy that already exists; a
+    // repo id that is not exactly `owner/name` is a directory whose name did not decode.
+    const blocked = [];
+    const importable = [];
+    for (const repo of selected) {
+        if (repo.in_library) blocked.push(`${repo.repo_id} — your library already has it`);
+        else if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo.repo_id)) blocked.push(`${repo.repo_id} — not a recognisable repo id`);
+        else importable.push(repo);
+    }
+    if (!importable.length) {
+        showToast(`Nothing to import: ${blocked.join('; ')}`, 'warning');
+        return;
+    }
+    if (importable.length > DISK_IMPORT_LIMIT) {
+        showToast(`Import is limited to ${DISK_IMPORT_LIMIT} repos at a time (${importable.length} selected)`, 'warning');
+        return;
+    }
+
+    const repoIds = importable.map(repo => repo.repo_id);
+    try {
+        const previewResp = await fetch('/api/models/library/migration/preview', {
+            method: 'POST',
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hf_repos: repoIds }),
+        });
+        const plan = await previewResp.json().catch(() => ({}));
+        if (!previewResp.ok) throw new Error(plan.error || 'Import preview failed');
+
+        // The planner returns a full library migration, not just these repos: anything
+        // already in the library that is not in its canonical folder gets moved too, and
+        // presets and sessions are rewritten to follow. That is a bigger action than
+        // "import these", so it is stated rather than buried in a move count.
+        const moves = Array.isArray(plan.moves) ? plan.moves.length : 0;
+        const rewrites = Array.isArray(plan.persistence_rewrites) ? plan.persistence_rewrites.length : 0;
+        const extra = moves > repoIds.length
+            ? `\n\nThis plan also reorganises ${moves - repoIds.length} other path(s) already inside your library into their canonical folders${rewrites ? `, and rewrites ${rewrites} saved file(s) (presets, sessions, tags) to match` : ''}.`
+            : '';
+        const skipped = blocked.length ? `\n\nSkipped: ${blocked.join('; ')}` : '';
+        const confirmed = await _showConfirm(
+            'Import into the library',
+            `${repoIds.length} repo(s) will be moved out of the shared cache and into your managed library:\n\n${repoIds.join('\n')}\n\nThis is a move, not a copy, so the shared cache shrinks by the same amount.${extra}${skipped}`
+        );
+        if (!confirmed) return;
+
+        // Execution is admin-gated because it rewrites paths that presets and sessions
+        // point at, so it needs the stronger token the migration endpoint requires.
+        const tokenResp = await fetch('/api/db/admin-token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
+        if (!tokenData.token) throw new Error('Authentication required to modify the library');
+
+        const execResp = await fetch('/api/models/library/migration/execute', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + tokenData.token,
+            },
+            body: JSON.stringify({
+                plan_id: plan.plan_id,
+                confirmation: 'MIGRATE_MODEL_LIBRARY',
+                hf_repos: repoIds,
+            }),
+        });
+        const result = await execResp.json().catch(() => ({}));
+        if (!execResp.ok) throw new Error(result.error || 'Import failed');
+        showToast(`Imported ${repoIds.length} repo(s) into the library`, 'success');
+    } catch (error) {
+        showToast(error.message || String(error), 'error');
+        return;
+    }
+    diskSelection.clear();
+    inventoryCache = null;
+    await scanDiskCache();
 }
 
 // ── Utilities ────────────────────────────────────────────────────────────────
