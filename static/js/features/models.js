@@ -2150,8 +2150,7 @@ async function initHfDownloadTab() {
         const typedQuery = (searchInput.value || '').trim();
         const query = typedQuery || hfState.activeDiscoverQuery || '';
         const author = (typedQuery ? hfState.activeAuthor : (hfState.activeAuthor || null));
-        const workloadProfile = sessionState.workloadProfile?.id || null;
-        return { query: query || undefined, author: author || undefined, workloadProfile };
+        return { query: query || undefined, author: author || undefined };
     };
 
     // Render discover pills
@@ -2174,7 +2173,6 @@ async function initHfDownloadTab() {
                 discoverPillsContainerId: 'mm-hf-discover-pills',
                 onOpenCardPanel: openCardPanel,
                 onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
-                workloadProfile: sessionState.workloadProfile?.id || null,
                 quantsOnly: hfState.discoveryQuantsOnly,
             });
         },
@@ -2200,7 +2198,6 @@ async function initHfDownloadTab() {
                 discoverPillsContainerId: 'mm-hf-discover-pills',
                 onOpenCardPanel: openCardPanel,
                 onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
-                workloadProfile: sessionState.workloadProfile?.id || null,
                 quantsOnly: hfState.discoveryQuantsOnly,
             });
         },
@@ -2209,7 +2206,7 @@ async function initHfDownloadTab() {
     // Search on input (debounced)
     let searchTimer = null;
     const doSearch = () => {
-        const { query, author, sort, workloadProfile } = buildSearchParams();
+        const { query, author, sort } = buildSearchParams();
         console.log('[HF-SEARCH] mlxActive:', hfState.discoveryScopeMlx, 'ggufActive:', hfState.discoveryScopeGguf, 'query:', query);
         hfSearch({
             query,
@@ -2225,7 +2222,6 @@ async function initHfDownloadTab() {
             discoverPillsContainerId: 'mm-hf-discover-pills',
             onOpenCardPanel: openCardPanel,
             onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
-            workloadProfile,
             quantsOnly: hfState.discoveryQuantsOnly,
         });
     };
@@ -2858,10 +2854,12 @@ async function updateVramDisplay(file) {
             available_vram_bytes: availVram,
             is_unified_memory: isMlx || cachedUnified,
             mmproj_bytes: mmprojBytes,
-            // Model Library starts from the selected product workload rather
-            // than an unrelated generic 8K/default scenario. The backend
-            // normalizes the profile ID into its estimator policy.
-            workload_scenario: sessionState.workloadProfile?.id || 'interactive_coding_agent',
+            // No workload_scenario. This read was `sessionState.workloadProfile?.id`, and
+            // that property is declared nowhere and written nowhere, so the fallback was
+            // taken on every call and the Library quietly estimated every model as a coding
+            // agent. Workload is a spawn-wizard input derived from the page-1 use-case
+            // cards; the Library has no such selection to start from, so it takes the
+            // estimator's own default rather than inventing one.
         });
         const headers = window.authHeaders
             ? { ...window.authHeaders(), 'Content-Type': 'application/json' }

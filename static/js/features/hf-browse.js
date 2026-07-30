@@ -544,7 +544,6 @@ function createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel
 //   discoverPillsContainerId            – optional id of discover-pills container (for loading/active state)
 //   onOpenCardPanel                     – (repoId) => void
 //   onSelectModel                       – (model) => void  (called when user clicks a result row)
-//   workloadProfile                     – current workload profile ID (for Auto sorting)
 
 export async function hfSearch({
   query,
@@ -565,7 +564,6 @@ export async function hfSearch({
   discoverPillsContainerId,
   onOpenCardPanel,
   onSelectModel,
-  workloadProfile,
   quantsOnly = false,
 }) {
   if (!container) return;
@@ -619,7 +617,6 @@ export async function hfSearch({
       cursor: cursor || undefined,
       format: resolvedScope.format,
       includeUnsupported: resolvedScope.includeUnsupported,
-      workload_profile: workloadProfile || null,
       quantsOnly: quantsOnly,
     };
 
@@ -661,8 +658,7 @@ export async function hfSearch({
           query, author, sort, limit, mlxActive, ggufActive, allActive, hfSort, minParamB, cursor: nextCursor, append: true,
           container, filelistContainer, quickpicksContainer,
           discoverPillsContainerId, onOpenCardPanel, onSelectModel,
-          workloadProfile,
-        }));
+                }));
         container.appendChild(moreBtn);
       }
       if (!append) scrollToResults();
@@ -775,8 +771,7 @@ export async function hfSearch({
         _cascadeDepth: 0,
         container, filelistContainer, quickpicksContainer,
         discoverPillsContainerId, onOpenCardPanel, onSelectModel,
-        workloadProfile,
-      }));
+            }));
       container.appendChild(moreBtn);
     }
 
@@ -791,8 +786,7 @@ export async function hfSearch({
         _cascadeDepth: _cascadeDepth + 1,
         container, filelistContainer, quickpicksContainer,
         discoverPillsContainerId, onOpenCardPanel, onSelectModel,
-        workloadProfile,
-      });
+            });
     }
   } catch (err) {
     clearPillLoading();

@@ -63,7 +63,7 @@ function kvBpe(quant) { return KV_BPE[quant] ?? 1.0; }
 // ── Workload profiles ────────────────────────────────────────────────────────
 // UI removed (Phase 7B2: dedicated step-3 picker + confirmation gate was redundant
 // with page-1 use-case selection). Backend integration (workload_scenario → VRAM
-// estimation) remains active. wizardState.hardware.workloadProfile defaults to
+// estimation) remains active. wizardState.hardware.workloadScenario defaults to
 // 'interactive_coding_agent' and is serialized as workload_scenario on spawn.
 // Page-1 "what are you running this for?" cards map to workload_scenario strings
 // consumed by the backend VRAM estimator.
@@ -71,6 +71,22 @@ const USE_CASE_TO_PROFILE = {
   agentic: 'interactive_coding_agent',
   general: 'general_chat',
   roleplay: 'roleplay_storytelling',
+};
+
+// The one concrete thing a use-case should change on llama.cpp: how hard the KV cache is
+// quantized. Tool-calling degrades badly below q8_0 -- q4_0 KV sends agentic runs into
+// repeat loops -- so anything that has to call tools holds the q8_0 floor. Roleplay has no
+// tool grammar to corrupt and would rather spend the saved VRAM on a longer memory, so it
+// drops to q4_0.
+//
+// Rapid-MLX is deliberately absent: its KV quantization is a different mechanism with a
+// different floor, and `--kv-cache-dtype` does not quantize the live cache on the batch
+// path at all, so copying llama.cpp's numbers across would be guesswork dressed as a
+// recommendation.
+const USE_CASE_TO_KV_DTYPE = {
+  agentic: 'q8_0',
+  general: 'q8_0',
+  roleplay: 'q4_0',
 };
 
 function formatCtx(n) {
@@ -222,6 +238,8 @@ export const wizardState = {
     batchSize: 2048, ubatchSize: 2048,
     parallelSlots: 1,
     cacheTypeK: 'q8_0', cacheTypeV: 'q8_0',
+    // True once the user expresses a KV preference; stops the use-case cards seeding it.
+    kvDtypeUserSet: false,
     nCpuMoe: 0,
     tensorSplit: '',
     fitEnabled: null,
@@ -463,6 +481,7 @@ export function openSpawnWizard(opts = {}) {
     // the user only needs to pick a model. Settings are applied but not locked.
     const t = opts.templatePreset;
     if (t.context_size)      wizardState.hardware.contextSize    = t.context_size;
+    if (t.ctk || t.ctv)      wizardState.hardware.kvDtypeUserSet = true;
     if (t.ctk)               wizardState.hardware.cacheTypeK     = t.ctk;
     if (t.ctv)               wizardState.hardware.cacheTypeV     = t.ctv;
     if (t.batch_size)        wizardState.hardware.batchSize      = t.batch_size;
@@ -607,6 +626,7 @@ function resetWizardState() {
   wizardState.hardware.parallelSlots = 1;
   wizardState.hardware.cacheTypeK = '';
   wizardState.hardware.cacheTypeV = '';
+  wizardState.hardware.kvDtypeUserSet = false;
   wizardState.hardware.flashAttn = '';
   wizardState.hardware.kvUnified = null;
   wizardState.hardware.mlock = false;
@@ -967,6 +987,7 @@ function bindEvents() {
        card.classList.add('selected');
        const profileId = USE_CASE_TO_PROFILE[card.dataset.usecase];
        if (profileId) wizardState.hardware.workloadScenario = profileId;
+       applyUseCaseKvDtype(card.dataset.usecase);
        updateVramDisplay();
        refreshStepGuardrails();
      });
@@ -1102,6 +1123,14 @@ function bindEvents() {
   ].forEach(el => {
     el?.addEventListener('input', onHardwareChange);
     el?.addEventListener('change', onHardwareChange);
+  });
+
+  // A change on either KV select means the user now has an opinion about KV quantization,
+  // so the use-case cards stop seeding it. Advisor suggestions dispatch a real change event
+  // through these same controls, and accepting one is just as much a choice as picking from
+  // the dropdown, so it counts too.
+  [dom.cacheTypeKSelect, dom.cacheTypeVSelect].forEach(el => {
+    el?.addEventListener('change', () => { wizardState.hardware.kvDtypeUserSet = true; });
   });
 
   // mmproj "Browse" button: open file browser for mmproj projectors
@@ -1450,8 +1479,28 @@ function _applyRapidMlxDefaults() {
 }
 
 // ── Workload profile helpers ─────────────────────────────────────────────────
-// Dedicated step-3 picker removed (Phase 7B2). workloadProfile is now derived
+// Dedicated step-3 picker removed (Phase 7B2). workloadScenario is now derived
 // from page-1 use-case selection only; no UI confirmation gate.
+
+// Seed the KV dtype from the chosen use case, on llama.cpp only.
+//
+// This is guidance, not policy: it moves the starting point, and the moment the user
+// expresses a KV preference of their own -- by changing the control, accepting an advisor
+// suggestion, or loading a preset that carries one -- it stops touching the value. Same
+// omission-only rule the VRAM estimator uses for its scenario-derived parameters: fill the
+// gap, never overwrite an answer someone already gave.
+function applyUseCaseKvDtype(useCase) {
+  if (wizardState.engine.selected === 'rapid_mlx') return;
+  if (wizardState.hardware.kvDtypeUserSet) return;
+
+  const dtype = USE_CASE_TO_KV_DTYPE[useCase];
+  if (!dtype) return;
+
+  wizardState.hardware.cacheTypeK = dtype;
+  wizardState.hardware.cacheTypeV = dtype;
+  if (dom.cacheTypeKSelect) dom.cacheTypeKSelect.value = dtype;
+  if (dom.cacheTypeVSelect) dom.cacheTypeVSelect.value = dtype;
+}
 
 async function refreshHfTokenState() {
   try {
@@ -6218,6 +6267,8 @@ async function renderScenarioCards(modelBytes, arch, availVram) {
 
     if (selectable) {
       const applyScenario = () => {
+        // Picking a KV scenario card is an explicit KV choice; stop seeding from use case.
+        wizardState.hardware.kvDtypeUserSet = true;
         wizardState.hardware.cacheTypeK = s.kk;
         wizardState.hardware.cacheTypeV = s.kv;
         // Keep current context (already validated to fit).
@@ -8506,6 +8557,8 @@ async function triggerAutoSize() {
 
     // Apply recommended settings
     wizardState.hardware.contextSize = r.context_size;
+    // A recommendation carries its own KV values; they outrank the use-case seed.
+    wizardState.hardware.kvDtypeUserSet = true;
     wizardState.hardware.cacheTypeK  = r.kv_quant_k;
     wizardState.hardware.cacheTypeV  = r.kv_quant_v;
     wizardState.hardware.ubatchSize  = r.ubatch_size;
