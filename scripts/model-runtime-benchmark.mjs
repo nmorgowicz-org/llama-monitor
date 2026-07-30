@@ -296,6 +296,15 @@ function isSubset(expected, actual) {
   return Object.entries(expected).every(([key, value]) => isSubset(value, actual[key]));
 }
 
+// `followup` and `fork` rebuild their prompt with includeMarkers=false, so the CHECK_*
+// constants are absent from the corpus and the instruction asks for a concise answer instead
+// of NAME=VALUE lines. Recall is therefore unmeasurable in those phases, and scoring it
+// anyway records 0/5 on a third of every cache receipt's attempts — which reads as the cache
+// corrupting long context. Any phase that did not carry the markers scores null instead.
+function phaseIncludesMarkers(phase) {
+  return phase !== 'followup' && phase !== 'fork';
+}
+
 // Markers are scattered numeric constants scored as graduated recall rather than
 // a single verbatim string match, so fidelity survives sampling/temperature
 // variance and cannot be satisfied by pattern-completing repeated filler text.
@@ -328,7 +337,7 @@ function scoreMarkerRecall(markers, completionText) {
   };
 }
 
-function scoreFidelity(workload, response) {
+function scoreFidelity(workload, response, phase) {
   const matchingTool = workload.expected_tool_name
     ? response.tool_calls.find((call) => call.function?.name === workload.expected_tool_name)
     : null;
@@ -359,10 +368,12 @@ function scoreFidelity(workload, response) {
   return {
     request_succeeded: requestSucceeded,
     failure_reason: failureReason,
-    marker_recall: scoreMarkerRecall(
-      workload.markers,
-      response.completion_text ?? response.completion_preview,
-    ),
+    marker_recall: phaseIncludesMarkers(phase)
+      ? scoreMarkerRecall(
+        workload.markers,
+        response.completion_text ?? response.completion_preview,
+      )
+      : null,
     expected_tool_name: workload.expected_tool_name ?? null,
     tool_call_observed: workload.expected_tool_name
       ? Boolean(matchingTool)
@@ -599,7 +610,7 @@ async function runAttempt(baseUrl, metricsPath, cell, phase, extension = false, 
   response.round_trip_generation_tokens_per_second = roundTripGenerationMs > 0
     ? Math.round((roundTripCompletionTokens * 100000) / roundTripGenerationMs) / 100
     : null;
-  const fidelity = scoreFidelity(cell.workload, response);
+  const fidelity = scoreFidelity(cell.workload, response, phase);
   const conversationAssistantContent = response.completion_text;
   // Full completions are needed for scoring but are deliberately kept out of
   // durable receipts; the bounded preview remains the diagnostic artifact.
@@ -676,6 +687,9 @@ async function runManifest(manifest, selectedCells, serverPid = null) {
       let requestOverride = null;
       if (phase === 'followup' || phase === 'fork') {
         if (!coldAttempt?.conversation_assistant_content) die(`${cell.id} ${phase} requires a completed cold assistant turn.`);
+        // Markerless by construction — the branch that makes `phaseIncludesMarkers(phase)`
+        // false. Keep the two in step: a phase added here must be added there too, or its
+        // receipts will record a recall score for markers that were never in the prompt.
         const baseRequest = await requestFor(cell, false);
         const priorMessages = [...baseRequest.messages, { role: 'assistant', content: coldAttempt.conversation_assistant_content }];
         const suffix = cell.workload.exact_extension_text ?? makeCorpus(cell.workload, cell.workload.extension_words ?? 0, false);

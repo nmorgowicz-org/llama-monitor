@@ -89,6 +89,21 @@ disable normal one-slot same-session reuse. Keep Apple single-user Auto=`0`
 until a separate multi-branch/slot-pressure test proves an extra host-cache
 budget benefits the target workload.
 
+Marker recall is identical between the two conditions in all twelve
+context × phase pairs, so `-cram 0` costs no fidelity either — cold and repeat
+score 5/5 at 131K, 160K, and 200K under both settings. Recall is the stronger
+of the two signals here, because the sub-100 ms TTFT differences are near
+measurement noise while a recall difference would not be.
+
+**Reading recall in these receipts:** only the `cold` and `repeat` phases carry
+scoreable recall. `followup` and `fork` rebuild the prompt without the CHECK_\*
+constants and ask for a concise answer instead of `NAME=VALUE` lines, so recall
+is not measurable there. Receipts captured before 2026-07-30 nonetheless record
+`recall_rate: 0` for those phases, which is a scorer artifact and **not**
+evidence that the cache corrupts long context; the two `5/5` outliers
+(160K fork, 200K followup) are the model echoing markers from the prior
+assistant turn. The harness now scores those phases `null`.
+
 ## Current product policy
 
 1. Estimate mandatory memory as weights + active KV/context + runtime
