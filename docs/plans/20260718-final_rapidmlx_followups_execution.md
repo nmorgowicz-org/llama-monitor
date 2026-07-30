@@ -407,17 +407,46 @@ real model `nightmedia-27b-mxfp8-mlx`: argv contains `--served-model-name live-p
 `--max-tokens 4096`, and none of the three invented defaults. 1030 lib tests pass;
 `cargo fmt --check` and `cargo clippy --all-targets` are silent on lib and bin.
 
-**Noted, not changed:** `command.rs` clamps `prefill_step_size` to `1..=2048`. That is a
-deliberate crash guard — the 2026-07-24 investigation overflowed Metal's single-buffer cap at
-`32768`, and the standing default is `512` — but it also makes the documented `4096` rescue
-value unreachable through the product. Left alone; reopen with an advanced-only path if a
-model ever needs it.
+**Noted, not changed:** `command.rs` clamps `prefill_step_size` to `1..=2048`. Correcting an
+earlier note here that called this clamp too tight: `2048` is rapid-mlx's own native default,
+`512` is llama-monitor's benchmarked text setting, and vision work advances at most
+`1024 → 1536 → 2048`. The `4096` figure in the 2026-07-24 archive was a step *down* from a
+crashing `32768`, not a target. The clamp covers every sanctioned use.
 
-##### Phase 7A3 — API endpoint + preset migration — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
+##### Phase 7A3 — API endpoint + preset migration — Verified complete
 
-- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
+- **State:** Verified complete — Coordinator, 2026-07-30
 - **Files:** rapid_mlx_runtime.rs (POST /api/rapid-mlx/command-preview with auth), presets/mod.rs (v3 migration), api/mod.rs (route)
-- **Commit:** 774b611
+- **Commit:** 774b611 + HEAD
+
+**Reachability:** route registered at `rapid_mlx_runtime.rs:285`, mounted in `api/mod.rs:1034`,
+auth filter at `:503-519`. Live check on a throwaway instance: request without a token returns
+`401`, with a token returns argv. `migrate_preset` is called from `load_presets` and from the
+save boundary, both reachable.
+
+**Migration verified live, not just in unit tests.** A planted pre-Phase-7 v2 preset loads and
+migrates to v3, preserving `prefix_cache_enabled=true` and `retained_cache_mib=8192`, and
+materializing `prefill_step_size: 512`, `hybrid_mode: auto`, `disk_checkpoint_interval: 0`.
+
+**Defect found and fixed — silent total preset loss.** `load_presets` deserialized the file as
+one `Vec<ModelPreset>`, so a single unreadable entry failed the whole parse; the loader then
+wrote `default_presets()` over the file it had just failed to read. Reproduced live: a file
+with two good presets (one user-renamed) plus one malformed entry came back after restart as
+the seed defaults only, with the renamed preset gone and nothing but a `[warn]` line. The v3
+schema change makes an unreadable entry a realistic event, so this was reachable, not
+theoretical.
+
+Fixed by parsing entry by entry (`parse_presets`): a bad entry costs that one preset, is
+reported by index and name, and the file is left byte-identical because a partial read
+suppresses every write-back (migration save and GGUF backfill both). A file that is not JSON
+at all is renamed to `presets.json.unreadable-<epoch>` rather than overwritten. Re-ran the
+original scenario: the renamed preset survives and the on-disk file is unchanged. Three
+regression tests added.
+
+**Also corrected:** the v2→v3 comment in `migrate_preset` claimed existing presets "load with
+None (safe degraded mode)". Serde defaults do make the migration marker-only, but the defaults
+are llama-monitor's — a v2 preset moves from the runtime's `2048` to `512`. Intended policy,
+but not a no-op, and the comment now says so.
 
 #### Phase 7B — Shared Wizard/Editor UI, teaching, captures, tests (split into 4 parts)
 
@@ -765,7 +794,7 @@ Only the Coordinator updates this table after independent verification.
 | 6.5b | Not started — parked behind 6.5a | — | — | Item 14 discharged early (`ca3cffb`) | Fresh 6.5a Verifier PASS required before items 12, 13, 15 begin. Item 14 (refuse the corrupting in-trunk sidecar layout) was taken early because it prevents silent trunk corruption on models the user already has; it qualifies nothing and does not unpark the sub-phase |
 | 7A1 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug). Catalog reachability defect discharged 2026-07-30; awaiting Verifier | — | PASS (settings.rs validated, mod.rs validated, 814 tests pass) — note this PASS predates the reachability finding | HEAD pending | `ValidationContext` fields still unread; prefix-cache model differs between catalog and API |
 | 7A2 | Verified complete | Coordinator, 2026-07-30 | PASS — reachability clean; two defects found and fixed: the preview kept a second config→argv mapping that dropped 12 flags and invented 3, and capability probing read the wrong stream so the endpoint failed against every real runtime. Live-checked against installed 0.11.1 with no capabilities override. 1030 tests | 774b611 + HEAD | `prefill_step_size` clamp keeps the documented 4096 value unreachable (recorded, deliberate) |
-| 7A3 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (command-preview endpoint with auth, preset migration v3, 820 tests) | 774b611 | None |
+| 7A3 | Verified complete | Coordinator, 2026-07-30 | PASS — route/auth reachable, live 401 without token; v2→v3 migration verified live on a planted pre-Phase-7 preset. One defect found and fixed: a single unreadable preset failed the whole-file parse and the loader then wrote defaults over the file, silently destroying every other preset. Now parsed entry by entry; a partial read never writes back; an unparseable file is preserved rather than overwritten. Reproduced and re-verified live. 1033 tests | 774b611 + HEAD | Earlier 7A2 note about the `4096` clamp was wrong; corrected in place |
 | 7B1 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (existing controls wired to catalog, Web UI group, sampling selector, prompt storage, screenshots verified) | 31af56b | None |
 | 7B2 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (workload profiles with editable assumptions, confirmation flow, screenshots verified) | 5d00ee0 | None |
 | 7B3 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (roleplay teaching panel, 3 tests) | 91468fb | None |

@@ -50,8 +50,12 @@ pub fn migrate_preset(preset: &mut ModelPreset) -> bool {
         migrated = true;
     }
     // v2 → v3: Phase 7A — all Phase 7 config fields.
-    // All fields use #[serde(default, skip_serializing_if = "Option::is_none")] so
-    // existing presets load with None (safe degraded mode). Migration bumps schema marker.
+    // Every field carries a serde default, so a v2 preset deserializes without help and the
+    // migration only bumps the schema marker. That is not the same as behaviorally neutral:
+    // the defaults are llama-monitor's, not rapid-mlx's, so a pre-Phase-7 preset picks up
+    // `prefill_step_size: 512` where the runtime's own default is 2048. That is the intended
+    // policy (512 measured better for text; vision work raises it deliberately), but it is a
+    // real change to how the preset launches, not a no-op.
     if preset.schema_version.unwrap_or(2) < 3 {
         preset.schema_version = Some(3);
         migrated = true;
@@ -344,12 +348,86 @@ pub fn next_id() -> String {
     format!("p{ts}")
 }
 
+/// Outcome of reading a presets file entry by entry.
+struct PresetParse {
+    presets: Vec<ModelPreset>,
+    /// Entries that could not be understood, described well enough to find by hand.
+    rejected: Vec<String>,
+}
+
+/// Parses each entry independently so one unreadable preset costs one preset.
+///
+/// Deserializing the file as a single `Vec<ModelPreset>` meant any one bad entry failed the
+/// whole parse, and the caller then wrote defaults over the file — silently destroying every
+/// other preset the user had. A schema mismatch is a realistic way to get there, since v3
+/// added a large block of fields.
+fn parse_presets(contents: &str) -> Result<PresetParse, serde_json::Error> {
+    let entries: Vec<serde_json::Value> = serde_json::from_str(contents)?;
+    let mut presets = Vec::with_capacity(entries.len());
+    let mut rejected = Vec::new();
+    for (index, entry) in entries.into_iter().enumerate() {
+        let label = entry
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| entry.get("id").and_then(serde_json::Value::as_str))
+            .unwrap_or("<unnamed>")
+            .to_string();
+        match serde_json::from_value::<ModelPreset>(entry) {
+            Ok(preset) => presets.push(preset),
+            Err(error) => rejected.push(format!("entry {index} ({label}): {error}")),
+        }
+    }
+    Ok(PresetParse { presets, rejected })
+}
+
+/// Moves a file we could not read at all out of the way instead of overwriting it.
+///
+/// Returning defaults is recoverable; writing them over the only copy is not.
+fn quarantine_unreadable(path: &Path) {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut backup = path.as_os_str().to_owned();
+    backup.push(format!(".unreadable-{stamp}"));
+    let backup = std::path::PathBuf::from(backup);
+    match std::fs::rename(path, &backup) {
+        Ok(()) => eprintln!(
+            "[warn] Kept the unreadable presets file at {} — defaults were not written over it",
+            backup.display()
+        ),
+        Err(error) => eprintln!(
+            "[error] Could not preserve the unreadable presets file at {}: {error}. \
+             Leaving it untouched rather than replacing it.",
+            path.display()
+        ),
+    }
+}
+
 /// Load presets from disk, falling back to defaults if file doesn't exist.
 pub fn load_presets(path: &Path) -> Vec<ModelPreset> {
     if path.exists() {
         match std::fs::read_to_string(path) {
-            Ok(contents) => match serde_json::from_str::<Vec<ModelPreset>>(&contents) {
-                Ok(mut presets) if !presets.is_empty() => {
+            Ok(contents) => match parse_presets(&contents) {
+                Ok(parse) if !parse.presets.is_empty() => {
+                    let mut presets = parse.presets;
+                    // Anything we could not read stays on disk untouched. Saving here would
+                    // persist the surviving subset and drop the rest permanently, so a
+                    // partial read makes this load read-only.
+                    let readable_in_full = parse.rejected.is_empty();
+                    for rejection in &parse.rejected {
+                        eprintln!("[warn] Skipping unreadable preset: {rejection}");
+                    }
+                    if !readable_in_full {
+                        eprintln!(
+                            "[warn] {} preset(s) in {} could not be read. The other {} loaded \
+                             normally, and the file is left as-is so nothing is lost — fix or \
+                             remove the entries above to make them editable again.",
+                            parse.rejected.len(),
+                            path.display(),
+                            presets.len()
+                        );
+                    }
                     // D32: forward-migrate presets from prior schema versions.
                     let mut any_migrated = false;
                     for preset in presets.iter_mut() {
@@ -357,20 +435,41 @@ pub fn load_presets(path: &Path) -> Vec<ModelPreset> {
                             any_migrated = true;
                         }
                     }
-                    if any_migrated {
+                    if any_migrated && readable_in_full {
                         let _ = save_presets(path, &presets);
                     }
                     // Backfill GGUF-derived metadata (architecture_kind, active_params_b,
                     // expert counts, etc.) for presets saved before these fields existed,
                     // then persist so the welcome page / launch cards render correctly
                     // without requiring the user to re-save each preset.
-                    backfill_gguf_metadata(path, &mut presets);
+                    if readable_in_full {
+                        backfill_gguf_metadata(path, &mut presets);
+                    }
                     return presets;
                 }
-                Ok(_) => eprintln!("[warn] Presets file is empty, using defaults"),
-                Err(e) => eprintln!("[warn] Failed to parse presets file: {e}, using defaults"),
+                Ok(parse) if !parse.rejected.is_empty() => {
+                    for rejection in &parse.rejected {
+                        eprintln!("[warn] Skipping unreadable preset: {rejection}");
+                    }
+                    eprintln!(
+                        "[warn] No preset in {} could be read, so defaults are in use for this \
+                         session. The file is left as-is.",
+                        path.display()
+                    );
+                    return default_presets();
+                }
+                Ok(_) => {
+                    eprintln!("[warn] Presets file is empty, using defaults");
+                }
+                Err(e) => {
+                    eprintln!("[warn] Failed to parse presets file: {e}, using defaults");
+                    quarantine_unreadable(path);
+                }
             },
-            Err(e) => eprintln!("[warn] Failed to read presets file: {e}, using defaults"),
+            Err(e) => {
+                eprintln!("[warn] Failed to read presets file: {e}, using defaults");
+                return default_presets();
+            }
         }
     }
     let presets = default_presets();
@@ -637,6 +736,82 @@ pub fn default_presets() -> Vec<ModelPreset> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// Writes a presets file with two readable presets around one that is not.
+    ///
+    /// The bad entry is a realistic shape, not garbage: a `rapid_mlx.model_source` written
+    /// against an older layout, which is exactly what a schema change produces.
+    fn write_mixed_presets(path: &Path) {
+        let good = |name: &str| {
+            serde_json::json!({
+                "id": name,
+                "name": name,
+                "model_path": "/models/example.gguf",
+                "schema_version": 3,
+            })
+        };
+        let contents = serde_json::json!([
+            good("keeper-one"),
+            {
+                "id": "broken",
+                "name": "broken",
+                "model_path": "/models/example.gguf",
+                "rapid_mlx": { "model_source": { "Local": { "path": "/models/mlx/thing" } } },
+            },
+            good("keeper-two"),
+        ]);
+        std::fs::write(path, serde_json::to_string_pretty(&contents).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn one_unreadable_preset_does_not_destroy_the_others() {
+        // A whole-file `Vec<ModelPreset>` parse used to fail here, after which the loader
+        // wrote defaults over the file — silently deleting every preset the user had.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("presets.json");
+        write_mixed_presets(&path);
+
+        let presets = load_presets(&path);
+
+        let names: Vec<&str> = presets.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["keeper-one", "keeper-two"]);
+    }
+
+    #[test]
+    fn a_partial_read_never_writes_the_surviving_subset_back() {
+        // Persisting after a partial read would drop the unreadable entry permanently,
+        // turning a recoverable problem into data loss. The file must be left alone so the
+        // user can fix the entry by hand.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("presets.json");
+        write_mixed_presets(&path);
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        let _ = load_presets(&path);
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn an_unparseable_presets_file_is_preserved_rather_than_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("presets.json");
+        std::fs::write(&path, "{ this is not json at all").unwrap();
+
+        let presets = load_presets(&path);
+
+        assert!(!presets.is_empty(), "should fall back to defaults");
+        let preserved: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().contains(".unreadable-"))
+            .collect();
+        assert_eq!(preserved.len(), 1, "original contents must survive");
+        assert_eq!(
+            std::fs::read_to_string(preserved[0].path()).unwrap(),
+            "{ this is not json at all"
+        );
+    }
 
     #[test]
     fn missing_templates_file_is_recreated() {
