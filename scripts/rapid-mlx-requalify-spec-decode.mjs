@@ -18,11 +18,14 @@
 // src/inference/rapid_mlx/capabilities.rs; the probe message the user sees
 // after a managed upgrade points here. Keep the two in step.
 //
-// Usage:
-//   node scripts/rapid-mlx-requalify-spec-decode.mjs \
-//     --model /path/to/trunk \
-//     --speculative-control-model mlx-community/Qwen3.6-27B-MTP-4bit \
-//     --out tmp/requalify-0.12.0
+// Usage -- no arguments needed:
+//
+//   node scripts/rapid-mlx-requalify-spec-decode.mjs
+//
+// Models, parsers and port come from scripts/spec-decode-recipe.json; --out defaults
+// to tmp/requalify-<version>-<date>; and the verdict is recorded against the installed
+// runtime automatically. Any field can still be overridden with a flag, and
+// --recipe FILE selects a different one. See --help.
 //
 // Exit codes:
 //   0   all gates pass; speculative decoding may be promoted for this build
@@ -30,8 +33,10 @@
 //   1   a gate is uninterpretable: control failed, or a run errored
 
 import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { isAbsolute, join, resolve } from 'node:path';
 
 const SUITE = resolve('scripts/rapid-mlx-benchmark-suite.mjs');
 
@@ -40,34 +45,125 @@ function die(message) {
   process.exit(1);
 }
 
+const DEFAULT_RECIPE = resolve('scripts/spec-decode-recipe.json');
+
+const USAGE = `Requalify Rapid-MLX speculative decoding. Usually takes no arguments:
+
+  node scripts/rapid-mlx-requalify-spec-decode.mjs
+
+Inputs come from ${DEFAULT_RECIPE}; flags below override it.
+
+  --recipe FILE                  use a different recipe
+  --model DIR                    trunk to serve
+  --speculative-model DIR        subject MTP head
+  --speculative-control-model M  known-good positive control
+  --tool-call-parser NAME        needed by the 'constrained' gate
+  --reasoning-parser NAME
+  --profile-alias REPO           HF alias to read parsers from
+  --out DIR                      receipts (default: tmp/requalify-<version>-<date>)
+  --port N                       (default 8110)
+  --rapid-mlx-bin PATH
+  --gate NAME                    run a subset; repeatable. A partial sweep is
+                                 evidence, never qualification
+  --no-ingest                    write the report but do not record the verdict
+  --help
+`;
+
+/// Paths in a recipe are written for humans, so ~ has to work.
+function expandHome(value) {
+  if (typeof value !== 'string') return value;
+  if (value === '~') return homedir();
+  return value.startsWith('~/') ? join(homedir(), value.slice(2)) : value;
+}
+
+/// Load the recipe. A missing default recipe is not an error -- every field it would
+/// have supplied can be passed as a flag -- but a named one that is missing is, because
+/// the caller asked for something specific.
+function loadRecipe(path, explicit) {
+  if (!existsSync(path)) {
+    if (explicit) die(`Recipe not found: ${path}`);
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8'));
+    // `$comment` and the `*Note` fields are documentation for whoever opens the file
+    // next, which is the whole reason it is worth committing. Ignore them here.
+    return parsed;
+  } catch (error) {
+    die(`Recipe ${path} is not readable JSON: ${error.message}`);
+  }
+}
+
 function parseArgs(argv) {
-  const options = { port: 8110 };
+  const flags = {};
   const rest = argv.slice(2);
   for (let index = 0; index < rest.length; index += 1) {
     const key = rest[index];
+    if (key === '--help' || key === '-h') {
+      process.stdout.write(USAGE);
+      process.exit(0);
+    }
     if (!key.startsWith('--')) die(`Invalid argument: ${key}`);
+    // Valueless flags first, so they do not swallow the next argument.
+    if (key === '--no-ingest') {
+      flags.ingest = false;
+      continue;
+    }
     const value = rest[index + 1];
     if (value === undefined) die(`Missing value for ${key}`);
     index += 1;
-    if (key === '--model') options.model = value;
-    else if (key === '--speculative-control-model') options.controlModel = value;
-    else if (key === '--speculative-model') options.subjectModel = value;
-    else if (key === '--out') options.out = value;
-    else if (key === '--rapid-mlx-bin') options.rapidMlxBin = value;
-    else if (key === '--port') options.port = Number(value);
-    else if (key === '--tool-call-parser') options.toolCallParser = value;
-    else if (key === '--reasoning-parser') options.reasoningParser = value;
-    else if (key === '--profile-alias') options.profileAlias = value;
-    else if (key === '--gate') (options.gates ??= []).push(value);
+    if (key === '--recipe') flags.recipe = value;
+    else if (key === '--model') flags.model = value;
+    else if (key === '--speculative-control-model') flags.controlModel = value;
+    else if (key === '--speculative-model') flags.subjectModel = value;
+    else if (key === '--out') flags.out = value;
+    else if (key === '--rapid-mlx-bin') flags.rapidMlxBin = value;
+    else if (key === '--port') flags.port = Number(value);
+    else if (key === '--tool-call-parser') flags.toolCallParser = value;
+    else if (key === '--reasoning-parser') flags.reasoningParser = value;
+    else if (key === '--profile-alias') flags.profileAlias = value;
+    else if (key === '--gate') (flags.gates ??= []).push(value);
     else die(`Unknown option: ${key}`);
   }
-  if (!options.model) die('--model is required (the trunk to run).');
+
+  const recipePath = flags.recipe ? resolve(flags.recipe) : DEFAULT_RECIPE;
+  const recipe = loadRecipe(recipePath, Boolean(flags.recipe));
+  const usedRecipe = Object.keys(recipe).length > 0;
+
+  // Flags win over the recipe, field by field, so overriding one input does not mean
+  // restating the rest.
+  const options = {
+    recipePath: usedRecipe ? recipePath : null,
+    ingest: flags.ingest ?? true,
+    port: flags.port ?? recipe.port ?? 8110,
+    model: expandHome(flags.model ?? recipe.model),
+    subjectModel: expandHome(flags.subjectModel ?? recipe.speculativeModel),
+    controlModel: expandHome(flags.controlModel ?? recipe.speculativeControlModel),
+    toolCallParser: flags.toolCallParser ?? recipe.toolCallParser,
+    reasoningParser: flags.reasoningParser ?? recipe.reasoningParser,
+    profileAlias: flags.profileAlias ?? recipe.profileAlias,
+    out: flags.out,
+    rapidMlxBin: flags.rapidMlxBin ?? recipe.rapidMlxBin,
+    gates: flags.gates,
+  };
+
+  const missing = (field, flag) => `${field} is not set. Pass ${flag}, or add it to `
+    + `${recipePath}.`;
+  if (!options.model) die(missing('The trunk to serve', '--model'));
   if (!options.controlModel) {
-    die('--speculative-control-model is required. Requalification without a '
-      + 'known-good positive control cannot distinguish "upstream is still '
+    die(`${missing('A positive control', '--speculative-control-model')} Requalification `
+      + 'without a known-good positive control cannot distinguish "upstream is still '
       + 'blocked" from "this sidecar is broken".');
   }
-  if (!options.out) die('--out RECEIPT_DIRECTORY is required.');
+  // Local paths are checked before anything is served: a run that dies twenty minutes
+  // in because a directory moved wastes the whole point of a cheap lane.
+  for (const [label, path] of [['Trunk', options.model], ['Subject head', options.subjectModel]]) {
+    if (path && (isAbsolute(path) || path.startsWith('.')) && !existsSync(path)) {
+      die(`${label} does not exist: ${path}\n`
+        + `Fix the path in ${recipePath}, or pass the flag explicitly. `
+        + 'Artifact provenance: section 12.3 of docs/reference/rapid-mlx-mtp-evidence.md.');
+    }
+  }
   const unknown = (options.gates ?? []).filter((name) => !GATES.some((gate) => gate.name === name));
   if (unknown.length) die(`Unknown gate(s): ${unknown.join(', ')}`);
   return options;
@@ -235,6 +331,52 @@ function installedVersion(bin) {
   return version;
 }
 
+// Ordered by how likely each is to be the build the user actually means: an explicit
+// override, then this checkout's newest binary, then whatever is on PATH.
+//
+// Newest rather than release-over-debug, learned the hard way: a stale target/release
+// from before a flag existed gets picked over a debug build that has it, and rejects the
+// report with an argument error that looks like the report's fault.
+function resolveMonitorBin() {
+  if (process.env.LLAMA_MONITOR_BIN) return process.env.LLAMA_MONITOR_BIN;
+  const built = ['release', 'debug']
+    .map((profile) => resolve('target', profile, 'llama-monitor'))
+    .filter((candidate) => existsSync(candidate))
+    .map((candidate) => ({ candidate, mtime: statSync(candidate).mtimeMs }))
+    .sort((left, right) => right.mtime - left.mtime);
+  if (built.length) return built[0].candidate;
+  const which = spawnSync('command', ['-v', 'llama-monitor'], { encoding: 'utf8', shell: true });
+  const found = (which.stdout ?? '').trim();
+  return found || null;
+}
+
+/// Record the verdict against the installed runtime. Returns whether it landed.
+///
+/// Failure here does not invalidate the run -- the report on disk is the measurement, and
+/// ingesting is bookkeeping -- so this reports and moves on rather than exiting. The exit
+/// code still reflects the gates.
+function ingestReport(path) {
+  const bin = resolveMonitorBin();
+  if (!bin) {
+    process.stderr.write('\nNo llama-monitor binary found to record the verdict with.\n');
+    return false;
+  }
+  process.stderr.write(`\nRecording the verdict via ${bin}\n`);
+  const result = spawnSync(bin, ['--ingest-spec-decode-report', path], {
+    stdio: ['ignore', 'inherit', 'inherit'],
+    timeout: 120000,
+  });
+  if (result.error) {
+    process.stderr.write(`Could not run ${bin}: ${result.error.message}\n`);
+    return false;
+  }
+  if (result.status !== 0) {
+    process.stderr.write(`${bin} refused the report (exit ${result.status}).\n`);
+    return false;
+  }
+  return true;
+}
+
 function runSuite(args) {
   return new Promise((resolveRun) => {
     const child = spawn(process.execPath, [SUITE, 'run', ...args], {
@@ -288,6 +430,15 @@ const parsedOptions = parseArgs(process.argv);
 const rapidMlxBin = parsedOptions.rapidMlxBin ?? 'rapid-mlx';
 const options = resolveParsers(parsedOptions, rapidMlxBin);
 const version = installedVersion(rapidMlxBin);
+// Derived rather than required: a receipt directory named after the build it measured is
+// the one thing a future reader needs from it, and picking that name is not a decision
+// worth asking for.
+if (!options.out) {
+  const slug = `${version} ${new Date().toISOString().slice(0, 10)}`
+    .replace(/[^A-Za-z0-9.]+/g, '-')
+    .replace(/^-|-$/g, '');
+  options.out = join('tmp', `requalify-${slug}`);
+}
 const outRoot = resolve(options.out);
 await mkdir(outRoot, { recursive: true });
 
@@ -306,6 +457,11 @@ if (selected.some((gate) => gate.name === 'constrained') && !options.toolCallPar
 }
 
 process.stderr.write(`Requalifying speculative decoding on ${version}\n`);
+process.stderr.write(`Inputs: ${options.recipePath ?? 'command-line flags only'}\n`);
+process.stderr.write(`Trunk: ${options.model}\n`);
+process.stderr.write(`Subject head: ${options.subjectModel ?? 'none (trunk-embedded)'}\n`);
+process.stderr.write(`Control: ${options.controlModel}\n`);
+process.stderr.write(`Receipts: ${outRoot}\n`);
 process.stderr.write(`Parsers: tool=${options.toolCallParser ?? 'none'} `
   + `reasoning=${options.reasoningParser ?? 'none'} (source: ${options.parserSource})\n`);
 
@@ -423,11 +579,22 @@ await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 process.stderr.write(`\nOverall: ${overall}\n`);
 // Either verdict is worth recording: the app resolves spec_decode from a measurement
 // against this exact install before it consults any shipped prior, so a still-blocked
-// result is a fact about this box, not a no-op.
-process.stderr.write(
-  '\nRecord this verdict against the installed runtime:\n'
-  + `  llama-monitor --ingest-spec-decode-report ${reportPath}\n`,
-);
+// result is a fact about this box, not a no-op. Recording it is therefore the default
+// rather than a step to remember -- a report nobody ingested changes nothing.
+if (options.ingest) {
+  const recorded = ingestReport(reportPath);
+  if (!recorded) {
+    process.stderr.write(
+      '\nThe verdict was NOT recorded. Build the app and record it with:\n'
+      + `  cargo run -- --ingest-spec-decode-report ${reportPath}\n`,
+    );
+  }
+} else {
+  process.stderr.write(
+    '\n--no-ingest: verdict not recorded. To record it later:\n'
+    + `  llama-monitor --ingest-spec-decode-report ${reportPath}\n`,
+  );
+}
 if (report.promotes_capability) {
   process.stderr.write(
     'All gates pass. Ingesting turns multi-token prediction on for this install. '

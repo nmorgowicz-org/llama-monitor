@@ -551,6 +551,26 @@ record the measurements here **before** adding a `SchedulerEvidence::Engages` en
 
 ## 12. Procedure — requalifying a future build
 
+**Short version — this is the whole procedure on an already-set-up box:**
+
+```
+node scripts/rapid-mlx-requalify-spec-decode.mjs
+```
+
+No arguments. Models, heads, parsers and port come from `scripts/spec-decode-recipe.json`;
+receipts land in `tmp/requalify-<version>-<date>`; local paths are checked before anything is
+served; and the verdict is recorded against the installed runtime automatically, so
+`spec_decode` — and therefore MTP — reflects the run without a second step. `--help` lists the
+overrides. Exit `0` qualified, `20` still blocked, `1` uninterpretable.
+
+A passing sweep needs one more thing that a local run cannot do for you: add the version to
+`SPEC_DECODE_VERSION_PRIORS` in `src/inference/rapid_mlx/capabilities.rs` as
+`SchedulerEvidence::Engages`, so users who never run this lane get the fix too. The lane prints
+that reminder on exit `0`.
+
+The rest of this section is the long version: what each artifact is, why each argument exists,
+and how to rebuild the inputs if the recipe's paths no longer resolve.
+
 Everything below is runnable without re-deriving any of the analysis above. Two scripts: one
 builds a draft head, one measures whether the runtime will use it.
 
