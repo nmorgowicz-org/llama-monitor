@@ -174,7 +174,10 @@ impl RapidMlxSetting {
             Self::TurboquantMode => serde_json::json!("none"),
             Self::PrefixCachePolicy => serde_json::json!("auto"),
             Self::HybridCacheEntries => serde_json::json!(0),
-            Self::PflashPolicy => serde_json::json!("auto"),
+            // Must track `default_pflash_policy` in the config, not rapid-mlx's own default. This
+            // catalog describes what llama-monitor will actually launch with, and llama-monitor
+            // launches `--pflash off` on every config.
+            Self::PflashPolicy => serde_json::json!("off"),
             Self::ResponseCachePolicy => serde_json::json!("auto"),
             Self::DiskCheckpointPolicy => serde_json::json!("auto"),
             Self::MaxNumSeqs => serde_json::json!(4),

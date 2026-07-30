@@ -452,11 +452,50 @@ but not a no-op, and the comment now says so.
 
 Phase 7B = builder brief items 6–13. Each part requires screenshot validation before proceeding.
 
-##### Phase 7B1 — Wire existing controls + Web UI/sampling/prompt storage — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
+##### Phase 7B1 — Wire existing controls + Web UI/sampling/prompt storage — Verified complete (Coordinator, 2026-07-30)
 
-- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
-- **Commit:** 31af56b (2026-07-21)
+- **State:** Verified complete — Coordinator, 2026-07-30. Four defects found and fixed (`a1f77fe`); one structural finding recorded below rather than fixed.
+- **Commit:** 31af56b (2026-07-21), reconciled by `a1f77fe` (2026-07-30)
 - **Screenshots:** spawn-wizard-rapid-mlx-advanced-controls.png, spawn-wizard-rapid-mlx-webui-group.png, rapid-mlx-preset-editor-advanced.png
+- **Verification method:** live binary on a throwaway `HOME`, not the suite. Every defect below was invisible to 1040
+  passing tests.
+- **Defects found and fixed:**
+  1. **PFlash shipped on.** `RapidMlxConfig::default()` names `Some("off")`, but the field carried a bare
+     `#[serde(default)]`, and on an `Option` that yields `None` — only a *container*-level default routes a missing
+     field through `Default::default()`. Every config arriving from disk or over the API therefore emitted no
+     `--pflash`, and rapid-mlx 0.11.1 defaults it to `always` for the verified Qwen3.5/Qwen3.6 aliases, where the
+     2026-07-24 verdict measured needle recall collapsing to 0–40% past 32768 tokens. Emitting nothing was not
+     neutrality. Fixed with a named `default_pflash_policy`; the command builder no longer requires a `--pflash` flag
+     in order to turn PFlash *off*, since a runtime lacking the flag has nothing to switch off and would otherwise
+     fail to launch on the new default. Live argv now carries `--pflash off`.
+  2. **Mutual exclusion fired on one participant.** `check_mutual_exclusions` used any-match, which makes a rule a ban
+     on a single setting rather than an exclusion between several: `{"reasoning_mode":"on"}` alone was live-confirmed
+     to report a conflict with a `sampling_mode` the caller never submitted. Participants are now value-aware
+     (`ExclusionMatch::OneOf`, and `Present` for numeric settings that have no conflicting value to compare) and all
+     must match. Re-verified live: reasoning alone is `valid: true`, the real pair still fails.
+  3. **`--reasoning` divergence hidden on the surface built to show it.** The flag pins the KV cache to int8 inside the
+     runtime whatever `--kv-cache-dtype` says. The VRAM estimator already modelled this, but `effective_policy` and
+     `requested_vs_effective` echoed the *requested* dtype. Both now report `int4 → int8` with a reason.
+  4. **Two 7B2-removal leftovers in the wizard.** The rapid_mlx spawn payload still carried a `workload_scenario` that
+     serde silently dropped, and the Review summary looked the scenario up in the canonical estimator vocabulary
+     rather than the one the use-case cards set, so it printed a raw snake_case key — including for the default
+     selection, because the guard compared against a value nothing produces.
+- **Structural finding, not fixed (feature work, not reconciliation):** the settings catalog has no frontend consumer.
+  `/api/rapid-mlx/settings` exists but nothing under `static/` fetches it, and grep for `command-preview`,
+  `requested_vs_effective`, and `effective_policy` across `static/js/` returns zero hits. The consequence is a
+  violation of the "no visible no-op control" gate: the backend honestly reports `turboquant_mode: requested k8v4 →
+  effective none`, while the wizard's Prompt storage selector and Review summary present K8V4 as in effect. Recorded
+  here; the UI work to consume that metadata is scoped separately.
+- **Coverage gap recorded:** 19 of 57 `RapidMlxConfig` fields have no UI presence at all under either snake_case or
+  camelCase (`trust_remote_code_consent`, `auto_tool_choice`, `no_thinking`, `hybrid_cache_entries`, `pflash_policy`,
+  `response_cache_policy`, `disk_checkpoint_policy`, `max_num_seqs`, `max_concurrent_requests`, `prefill_batch_size`,
+  `completion_batch_size`, `batching_policy`, `speculative_policy` (deliberately omitted per brief item 2),
+  `gpu_memory_utilization`, `endpoint_compatibility`, `request_safety_policy`, `default_frequency_penalty`,
+  `parser_policy`, `security_policy`). Brief item 2 requires several of these end to end. Separately, `712c261`'s
+  message claims it threaded `--gpu-memory-utilization` to a welcome-screen control; the diff touches backend files
+  only and no such control exists.
+- **Open, carried forward:** the settings catalog's `default_value()` for `PflashPolicy` still returns `"auto"`, now
+  inconsistent with the config default of `"off"`.
 
 ##### Phase 7B2 — Workload profiles + confirmation — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
@@ -795,7 +834,7 @@ Only the Coordinator updates this table after independent verification.
 | 7A1 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug). Catalog reachability defect discharged 2026-07-30; awaiting Verifier | — | PASS (settings.rs validated, mod.rs validated, 814 tests pass) — note this PASS predates the reachability finding | HEAD pending | `ValidationContext` fields still unread; prefix-cache model differs between catalog and API |
 | 7A2 | Verified complete | Coordinator, 2026-07-30 | PASS — reachability clean; two defects found and fixed: the preview kept a second config→argv mapping that dropped 12 flags and invented 3, and capability probing read the wrong stream so the endpoint failed against every real runtime. Live-checked against installed 0.11.1 with no capabilities override. 1030 tests | 774b611 + HEAD | `prefill_step_size` clamp keeps the documented 4096 value unreachable (recorded, deliberate) |
 | 7A3 | Verified complete | Coordinator, 2026-07-30 | PASS — route/auth reachable, live 401 without token; v2→v3 migration verified live on a planted pre-Phase-7 preset. One defect found and fixed: a single unreadable preset failed the whole-file parse and the loader then wrote defaults over the file, silently destroying every other preset. Now parsed entry by entry; a partial read never writes back; an unparseable file is preserved rather than overwritten. Reproduced and re-verified live. 1033 tests | 774b611 + HEAD | Earlier 7A2 note about the `4096` clamp was wrong; corrected in place |
-| 7B1 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (existing controls wired to catalog, Web UI group, sampling selector, prompt storage, screenshots verified) | 31af56b | None |
+| 7B1 | Verified complete | Coordinator, 2026-07-30 | FAIL-with-fixes — four defects found live, all invisible to the suite. (1) `pflash_policy` never reached any deserialized config, so llama-monitor shipped rapid-mlx's `always` default on Qwen3.5/3.6 against a measured 0–40% recall collapse; (2) `check_mutual_exclusions` fired on any single participant, so `reasoning_mode=on` alone reported a conflict with an unsubmitted setting; (3) `effective_policy`/`requested_vs_effective` echoed the requested KV dtype instead of the int8 `--reasoning` pins; (4) two 7B2-removal leftovers in the wizard (dead `workload_scenario` in the spawn payload, Review row using a vocabulary the wizard never produces). All fixed and re-verified against a running binary. 1040 tests | 31af56b + `a1f77fe` | Frontend never calls `/api/rapid-mlx/command-preview` and never reads `requested_vs_effective` or `effective_policy`, so the Prompt storage selector is a visible no-op while the backend honestly reports `k8v4 → none`; 19 of 57 config fields have no UI at all (see section) |
 | 7B2 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (workload profiles with editable assumptions, confirmation flow, screenshots verified) | 5d00ee0 | None |
 | 7B3 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (roleplay teaching panel, 3 tests) | 91468fb | None |
 | 7B4 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (MTP/concurrency teaching, endpoint compatibility, 5 tests, screenshots verified) | 3b96564 | None |
