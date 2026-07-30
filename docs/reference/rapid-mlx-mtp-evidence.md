@@ -7,7 +7,7 @@
 | Stack | mlx 0.32.0, mlx_lm 0.31.3, Python 3.11 |
 | Hardware | Apple Silicon M5 Max (single machine, single operator) |
 | First captured | 2026-07-29 |
-| Companions | Product plan, live state, and open items: Phase 6.5 of `docs/plans/20260718-final_rapidmlx_followups.md`. Cross-runtime audit: `docs/reference/apple-silicon-mtp-runtime-comparison.md`. Retired working handoff (history only, not current): `docs/archive/rapid-mlx/20260729-rapidmlx_speculative_decoding_handoff.md`. |
+| Companions | Product plan, live state, and open items: Phase 6.5 of `docs/plans/20260718-final_rapidmlx_followups.md`. Cross-runtime audit: `docs/reference/apple-silicon-mtp-runtime-comparison.md`. The former working-handoff doc was folded into those two and deleted on 2026-07-30 (git `396644b`). |
 
 This document holds what was **measured** and what the **source says**. It deliberately
 contains no roadmap, no UI design, and no enablement policy. Those live in Phase 6.5.
@@ -645,9 +645,9 @@ a recorded number; re-running the lane regenerates it.
 ### 12.3a Harness invocation prerequisites
 
 Facts a re-runner needs before invoking the fuller benchmark suite directly rather than through
-the requalification lane. Folded here 2026-07-30 from the retired working-handoff doc; the
-per-commit history of how the harness reached this state is in
-`docs/archive/rapid-mlx/20260729-rapidmlx_speculative_decoding_handoff.md` §6 and in git log.
+the requalification lane. Folded here 2026-07-30 from the working-handoff doc, which was then
+deleted; the per-commit history of how the harness reached this state is in `git log
+scripts/rapid-mlx-benchmark-suite.mjs`.
 
 - **`--spec-decode-lane forced|natural` is required and has no default** on any spec-decode
   invocation. The lane is verified against the backend log and a mismatch fails the run. This

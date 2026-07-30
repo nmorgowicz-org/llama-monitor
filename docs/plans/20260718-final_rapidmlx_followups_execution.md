@@ -685,9 +685,7 @@ Only the Coordinator updates this table after independent verification.
 
 **Last updated:** 2026-07-25 by Coordinator. Phase 5a/5b implementation is verified complete (`791635e`, `6a14cc7`); the independent runtime-evidence closeout is active and does not reopen the code gate. Phase 7 and Phase 8 (7A–8B2) are now UNVERIFIED — flagged 2026-07-25 after discovering the Phase 7B2 workload-profile confirmation flow was broken despite being marked verified; prior local-model verification of everything past Phase 5 cannot be trusted and needs re-checking. Phase 8B3 remains pending. Preserve the existing Phase 7/8 checkpoint history below until those phases are reconciled separately.
 
-**Amended 2026-07-30.** Phase 6.5 had no ledger row at all, so its state lived only in a separate working-handoff doc and a coordinator reading this table alone would have seen phase 6 → 7 and missed it. Rows for 6.5a and 6.5b are added below. That handoff is retired: its live state and open items are folded into the Phase 6.5 section of `20260718-final_rapidmlx_followups.md`, its harness prerequisites into §12.3a of `docs/reference/rapid-mlx-mtp-evidence.md`, and the document itself is archived at `docs/archive/rapid-mlx/20260729-rapidmlx_speculative_decoding_handoff.md` for narrative history only. Nothing outside this repo's plan/evidence pair should be treated as current MTP state.
-
-One correction to that archived doc, since it is cited: it recorded `cargo clippy --all-targets` as reporting 21 warnings on committed code. Those were fixed on 2026-07-30 and `--all-targets` is clean (`cargo test --lib`: 961 passed, 0 failed, 13 ignored). The archived text is left as written and flagged in place.
+**Amended 2026-07-30.** Phase 6.5 had no ledger row at all, so its state lived only in a separate working-handoff doc and a coordinator reading this table alone would have seen phase 6 → 7 and missed it. Rows for 6.5a and 6.5b are added below. That handoff is retired: its live state and open items are folded into the Phase 6.5 section of `20260718-final_rapidmlx_followups.md`, its harness prerequisites into §12.3a of `docs/reference/rapid-mlx-mtp-evidence.md`, and the document itself is **deleted** — recoverable from git history at `396644b`. Nothing outside this repo's plan/evidence pair is current MTP state. It was briefly archived with a stale-claims banner; keeping a corrected copy of a document whose content had already been absorbed was redundant, so the copy went rather than the corrections.
 
 | Phase | State | Builder handoff | Verifier verdict | Commit/checkpoint | Remaining condition |
 |---:|---|---|---|---|---|
@@ -720,6 +718,37 @@ One correction to that archived doc, since it is cited: it recorded `cargo clipp
 | 12 | Not started | — | — | — | Phases 3, 8–11 |
 | 13 | Not started | — | — | — | Phases 5–12 |
 | 14 | Not started | — | — | — | Phases 1–13 |
+
+### 8.1 Finding F-DEADCODE-RAPID — unwired Rapid-MLX capability surface (2026-07-30)
+
+**Severity:** medium. **Owner:** Phase 7 (largest share), Phase 6, Phase 8. **Blocks Phase 14: yes**
+(Phase 14 requires that Rapid estimates and controls agree with actual launch policy; code with no
+caller cannot agree with anything).
+
+Established by removing every `#[allow(dead_code)]` under `src/inference/rapid_mlx/` and letting
+the compiler decide, rather than by reading the attributes. Result: **29 items are genuinely
+unreachable from the running binary**, and the remaining suppressions were stale — the code they
+covered had been wired up later and nobody removed the attribute, which is why the raw attribute
+count overstated the problem. `src/lib.rs` re-exports these modules `pub`, so the lib target never
+warns; `src/main.rs` declares `mod inference` privately, so only the **binary** target exposes the
+gap. Anything reachable only from a unit test therefore looks alive in `cargo test` and is dead in
+the shipped program.
+
+| Group | Items | Status |
+|---|---|---|
+| `settings.rs` — the whole Rapid setting catalog (`RapidMlxSetting` + 7 methods, `all_settings`, `ValidationContext`, `EffectivePolicyExplanation`) | 12 | **Phase 7A1 backend.** Defined, validated, unit-tested; no endpoint calls `all_settings()`. Its only non-test consumer is a re-export in `mod.rs` |
+| `mlx_meta.rs` — older metadata API (`MlxMetadata`, `read_mlx_config`, `read_mlx_metadata`, `metadata_from_config`, `finish_metadata`, `SafetensorsIndexInfo`, `parse_safetensors_index`, `infer_weight_components_from_safetensors`, `to_arch`, `MlxMetaEvidence`) | 10 | Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which is what `/api/vram` calls. **Wire-or-delete decision open** |
+| `info_query.rs` — `rapid-mlx models` listing (`fetch_model_list`, `parse_model_list`, `parse_list_line`, `ModelListEntry`, `Eligibility::is_eligible`/`is_ineligible`, `MODELS_TIMEOUT`) | 7 | Parsed and tested, never called; discovery reads the filesystem and the HF API instead. Phase 8 decides |
+| `capabilities.rs` — cache guidance (`PrefixCacheGuidanceParams`, `supports_max_cache_blocks`, `CacheDiagnosticParams::snapshot`) | 3 | Phase 6 input; Phase 6 is Not started |
+| `capabilities.rs` — `MtpConcurrencyState::label`, `CapabilitySnapshot::fingerprint` | 2 | `label` renders a state nothing acts on (see Phase 6.5 open items); `fingerprint` is snapshot identity for upgrade invalidation, no caller |
+| `model_resolver.rs` — `empty`, `is_valid`, `validated_alias`; `mod.rs` — `model_source_view` method | 4 | Unused helpers; `presets.rs` assigns the `model_source_view` field directly and `command.rs` validates aliases through the full resolver |
+| `updater.rs` (whole module) | — | Suppressed at the `pub mod` declaration; wiring belongs to Phase 12 |
+
+Each surviving suppression now carries a comment naming the reason and the owning phase, so the
+next reader does not have to re-derive this. **Do not bulk-delete this code**: the `settings.rs`
+group is the Phase 7A1 deliverable that a previous Verifier marked PASS, and its unreachability is
+the same class of defect as the Phase 7B2 workload-profile bug that caused the 2026-07-25
+UNVERIFIED flag. Treat this table as evidence for the Phase 7/8 reconciliation, not as cleanup.
 
 Allowed states:
 

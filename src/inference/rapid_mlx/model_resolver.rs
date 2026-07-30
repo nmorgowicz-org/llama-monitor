@@ -188,8 +188,9 @@ impl RapidMlxModelSourceView {
         }
     }
 
-    /// Create an error view when no typed source is configured.
+    // Convenience constructors with no caller; the resolver builds views inline.
     #[allow(dead_code)]
+    /// Create an error view when no typed source is configured.
     pub fn empty() -> Self {
         Self {
             kind: "unknown".into(),
@@ -206,8 +207,8 @@ impl RapidMlxModelSourceView {
         }
     }
 
+    #[allow(dead_code)] // see the note on this impl block
     /// Check if this source is valid for launch.
-    #[allow(dead_code)]
     pub fn is_valid(&self) -> bool {
         self.launchable && self.warnings.is_empty() && !self.canonical_identity.is_empty()
     }
@@ -432,6 +433,8 @@ pub struct ResolvedRapidMlxLaunchModel {
 }
 
 impl ResolvedRapidMlxLaunchModel {
+    // Alias-only launch construction has no caller: `command.rs` validates aliases through
+    // the full resolver instead.
     #[allow(dead_code)]
     pub fn validated_alias(value: &str) -> Result<Self> {
         validate_alias(value)?;

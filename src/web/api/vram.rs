@@ -308,10 +308,20 @@ fn api_vram_estimate_breakdown(
                 };
 
                 // Override mmproj_bytes from explicit path or body field.
-                if let Some(explicit) = mmproj_bytes_override {
-                    arch.mmproj_bytes = explicit;
-                } else if !mmproj_path.is_empty() {
-                    arch.mmproj_bytes = std::fs::metadata(&mmproj_path).map(|m| m.len()).unwrap_or(0);
+                //
+                // GGUF only. An MLX vision tower lives *inside* the safetensors weights, which
+                // `model_size_bytes` already covers, so adding a projector on top of it would
+                // count the tower twice. `mmproj` is a llama.cpp packaging concept with no MLX
+                // equivalent, but the frontend sends both fields for whichever model is selected
+                // regardless of backend, so a stale mmproj path on a model entry would otherwise
+                // silently inflate every MLX estimate.
+                if !is_rapid_mlx {
+                    if let Some(explicit) = mmproj_bytes_override {
+                        arch.mmproj_bytes = explicit;
+                    } else if !mmproj_path.is_empty() {
+                        arch.mmproj_bytes =
+                            std::fs::metadata(&mmproj_path).map(|m| m.len()).unwrap_or(0);
+                    }
                 }
 
                 let mlx_cache_bytes = if is_rapid_mlx {
@@ -1442,6 +1452,67 @@ mod mlx_estimate_tests {
         assert_eq!(json["native_context_limit"], serde_json::json!(131072));
         assert_eq!(json["context_extension_required"], serde_json::json!(false));
         assert!(json["weights_bytes"].as_u64().unwrap() > 0);
+    }
+
+    /// An MLX vision tower is packed inside the safetensors weights, so `model_size_bytes`
+    /// already accounts for it. `mmproj` has no MLX equivalent, but the frontend sends
+    /// `mmproj_bytes`/`mmproj_path` for the selected model regardless of backend — so a stale
+    /// value must not be added on top of weights that already contain the tower.
+    #[tokio::test]
+    async fn vram_estimate_ignores_mmproj_override_on_the_mlx_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.json"),
+            r#"{
+                "model_type": "qwen3",
+                "hidden_size": 1024,
+                "num_hidden_layers": 28,
+                "num_attention_heads": 16,
+                "num_key_value_heads": 8,
+                "head_dim": 128,
+                "max_position_embeddings": 131072
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("model.safetensors.index.json"),
+            r#"{"weight_map":{"a":"model.safetensors"}}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("model.safetensors"), vec![0u8; 4096]).unwrap();
+
+        let estimate_with = |mmproj: u64| {
+            let body = serde_json::json!({
+                "backend": "rapid_mlx",
+                "model_path": dir.path().to_string_lossy(),
+                "n_ctx": 4096,
+                "available_vram_bytes": 32u64 * 1024 * 1024 * 1024,
+                "mmproj_bytes": mmproj,
+            });
+            async move {
+                let response = warp::test::request()
+                    .method("POST")
+                    .path("/api/vram-estimate")
+                    .header("authorization", "Bearer api-secret")
+                    .header("content-type", "application/json")
+                    .body(body.to_string())
+                    .reply(&test_routes())
+                    .await;
+                assert_eq!(response.status(), StatusCode::OK);
+                serde_json::from_slice::<serde_json::Value>(response.body()).unwrap()
+            }
+        };
+
+        let without = estimate_with(0).await;
+        let with_stale_mmproj = estimate_with(4 * 1024 * 1024 * 1024).await;
+
+        assert_eq!(without["ok"], serde_json::json!(true));
+        assert_eq!(with_stale_mmproj["ok"], serde_json::json!(true));
+        assert_eq!(with_stale_mmproj["mmproj_bytes"], serde_json::json!(0));
+        assert_eq!(
+            without["total_bytes"], with_stale_mmproj["total_bytes"],
+            "a 4 GiB mmproj override changed an MLX estimate; the tower is already in the weights"
+        );
     }
 
     #[tokio::test]

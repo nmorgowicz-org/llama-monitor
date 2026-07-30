@@ -10,6 +10,8 @@ pub mod model_resolver;
 pub mod poller;
 pub mod runtime;
 pub mod settings;
+// The managed-updater module is complete and unit-tested but has no caller in the
+// running binary yet; its wiring belongs to the Phase 12 dependency/watchlist work.
 #[allow(dead_code)]
 pub mod updater;
 
@@ -405,11 +407,13 @@ impl RapidMlxConfig {
         })
     }
 
+    // No caller in the running binary: `presets.rs` assigns the `model_source_view` field
+    // directly rather than deriving it from the config.
+    #[allow(dead_code)]
     /// Typed source view for display/edit/clone/save/estimate/library/launch.
     /// Uses only `model_source`; ignores legacy `model_path` entirely (Gap 3.2).
     /// Returns empty view when no typed source is configured — this is the
     /// "No model configured" signal that the frontend must show.
-    #[allow(dead_code)]
     pub fn model_source_view(&self) -> RapidMlxModelSourceView {
         match &self.model_source {
             Some(source) => RapidMlxModelSourceView::from_source(source),

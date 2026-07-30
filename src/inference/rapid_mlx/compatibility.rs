@@ -111,7 +111,6 @@ pub async fn probe(binary: &Path, source: RuntimeSource) -> Result<Compatibility
 /// Normal discovery remains stable-only. The runtime manager may opt a published
 /// prerelease into the same minimum-version and capability gates, but local-version
 /// builds remain ineligible for managed activation.
-#[allow(dead_code)]
 pub async fn probe_published_managed_release(
     binary: &Path,
     allow_prerelease: bool,

@@ -8,6 +8,9 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
 const INFO_TIMEOUT: Duration = Duration::from_secs(10);
+// The `rapid-mlx models` listing is parsed and unit-tested but has no caller; model
+// discovery currently reads the filesystem and the HF API instead. Phase 8 owns the decision
+// to wire this or drop it.
 #[allow(dead_code)]
 const MODELS_TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
@@ -72,12 +75,16 @@ pub struct Eligibility {
     pub reasons: BTreeMap<String, Option<String>>,
 }
 
-#[allow(dead_code)]
 impl Eligibility {
+    // The `rapid-mlx models` listing is parsed and unit-tested but has no caller; model
+    // discovery currently reads the filesystem and the HF API instead. Phase 8 owns the decision
+    // to wire this or drop it.
+    #[allow(dead_code)]
     pub fn is_eligible(&self) -> bool {
         self.supported == Some(true)
     }
 
+    #[allow(dead_code)] // see the note on this impl block
     pub fn is_ineligible(&self) -> bool {
         self.supported == Some(false)
     }
@@ -95,8 +102,11 @@ pub struct ExtraCapabilities {
     pub mtp_dflash: bool,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+// The `rapid-mlx models` listing is parsed and unit-tested but has no caller; model
+// discovery currently reads the filesystem and the HF API instead. Phase 8 owns the decision
+// to wire this or drop it.
 #[allow(dead_code)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ModelListEntry {
     pub name: String,
     pub display_name: String,
@@ -201,6 +211,9 @@ pub async fn fetch_model_profile(binary: &Path, model_id: &str) -> Result<Option
     parse_model_profile(&output.stdout, version_trusted, model_id)
 }
 
+// The `rapid-mlx models` listing is parsed and unit-tested but has no caller; model
+// discovery currently reads the filesystem and the HF API instead. Phase 8 owns the decision
+// to wire this or drop it.
 #[allow(dead_code)]
 pub async fn fetch_model_list(binary: &Path) -> Result<Vec<ModelListEntry>> {
     let output = run_query(binary, &["models"], MODELS_TIMEOUT, MAX_OUTPUT_BYTES).await?;
@@ -552,6 +565,9 @@ fn vision_keywords_match(id: &str) -> bool {
         || lower.contains("vlm")
 }
 
+// The `rapid-mlx models` listing is parsed and unit-tested but has no caller; model
+// discovery currently reads the filesystem and the HF API instead. Phase 8 owns the decision
+// to wire this or drop it.
 #[allow(dead_code)]
 fn parse_model_list(output: &str) -> Result<Vec<ModelListEntry>> {
     let mut entries = Vec::new();
@@ -567,6 +583,9 @@ fn parse_model_list(output: &str) -> Result<Vec<ModelListEntry>> {
     Ok(entries)
 }
 
+// The `rapid-mlx models` listing is parsed and unit-tested but has no caller; model
+// discovery currently reads the filesystem and the HF API instead. Phase 8 owns the decision
+// to wire this or drop it.
 #[allow(dead_code)]
 fn parse_list_line(line: &str) -> Option<(String, String)> {
     let parts: Vec<&str> = line.split_whitespace().collect();
@@ -580,7 +599,6 @@ fn parse_list_line(line: &str) -> Option<(String, String)> {
 
 // ── Local MLX Introspection (Phase 8A3) ───────────────────────────────────────────────────
 
-#[allow(dead_code)]
 /// Resolve the recursive disk size for an MLX model directory.
 pub fn resolve_mlx_recursive_size(model_path: &Path) -> Result<u64> {
     let mut total = 0u64;
@@ -599,7 +617,6 @@ pub fn resolve_mlx_recursive_size(model_path: &Path) -> Result<u64> {
     Ok(total)
 }
 
-#[allow(dead_code)]
 /// Read local config.json from an MLX model directory.
 pub fn read_mlx_local_config(
     model_path: &Path,
@@ -614,7 +631,6 @@ pub fn read_mlx_local_config(
     Ok(Some(config))
 }
 
-#[allow(dead_code)]
 /// Check whether an MLX model directory has an index.json with mmproj-like vision adapter files listed.
 ///
 /// Rapid-MLX has no fake mmproj equivalent; only show real integrated/qualified

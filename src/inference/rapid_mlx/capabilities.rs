@@ -78,7 +78,6 @@ pub enum DependencyVersionSource {
 /// Capability does NOT automatically equal product recommendation.
 #[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
 pub enum MtpConcurrencyState {
     /// Older/model/backend combinations requiring parallel=1 (single active request).
     RequiresSingle,
@@ -91,8 +90,10 @@ pub enum MtpConcurrencyState {
     Unknown,
 }
 
-#[allow(dead_code)]
 impl MtpConcurrencyState {
+    // Display string for a state nothing acts on yet — `mtp_concurrency` is reported in the
+    // runtime API's JSON and never read back. Tracked as an open item in Phase 6.5.
+    #[allow(dead_code)]
     pub fn label(self) -> &'static str {
         match self {
             Self::RequiresSingle => "requires single active request",
@@ -147,7 +148,6 @@ impl SamplingDefaultFields {
 
     /// Which fields are effectively settable via CLI defaults.
     /// Unmapped/unsupported fields must NOT be reported as effective.
-    #[allow(dead_code)]
     pub fn effective_fields(&self) -> Vec<&'static str> {
         let mut fields = Vec::new();
         if matches!(self.temperature, DefaultFieldState::Supported) {
@@ -348,8 +348,9 @@ impl CapabilitySnapshot {
             && self.help_hash == hash_help(&self.serve_flags.join(" "))
     }
 
-    /// Generate fingerprint that uniquely identifies this snapshot's subject.
+    // Snapshot identity, intended for cache invalidation across upgrades. No caller yet.
     #[allow(dead_code)]
+    /// Generate fingerprint that uniquely identifies this snapshot's subject.
     pub fn fingerprint(&self) -> String {
         let mut hasher = Sha256::new();
         hasher.update(self.executable_identity.path.as_bytes());
@@ -399,7 +400,6 @@ pub fn cache_snapshot(snapshot: CapabilitySnapshot) {
 /// Generate a capability snapshot using the discovered binary.
 /// Uses Discovery::resolve_binary to find rapid-mlx, then generates the snapshot.
 /// Returns Ok(snapshot) if binary found and probe succeeds; Err if not available.
-#[allow(dead_code)]
 pub async fn generate_snapshot_from_discovery() -> Result<CapabilitySnapshot> {
     use crate::inference::rapid_mlx::discovery::Discovery;
 
@@ -1042,8 +1042,10 @@ pub struct PrefixCacheGuidance {
     pub block_size_bytes: u64,
 }
 
-/// Parameters for deriving prefix cache guidance.
+// Phase 6 (cross-backend cache guidance) input. Phase 6 is Not started, so nothing consumes
+// this yet.
 #[allow(dead_code)]
+/// Parameters for deriving prefix cache guidance.
 #[derive(Debug, Clone)]
 pub struct PrefixCacheGuidanceParams {
     pub snapshot: CapabilitySnapshot,
@@ -1153,26 +1155,26 @@ impl PrefixCacheGuidance {
 }
 
 /// Parameters for computing prefix cache diagnostic findings.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct CacheDiagnosticParams {
     pub config_prefix_cache_enabled: bool,
     pub config_prefix_cache_budget_bytes: Option<u64>,
     pub config_max_cache_blocks: Option<u32>,
+    // Phase 6 (cross-backend cache guidance) input. Phase 6 is Not started, so nothing consumes
+    // this yet.
+    #[allow(dead_code)]
     pub snapshot: CapabilitySnapshot,
     pub configured_ceiling_bytes: u64,
     pub current_safe_availability_bytes: u64,
 }
 
 /// Diagnostic findings produced by cache configuration analysis.
-#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PrefixCacheDiagnosticFindings {
     pub findings: Vec<CacheDiagnosticFinding>,
 }
 
 /// A single cache diagnostic finding.
-#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CacheDiagnosticFinding {
     pub code: String,
@@ -1191,7 +1193,6 @@ impl CapabilitySnapshot {
     /// - prefix_cache_enabled=true but budget_bytes=0 and low headroom (warning)
     ///
     /// User explicit values always win; findings are recommendations only.
-    #[allow(dead_code)]
     pub fn compute_prefix_cache_findings(
         &self,
         params: &CacheDiagnosticParams,
@@ -1264,8 +1265,10 @@ impl CapabilitySnapshot {
         PrefixCacheDiagnosticFindings { findings }
     }
 
-    /// Check whether this snapshot supports --max-cache-blocks.
+    // Phase 6 (cross-backend cache guidance) input. Phase 6 is Not started, so nothing consumes
+    // this yet.
     #[allow(dead_code)]
+    /// Check whether this snapshot supports --max-cache-blocks.
     pub fn supports_max_cache_blocks(&self) -> bool {
         self.serve_flags.iter().any(|f| f == "--max-cache-blocks")
     }

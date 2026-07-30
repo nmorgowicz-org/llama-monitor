@@ -14,8 +14,6 @@
 //! NOTE: dead_code allowed until Parts B/C wire up consumption (Phase 4 Part B: geometry
 //! population; Part C: HF lookup, context propagation, estimator integration).
 
-#![allow(dead_code)]
-
 use std::path::Path;
 
 use crate::llama::model_memory_profile::*;
@@ -24,6 +22,10 @@ use crate::llama::vram_estimator::ModelArch;
 pub const MAX_CONFIG_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
 
+// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
+// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
+// open; see the dead-code inventory finding in the execution plan.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MlxMetaEvidence {
@@ -136,6 +138,10 @@ pub struct MlxWeightIndex {
     pub total_size_bytes: Option<u64>,
 }
 
+// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
+// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
+// open; see the dead-code inventory finding in the execution plan.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct MlxMetadata {
     pub config: MlxConfig,
@@ -155,6 +161,10 @@ fn bounded_read(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
+// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
+// open; see the dead-code inventory finding in the execution plan.
+#[allow(dead_code)]
 pub fn read_mlx_config(dir: &Path) -> Result<MlxConfig, String> {
     let bytes = bounded_read(&dir.join("config.json"), MAX_CONFIG_BYTES)?;
     parse_mlx_config(&bytes)
@@ -225,16 +235,28 @@ pub fn resolve_local_weight_bytes(dir: &Path, index: &MlxWeightIndex) -> Option<
     Some(total)
 }
 
+// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
+// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
+// open; see the dead-code inventory finding in the execution plan.
+#[allow(dead_code)]
 pub fn read_mlx_metadata(dir: &Path) -> Result<MlxMetadata, String> {
     let config = read_mlx_config(dir)?;
     let weight_index = read_mlx_weight_index(dir).unwrap_or_default();
     Ok(finish_metadata(config, weight_index))
 }
 
+// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
+// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
+// open; see the dead-code inventory finding in the execution plan.
+#[allow(dead_code)]
 pub fn metadata_from_config(config: MlxConfig) -> MlxMetadata {
     finish_metadata(config, MlxWeightIndex::default())
 }
 
+// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
+// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
+// open; see the dead-code inventory finding in the execution plan.
+#[allow(dead_code)]
 fn finish_metadata(config: MlxConfig, weight_index: MlxWeightIndex) -> MlxMetadata {
     let evidence = if config.hidden_size.is_some()
         && config.num_layers.is_some()
@@ -955,6 +977,10 @@ fn check_wrapper_field_conflicts(profile: &mut ModelMemoryProfile, raw: &serde_j
 
 // ── Safetensors index parsing (for Part C) ───────────────────────────────────────
 
+// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
+// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
+// open; see the dead-code inventory finding in the execution plan.
+#[allow(dead_code)]
 /// Safetensors index metadata parsed from model.safetensors.index.json.
 #[derive(Debug, Clone, Default)]
 pub struct SafetensorsIndexInfo {
@@ -969,6 +995,10 @@ pub struct SafetensorsIndexInfo {
     pub quant_group_size: Option<u32>,
 }
 
+// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
+// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
+// open; see the dead-code inventory finding in the execution plan.
+#[allow(dead_code)]
 /// Parse a safetensors index into [`SafetensorsIndexInfo`].
 ///
 /// Extracts tensor names, shard assignments, and quantization metadata.
@@ -1032,6 +1062,10 @@ pub fn parse_safetensors_index(index_path: &Path) -> Result<SafetensorsIndexInfo
     })
 }
 
+// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
+// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
+// open; see the dead-code inventory finding in the execution plan.
+#[allow(dead_code)]
 /// Infer WeightComponents from safetensors index tensor names when config is unavailable.
 ///
 /// This is the HEURISTIC DEGRADATION PATH — only used when config.json is missing or
@@ -1075,6 +1109,10 @@ pub fn infer_weight_components_from_safetensors(index: &SafetensorsIndexInfo) ->
 // ── Legacy compatibility ──────────────────────────────────────────────────────────
 
 impl MlxMetadata {
+    // Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
+    // is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
+    // open; see the dead-code inventory finding in the execution plan.
+    #[allow(dead_code)]
     pub fn to_arch(&self, model_size_bytes: u64, param_b: f64, fallback_name: &str) -> ModelArch {
         let mut arch = if self.evidence == MlxMetaEvidence::Degraded {
             ModelArch::from_name_and_params(fallback_name, param_b)

@@ -3,10 +3,8 @@ use crate::inference::rapid_mlx::runtime::RuntimeSource;
 use std::io;
 use std::path::{Path, PathBuf};
 
-#[allow(dead_code)]
 pub struct Discovery;
 
-#[allow(dead_code)]
 impl Discovery {
     /// Resolves the rapid-mlx binary based on precedence:
     /// 1. Explicit path
