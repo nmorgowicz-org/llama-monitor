@@ -49,7 +49,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VENDORED_EXTRACTOR = REPO_ROOT / "scripts" / "vendor" / "rapid-mlx" / "extract_mtp_weights.py"
@@ -66,10 +66,59 @@ SIDECAR_NAME = "mtp.safetensors"
 NORM_MARKER = "pre_fc_norm"
 STALE_EXTRACTOR_MEAN = -0.44
 
+# sha256 of the vendored extractor. Not a security boundary — it exists so a
+# re-pull that silently changes the extraction math is visible rather than
+# inferred from a bad acceptance rate a day later. See
+# scripts/vendor/rapid-mlx/PROVENANCE.md.
+VENDORED_EXTRACTOR_SHA256 = (
+    "0776ecb720de1b2c6228cd2d6f37abad26ce8c198cde07e1babc7db05616d5a8"
+)
 
-def die(message: str) -> None:
+
+def die(message: str) -> NoReturn:
     sys.stderr.write(f"error: {message}\n")
     raise SystemExit(1)
+
+
+def verify_extractor(extractor: Path) -> None:
+    """Refuse an extractor that predates upstream's RMSNorm-shift fix.
+
+    The stale extractor shifted only a hardcoded list of norm suffixes and so
+    missed the MTP-specific ``pre_fc_norm_embedding`` / ``pre_fc_norm_hidden``,
+    leaving the head's fc-input normalization inverted. Symptom: ~0% draft
+    acceptance, no error, backbone fine, tool calls fine — which is exactly why
+    it read as a capability limit for weeks rather than a bug.
+
+    The downstream norm check already catches this, but only after a full
+    extraction and quantization run. Reading the source first costs nothing and
+    names the defect instead of reporting a number. Checked out copies of older
+    revisions are still lying around on disk, and ``--extractor`` accepts any
+    path, so this is a live footgun rather than a hypothetical one.
+    """
+    try:
+        source = extractor.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        die(f"Cannot read extractor {extractor}: {exc}")
+
+    if NORM_MARKER not in source:
+        die(
+            f"{extractor} does not mention {NORM_MARKER!r}, so it predates upstream's "
+            "RMSNorm-shift fix. It will silently build a dead draft head: every trunk "
+            "norm shifted correctly, the MTP head's own pre_fc_norm_* left inverted, "
+            "~0% draft acceptance and no error anywhere.\nUse the vendored copy "
+            f"({VENDORED_EXTRACTOR}) or re-pull a current one from upstream."
+        )
+
+    digest = hashlib.sha256(extractor.read_bytes()).hexdigest()
+    if digest != VENDORED_EXTRACTOR_SHA256:
+        # Not fatal: --extractor is a legitimate override, and a newer upstream
+        # copy is the expected reason to use it. Say so rather than deciding.
+        sys.stderr.write(
+            f"note: extractor sha256 {digest[:16]} does not match the recorded vendored "
+            f"copy ({VENDORED_EXTRACTOR_SHA256[:16]}). It passes the norm-fix check, so "
+            "this is reported, not refused. If this is a newer upstream revision, update "
+            "VENDORED_EXTRACTOR_SHA256 and PROVENANCE.md.\n"
+        )
 
 
 def resolve_interpreter(explicit: str | None) -> str:
@@ -214,6 +263,7 @@ def main() -> int:
     extractor = Path(args.extractor).expanduser().resolve()
     if not extractor.is_file():
         die(f"Extractor not found: {extractor}")
+    verify_extractor(extractor)
 
     out_dir = (
         Path(args.out).expanduser().resolve()

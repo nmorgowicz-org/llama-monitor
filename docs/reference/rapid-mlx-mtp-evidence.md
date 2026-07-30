@@ -572,8 +572,21 @@ with a `provenance.json` beside it.
 
 Tensor extraction is upstream's, vendored verbatim at
 `scripts/vendor/rapid-mlx/extract_mtp_weights.py` and never edited, so a future upstream
-version can be dropped in by re-pulling that one file. The wrapper owns only what upstream gets
-wrong for us, which is placement, not math:
+version can be dropped in by re-pulling that one file. What is pinned, and what is *not*
+recorded about it, is in `scripts/vendor/rapid-mlx/PROVENANCE.md`: the sha256 is recorded, the
+upstream commit was **not captured at vendor time** and is written down as unknown rather than
+guessed. It is established to postdate `5fc6556` — a checkout at that revision contains no
+`pre_fc_norm` handling at all, while the vendored copy does.
+
+⚠️ Older rapid-mlx checkouts carrying the **defective** extractor still exist on this machine
+(e.g. `/private/tmp/rapid-mlx-build` at `5fc6556`), and `build-mtp-head.py --extractor <path>`
+accepts any of them, which would silently rebuild a dead head. `verify_extractor()` now refuses
+an extractor that does not mention `pre_fc_norm` — naming the defect up front instead of
+letting the post-build norm check report a number after a full extraction run — and *reports*
+rather than refuses a sha256 that differs from the pin, since a newer upstream copy is a
+legitimate override.
+
+The wrapper owns only what upstream gets wrong for us, which is placement, not math:
 
 - Upstream writes `model-mtp.safetensors` **into** `--mlx-model` and rewrites that
   `config.json` in place. `mlx_lm` globs `model*.safetensors` when loading a trunk, so an
