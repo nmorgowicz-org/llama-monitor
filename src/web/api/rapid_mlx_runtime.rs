@@ -278,6 +278,11 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .unify()
         .or(escape_hatch_route(ctx.clone()))
         .unify()
+        // Registered before the catalog route so the longer path wins the match.
+        .or(settings_validate_route(ctx.clone()))
+        .unify()
+        .or(settings_catalog_route(ctx.clone()))
+        .unify()
         .or(command_preview_route(ctx.clone()))
         .unify()
         .or(prefix_cache_guidance_route(ctx.clone()))
@@ -301,6 +306,199 @@ fn escape_hatch_route(ctx: ApiCtx) -> ApiRoute {
             )) as ApiReply
         })
         .boxed()
+}
+
+/// Serve the Rapid-MLX semantic setting catalog, resolved against a capability snapshot.
+///
+/// This is the endpoint `settings.rs` was written for: it is the authoritative Rust
+/// definition of what each setting is, what it defaults to, and why it is unavailable — so
+/// the wizard and preset editor read capability gating from one place instead of each
+/// re-deriving it from flag strings.
+///
+/// Capability gating needs a snapshot. A caller may pass `serve_flags` to resolve against a
+/// specific runtime (the wizard previewing a version it has not installed); otherwise the
+/// live discovered runtime is probed. When neither is available the catalog is still served
+/// with everything ungated and `snapshot_source: "none"`, because a settings list the user
+/// cannot see at all is worse than one whose availability is marked unknown.
+fn settings_catalog_route(ctx: ApiCtx) -> ApiRoute {
+    use crate::inference::rapid_mlx::settings;
+
+    let config = ctx.config;
+    warp::path!("api" / "rapid-mlx" / "settings")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::query::<SettingsCatalogQuery>())
+        .and_then(move |auth: Option<String>, query: SettingsCatalogQuery| {
+            let config = config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                let (snapshot, source) = resolve_catalog_snapshot(query.serve_flags).await;
+                let settings: Vec<_> = settings::all_settings()
+                    .iter()
+                    .map(|setting| {
+                        let supported = snapshot
+                            .as_ref()
+                            .map(|snap| setting.capability(snap))
+                            .unwrap_or(true);
+                        serde_json::json!({
+                            "id": setting.id(),
+                            "default": setting.default_value(),
+                            "supported": supported,
+                            "unsupported_reason": snapshot
+                                .as_ref()
+                                .and_then(|snap| setting.unsupported_reason(snap)),
+                        })
+                    })
+                    .collect();
+                let rules: Vec<_> = settings::mutual_exclusion_rules()
+                    .iter()
+                    .map(|rule| serde_json::json!({"settings": rule.settings, "error": rule.error}))
+                    .collect();
+                Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(&serde_json::json!({
+                    "ok": true,
+                    "snapshot_source": source,
+                    "rapid_mlx_version": snapshot.as_ref().map(|s| s.rapid_mlx_version.clone()),
+                    "settings": settings,
+                    "mutual_exclusion_rules": rules,
+                }))) as ApiReply)
+            }
+        })
+        .boxed()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SettingsCatalogQuery {
+    /// Comma-separated serve flags to gate against, instead of probing the live runtime.
+    pub serve_flags: Option<String>,
+}
+
+/// Pick the capability snapshot the catalog is resolved against, and say which it was.
+///
+/// The source is returned rather than inferred by the client, because "this flag is
+/// unsupported" and "we could not tell" must not look alike in the UI.
+async fn resolve_catalog_snapshot(
+    serve_flags: Option<String>,
+) -> (Option<CapabilitySnapshot>, &'static str) {
+    if let Some(raw) = serve_flags {
+        let flags: Vec<String> = raw
+            .split(',')
+            .map(|flag| flag.trim().to_string())
+            .filter(|flag| !flag.is_empty())
+            .collect();
+        return (
+            Some(CapabilitySnapshot {
+                serve_flags: flags,
+                ..Default::default()
+            }),
+            "caller_flags",
+        );
+    }
+    match capabilities::generate_snapshot_from_discovery().await {
+        Ok(snapshot) => (Some(snapshot), "discovered"),
+        Err(_) => (None, "none"),
+    }
+}
+
+/// Validate a proposed set of settings and explain what each one resolves to.
+///
+/// Validation and effective-policy resolution live in the catalog, so the answer here is the
+/// same answer launch will act on. Returning both together matters: a value can be perfectly
+/// valid and still not be what runs, and a user told only "valid" would never learn that.
+fn settings_validate_route(ctx: ApiCtx) -> ApiRoute {
+    use crate::inference::rapid_mlx::settings::{self, ValidationContext};
+    use std::collections::BTreeMap;
+
+    let config = ctx.config;
+    warp::path!("api" / "rapid-mlx" / "settings" / "validate")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<SettingsValidateRequest>())
+        .and_then(move |auth: Option<String>, req: SettingsValidateRequest| {
+            let config = config.clone();
+            async move {
+                if !check_api_token(&auth, &config) {
+                    return Ok(unauthorized_api_token());
+                }
+                let (snapshot, source) = resolve_catalog_snapshot(req.serve_flags).await;
+                let context = ValidationContext {
+                    capabilities: snapshot.as_ref(),
+                    workload_scenario: None,
+                    ..Default::default()
+                };
+
+                let mut errors = Vec::new();
+                let mut effective = serde_json::Map::new();
+                // Unknown ids are reported rather than ignored: silently dropping a setting
+                // the client believes it set is how a UI ends up showing a value that never
+                // reaches launch.
+                let mut unknown: Vec<&str> = Vec::new();
+                let mut by_id = BTreeMap::new();
+
+                for (id, value) in &req.values {
+                    let Some(setting) = settings::all_settings()
+                        .iter()
+                        .find(|setting| setting.id() == id)
+                    else {
+                        unknown.push(id.as_str());
+                        continue;
+                    };
+                    by_id.insert(setting.id(), value.clone());
+                    if let Err(error) = setting.validate(value, &context) {
+                        errors.push(error);
+                        continue;
+                    }
+                    if let Some(snap) = snapshot.as_ref() {
+                        let resolved = setting.effective_policy(value, snap);
+                        let reason = resolved
+                            .get("reason")
+                            .and_then(|reason| reason.as_str())
+                            .map(String::from);
+                        let explanation = settings::EffectivePolicyExplanation {
+                            requested: value.clone(),
+                            effective: resolved.clone(),
+                            reason,
+                            reason_code: None,
+                        };
+                        effective.insert(
+                            setting.id().to_string(),
+                            serde_json::json!({
+                                "explanation": explanation,
+                                // The argv this setting contributes at launch. Showing it is
+                                // what closes the catalog's promised trace from capability
+                                // through validation to launch mapping — without it the user
+                                // is told a value is fine but never what it does.
+                                "cli_args": setting.to_cli_args(&resolved),
+                            }),
+                        );
+                    }
+                }
+
+                if let Err(error) = settings::check_mutual_exclusions(&by_id) {
+                    errors.push(error);
+                }
+
+                Ok::<ApiReply, warp::Rejection>(Box::new(warp::reply::json(&serde_json::json!({
+                    "ok": true,
+                    "valid": errors.is_empty(),
+                    "snapshot_source": source,
+                    "errors": errors,
+                    "effective": effective,
+                    "unknown_settings": unknown,
+                }))) as ApiReply)
+            }
+        })
+        .boxed()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SettingsValidateRequest {
+    /// Setting id -> proposed value.
+    #[serde(default)]
+    pub values: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Comma-separated serve flags to gate against, instead of probing the live runtime.
+    pub serve_flags: Option<String>,
 }
 
 fn command_preview_route(ctx: ApiCtx) -> ApiRoute {
@@ -2034,6 +2232,134 @@ fn parse_doctor_output(output: &str) -> Vec<DoctorFinding> {
     }
 
     findings
+}
+
+#[cfg(test)]
+mod settings_catalog_tests {
+    use super::*;
+    use crate::inference::rapid_mlx::settings;
+
+    fn snapshot_with(flags: &[&str]) -> CapabilitySnapshot {
+        CapabilitySnapshot {
+            serve_flags: flags.iter().map(|flag| flag.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// `build_effective_policy` writes all 26 setting keys by hand. That hand-written list is
+    /// how the catalog went stale the first time: a setting added to one and not the other
+    /// silently stops appearing in the policy snapshot the UI reads. Neither is derived from
+    /// the other, so pin them together here.
+    #[test]
+    fn effective_policy_snapshot_covers_exactly_the_catalog() {
+        let config = RapidMlxConfig::default();
+        let policy = build_effective_policy(&config);
+        let policy_keys: std::collections::BTreeSet<&str> = policy
+            .as_object()
+            .expect("effective policy is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let catalog_ids: std::collections::BTreeSet<&str> = settings::all_settings()
+            .iter()
+            .map(|setting| setting.id())
+            .collect();
+
+        // One known, deliberate disagreement. The catalog models prefix caching as a single
+        // `prefix_cache_policy`; the shipped API and every frontend consumer instead use the
+        // three raw config fields below. Reconciling them is Phase 7 UI work, not something
+        // to change underneath presets.js, setup-view.js, spawn-wizard.js, and
+        // vram-estimate.js, none of which read `prefix_cache_policy` at all. Listed as an
+        // exception so the pairing still catches *new* drift.
+        const CATALOG_ONLY: &[&str] = &["prefix_cache_policy"];
+        const SNAPSHOT_ONLY: &[&str] = &[
+            "prefix_cache_enabled",
+            "retained_cache_mib",
+            "disk_checkpoint_interval",
+        ];
+
+        let missing: Vec<_> = catalog_ids
+            .difference(&policy_keys)
+            .filter(|id| !CATALOG_ONLY.contains(*id))
+            .collect();
+        let extra: Vec<_> = policy_keys
+            .difference(&catalog_ids)
+            .filter(|id| !SNAPSHOT_ONLY.contains(*id))
+            .collect();
+        assert!(
+            missing.is_empty() && extra.is_empty(),
+            "effective-policy snapshot has drifted from the catalog.\n\
+             in catalog, absent from snapshot: {missing:?}\n\
+             in snapshot, absent from catalog: {extra:?}"
+        );
+    }
+
+    #[test]
+    fn catalog_gates_settings_on_the_snapshot_and_says_why() {
+        let without = snapshot_with(&[]);
+        let kv = settings::all_settings()
+            .iter()
+            .find(|setting| setting.id() == "kv_cache_dtype")
+            .expect("kv_cache_dtype is in the catalog");
+
+        assert!(!kv.capability(&without));
+        assert_eq!(
+            kv.unsupported_reason(&without).as_deref(),
+            Some("Current runtime does not support --kv-cache-dtype"),
+        );
+
+        let with = snapshot_with(&["--kv-cache-dtype"]);
+        assert!(kv.capability(&with));
+        assert_eq!(
+            kv.unsupported_reason(&with),
+            None,
+            "a supported setting must carry no reason, or the UI shows a stale excuse"
+        );
+    }
+
+    /// The gap that mattered: an unsupported setting must not silently launch. It resolves to
+    /// null and contributes no argv, rather than erroring.
+    #[test]
+    fn unsupported_settings_resolve_away_instead_of_reaching_argv() {
+        let without = snapshot_with(&[]);
+        let kv = settings::all_settings()
+            .iter()
+            .find(|setting| setting.id() == "kv_cache_dtype")
+            .unwrap();
+        let requested = serde_json::json!({"effective": "int8"});
+
+        assert!(
+            kv.validate(&requested, &settings::ValidationContext::default())
+                .is_ok(),
+            "validation is capability-free by design; gating happens in effective_policy"
+        );
+        let resolved = kv.effective_policy(&requested, &without);
+        assert!(resolved.is_null());
+        assert!(kv.to_cli_args(&resolved).is_empty());
+    }
+
+    #[test]
+    fn mutual_exclusions_are_reported_for_conflicting_pairs() {
+        let mut values = std::collections::BTreeMap::new();
+        values.insert("reasoning_mode", serde_json::json!("on"));
+        values.insert("sampling_mode", serde_json::json!("model_default"));
+        let error = settings::check_mutual_exclusions(&values)
+            .expect_err("reasoning_mode=on with sampling_mode=model_default must conflict");
+        assert_eq!(error.code, "mutual_exclusion");
+    }
+
+    #[test]
+    fn every_catalog_default_validates_against_its_own_setting() {
+        let context = settings::ValidationContext::default();
+        for setting in settings::all_settings() {
+            let default = setting.default_value();
+            assert!(
+                setting.validate(&default, &context).is_ok(),
+                "{} ships a default its own validator rejects",
+                setting.id()
+            );
+        }
+    }
 }
 
 #[cfg(test)]

@@ -15,11 +15,16 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
-// Phase 7A1 backend. The catalog is defined, validated, and unit-tested, but nothing in
-// the running binary calls it: no endpoint consumes `all_settings()`. This is the class of
-// gap that put the Phase 7 ledger rows back to UNVERIFIED. Wire it in Phase 7, do not delete.
-#[allow(dead_code)]
 /// Validation context for settings that depend on runtime state.
+///
+/// Both fields are populated by callers and read by none: `validate` takes the context as
+/// `_context` and ignores it, so every rule in the catalog is currently context-free. That is
+/// a catalog defect rather than a wiring one — the API passes a real snapshot in — and it is
+/// left visible here instead of being papered over, because the fix is to decide which rules
+/// are genuinely capability- or workload-dependent, not to invent rules so the fields are read.
+/// Note that an unsupported setting is *not* one of those cases: `effective_policy` already
+/// downgrades it gracefully, and erroring in `validate` instead would contradict that design.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ValidationContext<'a> {
     pub capabilities: Option<&'a CapabilitySnapshot>,
@@ -45,10 +50,6 @@ pub struct ValidationError {
     pub code: &'static str,
 }
 
-// Phase 7A1 backend. The catalog is defined, validated, and unit-tested, but nothing in
-// the running binary calls it: no endpoint consumes `all_settings()`. This is the class of
-// gap that put the Phase 7 ledger rows back to UNVERIFIED. Wire it in Phase 7, do not delete.
-#[allow(dead_code)]
 /// Effective policy explanation for a setting.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EffectivePolicyExplanation {
@@ -58,10 +59,6 @@ pub struct EffectivePolicyExplanation {
     pub reason_code: Option<&'static str>,
 }
 
-// Phase 7A1 backend. The catalog is defined, validated, and unit-tested, but nothing in
-// the running binary calls it: no endpoint consumes `all_settings()`. This is the class of
-// gap that put the Phase 7 ledger rows back to UNVERIFIED. Wire it in Phase 7, do not delete.
-#[allow(dead_code)]
 /// A single setting in the Rapid-MLX semantic catalog.
 #[derive(Debug, Clone)]
 pub enum RapidMlxSetting {
@@ -94,10 +91,6 @@ pub enum RapidMlxSetting {
 }
 
 impl RapidMlxSetting {
-    // Phase 7A1 backend. The catalog is defined, validated, and unit-tested, but nothing in
-    // the running binary calls it: no endpoint consumes `all_settings()`. This is the class of
-    // gap that put the Phase 7 ledger rows back to UNVERIFIED. Wire it in Phase 7, do not delete.
-    #[allow(dead_code)]
     /// Stable ID used for serialization and API.
     pub fn id(&self) -> &'static str {
         match self {
@@ -130,7 +123,6 @@ impl RapidMlxSetting {
         }
     }
 
-    #[allow(dead_code)] // see the note on this impl block
     /// Whether this setting is supported by the given capability snapshot.
     pub fn capability(&self, snapshot: &CapabilitySnapshot) -> bool {
         let has_flag = |flag: &str| snapshot.serve_flags.iter().any(|f| f == flag);
@@ -175,7 +167,6 @@ impl RapidMlxSetting {
         }
     }
 
-    #[allow(dead_code)] // see the note on this impl block
     /// Default value for this setting (JSON-serializable).
     pub fn default_value(&self) -> serde_json::Value {
         match self {
@@ -208,7 +199,6 @@ impl RapidMlxSetting {
         }
     }
 
-    #[allow(dead_code)] // see the note on this impl block
     /// Validate a value for this setting.
     pub fn validate<'a>(
         &self,
@@ -321,9 +311,17 @@ impl RapidMlxSetting {
         }
     }
 
-    #[allow(dead_code)] // see the note on this impl block
     /// Convert a setting value to CLI arguments.
+    ///
+    /// A null value means the setting is not in play — most often because `effective_policy`
+    /// resolved it away on a runtime that does not support the flag. Returning early is what
+    /// makes that resolution mean anything: several arms below (`KvCacheDtype` among them)
+    /// fall back to a hardcoded default when the value has no recognised shape, so without
+    /// this guard an unsupported setting would emit the very flag it was nulled out to avoid.
     pub fn to_cli_args(&self, value: &serde_json::Value) -> Vec<String> {
+        if value.is_null() {
+            return Vec::new();
+        }
         let mut args = Vec::new();
 
         match self {
@@ -408,7 +406,6 @@ impl RapidMlxSetting {
         args
     }
 
-    #[allow(dead_code)] // see the note on this impl block
     /// Compute the effective value given a requested value and capabilities.
     pub fn effective_policy(
         &self,
@@ -454,7 +451,6 @@ impl RapidMlxSetting {
         }
     }
 
-    #[allow(dead_code)] // see the note on this impl block
     /// Unsupported reason when capability returns false.
     pub fn unsupported_reason(&self, snapshot: &CapabilitySnapshot) -> Option<String> {
         if self.capability(snapshot) {
@@ -480,10 +476,6 @@ impl RapidMlxSetting {
     }
 }
 
-// Phase 7A1 backend. The catalog is defined, validated, and unit-tested, but nothing in
-// the running binary calls it: no endpoint consumes `all_settings()`. This is the class of
-// gap that put the Phase 7 ledger rows back to UNVERIFIED. Wire it in Phase 7, do not delete.
-#[allow(dead_code)]
 /// Complete catalog of all Rapid-MLX settings.
 pub fn all_settings() -> &'static [RapidMlxSetting] {
     &[

@@ -341,9 +341,18 @@ Checkpoint: 774b611 (2026-07-21). 820 tests pass.
 
 ##### Phase 7A1 — Semantic catalog + config fields — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
-- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
-- **Files:** settings.rs (25-setting catalog), mod.rs (Phase 7 fields), execution_policy.rs/workload_scenarios.rs wired
-- **Commit:** 774b611
+- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug). **Catalog wired 2026-07-30**; still awaiting a Verifier pass.
+- **Files:** settings.rs (26-setting catalog), mod.rs (Phase 7 fields), execution_policy.rs/workload_scenarios.rs wired
+- **Commit:** 774b611; wiring in the 2026-07-30 commit below
+
+**Reachability defect discharged 2026-07-30.** The catalog is no longer dead code: `GET /api/rapid-mlx/settings` serves it resolved against a capability snapshot (caller-supplied `serve_flags`, else live discovery, else ungated with `snapshot_source: "none"`), and `POST /api/rapid-mlx/settings/validate` runs `validate` + `check_mutual_exclusions` and returns `EffectivePolicyExplanation` plus the argv each setting contributes. All 12 previously-unreachable items now have a non-test consumer and every `#[allow(dead_code)]` in `settings.rs` is gone except one (below). Verified live against rapid-mlx 0.11.1: 26 settings served, capability gating and reasons correct, invalid values rejected, mutual exclusion caught, unknown ids reported rather than dropped, 401 without a token.
+
+Two defects surfaced by the wiring, both pre-existing:
+
+- **`to_cli_args` ignored the null resolution — fixed.** Several arms fall back to a hardcoded default when the value has no recognised shape, so a setting `effective_policy` had nulled out on an unsupporting runtime still emitted its flag (`kv_cache_dtype` → `--kv-cache-dtype int4`). It now returns empty for a null value, which is what makes the resolution mean anything.
+- **The catalog and the shipped API model prefix caching differently — recorded, not changed.** The catalog has one `prefix_cache_policy`; `build_effective_policy` and every frontend consumer (`presets.js`, `setup-view.js`, `spawn-wizard.js`, `vram-estimate.js`) use three raw fields (`prefix_cache_enabled`, `retained_cache_mib`, `disk_checkpoint_interval`) and never read `prefix_cache_policy`. Reconciling them is Phase 7 UI work; changing the API underneath those four consumers was out of scope here. `effective_policy_snapshot_covers_exactly_the_catalog` pins the pairing with this one exception listed, so new drift still fails.
+
+**Still open in the catalog:** `ValidationContext`'s `capabilities` and `workload_scenario` fields are populated by callers and read by nobody — `validate` takes `_context` and ignores it, so every rule is context-free. The remaining `#[allow(dead_code)]` marks it. The fix is to decide which rules are genuinely capability- or workload-dependent; note that an unsupported setting is *not* such a case, since `effective_policy` already downgrades it gracefully and erroring in `validate` would contradict that.
 
 ##### Phase 7A2 — Command builder + launch wiring — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
@@ -701,7 +710,7 @@ Only the Coordinator updates this table after independent verification.
 | 6 | Not started | — | — | — | Phase 5 evidence closeout must record conservative cache/quant eligibility first |
 | 6.5a | Blocked — upstream capability gate (2026-07-29) | — | — | `ca3cffb`, `209f6bd`, `27243c7` (upstream-independent wiring only) | Rapid-MLX permits MTP only for greedy requests with no logits processor, so normal sampled and constrained-tool requests record zero speculative activity. Resume only when the requalification lane (`scripts/rapid-mlx-requalify-spec-decode.mjs`) exits `0` on a pinned build. Suspension is **not** a passing verdict; no downstream phase may read it as one |
 | 6.5b | Not started — parked behind 6.5a | — | — | Item 14 discharged early (`ca3cffb`) | Fresh 6.5a Verifier PASS required before items 12, 13, 15 begin. Item 14 (refuse the corrupting in-trunk sidecar layout) was taken early because it prevents silent trunk corruption on models the user already has; it qualifies nothing and does not unpark the sub-phase |
-| 7A1 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (settings.rs validated, mod.rs validated, 814 tests pass) | HEAD pending | None |
+| 7A1 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug). Catalog reachability defect discharged 2026-07-30; awaiting Verifier | — | PASS (settings.rs validated, mod.rs validated, 814 tests pass) — note this PASS predates the reachability finding | HEAD pending | `ValidationContext` fields still unread; prefix-cache model differs between catalog and API |
 | 7A2 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (command.rs validated, launch.rs validated, mutual exclusions wired, 817 tests) | HEAD pending | None |
 | 7A3 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (command-preview endpoint with auth, preset migration v3, 820 tests) | 774b611 | None |
 | 7B1 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (existing controls wired to catalog, Web UI group, sampling selector, prompt storage, screenshots verified) | 31af56b | None |
@@ -736,7 +745,7 @@ the shipped program.
 
 | Group | Items | Status |
 |---|---|---|
-| `settings.rs` — the whole Rapid setting catalog (`RapidMlxSetting` + 7 methods, `all_settings`, `ValidationContext`, `EffectivePolicyExplanation`) | 12 | **Phase 7A1 backend.** Defined, validated, unit-tested; no endpoint calls `all_settings()`. Its only non-test consumer is a re-export in `mod.rs` |
+| `settings.rs` — the whole Rapid setting catalog (`RapidMlxSetting` + 7 methods, `all_settings`, `ValidationContext`, `EffectivePolicyExplanation`) | 12 | **Resolved 2026-07-30.** Wired via `GET /api/rapid-mlx/settings` and `POST /api/rapid-mlx/settings/validate`; 11 of 12 suppressions removed. Only `ValidationContext`'s unread fields remain, because `validate` ignores its context — see Phase 7A1 above |
 | `mlx_meta.rs` — older metadata API (`MlxMetadata`, `read_mlx_config`, `read_mlx_metadata`, `metadata_from_config`, `finish_metadata`, `SafetensorsIndexInfo`, `parse_safetensors_index`, `infer_weight_components_from_safetensors`, `to_arch`, `MlxMetaEvidence`) | 10 | Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which is what `/api/vram` calls. **Wire-or-delete decision open** |
 | `info_query.rs` — `rapid-mlx models` listing (`fetch_model_list`, `parse_model_list`, `parse_list_line`, `ModelListEntry`, `Eligibility::is_eligible`/`is_ineligible`, `MODELS_TIMEOUT`) | 7 | Parsed and tested, never called; discovery reads the filesystem and the HF API instead. Phase 8 decides |
 | `capabilities.rs` — cache guidance (`PrefixCacheGuidanceParams`, `supports_max_cache_blocks`, `CacheDiagnosticParams::snapshot`) | 3 | Phase 6 input; Phase 6 is Not started |
