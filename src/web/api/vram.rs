@@ -55,7 +55,7 @@ fn api_vram_estimate_breakdown(
                 let model_path = body["model_path"].as_str().unwrap_or("").to_string();
                 let n_ctx = body["n_ctx"].as_u64().unwrap_or(4096);
                 let gpu_layers = body["gpu_layers"].as_i64().unwrap_or(-1) as i32;
-                let parallel_slots = body["parallel_slots"].as_u64().unwrap_or(1) as u32;
+                let explicit_parallel_slots = body["parallel_slots"].as_u64().map(|v| v as u32);
                 let ubatch_size = body["ubatch_size"].as_u64().unwrap_or(2048) as u32;
                 let ctk = body["ctk"].as_str().unwrap_or("q8_0").to_string();
                 let ctv = body["ctv"].as_str().unwrap_or("q8_0").to_string();
@@ -344,6 +344,15 @@ fn api_vram_estimate_breakdown(
                 let rapid_retained_cache_tokens = explicit_retained
                     .or_else(|| scenario_params.map(|p| p.retained_cache_tokens))
                     .unwrap_or(0);
+
+                // Slot count follows the same omission-only rule as the token counts above. The
+                // scenario's own slot count had never been read, so a multi-slot workload was
+                // estimated -- and admitted -- as single-slot, which put the D25
+                // multi-slot-conflicts-with-MTP warning out of reach of any scenario.
+                let parallel_slots = explicit_parallel_slots
+                    .or_else(|| scenario_params.map(|p| p.parallel_slots))
+                    .unwrap_or(1)
+                    .max(1);
 
                 // Builder item 13: MTP configuration from request body.
                 let mtp_config: Option<crate::llama::vram_estimator::MtpConfig> = body["mtp_config"]

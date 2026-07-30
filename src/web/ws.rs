@@ -75,13 +75,13 @@ pub fn ws_route(
                     let manual_on_open = state.sleep_mode_manual.load(Ordering::Relaxed);
                     // Auto-sleep (mode=2, not manual): wake on WS open.
                     let should_wake = mode_on_open == 2 && !manual_on_open;
-                    eprintln!(
-                        "[sleep] WS open: mode={} manual={}{}",
-                        mode_on_open,
-                        manual_on_open,
-                        if should_wake { " → waking (auto-sleep)" } else { "" }
-                    );
+                    // Only the wake is worth a line. Every page load, tab, and reconnect opens a
+                    // socket, so logging the idle case put `mode=0 manual=false` between every
+                    // step of an end-to-end run and told nobody anything.
                     if should_wake {
+                        eprintln!(
+                            "[sleep] WS open: mode={mode_on_open} manual={manual_on_open} → waking (auto-sleep)"
+                        );
                         state.sleep_mode.store(0, Ordering::Relaxed);
                         state.sleep_notify.notify_waiters();
                     }

@@ -958,12 +958,13 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         expect(status).toBeLessThan(500);
     });
 
-    test('@in-memory-test workload_scenario from page-1 use-case serializes correctly', async ({ page }) => {
+    test('@in-memory-test page-1 use-case drives the estimate, and stays out of the launch payload', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');
 
         const result = await page.evaluate(async () => {
             const { buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js');
+            const { rapidEstimatePolicyFromWizardHardware } = await import('/js/features/vram-estimate.js');
 
             wizardState.engine.selected = 'rapid_mlx';
             wizardState.engine.explicit = true;
@@ -971,17 +972,22 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
             wizardState.access.port = 9123;
 
             // Page-1 use-case cards set workloadScenario directly (Phase 7B2).
-            wizardState.hardware.workloadScenario = 'tool_research_agent';
+            wizardState.hardware.workloadScenario = 'roleplay_storytelling';
 
             const payload = buildSpawnPayload();
             return {
-                scenario: payload.rapid_mlx?.workload_scenario,
+                inLaunchPayload: 'workload_scenario' in (payload.rapid_mlx || {}),
                 hasAssumptions: !!payload.rapid_mlx?.workload_assumptions,
+                estimateScenario: rapidEstimatePolicyFromWizardHardware(wizardState.hardware).workload_scenario,
             };
         });
 
-        expect(result.scenario).toBe('tool_research_agent');
+        // Workload scenario is an estimator input, not a launch setting. `RapidMlxConfig` has no
+        // such field, so anything the wizard put here was dropped by serde on arrival -- asserting
+        // that it serialized only ever proved the wizard wrote it, never that it did anything.
+        expect(result.inLaunchPayload).toBe(false);
         expect(result.hasAssumptions).toBe(false);
+        expect(result.estimateScenario).toBe('roleplay_storytelling');
     });
 
 });

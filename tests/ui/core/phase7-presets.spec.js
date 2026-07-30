@@ -1,9 +1,12 @@
 // tests/ui/core/phase7-presets.spec.js
 //
 // Phase 7 preset serialization tests (7.5A).
-// Verifies Phase 7 Rapid-MLX fields (kv_cache_dtype, turboquant_mode, workload_scenario,
-// reasoning_mode, sampling_mode, tool_call_parser, enable_auto_tool_choice) serialize
-// correctly through wizard buildSpawnPayload() and preset payloads.
+// Verifies Phase 7 Rapid-MLX fields (kv_cache_dtype, turboquant_mode, reasoning_mode,
+// sampling_mode, tool_call_parser, enable_auto_tool_choice) serialize correctly through
+// wizard buildSpawnPayload() and preset payloads.
+//
+// workload_scenario is deliberately not in that list. It is an estimator input, not a
+// launch setting, and `RapidMlxConfig` has no field for it.
 //
 // These tests work against real endpoints in CI — no fake data needed.
 
@@ -11,7 +14,7 @@ import { test, expect } from '@playwright/test';
 import { dismissAuthShell } from '../helpers.js';
 
 test.describe('Phase 7 preset serialization', () => {
-  test('@in-memory-test workload profile serializes into spawn payload', async ({ page }) => {
+  test('@in-memory-test workload profile reaches the estimator, not the spawn payload', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
@@ -34,12 +37,19 @@ test.describe('Phase 7 preset serialization', () => {
     });
     expect(stateInPage).toBe('tool_research_agent');
 
-    // Build and check spawn payload includes workload_scenario
-    const spawnPayload = await page.evaluate(async () => {
-      const { buildSpawnPayload } = await import('/js/features/spawn-wizard.js');
-      return buildSpawnPayload();
+    // The scenario must reach the VRAM estimate and stay out of the launch payload. This test
+    // used to assert the opposite, which proved only that the wizard wrote the key -- the
+    // backend has no `workload_scenario` field on `RapidMlxConfig` and dropped it on arrival.
+    const result = await page.evaluate(async () => {
+      const { buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js');
+      const { rapidEstimatePolicyFromWizardHardware } = await import('/js/features/vram-estimate.js');
+      return {
+        inLaunchPayload: 'workload_scenario' in (buildSpawnPayload().rapid_mlx || {}),
+        estimateScenario: rapidEstimatePolicyFromWizardHardware(wizardState.hardware).workload_scenario,
+      };
     });
-    expect(spawnPayload.rapid_mlx?.workload_scenario).toBe('tool_research_agent');
+    expect(result.inLaunchPayload).toBe(false);
+    expect(result.estimateScenario).toBe('tool_research_agent');
   });
 
   test('@in-memory-test wizard buildPresetPayload preserves Rapid-MLX model_source', async ({ page }) => {

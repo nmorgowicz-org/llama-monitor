@@ -1055,6 +1055,49 @@ mod tests {
         );
     }
 
+    /// The test above hands `compute` a slot count of 2 directly, which proves the rule and
+    /// proves nothing about whether any caller ever supplies it. `/api/vram-estimate` did not:
+    /// it read `parallel_slots` from the request body, defaulted to 1 on absence, and never
+    /// consulted the scenario, so the warning above was unreachable for a caller that had only
+    /// picked a workload. Route the slot count the way a caller has to.
+    #[test]
+    fn a_multi_slot_scenario_supplies_the_slot_count_that_triggers_the_conflict() {
+        let scenario = WorkloadScenario::ToolResearchAgent {
+            planning_context_tokens: 128_000,
+            retained_cache_tokens: 48_000,
+            parallel_slots: 2,
+        };
+        let slots = scenario.to_estimator_params(ClientType::App).parallel_slots;
+        assert_eq!(slots, 2, "the scenario must carry its own slot count");
+
+        let result = MtpAdmissionResult::compute(
+            MtpMode::Embedded,
+            &scenario,
+            3,
+            slots,
+            ConcurrencyPolicy::AllowOverlap,
+        );
+        assert!(
+            result
+                .warnings
+                .contains(&MtpWarning::MultiSlotConflictsWithSingleStreamMtp)
+        );
+
+        // A caller that states its own slot count still wins: scenario values fill gaps only.
+        let single = MtpAdmissionResult::compute(
+            MtpMode::Embedded,
+            &scenario,
+            3,
+            1,
+            ConcurrencyPolicy::AllowOverlap,
+        );
+        assert!(
+            !single
+                .warnings
+                .contains(&MtpWarning::MultiSlotConflictsWithSingleStreamMtp)
+        );
+    }
+
     #[test]
     fn d25_multi_slot_conflicts_with_mtp() {
         let scenario = WorkloadScenario::ToolResearchAgent {
