@@ -261,10 +261,56 @@ impl WorkloadScenario {
     ///
     /// Per D25: capability ≠ recommendation. MTP is eligible for single-stream
     /// workloads but not automatically recommended for all scenarios.
+    ///
+    /// This answers the *concurrency* half of admission only. The decode-shape
+    /// half (greedy sampling, no logits processors) lives in
+    /// [`DecodeRequestShape::permits_speculation`] because it is a property of
+    /// the request, not of the scenario. Both halves must hold; see
+    /// [`MtpAdmissionResult::compute`].
     pub fn mtp_eligible(&self) -> bool {
-        // MTP requires single-stream greedy decoding (D25).
         // Multi-slot scenarios conflict with MTP's single-active constraint.
         !self.needs_multi_slot()
+    }
+
+    /// The decode shape this scenario is *expected* to run under.
+    ///
+    /// These are product-defined defaults, not measured values: they describe
+    /// how a typical request in this scenario is shaped so admission can tell
+    /// the user whether a speculative scheduler would engage at all. A caller
+    /// that knows the real request parameters should pass those instead of
+    /// these defaults.
+    pub fn default_decode_shape(&self) -> DecodeRequestShape {
+        match self {
+            // Chat and roleplay are sampled for variety.
+            Self::InteractiveChat { .. } => DecodeRequestShape {
+                temperature: 0.7,
+                constrained_tools: false,
+                reasoning: false,
+            },
+            Self::Roleplay { .. } => DecodeRequestShape {
+                temperature: 0.9,
+                constrained_tools: false,
+                reasoning: false,
+            },
+            // Coding and research agents sample *and* install a tool grammar.
+            Self::CodingAgent { .. } => DecodeRequestShape {
+                temperature: 0.6,
+                constrained_tools: true,
+                reasoning: true,
+            },
+            Self::ToolResearchAgent { .. } => DecodeRequestShape {
+                temperature: 0.6,
+                constrained_tools: true,
+                reasoning: true,
+            },
+            // Batch eval is the one scenario that is reproducibility-driven,
+            // so it is the one shape a greedy-only scheduler can serve.
+            Self::BatchEval { .. } => DecodeRequestShape {
+                temperature: 0.0,
+                constrained_tools: false,
+                reasoning: false,
+            },
+        }
     }
 
     /// Serialize as the scenario key string used in API queries.
@@ -462,10 +508,97 @@ pub struct MtpAdmissionResult {
     /// Whether MTP is recommended for this workload scenario.
     /// Capability ≠ recommendation (D25).
     pub recommended_for_workload: bool,
+    /// Whether the speculative scheduler would actually engage under the decode
+    /// shape this workload runs at.
+    ///
+    /// Distinct from `recommended_for_workload`: a model can be eligible and the
+    /// scenario single-stream, and the scheduler still never run because the
+    /// request is sampled or installs a logits processor. When this is false the
+    /// MTP head is paid for in memory and never used.
+    pub engages_for_workload: bool,
+    /// Why the scheduler would fall through to plain autoregressive decode.
+    /// Empty when `engages_for_workload` is true.
+    pub fallthroughs: Vec<SpecDecodeFallthrough>,
     /// Warnings about MTP + concurrency interaction.
     pub warnings: Vec<MtpWarning>,
     /// The concurrency policy that will be used.
     pub concurrency_policy: ConcurrencyPolicy,
+}
+
+/// Per-request decode conditions that determine whether a speculative
+/// scheduler can engage, independent of model architecture.
+///
+/// Rapid-MLX 0.11.1's MTP scheduler is greedy-only and bails when any logits
+/// processor is installed, so either condition alone silently disables
+/// speculation. See `docs/reference/rapid-mlx-mtp-evidence.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct DecodeRequestShape {
+    /// Sampling temperature. Anything above zero is non-greedy.
+    pub temperature: f32,
+    /// Whether a constrained tool grammar is installed for this request.
+    pub constrained_tools: bool,
+    /// Whether reasoning/thinking mode is on.
+    pub reasoning: bool,
+}
+
+impl Default for DecodeRequestShape {
+    /// Greedy, unconstrained: the only shape a greedy-only scheduler serves.
+    fn default() -> Self {
+        Self {
+            temperature: 0.0,
+            constrained_tools: false,
+            reasoning: false,
+        }
+    }
+}
+
+impl DecodeRequestShape {
+    /// Whether a greedy-only speculative scheduler can engage for this request.
+    pub fn permits_speculation(&self) -> bool {
+        self.fallthroughs().is_empty()
+    }
+
+    /// The reasons speculation would fall through for this request, if any.
+    pub fn fallthroughs(&self) -> Vec<SpecDecodeFallthrough> {
+        let mut out = Vec::new();
+        if self.temperature > 0.0 {
+            out.push(SpecDecodeFallthrough::NonGreedySampling);
+        }
+        if self.constrained_tools {
+            out.push(SpecDecodeFallthrough::LogitsProcessorInstalled);
+        }
+        out
+    }
+}
+
+/// Why a speculative scheduler falls through to plain autoregressive decode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpecDecodeFallthrough {
+    /// Temperature above zero; the scheduler only handles argmax.
+    NonGreedySampling,
+    /// A logits processor (constrained tool grammar) is installed.
+    LogitsProcessorInstalled,
+}
+
+/// Inputs to [`MtpAdmissionResult::compute_with_shape`].
+///
+/// Grouped rather than passed positionally because admission now depends on
+/// both model facts and request facts, and the two are easy to transpose.
+#[derive(Debug, Clone)]
+pub struct MtpAdmissionParams<'a> {
+    /// Requested MTP mode.
+    pub mtp_mode: MtpMode,
+    /// Workload scenario.
+    pub scenario: &'a WorkloadScenario,
+    /// MTP depth from architecture (0 = no MTP).
+    pub arch_mtp_depth: u32,
+    /// Requested parallel slots.
+    pub parallel_slots: u32,
+    /// Concurrency policy.
+    pub concurrency_policy: ConcurrencyPolicy,
+    /// Decode shape requests in this workload will actually use.
+    pub decode_shape: DecodeRequestShape,
 }
 
 /// Warnings about MTP admission and concurrency interaction.
@@ -480,6 +613,9 @@ pub enum MtpWarning {
     ExternalDrafterRequiresSeparateDownload,
     /// MTP eligibility unknown; cannot qualify.
     MtpEligibilityUnknown,
+    /// Model and scenario both qualify, but the decode shape this workload runs
+    /// at makes the speculative scheduler fall through every request.
+    SchedulerFallsThroughForWorkload,
 }
 
 /// Concurrency policy for MTP admission (D25).
@@ -503,6 +639,9 @@ impl MtpAdmissionResult {
     /// `arch_mtp_depth`: MTP depth from architecture (0 = no MTP)
     /// `parallel_slots`: requested parallel slots
     /// `concurrency_policy`: concurrency policy
+    ///
+    /// The decode shape is taken from [`WorkloadScenario::default_decode_shape`].
+    /// Use [`Self::compute_with_shape`] when the real request parameters are known.
     pub fn compute(
         mtp_mode: MtpMode,
         scenario: &WorkloadScenario,
@@ -510,6 +649,26 @@ impl MtpAdmissionResult {
         parallel_slots: u32,
         concurrency_policy: ConcurrencyPolicy,
     ) -> Self {
+        Self::compute_with_shape(MtpAdmissionParams {
+            mtp_mode,
+            scenario,
+            arch_mtp_depth,
+            parallel_slots,
+            concurrency_policy,
+            decode_shape: scenario.default_decode_shape(),
+        })
+    }
+
+    /// Compute D25 admission with an explicit decode shape.
+    pub fn compute_with_shape(params: MtpAdmissionParams<'_>) -> Self {
+        let MtpAdmissionParams {
+            mtp_mode,
+            scenario,
+            arch_mtp_depth,
+            parallel_slots,
+            concurrency_policy,
+            decode_shape,
+        } = params;
         let mut warnings = Vec::new();
 
         // Check eligibility: MTP requires arch support.
@@ -530,15 +689,25 @@ impl MtpAdmissionResult {
             warnings.push(MtpWarning::ExternalDrafterRequiresSeparateDownload);
         }
 
+        // Would the scheduler engage at all under this workload's decode shape?
+        // A sampled or grammar-constrained request never reaches it.
+        let mtp_requested = matches!(mtp_mode, MtpMode::Embedded | MtpMode::External);
+        let fallthroughs = if mtp_requested {
+            decode_shape.fallthroughs()
+        } else {
+            Vec::new()
+        };
+        let engages_for_workload = eligible && fallthroughs.is_empty();
+
         // D25: MTP capability ≠ recommendation.
-        // MTP is eligible but may not be recommended for this workload.
+        // Eligible, single-stream, and actually reached are three separate gates.
         let workload_needs_mtp = scenario.mtp_eligible();
-        let recommended_for_workload = eligible && workload_needs_mtp;
-        if eligible
-            && !workload_needs_mtp
-            && matches!(mtp_mode, MtpMode::Embedded | MtpMode::External)
-        {
+        let recommended_for_workload = eligible && workload_needs_mtp && engages_for_workload;
+        if eligible && !workload_needs_mtp && mtp_requested {
             warnings.push(MtpWarning::MtpEligibleButNotRecommended);
+        }
+        if eligible && workload_needs_mtp && mtp_requested && !fallthroughs.is_empty() {
+            warnings.push(MtpWarning::SchedulerFallsThroughForWorkload);
         }
 
         // D25: MTP requires single-stream. Multi-slot conflicts.
@@ -565,6 +734,8 @@ impl MtpAdmissionResult {
             mode: mtp_mode,
             eligible,
             recommended_for_workload,
+            engages_for_workload,
+            fallthroughs,
             warnings,
             concurrency_policy: effective_concurrency_policy,
         }
@@ -577,6 +748,7 @@ impl MtpAdmissionResult {
                 w,
                 MtpWarning::MultiSlotConflictsWithSingleStreamMtp
                     | MtpWarning::MtpEligibilityUnknown
+                    | MtpWarning::SchedulerFallsThroughForWorkload
             )
         })
     }
@@ -813,23 +985,31 @@ mod tests {
 
     #[test]
     fn embedded_mtp_eligible_with_depth() {
-        let result = MtpAdmissionResult::compute(
-            MtpMode::Embedded,
-            &WorkloadScenario::CodingAgent {
-                planning_context_tokens: 128_000,
-                retained_cache_tokens: 32_000,
-            },
-            3, // arch has MTP depth 3
-            1, // single slot
-            ConcurrencyPolicy::SingleActive,
-        );
+        let scenario = WorkloadScenario::CodingAgent {
+            planning_context_tokens: 128_000,
+            retained_cache_tokens: 32_000,
+        };
+        // Greedy shape isolates architecture/concurrency admission from the
+        // decode-shape gate, which has its own test below.
+        let result = MtpAdmissionResult::compute_with_shape(MtpAdmissionParams {
+            mtp_mode: MtpMode::Embedded,
+            scenario: &scenario,
+            arch_mtp_depth: 3, // arch has MTP depth 3
+            parallel_slots: 1, // single slot
+            concurrency_policy: ConcurrencyPolicy::SingleActive,
+            decode_shape: DecodeRequestShape::default(),
+        });
         assert!(
             result.eligible,
             "Embedded MTP should be eligible when arch has depth > 0"
         );
         assert!(
             !result.has_conflicts(),
-            "No conflicts for single-slot with embedded MTP"
+            "No conflicts for single-slot greedy with embedded MTP"
+        );
+        assert!(
+            result.engages_for_workload,
+            "Greedy unconstrained decode should reach the scheduler"
         );
     }
 
@@ -932,13 +1112,15 @@ mod tests {
     }
 
     #[test]
-    fn mtp_eligible_but_not_recommended_warning() {
-        // Roleplay scenario with multi-slot conflict resolved.
+    fn coding_agent_eligible_but_scheduler_falls_through() {
+        // A coding agent is single-stream, so it clears the concurrency gate,
+        // but it samples and installs a tool grammar — so a greedy-only,
+        // processor-intolerant scheduler never runs. Eligible must not imply
+        // recommended here: the MTP head would be paid for and never used.
         let scenario = WorkloadScenario::CodingAgent {
             planning_context_tokens: 128_000,
             retained_cache_tokens: 32_000,
         };
-        // MTP eligible for coding agent.
         let result = MtpAdmissionResult::compute(
             MtpMode::Embedded,
             &scenario,
@@ -946,8 +1128,88 @@ mod tests {
             1,
             ConcurrencyPolicy::SingleActive,
         );
-        assert!(result.eligible);
+        assert!(result.eligible, "arch depth 3 is eligible");
+        assert!(scenario.mtp_eligible(), "single-stream clears concurrency");
+        assert!(
+            !result.engages_for_workload,
+            "sampled + grammar-constrained decode never reaches the scheduler"
+        );
+        assert!(
+            !result.recommended_for_workload,
+            "must not recommend MTP for a workload where it cannot engage"
+        );
+        assert!(
+            result
+                .fallthroughs
+                .contains(&SpecDecodeFallthrough::NonGreedySampling),
+            "temperature 0.6 is a fallthrough reason"
+        );
+        assert!(
+            result
+                .fallthroughs
+                .contains(&SpecDecodeFallthrough::LogitsProcessorInstalled),
+            "tool grammar is a fallthrough reason"
+        );
+        assert!(
+            result
+                .warnings
+                .contains(&MtpWarning::SchedulerFallsThroughForWorkload),
+            "user must be told the head will not be used"
+        );
+    }
+
+    #[test]
+    fn batch_eval_greedy_shape_reaches_scheduler() {
+        // Batch eval is the one default shape that can speculate; with a single
+        // slot it should engage and be recommended.
+        let scenario = WorkloadScenario::BatchEval {
+            planning_context_tokens: 8_000,
+            retained_cache_tokens: 0,
+            parallel_slots: 1,
+        };
+        assert!(scenario.default_decode_shape().permits_speculation());
+        let result = MtpAdmissionResult::compute(
+            MtpMode::Embedded,
+            &scenario,
+            3,
+            1,
+            ConcurrencyPolicy::SingleActive,
+        );
+        assert!(result.engages_for_workload);
         assert!(result.recommended_for_workload);
+        assert!(result.fallthroughs.is_empty());
+    }
+
+    #[test]
+    fn decode_shape_fallthrough_reasons_are_independent() {
+        let sampled = DecodeRequestShape {
+            temperature: 0.7,
+            constrained_tools: false,
+            reasoning: false,
+        };
+        assert_eq!(
+            sampled.fallthroughs(),
+            vec![SpecDecodeFallthrough::NonGreedySampling]
+        );
+
+        let grammar = DecodeRequestShape {
+            temperature: 0.0,
+            constrained_tools: true,
+            reasoning: false,
+        };
+        assert_eq!(
+            grammar.fallthroughs(),
+            vec![SpecDecodeFallthrough::LogitsProcessorInstalled]
+        );
+
+        // Reasoning alone does not stop the scheduler; it is recorded because it
+        // changes acceptance, not eligibility.
+        let reasoning = DecodeRequestShape {
+            temperature: 0.0,
+            constrained_tools: false,
+            reasoning: true,
+        };
+        assert!(reasoning.permits_speculation());
     }
 
     #[test]

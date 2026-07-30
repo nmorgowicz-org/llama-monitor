@@ -247,6 +247,15 @@ acceptance, parking, tokens saved, TG change, TTFT change, and end-to-end
 change. Do not recommend enablement from acceptance or TG alone: long-prefill
 rows can gain decode throughput while losing most of that benefit to TTFT.
 
+Rapid-MLX 0.11.1's MTP scheduler is greedy-only. Requests with temperature >0
+or a logits processor deliberately fall through to plain autoregressive decode;
+the harness treats the resulting zero speculative activity as a failed MTP
+cell. `--sampling recommended` remains useful as a capability probe with
+recorded provenance, but it cannot produce sampled MTP performance evidence on
+this runtime. Do not interpret `performance_claim_eligible: true` on a failed
+suite index as proof that MTP ran; `complete`, the speculative counters, and the
+backend log remain mandatory gates.
+
 ### The positive control gates the run
 
 A spec-decode matrix without a working positive control cannot tell *"this
@@ -360,3 +369,29 @@ This is protocol fidelity, not a text-pattern test: the model must emit a struct
 - Keep actual measurements and mathematical extrapolations separate. The report’s 160k/200k values are straight-line estimates from matching configuration rows, never fit, quality, or safety claims. Peak-memory estimates require fresh-server-per-cell evidence.
 
 For agentic settings, add identical revision-pinned template/tool-schema cells for int8 and int4: single call, sequential multi-turn calls, parallel calls where supported, null/empty arguments, large observations, retry/error handling, and cached-prefix reuse. Only direct parse/name/argument fidelity evidence can support an agentic KV recommendation.
+
+## Suspended Rapid-MLX MTP requalification lane
+
+Rapid-MLX 0.11.1 MTP qualification is suspended because its scheduler bypasses
+speculative decoding for nonzero temperature and for requests with a logits
+processor. Normal sampled coding-agent traffic hits the first condition, and
+normal constrained-tool traffic hits the second. More greedy/no-grammar
+benchmark volume cannot close that product gap.
+
+Preserve `scripts/rapid-mlx-benchmark-suite.mjs` and the existing receipts, but
+do not run the deferred qx64/MXFP8, natural-lane, 65k/131k, expanded-completion,
+or tool-call matrices until a pinned upstream build passes this preflight:
+
+1. one nonzero-temperature request records nonzero speculative attempts;
+2. one normal constrained-tool request records nonzero speculative attempts;
+3. both return valid output and expose requested/effective depth and fallback
+   evidence.
+
+If any condition fails, record the upstream snapshot and stop without loading
+the full matrix. If all pass, resume the counterbalanced qualification protocol,
+including the higher-context rows; do not treat the preflight itself as a
+performance result.
+
+See [Apple-silicon MTP runtime comparison](apple-silicon-mtp-runtime-comparison.md)
+for the Rapid-MLX 0.11.1, MTPLX 2.3.0, and llama.cpp source-level capability
+boundary.

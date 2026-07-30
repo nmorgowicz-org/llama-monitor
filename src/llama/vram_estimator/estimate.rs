@@ -797,7 +797,9 @@ pub fn full_estimate(
         // Compute admission result when MTP is enabled.
         let admission = if mode != super::workload_scenarios::MtpMode::Disabled {
             // Use default scenario for admission when none provided explicitly.
-            // The caller can refine this with actual workload info.
+            // The caller can refine this with actual workload info; the decode
+            // shape follows the scenario via `compute`, and a caller holding the
+            // real request parameters should use `compute_with_shape` instead.
             let scenario = super::workload_scenarios::WorkloadScenario::default();
             Some(super::workload_scenarios::MtpAdmissionResult::compute(
                 mode,

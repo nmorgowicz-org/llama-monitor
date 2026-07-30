@@ -66,3 +66,12 @@ scripts/*.sh
 # Screenshot test artifacts (for debugging only; promote to docs/screenshots/ when documented)
 docs/screenshots/artifacts/
 !scripts/check-unused-screenshots.sh
+
+# Python bytecode (scripts/build-mtp-head.py and friends)
+__pycache__/
+*.pyc
+
+# Benchmark receipt scratch space. Deliberately untracked: these are large,
+# machine-specific artifacts, and the evidence record cites them by path
+# knowing they will not survive a clean checkout.
+/tmp/

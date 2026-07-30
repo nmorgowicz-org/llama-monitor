@@ -726,7 +726,7 @@ Approach B avoids an eager reservation but still permits unbounded growth from t
 
 ### D19. Agent concurrency and llama.cpp slots
 
-**Approach A — accepted:** treat the normal home/single-user policy as one active foreground generation with rare background work queued. Keep **simultaneous active generations** separate from hot reusable sessions. Recommend two only when the user explicitly requires interactive coding to remain available during a background Hermes/OpenClaw job and the memory/throughput estimate fits; do not infer that need from the mere existence of cron jobs or sub-agents. Higher values require an explicit multi-client throughput workload and measured evidence. Llama.cpp MTP remains an explicit `--parallel 1` single-stream mode; Rapid retains admission behavior but its MTP fast path is opportunistic for one live eligible request as specified separately.
+**Approach A — accepted:** treat the normal home/single-user policy as one active foreground generation with rare background work queued. Keep **simultaneous active generations** separate from hot reusable sessions. Recommend two only when the user explicitly requires interactive coding to remain available during a background Hermes/OpenClaw job and the memory/throughput estimate fits; do not infer that need from the mere existence of cron jobs or sub-agents. Higher values require an explicit multi-client throughput workload and measured evidence. Llama.cpp MTP remains an explicit `--parallel 1` single-stream mode. Rapid admission remains separately configurable, but Phase 6.5's 2026-07-29 disposition suspends its MTP product path.
 
 **Approach B:** default the 80/20 profile to two slots because OpenCode and scheduled jobs may overlap.
 
@@ -773,6 +773,11 @@ Approach B is feasible but hides potentially huge total allocations and does not
 Approach B is technically possible in current upstream, but recurrent-state memory grows with parallelism and upstream reports little general MTP benefit during parallel generation. Keep it out of Auto recommendations until model/build/hardware benchmarks prove otherwise. In either approach, never let the UI accept N slots and silently submit 1.
 
 ### D25. Rapid-MLX MTP and concurrency
+
+**Status — superseded for current product execution by the Phase 6.5 disposition dated
+2026-07-29.** The inventory and memory rules below remain future requalification
+requirements, but no current Rapid MTP control, recommendation, or launch path may be built
+from this decision. Ordinary Rapid admission/concurrency work remains in scope.
 
 The audited source requires a per-family companion audit before presenting MTP as “native” or “sidecar-free.” Qwen3.5/3.6 detection uses intrinsic config metadata, but the production injector constructs an MTP module and refuses non-test operation without separate sidecar weights; HY3 automatically resolves a revision-pinned external sidecar because converted base weights strip the MTP head; Gemma4 has a four-layer Google assistant loader but is absent from the production dispatch table and detection explicitly leaves sidecar promotion disabled pending validation. Conflicting source comments that call a path baked-in/native do not override the actual loader. Represent every loaded MTP weight source and cache separately and stop if eligibility, dispatch, and weight ownership disagree.
 
@@ -1194,7 +1199,7 @@ Never combine these into one “cache size” control.
 - Primary metrics: prefix-extension hits, prefill tokens/ms saved, TTFT, entry p95 bytes, evictions, PFlash bypasses, and tool-schema/prefix churn.
 - Llama MTP profile: explicitly `--parallel 1`; tell OpenCode/sub-agents to run model turns sequentially. They queue rather than decode concurrently, preserving the single-stream optimization and avoiding parallel MTP state growth.
 - Sequential does not mean “one reusable session.” If the parent and several sub-agents alternate independent transcripts, each transcript that will resume counts toward the reusable prompt-state working set and can evict another. Estimate cache/checkpoint retention from revisited transcripts while active-generation concurrency remains one.
-- Rapid MTP profile: keep scheduler admission separate. MTP accelerates only eligible single-live-request greedy steps; overlapping requests fall back to ordinary decode. Sequential orchestration increases MTP eligibility but is not a hard server requirement.
+- Rapid MTP profile: suspended by Phase 6.5. Keep ordinary scheduler admission separate; do not recommend sequential orchestration to obtain a greedy/no-grammar research fast path.
 
 #### Tool/research agent — Hermes/OpenClaw-style interactive, delegated, or scheduled work
 
@@ -1507,7 +1512,7 @@ The coordinator must present these to the user before the phase that depends on 
 | A45 | Workload discovery default | Coding agent first/default; Tool/research and Roleplay separate; scheduling/delegation/overlap are editable Tool/research assumptions; General chat secondary; Deterministic batch/eval Advanced | Phase 2/8/10 |
 | A46 | Recommended quant meaning | Must fit selected workload/context/concurrency policy; otherwise label quality-only or not recommended | Phase 5/8 |
 | A47 | Context compaction owner | External client owns compaction/history; app chat compaction is never presented as protection for OpenCode/Hermes/SillyTavern | Phase 5/7/13 |
-| A48 | Rapid MTP concurrency | Accepted: memory-first single-active Auto for maximum quant/context fit, resolving the effective admission ceiling to one where required; separately estimated Advanced Allow overlap starts at two and must refit quant/context/guarantees; never derive fit without additive MTP companion/cache ownership or assume audited mid-stream fallback is lossless | Phase 3/5/7/11 |
+| A48 | Rapid MTP concurrency | Superseded for current product execution by Phase 6.5's 2026-07-29 suspension. Preserve the earlier memory/ownership policy only as a future requalification input; do not expose or optimize current admission around Rapid MTP. | Phase 3/5/6.5/7/11 |
 | A49 | Backend-settings ownership | Accepted: Rust owns the semantic setting catalog and runtime truth; reusable frontend components own teaching, hierarchy, responsive layout, and custom interaction; never reduce this to a fully generated form or duplicate setting semantics in JavaScript | Phase 7/10/13 |
 | A50 | Spawn Wizard flow | Accepted intent-first six-step shell: Goal & Guidance; Model & Engine; Fit & Context; Behavior & Endpoint; Review Plan; Start & Verify. Rename setup depth to Guidance level (Guided/Customize/Expert), default workload to Interactive coding, and allow source deep links to prefill without bypassing workload confirmation | Phase 7/10 |
 | A51 | Sampling mode visibility and provenance | Accepted: every model on both backends shows the complete applicable mode selector everywhere; preserve all family modes; provide universal Model/author, General, Coding/Agentic, Precise/Deterministic, Creative/Roleplay, and Custom choices; persistent best-use/source badges replace tooltip-only guidance | Phase 2/7/8/10/13 |
@@ -1859,7 +1864,7 @@ The dependency table above is authoritative. Do not infer prerequisites from a s
 10. Add workload scenarios for foreground-only coding, coding plus one background job, multiple scheduled jobs, single roleplay chat, and multiple roleplay sessions. Explain throughput, queueing, per-request context, and memory consequences.
 11. Replace the quant-comparison 8k/generic use-case baseline with the selected workload, architecture, target context, guaranteed/elastic concurrency, backend, and unified-memory state. A Recommended badge requires policy fit.
 12. Make llama.cpp MTP an explicit `--parallel 1` single-stream policy before save/launch, with queueing and sequential-sub-agent guidance. Benchmark it against a multi-slot/MTP-Off overlap policy; permit current-upstream multi-slot MTP only as a build/model/hardware-qualified experiment. Include all MTP recurrent/draft memory.
-13. For Rapid, inventory per-family embedded versus external MTP weights from actual loader behavior, not config labels/comments; include sidecar download/disk/provenance plus resident weights and MTP cache/state additively even while inactive. Implement the selected D25 admission policy. For Advanced overlap, model every allowed active request's KV/recurrent/working/speculative state, reduced context guarantee, and audited single-live greedy/no-logits MTP gate; do not claim lossless mid-stream fallback until exact-runtime stress tests pass. Return eligibility/fallback/handoff reasons, count MTP-active steps, and record peak memory.
+13. For Rapid, preserve the per-family embedded/external MTP inventory and additive memory ownership as requalification inputs, but park MTP-specific estimator, sidecar, eligibility, and admission implementation while Phase 6.5 is suspended. Implement and calibrate ordinary Rapid active-request concurrency independently; restore speculative state, fallback/handoff, and peak-memory work only after the reopening trigger passes.
 14. Distinguish external-client compaction ownership from Llama Monitor chat compaction and show observed prompt/context pressure without promising app-side protection.
 _— Phase 5a gate falls here; 5b begins. A fresh Verifier must pass Phase 5a (items 1–14, ending in cross-surface estimate equality) before the following items start. —_
 
@@ -1916,10 +1921,67 @@ _— Phase 5a gate falls here; 5b begins. A fresh Verifier must pass Phase 5a (i
 
 The measurement history that motivates this phase — two stacked tooling bugs, the served three-trunk screening matrix, the K=1 SSM clamp, and the `aliases.json` reliability findings — lives in `docs/reference/rapid-mlx-mtp-evidence.md`. Do not restate its numbers here; cite it. `docs/plans/20260729-rapidmlx_speculative_decoding_handoff.md` carries live state and open questions between working sessions. Note that every served figure in the evidence record is `n=1` screening evidence, explicitly not qualification: 6.5a exists to replace it.
 
+**Disposition — 2026-07-29:** Phase 6.5 is suspended at a valid upstream capability gate,
+not abandoned and not awaiting more benchmark volume. Rapid-MLX 0.11.1 permits MTP only
+for greedy requests with no logits processor; normal sampled coding-agent requests and
+normal constrained-tool requests therefore record zero speculative activity. The clean
+greedy repeat passed parity and retained a throughput benefit, but qualifies only an
+artificial research envelope. The remaining qx64/MXFP8, natural-lane, 65k/131k,
+expanded-length, and tool-call MTP matrices are deferred because they cannot qualify the
+workload Phase 7 would expose. Preserve the harness and receipts as a requalification lane.
+
+This suspension does **not** block the rest of the Rapid integration roadmap. Phase 7 and
+later phases may proceed with Rapid MTP absent from advertised, automatic, and ordinary
+Advanced controls. No downstream phase may interpret “Phase 6.5 suspended” as a passing
+qualification result. MTP-specific artifact acquisition, eligibility, estimator, API, and
+UI work remains parked with 6.5b. The cross-runtime source audit and future validation
+boundary are in `docs/reference/apple-silicon-mtp-runtime-comparison.md`.
+
+**Requalification trigger:** first prove on a pinned upstream build that (a) a
+nonzero-temperature request and (b) a normal constrained-tool request each record nonzero
+speculative attempts with output parity/fidelity. Requested/effective depth and fallback
+reasons must remain observable. Only then resume items 1–11, including the deferred
+higher-context rows; 6.5b still requires a fresh 6.5a Verifier pass.
+
+**Requalification is now one command.** `scripts/rapid-mlx-requalify-spec-decode.mjs` encodes
+exactly the three conditions above as gates named `sampled`, `constrained`, and `parity`, runs
+them at the 8k tier in the `natural` lane with the mandatory positive control, and exits `0`
+qualified / `20` still blocked / `1` uninterpretable. It never uses the forced lane. The same
+three gate names appear in `SPEC_DECODE_GATES` in `src/inference/rapid_mlx/capabilities.rs`,
+so the post-upgrade probe tells the user which gate is outstanding and what to run. Details in
+§6.1 of the handoff doc.
+
+**Capability wiring — landed 2026-07-29, upstream-independent.** Because upstream commits
+daily, the app-side work that a future fix would need was completed while 6.5 stayed
+suspended. It does not enable MTP anywhere and is *not* sub-phase 6.5b. In scope terms it
+discharges item 9 for Rapid, and is the app-side half of item 11's honesty requirement:
+
+- `spec_decode` is now a tri-state `FeatureQualification` in the Rapid `CapabilitySnapshot`,
+  reaching `CapabilitySet.mtp`. Flag presence can only produce `Indeterminate`;
+  `SPEC_DECODE_GREEDY_ONLY_VERSIONS` records `0.11.1` as behaviorally `Unavailable`. This is
+  item 9's "derive capability from checkable facts, never from alias metadata" applied to the
+  runtime rather than the model.
+- A live estimator defect was fixed: `MtpAdmissionResult` recommended MTP for `CodingAgent`,
+  the one workload where the scheduler can never engage. Admission now models the decode
+  shape (temperature, constrained tools, reasoning) and reports `engages_for_workload` plus
+  the `fallthroughs` that explain a negative. Capability ≠ recommendation (D25) now has a
+  third gate: *reached*.
+- HF browse vision discovery reads `config.json` and the safetensors index weight map before
+  falling back to filename/tag heuristics, and labels which one answered. This is the
+  discovery-side counterpart to §3.8a's revision-bound runnable-capability receipt: it does
+  not prove a model *runs*, it stops the app claiming vision from a repo name.
+
+Deliberately still open: `derive_mtp_concurrency` remains a stub returning `Unknown` (help
+output cannot prove model eligibility — the requalification lane should populate it);
+`command.rs` still gates on `--speculative` existence rather than the behavioral verdict, so a
+user can still launch MTP to test it; and `RAPID_MLX_CONSTRAIN_TOOLS` has no representation in
+`src/`, so the app cannot yet offer "drop the tool grammar in exchange for speculation" as a
+choice. Full list in §7.2 of the handoff doc.
+
 **Formal sub-phase split (E6.5).** Phase 6.5 is executed as two formal sub-phases on the §E5 pattern, each with its own hard gate and its own **fresh Verifier pass**. The split is not a token-fit measure; it exists because 6.5b's artifact-management decisions are only answerable once 6.5a has produced qualification results, and a single packet would let unqualified evidence leak into placement and eligibility logic:
 
 - **Phase 6.5a — qualification and benchmark validity (Builder brief items 1–11):** captured-stderr effective-depth proof, repeated counterbalanced trials, forced-vs-natural lane separation, mandatory positive control, sidecar preflight, paired-metric reporting, tier/tool-call/greedy-parity coverage, label-safety audit, fact-derived capability, symmetric llama.cpp draft coverage, and estimator ownership. 6.5a must pass its own gate before 6.5b starts.
-- **Phase 6.5b — managed sidecar artifacts (Builder brief items 12–15):** app-managed acquisition and out-of-trunk placement, per-artifact provenance, in-trunk-layout refusal, and qualification-gated eligibility.
+- **Phase 6.5b — managed sidecar artifacts (Builder brief items 12–15):** currently parked with 6.5a; app-managed acquisition and out-of-trunk placement, per-artifact provenance, in-trunk-layout refusal, and qualification-gated eligibility begin only after requalification.
 
 **Budget:** two sub-phases, each <=120k. **Prerequisites:** Phase 3 (runtime capability qualification), Phase 5 (estimator and memory ownership); A2, A14, A17–A19, A22, A26, A51–A52. **Files:** `scripts/rapid-mlx-benchmark-suite.mjs`, `scripts/model-runtime-benchmark.mjs`, `docs/reference/model-runtime-benchmarking.md`, Rapid capability/qualification modules, `tests/fixtures/calibration/`, MTP artifact resolution and companion-download paths, memory estimator MTP components.
 
@@ -1937,7 +1999,9 @@ The measurement history that motivates this phase — two stacked tooling bugs, 
 10. Cover the llama.cpp side symmetrically: embedded and `-md` draft-model paths including Gemma 4, against the pinned build, with the same paired-metric and positive-control discipline.
 11. Audit estimator ownership for speculative state — draft weights, MTP cache/recurrent state, and sidecar resident bytes must be additive in Phase 5's estimator and attributable to a named owner.
 
-_— Phase 6.5a gate falls here; 6.5b begins. A fresh Verifier must pass 6.5a before the following items start. —_
+_— Phase 6.5a gate falls here. As of 2026-07-29 it is suspended on the sampled/tool-processor
+upstream boundary; 6.5b does not begin. A fresh Verifier must pass resumed 6.5a before the
+following items start. —_
 
 **Builder brief — 6.5b (managed sidecar artifacts):**
 
@@ -1967,14 +2031,14 @@ _— Phase 6.5a gate falls here; 6.5b begins. A fresh Verifier must pass 6.5a be
 **Builder brief:**
 
 1. Build one schema/descriptor-driven component covering capability, evidence, default, help, validation, serialization, command/request mapping, summary, and unsupported reason.
-2. Wire qualified speculative decoding, MLLM, embeddings, KV policy, reasoning, PFlash, batching/concurrency, request safety, cache policies, and troubleshooting overrides end to end.
+2. Wire qualified MLLM, embeddings, KV policy, reasoning, PFlash, batching/concurrency, request safety, cache policies, and troubleshooting overrides end to end. Rapid speculative decoding is explicitly omitted while Phase 6.5 is suspended; saved research values may round-trip only as unavailable/provisional state and must never launch or appear enabled.
 3. Enforce mutual exclusions and source/extra/model eligibility before launch.
 4. Provide exact command preview with secrets redacted and effective-vs-requested policy explanations.
 5. Restore/edit/clone existing presets including unsupported/provisional saved values without silent loss.
 6. Preserve current tab/step shell until Phase 10; add new JS module baseline when applicable.
 7. Add transparent workload inputs for all five accepted profiles; display derived streaming/tool/format/sampling/concurrency/cache assumptions and require confirmation.
 8. For Roleplay, cover long-context reserve, client-owned samplers/stops, chat-vs-text formatting owner, and prompt-cache stability without encoding SillyTavern-specific guesses as server facts.
-9. Replace raw Parallel Slots teaching with active-generation, guaranteed-context, burst-context, and inactive-session inputs. Selecting llama.cpp MTP visibly locks the resulting policy to one slot and explains sequential queueing before the user confirms; switching to overlap mode visibly disables MTP. Rapid's memory-first Auto also uses one active generation to protect near-capacity quant/context fit, while Advanced Allow overlap refits two active working sets and shows MTP eligibility/fallback/handoff evidence; do not claim MTP itself is the only reason for the admission policy.
+9. Replace raw Parallel Slots teaching with active-generation, guaranteed-context, burst-context, and inactive-session inputs. Selecting llama.cpp MTP visibly locks the resulting policy to one slot and explains sequential queueing before the user confirms; switching to overlap mode visibly disables MTP. Rapid's memory-first Auto also uses one active generation to protect near-capacity quant/context fit, while Advanced Allow overlap refits two active working sets; neither path exposes Rapid MTP eligibility while Phase 6.5 is suspended.
 10. Show endpoint compatibility per workload: Chat Completions, Responses, Anthropic Messages if qualified, and raw/text completion routes. Do not imply one OpenAI-compatible label proves every client protocol.
 11. Implement the capability-gated Advanced llama-server Web UI group from accepted D26/A44: Auto/On/Off availability, open action, validated config JSON/file, Expert custom static path, and effective Network & Access explanation. Keep the MCP proxy Off and built-in tools/`--agent` absent unless the separately approved Experimental security gate is satisfied.
 12. Render the complete shared sampling mode selector in Wizard and Preset Editor with persistent best-use/source badges, full values, Custom and Model/author-default choices, backend coverage, and visible explicit-client precedence. Never hide non-default family modes or collapse a finetune to one option.
@@ -2263,9 +2327,9 @@ MTP-specific cases:
 - llama required/product single-stream mode emits `--parallel 1`, disables conflicting slot input, and queues two client requests;
 - pinned current llama multi-slot MTP is labeled Experimental and must prove initialization, recurrent-state memory, output correctness, acceptance, foreground latency, and aggregate throughput before exposure;
 - switching llama to overlap mode disables MTP explicitly and restores the chosen slot/context policy;
-- Rapid one live greedy request activates MTP;
-- Rapid non-greedy/logits-processor request and two live requests fall back to autoregressive decoding without failure or admission-policy mutation;
-- Rapid returns observable MTP active/fallback reasons and includes sidecar/native MTP memory even while the fast path is inactive.
+- Rapid MTP is unavailable/suspended in product capability and cannot be launched from saved, API, or UI state;
+- the retained requalification fixture proves non-greedy and constrained-tool requests currently fall back with zero speculative activity, without making that fallback a product mode;
+- after the Phase 6.5 reopening trigger passes, restore active/fallback, sidecar/native-memory, and concurrency cases before exposure.
 
 ### 12.6 HF and Model Library matrix
 
@@ -2487,7 +2551,7 @@ External citations do not replace local regression tests. Before fixing each def
 | unconditional llama Web UI MCP proxy | `src/inference/llama_cpp.rs` | ordinary external-agent argv omits flag; explicit secure Web UI case only |
 | cache-idle copy conflates mechanisms | preset/wizard HTML/JS/docs | lifecycle test plus reviewed educational copy `[decide-once]` (Nick approves the copy string once in refinement; the gate then becomes `[local-verifiable]`) |
 | llama MTP slot policy is hidden | wizard payload and launch policy | explicit MTP single-stream lock/queue guidance; multi-slot mode disables MTP; no silent rewrite |
-| Rapid MTP benefit is conditional | scheduler/profile/diagnostics | single-greedy-request activation and batched/non-greedy fallback tests/metrics |
+| Rapid MTP is not currently product-eligible | scheduler/profile/diagnostics | unavailable/suspended capability fixture; requalification preflight before activation/fallback tests return |
 | generic quant recommendation ignores workload | estimator/Model Browser/HF/wizard | workload-fit recommendation equality and badge gate `[decide-once]` (Nick sets the fit threshold once; the gate then becomes `[local-verifiable]`) |
 | explicit sampler zeros are lost | wizard/preset/default/request path | zero/false/omission round-trip and client-precedence tests |
 
@@ -2531,7 +2595,7 @@ The Coordinator maintains this table after each independently verified phase. A 
 | llama Web UI MCP proxy exposure | 1, 12 | default-off argv and security tests | Open |
 | llama cache teaching/telemetry | 6, 11 | mechanism/workload matrix, bounded bytes, cached-token evidence | Open |
 | workload/default/quant precedence | 2, 5, 7, 8 | explicit-zero/provenance and fit recommendation tests | Open |
-| llama/Rapid MTP concurrency policy | 3, 5, 7, 11 | llama explicit single-stream lock; Rapid memory-first one-active Auto plus fully refitted Advanced overlap, companion ownership, and activation/fallback/handoff metrics | Open |
+| llama/Rapid MTP concurrency policy | 3, 5, 6.5, 7, 11 | llama explicit single-stream lock; Rapid MTP suspended with ordinary admission independent; preserve companion/state ownership and activation/fallback tests for requalification | Rapid suspended |
 | OpenCode/Hermes/OpenClaw qualification | 0, 3, 6, 9, 11 | pinned source plus real wire/tool-loop fixtures | Open |
 | SillyTavern Text and Chat qualification | 3, 6, 7, 9, 11 | llama `/completion`, Rapid `/v1/completions`, Chat path fixtures | Open |
 | UI/IA improvement | 7, 10 | accepted seven-category/six-step direction, then screenshot-backed final visual approval and accessibility evidence | Open |

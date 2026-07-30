@@ -138,6 +138,18 @@ pub struct HfWeightIndexEvidence {
 pub struct HfExtrasEvidence {
     #[serde(default)]
     pub vision: bool,
+    /// What established the vision verdict, e.g.
+    /// `config.json:vision_config` or `filename/tag heuristics`.
+    ///
+    /// A repo name or a `vision` tag is somebody's label, not a fact about the
+    /// weights; `aliases.json` has already been wrong twice this way. Recording
+    /// the source lets a caller refuse to act on a guess.
+    #[serde(default)]
+    pub vision_source: String,
+    /// `confirmed` when a config or tensor artifact settled it either way,
+    /// `heuristic` when only names and tags were available.
+    #[serde(default)]
+    pub vision_confidence: String,
     #[serde(default)]
     pub tool_use: bool,
     #[serde(default)]
@@ -218,7 +230,14 @@ pub async fn hf_qualify_repo(req: QualifyRequest) -> Result<HfQualification, Str
     let tokenizer = collect_tokenizer_evidence(&siblings);
     let chat_template = collect_template_evidence(repo_id, &revision, &siblings, &mut errors).await;
     let weight_index = collect_weight_evidence(repo_id, &siblings, &mut errors).await;
-    let extras = collect_extras_evidence(repo_id, &siblings, &runtime_snapshot, &mut errors).await;
+    let extras = collect_extras_evidence(
+        repo_id,
+        &revision,
+        &siblings,
+        &runtime_snapshot,
+        &mut errors,
+    )
+    .await;
 
     // Determine backend hint and qualification
     let backend_hint = determine_backend_hint(&format, config.as_ref(), extras.as_ref());
@@ -618,6 +637,7 @@ async fn fetch_weight_total_bytes(repo_id: &str, _siblings: &[String]) -> Result
 /// Collect extras evidence.
 async fn collect_extras_evidence(
     repo_id: &str,
+    revision: &str,
     siblings: &[String],
     runtime: &HfRuntimeSnapshot,
     _errors: &mut Vec<String>,
@@ -629,13 +649,7 @@ async fn collect_extras_evidence(
         .map(|t| t.to_ascii_lowercase())
         .collect();
 
-    let has_vision_files = siblings.iter().any(|p| {
-        let l = p.to_ascii_lowercase();
-        l.contains("vision") || l.contains("mmproj") || l.contains("projector")
-    });
-    let has_vision_tag = tags_lower.iter().any(|t| t.contains("vision"));
-    let has_vision_in_config = siblings.iter().any(|p| p == "preprocessor_config.json");
-    let vision = has_vision_files || has_vision_tag || has_vision_in_config;
+    let vision_verdict = resolve_vision_evidence(repo_id, revision, siblings, &tags_lower).await;
 
     let tool_use = tags_lower
         .iter()
@@ -662,13 +676,161 @@ async fn collect_extras_evidence(
     let readme_model_family = fetch_readme_model_family_hint(repo_id).await;
 
     Some(HfExtrasEvidence {
-        vision,
+        vision: vision_verdict.vision,
+        vision_source: vision_verdict.source,
+        vision_confidence: vision_verdict.confidence,
         tool_use,
         reasoning,
         generation_config_params: gen_config,
         readme_model_family,
         security_signals,
     })
+}
+
+/// A vision verdict together with what produced it.
+struct VisionVerdict {
+    vision: bool,
+    source: String,
+    confidence: String,
+}
+
+/// Tensor-name prefixes that only exist when a vision tower is actually present
+/// in the weights. Matched against the safetensors index, so this reads the
+/// model's own artifact rather than its packaging.
+const VISION_TENSOR_MARKERS: &[&str] = &[
+    "vision_tower",
+    "vision_model",
+    "visual.",
+    "mm_projector",
+    "multi_modal_projector",
+    "image_newline",
+];
+
+/// Config keys that establish a vision component.
+const VISION_CONFIG_KEYS: &[&str] = &["vision_config", "vision_tower", "mm_vision_tower"];
+
+/// Resolve whether a repo has a vision component, preferring artifacts over names.
+///
+/// Order: `config.json`, then the safetensors index, then filename/tag
+/// heuristics. The first two are facts about the model; the third is a guess and
+/// is labelled as one. When both artifacts are readable and neither shows a
+/// vision component, the absence is confirmed and overrides the heuristics —
+/// which is the point, because a `-vision-` in a repo name or a stray `vision`
+/// tag currently produces false positives that reach the browse UI.
+async fn resolve_vision_evidence(
+    repo_id: &str,
+    revision: &str,
+    siblings: &[String],
+    tags_lower: &[String],
+) -> VisionVerdict {
+    // An empty revision would build a malformed resolve URL, and every fetch
+    // would fail into the heuristic path without saying why.
+    let revision = if revision.is_empty() {
+        "main"
+    } else {
+        revision
+    };
+
+    let config = fetch_json_at(repo_id, revision, "config.json", 512 * 1024).await;
+    if let Some(ref value) = config
+        && let Some(key) = vision_config_key(value)
+    {
+        return VisionVerdict {
+            vision: true,
+            source: format!("config.json:{key}"),
+            confidence: "confirmed".into(),
+        };
+    }
+
+    let index = fetch_json_at(
+        repo_id,
+        revision,
+        "model.safetensors.index.json",
+        8 * 1024 * 1024,
+    )
+    .await;
+    if let Some(ref value) = index
+        && let Some(marker) = vision_tensor_marker(value)
+    {
+        return VisionVerdict {
+            vision: true,
+            source: format!("model.safetensors.index.json:{marker}"),
+            confidence: "confirmed".into(),
+        };
+    }
+
+    // Both artifacts read cleanly and neither carries a vision component.
+    if config.is_some() && index.is_some() {
+        return VisionVerdict {
+            vision: false,
+            source: "config.json + model.safetensors.index.json show no vision component".into(),
+            confidence: "confirmed".into(),
+        };
+    }
+
+    // No artifact settled it. Fall back to the old heuristics and say so, so a
+    // caller can decline to enable vision on the strength of a filename.
+    let has_vision_files = siblings.iter().any(|p| {
+        let l = p.to_ascii_lowercase();
+        l.contains("vision") || l.contains("mmproj") || l.contains("projector")
+    });
+    let has_vision_tag = tags_lower.iter().any(|t| t.contains("vision"));
+    let has_preprocessor = siblings.iter().any(|p| p == "preprocessor_config.json");
+    let vision = has_vision_files || has_vision_tag || has_preprocessor;
+    let mut signals = Vec::new();
+    if has_vision_files {
+        signals.push("filename");
+    }
+    if has_vision_tag {
+        signals.push("tag");
+    }
+    if has_preprocessor {
+        signals.push("preprocessor_config.json");
+    }
+    VisionVerdict {
+        vision,
+        source: if signals.is_empty() {
+            "no vision signal in filenames or tags; no readable config or index".into()
+        } else {
+            format!("heuristic: {}", signals.join(", "))
+        },
+        confidence: "heuristic".into(),
+    }
+}
+
+/// Which vision key a config carries, if any. Checked at the top level and one
+/// level down, because wrappers nest the text model's config under `text_config`
+/// and keep the vision block beside it.
+fn vision_config_key(value: &serde_json::Value) -> Option<&'static str> {
+    let object = value.as_object()?;
+    VISION_CONFIG_KEYS
+        .iter()
+        .find(|key| object.contains_key(**key))
+        .copied()
+}
+
+/// The first vision tensor marker present in a safetensors index weight map.
+fn vision_tensor_marker(value: &serde_json::Value) -> Option<&'static str> {
+    let weight_map = value.get("weight_map")?.as_object()?;
+    VISION_TENSOR_MARKERS.iter().copied().find(|marker| {
+        weight_map
+            .keys()
+            .any(|tensor| tensor.to_ascii_lowercase().contains(*marker))
+    })
+}
+
+/// Fetch and parse a small JSON artifact. `None` means "could not read it",
+/// which is deliberately distinct from "read it and found nothing".
+async fn fetch_json_at(
+    repo_id: &str,
+    revision: &str,
+    path: &str,
+    cap: u64,
+) -> Option<serde_json::Value> {
+    let bytes = fetch_raw_bytes_at(repo_id, revision, path, cap)
+        .await
+        .ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 async fn fetch_generation_config(repo_id: &str) -> Result<Option<serde_json::Value>, String> {
@@ -846,7 +1008,12 @@ fn build_qualification_reason(
         .map(|e| {
             let mut parts = Vec::new();
             if e.vision {
-                parts.push("vision");
+                // A guess is marked as a guess: this string is read by users.
+                parts.push(if e.vision_confidence == "confirmed" {
+                    "vision"
+                } else {
+                    "vision (unconfirmed)"
+                });
             }
             if e.tool_use {
                 parts.push("tool-use");
@@ -1481,6 +1648,37 @@ fn identity_minimal(repo_id: &str, revision: String, errors: Vec<String>) -> HfI
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vision_config_key_finds_nested_and_top_level() {
+        let config =
+            serde_json::json!({ "model_type": "gemma4", "vision_config": { "depth": 27 } });
+        assert_eq!(vision_config_key(&config), Some("vision_config"));
+
+        let legacy = serde_json::json!({ "mm_vision_tower": "openai/clip-vit-large" });
+        assert_eq!(vision_config_key(&legacy), Some("mm_vision_tower"));
+
+        let text_only = serde_json::json!({ "model_type": "qwen3", "num_hidden_layers": 64 });
+        assert_eq!(vision_config_key(&text_only), None);
+    }
+
+    #[test]
+    fn vision_tensor_marker_reads_the_weight_map() {
+        let index = serde_json::json!({ "weight_map": {
+            "model.layers.0.self_attn.q_proj.weight": "model-00001.safetensors",
+            "vision_tower.encoder.layers.0.mlp.fc1.weight": "model-00002.safetensors",
+        } });
+        assert_eq!(vision_tensor_marker(&index), Some("vision_tower"));
+
+        // A repo whose *name* says vision but whose weights do not.
+        let text_only = serde_json::json!({ "weight_map": {
+            "model.layers.0.self_attn.q_proj.weight": "model-00001.safetensors",
+        } });
+        assert_eq!(vision_tensor_marker(&text_only), None);
+
+        // Not an index at all: absent, not falsely positive.
+        assert_eq!(vision_tensor_marker(&serde_json::json!({})), None);
+    }
 
     #[test]
     fn test_detect_format_gguf() {

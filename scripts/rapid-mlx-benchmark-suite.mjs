@@ -44,6 +44,14 @@ const DEFAULT_CONTROL_ACCEPT_FLOOR = 0.3;
 const REASONING_BUDGET = 16000;
 const MAX_TOKENS = REASONING_BUDGET + 512;
 const SAFE_MLLM_PREFILL_STEPS = new Set([512, 1024, 1536, 2048]);
+// Generation length for the spec-decode suites' cells. This was 512, which is
+// wrong for two independent reasons: a reasoning-on lane spends the entire
+// budget inside <think> and emits empty content (the run then fails its
+// completion floor, telling you nothing about speculation), and 512 tokens is
+// too short to say anything stable about draft acceptance, which is measured
+// over accepted/attempted counts that accumulate across the generation. 8k is
+// the floor for a spec-decode number worth recording.
+const DEFAULT_SPEC_COMPLETION_TOKENS = 8192;
 
 function die(message) { throw new Error(message); }
 
@@ -95,6 +103,8 @@ function parseArgs(argv) {
     else if (key === '--control-accept-floor') options.controlAcceptFloor = Number(value);
     else if (key === '--sampling') options.sampling = value;
     else if (key === '--sampling-variant') options.samplingVariant = value;
+    else if (key === '--spec-completion-tokens') options.specCompletionTokens = Number(value);
+    else if (key === '--spec-zero-activity') options.specZeroActivity = value;
     else if (key === '--temperature') options.temperature = Number(value);
     else if (key === '--top-p') options.topP = Number(value);
     else if (key === '--top-k') options.topK = Number(value);
@@ -130,6 +140,13 @@ function parseArgs(argv) {
     // stops a research override from silently becoming a qualification result.
     if (!['forced', 'natural'].includes(options.specDecodeLane)) {
       die('Spec-decode suites require --spec-decode-lane forced|natural. "forced" passes --force-spec-decode, overriding the profile\'s supports_spec_decode verdict; results from it are research evidence and can never gate enablement. "natural" lets Rapid apply its own eligibility rules.');
+    }
+    // Defaults to 'required' rather than being mandatory: failing on a
+    // speculative cell that never speculated is the right default for a
+    // qualification matrix. Validated so a typo cannot silently select it.
+    options.specZeroActivity ??= 'required';
+    if (!['required', 'observed'].includes(options.specZeroActivity)) {
+      die('--spec-zero-activity must be "required" (zero speculative activity fails the run; default) or "observed" (record it as a finding, for the requalification lane whose gates evaluate it themselves).');
     }
   }
   return { command, options };
@@ -228,6 +245,17 @@ function configuration({
     speculative_workload: speculative?.workload ?? null,
     num_speculative_tokens: speculativeMethod === 'off' ? null : (speculative?.numSpeculativeTokens ?? DEFAULT_SPECULATIVE_TOKENS),
     speculative_disable_auto_k: speculativeMethod === 'off' ? null : Boolean(speculative?.disableAutoK),
+    // 'required' (default) treats zero speculative activity as a broken cell and
+    // fails the run -- correct for a qualification matrix, where a speculative
+    // cell that never speculated measured nothing.
+    //
+    // 'observed' records it as a finding instead. The requalification lane needs
+    // this: "did the scheduler engage?" is its entire question, and on a build
+    // that still falls through, zero activity is the *answer*. With 'required'
+    // the inner benchmark dies before writing a receipt, so the gates' own
+    // attempts<=0 -> blocked branches are unreachable and a known-blocked build
+    // reports as `uninterpretable` (harness broken) instead of `still-blocked`.
+    speculative_zero_activity: speculativeMethod === 'off' ? null : (speculative?.zeroActivity ?? 'required'),
     expected_metrics: expectedMetrics,
   };
 }
@@ -251,7 +279,7 @@ async function imageFixtureMetadata(imagePath) {
   };
 }
 
-async function suiteCells(model, suite, imagePath, expectedVisualTerms = [], mllmPrefillStepSize = 1024, workspacePackPath = 'tests/fixtures/calibration/workspace-cache/project-pack.json', speculativeModel = null, speculativeControlModel = null, speculativeTokens = DEFAULT_SPECULATIVE_TOKENS, speculativeMethods = ['mtp'], speculativeWorkloads = ['code'], disableSpeculativeAutoK = false) {
+async function suiteCells(model, suite, imagePath, expectedVisualTerms = [], mllmPrefillStepSize = 1024, workspacePackPath = 'tests/fixtures/calibration/workspace-cache/project-pack.json', speculativeModel = null, speculativeControlModel = null, speculativeTokens = DEFAULT_SPECULATIVE_TOKENS, speculativeMethods = ['mtp'], speculativeWorkloads = ['code'], disableSpeculativeAutoK = false, specCompletionTokens = DEFAULT_SPEC_COMPLETION_TOKENS, specZeroActivity = 'required') {
   const include = (name) => suite === 'all' || suite === name;
   const cells = [];
   let workspacePack = null;
@@ -335,8 +363,8 @@ async function suiteCells(model, suite, imagePath, expectedVisualTerms = [], mll
           corpus: 'code',
           markers: null,
           instruction: 'Continue the TypeScript reference with additional typed validation functions. Output TypeScript code only and continue until the token budget is exhausted.',
-          max_tokens: 512,
-          minimum_completion_tokens: 256,
+          max_tokens: specCompletionTokens,
+          minimum_completion_tokens: Math.floor(specCompletionTokens / 2),
           extra_body: { chat_template_kwargs: { enable_thinking: false } },
         },
       },
@@ -346,8 +374,8 @@ async function suiteCells(model, suite, imagePath, expectedVisualTerms = [], mll
           corpus: 'prose',
           markers: null,
           instruction: 'Write a coherent technical essay about reliable local inference systems. Use the reference for themes, do not quote it, and continue until the token budget is exhausted.',
-          max_tokens: 512,
-          minimum_completion_tokens: 256,
+          max_tokens: specCompletionTokens,
+          minimum_completion_tokens: Math.floor(specCompletionTokens / 2),
           extra_body: { chat_template_kwargs: { enable_thinking: false } },
         },
       },
@@ -378,6 +406,7 @@ async function suiteCells(model, suite, imagePath, expectedVisualTerms = [], mll
                 workload: workloadName,
                 numSpeculativeTokens: speculativeTokens,
                 disableAutoK: disableSpeculativeAutoK,
+                zeroActivity: specZeroActivity,
               },
             }), profile.overrides));
           }
@@ -398,7 +427,7 @@ async function suiteCells(model, suite, imagePath, expectedVisualTerms = [], mll
   // (slow, already-run) cold spec-decode sweep above.
   if (suite === 'spec-decode' || suite === 'spec-decode-warm') {
     const specToolWorkload = (overrides = {}) => ({
-      max_tokens: 4096,
+      max_tokens: specCompletionTokens,
       instruction: 'Use read_file on src/example.ts. After seeing the file result, use apply_patch to replace the marked value.',
       markers: null,
       extension_words: 500,
@@ -414,7 +443,7 @@ async function suiteCells(model, suite, imagePath, expectedVisualTerms = [], mll
       }] },
       ...overrides,
     });
-    const specWarmOff = cell(model, 'spec-warm-off-8000-int8', 8000, configuration({ dtype: 'int8', prefillStepSize: '512', cache: true, maxTokens: 4096, speculative: { method: 'off', workload: 'tools' } }), specToolWorkload());
+    const specWarmOff = cell(model, 'spec-warm-off-8000-int8', 8000, configuration({ dtype: 'int8', prefillStepSize: '512', cache: true, maxTokens: specCompletionTokens, speculative: { method: 'off', workload: 'tools' } }), specToolWorkload());
     specWarmOff.sequence = ['cold', 'repeat', 'extension'];
     cells.push(specWarmOff);
     const sidecars = [
@@ -427,7 +456,7 @@ async function suiteCells(model, suite, imagePath, expectedVisualTerms = [], mll
           dtype: 'int8',
           prefillStepSize: '512',
           cache: true,
-          maxTokens: 4096,
+          maxTokens: specCompletionTokens,
           speculative: {
             method,
             model: sidecarModel,
@@ -435,6 +464,7 @@ async function suiteCells(model, suite, imagePath, expectedVisualTerms = [], mll
             workload: 'tools',
             numSpeculativeTokens: speculativeTokens,
             disableAutoK: disableSpeculativeAutoK,
+            zeroActivity: specZeroActivity,
           },
         }), specToolWorkload());
         specWarm.sequence = ['cold', 'repeat', 'extension'];
@@ -634,6 +664,17 @@ function extractInfoPair(line) {
   return [key, value];
 }
 
+// `rapid-mlx info` renders "not detected" as the literal string "(none)". It is
+// a display placeholder, not a parser name: passing it through produces
+// `--reasoning-parser '(none)'`, which rapid-mlx rejects with an argparse
+// "invalid choice" and kills the server before it can become healthy. Every
+// spec-decode cell on a plain local --model directory died this way.
+const INFO_ABSENT_VALUES = new Set(['(none)', 'none', 'n/a', '-', 'unknown', 'unset', '']);
+
+function infoValueOrAbsent(value) {
+  return INFO_ABSENT_VALUES.has(value.trim().toLowerCase()) ? null : value;
+}
+
 // Mirrors src/inference/rapid_mlx/info_query.rs::parse_model_profile so the
 // suite driver's argv derivation stays in lockstep with the Rust runtime's
 // own `rapid-mlx info` field parsing instead of a hand-pinned model list.
@@ -649,9 +690,11 @@ async function profileOverridesFor(model, rapidMlxBin) {
     if (!pair) continue;
     const [key, value] = pair;
     const keyNormalized = key.toLowerCase().replace(/[ _-]/g, '');
-    if (keyNormalized === 'toolformat' || keyNormalized === 'tool') profile.tool_call_parser = value;
-    else if (keyNormalized === 'reasoningparser' || keyNormalized === 'reasoning') profile.reasoning_parser = value;
-    else if (keyNormalized === 'architecture' || keyNormalized === 'arch') profile.architecture = value;
+    const present = infoValueOrAbsent(value);
+    if (!present) continue;
+    if (keyNormalized === 'toolformat' || keyNormalized === 'tool') profile.tool_call_parser = present;
+    else if (keyNormalized === 'reasoningparser' || keyNormalized === 'reasoning') profile.reasoning_parser = present;
+    else if (keyNormalized === 'architecture' || keyNormalized === 'arch') profile.architecture = present;
   }
   return profile;
 }
@@ -1269,11 +1312,42 @@ function materializeSpeculativeCell(cell, speculativeSidecars) {
   };
 }
 
+// With stdio:'inherit' the inner benchmark's own diagnosis survives only if the
+// caller happened to redirect the suite's stderr, and never reaches the failure
+// message -- a failing cell then reports "node exited 1" plus a backend log that
+// is usually healthy, which says nothing about the actual cause. When logPath is
+// given, output is teed to that file verbatim and its tail is carried into the
+// rejection, so the receipt directory holds the reason on its own.
 function runProcess(command, args, options = {}) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, { stdio: options.stdio ?? 'inherit', cwd: options.cwd });
-    child.once('error', reject);
-    child.once('exit', (code, signal) => code === 0 ? resolvePromise() : reject(new Error(`${command} exited ${code ?? signal}`)));
+    const logPath = options.logPath ?? null;
+    const child = spawn(command, args, {
+      stdio: logPath ? ['ignore', 'pipe', 'pipe'] : (options.stdio ?? 'inherit'),
+      cwd: options.cwd,
+    });
+    const sink = logPath ? createWriteStream(logPath) : null;
+    const tail = [];
+    if (logPath) {
+      const append = (chunk) => {
+        sink.write(chunk);
+        // Still mirrored to the console so a long run stays watchable live.
+        process.stderr.write(chunk);
+        tail.push(chunk.toString());
+        while (tail.join('').length > 8000) tail.shift();
+      };
+      child.stdout.on('data', append);
+      child.stderr.on('data', append);
+    }
+    const finish = (error) => {
+      if (!sink) return error ? reject(error) : resolvePromise();
+      sink.end(() => (error ? reject(error) : resolvePromise()));
+    };
+    child.once('error', (error) => finish(error));
+    child.once('close', (code, signal) => {
+      if (code === 0) return finish(null);
+      const detail = logPath ? `\nHarness output tail (full log: ${logPath}):\n${tail.join('')}` : '';
+      finish(new Error(`${command} exited ${code ?? signal}${detail}`));
+    });
   });
 }
 
@@ -1426,20 +1500,42 @@ function cellAcceptRatio(cell) {
 function assertPositiveControl(receiptCells, floor) {
   const controls = receiptCells.filter((cell) => cell.configuration?.speculative_role === 'control');
   if (!controls.length) {
-    return { ok: false, reason: 'No control-role cell ran. Pass --speculative-control-model so the matrix carries a known-good positive control.' };
+    return { ok: false, code: 'missing', reason: 'No control-role cell ran. Pass --speculative-control-model so the matrix carries a known-good positive control.' };
   }
   const failures = [];
+  // Two different findings, and they must not be merged. "Never engaged" can
+  // mean a broken sidecar *or* a scheduler that declined -- the requalification
+  // lane exists to tell those apart, and its cells opt in via
+  // speculative_zero_activity='observed'. "Engaged but below floor" is always a
+  // real control failure, whoever is asking.
+  let noActivity = 0;
   for (const cell of controls) {
     const { ratio, accepts, attempts } = cellAcceptRatio(cell);
     if (ratio === null) {
-      failures.push(`${cell.id}: no speculative attempts recorded (MTP never installed?)`);
+      noActivity += 1;
+      if (cell.configuration?.speculative_zero_activity !== 'observed') {
+        failures.push(`${cell.id}: no speculative attempts recorded (MTP never installed?)`);
+      }
     } else if (ratio < floor) {
       failures.push(`${cell.id}: acceptance ${(ratio * 100).toFixed(1)}% (${accepts}/${attempts}) below floor ${(floor * 100).toFixed(1)}%`);
     }
   }
-  return failures.length
-    ? { ok: false, reason: `Positive control failed:\n  ${failures.join('\n  ')}` }
-    : { ok: true, controls: controls.length };
+  if (failures.length) {
+    return { ok: false, code: 'failed', reason: `Positive control failed:\n  ${failures.join('\n  ')}` };
+  }
+  // ok:true with no acceptance evidence. Deliberately not ok:false -- the caller
+  // must not read this as "harness broken" -- and deliberately not silent, since
+  // nothing here licenses a positive claim either.
+  if (noActivity === controls.length) {
+    return {
+      ok: true,
+      code: 'no-activity',
+      controls: controls.length,
+      reason: 'Control cells ran but recorded zero speculative activity. This does not '
+        + 'clear an acceptance floor; it only shows the scheduler never engaged.',
+    };
+  }
+  return { ok: true, code: 'cleared-floor', controls: controls.length };
 }
 
 // Speculative decoding claims losslessness at temperature 0: accepted drafts
@@ -1631,15 +1727,19 @@ async function runSuite(options, manifests, tempDir) {
     await mkdir(cacheHome, { recursive: true });
     const hfHome = process.env.HF_HOME ?? join(process.env.HOME ?? '', '.cache', 'huggingface');
     const serverLogPath = join(outputDir, `${String(index).padStart(2, '0')}-${label}.server.log`);
+    const harnessLogPath = join(outputDir, `${String(index).padStart(2, '0')}-${label}.harness.log`);
     const started = launchServer(command, args, { ...process.env, HOME: cacheHome, HF_HOME: hfHome }, serverLogPath);
     const server = started.child;
     let backendLog = null;
     try {
       await waitForHealth(manifest.runtime.base_url, server);
-      await runProcess(process.execPath, [resolve('scripts/model-runtime-benchmark.mjs'), 'run', '--manifest', manifestPath, '--out', receiptPath, '--server-pid', String(server.pid)], { cwd: process.cwd() });
-      receipts.push({ label, receipt: basename(receiptPath), server_log: basename(serverLogPath), manifest: options.keepManifests ? manifestPath : null });
+      await runProcess(process.execPath, [resolve('scripts/model-runtime-benchmark.mjs'), 'run', '--manifest', manifestPath, '--out', receiptPath, '--server-pid', String(server.pid)], { cwd: process.cwd(), logPath: harnessLogPath });
+      receipts.push({ label, receipt: basename(receiptPath), server_log: basename(serverLogPath), harness_log: basename(harnessLogPath), manifest: options.keepManifests ? manifestPath : null });
     } catch (error) {
-      failure = new Error(`${error.message}\nRapid-MLX log tail for ${label} (full log: ${serverLogPath}):\n${started.logs()}`);
+      // Backend tail first, harness tail last: the harness message names the
+      // actual failed assertion, and a reader scanning the end of a long report
+      // should hit that rather than trailing server keepalive noise.
+      failure = new Error(`Rapid-MLX log tail for ${label} (full log: ${serverLogPath}):\n${started.logs()}\n${error.message}`);
     } finally {
       await stopServer(server, options.settleSeconds ?? 0);
       // Only safe to read the log after the process closed and the sink drained.
@@ -1685,6 +1785,12 @@ async function runSuite(options, manifests, tempDir) {
     controlGate = { floor, ...assertPositiveControl(receiptCells, floor) };
     if (!controlGate.ok) {
       failure = new Error(`${controlGate.reason}\nThe positive control is what separates "this sidecar does not work" from "the harness does not work". Every subject number in this run is uninterpretable.`);
+    } else if (controlGate.code === 'no-activity') {
+      // Not a failure here by construction, but it must never read as a cleared
+      // floor: this run carries no evidence that speculation works at all.
+      process.stderr.write(`Positive control: NO ACTIVITY — ${controlGate.reason}\n`);
+    } else {
+      process.stderr.write(`Positive control: cleared floor ${(floor * 100).toFixed(1)}% (${controlGate.controls} cell(s)).\n`);
     }
   }
   await writeFile(join(outputDir, 'suite-index.json'), `${JSON.stringify({
@@ -1724,7 +1830,7 @@ if (options.suite.startsWith('spec-decode')) {
   options.draftDepthFacts = await trunkDraftDepthFacts(identity, options.speculativeTokens ?? DEFAULT_SPECULATIVE_TOKENS);
   process.stderr.write(`Draft depth: predicted effective K=${options.draftDepthFacts.predicted_effective_max_k} (${options.draftDepthFacts.evidence})\n`);
 }
-const allCells = await suiteCells(options.model, options.suite, options.image, options.expectedVisualTerms, options.mllmPrefillStepSize ?? 1024, options.workspacePack, options.speculativeModel ?? null, options.speculativeControlModel ?? null, options.speculativeTokens ?? DEFAULT_SPECULATIVE_TOKENS, options.speculativeMethods ?? ['mtp'], options.speculativeWorkloads ?? ['code'], options.disableSpeculativeAutoK ?? false);
+const allCells = await suiteCells(options.model, options.suite, options.image, options.expectedVisualTerms, options.mllmPrefillStepSize ?? 1024, options.workspacePack, options.speculativeModel ?? null, options.speculativeControlModel ?? null, options.speculativeTokens ?? DEFAULT_SPECULATIVE_TOKENS, options.speculativeMethods ?? ['mtp'], options.speculativeWorkloads ?? ['code'], options.disableSpeculativeAutoK ?? false, options.specCompletionTokens ?? DEFAULT_SPEC_COMPLETION_TOKENS, options.specZeroActivity ?? 'required');
 // Applied after the matrix is built so the sampling lane is orthogonal to cell
 // selection: the same cells run in both lanes and stay comparable by id.
 const samplingMode = options.sampling ?? 'greedy';

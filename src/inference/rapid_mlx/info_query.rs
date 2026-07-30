@@ -342,13 +342,13 @@ fn parse_model_profile(
 
                 match key_lower.as_str() {
                     "toolformat" | "tool" => {
-                        profile.tool_format = Some(value.to_string());
+                        profile.tool_format = info_value_or_absent(&value);
                     }
                     "reasoningparser" | "reasoning" => {
-                        profile.reasoning_parser = Some(value.to_string());
+                        profile.reasoning_parser = info_value_or_absent(&value);
                     }
                     "architecture" | "arch" => {
-                        profile.architecture = Some(value.to_string());
+                        profile.architecture = info_value_or_absent(&value);
                     }
                     "specdecode" | "speculative" => {
                         profile.spec_decode = parse_bool_value(&value_lower, '✓', '✗');
@@ -496,6 +496,26 @@ fn flush_eligibility_into(profile: &mut ModelProfile, section: &str, elig: Optio
         target.supported = elig.supported;
     }
     target.reasons.extend(elig.reasons);
+}
+
+/// Values `rapid-mlx info` prints to mean "not detected".
+///
+/// `info` renders an absent field as the literal `(none)`, and it only resolves
+/// tool/reasoning parsers for HF repo aliases at all — a local model directory
+/// reports `(none)` for both even when the family has parsers. Storing that as
+/// the field value made the app claim the model "declares tool format '(none)'"
+/// in its preflight warnings, and made `has_reasoning_parser` true for a model
+/// with none. The same string reached the benchmark suite's argv, where
+/// `--reasoning-parser '(none)'` is an argparse error that killed the server
+/// before it could become healthy.
+const INFO_ABSENT_VALUES: &[&str] = &["(none)", "none", "n/a", "-", "unknown", "unset"];
+
+fn info_value_or_absent(value: &str) -> Option<String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty() || INFO_ABSENT_VALUES.contains(&normalized.as_str()) {
+        return None;
+    }
+    Some(value.to_string())
 }
 
 fn extract_pair(line: &str) -> Option<(String, String)> {
@@ -864,6 +884,31 @@ mod tests {
         assert!(profile.reasoning_parser.is_none());
         assert!(profile.architecture.is_none());
         assert_eq!(profile.spec_decode, SpecDecodeSupport::Unknown);
+    }
+
+    /// Verbatim shape of `rapid-mlx info <local-dir>` on 0.11.1: `info` resolves
+    /// parsers only for HF repo aliases, so a local model directory reports the
+    /// placeholder for every one of them. Storing `"(none)"` made the app warn
+    /// that the model "declares tool format '(none)'", and put
+    /// `--reasoning-parser '(none)'` on the benchmark suite's argv, which is an
+    /// argparse error that kills the server before it becomes healthy.
+    #[test]
+    fn info_none_placeholder_is_absence_not_a_parser_name() {
+        let output = r#"┌──────────────────────────────────────────────────────────────┐
+│ Model: /Users/nick/mlx-models/nightmedia-27b-mxfp8-mlx        │
+│ ──────────────────────────────────────────────────────────── │
+│ Tool format      : (none)                                    │
+│ Reasoning parser : (none)                                    │
+│ Architecture     : pure attention                            │
+└──────────────────────────────────────────────────────────────┘"#;
+
+        let profile = parse_model_profile(output, true, "local-dir")
+            .unwrap()
+            .unwrap();
+        assert!(profile.tool_format.is_none());
+        assert!(profile.reasoning_parser.is_none());
+        // A real value alongside the placeholders still parses.
+        assert_eq!(profile.architecture, Some("pure attention".into()));
     }
 
     #[test]

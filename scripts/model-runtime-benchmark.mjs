@@ -642,7 +642,14 @@ function assertAttemptQualified(cell, attempt) {
     const attempts = metricSumByPrefix(attempt.metrics_delta, 'rapid_mlx_spec_decode_attempts_total');
     const parks = metricSumByPrefix(attempt.metrics_delta, 'rapid_mlx_spec_decode_park_total');
     const rounds = metricSumByPrefix(attempt.metrics_delta, 'rapid_mlx_spec_decode_k_chosen_rounds_total');
-    if (attempts <= 0 && parks <= 0 && rounds <= 0) {
+    const engaged = attempts > 0 || parks > 0 || rounds > 0;
+    // Recorded on both outcomes: an absent field would read as "not checked".
+    attempt.fidelity.speculative_activity_observed = engaged;
+    // A requalification cell asks whether the scheduler engages at all, so zero
+    // activity is its answer, not a broken run. Record the finding and let the
+    // caller's predicate decide; dying here would make a known-blocked build
+    // indistinguishable from a broken harness.
+    if (!engaged && cell.configuration?.speculative_zero_activity !== 'observed') {
       die(`${cell.id}/${attempt.phase} requested ${method} but observed zero speculative activity.`);
     }
   }

@@ -1259,6 +1259,9 @@ fn capabilities_from_snapshot(snapshot: &self::capabilities::CapabilitySnapshot)
         guided_generation: is_available(&snapshot.qualified_features.guided_generation),
         vision: is_available(&snapshot.qualified_features.vision),
         embeddings: is_available(&snapshot.qualified_features.embeddings),
+        // Evidence-backed: false until the requalification lane promotes
+        // spec_decode to Available, rather than permanently false by default.
+        mtp: is_available(&snapshot.qualified_features.spec_decode),
         // Core capabilities always available when runtime is validated
         status_memory_telemetry: true,
         one_shot_launch: true,

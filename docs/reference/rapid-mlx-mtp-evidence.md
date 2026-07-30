@@ -7,7 +7,7 @@
 | Stack | mlx 0.32.0, mlx_lm 0.31.3, Python 3.11 |
 | Hardware | Apple Silicon M5 Max (single machine, single operator) |
 | First captured | 2026-07-29 |
-| Companions | Working state: `docs/plans/20260729-rapidmlx_speculative_decoding_handoff.md`. Product plan: Phase 6.5 of `docs/plans/20260718-final_rapidmlx_followups.md`. |
+| Companions | Working state: `docs/plans/20260729-rapidmlx_speculative_decoding_handoff.md`. Product plan: Phase 6.5 of `docs/plans/20260718-final_rapidmlx_followups.md`. Cross-runtime audit: `docs/reference/apple-silicon-mtp-runtime-comparison.md`. |
 
 This document holds what was **measured** and what the **source says**. It deliberately
 contains no roadmap, no UI design, and no enablement policy. Those live in Phase 6.5.
@@ -200,11 +200,76 @@ unresolved.
 | `tmp/spec-decode-qx64-subject-v2/`, `tmp/spec-decode-qx64-off-v2/` | `qx64-hi` pair |
 | `tmp/spec-decode-mxfp8-subject-v2/`, `tmp/spec-decode-mxfp8-off-v2/` | MXFP8 pair |
 | `tmp/spec-decode-qx64-prose-pair-v2/`, `tmp/spec-decode-qx64-code-32k-pair-v2/` | workload pairs |
+| `tmp/spec-decode-trials-unsloth8bit-greedy-clean/` | clean 4-trial forced/greedy ABBA repeat |
+| `tmp/spec-decode-trials-unsloth8bit-recommended-default/` | sampled-lane failure receipt and backend log |
 
 **Void receipts.** `tmp/spec-decode-receipts/`, `tmp/spec-decode-warm-receipts/`, and
 `tmp/spec-decode-control-receipts/` were all produced with a dead draft head (§1), and the
 nightmedia ones additionally with a double-shifted trunk (§2). **They measure nothing about
 MTP capability.** Retained only as a record of what the broken configuration looked like.
+
+---
+
+### 4.5 Clean repeated greedy lane — 2026-07-29
+
+The unsloth 8-bit trunk was repeated with four counterbalanced ABBA trials, 45 seconds of
+thermal settling, requested max K=2, the official 4-bit control, and the validated extracted
+8-bit subject. The lane was explicitly `forced` and `greedy`, so it is research evidence,
+not a naturally-eligible qualification result.
+
+| Arm | Trials | Acceptance | TG gain, mean (range) | TTFT change, mean | End-to-end gain, mean (range) |
+|---|---:|---:|---:|---:|---:|
+| official 4-bit control | 4 | 97.25% | **+21.17%** (+20.66% to +21.72%) | −1.17% | **+16.10%** (+13.83% to +17.25%) |
+| extracted 8-bit subject | 4 | 95.72% | **+20.01%** (+19.56% to +20.40%) | −1.98% | **+15.49%** (+14.52% to +16.26%) |
+
+The suite completed all 12 receipts with no server errors. The positive control passed in
+all four trials. Every speculative cell captured the SSM K=2→K=1 clamp. All four baseline
+completions had one SHA-256 digest, and all eight off-vs-MTP comparisons matched it:
+`greedy_parity.verdict="parity_held"`.
+
+The earlier run's isolated trial-3 baseline collapse did not reproduce. Within this trunk,
+the higher-acceptance official control also produced the slightly higher generation gain.
+This does not resolve §4.3, which compares different trunks and still needs repeated qx64
+and MXFP8 baselines if greedy-only research remains in scope.
+
+### 4.6 Recommended sampled lane is unsupported — 2026-07-29
+
+The next run resolved the unsloth vendor profile to temperature 1.0, top-p 0.95, top-k 20,
+and reasoning enabled. Its baseline completed at 14.40 tok/s. The first official-control
+request then produced zero speculative counter activity and the harness failed as designed.
+
+The backend log records both facts:
+
+- MTP installed as `single-request greedy K=1 ... falls through on ... non-greedy /
+  logits-processors`.
+- The request engaged `fused_top_p_sampler` at temperature 1.0/top-p 0.95/top-k 20.
+
+Installed Rapid-MLX 0.11.1 source makes this an explicit contract: temperature >0 falls
+through to autoregressive decode because residual-distribution rejection sampling is not
+exercised by the MVP, and non-greedy support is a follow-up. Therefore sampled acceptance
+and speedup are not merely unmeasured; they are unavailable in the pinned runtime. A
+temperature-0.6 coding variant and tool-logits-processor workload hit the same boundary.
+
+This is unchanged on current upstream `main`; it is also independently recorded in upstream
+issue `#1013`. There are two separate real-agent blockers:
+
+1. A sampling temperature above zero trips `_is_greedy_for_uid` and falls through.
+2. Any truthy `GenerationBatch.logits_processors` entry also falls through. Rapid's
+   default-on constrained-tool path builds a stateful `GrammarLogitsProcessor` for ordinary
+   tool-enabled `auto` requests, so tool traffic reaches this gate without requiring
+   `--enable-tool-logits-bias`.
+
+The apparent bypass — force temperature 0 and set `RAPID_MLX_CONSTRAIN_TOOLS=0` — changes
+both the sampling policy and tool-call reliability contract. It is suitable only for
+diagnostics. It is not transparent acceleration of a coding-agent workload.
+
+The implementation gap is narrower than a new speculative decoder but wider than deleting
+two guards. `mtp_generate_step` already accepts temperature/top-p/top-k/min-p and contains
+probabilistic acceptance plus residual-distribution sampling; the scheduler nevertheless
+hardcodes `temp=0.0`. Sampled support must plumb the real per-request sampler and preserve
+seed/EOS/cancellation behavior. Tool support is harder: the stateful grammar processor must
+advance across accepted drafts and restore exactly on rejection rather than observe
+hypothetical tokens permanently.
 
 ---
 
@@ -463,7 +528,8 @@ by **metric-name prefix** across all label sets, and is immune by construction.
 
 Carried forward to Phase 6.5. Nothing below has been measured.
 
-1. Repeated-trial variance, thermal drift, and cell-ordering effects (everything above is n=1).
+1. ~~Repeated-trial variance on the unsloth greedy lane.~~ **Closed 2026-07-29** with four
+   counterbalanced trials; qx64 and MXFP8 remain n=1.
 2. The §4.3 speedup inversion.
 3. Why the depth controller barely parks at 72% acceptance (§4.1).
 4. ~~Direct observation of the K=1 clamp log (§5).~~ **Closed 2026-07-29** — observed,
@@ -471,4 +537,156 @@ Carried forward to Phase 6.5. Nothing below has been measured.
 5. Tool-call warm/repeat/extension behaviour under MTP.
 6. 65k and 131k prompt tiers; completion lengths other than 512.
 7. Whether a same-shape wrong-parent sidecar is detectable before serving.
-8. Greedy-lossless token parity between off and MTP runs.
+8. ~~Greedy-lossless token parity between off and MTP runs.~~ **Closed 2026-07-29** on the
+   unsloth lane: deterministic baseline and 8/8 speculative comparisons matched.
+9. Sampled MTP behavior. **Blocked in Rapid-MLX 0.11.1:** non-greedy requests deliberately
+   fall through to plain autoregressive decode.
+
+Items 5 and 9, plus the constrained-tool case, are now the three gates of
+`scripts/rapid-mlx-requalify-spec-decode.mjs`. Run it against a new upstream build rather than
+re-deriving them by hand; it exits `20` while upstream is still blocked, and only a full sweep
+with every gate passing may promote `spec_decode` out of `Unavailable`. If it ever exits `0`,
+record the measurements here **before** editing `SPEC_DECODE_GREEDY_ONLY_VERSIONS` in
+`src/inference/rapid_mlx/capabilities.rs` — the version list is a claim about this document.
+
+## 12. Procedure — requalifying a future build
+
+Everything below is runnable without re-deriving any of the analysis above. Two scripts: one
+builds a draft head, one measures whether the runtime will use it.
+
+### 12.1 Build a draft head from a BF16 source
+
+Needed only if you do not already have a head for the trunk. Skip it when requalifying with
+the official control (§12.3), which ships its own.
+
+```
+python3 scripts/build-mtp-head.py \
+  --bf16-source nightmedia/Qwen3.6-27B-Architect-Polaris2-Fable-B-F451-Tess \
+  --mlx-model /Users/nick/mlx-models/nightmedia-27b-mxfp8-mlx
+```
+
+`--bf16-source` is the repo (or local path) carrying the `mtp.*` tensors; `--mlx-model` is the
+quantized MLX trunk, which supplies the quantization config and **is not modified**. Output
+defaults to `~/.config/llama-monitor/models/rapid-mlx/mtp-sidecars/<trunk-slug>/mtp.safetensors`
+with a `provenance.json` beside it.
+
+Tensor extraction is upstream's, vendored verbatim at
+`scripts/vendor/rapid-mlx/extract_mtp_weights.py` and never edited, so a future upstream
+version can be dropped in by re-pulling that one file. The wrapper owns only what upstream gets
+wrong for us, which is placement, not math:
+
+- Upstream writes `model-mtp.safetensors` **into** `--mlx-model` and rewrites that
+  `config.json` in place. `mlx_lm` globs `model*.safetensors` when loading a trunk, so an
+  in-trunk sidecar is read as a trunk shard, which sets `should_shift_norm_weights` and
+  double-shifts every trunk RMSNorm weight into gibberish, silently (§2). The wrapper moves the
+  sidecar out, restores the config, and refuses an `--out` inside the trunk.
+- It re-reads the built head and refuses to certify one whose `pre_fc_norm_*` means are not
+  positive. A valid head reads ~`+0.56`; the stale extractor's read ~`-0.44` and gave ~0%
+  acceptance (§1). This is the check that would have caught the original defect.
+
+A passing norm check is an offline sanity check, not a qualification. Only §12.2 measures
+whether the head is used.
+
+### 12.2 Measure whether the runtime engages it
+
+```
+node scripts/rapid-mlx-requalify-spec-decode.mjs \
+  --model /Users/nick/mlx-models/nightmedia-27b-mxfp8-mlx \
+  --speculative-control-model mlx-community/Qwen3.6-27B-MTP-4bit \
+  --profile-alias unsloth/Qwen3.6-27B-MLX-8bit \
+  --out tmp/requalify-<version>
+```
+
+Exit codes: `0` qualified, `20` gates ran cleanly but the scheduler still does not engage,
+`1` uninterpretable (control failed or a run errored). A failing positive control is always
+`fail`, never `blocked`: "this build is still limited" and "the harness is broken" are
+different findings, and conflating them is what produced the void receipts.
+
+`--profile-alias` is not optional in practice. `rapid-mlx info` resolves the tool and reasoning
+parsers only for HF repo aliases; for a **local model directory it reports the literal
+`(none)`** for both. Without the alias the `constrained` gate would install no tool grammar and
+then report that speculation survives tool use — from a request that never constrained
+anything. The lane refuses to run that gate rather than produce the number. Pass
+`--tool-call-parser` / `--reasoning-parser` explicitly if no alias fits.
+
+Gate names are duplicated in `SPEC_DECODE_GATES` in `src/inference/rapid_mlx/capabilities.rs`,
+because the post-upgrade probe message names the outstanding gates. Keep the two in step.
+
+### 12.3 Artifacts this needs, and where they are
+
+| Artifact | Location | Note |
+|---|---|---|
+| Trunk | `/Users/nick/mlx-models/nightmedia-27b-mxfp8-mlx` | 27 GB, real files |
+| Positive control | `mlx-community/Qwen3.6-27B-MTP-4bit` | HF cache; a standalone 228 MB / 31-tensor head (`model_type: qwen3_5_mtp`), not a full model — nothing to extract |
+| Validated subject head | `~/.config/llama-monitor/models/rapid-mlx/mtp-sidecars/qwen3.6-27b-nightmedia-f451-tess-8bit/` | 478 MB + `provenance.json` |
+| Quarantined heads | `/Users/nick/mlx-models/.quarantine-in-trunk-sidecars/` | Pulled out of trunks; mostly stale-extractor output. See its README |
+
+The `-mtp-fixed` and `control-unsloth8bit-official-mtp` directories under `~/mlx-models/` are
+symlink farms over the trunk and the HF cache with their own `config.json`; neither currently
+holds a head.
+
+### 12.4 Zero speculative activity is an answer, not a crash
+
+The first two live executions of the lane both exited `1` / `uninterpretable` on a build whose
+correct verdict is `20` / `still-blocked`. Two independent guards caused it, and both were
+right for the qualification matrix they were written for:
+
+1. `assertAttemptQualified` in `model-runtime-benchmark.mjs` calls `die()` when a speculative
+   cell records no attempts, parks, or K-chosen rounds — so no receipt was ever written.
+2. `assertPositiveControl` treats a control with no attempts as a control *failure*, which the
+   requalification lane maps to `fail`.
+
+Between them, all three gates' own `attempts <= 0 → blocked` branches were unreachable dead
+code on 0.11.1: the lane could not report the one finding it exists to report. Fixed with an
+opt-in, `speculative_zero_activity: 'required' | 'observed'` (suite flag
+`--spec-zero-activity`, default `required`):
+
+- `required` keeps the old behaviour. A speculative cell that never speculated measured
+  nothing, which is the correct default for a qualification run.
+- `observed` records `fidelity.speculative_activity_observed` (set on **both** outcomes, so an
+  absent field never reads as "not checked") and lets the caller's predicate decide.
+
+The positive control now returns a `code` — `cleared-floor`, `no-activity`, `failed`, or
+`missing` — because "never engaged" and "engaged but below floor" are different findings.
+`no-activity` returns `ok: true` so it cannot be misread as a broken harness, but carries a
+`reason` and prints `Positive control: NO ACTIVITY`, because nothing about it licenses a
+positive claim either. The requalification lane additionally refuses to promote capability when
+a gate returns `pass` while its control recorded `no-activity` — that combination means the
+predicate and the control disagree, and neither reading is then trustworthy.
+
+⚠️ Do not "simplify" this by defaulting `--spec-zero-activity` to `observed`. A qualification
+matrix that tolerates zero activity will happily record a full sweep of cells that never
+speculated, which is precisely how the original void receipts happened.
+
+### 12.5 The scheduler states its own constraints in the backend log
+
+Observed directly on 0.11.1 while first executing the lane (`--gate sampled`, nightmedia MXFP8
+trunk, official 4-bit control):
+
+```
+[MTP-vendored] installed on GenerationBatch._step (single-request greedy K=1 chain-of-1;
+falls through on B>1 / non-greedy / logits-processors)
+```
+
+This is the two blocking conditions stated by the runtime itself, in one line, at install time —
+not inferred from acceptance counts. It is also exactly the definition of
+`MtpConcurrencyState::SingleActiveGreedy`, which `derive_mtp_concurrency` in
+`src/inference/rapid_mlx/capabilities.rs` still returns `Unknown` for because it only sees
+`serve --help`. The line is captured in every cell's `*.server.log`, so the requalification lane
+is the natural place to promote that state from a measurement rather than a help-text guess.
+
+Also worth noting from the same run: injection itself is healthy. `[mtp.inject]` loaded 31/31
+expected tensors from the control sidecar and reported `Quantized MTP: 4-bit, group_size=64
+(from sidecar tensors)`, and `[MTP-chain-of-K]` clamped `max_k` 2→1 on the SSM cache as in §5.
+Nothing about the sidecar path is broken; the fall-through is a scheduler policy.
+
+### 12.6 Generation length
+
+The spec-decode suites generate `--spec-completion-tokens` (default 8192, floor half that).
+It was 512, which broke the `sampled` gate outright: the recommended lane resolves this family
+to temperature 1.0 with reasoning **on**, so the model spent the whole 512-token budget inside
+`<think>`, emitted empty content, and the run failed its completion floor — a failure that says
+nothing about speculation. The `sampled` gate therefore pins `--sampling explicit
+--temperature 0.6` and leaves reasoning off, isolating the one axis it is named for. The cap is
+only a ceiling; the floor is what costs wall-clock, so lower it if a per-bump check needs to be
+cheaper than a stable acceptance ratio.

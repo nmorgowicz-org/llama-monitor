@@ -292,6 +292,13 @@ pub struct QualifiedFeatures {
     pub status_memory_telemetry: FeatureQualification,
     #[serde(default)]
     pub one_shot_launch: FeatureQualification,
+    /// Speculative decoding (MTP / external drafter).
+    ///
+    /// Never `Available` from flag presence alone: the scheduler can exist and
+    /// still fall through on every request. Only the requalification lane in
+    /// `scripts/rapid-mlx-requalify-spec-decode.mjs` can promote this.
+    #[serde(default)]
+    pub spec_decode: FeatureQualification,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -741,7 +748,7 @@ fn derive_qualified_features(
     flags: &[String],
     extras: &InstalledExtras,
     package_versions: &[DependencyVersion],
-    _version: &str,
+    version: &str,
     source: RuntimeSource,
 ) -> QualifiedFeatures {
     let has_tool_parser = flags.iter().any(|f| f == "--tool-call-parser");
@@ -836,6 +843,8 @@ fn derive_qualified_features(
     let status_memory_telemetry = FeatureQualification::Available;
     let one_shot_launch = FeatureQualification::Available;
 
+    let spec_decode = derive_spec_decode(flags, version);
+
     let _ = source; // Managed runtime may perform additional baseline checks in future
 
     QualifiedFeatures {
@@ -848,7 +857,40 @@ fn derive_qualified_features(
         embeddings,
         status_memory_telemetry,
         one_shot_launch,
+        spec_decode,
     }
+}
+
+/// Rapid-MLX versions where the speculative scheduler was directly observed to
+/// be greedy-only and to bail whenever a logits processor is installed.
+///
+/// Under those conditions it cannot serve a sampled or tool-constrained
+/// request, which is every shipping agentic workload. Evidence:
+/// `docs/reference/rapid-mlx-mtp-evidence.md`.
+const SPEC_DECODE_GREEDY_ONLY_VERSIONS: &[&str] = &["0.11.1"];
+
+/// Derive speculative-decoding qualification.
+///
+/// Flag presence proves a scheduler is reachable, never that it engages, so the
+/// best this can return is `Indeterminate`. A version with recorded negative
+/// behavioral evidence returns `Unavailable`.
+fn derive_spec_decode(flags: &[String], version: &str) -> FeatureQualification {
+    let has_speculative = flags.iter().any(|f| f == "--speculative");
+    if !has_speculative {
+        return FeatureQualification::Unavailable("Missing --speculative flag".into());
+    }
+    if SPEC_DECODE_GREEDY_ONLY_VERSIONS.contains(&version) {
+        return FeatureQualification::Unavailable(format!(
+            "Rapid-MLX {version} speculative scheduler is greedy-only and bails when a \
+             logits processor is installed; sampled and tool-constrained requests fall \
+             through to plain decode"
+        ));
+    }
+    FeatureQualification::Indeterminate(
+        "--speculative is present; run the spec-decode requalification lane \
+         (scripts/rapid-mlx-requalify-spec-decode.mjs) to qualify"
+            .into(),
+    )
 }
 
 fn is_broken_vision_version(package_versions: &[DependencyVersion]) -> bool {
@@ -1573,6 +1615,54 @@ fn collect_feature_failures(snapshot: &CapabilitySnapshot) -> Vec<FeatureProbeFa
         // Missing is informational, not a failure
     }
 
+    // Speculative decoding: flag presence cannot qualify it, so an update that
+    // exposes --speculative on a version we have no behavioral evidence for
+    // needs the requalification lane run before MTP can be recommended.
+    failures.extend(collect_spec_decode_failures(snapshot));
+
+    failures
+}
+
+/// The three behavioral gates that must all pass before speculative decoding
+/// can be qualified. Each requires a live server and a real model, so none can
+/// be answered by the update-validation probe; the probe's job is to say which
+/// gates are outstanding.
+///
+/// Kept here so the probe message and the harness lane cannot drift apart.
+pub const SPEC_DECODE_GATES: &[&str] = &[
+    "sampled: speculation is active at temperature > 0",
+    "constrained: speculation is active with a tool grammar installed",
+    "parity: greedy output is token-identical with speculation on and off",
+];
+
+/// Per-feature notes for speculative decoding, derived from the snapshot.
+fn collect_spec_decode_failures(snapshot: &CapabilitySnapshot) -> Vec<FeatureProbeFailure> {
+    let mut failures = Vec::new();
+    // No scheduler exposed means there is nothing to requalify.
+    if !snapshot.serve_flags.iter().any(|f| f == "--speculative") {
+        return failures;
+    }
+    match snapshot.qualified_features.spec_decode {
+        // Nothing outstanding: the lane already promoted this.
+        FeatureQualification::Available => {}
+        // Known-blocked version, or a version with no behavioral evidence yet.
+        // Either way the user needs to know why MTP stays off and what would
+        // change it.
+        FeatureQualification::Unavailable(ref reason)
+        | FeatureQualification::Indeterminate(ref reason) => {
+            failures.push(FeatureProbeFailure {
+                feature: "spec_decode".into(),
+                message: format!(
+                    "Speculative decoding is not qualified on Rapid-MLX {version}: {reason}. \
+                     Outstanding gates: {gates}. Run \
+                     `node scripts/rapid-mlx-requalify-spec-decode.mjs` \
+                     to re-test on this build.",
+                    version = snapshot.rapid_mlx_version,
+                    gates = SPEC_DECODE_GATES.join("; "),
+                ),
+            });
+        }
+    }
     failures
 }
 
@@ -1867,6 +1957,64 @@ Options:
     }
 
     #[test]
+    fn spec_decode_is_unavailable_without_the_flag() {
+        let features = derive_qualified_features(
+            &[],
+            &InstalledExtras::default(),
+            &[],
+            "0.12.0",
+            RuntimeSource::Managed,
+        );
+        match features.spec_decode {
+            FeatureQualification::Unavailable(ref reason) => {
+                assert!(reason.contains("--speculative"), "reason: {reason}");
+            }
+            ref other => panic!("expected Unavailable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spec_decode_flag_presence_never_qualifies() {
+        // The scheduler being reachable is not the scheduler engaging. An
+        // unrecognised version must stay indeterminate, not become Available.
+        let flags: Vec<String> = vec!["--speculative".into()];
+        let features = derive_qualified_features(
+            &flags,
+            &InstalledExtras::default(),
+            &[],
+            "0.99.0",
+            RuntimeSource::Managed,
+        );
+        match features.spec_decode {
+            FeatureQualification::Indeterminate(ref reason) => {
+                assert!(reason.contains("requalification"), "reason: {reason}");
+            }
+            ref other => panic!("expected Indeterminate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn spec_decode_greedy_only_version_is_unavailable() {
+        // 0.11.1 was directly observed to fall through on sampled and
+        // tool-constrained requests, so the flag being present is not enough.
+        let flags: Vec<String> = vec!["--speculative".into()];
+        let features = derive_qualified_features(
+            &flags,
+            &InstalledExtras::default(),
+            &[],
+            "0.11.1",
+            RuntimeSource::Managed,
+        );
+        match features.spec_decode {
+            FeatureQualification::Unavailable(ref reason) => {
+                assert!(reason.contains("greedy-only"), "reason: {reason}");
+                assert!(reason.contains("logits processor"), "reason: {reason}");
+            }
+            ref other => panic!("expected Unavailable, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn flag_presence_alone_does_not_qualify_guided() {
         // Even if Rapid's serve has some JSON-related flag, guided_generation
         // requires the [guided] extra actually installed.
@@ -2010,6 +2158,79 @@ Options:
         let failures = collect_feature_failures(&snapshot);
         // Missing is not a failure; only Broken is; installed+available means no failure
         assert!(failures.is_empty());
+    }
+
+    /// A snapshot whose only interesting property is its spec-decode state.
+    fn spec_decode_snapshot(
+        version: &str,
+        serve_flags: Vec<String>,
+        spec_decode: FeatureQualification,
+    ) -> CapabilitySnapshot {
+        CapabilitySnapshot {
+            executable_identity: ExecutableIdentity {
+                path: "/tmp/rapid-mlx".into(),
+                file_hash: "h".into(),
+                file_mtime_unix: 0,
+            },
+            rapid_mlx_version: version.into(),
+            help_hash: "h".into(),
+            serve_flags,
+            package_versions: vec![],
+            installed_extras: InstalledExtras {
+                guided: ExtraState::Installed,
+                vision: ExtraState::Installed,
+                embeddings: ExtraState::Installed,
+            },
+            qualified_features: QualifiedFeatures {
+                guided_generation: FeatureQualification::Available,
+                spec_decode,
+                ..Default::default()
+            },
+            mtp_concurrency: MtpConcurrencyState::Unknown,
+            sampling_defaults: SamplingDefaultFields::default(),
+            sampling_cascade: SamplingCascade::default(),
+            evidence_timestamp: 0,
+            source: CapabilitySnapshotSource::AutoProbed,
+        }
+    }
+
+    #[test]
+    fn spec_decode_probe_is_silent_without_the_flag() {
+        // No scheduler exposed: the default fail-closed qualification must not
+        // produce a note telling the user to requalify something absent.
+        let snapshot = spec_decode_snapshot("0.10.10", vec![], FeatureQualification::default());
+        assert!(collect_feature_failures(&snapshot).is_empty());
+    }
+
+    #[test]
+    fn spec_decode_probe_names_outstanding_gates() {
+        let snapshot = spec_decode_snapshot(
+            "0.11.1",
+            vec!["--speculative".into()],
+            FeatureQualification::Unavailable("greedy-only".into()),
+        );
+        let failures = collect_feature_failures(&snapshot);
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].feature, "spec_decode");
+        let message = &failures[0].message;
+        assert!(message.contains("0.11.1"), "message: {message}");
+        assert!(
+            message.contains("rapid-mlx-requalify-spec-decode"),
+            "{message}"
+        );
+        for gate in SPEC_DECODE_GATES {
+            assert!(message.contains(gate), "missing gate {gate} in: {message}");
+        }
+    }
+
+    #[test]
+    fn spec_decode_probe_is_silent_once_qualified() {
+        let snapshot = spec_decode_snapshot(
+            "0.12.0",
+            vec!["--speculative".into()],
+            FeatureQualification::Available,
+        );
+        assert!(collect_feature_failures(&snapshot).is_empty());
     }
 
     #[test]
