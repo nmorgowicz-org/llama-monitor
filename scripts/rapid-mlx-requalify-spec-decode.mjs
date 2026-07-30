@@ -47,6 +47,17 @@ function die(message) {
 
 const DEFAULT_RECIPE = resolve('scripts/spec-decode-recipe.json');
 
+/// Where a repo-id model (the positive control) resolves from.
+///
+/// Defaults to the app's own cache rather than the user-wide `~/.cache/huggingface`,
+/// because that is where model management is supposed to live: the resolver points
+/// rapid-mlx at `<models_dir>/cache/huggingface/hub` when the app launches it, so a lane
+/// reading somewhere else would be measuring a model the app cannot serve. Exported to
+/// the suite, and from there to rapid-mlx, since neither reads this recipe.
+const DEFAULT_HF_HUB_CACHE = join(
+  homedir(), '.config', 'llama-monitor', 'models', 'cache', 'huggingface', 'hub',
+);
+
 const USAGE = `Requalify Rapid-MLX speculative decoding. Usually takes no arguments:
 
   node scripts/rapid-mlx-requalify-spec-decode.mjs
@@ -63,6 +74,8 @@ Inputs come from ${DEFAULT_RECIPE}; flags below override it.
   --out DIR                      receipts (default: tmp/requalify-<version>-<date>)
   --port N                       (default 8110)
   --rapid-mlx-bin PATH
+  --hf-hub-cache DIR             where repo-id models resolve from
+                                 (default: the app's managed cache)
   --gate NAME                    run a subset; repeatable. A partial sweep is
                                  evidence, never qualification
   --no-ingest                    write the report but do not record the verdict
@@ -118,6 +131,7 @@ function parseArgs(argv) {
     else if (key === '--speculative-model') flags.subjectModel = value;
     else if (key === '--out') flags.out = value;
     else if (key === '--rapid-mlx-bin') flags.rapidMlxBin = value;
+    else if (key === '--hf-hub-cache') flags.hfHubCache = value;
     else if (key === '--port') flags.port = Number(value);
     else if (key === '--tool-call-parser') flags.toolCallParser = value;
     else if (key === '--reasoning-parser') flags.reasoningParser = value;
@@ -144,6 +158,7 @@ function parseArgs(argv) {
     profileAlias: flags.profileAlias ?? recipe.profileAlias,
     out: flags.out,
     rapidMlxBin: flags.rapidMlxBin ?? recipe.rapidMlxBin,
+    hfHubCache: expandHome(flags.hfHubCache ?? recipe.hfHubCache ?? DEFAULT_HF_HUB_CACHE),
     gates: flags.gates,
   };
 
@@ -163,6 +178,12 @@ function parseArgs(argv) {
         + `Fix the path in ${recipePath}, or pass the flag explicitly. `
         + 'Artifact provenance: section 12.3 of docs/reference/rapid-mlx-mtp-evidence.md.');
     }
+  }
+  // Not fatal: a repo id that is absent can still be fetched. Worth saying, though,
+  // because the alternative is a twenty-minute run whose first minutes are a download
+  // nobody asked for.
+  if (!existsSync(options.hfHubCache)) {
+    process.stderr.write(`[warn] HF hub cache does not exist yet: ${options.hfHubCache}\n`);
   }
   const unknown = (options.gates ?? []).filter((name) => !GATES.some((gate) => gate.name === name));
   if (unknown.length) die(`Unknown gate(s): ${unknown.join(', ')}`);
@@ -377,10 +398,13 @@ function ingestReport(path) {
   return true;
 }
 
-function runSuite(args) {
+function runSuite(args, hfHubCache) {
   return new Promise((resolveRun) => {
     const child = spawn(process.execPath, [SUITE, 'run', ...args], {
       stdio: ['ignore', 'inherit', 'inherit'],
+      // An explicit HF_HUB_CACHE already in the environment wins: whoever set it knows
+      // something about this run that the recipe does not.
+      env: { HF_HUB_CACHE: hfHubCache, ...process.env },
     });
     child.on('error', (error) => resolveRun({ status: null, error: error.message }));
     child.on('close', (status) => resolveRun({ status, error: null }));
@@ -461,6 +485,7 @@ process.stderr.write(`Inputs: ${options.recipePath ?? 'command-line flags only'}
 process.stderr.write(`Trunk: ${options.model}\n`);
 process.stderr.write(`Subject head: ${options.subjectModel ?? 'none (trunk-embedded)'}\n`);
 process.stderr.write(`Control: ${options.controlModel}\n`);
+process.stderr.write(`HF hub cache: ${options.hfHubCache}\n`);
 process.stderr.write(`Receipts: ${outRoot}\n`);
 process.stderr.write(`Parsers: tool=${options.toolCallParser ?? 'none'} `
   + `reasoning=${options.reasoningParser ?? 'none'} (source: ${options.parserSource})\n`);
@@ -496,7 +521,7 @@ for (const gate of selected) {
     ...gate.cells.flatMap((cell) => ['--cell', cell]),
   ];
 
-  const run = await runSuite(args);
+  const run = await runSuite(args, options.hfHubCache);
   let result;
   if (run.error) {
     result = { verdict: 'error', reason: `Suite failed to start: ${run.error}` };

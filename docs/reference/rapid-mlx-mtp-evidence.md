@@ -654,6 +654,14 @@ because the post-upgrade probe message names the outstanding gates. Keep the two
 | Validated subject head | `~/.config/llama-monitor/models/rapid-mlx/mtp-sidecars/qwen3.6-27b-nightmedia-f451-tess-8bit/` | 478 MB + `provenance.json` |
 | Quarantined heads | `/Users/nick/mlx-models/.quarantine-in-trunk-sidecars/` | Pulled out of trunks; mostly stale-extractor output. See its README |
 
+All three lane artifacts live under `~/.config/llama-monitor/models/` as of 2026-07-30, so
+model management stays inside the app: the trunk at `models/mlx/native/` (already an
+inventory root, no import step needed), the subject head at `models/rapid-mlx/mtp-sidecars/`,
+and the positive control in the app's own HF cache at `models/cache/huggingface/hub/`. The
+lane exports `HF_HUB_CACHE` to that cache, matching what the resolver does when the app
+launches rapid-mlx, so a repo-id control resolves to a model the app can actually serve.
+
+
 The `-mtp-fixed` and `control-unsloth8bit-official-mtp` directories under `~/mlx-models/` are
 symlink farms over the trunk and the HF cache with their own `config.json`; neither currently
 holds a head.
