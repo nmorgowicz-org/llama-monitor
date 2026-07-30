@@ -1675,7 +1675,7 @@ Rules:
 | 4 | Normalized MLX architecture metadata | 0, 2 | A25, A53 | 170k | Not started |
 | 5 | Backend execution policies and first-class estimator (formal sub-phases 5a → 5b, §E5) | 3–4 (5b also needs 5a Verified) | A1, A3–A5, A21–A22, A42–A43, A46–A48, A53–A54, A58 | two sub-phases, each <=120k, each own gate + fresh Verifier | Not started |
 | 6 | Cross-backend cache policies, recommendations, and teaching | 5 | A6–A9, A21, A23, A31–A37, A41 | 170k | Not started |
-| 6.5 | Speculative decoding / MTP runtime qualification and managed sidecar artifacts (formal sub-phases 6.5a → 6.5b, §E6.5) | 3, 5 (6.5b also needs 6.5a Verified) | A2, A14, A17–A19, A22, A26, A51–A52 | two sub-phases, each <=120k, each own gate + fresh Verifier | Not started |
+| 6.5 | Speculative decoding / MTP runtime qualification and managed sidecar artifacts (formal sub-phases 6.5a → 6.5b, §E6.5) | 3, 5 (6.5b also needs 6.5a Verified) | A2, A14, A17–A19, A22, A26, A51–A52 | two sub-phases, each <=120k, each own gate + fresh Verifier | 6.5a **closed 2026-07-30** — upstream-blocked, *not* qualified; reopens only on a passing requalification-lane run. 6.5b parked: items 12, 13, 15 remaining, item 14 discharged early. |
 | 7 | Critical settings and shared wizard/editor component | 2–3, 5–6, 6.5 | A2, A5, A7–A8, A26, A30, A33, A38–A40, A43, A45, A47–A49, A51 | two Builder packets, each <=120k | Not started |
 | 8 | HF discovery and Model Library convergence | 2–5 | A15, A17, A25, A29, A45–A46, A51–A57 | two Builder packets, each <=120k | Not started |
 | 9 | Conversation formatting, client routes, and revision-pinned chat-template substitution (tool-call reliability) | 2–3 | A10, A27 (both resolved by E1), A38–A40 | 120k | Not started |
@@ -1937,11 +1937,29 @@ qualification result. MTP-specific artifact acquisition, eligibility, estimator,
 UI work remains parked with 6.5b. The cross-runtime source audit and future validation
 boundary are in `docs/reference/apple-silicon-mtp-runtime-comparison.md`.
 
-**Requalification trigger:** first prove on a pinned upstream build that (a) a
-nonzero-temperature request and (b) a normal constrained-tool request each record nonzero
-speculative attempts with output parity/fidelity. Requested/effective depth and fallback
-reasons must remain observable. Only then resume items 1–11, including the deferred
-higher-context rows; 6.5b still requires a fresh 6.5a Verifier pass.
+**Closed — 2026-07-30.** 6.5a is now **closed, not open-and-waiting**. The 2026-07-29
+suspension above was the right call on the day, but leaving eleven items sitting in an
+open phase implies work someone could pick up, and there is none: every remaining item
+measures a workload the pinned runtime refuses to run, and upstream has given no ETA for a
+build that would run it. Carrying them as open would also make the phase a permanent
+blocker on the release bar for a feature the product does not advertise and ships disabled.
+
+What "closed" means precisely, because this is the sentence a future reader will misread:
+the *measurement obligation* is closed and the *capability question* is unresolved. No
+downstream phase may read "6.5a closed" as a passing qualification result — closure and
+qualification are opposite outcomes here, and MTP stays off, unadvertised, and absent from
+ordinary Advanced controls exactly as the suspension required. The state of the runtime
+limitation itself is recorded for future readers at the top of
+`docs/reference/rapid-mlx-mtp-evidence.md`, which is the doc to read first.
+
+**Requalification trigger — the only path that reopens this.** Prove on a pinned upstream
+build that (a) a nonzero-temperature request and (b) a normal constrained-tool request each
+record nonzero speculative attempts with output parity/fidelity. Requested/effective depth
+and fallback reasons must remain observable. That is what the zero-argument requalification
+lane below checks, and its exit `0` is what reopens items 1–11 — including the deferred
+higher-context rows — as a fresh sub-phase. Nothing else does; in particular an upstream
+changelog entry claiming an MTP fix is a reason to run the lane, not evidence. 6.5b still
+requires a fresh 6.5a Verifier pass after any such reopening.
 
 **Requalification is now one command.** `scripts/rapid-mlx-requalify-spec-decode.mjs` encodes
 exactly the three conditions above as gates named `sampled`, `constrained`, and `parity`, runs
@@ -2059,9 +2077,11 @@ working-handoff doc):
 10. Cover the llama.cpp side symmetrically: embedded and `-md` draft-model paths including Gemma 4, against the pinned build, with the same paired-metric and positive-control discipline.
 11. Audit estimator ownership for speculative state — draft weights, MTP cache/recurrent state, and sidecar resident bytes must be additive in Phase 5's estimator and attributable to a named owner.
 
-_— Phase 6.5a gate falls here. As of 2026-07-29 it is suspended on the sampled/tool-processor
-upstream boundary; 6.5b does not begin. A fresh Verifier must pass resumed 6.5a before the
-following items start. —_
+_— Phase 6.5a gate falls here. Suspended 2026-07-29 on the sampled/tool-processor upstream
+boundary and **closed 2026-07-30** with no ETA for a build that would lift it; see the
+disposition above. Items 1–11 reopen only on a passing requalification-lane run, and a fresh
+Verifier must pass that reopened 6.5a before the following items start. Closed is not
+qualified: 6.5b does not begin. —_
 
 **Builder brief — 6.5b (managed sidecar artifacts):**
 

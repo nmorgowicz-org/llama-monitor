@@ -32,7 +32,7 @@ Usage
 -----
     python3 scripts/build-mtp-head.py \
         --bf16-source nightmedia/Qwen3.6-27B-Architect-Polaris2-Fable-B-F451-Tess \
-        --mlx-model /Users/nick/mlx-models/nightmedia-27b-mxfp8-mlx
+        --mlx-model ~/.config/llama-monitor/models/mlx/native/nightmedia-27b-mxfp8-mlx
 
 See docs/reference/rapid-mlx-mtp-evidence.md for the requalification procedure
 this feeds.

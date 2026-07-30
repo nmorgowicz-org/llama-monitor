@@ -17,6 +17,25 @@ contains no roadmap, no UI design, and no enablement policy. Those live in Phase
 > tokens per second, which corresponds to 37% less generation time. Mixing the two
 > conventions is the easiest way to misquote this document.
 
+> **State of Rapid-MLX speculative decoding, as of 2026-07-30 — read this before quoting
+> any number below.** MTP is **not usable for real agent traffic on any shipped build**, and
+> there is **no ETA on a build where it will be**. Rapid-MLX 0.11.1 engages the MTP path only
+> for a greedy request carrying no logits processor, so a request at any temperature above
+> zero, and any ordinary tool-enabled request (Rapid builds a grammar processor by default),
+> falls through to plain autoregressive decode and records zero speculative attempts. This is
+> an explicit contract in the installed source, unchanged on upstream `main`, and tracked as
+> upstream issue `#1013` — see §4.6. Everything measured here is therefore an **artificial
+> greedy research envelope**, not a workload the product can expose. The app ships with MTP
+> off for everyone and does not advertise it.
+>
+> **What would change that, and the only thing that would:** run
+> `scripts/rapid-mlx-requalify-spec-decode.mjs` (zero arguments) against a new build. Exit `0`
+> means its `sampled`, `constrained`, and `parity` gates all passed and the state above is
+> stale; exit `20` means still blocked and nothing here changes; exit `1` means the harness
+> broke, which is not the same finding. Full procedure in §12. Because of this, Phase 6.5a of
+> the product plan was **closed on 2026-07-30** rather than left open indefinitely; the lane is
+> the reopening mechanism.
+
 ---
 
 ## 1. Root cause 1 — stale extractor produced a dead draft head
@@ -455,9 +474,9 @@ user-owned trunk or an HF cache snapshot.
 
 | Path | State |
 |---|---|
-| `/Users/nick/mlx-models/nightmedia-27b-mxfp8-mlx` | **Currently corrupted on load.** Contains `model-mtp.safetensors` and `model-mtp.safetensors.shifted.bak`. Both fail the norm preflight (`pre_fc_norm_embedding` mean ≈ −0.44), and either in-dir file triggers the §2 trunk glob defect. Not modified. |
-| `/Users/nick/mlx-models/nightmedia-27b-mxfp8-mtp-fixed` | Symlinked trunk + correctly extracted head, but sidecar is **in-dir**, so it carries the same §2 defect. |
-| `/Users/nick/mlx-models/control-unsloth8bit-official-mtp` | Prior investigation's control, built from a corrupted head. **Invalid — do not reuse.** |
+| `~/.config/llama-monitor/models/mlx/native/nightmedia-27b-mxfp8-mlx` | The MXFP8 trunk, 27 GB of real files. Moved here from `/Users/nick/mlx-models/` on 2026-07-30. Its two in-dir heads (`model-mtp.safetensors` and `model-mtp.safetensors.shifted.bak`) were pulled out and quarantined; both failed the norm preflight (`pre_fc_norm_embedding` mean ≈ −0.44) and either one triggers the §2 trunk glob defect while present. Trunk weights themselves were never modified. |
+| `/Users/nick/mlx-models/` | **Deleted 2026-07-30.** Held no model bytes of its own by then — two symlink farms over the trunk and the HF cache (`nightmedia-27b-mxfp8-mtp-fixed`, `control-unsloth8bit-official-mtp`, neither holding a head), plus the quarantine directory below. The `-mtp-fixed` farm carried a correctly extracted head **in-dir**, so it had the §2 defect; the `control-unsloth8bit-official-mtp` head was built from the stale extractor and was **invalid — never reuse it**. Both are superseded by the standalone official control. |
+| `~/.config/llama-monitor/models/rapid-mlx/mtp-sidecars/.quarantine-in-trunk-sidecars/` | The four quarantined heads (1.9 GB) plus the README explaining each. Moved out of `~/mlx-models/` on 2026-07-30 when that directory was deleted. Kept as negative-control fixtures: a stale-extractor head and a wrong-parent head are exactly what a sidecar preflight has to refuse. |
 | `scratchpad/nm-trunk-only` | Symlinked trunk, MTP files excluded. Generates correctly. Used as the MXFP8 subject. |
 | `scratchpad/nm-mtp-fixed.safetensors` | Validated external sidecar. SHA-256 `5088ad4339b6d669b51ee66ab0e1ad214e5ca17d62bf643970ff09f09f25717a`. Served successfully. |
 | `scratchpad/mtp_probe2.py` | The offline agreement probe. |
@@ -582,7 +601,7 @@ the official control (§12.3), which ships its own.
 ```
 python3 scripts/build-mtp-head.py \
   --bf16-source nightmedia/Qwen3.6-27B-Architect-Polaris2-Fable-B-F451-Tess \
-  --mlx-model /Users/nick/mlx-models/nightmedia-27b-mxfp8-mlx
+  --mlx-model ~/.config/llama-monitor/models/mlx/native/nightmedia-27b-mxfp8-mlx
 ```
 
 `--bf16-source` is the repo (or local path) carrying the `mtp.*` tensors; `--mlx-model` is the
@@ -623,12 +642,15 @@ whether the head is used.
 ### 12.2 Measure whether the runtime engages it
 
 ```
-node scripts/rapid-mlx-requalify-spec-decode.mjs \
-  --model /Users/nick/mlx-models/nightmedia-27b-mxfp8-mlx \
-  --speculative-control-model mlx-community/Qwen3.6-27B-MTP-4bit \
-  --profile-alias unsloth/Qwen3.6-27B-MLX-8bit \
-  --out tmp/requalify-<version>
+node scripts/rapid-mlx-requalify-spec-decode.mjs
 ```
+
+**No arguments.** Every input — trunk, subject head, positive control, parsers, port — is
+pinned in `scripts/spec-decode-recipe.json`, and `--out` defaults to a timestamped directory.
+That is deliberate: the arguments are not guessable months later and the wrong ones do not
+fail loudly, so a run with no tool parser would install no tool grammar and then report that
+speculation survives tool use. Any field is still overridable by flag, and flags win over the
+recipe field by field.
 
 Exit codes: `0` qualified, `20` gates ran cleanly but the scheduler still does not engage,
 `1` uninterpretable (control failed or a run errored). A failing positive control is always
@@ -649,10 +671,10 @@ because the post-upgrade probe message names the outstanding gates. Keep the two
 
 | Artifact | Location | Note |
 |---|---|---|
-| Trunk | `/Users/nick/mlx-models/nightmedia-27b-mxfp8-mlx` | 27 GB, real files |
+| Trunk | `~/.config/llama-monitor/models/mlx/native/nightmedia-27b-mxfp8-mlx` | 27 GB, real files |
 | Positive control | `mlx-community/Qwen3.6-27B-MTP-4bit` | HF cache; a standalone 228 MB / 31-tensor head (`model_type: qwen3_5_mtp`), not a full model — nothing to extract |
 | Validated subject head | `~/.config/llama-monitor/models/rapid-mlx/mtp-sidecars/qwen3.6-27b-nightmedia-f451-tess-8bit/` | 478 MB + `provenance.json` |
-| Quarantined heads | `/Users/nick/mlx-models/.quarantine-in-trunk-sidecars/` | Pulled out of trunks; mostly stale-extractor output. See its README |
+| Quarantined heads | `~/.config/llama-monitor/models/rapid-mlx/mtp-sidecars/.quarantine-in-trunk-sidecars/` | Pulled out of trunks; mostly stale-extractor output. Kept as negative-control fixtures. See its README |
 
 All three lane artifacts live under `~/.config/llama-monitor/models/` as of 2026-07-30, so
 model management stays inside the app: the trunk at `models/mlx/native/` (already an
@@ -662,9 +684,12 @@ lane exports `HF_HUB_CACHE` to that cache, matching what the resolver does when 
 launches rapid-mlx, so a repo-id control resolves to a model the app can actually serve.
 
 
-The `-mtp-fixed` and `control-unsloth8bit-official-mtp` directories under `~/mlx-models/` are
-symlink farms over the trunk and the HF cache with their own `config.json`; neither currently
-holds a head.
+`~/mlx-models/` no longer exists — it was deleted on 2026-07-30, once the trunk had moved and
+6.5a closed. What it held by then was two symlink farms over the trunk and the user-wide HF
+cache (`-mtp-fixed` and `control-unsloth8bit-official-mtp`, each with its own `config.json`
+and neither holding a head) plus the quarantine directory, which was moved rather than
+deleted; see §9. Any older receipt or log citing an `~/mlx-models/…` path is describing the
+pre-move layout, not a directory a re-runner should expect to find.
 
 ⚠️ **The `tmp/…` receipt paths cited throughout this record are untracked** and will not survive
 a clean checkout. Treat a missing receipt directory as absent evidence, not as a contradiction of
