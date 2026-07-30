@@ -11,28 +11,17 @@
 //! Per D1/D2/A53: this parser populates the shared geometry profile; it does not contain
 //! backend-specific allocation math or llama.cpp vocabulary.
 //!
-//! NOTE: dead_code allowed until Parts B/C wire up consumption (Phase 4 Part B: geometry
-//! population; Part C: HF lookup, context propagation, estimator integration).
+//! A directory without a readable config.json degrades to the safetensors index rather
+//! than failing: see [`degraded_profile_from_safetensors`]. Every field it produces is
+//! labelled heuristic, and the reason config.json was unusable is recorded in
+//! `warnings.missing_critical_fields`.
 
 use std::path::Path;
 
 use crate::llama::model_memory_profile::*;
-use crate::llama::vram_estimator::ModelArch;
 
 pub const MAX_CONFIG_BYTES: u64 = 8 * 1024 * 1024;
 pub const MAX_INDEX_BYTES: u64 = 64 * 1024 * 1024;
-
-// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
-// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
-// open; see the dead-code inventory finding in the execution plan.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MlxMetaEvidence {
-    #[default]
-    Exact,
-    Degraded,
-}
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -138,17 +127,6 @@ pub struct MlxWeightIndex {
     pub total_size_bytes: Option<u64>,
 }
 
-// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
-// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
-// open; see the dead-code inventory finding in the execution plan.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Default)]
-pub struct MlxMetadata {
-    pub config: MlxConfig,
-    pub weight_index: MlxWeightIndex,
-    pub evidence: MlxMetaEvidence,
-}
-
 fn bounded_read(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
     let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
     if meta.len() > max_bytes {
@@ -159,15 +137,6 @@ fn bounded_read(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
         ));
     }
     std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
-// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
-// open; see the dead-code inventory finding in the execution plan.
-#[allow(dead_code)]
-pub fn read_mlx_config(dir: &Path) -> Result<MlxConfig, String> {
-    let bytes = bounded_read(&dir.join("config.json"), MAX_CONFIG_BYTES)?;
-    parse_mlx_config(&bytes)
 }
 
 pub fn parse_mlx_config(bytes: &[u8]) -> Result<MlxConfig, String> {
@@ -235,44 +204,6 @@ pub fn resolve_local_weight_bytes(dir: &Path, index: &MlxWeightIndex) -> Option<
     Some(total)
 }
 
-// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
-// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
-// open; see the dead-code inventory finding in the execution plan.
-#[allow(dead_code)]
-pub fn read_mlx_metadata(dir: &Path) -> Result<MlxMetadata, String> {
-    let config = read_mlx_config(dir)?;
-    let weight_index = read_mlx_weight_index(dir).unwrap_or_default();
-    Ok(finish_metadata(config, weight_index))
-}
-
-// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
-// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
-// open; see the dead-code inventory finding in the execution plan.
-#[allow(dead_code)]
-pub fn metadata_from_config(config: MlxConfig) -> MlxMetadata {
-    finish_metadata(config, MlxWeightIndex::default())
-}
-
-// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
-// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
-// open; see the dead-code inventory finding in the execution plan.
-#[allow(dead_code)]
-fn finish_metadata(config: MlxConfig, weight_index: MlxWeightIndex) -> MlxMetadata {
-    let evidence = if config.hidden_size.is_some()
-        && config.num_layers.is_some()
-        && config.num_attention_heads.is_some()
-    {
-        MlxMetaEvidence::Exact
-    } else {
-        MlxMetaEvidence::Degraded
-    };
-    MlxMetadata {
-        config,
-        weight_index,
-        evidence,
-    }
-}
-
 // ── ModelMemoryProfile parsing ───────────────────────────────────────────────────
 
 /// Parse an MLX config.json from a file into a normalized [`ModelMemoryProfile`].
@@ -288,7 +219,15 @@ pub fn parse_mlx_config_to_profile(config_path: &Path) -> Result<ModelMemoryProf
 /// Read a local MLX directory through the normalized geometry path used by
 /// Rapid estimates. GGUF metadata deliberately has no dependency on this.
 pub fn read_mlx_model_profile(dir: &Path) -> Result<ModelMemoryProfile, String> {
-    let mut profile = parse_mlx_config_to_profile(&dir.join("config.json"))?;
+    let mut profile = match parse_mlx_config_to_profile(&dir.join("config.json")) {
+        Ok(profile) => profile,
+        // config.json is the only exact source of geometry, but a directory can
+        // arrive without one — an interrupted download, a hand-assembled MLX
+        // conversion, a checkpoint whose config lives one level up. Refusing
+        // outright would leave the estimator with nothing but the filename, so
+        // fall through to the safetensors index and label every field heuristic.
+        Err(config_error) => degraded_profile_from_safetensors(dir, &config_error)?,
+    };
     // config.json is not the last word on a vision tower: some checkpoints ship
     // one without naming it. The index is only available once the model is on
     // disk, which is why this lives here and not in the bytes-only parser.
@@ -301,6 +240,51 @@ pub fn read_mlx_model_profile(dir: &Path) -> Result<ModelMemoryProfile, String> 
             ..Default::default()
         });
     }
+    Ok(profile)
+}
+
+/// Build a degraded profile from the safetensors index alone, for a directory whose
+/// config.json is missing or unreadable.
+///
+/// Every field this produces is labelled heuristic by
+/// [`infer_weight_components_from_safetensors`], and the reason config.json was
+/// unusable is recorded in `warnings.missing_critical_fields` so a caller can tell
+/// a user why the estimate is approximate rather than measured. Never returns a
+/// profile that claims exact evidence.
+fn degraded_profile_from_safetensors(
+    dir: &Path,
+    config_error: &str,
+) -> Result<ModelMemoryProfile, String> {
+    let index = parse_safetensors_index(&dir.join("model.safetensors.index.json")).map_err(
+        |index_error| {
+            format!("{config_error}; the safetensors index cannot stand in for it: {index_error}")
+        },
+    )?;
+
+    let weights = infer_weight_components_from_safetensors(&index);
+    // No layer count means the index named no `model.layers.N` tensors, so there is
+    // no geometry to degrade to. Say that instead of returning an empty profile that
+    // downstream code would read as a successful parse.
+    if weights.n_layers.value == 0 {
+        return Err(format!(
+            "{config_error}; the safetensors index names no model.layers.N tensors, \
+             so no layer count could be inferred either"
+        ));
+    }
+
+    let mut profile = ModelMemoryProfile {
+        weights,
+        ..Default::default()
+    };
+    profile.warnings.missing_critical_fields.push(ParseWarning {
+        field: "config.json".into(),
+        message: format!(
+            "{config_error}. Geometry was inferred from the safetensors index instead; \
+             layer count is heuristic and hidden size, head counts, and vocabulary are unknown."
+        ),
+        outer_value: None,
+        inner_value: None,
+    });
     Ok(profile)
 }
 
@@ -977,28 +961,21 @@ fn check_wrapper_field_conflicts(profile: &mut ModelMemoryProfile, raw: &serde_j
 
 // ── Safetensors index parsing (for Part C) ───────────────────────────────────────
 
-// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
-// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
-// open; see the dead-code inventory finding in the execution plan.
-#[allow(dead_code)]
 /// Safetensors index metadata parsed from model.safetensors.index.json.
+///
+/// Deliberately narrower than [`MlxWeightIndex`]: shard files and total byte count are
+/// that type's job, and duplicating them here gave two answers to one question. This
+/// carries only what the degradation path needs — tensor names to count layers from,
+/// and quantization metadata.
 #[derive(Debug, Clone, Default)]
 pub struct SafetensorsIndexInfo {
     /// Tensor name → shard file mapping.
     pub weight_map: std::collections::BTreeMap<String, String>,
-    /// Unique shard files in order.
-    pub shard_files: Vec<String>,
-    /// Total tensor bytes from metadata (if present).
-    pub total_size_bytes: Option<u64>,
     /// Quantization metadata (if present).
     pub quant_bits: Option<u32>,
     pub quant_group_size: Option<u32>,
 }
 
-// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
-// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
-// open; see the dead-code inventory finding in the execution plan.
-#[allow(dead_code)]
 /// Parse a safetensors index into [`SafetensorsIndexInfo`].
 ///
 /// Extracts tensor names, shard assignments, and quantization metadata.
@@ -1017,7 +994,6 @@ pub fn parse_safetensors_index(index_path: &Path) -> Result<SafetensorsIndexInfo
 
     let mut weight_map: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
-    let mut shard_files: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for (tensor_name, shard_val) in weight_map_value {
         let Some(shard_name) = shard_val.as_str() else {
             return Err("safetensors index contains a non-string shard".into());
@@ -1034,14 +1010,10 @@ pub fn parse_safetensors_index(index_path: &Path) -> Result<SafetensorsIndexInfo
             ));
         }
         weight_map.insert(tensor_name.clone(), shard_name.to_string());
-        shard_files.insert(shard_name.to_string());
     }
 
     // Extract metadata.
     let metadata = value.get("metadata").and_then(|v| v.as_object());
-    let total_size_bytes = metadata
-        .and_then(|m| m.get("total_size"))
-        .and_then(|t| t.as_u64());
     let quant_bits = metadata
         .and_then(|m| m.get("quant_bits"))
         .or_else(|| metadata.and_then(|m| m.get("bits")))
@@ -1055,22 +1027,17 @@ pub fn parse_safetensors_index(index_path: &Path) -> Result<SafetensorsIndexInfo
 
     Ok(SafetensorsIndexInfo {
         weight_map,
-        shard_files: shard_files.into_iter().collect(),
-        total_size_bytes,
         quant_bits,
         quant_group_size,
     })
 }
 
-// Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
-// is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
-// open; see the dead-code inventory finding in the execution plan.
-#[allow(dead_code)]
 /// Infer WeightComponents from safetensors index tensor names when config is unavailable.
 ///
-/// This is the HEURISTIC DEGRADATION PATH — only used when config.json is missing or
-/// ambiguous. Never labeled as exact. Returns WeightComponents with field_evidence
-/// clearly marked as "heuristic from safetensors index".
+/// This is the HEURISTIC DEGRADATION PATH — only reached from
+/// [`degraded_profile_from_safetensors`] when config.json is missing or unparseable.
+/// Never labeled as exact. Returns WeightComponents with field_evidence clearly
+/// marked as "heuristic from safetensors index".
 pub fn infer_weight_components_from_safetensors(index: &SafetensorsIndexInfo) -> WeightComponents {
     let mut weights = WeightComponents::default();
 
@@ -1104,71 +1071,6 @@ pub fn infer_weight_components_from_safetensors(index: &SafetensorsIndexInfo) ->
     }
 
     weights
-}
-
-// ── Legacy compatibility ──────────────────────────────────────────────────────────
-
-impl MlxMetadata {
-    // Superseded in practice by `read_mlx_model_profile` / `parse_mlx_config_to_profile`, which
-    // is what the API actually calls. No caller in the running binary. Wire-or-delete decision is
-    // open; see the dead-code inventory finding in the execution plan.
-    #[allow(dead_code)]
-    pub fn to_arch(&self, model_size_bytes: u64, param_b: f64, fallback_name: &str) -> ModelArch {
-        let mut arch = if self.evidence == MlxMetaEvidence::Degraded {
-            ModelArch::from_name_and_params(fallback_name, param_b)
-        } else {
-            ModelArch::default()
-        };
-
-        let cfg = &self.config;
-        if let Some(layers) = cfg.num_layers {
-            arch.n_layers = layers;
-        }
-        if let Some(embd) = cfg.hidden_size {
-            arch.n_embd = embd;
-        }
-        let n_head = cfg.num_attention_heads;
-        if let Some(kv) = cfg.num_key_value_heads {
-            arch.n_kv_heads = kv;
-        } else if arch.n_kv_heads == 0
-            && let Some(h) = n_head
-        {
-            arch.n_kv_heads = h;
-        }
-        let head_dim = cfg.head_dim.or_else(|| {
-            let embd = cfg.hidden_size?;
-            let heads = n_head?;
-            embd.checked_div(heads)
-        });
-        if let Some(hd) = head_dim {
-            arch.head_dim = hd;
-        }
-
-        if let Some(experts) = cfg.num_experts {
-            arch.n_experts = experts;
-        }
-        if let Some(used) = cfg.num_experts_per_tok {
-            arch.n_experts_used = used;
-        }
-        if arch.n_experts > 0 && arch.expert_fraction == 0.0 {
-            arch.expert_fraction = 0.65;
-        }
-
-        if let Some(window) = cfg.sliding_window {
-            arch.local_attn_window = window;
-        }
-
-        if arch.n_layers > 0 {
-            arch.bytes_per_layer = model_size_bytes / arch.n_layers as u64;
-        }
-        arch.param_b = param_b;
-
-        if cfg.draft_model.is_some() || cfg.speculative_config.is_some() {
-            arch.mtp_depth = arch.mtp_depth.max(1);
-        }
-
-        arch
-    }
 }
 
 #[cfg(test)]
@@ -1248,77 +1150,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_dense_qwen3_style_config() {
-        let dir = tempfile::tempdir().unwrap();
-        write_config(
-            dir.path(),
-            r#"{
-                "model_type": "qwen3",
-                "hidden_size": 1024,
-                "num_hidden_layers": 28,
-                "num_attention_heads": 16,
-                "num_key_value_heads": 8,
-                "head_dim": 128,
-                "intermediate_size": 3072,
-                "max_position_embeddings": 32768,
-                "quantization": {"bits": 4, "group_size": 64}
-            }"#,
-        );
-        let meta = read_mlx_metadata(dir.path()).unwrap();
-        assert_eq!(meta.evidence, MlxMetaEvidence::Exact);
-        assert_eq!(meta.config.num_layers, Some(28));
-        assert_eq!(meta.config.quantization.clone().unwrap().bits, Some(4));
-
-        let arch = meta.to_arch(400_000_000, 0.6, "Qwen3-0.6B-4bit");
-        assert_eq!(arch.n_layers, 28);
-        assert_eq!(arch.n_embd, 1024);
-        assert_eq!(arch.n_kv_heads, 8);
-        assert_eq!(arch.head_dim, 128);
-        assert_eq!(arch.n_experts, 0);
-        assert_eq!(arch.bytes_per_layer, 400_000_000 / 28);
-    }
-
-    #[test]
-    fn parses_moe_qwen3_style_config() {
-        let dir = tempfile::tempdir().unwrap();
-        write_config(
-            dir.path(),
-            r#"{
-                "model_type": "qwen3_moe",
-                "hidden_size": 2048,
-                "num_hidden_layers": 48,
-                "num_attention_heads": 32,
-                "num_key_value_heads": 4,
-                "num_experts": 128,
-                "num_experts_per_tok": 8,
-                "quantization": {"bits": 4, "group_size": 64}
-            }"#,
-        );
-        let meta = read_mlx_metadata(dir.path()).unwrap();
-        assert_eq!(meta.evidence, MlxMetaEvidence::Exact);
-
-        let arch = meta.to_arch(16_000_000_000, 30.0, "Qwen3-30B-A3B-4bit");
-        assert_eq!(arch.n_experts, 128);
-        assert_eq!(arch.n_experts_used, 8);
-        assert!(arch.is_moe());
-    }
-
-    #[test]
-    fn missing_required_fields_flags_degraded() {
-        let dir = tempfile::tempdir().unwrap();
-        write_config(
-            dir.path(),
-            r#"{"model_type": "mystery", "hidden_size": 4096}"#,
-        );
-        let meta = read_mlx_metadata(dir.path()).unwrap();
-        assert_eq!(meta.evidence, MlxMetaEvidence::Degraded);
-
-        let heuristic = ModelArch::from_name_and_params("mystery-7b", 7.0);
-        let arch = meta.to_arch(4_000_000_000, 7.0, "mystery-7b");
-        assert_eq!(arch.n_layers, heuristic.n_layers);
-    }
-
-    #[test]
     fn exact_weight_accounting_from_safetensors_index_total_size() {
         let dir = tempfile::tempdir().unwrap();
         write_config(
@@ -1335,11 +1166,11 @@ mod tests {
                 }
             }"#,
         );
-        let meta = read_mlx_metadata(dir.path()).unwrap();
-        assert_eq!(meta.weight_index.total_size_bytes, Some(123_456_789));
-        assert_eq!(meta.weight_index.shard_files.len(), 2);
+        let index = read_mlx_weight_index(dir.path()).unwrap();
+        assert_eq!(index.total_size_bytes, Some(123_456_789));
+        assert_eq!(index.shard_files.len(), 2);
         assert_eq!(
-            resolve_local_weight_bytes(dir.path(), &meta.weight_index),
+            resolve_local_weight_bytes(dir.path(), &index),
             Some(123_456_789)
         );
     }
@@ -1353,12 +1184,9 @@ mod tests {
         );
         write_index(dir.path(), r#"{"weight_map": {"a": "model.safetensors"}}"#);
         std::fs::write(dir.path().join("model.safetensors"), vec![0u8; 4096]).unwrap();
-        let meta = read_mlx_metadata(dir.path()).unwrap();
-        assert_eq!(meta.weight_index.total_size_bytes, None);
-        assert_eq!(
-            resolve_local_weight_bytes(dir.path(), &meta.weight_index),
-            Some(4096)
-        );
+        let index = read_mlx_weight_index(dir.path()).unwrap();
+        assert_eq!(index.total_size_bytes, None);
+        assert_eq!(resolve_local_weight_bytes(dir.path(), &index), Some(4096));
     }
 
     #[test]
@@ -1373,25 +1201,11 @@ mod tests {
             r#"{"weight_map": {"a": "../../etc/passwd.safetensors"}}"#,
         );
         assert!(read_mlx_weight_index(dir.path()).is_err());
-        let meta = read_mlx_metadata(dir.path()).unwrap();
-        assert!(meta.weight_index.shard_files.is_empty());
-    }
-
-    #[test]
-    fn draft_sidecar_sets_mtp_depth() {
-        let dir = tempfile::tempdir().unwrap();
-        write_config(
-            dir.path(),
-            r#"{
-                "hidden_size": 1024,
-                "num_hidden_layers": 10,
-                "num_attention_heads": 8,
-                "speculative_config": {"model": "draft-model", "num_hidden_layers": 2}
-            }"#,
-        );
-        let meta = read_mlx_metadata(dir.path()).unwrap();
-        let arch = meta.to_arch(1_000_000, 1.0, "test");
-        assert_eq!(arch.mtp_depth, 1);
+        // The traversal attempt must not take the whole profile down with it: config.json
+        // is present and exact here, so geometry still resolves and only the shard list
+        // is lost.
+        let profile = read_mlx_model_profile(dir.path()).unwrap();
+        assert_eq!(profile.weights.n_layers.value, 10);
     }
 
     // ── ModelMemoryProfile tests (Phase 4 Part A) ─────────────────────────────
@@ -1772,8 +1586,11 @@ mod tests {
         )
         .unwrap();
         let info = parse_safetensors_index(&index_path).unwrap();
-        assert_eq!(info.shard_files.len(), 1);
-        assert_eq!(info.total_size_bytes, Some(123_456_789));
+        assert_eq!(info.weight_map.len(), 1);
+        assert_eq!(
+            info.weight_map["a"], "model-00001-of-00002.safetensors",
+            "the shard a tensor lives in has to survive the parse"
+        );
     }
 
     #[test]
@@ -1796,9 +1613,7 @@ mod tests {
         )
         .unwrap();
         let info = parse_safetensors_index(&index_path).unwrap();
-        assert_eq!(info.shard_files.len(), 2);
         assert_eq!(info.weight_map.len(), 5);
-        assert_eq!(info.total_size_bytes, Some(378_945_612));
 
         // Heuristic inference from tensor names.
         let weights = infer_weight_components_from_safetensors(&info);
@@ -1859,6 +1674,122 @@ mod tests {
                 .field_evidence
                 .contains("heuristic")
         );
+    }
+
+    /// Same claim as `heuristic_degradation_only_when_config_missing`, but through the
+    /// entry point a caller actually uses. The bytes-only parser cannot demonstrate
+    /// precedence, because it never sees the index that would compete with the config.
+    #[test]
+    fn read_mlx_model_profile_prefers_config_over_the_index_when_both_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        write_config(
+            dir.path(),
+            r#"{"hidden_size": 1024, "num_hidden_layers": 28, "num_attention_heads": 16}"#,
+        );
+        write_index(
+            dir.path(),
+            r#"{"weight_map": {"model.layers.5.attention.wq.weight": "model.safetensors"}}"#,
+        );
+        let profile = read_mlx_model_profile(dir.path()).unwrap();
+        // 28 from config, not 6 from the index.
+        assert_eq!(profile.weights.n_layers.value, 28);
+        assert!(
+            !profile
+                .weights
+                .n_layers
+                .field_evidence
+                .contains("heuristic")
+        );
+        assert!(profile.warnings.missing_critical_fields.is_empty());
+    }
+
+    /// The degradation path has to be reachable from the entry point, not just callable
+    /// from a test. A directory with an index and no config must still produce a profile,
+    /// and must say why it is approximate.
+    #[test]
+    fn read_mlx_model_profile_degrades_to_the_index_when_config_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        write_index(
+            dir.path(),
+            r#"{
+                "metadata": {"bits": 4, "group_size": 64},
+                "weight_map": {
+                    "model.layers.0.attention.wq.weight": "model.safetensors",
+                    "model.layers.27.attention.wq.weight": "model.safetensors"
+                }
+            }"#,
+        );
+        let profile = read_mlx_model_profile(dir.path()).unwrap();
+
+        assert_eq!(profile.weights.n_layers.value, 28);
+        assert!(
+            profile
+                .weights
+                .n_layers
+                .field_evidence
+                .contains("heuristic")
+        );
+        assert_eq!(profile.weights.quant_bits.value, 4);
+        assert_eq!(profile.weights.quant_group_size.value, 64);
+        // Nothing the index cannot answer may be invented.
+        assert_eq!(profile.weights.n_embd.value, 0);
+        assert!(profile.is_substantive());
+
+        let warning = profile
+            .warnings
+            .missing_critical_fields
+            .iter()
+            .find(|w| w.field == "config.json")
+            .expect("a degraded profile must record why config.json was unusable");
+        assert!(
+            warning.message.contains("safetensors index"),
+            "warning must name the substitute source: {}",
+            warning.message
+        );
+    }
+
+    /// An unparseable config is the same situation as a missing one — a truncated
+    /// download leaves a file behind.
+    #[test]
+    fn read_mlx_model_profile_degrades_when_config_is_unparseable() {
+        let dir = tempfile::tempdir().unwrap();
+        write_config(dir.path(), "{ this is not json");
+        write_index(
+            dir.path(),
+            r#"{"weight_map": {"model.layers.9.attention.wq.weight": "model.safetensors"}}"#,
+        );
+        let profile = read_mlx_model_profile(dir.path()).unwrap();
+        assert_eq!(profile.weights.n_layers.value, 10);
+        assert!(
+            profile
+                .weights
+                .n_layers
+                .field_evidence
+                .contains("heuristic")
+        );
+    }
+
+    /// With neither artifact readable there is nothing to degrade to, and the error has
+    /// to name both failures — reporting only the index would hide the real cause.
+    #[test]
+    fn read_mlx_model_profile_reports_both_failures_when_nothing_is_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = read_mlx_model_profile(dir.path()).unwrap_err();
+        assert!(err.contains("config.json"), "{err}");
+        assert!(err.contains("safetensors index"), "{err}");
+    }
+
+    /// An index that names no transformer layers cannot stand in for a config. Returning
+    /// an empty profile here would read downstream as a successful parse of a 0-layer model.
+    #[test]
+    fn read_mlx_model_profile_refuses_an_index_with_no_layer_tensors() {
+        let dir = tempfile::tempdir().unwrap();
+        write_index(
+            dir.path(),
+            r#"{"weight_map": {"lm_head.weight": "model.safetensors"}}"#,
+        );
+        let err = read_mlx_model_profile(dir.path()).unwrap_err();
+        assert!(err.contains("model.layers.N"), "{err}");
     }
 
     // ── Part B: Architecture-specific geometry tests ──────────────────────────
