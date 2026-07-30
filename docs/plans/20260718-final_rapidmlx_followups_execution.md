@@ -497,12 +497,35 @@ Phase 7B = builder brief items 6–13. Each part requires screenshot validation 
 - **Open, carried forward:** the settings catalog's `default_value()` for `PflashPolicy` still returns `"auto"`, now
   inconsistent with the config default of `"off"`.
 
-##### Phase 7B2 — Workload profiles + confirmation — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
+##### Phase 7B2 — Workload profiles — Verified complete (Coordinator, 2026-07-30), rescoped
 
-- **State:** UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
-- **Commit:** 5d00ee0 (2026-07-21)
-- **Screenshots:** spawn-wizard-workload-profiles.png, spawn-wizard-workload-roleplay.png, spawn-wizard-workload-tool-research.png, spawn-wizard-workload-deterministic.png
-- **Features:** 5 profiles (Interactive coding agent default, Tool/research, Roleplay, General chat, Deterministic batch/eval advanced); editable assumptions; confirmation checkbox required
+- **State:** Verified complete — Coordinator, 2026-07-30. This is the sub-phase whose broken confirmation flow
+  triggered the mass UNVERIFIED flag on 2026-07-25, so it was re-checked against a running instance rather than
+  re-read.
+- **Commit:** 5d00ee0 (2026-07-21), rescoped by 712c261 / 71aa16e / 58cfa42, reconciled by `0a0a9a0` (2026-07-30)
+- **Rescoped — the row above described a UI that no longer exists.** The dedicated step-3 picker with five profiles,
+  editable assumptions, and a required confirmation checkbox was deleted as redundant with the page-1 "what are you
+  running this for?" cards. The broken confirmation gate was removed, not repaired. The four workload screenshots
+  document a deleted screen and are retained only as history.
+- **What actually ships:** three page-1 use-case cards (`agentic`, `general`, `roleplay`) mapping through
+  `USE_CASE_TO_PROFILE` to profile keys, then through `WorkloadScenario::from_profile_or_key` onto the canonical
+  estimator enum. Workload scenario is spawn-time guidance for the VRAM estimate. It is not a launch setting and
+  nothing about it is persisted.
+- **Verified live end to end.** The card vocabulary reaches the estimator and materially moves the number — 27B mxfp8
+  at 32768 context estimates 29.6 GB with no scenario, 44.4 GB `interactive_coding_agent`, 33.3 GB `general_chat`,
+  38.5 GB `roleplay_storytelling`. All three `data-usecase` attribute values match the map's keys.
+- **Defect found and fixed:** the picker removal stopped halfway. The preset editor kept its own Workload Scenario
+  dropdown, which could never save anything — a preset stores a `RapidMlxConfig`, which has no `workload_scenario`
+  field, so serde dropped the value. Reproduced live: saved a preset carrying `workload_scenario: "roleplay"`, read it
+  back, the key was gone; the control would reopen at "(unset)" every time. It also spoke the canonical estimator
+  vocabulary rather than the profile keys, and carried a `dataset.assumptions` read left over from the deleted
+  editable-assumptions UI that nothing consumed. Removed, along with the same dead read in
+  `rapidEstimatePolicyFromConfig`, which meant every non-wizard surface had been sending `workload_scenario: null`.
+  Scope confirmed with the user 2026-07-30: workload scenario is initial guidance and does not warrant persistence.
+- **Same run confirmed** the 7B1 PFlash fix reaches the preset path: a saved preset comes back with
+  `pflash_policy: "off"`.
+- **Recorded, not fixed:** `/api/vram-estimate` silently ignores an unrecognised `workload_scenario` and falls back to
+  no scenario rather than rejecting it. Low stakes — the only producers are three fixed cards.
 
 #### Phase 7.5 — Testing framework improvements — UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug)
 
@@ -835,7 +858,7 @@ Only the Coordinator updates this table after independent verification.
 | 7A2 | Verified complete | Coordinator, 2026-07-30 | PASS — reachability clean; two defects found and fixed: the preview kept a second config→argv mapping that dropped 12 flags and invented 3, and capability probing read the wrong stream so the endpoint failed against every real runtime. Live-checked against installed 0.11.1 with no capabilities override. 1030 tests | 774b611 + HEAD | `prefill_step_size` clamp keeps the documented 4096 value unreachable (recorded, deliberate) |
 | 7A3 | Verified complete | Coordinator, 2026-07-30 | PASS — route/auth reachable, live 401 without token; v2→v3 migration verified live on a planted pre-Phase-7 preset. One defect found and fixed: a single unreadable preset failed the whole-file parse and the loader then wrote defaults over the file, silently destroying every other preset. Now parsed entry by entry; a partial read never writes back; an unparseable file is preserved rather than overwritten. Reproduced and re-verified live. 1033 tests | 774b611 + HEAD | Earlier 7A2 note about the `4096` clamp was wrong; corrected in place |
 | 7B1 | Verified complete | Coordinator, 2026-07-30 | FAIL-with-fixes — four defects found live, all invisible to the suite. (1) `pflash_policy` never reached any deserialized config, so llama-monitor shipped rapid-mlx's `always` default on Qwen3.5/3.6 against a measured 0–40% recall collapse; (2) `check_mutual_exclusions` fired on any single participant, so `reasoning_mode=on` alone reported a conflict with an unsubmitted setting; (3) `effective_policy`/`requested_vs_effective` echoed the requested KV dtype instead of the int8 `--reasoning` pins; (4) two 7B2-removal leftovers in the wizard (dead `workload_scenario` in the spawn payload, Review row using a vocabulary the wizard never produces). All fixed and re-verified against a running binary. 1040 tests | 31af56b + `a1f77fe` | Frontend never calls `/api/rapid-mlx/command-preview` and never reads `requested_vs_effective` or `effective_policy`, so the Prompt storage selector is a visible no-op while the backend honestly reports `k8v4 → none`; 19 of 57 config fields have no UI at all (see section) |
-| 7B2 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (workload profiles with editable assumptions, confirmation flow, screenshots verified) | 5d00ee0 | None |
+| 7B2 | Verified complete — rescoped | Coordinator, 2026-07-30 | PASS with one defect fixed. The row's promised UI (5 profiles, editable assumptions, required confirmation checkbox) no longer exists: the step-3 picker was deleted as redundant with the page-1 use-case cards, and the broken confirmation gate — the trigger for the whole UNVERIFIED flag — was removed rather than repaired. The surviving path is live-verified: three use-case cards map onto the estimator and move the number (29.6 GB no scenario / 44.4 agentic / 33.3 general / 38.5 roleplay at 27B mxfp8, 32K). Defect: the preset editor kept a Workload Scenario dropdown that serde dropped on save, since `RapidMlxConfig` has no such field; reproduced live and removed. 1040 tests, eslint and validate-js clean | 5d00ee0 + `0a0a9a0` | `/api/vram-estimate` silently ignores an unknown scenario rather than rejecting it |
 | 7B3 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (roleplay teaching panel, 3 tests) | 91468fb | None |
 | 7B4 | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (MTP/concurrency teaching, endpoint compatibility, 5 tests, screenshots verified) | 3b96564 | None |
 | 8A | UNVERIFIED — flagged 2026-07-25, prior local-model verification found unreliable (see Phase 7B2 workload-profile bug) | — | PASS (CommunitySourceCatalog, HF qualify/identity APIs, MLX discovery/introspection, 825 tests) | 0fe6105 | None |
