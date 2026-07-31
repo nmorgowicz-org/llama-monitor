@@ -15,6 +15,7 @@ pub const CSS_CHAT_HISTORY_QA: &str = include_str!("../../static/css/chat-histor
 pub const CSS_CHAT: &str = include_str!("../../static/css/chat.css");
 pub const CSS_COMMAND_PALETTE: &str = include_str!("../../static/css/command-palette.css");
 pub const CSS_COMPONENTS: &str = include_str!("../../static/css/components.css");
+pub const CSS_EVIDENCE_DRAWER: &str = include_str!("../../static/css/evidence-drawer.css");
 pub const CSS_LAYOUT: &str = include_str!("../../static/css/layout.css");
 pub const CSS_LOGS: &str = include_str!("../../static/css/logs.css");
 pub const CSS_MODAL_PREMIUM: &str = include_str!("../../static/css/modal-premium.css");
@@ -68,6 +69,8 @@ pub const FEATURES_DASHBOARD_RENDER_JS: &str =
     include_str!("../../static/js/features/dashboard-render.js");
 pub const FEATURES_DASHBOARD_WS_JS: &str = include_str!("../../static/js/features/dashboard-ws.js");
 pub const FEATURES_DB_ADMIN_JS: &str = include_str!("../../static/js/features/db-admin.js");
+pub const FEATURES_EVIDENCE_DRAWER_JS: &str =
+    include_str!("../../static/js/features/evidence-drawer.js");
 pub const FEATURES_FILE_BROWSER_LAUNCHER_JS: &str =
     include_str!("../../static/js/features/file-browser-launcher.js");
 pub const FEATURES_FILE_BROWSER_JS: &str = include_str!("../../static/js/features/file-browser.js");
