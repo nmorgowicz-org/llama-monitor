@@ -607,9 +607,13 @@ async fn build_command_preview(
         model_source,
         &RapidMlxResolveContext {
             models_dir,
-            python_executable: PathBuf::from(if cfg!(windows) { "python.exe" } else { "python3" }),
-            runtime_version: crate::inference::rapid_mlx::compatibility::LATEST_QUALIFIED_VERSION_TEXT
-                .into(),
+            python_executable: PathBuf::from(if cfg!(windows) {
+                "python.exe"
+            } else {
+                "python3"
+            }),
+            runtime_version:
+                crate::inference::rapid_mlx::compatibility::LATEST_QUALIFIED_VERSION_TEXT.into(),
             hf_token: None,
             verified_aliases: Vec::new(),
             execute_conversion: false,
