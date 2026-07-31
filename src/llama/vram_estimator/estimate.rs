@@ -355,7 +355,6 @@ pub struct EstimatorOptions {
     /// Builder item 14: Client type for external-client vs app_fit variants.
     pub client_type: super::workload_scenarios::ClientType,
     /// D25: Concurrency policy for MTP admission.
-    pub concurrency_policy: super::workload_scenarios::ConcurrencyPolicy,
     /// Workload the estimate is being admitted against. `None` means the caller did
     /// not state one, and admission falls back to `WorkloadScenario::default()`
     /// (`CodingAgent`) — a defensible shape, but an assumption rather than a fact, so
@@ -377,7 +376,6 @@ impl Default for EstimatorOptions {
             turboquant_eligibility: Default::default(),
             mtp_config: None,
             client_type: Default::default(),
-            concurrency_policy: Default::default(),
             workload_scenario: None,
         }
     }
@@ -811,7 +809,6 @@ pub fn full_estimate(
                 &scenario,
                 arch.mtp_depth,
                 parallel_slots.max(1),
-                opts.concurrency_policy,
             ))
         } else {
             None

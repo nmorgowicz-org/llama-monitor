@@ -22,11 +22,6 @@ export function rapidEstimatePolicyFromConfig(rapidMlx = {}) {
     // No workload_scenario: a persisted RapidMlxConfig has no such field, so reading one here
     // only ever produced null. Scenario is a wizard-side input, derived from the page-1
     // use-case cards; every other surface takes the estimator default.
-    // Same story as workload_scenario. `concurrency_policy` is a real estimator input
-    // (workload_scenarios.rs) but no longer a config field: it used to be one, gated on
-    // `--concurrency-policy`, a flag no runtime has. The field went; the estimator input
-    // stayed. Nothing on this surface supplies it, so the estimator default applies.
-    concurrency_policy: null,
     retained_cache_mib: rapidMlx.prefix_cache_enabled === false ? 0 : (rapidMlx.retained_cache_mib ?? 8192),
   };
 }
@@ -37,10 +32,6 @@ export function rapidEstimatePolicyFromWizardHardware(hardware = {}) {
     turboquant_mode: hardware.turboquantMode || null,
     reasoning_mode: hardware.reasoningMode === true || hardware.reasoningMode === 'on',
     workload_scenario: hardware.workloadScenario || null,
-    // `concurrencyPolicy` is never written to wizardState.hardware by any surface, so this
-    // has always resolved to null. Left in place because the estimator input is real; giving
-    // it a UI source is a separate decision.
-    concurrency_policy: hardware.concurrencyPolicy || null,
     mtp_config: hardware.mtpConfig || null,
     retained_cache_mib: Number(hardware.retainedCacheMib ?? 8192),
   };
@@ -78,7 +69,6 @@ export function rapidEstimatePolicyFromWizardHardware(hardware = {}) {
 // @param {number|null} params.rapid_planning_context_tokens — Rapid planning context tokens
 // @param {number|null} params.rapid_retained_cache_tokens — Rapid retained cache tokens
 // @param {string|null} params.client_type — 'app' or 'external_client'
-// @param {string|null} params.concurrency_policy — 'single_active' or 'allow_overlap'
 // @param {Object|null} params.mtp_config — MTP configuration object
 // @param {string|null} params.hf_repo_revision — pinned revision (Phase 8B2)
 // @param {string|null} params.hf_quant_label — quant label/variant name (Phase 8B2)
@@ -137,7 +127,6 @@ export function buildEstimateBody(params) {
     if (params.rapid_retained_cache_tokens != null)
         body.rapid_retained_cache_tokens = params.rapid_retained_cache_tokens;
     if (params.client_type) body.client_type = params.client_type;
-    if (params.concurrency_policy) body.concurrency_policy = params.concurrency_policy;
     if (params.mtp_config) body.mtp_config = params.mtp_config;
     // Phase 5b Part C: max_cache_blocks from preset for prelaunch estimates.
 

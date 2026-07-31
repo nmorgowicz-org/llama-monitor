@@ -385,12 +385,6 @@ fn api_vram_estimate_breakdown(
                             serde_json::from_str::<crate::llama::vram_estimator::ClientType>(&format!("\"{s}\"")).ok()
                         })
                         .unwrap_or_default(),
-                    concurrency_policy: body["concurrency_policy"]
-                        .as_str()
-                        .and_then(|s| {
-                            serde_json::from_str::<crate::llama::vram_estimator::ConcurrencyPolicy>(&format!("\"{s}\"")).ok()
-                        })
-                        .unwrap_or_default(),
                     // The request already states its workload; MTP admission used to
                     // ignore it and admit against the CodingAgent default instead.
                     workload_scenario,

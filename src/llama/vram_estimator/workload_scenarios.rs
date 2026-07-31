@@ -593,10 +593,9 @@ pub struct MtpAdmissionParams<'a> {
     pub scenario: &'a WorkloadScenario,
     /// MTP depth from architecture (0 = no MTP).
     pub arch_mtp_depth: u32,
-    /// Requested parallel slots.
+    /// Requested parallel slots. Also decides the concurrency policy: overlap is
+    /// `parallel_slots > 1`, not a separate input.
     pub parallel_slots: u32,
-    /// Concurrency policy.
-    pub concurrency_policy: ConcurrencyPolicy,
     /// Decode shape requests in this workload will actually use.
     pub decode_shape: DecodeRequestShape,
 }
@@ -638,7 +637,12 @@ impl MtpAdmissionResult {
     /// `scenario`: workload scenario
     /// `arch_mtp_depth`: MTP depth from architecture (0 = no MTP)
     /// `parallel_slots`: requested parallel slots
-    /// `concurrency_policy`: concurrency policy
+    ///
+    /// There is no `concurrency_policy` input. It used to be one, but "may generations
+    /// overlap" is not a second question -- it is `parallel_slots > 1`, which this function
+    /// already receives. Asking for it separately meant the API read a body key no client
+    /// ever sent, so it always defaulted to `SingleActive` and
+    /// `MultiSlotConflictsWithSingleStreamMtp` could never fire for a real request.
     ///
     /// The decode shape is taken from [`WorkloadScenario::default_decode_shape`].
     /// Use [`Self::compute_with_shape`] when the real request parameters are known.
@@ -647,14 +651,12 @@ impl MtpAdmissionResult {
         scenario: &WorkloadScenario,
         arch_mtp_depth: u32,
         parallel_slots: u32,
-        concurrency_policy: ConcurrencyPolicy,
     ) -> Self {
         Self::compute_with_shape(MtpAdmissionParams {
             mtp_mode,
             scenario,
             arch_mtp_depth,
             parallel_slots,
-            concurrency_policy,
             decode_shape: scenario.default_decode_shape(),
         })
     }
@@ -666,7 +668,6 @@ impl MtpAdmissionResult {
             scenario,
             arch_mtp_depth,
             parallel_slots,
-            concurrency_policy,
             decode_shape,
         } = params;
         let mut warnings = Vec::new();
@@ -710,24 +711,19 @@ impl MtpAdmissionResult {
             warnings.push(MtpWarning::SchedulerFallsThroughForWorkload);
         }
 
-        // D25: MTP requires single-stream. Multi-slot conflicts.
-        let effective_concurrency_policy = match (mtp_mode, concurrency_policy, parallel_slots > 1)
-        {
-            (MtpMode::Disabled, _, _) => concurrency_policy,
-            // MTP + single active = fine
-            (MtpMode::Embedded | MtpMode::External, ConcurrencyPolicy::SingleActive, _) => {
-                ConcurrencyPolicy::SingleActive
-            }
-            // MTP + overlap requested + multi-slot = conflict warning
-            (MtpMode::Embedded | MtpMode::External, ConcurrencyPolicy::AllowOverlap, true) => {
+        // D25: MTP requires single-stream, so slot count decides the policy.
+        let overlap_requested = parallel_slots > 1;
+        let effective_concurrency_policy = match (mtp_mode, overlap_requested) {
+            (MtpMode::Disabled, true) => ConcurrencyPolicy::AllowOverlap,
+            (MtpMode::Disabled, false) => ConcurrencyPolicy::SingleActive,
+            // MTP uses the primary-only path, so multi-slot agents queue sequentially:
+            // the effective policy is single-active either way, and the multi-slot case
+            // is a conflict the caller asked for without being able to get it.
+            (MtpMode::Embedded | MtpMode::External, true) => {
                 warnings.push(MtpWarning::MultiSlotConflictsWithSingleStreamMtp);
-                // MTP uses primary-only path; multi-slot agents queue sequentially.
                 ConcurrencyPolicy::SingleActive
             }
-            // MTP + overlap but single slot = OK
-            (MtpMode::Embedded | MtpMode::External, ConcurrencyPolicy::AllowOverlap, false) => {
-                ConcurrencyPolicy::SingleActive
-            }
+            (MtpMode::Embedded | MtpMode::External, false) => ConcurrencyPolicy::SingleActive,
         };
 
         Self {
@@ -995,8 +991,7 @@ mod tests {
             mtp_mode: MtpMode::Embedded,
             scenario: &scenario,
             arch_mtp_depth: 3, // arch has MTP depth 3
-            parallel_slots: 1, // single slot
-            concurrency_policy: ConcurrencyPolicy::SingleActive,
+            parallel_slots: 1, // single slot, so single-active
             decode_shape: DecodeRequestShape::default(),
         });
         assert!(
@@ -1023,7 +1018,6 @@ mod tests {
             },
             0, // no MTP depth in arch
             1,
-            ConcurrencyPolicy::SingleActive,
         );
         assert!(
             !result.eligible,
@@ -1045,7 +1039,6 @@ mod tests {
             },
             0,
             1,
-            ConcurrencyPolicy::SingleActive,
         );
         assert!(
             result
@@ -1075,7 +1068,6 @@ mod tests {
             &scenario,
             3,
             slots,
-            ConcurrencyPolicy::AllowOverlap,
         );
         assert!(
             result
@@ -1089,7 +1081,6 @@ mod tests {
             &scenario,
             3,
             1,
-            ConcurrencyPolicy::AllowOverlap,
         );
         assert!(
             !single
@@ -1105,13 +1096,8 @@ mod tests {
             retained_cache_tokens: 48_000,
             parallel_slots: 2,
         };
-        let result = MtpAdmissionResult::compute(
-            MtpMode::Embedded,
-            &scenario,
-            3,
-            2,
-            ConcurrencyPolicy::AllowOverlap,
-        );
+        // Two slots is the overlap request; there is no separate policy argument.
+        let result = MtpAdmissionResult::compute(MtpMode::Embedded, &scenario, 3, 2);
         assert!(
             result
                 .warnings
@@ -1143,7 +1129,6 @@ mod tests {
             &scenario,
             3,
             1, // single slot for this test
-            ConcurrencyPolicy::SingleActive,
         );
         // Eligible by architecture
         assert!(result.eligible);
@@ -1169,7 +1154,6 @@ mod tests {
             &scenario,
             3,
             1,
-            ConcurrencyPolicy::SingleActive,
         );
         assert!(result.eligible, "arch depth 3 is eligible");
         assert!(scenario.mtp_eligible(), "single-stream clears concurrency");
@@ -1216,7 +1200,6 @@ mod tests {
             &scenario,
             3,
             1,
-            ConcurrencyPolicy::SingleActive,
         );
         assert!(result.engages_for_workload);
         assert!(result.recommended_for_workload);
@@ -1337,7 +1320,6 @@ mod tests {
             &WorkloadScenario::default(),
             3,
             1,
-            ConcurrencyPolicy::SingleActive,
         );
         let json = serde_json::to_string(&result).unwrap();
         let restored: MtpAdmissionResult = serde_json::from_str(&json).unwrap();
