@@ -1060,9 +1060,6 @@ pub struct IdentityRequest {
     /// Revision to use (defaults to "main").
     #[serde(default)]
     pub revision: String,
-    /// Optional config dir for catalog loading.
-    #[serde(default)]
-    pub config_dir: Option<String>,
 }
 
 /// Authorship and lineage identity resolution.
@@ -1670,7 +1667,9 @@ mod tests {
 
     #[test]
     fn test_identity_request_deser() {
-        let json = r#"{"repoId":"test/model","revision":"abc123"}"#;
+        // Legacy clients may still send `configDir`; serde ignores the unknown
+        // field, and the route always supplies AppConfig::config_dir.
+        let json = r#"{"repoId":"test/model","revision":"abc123","configDir":"/tmp/untrusted"}"#;
         let req: IdentityRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.repo_id, "test/model");
         assert_eq!(req.revision, "abc123");

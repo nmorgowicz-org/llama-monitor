@@ -104,7 +104,7 @@ fn safetensors_total_bytes(item: &serde_json::Value) -> Option<u64> {
 #[serde(rename_all = "camelCase")]
 pub enum HfSort {
     #[default]
-    Downloads,    // most downloaded (best signal for quality community quants)
+    Downloads, // most downloaded (best signal for quality community quants)
     Likes,        // most liked
     CreatedAt,    // newest first
     LastModified, // most recently updated — the useful one for quant repos, which are
@@ -273,6 +273,11 @@ pub fn detect_quant_type(filename: &str) -> QuantFileType {
 #[serde(default)]
 pub struct SimpleModelInfo {
     pub id: String,
+    /// Commit currently returned by the Hub search API for this repository.
+    /// Browse selections use this immutable revision instead of silently
+    /// falling back to the mutable `main` branch.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub revision: String,
     pub gated: bool,
     pub tags: Vec<String>,
     pub downloads: u64,
@@ -1184,6 +1189,11 @@ fn parse_model_item(item: serde_json::Value, format: &HfModelFormat) -> Option<S
 
     Some(SimpleModelInfo {
         id,
+        revision: item
+            .get("sha")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
         gated: item.get("gated").and_then(|v| v.as_bool()).unwrap_or(false),
         tags,
         downloads: item.get("downloads").and_then(|v| v.as_u64()).unwrap_or(0),
@@ -2904,7 +2914,13 @@ mod tests {
     #[test]
     fn every_sort_maps_to_a_real_hf_key_or_a_deliberate_absence() {
         // The keys HF's /api/models endpoint accepts for `sort`.
-        let hf_accepts = ["downloads", "likes", "createdAt", "lastModified", "trendingScore"];
+        let hf_accepts = [
+            "downloads",
+            "likes",
+            "createdAt",
+            "lastModified",
+            "trendingScore",
+        ];
 
         for sort in [
             HfSort::Downloads,
@@ -2916,7 +2932,10 @@ mod tests {
             let key = sort
                 .as_api_str()
                 .unwrap_or_else(|| panic!("{sort:?} must send a sort key"));
-            assert!(hf_accepts.contains(&key), "{sort:?} sends unknown key {key:?}");
+            assert!(
+                hf_accepts.contains(&key),
+                "{sort:?} sends unknown key {key:?}"
+            );
         }
 
         // Relevance is the one mode defined by sending nothing: HF ranks by the search term
@@ -2941,7 +2960,11 @@ mod tests {
         .collect();
 
         let unique: std::collections::BTreeSet<_> = keys.iter().collect();
-        assert_eq!(unique.len(), keys.len(), "two sorts share an API key: {keys:?}");
+        assert_eq!(
+            unique.len(),
+            keys.len(),
+            "two sorts share an API key: {keys:?}"
+        );
     }
 
     #[test]
@@ -3122,6 +3145,29 @@ mod tests {
         assert!(
             info.has_imatrix,
             "mradermacher repo should be flagged as imatrix"
+        );
+    }
+
+    #[test]
+    fn model_search_preserves_the_hub_commit_for_pinned_selection() {
+        let item = serde_json::json!({
+            "id": "mlx-community/Qwen",
+            "sha": "abcdef1234567890",
+            "tags": ["mlx"],
+        });
+        let info = parse_model_item(item, &HfModelFormat::Mlx).unwrap();
+        assert_eq!(info.revision, "abcdef1234567890");
+
+        let without_sha = serde_json::json!({
+            "id": "mlx-community/Qwen",
+            "tags": ["mlx"],
+        });
+        assert!(
+            parse_model_item(without_sha, &HfModelFormat::Mlx)
+                .unwrap()
+                .revision
+                .is_empty(),
+            "missing Hub metadata must stay unpinned rather than inventing main"
         );
     }
 

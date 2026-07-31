@@ -1390,6 +1390,26 @@ fn api_models_gguf_meta(
 
 // ── POST /api/models/mlx-introspect (Phase 8A3) ──────────────────────────────────────────────
 
+fn canonical_model_path_within_roots(
+    model_path: &std::path::Path,
+    allowed_roots: &[PathBuf],
+) -> Result<PathBuf, String> {
+    let canonical_model_path = model_path
+        .canonicalize()
+        .map_err(|_| "Model path not found or invalid".to_string())?;
+
+    let allowed = allowed_roots.iter().any(|root| {
+        root.canonicalize()
+            .map(|canonical_root| canonical_model_path.starts_with(canonical_root))
+            .unwrap_or(false)
+    });
+    if !allowed {
+        return Err("model_path is outside configured model directories".to_string());
+    }
+
+    Ok(canonical_model_path)
+}
+
 fn api_models_mlx_introspect(
     state: AppState,
     app_config: Arc<AppConfig>,
@@ -1416,51 +1436,24 @@ fn api_models_mlx_introspect(
                     ));
                 }
 
-                // Security: canonicalize and validate
-                let canon = match std::path::Path::new(&model_path).canonicalize() {
-                    Ok(p) => p,
-                    Err(_) => {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": "Model path not found or invalid"
-                            })),
-                        ));
-                    }
-                };
-
-                // Ensure path is inside allowed directories
-                let models_dir = get_effective_models_dir(&state)
-                    .unwrap_or_else(|| cfg.default_models_dir.clone());
-                let in_models_dir = models_dir
-                    .canonicalize()
-                    .map(|d| canon.starts_with(&d))
-                    .unwrap_or(false);
-                let in_home = dirs::home_dir()
-                    .and_then(|h| h.canonicalize().ok())
-                    .map(|h| canon.starts_with(&h))
-                    .unwrap_or(false);
-                let in_extra = state
+                let mut allowed_roots = vec![get_effective_models_dir(&state)
+                    .unwrap_or_else(|| cfg.default_models_dir.clone())];
+                allowed_roots.extend(
+                    state
                     .ui_settings
                     .lock()
-                    .map(|s| {
-                        s.extra_models_dirs.iter().any(|d| {
-                            std::path::Path::new(d)
-                                .canonicalize()
-                                .map(|cd| canon.starts_with(&cd))
-                                .unwrap_or(false)
-                        })
-                    })
-                    .unwrap_or(false);
-
-                if !in_models_dir && !in_home && !in_extra {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": "model_path is outside allowed directories"
-                        })),
-                    ));
-                }
+                    .map(|s| s.extra_models_dirs.iter().map(PathBuf::from).collect::<Vec<_>>())
+                    .unwrap_or_default(),
+                );
+                let canon = match canonical_model_path_within_roots(
+                    std::path::Path::new(&model_path),
+                    &allowed_roots,
+                ) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        return Ok(error_reply(warp::http::StatusCode::BAD_REQUEST, error));
+                    }
+                };
 
                 // Introspect using blocking task with timeout
                 let result = tokio::time::timeout(
@@ -2298,6 +2291,11 @@ mod phase5_auth_tests {
             ),
             (
                 "POST",
+                "/api/models/mlx-introspect",
+                Some(r#"{"model_path":"/tmp/model"}"#),
+            ),
+            (
+                "POST",
                 "/api/models/library/migration/preview",
                 Some(r#"{}"#),
             ),
@@ -2439,5 +2437,48 @@ mod phase5_auth_tests {
             .await;
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
         drop(permits);
+    }
+
+    #[test]
+    fn mlx_introspect_path_must_be_within_a_configured_model_root() {
+        let models = tempfile::tempdir().expect("models root");
+        let nested = models.path().join("publisher").join("model");
+        std::fs::create_dir_all(&nested).expect("nested model");
+
+        let outside = tempfile::tempdir().expect("outside root");
+        assert!(canonical_model_path_within_roots(&nested, &[models.path().to_path_buf()]).is_ok());
+        let error =
+            canonical_model_path_within_roots(outside.path(), &[models.path().to_path_buf()])
+                .expect_err("an arbitrary home or temporary path must not be accepted");
+        assert!(error.contains("outside configured model directories"));
+    }
+
+    #[test]
+    fn mlx_introspect_path_accepts_an_extra_model_root() {
+        let primary = tempfile::tempdir().expect("primary root");
+        let extra = tempfile::tempdir().expect("extra root");
+        let model = extra.path().join("mlx-model");
+        std::fs::create_dir(&model).expect("model directory");
+
+        let canonical = canonical_model_path_within_roots(
+            &model,
+            &[primary.path().to_path_buf(), extra.path().to_path_buf()],
+        )
+        .expect("configured extra model root should be accepted");
+        assert_eq!(canonical, model.canonicalize().unwrap());
+    }
+
+    #[tokio::test]
+    async fn mlx_introspect_rejects_malformed_json_as_bad_request() {
+        let routes = test_routes().recover(crate::web::handle_rejection);
+        let response = warp::test::request()
+            .method("POST")
+            .path("/api/models/mlx-introspect")
+            .header("authorization", "Bearer api-secret")
+            .header("content-type", "application/json")
+            .body("{")
+            .reply(&routes)
+            .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }

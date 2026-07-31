@@ -13,6 +13,9 @@ use super::models::get_effective_models_dir;
 
 static HF_REPO_RE: Lazy<regex::Regex> =
     Lazy::new(|| regex::Regex::new(r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9._-]+$").unwrap());
+static HF_EVIDENCE_GATE: Lazy<Arc<tokio::sync::Semaphore>> =
+    Lazy::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
+const HF_EVIDENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 
 fn validate_hf_repo_id(repo_id: &str) -> bool {
     HF_REPO_RE.is_match(repo_id)
@@ -1081,10 +1084,7 @@ fn api_hf_qualify(
     warp::path!("api" / "hf" / "qualify")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(
-            warp::body::content_length_limit(64 * 1024)
-                .and(warp::body::json::<crate::hf::QualifyRequest>()),
-        )
+        .and(super::super::safe_json_body::<crate::hf::QualifyRequest>())
         .and_then(
             move |auth: Option<String>, req: crate::hf::QualifyRequest| {
                 let cfg = config.clone();
@@ -1092,14 +1092,40 @@ fn api_hf_qualify(
                     if !check_api_token(&auth, &cfg) {
                         return Ok(unauthorized_api_token());
                     }
-                    match crate::hf::qualify::hf_qualify_repo(req).await {
-                        Ok(result) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&result),
+                    let _permit = match HF_EVIDENCE_GATE.clone().try_acquire_owned() {
+                        Ok(permit) => permit,
+                        Err(_) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({
+                                        "error": "HF evidence resolution is busy; try again shortly"
+                                    })),
+                                    StatusCode::TOO_MANY_REQUESTS,
+                                ),
+                            ));
+                        }
+                    };
+                    match tokio::time::timeout(
+                        HF_EVIDENCE_TIMEOUT,
+                        crate::hf::qualify::hf_qualify_repo(req),
+                    )
+                    .await
+                    {
+                        Err(_) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "error": "HF qualification timed out"
+                                })),
+                                StatusCode::GATEWAY_TIMEOUT,
+                            ),
                         )),
-                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        Ok(Ok(result)) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&result)),
+                        ),
+                        Ok(Err(e)) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::with_status(
                                 warp::reply::json(&serde_json::json!({ "error": e })),
-                                StatusCode::INTERNAL_SERVER_ERROR,
+                                StatusCode::BAD_REQUEST,
                             ),
                         )),
                     }
@@ -1109,7 +1135,7 @@ fn api_hf_qualify(
 }
 
 /// POST /api/hf/identity — authorship and lineage resolution.
-/// Input: repoId (string), revision (string, optional), configDir (string, optional).
+/// Input: repoId (string), revision (string, optional).
 /// Output: HfIdentity with original_author, converter_role, roles, etc.
 fn api_hf_identity(
     config: Arc<AppConfig>,
@@ -1117,10 +1143,7 @@ fn api_hf_identity(
     warp::path!("api" / "hf" / "identity")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(
-            warp::body::content_length_limit(64 * 1024)
-                .and(warp::body::json::<crate::hf::IdentityRequest>()),
-        )
+        .and(super::super::safe_json_body::<crate::hf::IdentityRequest>())
         .and_then(
             move |auth: Option<String>, req: crate::hf::IdentityRequest| {
                 let cfg = config.clone();
@@ -1128,19 +1151,40 @@ fn api_hf_identity(
                     if !check_api_token(&auth, &cfg) {
                         return Ok(unauthorized_api_token());
                     }
-                    let explicit_config_dir = req.config_dir.clone();
-                    let config_dir = explicit_config_dir
-                        .as_ref()
-                        .map(std::path::Path::new)
-                        .unwrap_or_else(|| cfg.config_dir.as_ref());
-                    match crate::hf::qualify::hf_resolve_identity(req, config_dir).await {
-                        Ok(result) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&result),
+                    let _permit = match HF_EVIDENCE_GATE.clone().try_acquire_owned() {
+                        Ok(permit) => permit,
+                        Err(_) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({
+                                        "error": "HF evidence resolution is busy; try again shortly"
+                                    })),
+                                    StatusCode::TOO_MANY_REQUESTS,
+                                ),
+                            ));
+                        }
+                    };
+                    match tokio::time::timeout(
+                        HF_EVIDENCE_TIMEOUT,
+                        crate::hf::qualify::hf_resolve_identity(req, &cfg.config_dir),
+                    )
+                    .await
+                    {
+                        Err(_) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "error": "HF identity resolution timed out"
+                                })),
+                                StatusCode::GATEWAY_TIMEOUT,
+                            ),
                         )),
-                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        Ok(Ok(result)) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&result)),
+                        ),
+                        Ok(Err(e)) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::with_status(
                                 warp::reply::json(&serde_json::json!({ "error": e })),
-                                StatusCode::INTERNAL_SERVER_ERROR,
+                                StatusCode::BAD_REQUEST,
                             ),
                         )),
                     }
@@ -1224,6 +1268,16 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::web::auth::AuthManager;
+
+    fn test_routes() -> ApiRoute {
+        let config = Arc::new(AppConfig::for_test(Some("api-secret".to_string()), None));
+        routes(ApiCtx {
+            state: AppState::default(),
+            auth: AuthManager::new(None, None, &crate::config::TLSConfig::default().mode),
+            config,
+        })
+    }
 
     /// Covers the `format` threading from an `/api/hf/search` request body
     /// through to the `HfModelFormat` passed into `HfSearchParams` (and, via
@@ -1261,5 +1315,35 @@ mod tests {
             parse_hf_format_param("bogus"),
             crate::hf::HfModelFormat::Gguf
         ));
+    }
+
+    #[tokio::test]
+    async fn evidence_routes_require_api_token() {
+        for path in ["/api/hf/qualify", "/api/hf/identity"] {
+            let response = warp::test::request()
+                .method("POST")
+                .path(path)
+                .header("content-type", "application/json")
+                .body(r#"{"repoId":"owner/model"}"#)
+                .reply(&test_routes())
+                .await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn evidence_routes_return_bad_request_for_malformed_json() {
+        let routes = test_routes().recover(crate::web::handle_rejection);
+        for path in ["/api/hf/qualify", "/api/hf/identity"] {
+            let response = warp::test::request()
+                .method("POST")
+                .path(path)
+                .header("authorization", "Bearer api-secret")
+                .header("content-type", "application/json")
+                .body("{")
+                .reply(&routes)
+                .await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
+        }
     }
 }

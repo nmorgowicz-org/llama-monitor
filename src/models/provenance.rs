@@ -84,7 +84,6 @@ impl DownloadProvenance {
             self.revision.as_deref().unwrap_or("main"),
         )
     }
-
 }
 
 /// What the inventory API sends to the browser.
@@ -178,11 +177,7 @@ pub fn directory_origin(dir: &Path) -> Option<DownloadProvenance> {
 ///
 /// Overwrites an existing record for the same filename: re-downloading a file replaces it on
 /// disk, so the old origin is no longer true of what is there.
-pub fn record_download(
-    dir: &Path,
-    filename: &str,
-    provenance: DownloadProvenance,
-) -> Result<()> {
+pub fn record_download(dir: &Path, filename: &str, provenance: DownloadProvenance) -> Result<()> {
     if filename.is_empty() || filename.contains('/') || filename.contains('\\') {
         return Err(anyhow!(
             "provenance key must be a plain filename, got {filename:?}"
@@ -309,18 +304,32 @@ mod tests {
             .expect("second");
 
         let all = load_directory(tmp.path());
-        assert_eq!(all.len(), 2, "companion download dropped the model's record");
+        assert_eq!(
+            all.len(),
+            2,
+            "companion download dropped the model's record"
+        );
     }
 
     #[test]
     fn redownloading_replaces_the_stale_origin() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        record_download(tmp.path(), "model.gguf", sample("old/repo", "model.gguf", 100))
-            .expect("first");
-        record_download(tmp.path(), "model.gguf", sample("new/repo", "model.gguf", 200))
-            .expect("second");
+        record_download(
+            tmp.path(),
+            "model.gguf",
+            sample("old/repo", "model.gguf", 100),
+        )
+        .expect("first");
+        record_download(
+            tmp.path(),
+            "model.gguf",
+            sample("new/repo", "model.gguf", 200),
+        )
+        .expect("second");
 
-        let found = load_directory(tmp.path()).remove("model.gguf").expect("recorded");
+        let found = load_directory(tmp.path())
+            .remove("model.gguf")
+            .expect("recorded");
         assert_eq!(found.repo_id, "new/repo");
         assert_eq!(load_directory(tmp.path()).len(), 1);
     }
@@ -385,8 +394,12 @@ mod tests {
     #[test]
     fn a_directory_with_files_from_two_repos_has_no_single_origin() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        record_download(tmp.path(), "a.safetensors", sample("mlx-community/Qwen3-8B-4bit", "a", 1))
-            .expect("a");
+        record_download(
+            tmp.path(),
+            "a.safetensors",
+            sample("mlx-community/Qwen3-8B-4bit", "a", 1),
+        )
+        .expect("a");
         assert_eq!(
             directory_origin(tmp.path()).map(|p| p.repo_id),
             Some("mlx-community/Qwen3-8B-4bit".to_string()),
@@ -407,7 +420,10 @@ mod tests {
         // Alphabetically last but chronologically last too -- and the reverse case:
         record_download(tmp.path(), "m.safetensors", sample("a/b", "m", 300)).expect("m");
 
-        assert_eq!(directory_origin(tmp.path()).expect("origin").remote_path, "z");
+        assert_eq!(
+            directory_origin(tmp.path()).expect("origin").remote_path,
+            "z"
+        );
     }
 
     #[test]
@@ -415,9 +431,15 @@ mod tests {
         let record = sample("a/b", "model.gguf", 1);
         assert!(DownloadProvenanceView::from(&record).pinned);
 
-        let unpinned = DownloadProvenance { revision: None, ..record };
+        let unpinned = DownloadProvenance {
+            revision: None,
+            ..record
+        };
         let view = DownloadProvenanceView::from(&unpinned);
-        assert!(!view.pinned, "a branch-tip download must not read as reproducible");
+        assert!(
+            !view.pinned,
+            "a branch-tip download must not read as reproducible"
+        );
         assert!(view.source_url.contains("/resolve/main/"));
     }
 
