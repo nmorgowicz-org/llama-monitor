@@ -385,3 +385,46 @@ presets.js and so covers the new controls without being edited — which is what
 `_configureBackendPresetEditor` still listed `pe-row-rapid-webui` and
 `pe-row-rapid-webui-expert`, ids deleted in `9527e35`. Removed, along with the two one-off
 `prefix-cache`/`cache-memory` lines that duplicated what the loop already does.
+
+## 13. The omission class, generalised (2026-07-31)
+
+Section 12 fixed the spread-omission bug for the throughput fields. The user asked whether more
+of it remained. It did — considerably more, in two directions.
+
+### Every Rapid control had it, not four
+
+`if (value) out.x = value` was the idiom throughout the Rapid branch of `_buildFormPreset`, so
+`(unset)` and `Auto` were **unreachable states on any preset that already had a value**: the
+spread restored the old one and it kept reaching argv. That covered `enable_thinking`,
+`kv_cache_dtype`, `turboquant_mode`, `tool_call_parser`, `reasoning_parser`, `sampling_mode`,
+`prefill_step_size`, and all seven sampling defaults. All now write unconditionally —
+`null` for the `Option<…>` fields, the control's value for `prefill_step_size`, which is a plain
+`u32` backend-side.
+
+### Seven controls were read on save but unreachable in the editor
+
+Found by trying to write the test for the above: `page.fill` failed, because
+`modal-temperature`, `modal-top-p`, `modal-top-k`, `modal-min-p`, `modal-repeat-penalty` and
+`modal-presence-penalty` live in the **generation** section, and the Rapid nav allowlist hid
+every section except model and advanced. `modal-max-tokens` was in advanced but in a row with no
+id, so the row-level chain hid it too.
+
+All seven map to real flags (`--default-temperature` … , `--max-tokens`). They are now reachable:
+the generation section is exempted for Rapid with its own deny-by-default field chain that keeps
+the llama.cpp-only half (thinking / preserve-thinking / reasoning / reasoning-budget /
+tool-call-format) hidden, and the max-tokens row got an id.
+
+**This is the section-11 defect again, in the surface that was supposed to prevent it.** Worth
+being precise about the near-miss: had the class-wide fix landed without this, every save would
+have written `null` over the user's stored sampling defaults, because the inputs are unreachable
+and therefore always read empty. The conditional idiom was masking the reachability bug.
+
+### Why the existing guard missed it
+
+`rapid-preset-visibility.spec.js` derived its id list with `/modal-rapid-[a-z0-9-]+/`. Six of the
+seven do not carry the `rapid` infix, so the guard could not see them, and it only ever measured
+visibility under the advanced section.
+
+It now brace-matches the Rapid branch of `_buildFormPreset` and takes **every** `modal-*` id it
+reads, then checks each against every section a Rapid preset can open. That broadened guard is
+what found `modal-max-tokens` — a control neither the audit nor the first fix had noticed.

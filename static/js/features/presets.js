@@ -1786,7 +1786,7 @@ function _buildFormPreset(existing) {
                     const et = nullableBoolOpt('modal-rapid-enable-thinking');
                     const re = strVal('modal-rapid-reasoning-effort');
                     const out = {};
-                    if (et != null) out.enable_thinking = et;
+                    out.enable_thinking = et;
                     // reasoning_effort removed: config field exists but argv builder does not emit --reasoning-effort.
                     // Phase 6 Part B: prefix cache enabled toggle.
                     const pceInput = document.getElementById('modal-rapid-prefix-cache-enabled');
@@ -1802,20 +1802,28 @@ function _buildFormPreset(existing) {
                     const hybridEntries = Number(strVal('modal-rapid-hybrid-cache-entries') || 0);
                     out.hybrid_cache_entries = retainedCacheEnabled && hybridEntries > 0 ? hybridEntries : null;
                     // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
+                    // Every one of these writes unconditionally, including when the choice is
+                    // "unset"/"auto". `out` is spread over the stored rapid_mlx below, so a key
+                    // the save path omits keeps its previous value -- which meant choosing
+                    // "(unset)" or "Auto" on a preset that already had a value silently did
+                    // nothing and the old value kept reaching argv. The load path fills all of
+                    // these controls, so re-reading them preserves untouched values; serde
+                    // reads null into the same None an absent key would have produced.
                     const kvDtype = strVal('modal-rapid-kv-cache-dtype');
                     const tqMode = strVal('modal-rapid-turboquant-mode');
                     const toolParser = strVal('modal-rapid-tool-call-parser');
                     const reasoningParser = strVal('modal-rapid-reasoning-parser');
                     const samplingMode = strVal('modal-rapid-sampling-mode');
                     const rmInput = document.getElementById('modal-rapid-reasoning-mode');
-                    if (kvDtype) out.kv_cache_dtype = kvDtype;
-                    if (tqMode && tqMode !== 'auto') out.turboquant_mode = tqMode;
-                    if (toolParser) out.tool_call_parser = toolParser;
-                    if (reasoningParser) out.reasoning_parser = reasoningParser;
-                    if (samplingMode && samplingMode !== 'auto') out.sampling_mode = samplingMode;
+                    out.kv_cache_dtype = kvDtype || null;
+                    out.turboquant_mode = tqMode && tqMode !== 'auto' ? tqMode : null;
+                    out.tool_call_parser = toolParser || null;
+                    out.reasoning_parser = reasoningParser || null;
+                    out.sampling_mode = samplingMode && samplingMode !== 'auto' ? samplingMode : null;
                     if (rmInput) out.reasoning_mode = rmInput.checked ? 'on' : 'off';
-                    const prefillStepSize = Number(strVal('modal-rapid-prefill-step-size') || 512);
-                    if (prefillStepSize && prefillStepSize !== 512) out.prefill_step_size = prefillStepSize;
+                    // prefill_step_size is a plain u32 backend-side, not an Option, so it takes
+                    // the control's value directly rather than a null.
+                    out.prefill_step_size = Number(strVal('modal-rapid-prefill-step-size') || 512);
                     // Throughput / memory. Auto ('') means "omit the flag and take the runtime
                     // default", which is not the same as an explicit value -- so Auto writes
                     // null, not a placeholder number. It has to write *something*: `out` is
@@ -1838,13 +1846,15 @@ function _buildFormPreset(existing) {
                     const repeatPen = floatOrNull('modal-repeat-penalty');
                     const presencePen = floatOrNull('modal-presence-penalty');
                     const maxTok = intOrNull('modal-max-tokens');
-                    if (temp != null) out.default_temperature = temp;
-                    if (topP != null) out.default_top_p = topP;
-                    if (topK != null) out.default_top_k = topK;
-                    if (minP != null) out.default_min_p = minP;
-                    if (repeatPen != null) out.default_repetition_penalty = repeatPen;
-                    if (presencePen != null) out.default_presence_penalty = presencePen;
-                    if (maxTok != null) out.max_tokens = maxTok;
+                    // Same rule as above: clearing one of these inputs has to write null, or
+                    // the spread would keep the old default and it could never be cleared.
+                    out.default_temperature = temp;
+                    out.default_top_p = topP;
+                    out.default_top_k = topK;
+                    out.default_min_p = minP;
+                    out.default_repetition_penalty = repeatPen;
+                    out.default_presence_penalty = presencePen;
+                    out.max_tokens = maxTok;
                     return out;
                 })(),
             } : null,

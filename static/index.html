@@ -3379,7 +3379,9 @@
                                     <div class="pe-field-hint">The runtime raises this to the prefill batch size when it is set lower.</div>
                                 </div>
                             </div>
-                            <div class="pe-row pe-row-3">
+                            <!-- id so the Rapid allowlist can reach modal-max-tokens; the seed
+                                 field beside it stays hidden by the field-level chain. -->
+                            <div class="pe-row pe-row-3" id="pe-row-max-tokens-seed">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-max-tokens" title="Maximum tokens to generate per request. Empty = unlimited (model's context limit).">Max Tokens</label>
                                     <input type="number" class="pe-input" id="modal-max-tokens" placeholder="unlimited">

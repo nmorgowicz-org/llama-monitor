@@ -101,6 +101,79 @@ test.describe('Rapid-MLX preset editor throughput fields', () => {
     expect(body.rapid_mlx.max_concurrent_requests).toBeNull();
   });
 
+  // The generalisation of the bug above. Every Rapid control in the save path used the
+  // `if (value) out.x = value` idiom, so "(unset)" and "Auto" were unreachable states on any
+  // preset that already had a value -- the spread restored the old one and it kept reaching
+  // argv. This walks the whole set rather than the four that were noticed first.
+  test('@in-memory-test every Rapid control can be returned to its unset state', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.evaluate(async () => {
+      const { sessionState } = await import('/js/core/app-state.js');
+      const mod = await import('/js/features/presets.js');
+      sessionState.presets = [{
+        id: 'probe', name: 'fully set', backend: 'rapid_mlx',
+        rapid_mlx: {
+          port: 8080, model_source: '/tmp/Qwen3-8B-4bit',
+          enable_thinking: true, kv_cache_dtype: 'int8', turboquant_mode: 'k8v4',
+          tool_call_parser: 'hermes', reasoning_parser: 'deepseek_r1', sampling_mode: 'coding',
+          default_temperature: 0.7, default_top_p: 0.9, default_top_k: 40, default_min_p: 0.05,
+          default_repetition_penalty: 1.1, default_presence_penalty: 0.5, max_tokens: 4096,
+        },
+      }];
+      const sel = document.getElementById('preset-select');
+      sel.innerHTML = '<option value="probe">fully set</option>';
+      sel.value = 'probe';
+      mod.openPresetModal('edit');
+    });
+    await page.locator('#preset-modal .preset-nav-item[data-section="advanced"]').click();
+
+    // Return every control to the option that means "do not send this".
+    await page.selectOption('#modal-rapid-enable-thinking', '');
+    await page.selectOption('#modal-rapid-kv-cache-dtype', '');
+    await page.selectOption('#modal-rapid-turboquant-mode', 'auto');
+    await page.selectOption('#modal-rapid-tool-call-parser', '');
+    await page.selectOption('#modal-rapid-reasoning-parser', '');
+    await page.selectOption('#modal-rapid-sampling-mode', 'auto');
+    await page.fill('#modal-max-tokens', '');
+    // The sampling inputs live in the generation section, which a Rapid preset can now open.
+    await page.locator('#preset-modal .preset-nav-item[data-section="generation"]').click();
+    for (const id of ['modal-temperature', 'modal-top-p', 'modal-top-k', 'modal-min-p',
+                      'modal-repeat-penalty', 'modal-presence-penalty']) {
+      await page.fill(`#${id}`, '');
+    }
+
+    let body = null;
+    await page.route('**/api/presets/**', async (route, request) => {
+      if (request.method() === 'PUT') body = request.postDataJSON();
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"id":"probe"}' });
+    });
+    for (const _ of [0, 1]) {
+      await page.evaluate(async () => {
+        const mod = await import('/js/features/presets.js');
+        await mod.savePreset(new Event('submit'));
+      });
+    }
+
+    expect(body, 'save request was never issued').not.toBeNull();
+    const stuck = Object.entries({
+      enable_thinking: body.rapid_mlx.enable_thinking,
+      kv_cache_dtype: body.rapid_mlx.kv_cache_dtype,
+      turboquant_mode: body.rapid_mlx.turboquant_mode,
+      tool_call_parser: body.rapid_mlx.tool_call_parser,
+      reasoning_parser: body.rapid_mlx.reasoning_parser,
+      sampling_mode: body.rapid_mlx.sampling_mode,
+      default_temperature: body.rapid_mlx.default_temperature,
+      default_top_p: body.rapid_mlx.default_top_p,
+      default_top_k: body.rapid_mlx.default_top_k,
+      default_min_p: body.rapid_mlx.default_min_p,
+      default_repetition_penalty: body.rapid_mlx.default_repetition_penalty,
+      default_presence_penalty: body.rapid_mlx.default_presence_penalty,
+      max_tokens: body.rapid_mlx.max_tokens,
+    }).filter(([, v]) => v !== null && v !== undefined);
+    expect(stuck, 'controls cleared by the user but still carrying their old value').toEqual([]);
+  });
+
   test('@in-memory-test Auto writes null rather than pinning a default', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
