@@ -1,8 +1,8 @@
-use crate::inference::rapid_mlx::RapidMlxHybridMode;
 use crate::inference::rapid_mlx::compatibility::ServeCapabilities;
 use crate::inference::rapid_mlx::model_resolver::{
     RapidMlxModelSource, ResolvedRapidMlxLaunchModel,
 };
+use crate::inference::rapid_mlx::{RapidMlxHybridMode, RapidMlxSpeculativeConfig};
 use crate::inference::supervisor::SupervisedLaunch;
 use anyhow::Result;
 use std::ffi::OsString;
@@ -39,6 +39,7 @@ pub struct RapidMlxCommandBuilder {
     prefill_step_size: Option<u32>,
     // Phase 7: reasoning/speculative
     reasoning_mode: Option<String>,
+    speculative_config: Option<RapidMlxSpeculativeConfig>,
     // Phase 7: MLLM/embeddings
     mllm_vision: Option<String>,
     embeddings: Option<String>,
@@ -95,6 +96,7 @@ impl RapidMlxCommandBuilder {
             completion_batch_size: None,
             prefill_step_size: None,
             reasoning_mode: None,
+            speculative_config: None,
             mllm_vision: None,
             embeddings: None,
             gpu_memory_utilization: None,
@@ -226,6 +228,11 @@ impl RapidMlxCommandBuilder {
         self.reasoning_mode = mode;
         self
     }
+
+    pub fn speculative_config(mut self, config: Option<RapidMlxSpeculativeConfig>) -> Self {
+        self.speculative_config = config;
+        self
+    }
     pub fn mllm_vision(mut self, vision: Option<String>) -> Self {
         self.mllm_vision = vision;
         self
@@ -315,11 +322,6 @@ impl RapidMlxCommandBuilder {
             capabilities.require("--enable-auto-tool-choice")?;
             args.push("--enable-auto-tool-choice".to_string());
         }
-        if self.no_thinking && self.reasoning_mode.as_deref() != Some("on") {
-            capabilities.require("--no-thinking")?;
-            args.push("--no-thinking".to_string());
-        }
-
         // Apply validated escape-hatch flags (already allowlisted at load time).
         // Bool flags are boolean switches: true = presence of flag, false = omitted.
         let legacy_force_hybrid = self
@@ -461,27 +463,30 @@ impl RapidMlxCommandBuilder {
             args.push("--prefill-step-size".to_string());
             args.push(size.to_string());
         }
-        // Phase 7: reasoning flags (on/off only, no auto; default ON)
-        match self.reasoning_mode.as_deref().unwrap_or("on") {
-            "on" => {
-                capabilities.require("--reasoning")?;
-                args.push("--reasoning".to_string());
-            }
-            "off" => {
-                if !self.no_thinking {
-                    capabilities.require("--no-thinking")?;
-                    args.push("--no-thinking".to_string());
-                }
-            }
+        // Rapid's --reasoning selects the qualified reasoning/KV quality profile; it does
+        // not mean "show thinking". Always request that profile. An explicit thinking
+        // opt-out independently adds --no-thinking for parser/chat-template behavior.
+        let thinking_disabled = match self.reasoning_mode.as_deref().unwrap_or("on") {
+            "on" => self.no_thinking,
+            "off" => true,
             value => anyhow::bail!("reasoning_mode must be on or off; got {value:?}"),
+        };
+        capabilities.require("--reasoning")?;
+        args.push("--reasoning".to_string());
+        if thinking_disabled {
+            capabilities.require("--no-thinking")?;
+            args.push("--no-thinking".to_string());
         }
-        // Speculative decoding is deliberately absent here. `--speculative` does not exist in
-        // any rapid-mlx release; the real flag is `--speculative-config`, which takes a
-        // vLLM-style JSON object ({method, model, num_speculative_tokens, ...}), not a policy
-        // word. A policy-string field cannot express it, so the field was removed rather than
-        // renamed. scripts/rapid-mlx-benchmark-suite.mjs already builds the real flag correctly
-        // and is the reference for whatever exposes it next.
-        //
+        // Speculative decoding is opt-in and typed. An older runtime must not blank an
+        // otherwise useful preview or suppress unrelated settings: omit the unsupported
+        // throughput feature and let requested_vs_effective explain the downgrade.
+        if let Some(config) = self.speculative_config
+            && capabilities.contains("--speculative-config")
+        {
+            args.push("--speculative-config".to_string());
+            args.push(config.to_cli_json()?);
+        }
+
         // Vision has only the real Rapid-MLX tri-state: Auto omits a flag,
         // On forces MLLM, and Off forces the text lane. A model-specific smoke
         // test still owns whether Auto is actually qualified.
@@ -718,7 +723,11 @@ mod tests {
         .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
         .expect("unsupported throughput tuning must not fail the build");
 
-        for flag in ["--max-num-seqs", "--max-concurrent-requests", "--gpu-memory-utilization"] {
+        for flag in [
+            "--max-num-seqs",
+            "--max-concurrent-requests",
+            "--gpu-memory-utilization",
+        ] {
             assert!(
                 !launch.args.iter().any(|a| a == flag),
                 "{flag} must be omitted on a runtime that does not support it"
@@ -727,26 +736,34 @@ mod tests {
         // An unrelated supported flag still reaches argv, so one unsupported choice cannot
         // suppress everything else.
         assert!(
-            launch.args.windows(2).any(|p| p == ["--prefill-step-size", "512"]),
+            launch
+                .args
+                .windows(2)
+                .any(|p| p == ["--prefill-step-size", "512"]),
             "a supported flag must survive alongside omitted ones"
         );
     }
 
     #[test]
     fn unsupported_speculative_is_omitted_without_failing_the_build() {
-        // verified_baseline() has no --speculative. This used to abort the whole command
-        // build, which blanked the command preview and every unrelated setting's diff with
-        // it. Speculative decoding and TurboQuant are independent features; neither may
-        // suppress the other, nor anything else.
+        let config = crate::inference::rapid_mlx::RapidMlxSpeculativeConfig {
+            method: crate::inference::rapid_mlx::RapidMlxSpeculativeMethod::Mtp,
+            model: None,
+            num_speculative_tokens: 2,
+            disable_auto_k: false,
+        };
+        let capabilities =
+            ServeCapabilities::from_help("--host --port --reasoning --prefill-step-size");
         let launch = RapidMlxCommandBuilder::new(
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         )
         .port(9000)
         .prefill_step_size(Some(512))
-        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
-        .expect("an unsupported speculative policy must not fail the build");
+        .speculative_config(Some(config))
+        .build("rapid-mlx".into(), &capabilities)
+        .expect("an unsupported speculative config must not fail the build");
 
-        // The settings the runtime *does* support still have to make it through.
+        assert!(!launch.args.iter().any(|arg| arg == "--speculative-config"));
         assert!(
             launch
                 .args
@@ -755,6 +772,32 @@ mod tests {
             "unrelated flags must survive: {:?}",
             launch.args
         );
+    }
+
+    #[test]
+    fn typed_mtp_config_serializes_exact_vllm_json_into_argv() {
+        let config = crate::inference::rapid_mlx::RapidMlxSpeculativeConfig {
+            method: crate::inference::rapid_mlx::RapidMlxSpeculativeMethod::Mtp,
+            model: Some("org/model-mtp".into()),
+            num_speculative_tokens: 4,
+            disable_auto_k: true,
+        };
+        assert_eq!(
+            config.to_cli_json().unwrap(),
+            r#"{"method":"mtp","model":"org/model-mtp","num_speculative_tokens":4,"disable_auto_k":true}"#
+        );
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .speculative_config(Some(config))
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .unwrap();
+        assert!(launch.args.windows(2).any(|pair| {
+            pair == [
+                "--speculative-config",
+                r#"{"method":"mtp","model":"org/model-mtp","num_speculative_tokens":4,"disable_auto_k":true}"#,
+            ]
+        }));
     }
 
     #[test]
@@ -1229,7 +1272,7 @@ mod tests {
         .unwrap();
         let args = args(&launch);
         assert!(args.iter().any(|arg| arg == "--no-thinking"));
-        assert!(!args.iter().any(|arg| arg == "--reasoning"));
+        assert!(args.iter().any(|arg| arg == "--reasoning"));
     }
 
     #[test]
@@ -1256,7 +1299,7 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_on_blocks_no_thinking_flag() {
+    fn explicit_no_thinking_is_orthogonal_to_reasoning_profile() {
         let launch = RapidMlxCommandBuilder::new(
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         )
@@ -1266,6 +1309,6 @@ mod tests {
         .unwrap();
         let args = args(&launch);
         assert!(args.iter().any(|arg| arg == "--reasoning"));
-        assert!(!args.iter().any(|arg| arg == "--no-thinking"));
+        assert!(args.iter().any(|arg| arg == "--no-thinking"));
     }
 }

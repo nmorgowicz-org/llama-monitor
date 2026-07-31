@@ -78,7 +78,7 @@ impl ServeCapabilities {
 
     pub fn verified_baseline() -> Self {
         Self::from_help(
-            "--host --port --log-level --served-model-name --timeout --enable-prefix-cache --disable-prefix-cache --cache-memory-mb --hybrid-cache-entries --kv-disk-checkpoint-interval --tool-call-parser --reasoning-parser --enable-auto-tool-choice --no-thinking --reasoning --force-hybrid --no-hybrid --prefill-step-size --pflash",
+            "--host --port --log-level --served-model-name --timeout --enable-prefix-cache --disable-prefix-cache --cache-memory-mb --hybrid-cache-entries --kv-disk-checkpoint-interval --tool-call-parser --reasoning-parser --enable-auto-tool-choice --no-thinking --reasoning --force-hybrid --no-hybrid --prefill-step-size --pflash --speculative-config",
         )
     }
 }

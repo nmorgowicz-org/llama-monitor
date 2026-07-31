@@ -734,12 +734,7 @@ fn build_effective_policy(config: &RapidMlxConfig) -> serde_json::Value {
     // flag"). The VRAM estimator already models this as `reasoning_mode_overrides_kv_to_int8`;
     // reporting the requested dtype here would make this snapshot the one surface that
     // disagrees, on the interaction that matters most for memory.
-    let reasoning_on = config.reasoning_mode.as_deref() == Some("on");
-    let effective_kv_cache_dtype = if reasoning_on {
-        Some(crate::inference::rapid_mlx::KvCacheConfig::Int8)
-    } else {
-        config.kv_cache_dtype.clone()
-    };
+    let effective_kv_cache_dtype = Some(crate::inference::rapid_mlx::KvCacheConfig::Int8);
     serde_json::json!({
         "kv_cache_dtype": effective_kv_cache_dtype,
         "turboquant_mode": effective_turboquant_mode,
@@ -752,7 +747,8 @@ fn build_effective_policy(config: &RapidMlxConfig) -> serde_json::Value {
         "max_concurrent_requests": config.max_concurrent_requests,
         "prefill_batch_size": config.prefill_batch_size,
         "completion_batch_size": config.completion_batch_size,
-        "reasoning_mode": config.reasoning_mode,
+        "reasoning_mode": "on",
+        "speculative_config": config.speculative_config,
         "mllm_vision": config.mllm_vision,
         "embeddings": config.embeddings,
         "gpu_memory_utilization": config.gpu_memory_utilization,
@@ -800,22 +796,42 @@ fn build_requested_vs_effective(
     // Reasoning outranks the dtype flag inside the runtime, so say so rather than let the
     // operator read a dtype the server will not use. Recorded even when the requested dtype
     // is already int8-compatible only if it actually differs.
-    if config.reasoning_mode.as_deref() == Some("on") {
-        let requested = config
-            .kv_cache_dtype
-            .as_ref()
-            .map(ToString::to_string)
-            .unwrap_or_else(|| "auto".to_string());
-        if requested != "int8" {
-            diff.insert(
-                "kv_cache_dtype".to_string(),
-                serde_json::json!({
-                    "requested": requested,
-                    "effective": "int8",
-                    "reason": "reasoning_mode=on pins the KV cache to int8 regardless of the requested dtype"
-                }),
-            );
-        }
+    let requested = config
+        .kv_cache_dtype
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "auto".to_string());
+    if requested != "int8" {
+        diff.insert(
+            "kv_cache_dtype".to_string(),
+            serde_json::json!({
+                "requested": requested,
+                "effective": "int8",
+                "reason": "the always-on Rapid reasoning quality profile pins the KV cache to int8 regardless of the requested dtype"
+            }),
+        );
+    }
+    if config.reasoning_mode.as_deref() == Some("off") {
+        diff.insert(
+            "reasoning_mode".to_string(),
+            serde_json::json!({
+                "requested": "off",
+                "effective": "on",
+                "reason": "the Rapid reasoning quality profile remains on; this legacy off value adds --no-thinking instead"
+            }),
+        );
+    }
+    if let Some(ref requested) = config.speculative_config
+        && !capabilities.contains("--speculative-config")
+    {
+        diff.insert(
+            "speculative_config".to_string(),
+            serde_json::json!({
+                "requested": requested,
+                "effective": null,
+                "reason": "--speculative-config is not supported by this runtime version; speculative decoding was omitted"
+            }),
+        );
     }
 
     // PFlash: may be unavailable if runtime lacks flag
@@ -897,9 +913,9 @@ fn build_requested_vs_effective(
 fn check_setting_warnings(_config: &RapidMlxConfig, warnings: &mut Vec<String>) {
     // Check mutual exclusions
     let mut settings_map = std::collections::BTreeMap::new();
-    if let Some(reasoning) = _config.reasoning_mode.as_deref() {
-        settings_map.insert("reasoning_mode", serde_json::json!(reasoning));
-    }
+    // The reasoning quality profile is always on. A legacy reasoning_mode=off value now
+    // controls --no-thinking only and must not suppress quality-profile compatibility checks.
+    settings_map.insert("reasoning_mode", serde_json::json!("on"));
     if let Some(sampling) = _config.sampling_mode.as_deref() {
         settings_map.insert("sampling_mode", serde_json::json!(sampling));
     }
@@ -1022,10 +1038,13 @@ fn runtime_metadata_route(ctx: ApiCtx, state: RuntimeApiState) -> ApiRoute {
                         "source": source,
                         "sampling_defaults": snapshot.sampling_defaults,
                         "effective_sampling_default_fields": effective_sampling_defaults,
-                        "sampling_cascade": snapshot.sampling_cascade,
-                        "mtp_concurrency": snapshot.mtp_concurrency,
-                        "qualified_features": snapshot.qualified_features,
-                    }),
+                                "sampling_cascade": snapshot.sampling_cascade,
+                                "mtp_concurrency": snapshot.mtp_concurrency,
+                                "qualified_features": snapshot.qualified_features,
+                                "evidence_timestamp": snapshot.evidence_timestamp,
+                                "measured_spec_decode": snapshot.measured_spec_decode,
+                                "superseded_spec_decode": snapshot.superseded_spec_decode,
+                            }),
                 )))
             }
         })
@@ -2299,6 +2318,10 @@ mod settings_catalog_tests {
             "prefix_cache_enabled",
             "retained_cache_mib",
             "disk_checkpoint_interval",
+            // Compound, discriminated product configuration rather than a scalar catalog
+            // setting. It is validated by RapidMlxSpeculativeConfig and rendered as one
+            // exact vLLM-style JSON object in the command builder.
+            "speculative_config",
         ];
 
         let missing: Vec<_> = catalog_ids
@@ -2694,6 +2717,7 @@ Run with `--verbose` for details on each check.
             completion_batch_size: None,
             prefill_step_size: 512,
             reasoning_mode: None,
+            speculative_config: None,
             mllm_vision: None,
             embeddings: None,
             gpu_memory_utilization: None,
@@ -2773,6 +2797,7 @@ Run with `--verbose` for details on each check.
             completion_batch_size: None,
             prefill_step_size: 512,
             reasoning_mode: None,
+            speculative_config: None,
             mllm_vision: None,
             embeddings: None,
             gpu_memory_utilization: None,
@@ -2832,6 +2857,7 @@ Run with `--verbose` for details on each check.
             completion_batch_size: None,
             prefill_step_size: 512,
             reasoning_mode: None,
+            speculative_config: None,
             mllm_vision: None,
             embeddings: None,
             gpu_memory_utilization: None,

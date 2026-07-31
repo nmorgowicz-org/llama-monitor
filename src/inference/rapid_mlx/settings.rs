@@ -520,12 +520,11 @@ mod tests {
     /// literals against a captured inventory rather than against another hand-written list.
     #[test]
     fn serve_flag_literals_exist_in_the_real_runtime() {
-        let inventory: std::collections::BTreeSet<&str> =
-            include_str!("testdata/serve-flags.txt")
-                .lines()
-                .map(str::trim)
-                .filter(|l| l.starts_with("--"))
-                .collect();
+        let inventory: std::collections::BTreeSet<&str> = include_str!("testdata/serve-flags.txt")
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("--"))
+            .collect();
         assert!(
             inventory.len() > 50,
             "flag inventory looks truncated: {} entries",

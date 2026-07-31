@@ -105,6 +105,7 @@ pub fn request_from_api_payload(payload: &serde_json::Value) -> Result<LocalLaun
                 anyhow::bail!("Rapid-MLX launch requires a non-zero port");
             }
             config.validate_access(None)?;
+            config.validate_speculative_config()?;
             Ok(LocalLaunchRequest::RapidMlx(Box::new(config)))
         }
     }
@@ -142,6 +143,7 @@ pub fn validate_preset_backend_config(preset: &ModelPreset) -> Result<()> {
                 );
             }
             rapid.validate_access(preset.api_key.as_deref())?;
+            rapid.validate_speculative_config()?;
             if let Err(invalid) = crate::inference::rapid_mlx::escape_hatch::validate_escape_flags(
                 &rapid.escape_hatch_flags,
             ) {

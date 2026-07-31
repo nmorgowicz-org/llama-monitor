@@ -41,6 +41,81 @@ fn default_pflash_policy() -> Option<String> {
     Some("off".into())
 }
 
+fn default_num_speculative_tokens() -> u32 {
+    2
+}
+
+/// Rapid-MLX speculative decoding method.
+///
+/// The enum is intentionally extensible, but MTP is the only method exposed by
+/// llama-monitor until another runtime path has its own qualification evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RapidMlxSpeculativeMethod {
+    Mtp,
+}
+
+/// Typed vLLM-compatible payload passed to Rapid-MLX `--speculative-config`.
+///
+/// This is deliberately not a free-form JSON escape hatch. Keeping the product
+/// contract typed prevents misspelled fields from silently disabling speculation
+/// and gives the estimator a trustworthy request shape (but never caller-authored
+/// architecture depth or memory byte counts).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RapidMlxSpeculativeConfig {
+    pub method: RapidMlxSpeculativeMethod,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default = "default_num_speculative_tokens")]
+    pub num_speculative_tokens: u32,
+    #[serde(default)]
+    pub disable_auto_k: bool,
+}
+
+impl RapidMlxSpeculativeConfig {
+    /// Validate the product-level contract before launch or estimation.
+    pub fn validate(&self) -> Result<()> {
+        if !(1..=8).contains(&self.num_speculative_tokens) {
+            return Err(anyhow!("num_speculative_tokens must be between 1 and 8"));
+        }
+        if let Some(model) = &self.model {
+            let model = model.trim();
+            if model.is_empty() {
+                return Err(anyhow!("speculative model must not be empty"));
+            }
+            if model.chars().any(char::is_control) || model.contains('\\') {
+                return Err(anyhow!(
+                    "speculative model must not contain control characters or backslashes"
+                ));
+            }
+            if std::path::Path::new(model)
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir))
+            {
+                return Err(anyhow!("speculative model must not contain '..'"));
+            }
+            if !model.starts_with('/') {
+                let mut parts = model.split('/');
+                let valid_hf_repo = parts.next().is_some_and(|part| !part.is_empty())
+                    && parts.next().is_some_and(|part| !part.is_empty())
+                    && parts.next().is_none();
+                if !valid_hf_repo {
+                    return Err(anyhow!(
+                        "speculative model must be an absolute local path or Hugging Face repo id (owner/repo)"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn to_cli_json(&self) -> Result<String> {
+        self.validate()?;
+        serde_json::to_string(self)
+            .map_err(|error| anyhow!("Could not serialize speculative config: {error}"))
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RapidMlxConfig {
     #[serde(default)]
@@ -156,6 +231,11 @@ pub struct RapidMlxConfig {
     /// Reasoning mode (auto/on/off).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_mode: Option<String>,
+    /// Qualified, typed Rapid-MLX speculative decoding request. MTP-only for the
+    /// first product release; omitted by default because current sampled/tool
+    /// workloads normally fall through to autoregressive decoding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speculative_config: Option<RapidMlxSpeculativeConfig>,
     // ── Phase 7: MLLM/embeddings ───────────────────────────────────────
     /// MLLM vision support (auto/on/off).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -347,6 +427,7 @@ impl Default for RapidMlxConfig {
             prefill_step_size: default_prefill_step_size(),
             // Phase 7: reasoning/speculative
             reasoning_mode: None,
+            speculative_config: None,
             // Phase 7: MLLM/embeddings
             mllm_vision: None,
             embeddings: None,
@@ -407,6 +488,13 @@ impl RapidMlxConfig {
         }
         Ok(())
     }
+
+    pub fn validate_speculative_config(&self) -> Result<()> {
+        if let Some(config) = &self.speculative_config {
+            config.validate()?;
+        }
+        Ok(())
+    }
 }
 
 pub struct RapidMlxAdapter {
@@ -440,6 +528,7 @@ pub struct RapidMlxAdapter {
     pub completion_batch_size: Option<u64>,
     pub prefill_step_size: u32,
     pub reasoning_mode: Option<String>,
+    pub speculative_config: Option<RapidMlxSpeculativeConfig>,
     pub mllm_vision: Option<String>,
     pub embeddings: Option<String>,
     pub gpu_memory_utilization: Option<f64>,
@@ -512,6 +601,7 @@ impl RapidMlxAdapter {
             completion_batch_size: None,
             prefill_step_size: default_prefill_step_size(),
             reasoning_mode: None,
+            speculative_config: None,
             mllm_vision: None,
             embeddings: None,
             gpu_memory_utilization: None,
@@ -568,6 +658,7 @@ impl RapidMlxAdapter {
         self.completion_batch_size = config.completion_batch_size;
         self.prefill_step_size = config.prefill_step_size;
         self.reasoning_mode = config.reasoning_mode.clone();
+        self.speculative_config = config.speculative_config.clone();
         self.mllm_vision = config.mllm_vision.clone();
         self.embeddings = config.embeddings.clone();
         self.gpu_memory_utilization = config.gpu_memory_utilization;
@@ -652,6 +743,13 @@ impl RapidMlxAdapter {
         }
         if self.resolved_model.launch_argument.trim().is_empty() {
             return Err(anyhow!("Rapid-MLX requires a model path"));
+        }
+        if let Some(frequency_penalty) = self.default_frequency_penalty
+            && !(-2.0..=2.0).contains(&frequency_penalty)
+        {
+            return Err(anyhow!(
+                "default_frequency_penalty must be between -2.0 and 2.0, got {frequency_penalty}"
+            ));
         }
         RapidMlxConfig {
             host: self.host.clone(),
@@ -916,6 +1014,7 @@ pub(crate) fn apply_phase7_adapter_config(
         .completion_batch_size(adapter.completion_batch_size)
         .prefill_step_size(Some(adapter.prefill_step_size))
         .reasoning_mode(adapter.reasoning_mode.clone())
+        .speculative_config(adapter.speculative_config.clone())
         .mllm_vision(adapter.mllm_vision.clone())
         .embeddings(adapter.embeddings.clone())
         .gpu_memory_utilization(adapter.gpu_memory_utilization)

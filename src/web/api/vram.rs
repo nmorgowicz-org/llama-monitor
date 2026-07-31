@@ -83,6 +83,19 @@ fn api_vram_estimate_breakdown(
                     .or_else(|| body["engine"].as_str())
                     .unwrap_or("llama_cpp");
                 let is_rapid_mlx = matches!(backend_field, "rapid_mlx" | "mlx" | "rapid-mlx");
+                // Rapid's prefill working width is independently qualified from llama.cpp's
+                // micro-batch size. Keep the request vocabularies separate even though both
+                // feed the shared estimator's scratch/overhead width internally.
+                let prefill_step_size = body["prefill_step_size"]
+                    .as_u64()
+                    .and_then(|value| u32::try_from(value).ok())
+                    .filter(|value| (1..=2048).contains(value))
+                    .unwrap_or(512);
+                let estimator_work_size = if is_rapid_mlx {
+                    prefill_step_size
+                } else {
+                    ubatch_size
+                };
 
                 // ── Rapid-MLX execution policy (Phase 5a Part 5: cross-surface equality) ────
                 //
@@ -96,7 +109,9 @@ fn api_vram_estimate_breakdown(
                         .and_then(|s| {
                             serde_json::from_str(&format!("\"{s}\"")).ok()
                         });
-                let rapid_reasoning_mode = body["reasoning_mode"].as_bool().unwrap_or(false);
+                // llama-monitor always launches Rapid with its qualified reasoning/KV quality
+                // profile. The separate thinking-output opt-out does not change estimate math.
+                let rapid_reasoning_mode = is_rapid_mlx;
                 let rapid_turboquant_mode: Option<crate::llama::vram_estimator::execution_policy::TurboQuantMode> =
                     body["turboquant_mode"]
                         .as_str()
@@ -354,12 +369,62 @@ fn api_vram_estimate_breakdown(
                     .unwrap_or(1)
                     .max(1);
 
-                // Builder item 13: MTP configuration from request body.
-                let mtp_config: Option<crate::llama::vram_estimator::MtpConfig> = body["mtp_config"]
-                    .as_object()
-                    .and_then(|obj| {
-                        serde_json::from_value::<crate::llama::vram_estimator::MtpConfig>(serde_json::Value::Object(obj.clone())).ok()
-                    });
+                // Product contract: accept the same typed speculative_config used by launch.
+                // Never accept caller-authored embedded depth or memory byte counts. Embedded
+                // depth comes from the server-parsed model architecture; external sidecars are
+                // kept truthful as unknown-memory companions until the server can resolve them.
+                let speculative_config = if is_rapid_mlx && !body["speculative_config"].is_null() {
+                    let parsed = match serde_json::from_value::<
+                        crate::inference::rapid_mlx::RapidMlxSpeculativeConfig,
+                    >(body["speculative_config"].clone()) {
+                        Ok(config) => config,
+                        Err(error) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": format!("Invalid speculative_config: {error}"),
+                                })),
+                            ));
+                        }
+                    };
+                    if let Err(error) = parsed.validate() {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": error.to_string(),
+                            })),
+                        ));
+                    }
+                    Some(parsed)
+                } else {
+                    None
+                };
+                let mtp_config = speculative_config.map(|config| {
+                    use crate::llama::vram_estimator::{
+                        CompanionMemoryEvidence, CompanionType, ExternalCompanion, MtpConfig,
+                        MtpMode,
+                    };
+                    match config.model {
+                        Some(model) => MtpConfig {
+                            mode: MtpMode::External,
+                            embedded_depth: 0,
+                            external_drafter: Some(ExternalCompanion {
+                                label: "Rapid-MLX MTP sidecar".into(),
+                                companion_type: CompanionType::Drafter,
+                                total_bytes: 0,
+                                weights_bytes: 0,
+                                kv_cache_bytes: 0,
+                                source: model,
+                                memory_evidence: CompanionMemoryEvidence::Unknown,
+                            }),
+                        },
+                        None => MtpConfig {
+                            mode: MtpMode::Embedded,
+                            embedded_depth: arch.mtp_depth,
+                            external_drafter: None,
+                        },
+                    }
+                });
 
                 // Use the execution policy's effective TurboQuant mode for the estimator.
                 // Per D31: effective_turboquant already has eligibility applied.
@@ -407,7 +472,7 @@ fn api_vram_estimate_breakdown(
                     estimate_ctk,
                     estimate_ctv,
                     parallel_slots,
-                    ubatch_size,
+                    estimator_work_size,
                     n_cpu_moe,
                     gpu_layers,
                     available_vram_bytes,
@@ -465,6 +530,11 @@ fn api_vram_estimate_breakdown(
                          "execution_policy": execution_policy_json,
                          "workload_scenario": workload_scenario_json,
                          "effective_kv_dtype": effective_kv_dtype_json,
+                         "prefill_step_size": if is_rapid_mlx {
+                             serde_json::json!(prefill_step_size)
+                         } else {
+                             serde_json::Value::Null
+                         },
                         "mlx_prefix_cache_bytes": breakdown.mlx_prefix_cache_bytes,
                         "native_context_limit": native_context_limit,
                         "context_extension_required": native_context_limit.is_some_and(|limit| n_ctx > limit),
@@ -1437,6 +1507,7 @@ mod mlx_estimate_tests {
             "backend": "rapid_mlx",
             "model_path": dir.path().to_string_lossy(),
             "n_ctx": 4096,
+            "prefill_step_size": 1536,
             "available_vram_bytes": 32u64 * 1024 * 1024 * 1024,
         });
         let response = warp::test::request()
@@ -1454,6 +1525,7 @@ mod mlx_estimate_tests {
         assert_eq!(json["evidence"], serde_json::json!("approximate"));
         assert_eq!(json["native_context_limit"], serde_json::json!(131072));
         assert_eq!(json["context_extension_required"], serde_json::json!(false));
+        assert_eq!(json["prefill_step_size"], serde_json::json!(1536));
         assert!(json["weights_bytes"].as_u64().unwrap() > 0);
     }
 

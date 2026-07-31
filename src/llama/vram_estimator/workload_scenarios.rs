@@ -481,6 +481,20 @@ pub struct ExternalCompanion {
     pub kv_cache_bytes: u64,
     /// Source identifier (HF repo, local path, or builtin).
     pub source: String,
+    /// Strength of the companion-memory evidence. `Unknown` means the source is
+    /// known but no trustworthy server-derived runtime byte count was available;
+    /// the zero byte fields must not be read as a free companion.
+    #[serde(default)]
+    pub memory_evidence: CompanionMemoryEvidence,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CompanionMemoryEvidence {
+    Measured,
+    Approximate,
+    #[default]
+    Unknown,
 }
 
 /// Type of external companion model.
@@ -1063,12 +1077,7 @@ mod tests {
         let slots = scenario.to_estimator_params(ClientType::App).parallel_slots;
         assert_eq!(slots, 2, "the scenario must carry its own slot count");
 
-        let result = MtpAdmissionResult::compute(
-            MtpMode::Embedded,
-            &scenario,
-            3,
-            slots,
-        );
+        let result = MtpAdmissionResult::compute(MtpMode::Embedded, &scenario, 3, slots);
         assert!(
             result
                 .warnings
@@ -1076,12 +1085,7 @@ mod tests {
         );
 
         // A caller that states its own slot count still wins: scenario values fill gaps only.
-        let single = MtpAdmissionResult::compute(
-            MtpMode::Embedded,
-            &scenario,
-            3,
-            1,
-        );
+        let single = MtpAdmissionResult::compute(MtpMode::Embedded, &scenario, 3, 1);
         assert!(
             !single
                 .warnings
@@ -1149,12 +1153,7 @@ mod tests {
             planning_context_tokens: 128_000,
             retained_cache_tokens: 32_000,
         };
-        let result = MtpAdmissionResult::compute(
-            MtpMode::Embedded,
-            &scenario,
-            3,
-            1,
-        );
+        let result = MtpAdmissionResult::compute(MtpMode::Embedded, &scenario, 3, 1);
         assert!(result.eligible, "arch depth 3 is eligible");
         assert!(scenario.mtp_eligible(), "single-stream clears concurrency");
         assert!(
@@ -1195,12 +1194,7 @@ mod tests {
             parallel_slots: 1,
         };
         assert!(scenario.default_decode_shape().permits_speculation());
-        let result = MtpAdmissionResult::compute(
-            MtpMode::Embedded,
-            &scenario,
-            3,
-            1,
-        );
+        let result = MtpAdmissionResult::compute(MtpMode::Embedded, &scenario, 3, 1);
         assert!(result.engages_for_workload);
         assert!(result.recommended_for_workload);
         assert!(result.fallthroughs.is_empty());
@@ -1262,6 +1256,7 @@ mod tests {
             weights_bytes: 600_000_000u64,
             kv_cache_bytes: 200_000_000u64,
             source: "mlx-community/Qwen3-0.6B".into(),
+            memory_evidence: CompanionMemoryEvidence::Approximate,
         };
         let config = MtpConfig {
             mode: MtpMode::External,
@@ -1300,6 +1295,7 @@ mod tests {
             weights_bytes: 400_000_000u64,
             kv_cache_bytes: 100_000_000u64,
             source: "hf://test/drafter".into(),
+            memory_evidence: CompanionMemoryEvidence::Measured,
         };
         let primary_total = 3_000_000_000u64;
         let total_estimate = primary_total + companion.total_bytes;
@@ -1315,12 +1311,8 @@ mod tests {
 
     #[test]
     fn mtp_admission_json_serialization() {
-        let result = MtpAdmissionResult::compute(
-            MtpMode::Embedded,
-            &WorkloadScenario::default(),
-            3,
-            1,
-        );
+        let result =
+            MtpAdmissionResult::compute(MtpMode::Embedded, &WorkloadScenario::default(), 3, 1);
         let json = serde_json::to_string(&result).unwrap();
         let restored: MtpAdmissionResult = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.mode, result.mode);
