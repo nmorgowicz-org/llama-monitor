@@ -428,3 +428,44 @@ visibility under the advanced section.
 It now brace-matches the Rapid branch of `_buildFormPreset` and takes **every** `modal-*` id it
 reads, then checks each against every section a Rapid preset can open. That broadened guard is
 what found `modal-max-tokens` — a control neither the audit nor the first fix had noticed.
+
+## 14. Disposition of the four capabilities left unexposed (2026-07-31)
+
+Section 11 listed four things as "genuine capabilities with no UI after the phantom deletion"
+and deferred the decision. Deciding them, because an undecided list is how the phantoms got
+written in the first place — someone saw a gap and filled it with an invented flag.
+
+### llama.cpp's web-UI flags — closed, no action
+
+Not a gap. `default_launch_argv_omits_experimental_webui_mcp_proxy`
+(`llama_cpp.rs:1009`) pins the launch argv exactly, and it deliberately omits the web-UI and
+MCP-proxy flags: llama-monitor takes llama-server's default web UI as-is and does not configure
+it. The phantom `web_ui_*` fields were those flags mis-copied into the *Rapid* builder, so
+deleting them restored the intended state rather than creating a hole. The "inversion" noted in
+section 11 — we could configure the web UI of the runtime without one, and not the runtime with
+one — was only ever half real. Recording this so it does not get re-litigated.
+
+### `--kv-disk-checkpoint-interval` — keep pinned at 0, and say why
+
+Fully plumbed (`command.rs:421`, `mod.rs:77`) and passed on every launch — as a hardcoded `0`
+from both the preset save path and the wizard. It is not missing UI; it is a constant with a
+plumbing chain attached. `0` means "no disk checkpointing", which is the right default for
+interactive use, where the retained cache lives in unified memory and a disk write buys nothing.
+The question it actually raises is a measurement one — does checkpointing shorten cold restart
+enough to matter? — so it belongs in the benchmark suite, not a dropdown. Leaving it pinned.
+
+### `--response-cache-entries` — deferred pending measurement
+
+No config field exists; adding one is a new feature, not a restoration. It caches whole responses
+for identical greedy requests. Duplicate requests are rare in interactive chat and plausible in
+agentic tool loops, and we have no data on which. Do not expose a knob whose benefit we cannot
+state. Benchmark first.
+
+### `--speculative-config` — promoted to its own task
+
+The only one of the four that is a real product feature. The benchmark suite already builds the
+flag correctly (`rapid-mlx-benchmark-suite.mjs:726`) and MTP measures 59–61% acceptance on
+Qwen3.6-27B, so the capability is proven — but exposing it needs a config field carrying a
+vLLM-style JSON object (`method`, `model`, `num_speculative_tokens`, `disable_auto_k`), external
+sidecar model management, and the K-clamping rules for hybrid SSM architectures. That is a
+feature with its own design, not a loose end from deleting a phantom. Tracked separately.
