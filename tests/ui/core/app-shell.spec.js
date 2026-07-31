@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { dismissAuthShell } from '../helpers.js';
+import { dismissAuthShell, openSettings } from '../helpers.js';
 
 async function enterMonitorView(page) {
   await dismissAuthShell(page);
@@ -115,11 +115,7 @@ test.describe('modals and menus', () => {
   });
 
   test('settings opens and secondary tabs switch', async ({ page }) => {
-    // Use JS to open settings modal directly (sidebar click may be intercepted by setup view)
-    await page.evaluate(async () => {
-      const { openSettingsModal } = await import('/js/features/settings.js');
-      openSettingsModal();
-    });
+    await openSettings(page);
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
 
     // Default active pane is now Session

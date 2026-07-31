@@ -5,6 +5,7 @@
 // - modals dismiss when navigating away via Router
 
 import { test, expect } from '@playwright/test';
+import { openSettings } from '../helpers.js';
 
 test.describe('SPA navigation & history', () => {
   test('SPA routes load the shell', async ({ page }) => {
@@ -87,32 +88,28 @@ test.describe('SPA navigation & history', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
 
-    // Open settings via JS (same pattern as app-shell tests)
-    await page.evaluate(async () => {
-      const { openSettingsModal } = await import('/js/features/settings.js');
-      openSettingsModal();
-    });
+    await openSettings(page);
     const modal = page.locator('#settings-modal');
     await expect(modal).toHaveClass(/open/);
 
-    // Navigate away using Router (avoids sidebar click issues)
+    // Navigate away using Router (avoids sidebar click issues). /logs, not /chat: the chat
+    // route falls back to welcome when no session is active (see the test above), and whether
+    // one is active depends on which specs ran earlier against this shared server. That made
+    // the URL assertion pass or fail on test order rather than on the behaviour under test.
     await page.evaluate(async () => {
       const Router = (await import('/js/features/router.js')).default;
-      Router.navigate('/chat');
+      Router.navigate('/logs');
     });
 
     await expect(modal).not.toHaveClass(/open/);
-    expect(page.url()).toContain('/chat');
+    expect(page.url()).toContain('/logs');
   });
 
   test('Escape key closes settings modal', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
 
-    await page.evaluate(async () => {
-      const { openSettingsModal } = await import('/js/features/settings.js');
-      openSettingsModal();
-    });
+    await openSettings(page);
     const modal = page.locator('#settings-modal');
     await expect(modal).toHaveClass(/open/);
 

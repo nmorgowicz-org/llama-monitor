@@ -286,7 +286,16 @@ test.describe('preset flow', () => {
       openPresetModal('edit');
     });
     await expect(page.locator('#modal-model-path')).toHaveValue(rapidConfig.model_path);
-    await expect(page.locator('.preset-nav-item:visible')).toHaveCount(2);
+    // Naming the sections rather than counting them: the point is that the llama.cpp-only
+    // sections stay hidden, and a bare count silently accepts the wrong three. Generation is
+    // here deliberately -- the Rapid sampling defaults live in it, and while it was hidden the
+    // editor rewrote them to nulls on every save because the user could not reach the inputs.
+    await expect(page.locator('.preset-nav-item:visible')).toHaveCount(3);
+    expect(
+      await page.locator('.preset-nav-item:visible').evaluateAll(
+        els => els.map(e => e.dataset.section),
+      ),
+    ).toEqual(['model', 'generation', 'advanced']);
     await page.locator('#modal-name').fill('Rapid renamed');
     await page.locator('.preset-nav-item[data-section="advanced"]').click();
     await page.locator('#modal-port').fill('9234');

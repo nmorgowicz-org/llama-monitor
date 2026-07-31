@@ -2,13 +2,10 @@
 
 import { test, expect } from '@playwright/test';
 import { switchToChat } from './fixtures.js';
+import { openSettings } from '../helpers.js';
 
 async function openGuidedGenSettings(page) {
-  // Use JS to open settings modal directly (sidebar click may be intercepted by setup view)
-  await page.evaluate(async () => {
-    const { openSettingsModal } = await import('/js/features/settings.js');
-    openSettingsModal();
-  });
+    await openSettings(page);
   await page.waitForSelector('#settings-modal:not([aria-hidden="true"])');
   await page.locator('.settings-tab[data-tab="chat"]').click();
   await page.waitForSelector('#settings-chat.active');

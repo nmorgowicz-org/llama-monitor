@@ -420,9 +420,19 @@ function applyWsIntervalLive() {
 
 // ── Modal open/close ──────────────────────────────────────────────────────────
 
+// Handle for the close animation's teardown timer. Reopening within the animation window
+// used to let the *previous* close's timer fire against the now-legitimately-open modal,
+// stripping `open` and setting aria-hidden/inert on it -- a modal that reports open while
+// rendering nothing. Cancelling on open is what makes open/close/open safe.
+let closeTeardownTimer = null;
+
 export function openSettingsModal(initialTab) {
     const modal = document.getElementById('settings-modal');
     if (!modal) return;
+    if (closeTeardownTimer !== null) {
+        clearTimeout(closeTeardownTimer);
+        closeTeardownTimer = null;
+    }
     modal.removeAttribute('aria-hidden');
     modal.inert = false;
     modal.classList.remove('closing');
@@ -471,7 +481,11 @@ export function closeSettingsModal() {
         try { history.replaceState({ path: base }, '', base); } catch {}
     }
     modal.classList.add('closing');
-    setTimeout(() => {
+    // Re-entrant close (Esc twice, or a route change racing the X button) must not stack
+    // timers: the later one would fire against whatever state the modal is in by then.
+    if (closeTeardownTimer !== null) clearTimeout(closeTeardownTimer);
+    closeTeardownTimer = setTimeout(() => {
+        closeTeardownTimer = null;
         modal.classList.remove('open', 'closing');
         modal.setAttribute('aria-hidden', 'true');
         modal.inert = true;

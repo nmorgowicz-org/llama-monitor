@@ -112,6 +112,9 @@ export function initDbAdmin() {
 
 function openDbAdminModal() {
     if (!dbAdminOverlay) return;
+    if (dbAdminCloseTimer !== null) { clearTimeout(dbAdminCloseTimer); dbAdminCloseTimer = null; }
+    dbAdminOverlay.classList.remove('closing');
+    dbAdminOverlay.querySelector('.db-admin-modal')?.classList.remove('closing');
     dbAdminOverlay.classList.add('active');
 
     if (!dbAdminInitializedData) {
@@ -125,13 +128,19 @@ function openDbAdminModal() {
     startDbStatsPolling();
 }
 
+let dbAdminCloseTimer = null;
+
 function closeDbAdminModal() {
     if (!dbAdminOverlay) return;
     stopDbStatsPolling();
     const modal = dbAdminOverlay.querySelector('.db-admin-modal');
     if (modal) {
         modal.classList.add('closing');
-        setTimeout(() => {
+        // Same stale-timer race as settings.js: reopening inside the animation window let
+        // the previous close's timer strip `active` off the newly opened overlay.
+        if (dbAdminCloseTimer !== null) clearTimeout(dbAdminCloseTimer);
+        dbAdminCloseTimer = setTimeout(() => {
+            dbAdminCloseTimer = null;
             dbAdminOverlay.classList.remove('active');
             modal.classList.remove('closing');
         }, 250);
