@@ -166,16 +166,28 @@ explicit → managed → PATH precedence; real `models_dir`; qualified runtime v
 `ef64903` (step-6 config card renders the argv, plus `requested_vs_effective` and `reasons`).
 `command-preview-ui.spec.js` covers it, negative-control verified.
 
-### Open, found while verifying the above
+### Retracted — two findings logged here on 2026-07-30 were wrong
 
-- **Capability-gated flags are dropped without a reason.** A `turboquant_mode: "k8v4"`
-  request against a runtime lacking `--kv-cache-turboquant` produces argv without the flag,
-  an empty `requested_vs_effective`, and no `reasons`. An unsupported `speculative_policy`,
-  by contrast, hard-errors. The preview surface renders whatever the backend reports, so it
-  will show these correctly once the backend reports them — but today the silent-drop case
-  is invisible in both places. Verified live on 2026-07-30.
-- **Two pre-existing load-sensitive test races.** `phase7-presets.spec.js:52` reads
-  `estimateScenario` as `interactive_coding_agent` where it expects `tool_research_agent`;
-  `preset-flow.spec.js:249` times out polling `putCount`. Neither reproduces in the
-  four-spec set alone (3/3 clean); both appear intermittently once a fifth spec adds
-  parallel load. Not caused by the command-preview work.
+Both were recorded in the commit message for `ef64903` and are corrected here.
+
+1. **"Capability-gated flags are dropped without a reason."** False. A
+   `turboquant_mode: "k8v4"` request does omit `--kv-cache-turboquant` from argv, but that
+   omission is deliberate (`build_effective_policy`, and the block at
+   `rapid_mlx_runtime.rs:846-866`): TurboQuant needs an exact model/revision qualification
+   receipt, and until that evidence is wired the value is persisted and shown but not
+   launched. `requested_vs_effective` reports it in full, with
+   `effective: "none"` and the reason "No exact model/revision TurboQuant qualification
+   receipt is available; disabled". Verified live 2026-07-30.
+
+   The original observation came from a payload that also carried a `speculative_policy` the
+   installed runtime does not support. That hard-errors before the diff is ever built, so the
+   response contained no diff at all — and the empty diff was misattributed to turboquant.
+   The lesson is the register's own: a probe that changes two things at once proves nothing
+   about either.
+
+2. **"Two pre-existing load-sensitive test races."** Not a defect. `playwright.config` sets
+   `fullyParallel: false`, `workers: 1` under CI and `retries: 2` under CI. The failures were
+   produced by running locally, where `workers` is undefined and therefore parallel and
+   `retries` is 0 — concurrency the suite is explicitly configured never to have. Under the
+   real settings the same five specs pass 40/40, twice over.
+
