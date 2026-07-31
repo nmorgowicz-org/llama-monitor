@@ -748,6 +748,68 @@ fn api_hf_meta(
         )
 }
 
+/// Read-only preflight for an external speculative-decoding (MTP) companion
+/// model: resolves `repo` to its pinned commit revision and reports whether
+/// it would require `trust_remote_code`. Does not download weights and does
+/// not grant consent — the launch-time gate in
+/// `inference::rapid_mlx::command::validate_trust_consent` still fail-closes
+/// independently of this result.
+fn api_hf_mtp_preflight(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "mtp-preflight")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::query::<std::collections::HashMap<String, String>>())
+        .and_then(
+            move |auth: Option<String>, params: std::collections::HashMap<String, String>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let repo = match params.get("repo") {
+                        Some(r) if !r.is_empty() => r.clone(),
+                        _ => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({
+                                        "ok": false, "error": "missing repo param"
+                                    })),
+                                    StatusCode::BAD_REQUEST,
+                                ),
+                            ));
+                        }
+                    };
+                    if !validate_hf_repo_id(&repo) {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Invalid repo id format. Expected: owner/repo"
+                                })),
+                                StatusCode::BAD_REQUEST,
+                            ),
+                        ));
+                    }
+                    match crate::hf::resolve_speculative_model_preflight(&repo).await {
+                        Ok(preflight) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "ok": true,
+                                "repoId": preflight.repo_id,
+                                "revision": preflight.revision,
+                                "trustRemoteCodeRequired": preflight.trust_remote_code_required,
+                            }))),
+                        ),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"ok": false, "error": e})),
+                        )),
+                    }
+                }
+            },
+        )
+}
+
 fn api_hf_resolve_origin(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
@@ -1251,6 +1313,7 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r.or(api_hf_card(config.clone())).unify().boxed();
     r = r.or(api_hf_meta(config.clone())).unify().boxed();
+    r = r.or(api_hf_mtp_preflight(config.clone())).unify().boxed();
     r = r.or(api_hf_resolve_origin(config.clone())).unify().boxed();
     r = r.or(api_hf_token_get(config.clone())).unify().boxed();
     r = r.or(api_hf_token_put(config.clone())).unify().boxed();

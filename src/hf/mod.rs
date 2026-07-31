@@ -535,6 +535,140 @@ pub async fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
     })
 }
 
+/// Read-only preflight for an external speculative-decoding (MTP) companion
+/// model reference. Resolves `repo_id` to its immutable commit `sha` and
+/// checks — without downloading model weights — whether the repo would
+/// require `trust_remote_code` to load (custom loader scripts, or a
+/// `config.json` declaring `main_class`/non-standard `auto_map` entries).
+///
+/// This only surfaces facts; it does not grant or check consent. The actual
+/// launch-time gate is `validate_trust_consent` in
+/// `inference::rapid_mlx::command`, which still fail-closes on any mismatch.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeculativeModelPreflight {
+    pub repo_id: String,
+    pub revision: String,
+    pub trust_remote_code_required: bool,
+}
+
+pub async fn resolve_speculative_model_preflight(
+    repo_id: &str,
+) -> Result<SpeculativeModelPreflight, String> {
+    let token = hf_load_token();
+    let url = format!("https://huggingface.co/api/models/{repo_id}");
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(ref tok) = token {
+        req = req.bearer_auth(tok);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HF models API request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HF returned HTTP {} for {repo_id}", resp.status()));
+    }
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse HF models API response: {e}"))?;
+
+    let revision = body
+        .get("sha")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("HF did not return a commit sha for {repo_id}"))?
+        .to_string();
+
+    let has_custom_loader = body
+        .get("siblings")
+        .and_then(|v| v.as_array())
+        .is_some_and(|files| {
+            files.iter().any(|f| {
+                let name = f
+                    .get("rfilename")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or("")
+                    .to_lowercase();
+                name == "main.py"
+                    || (name.starts_with("modeling_") && name.ends_with(".py"))
+                    || (name.starts_with("configuration_") && name.ends_with(".py"))
+            })
+        });
+
+    let trust_remote_code_required = if has_custom_loader {
+        true
+    } else {
+        fetch_repo_config_json_at(repo_id, &revision)
+            .await
+            .is_ok_and(|config| config_json_needs_trust_remote_code(&config))
+    };
+
+    Ok(SpeculativeModelPreflight {
+        repo_id: repo_id.to_string(),
+        revision,
+        trust_remote_code_required,
+    })
+}
+
+/// Mirrors the `main_class`/`auto_map` heuristic in
+/// `inference::rapid_mlx::model_resolver::needs_trust_remote_code`, applied
+/// to a remotely fetched `config.json` instead of a local model directory.
+fn config_json_needs_trust_remote_code(config: &serde_json::Value) -> bool {
+    if config.get("main_class").and_then(|v| v.as_str()).is_some() {
+        return true;
+    }
+    if let Some(auto_map) = config.get("auto_map").and_then(|v| v.as_object()) {
+        for class_value in auto_map.values() {
+            if let Some(class_str) = class_value.as_str()
+                && !class_str.starts_with("Auto")
+                && !class_str.contains("transformers.models")
+                && !class_str.contains("transformers_modules")
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Fetch a repo's `config.json` at a specific revision as raw JSON, bounded
+/// by the same size cap used for MLX config fetches. Absence or malformed
+/// JSON is reported as an error rather than defaulted, so callers make an
+/// explicit choice about how to treat "no config" (unlike the local-disk
+/// resolver, a missing remote config is not proof of a data-only repo).
+async fn fetch_repo_config_json_at(
+    repo_id: &str,
+    revision: &str,
+) -> Result<serde_json::Value, String> {
+    validate_hf_revision(revision)?;
+    let url = hf_resolve_download_url_at(repo_id, "config.json", revision);
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(token) = hf_load_token() {
+        req = req.bearer_auth(token);
+    }
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("request failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "HF returned HTTP {} for config.json",
+            resp.status()
+        ));
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("reading config.json: {e}"))?;
+    if bytes.len() as u64 > crate::inference::rapid_mlx::mlx_meta::MAX_CONFIG_BYTES {
+        return Err("config.json exceeds size limit".to_string());
+    }
+    serde_json::from_slice(&bytes).map_err(|e| format!("config.json is not valid JSON: {e}"))
+}
+
 /// List repo files; filters for GGUF if gguf_only=true.
 #[allow(dead_code)]
 pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileInfo>> {
