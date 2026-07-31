@@ -509,14 +509,23 @@ impl RapidMlxCommandBuilder {
             args.push("--kv-disk-checkpoint-interval".to_string());
             args.push(interval.to_string());
         }
-        // Phase 7: batching/concurrency flags
-        if let Some(seqs) = self.max_num_seqs {
-            capabilities.require("--max-num-seqs")?;
+        // Phase 7: batching/concurrency flags.
+        //
+        // Omit-and-report, like PFlash, TurboQuant and speculative decoding above: these are
+        // throughput tuning, so a runtime that lacks the flag should fall back to its own
+        // scheduling rather than fail the launch. They used to call require(), which aborts
+        // the whole build -- and since neither flag is in verified_baseline(), picking a
+        // value in the UI blanked the command preview outright, taking the
+        // requested-vs-effective diagnostics for every unrelated setting with it.
+        if let Some(seqs) = self.max_num_seqs
+            && capabilities.contains("--max-num-seqs")
+        {
             args.push("--max-num-seqs".to_string());
             args.push(seqs.to_string());
         }
-        if let Some(requests) = self.max_concurrent_requests {
-            capabilities.require("--max-concurrent-requests")?;
+        if let Some(requests) = self.max_concurrent_requests
+            && capabilities.contains("--max-concurrent-requests")
+        {
             args.push("--max-concurrent-requests".to_string());
             args.push(requests.to_string());
         }
@@ -604,9 +613,11 @@ impl RapidMlxCommandBuilder {
                 "embeddings is not a Rapid-MLX on/off launch setting; configure a qualified embedding model before enabling it"
             );
         }
-        // Phase 7: GPU flags
-        if let Some(util) = self.gpu_memory_utilization {
-            capabilities.require("--gpu-memory-utilization")?;
+        // Phase 7: GPU flags. Same omit-and-report treatment as the batching flags above --
+        // a memory-utilisation hint is not worth failing a launch over.
+        if let Some(util) = self.gpu_memory_utilization
+            && capabilities.contains("--gpu-memory-utilization")
+        {
             args.push("--gpu-memory-utilization".to_string());
             args.push(util.to_string());
         }
@@ -850,6 +861,36 @@ mod tests {
             .iter()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[test]
+    fn unsupported_throughput_flags_are_omitted_without_failing_the_build() {
+        // None of --max-num-seqs, --max-concurrent-requests or --gpu-memory-utilization are
+        // in verified_baseline(). These are exposed in the spawn wizard and the preset
+        // editor, so a require() here turned an ordinary UI choice into a launch failure.
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .port(9000)
+        .max_num_seqs(Some(8))
+        .max_concurrent_requests(Some(32))
+        .gpu_memory_utilization(Some(0.85))
+        .prefill_step_size(Some(512))
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .expect("unsupported throughput tuning must not fail the build");
+
+        for flag in ["--max-num-seqs", "--max-concurrent-requests", "--gpu-memory-utilization"] {
+            assert!(
+                !launch.args.iter().any(|a| a == flag),
+                "{flag} must be omitted on a runtime that does not support it"
+            );
+        }
+        // An unrelated supported flag still reaches argv, so one unsupported choice cannot
+        // suppress everything else.
+        assert!(
+            launch.args.windows(2).any(|p| p == ["--prefill-step-size", "512"]),
+            "a supported flag must survive alongside omitted ones"
+        );
     }
 
     #[test]

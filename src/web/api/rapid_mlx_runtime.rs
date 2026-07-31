@@ -897,6 +897,40 @@ fn build_requested_vs_effective(
         );
     }
 
+    // The three throughput tuning values below are dropped from argv on a runtime that lacks
+    // the flag rather than failing the launch. Each is reported so the user sees that the
+    // runtime, not their choice, is deciding scheduling and memory headroom.
+    for (name, flag, requested) in [
+        (
+            "max_num_seqs",
+            "--max-num-seqs",
+            config.max_num_seqs.map(|v| v.to_string()),
+        ),
+        (
+            "max_concurrent_requests",
+            "--max-concurrent-requests",
+            config.max_concurrent_requests.map(|v| v.to_string()),
+        ),
+        (
+            "gpu_memory_utilization",
+            "--gpu-memory-utilization",
+            config.gpu_memory_utilization.map(|v| v.to_string()),
+        ),
+    ] {
+        if let Some(value) = requested
+            && !capabilities.contains(flag)
+        {
+            diff.insert(
+                name.to_string(),
+                serde_json::json!({
+                    "requested": value,
+                    "effective": "runtime default",
+                    "reason": format!("{flag} is not supported by this runtime version; omitted")
+                }),
+            );
+        }
+    }
+
     // Concurrency policy: overlap mode requires runtime support
     if let Some(ref policy) = config.concurrency_policy
         && policy == "allow_overlap"
