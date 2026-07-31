@@ -185,9 +185,41 @@ Both were recorded in the commit message for `ef64903` and are corrected here.
    The lesson is the register's own: a probe that changes two things at once proves nothing
    about either.
 
+   **But the probe did expose a real defect, one layer over.** See below — the retraction
+   was of the diagnosis, not of the symptom.
+
 2. **"Two pre-existing load-sensitive test races."** Not a defect. `playwright.config` sets
    `fullyParallel: false`, `workers: 1` under CI and `retries: 2` under CI. The failures were
    produced by running locally, where `workers` is undefined and therefore parallel and
    `retries` is 0 — concurrency the suite is explicitly configured never to have. Under the
    real settings the same five specs pass 40/40, twice over.
 
+
+
+## 9. Resolved — speculative decoding suppressed every other setting's diagnostics (2026-07-31)
+
+Found while retracting the bad turboquant finding above. TurboQuant and speculative decoding
+are unrelated features that were handled at different layers with incompatible failure
+semantics:
+
+- TurboQuant lives in the response layer. `build_effective_policy` forces it to `Off`,
+  `build_requested_vs_effective` reports the downgrade with a reason, and it never reaches a
+  capability check that can fail.
+- Speculative called `capabilities.require("--speculative")?`, aborting the whole command
+  build.
+
+`--speculative` is absent from `ServeCapabilities::verified_baseline()`, so on a baseline
+runtime one `speculative_policy` blanked the entire preview — no argv, no `effective_policy`,
+and no `requested_vs_effective` for any unrelated setting. One feature's unavailability
+suppressed every other feature's diagnostics, which is also what made the original
+misdiagnosis possible.
+
+Speculative is a throughput feature like TurboQuant and PFlash and is now treated like them:
+omitted from argv when the flag is absent, reported as a downgrade instead. PFlash already
+set that precedent at `command.rs:487`. `build_effective_policy` now takes capabilities so it
+reports `speculative_policy: "off"` rather than echoing the request back and disagreeing with
+the argv beside it.
+
+Fixed in `7948ff3`. Regression test `unsupported_speculative_is_omitted_without_failing_the_build`,
+negative-control checked. Verified live: a payload setting both features returns argv plus two
+independent diff entries, with an unrelated `max_num_seqs` still reaching argv.
