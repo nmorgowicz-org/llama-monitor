@@ -145,3 +145,37 @@ replacement was never built.
   There is not enough divergence beyond that to justify storing it.
 - **`CONSTRAIN_TOOLS` is not a product setting.** Dropping tool grammar to buy speculation speed is
   the wrong trade.
+
+
+## 8. Resolved — command preview (2026-07-30)
+
+`/api/rapid-mlx/command-preview` had no consumer, and could not have had one. It
+returned `BAD_REQUEST` unless the caller supplied `executable_path`, and no frontend
+surface can learn that path — `/api/llama-binary/platform-info` exposes only the boolean
+`rapid_mlx_local_available`. Two further divergences from the real launch path sat in the
+same handler: `models_dir` was the relative literal `"models"` resolved against the
+server's CWD, and `runtime_version` was passed as an empty string.
+
+The one spec covering the endpoint, `phase7-command-preview.spec.js`, is `@runtime-required`
+and skipped unless `LLAMA_MONITOR_HAS_RUNTIME=1`, so it had never run. Its payloads also
+carry no `executable_path`, so it would have failed had it run. This is the defect class in
+its purest form: the test that would have caught it was the one that never executed.
+
+Fixed in `12a9739` (backend falls back to `Discovery::resolve_binary`, the launcher's own
+explicit → managed → PATH precedence; real `models_dir`; qualified runtime version) and
+`ef64903` (step-6 config card renders the argv, plus `requested_vs_effective` and `reasons`).
+`command-preview-ui.spec.js` covers it, negative-control verified.
+
+### Open, found while verifying the above
+
+- **Capability-gated flags are dropped without a reason.** A `turboquant_mode: "k8v4"`
+  request against a runtime lacking `--kv-cache-turboquant` produces argv without the flag,
+  an empty `requested_vs_effective`, and no `reasons`. An unsupported `speculative_policy`,
+  by contrast, hard-errors. The preview surface renders whatever the backend reports, so it
+  will show these correctly once the backend reports them — but today the silent-drop case
+  is invisible in both places. Verified live on 2026-07-30.
+- **Two pre-existing load-sensitive test races.** `phase7-presets.spec.js:52` reads
+  `estimateScenario` as `interactive_coding_agent` where it expects `tool_research_agent`;
+  `preset-flow.spec.js:249` times out polling `putCount`. Neither reproduces in the
+  four-spec set alone (3/3 clean); both appear intermittently once a fifth spec adds
+  parallel load. Not caused by the command-preview work.
