@@ -9814,6 +9814,113 @@ function _renderPresetParamsStep() {
 
 // ── Spawn config preview card (step 6) ────────────────────────────────────────
 
+/**
+ * Fetches and renders the exact `rapid-mlx serve` argv for the current wizard state.
+ *
+ * Rendered into the step-6 config card. `/api/rapid-mlx/command-preview` resolves the
+ * binary and the model the same way the launcher does, so a flag missing here is a flag
+ * that will be missing at launch — including ones the installed runtime does not support,
+ * which the endpoint drops rather than passes on.
+ */
+async function _renderCommandPreview(host) {
+  const mk = (tag, cls, text) => {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text !== undefined) el.textContent = text;
+    return el;
+  };
+
+  host.innerHTML = '';
+  host.appendChild(mk('div', 'spawn-command-preview-status', 'Building launch command…'));
+
+  let data;
+  try {
+    const payload = buildSpawnPayload();
+    // The key is a secret and the preview does not need it; the same strip is done for
+    // presets at buildPresetPayload().
+    const { api_key: _apiKey, ...config } = payload?.rapid_mlx || {};
+    const headers = Object.assign(
+      { 'Content-Type': 'application/json' },
+      window.authHeaders ? window.authHeaders() : {},
+    );
+    const resp = await fetch('/api/rapid-mlx/command-preview', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(config),
+    });
+    data = await resp.json();
+    if (!resp.ok || data?.ok === false) {
+      throw new Error(data?.error || `Preview failed (${resp.status})`);
+    }
+  } catch (err) {
+    host.innerHTML = '';
+    // A failed preview must not read as a failed launch. It is a preview of the command,
+    // and the spawn button stays enabled.
+    const warn = mk('div', 'spawn-command-preview-error');
+    warn.appendChild(mk('div', 'spawn-command-preview-error-title', 'Could not preview the launch command'));
+    warn.appendChild(mk('div', 'spawn-command-preview-error-detail', String(err.message || err)));
+    host.appendChild(warn);
+    return;
+  }
+
+  host.innerHTML = '';
+
+  const hdr = mk('div', 'spawn-command-preview-header');
+  hdr.appendChild(mk('span', 'spawn-command-preview-title', 'Launch command'));
+  const copyBtn = mk('button', 'spawn-command-preview-copy', 'Copy');
+  copyBtn.type = 'button';
+  const argvText = ['rapid-mlx', ...(data.argv || [])].join(' ');
+  copyBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(argvText);
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+    } catch {
+      copyBtn.textContent = 'Copy failed';
+      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+    }
+  });
+  hdr.appendChild(copyBtn);
+  host.appendChild(hdr);
+
+  host.appendChild(mk('pre', 'spawn-command-preview-argv', argvText));
+
+  if (data.redacted) {
+    host.appendChild(mk(
+      'div',
+      'spawn-command-preview-note',
+      'Secrets are redacted from this preview; the launched process receives the real values.',
+    ));
+  }
+
+  // Flags the runtime declined, or changed. Empty on a clean build, which is the normal case.
+  const diff = data.requested_vs_effective && typeof data.requested_vs_effective === 'object'
+    ? Object.entries(data.requested_vs_effective)
+    : [];
+  if (diff.length > 0) {
+    const box = mk('div', 'spawn-command-preview-diff');
+    box.appendChild(mk('div', 'spawn-command-preview-diff-title', 'Adjusted by the runtime'));
+    diff.forEach(([key, value]) => {
+      const row = mk('div', 'spawn-command-preview-diff-row');
+      row.appendChild(mk('span', 'spawn-command-preview-diff-key', key));
+      row.appendChild(mk(
+        'span',
+        'spawn-command-preview-diff-value',
+        typeof value === 'string' ? value : JSON.stringify(value),
+      ));
+      box.appendChild(row);
+    });
+    host.appendChild(box);
+  }
+
+  if (Array.isArray(data.reasons) && data.reasons.length > 0) {
+    const list = mk('ul', 'spawn-command-preview-reasons');
+    data.reasons.forEach((reason) => list.appendChild(mk('li', null, reason)));
+    host.appendChild(list);
+  }
+}
+
+
 async function _renderSpawnConfigCard() {
   const card = document.getElementById('spawn-config-card');
   const sidebar = document.getElementById('spawn-sidebar-config');
@@ -9893,6 +10000,17 @@ async function _renderSpawnConfigCard() {
       grid.appendChild(item);
     });
     card.appendChild(grid);
+
+    // Rapid-MLX takes most of its behaviour from serve flags rather than from the four
+    // fields above, so show the argv the launcher will actually run. This is also the only
+    // surface that consumes effective_policy / requested_vs_effective, which is where the
+    // runtime reports flags it silently declined to pass through.
+    if (rapid) {
+      const host = mk('div', 'spawn-command-preview');
+      host.id = 'spawn-command-preview';
+      card.appendChild(host);
+      _renderCommandPreview(host);
+    }
   }
 
   if (sidebar) {

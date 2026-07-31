@@ -8,6 +8,12 @@
 // - Respects workload_scenario
 //
 // These tests work against real endpoints in CI — Phase 7 backend is implemented.
+//
+// NOTE: every test here is @runtime-required and skipped unless LLAMA_MONITOR_HAS_RUNTIME=1,
+// so this file has never actually run. It was also written before the endpoint could resolve
+// its own binary: these payloads carry no `executable_path`, which the handler used to
+// require, so they would have failed with BAD_REQUEST. Browser-side coverage that does run
+// on every invocation lives in command-preview-ui.spec.js.
 
 import { test, expect } from '@playwright/test';
 

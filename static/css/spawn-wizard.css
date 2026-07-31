@@ -5963,6 +5963,108 @@
   color: var(--color-text-primary);
 }
 
+/* Rapid-MLX launch command preview (step 6) */
+.spawn-command-preview {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.spawn-command-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.spawn-command-preview-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+}
+.spawn-command-preview-copy {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+}
+.spawn-command-preview-copy:hover {
+  color: var(--color-text-primary);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+.spawn-command-preview-argv {
+  margin: 0;
+  padding: 8px 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: var(--radius-sm, 4px);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.spawn-command-preview-status,
+.spawn-command-preview-note {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 6px;
+}
+.spawn-command-preview-error {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm, 4px);
+  background: rgba(255, 176, 32, 0.08);
+  border: 1px solid rgba(255, 176, 32, 0.28);
+}
+.spawn-command-preview-error-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-warning, #ffb020);
+}
+.spawn-command-preview-error-detail {
+  font-size: 11px;
+  margin-top: 2px;
+  color: var(--color-text-muted);
+  word-break: break-word;
+}
+.spawn-command-preview-diff {
+  margin-top: 8px;
+}
+.spawn-command-preview-diff-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-warning, #ffb020);
+  margin-bottom: 3px;
+}
+.spawn-command-preview-diff-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  padding: 2px 0;
+}
+.spawn-command-preview-diff-key {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.spawn-command-preview-diff-value {
+  color: var(--color-text-primary);
+  text-align: right;
+  word-break: break-word;
+}
+.spawn-command-preview-reasons {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
 #wizard-step-5 .wizard-main > .btn-wizard-primary {
   width: 100%;
   min-height: 48px;
