@@ -956,6 +956,38 @@ mod tests {
             "/api/hf/quantizers",
             Some("[]")
         ),
+        (
+            route_hf_community_sources_get,
+            "GET",
+            "/api/hf/community-sources",
+            None
+        ),
+        // These two need bodies that actually deserialize: warp rejects a malformed body with
+        // 400 before the handler runs, which would make the 401 assertion below untestable.
+        (
+            route_hf_community_sources_put,
+            "PUT",
+            "/api/hf/community-sources",
+            Some(r#"{"entries":[]}"#)
+        ),
+        (
+            route_hf_community_sources_entry_post,
+            "POST",
+            "/api/hf/community-sources/entry",
+            Some(r#"{"username":"x","displayName":"x","description":"x","role":"curator"}"#)
+        ),
+        (
+            route_hf_community_sources_entry_delete,
+            "DELETE",
+            "/api/hf/community-sources/entry?username=x&role=curator",
+            None
+        ),
+        (
+            route_hf_community_sources_reset,
+            "POST",
+            "/api/hf/community-sources/reset",
+            None
+        ),
         (route_hf_download_dir, "GET", "/api/hf/download-dir", None),
         (route_hf_token_get, "GET", "/api/hf/token", None),
         (route_hf_token_put, "PUT", "/api/hf/token", Some("{}")),

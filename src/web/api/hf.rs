@@ -347,6 +347,218 @@ fn api_hf_quantizers_put(
         )
 }
 
+// ── Community source catalog ──────────────────────────────────────────────────
+//
+// The catalog module shipped with load/save/upsert/remove/reset and no caller under
+// `src/web/`, so "user-editable" was a property of the code and not of the product: the
+// frontend's role badges came from a hardcoded regex list instead. These are the endpoints
+// that make the on-disk catalog the actual source of truth.
+//
+// The role gates in `upsert_entry` (an original author can never also be registered as a
+// converter for the same username) are enforced there, not here, so they hold for any caller.
+
+fn api_hf_community_sources_get(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "community-sources")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                use crate::models::community_source_catalog::CommunitySourceRole;
+                let catalog =
+                    crate::models::community_source_catalog::load_catalog(&cfg.config_dir);
+                // The role vocabulary ships with the catalog so badge labels and their
+                // explanations have one source of truth in the enum, not a parallel list in JS.
+                let roles: Vec<_> = CommunitySourceRole::ALL
+                    .iter()
+                    .map(|r| {
+                        serde_json::json!({
+                            "id": r,
+                            "label": r.label(),
+                            "description": r.description(),
+                        })
+                    })
+                    .collect();
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({ "ok": true, "catalog": catalog, "roles": roles }),
+                )))
+            }
+        })
+}
+
+fn api_hf_community_sources_put(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "community-sources")
+        .and(warp::put())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::content_length_limit(512 * 1024).and(warp::body::json::<
+            crate::models::community_source_catalog::CommunitySourceCatalog,
+        >()))
+        .and_then(
+            move |auth: Option<String>,
+                  body: crate::models::community_source_catalog::CommunitySourceCatalog| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    match crate::models::community_source_catalog::save_catalog(
+                        &cfg.config_dir,
+                        &body,
+                    ) {
+                        Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({ "ok": true, "catalog": body })),
+                        )),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &serde_json::json!({ "ok": false, "error": format!("{e}") }),
+                            ),
+                        )),
+                    }
+                }
+            },
+        )
+}
+
+fn api_hf_community_sources_entry_post(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "community-sources" / "entry")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::content_length_limit(64 * 1024).and(warp::body::json::<
+            crate::models::community_source_catalog::CommunitySourceEntry,
+        >()))
+        .and_then(
+            move |auth: Option<String>,
+                  entry: crate::models::community_source_catalog::CommunitySourceEntry| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let mut catalog =
+                        crate::models::community_source_catalog::load_catalog(&cfg.config_dir);
+                    // A user-added entry is never bundled, whatever the request claims --
+                    // otherwise `remove_entry` would refuse to delete it later.
+                    let mut entry = entry;
+                    entry.bundled = false;
+                    let saved = match crate::models::community_source_catalog::upsert_entry(
+                        &mut catalog,
+                        entry,
+                    ) {
+                        Ok(e) => e,
+                        Err(e) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(
+                                    &serde_json::json!({ "ok": false, "error": format!("{e}") }),
+                                ),
+                            ));
+                        }
+                    };
+                    match crate::models::community_source_catalog::save_catalog(
+                        &cfg.config_dir,
+                        &catalog,
+                    ) {
+                        Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({ "ok": true, "entry": saved })),
+                        )),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &serde_json::json!({ "ok": false, "error": format!("{e}") }),
+                            ),
+                        )),
+                    }
+                }
+            },
+        )
+}
+
+#[derive(serde::Deserialize)]
+struct CommunitySourceEntryRef {
+    username: String,
+    role: crate::models::community_source_catalog::CommunitySourceRole,
+}
+
+fn api_hf_community_sources_entry_delete(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "community-sources" / "entry")
+        .and(warp::delete())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::query::<CommunitySourceEntryRef>())
+        .and_then(move |auth: Option<String>, q: CommunitySourceEntryRef| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let mut catalog =
+                    crate::models::community_source_catalog::load_catalog(&cfg.config_dir);
+                // Bundled entries survive this by design; the caller gets removed:false rather
+                // than an error, and `reset` is the way back to the shipped set.
+                let removed = crate::models::community_source_catalog::remove_entry(
+                    &mut catalog,
+                    &q.username,
+                    q.role,
+                );
+                if removed
+                    && let Err(e) = crate::models::community_source_catalog::save_catalog(
+                        &cfg.config_dir,
+                        &catalog,
+                    )
+                {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({ "ok": false, "error": format!("{e}") }),
+                        ),
+                    ));
+                }
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({ "ok": true, "removed": removed }),
+                )))
+            }
+        })
+}
+
+fn api_hf_community_sources_reset(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "community-sources" / "reset")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                // Preferences are editorial, not catalog data, so reset keeps them.
+                match crate::models::community_source_catalog::reset_catalog(&cfg.config_dir) {
+                    Ok(catalog) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": true, "catalog": catalog })),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({ "ok": false, "error": format!("{e}") }),
+                        ),
+                    )),
+                }
+            }
+        })
+}
+
 fn api_hf_download_dir(
     state: AppState,
     app_config: Arc<AppConfig>,
@@ -955,6 +1167,38 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r
         .or(api_hf_quantizers_put(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    // Longest paths first: `community-sources/entry` and `/reset` must be offered before the
+    // bare `community-sources` filter, which would otherwise reject the sub-paths and end the
+    // chain there.
+    r = r
+        .or(api_hf_community_sources_entry_post(
+            state.clone(),
+            config.clone(),
+        ))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_hf_community_sources_entry_delete(
+            state.clone(),
+            config.clone(),
+        ))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_hf_community_sources_reset(
+            state.clone(),
+            config.clone(),
+        ))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_hf_community_sources_get(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_hf_community_sources_put(state.clone(), config.clone()))
         .unify()
         .boxed();
     r = r

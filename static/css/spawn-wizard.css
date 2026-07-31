@@ -3268,6 +3268,23 @@
   color: rgba(167,139,250,0.85);
 }
 
+/* The catalog has seven roles, not the three the old hardcoded list could produce. Original
+   author is the one that most needs to read differently from the converter roles above --
+   confusing "made this model" with "requantised someone else's" is the mistake the whole
+   catalog exists to prevent. The rest share a neutral treatment. */
+.hf-sg-role-badge--original-author {
+  background: rgba(34,197,94,0.15);
+  color: rgba(74,222,128,0.85);
+}
+
+.hf-sg-role-badge--dataset-author,
+.hf-sg-role-badge--curator,
+.hf-sg-role-badge--merger-distiller,
+.hf-sg-role-badge--custom {
+  background: rgba(148,163,184,0.15);
+  color: rgba(203,213,225,0.85);
+}
+
 /* ── Qualification badges ──────────────────────────────────────────────────── */
 
 .hf-sg-qual-badge {

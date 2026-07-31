@@ -11,9 +11,9 @@
 //! - Original author never becomes converter
 //! - All roles are evidence-bearing, not name-only claims
 //!
-//! Phase 8A: backend module, not yet wired to endpoints.
-
-#![allow(dead_code)]
+//! Served by `/api/hf/community-sources` (GET/PUT, plus `/entry` and `/reset`) in
+//! `src/web/api/hf.rs`, which is what makes the "user-editable" claim above true rather
+//! than aspirational.
 
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -75,6 +75,19 @@ pub enum CommunitySourceRole {
 }
 
 impl CommunitySourceRole {
+    /// Every role, in the order the UI should offer them. Served to the frontend so the
+    /// badge labels and their explanations come from this enum rather than being retyped
+    /// in JavaScript and drifting from it.
+    pub const ALL: [CommunitySourceRole; 7] = [
+        CommunitySourceRole::OriginalAuthor,
+        CommunitySourceRole::DatasetAuthor,
+        CommunitySourceRole::GgufQuantizer,
+        CommunitySourceRole::MlxConverter,
+        CommunitySourceRole::Curator,
+        CommunitySourceRole::MergerDistiller,
+        CommunitySourceRole::Custom,
+    ];
+
     pub fn label(&self) -> &'static str {
         match self {
             CommunitySourceRole::OriginalAuthor => "Original author",
@@ -272,14 +285,6 @@ pub fn remove_entry(
         .entries
         .retain(|e| !(e.username == username && e.role == role) || e.bundled);
     len_before != catalog.entries.len()
-}
-
-/// Get entries filtered by role.
-pub fn entries_for_role(
-    catalog: &CommunitySourceCatalog,
-    role: CommunitySourceRole,
-) -> Vec<&CommunitySourceEntry> {
-    catalog.entries.iter().filter(|e| e.role == role).collect()
 }
 
 /// Get entries for a username across all roles.

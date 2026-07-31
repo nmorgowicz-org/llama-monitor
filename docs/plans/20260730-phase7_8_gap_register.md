@@ -469,3 +469,112 @@ Qwen3.6-27B, so the capability is proven — but exposing it needs a config fiel
 vLLM-style JSON object (`method`, `model`, `num_speculative_tokens`, `disable_auto_k`), external
 sidecar model management, and the K-clamping rules for hybrid SSM architectures. That is a
 feature with its own design, not a loose end from deleting a phantom. Tracked separately.
+
+## 15. Resolved — the full-suite flakiness was three unrelated causes (2026-07-31)
+
+The suite failed 2–5 tests per 252-test serial run, never the same set twice, which is why it
+had been carried as "instability" rather than diagnosed. It was not one problem. Running the
+failing specs in isolation passed every time; running `core/` alone passed; running `chat/`
+plus the failing specs passed. Only the full ordering reproduced it, and even then not
+deterministically. That pattern — passes alone, fails in company, different victim each run —
+is the signature of shared state, not of a product race.
+
+### Cause 1 — a stale close-animation timer (product defect, real)
+
+`closeSettingsModal` removed the `open` class inside an uncancelled 260 ms `setTimeout` and
+also set `aria-hidden`/`inert`. Reopening inside that window let the *previous* close's timer
+fire against the newly-open modal, producing a modal that reported `open` in the DOM while
+rendering nothing and swallowing input. Fixed by holding the timer handle and cancelling it on
+open, plus not stacking timers on a re-entrant close. `db-admin.js` and `chat-params.js`
+(`closeDebugModal`) had the same shape and got the same fix; `chat-templates.js:921` and
+`chat-params.js:558` were checked and are safe, because they remove the visibility class
+synchronously.
+
+`core/modal-reopen-race.spec.js` covers it. The test was negative-controlled: with the fix
+stashed, the reopened modal comes back with `class="modal-overlay"` — no `open` at all — so
+the test fails for the intended reason rather than passing vacuously.
+
+### Cause 2 — six specs fabricated a state the app never produces (test defect)
+
+`tls-certificates`, `spa-navigation`, `app-shell` and `settings-guided-gen` opened settings by
+importing `openSettingsModal` and calling it directly, leaving the modal open while the URL was
+still `/`. The app never does this: every real entry point (`nav.js`, `user-menu.js`,
+`models.js`) goes through `Router.navigate('/settings')`. And `Router.onBeforeDispatch`
+(`bootstrap.js:221`) closes the settings modal for any path that is not `/settings` — correctly,
+so Back/Forward does not strand overlays. So any router dispatch landing after the direct call
+closed the modal mid-test. Under a full serial suite the boot dispatch is slow enough to land
+late, which is exactly why load, and therefore test order, decided the outcome.
+
+Fixed as a class rather than per-spec: `helpers.js` gained `openSettings(page, tab)`, which
+navigates the way the product does and waits for `open`. All six call sites now use it.
+
+Worth stating plainly, because the fix could be mistaken for a workaround: cause 1 was a real
+bug and cause 2 was not. The modal timer would have bitten a user who closed and reopened
+settings quickly. The dispatch teardown only ever bit tests, because only tests could reach the
+state it tears down.
+
+### Cause 3 — an assertion coupled to session state (test defect)
+
+`spa-navigation.spec.js:86` navigated away to `/chat` and asserted the URL contained `/chat`.
+But `/chat` falls back to welcome when no session is active — the test two cases above it
+asserts exactly that — and whether a session exists depends on which specs ran earlier against
+the shared server. Now navigates to `/logs`, which has no such dependency. The behaviour under
+test (the modal dismisses when navigating away) is unchanged.
+
+### Also fixed: one deterministic failure that was mine
+
+`preset-flow.spec.js:289` asserted a Rapid preset shows exactly 2 nav sections. Section 13
+deliberately made it 3 by exposing the generation section, and this spec was not in the four
+run at the time, so the regression shipped unnoticed. The assertion now names the sections
+(`model`, `generation`, `advanced`) instead of counting them — a count silently accepts the
+wrong three — and records why generation belongs there.
+
+### Result and what is still open
+
+Three consecutive full runs: 5 failed → 1 failed → see below. `guided-generation/phase8-tag-cloud.spec.js:255`
+(a group header's `aria-expanded` still `false` after a re-expand click) failed once across the
+three runs and has not been diagnosed. It is a different shape from the three above — a click
+that did not take, not a torn-down modal — so it is recorded here rather than assumed to share
+a cause. Do not treat a single green full run as proof this class is closed; the failure rate
+was always low enough that one clean run proves little.
+
+## 16. Resolved — `CommunitySourceCatalog` reached from nothing (2026-07-31)
+
+Section 4 recorded two halves of one gap: a seven-role, user-editable catalog on the server
+with `save_catalog`/`reset_catalog`/`upsert_entry`/`remove_entry` called from nowhere under
+`src/web/`, and role badges in the frontend built from `KNOWN_CONVERTER_PATTERNS`, a hardcoded
+regex list with three roles that classified `Qwen/` as a converter. Qwen is the original author
+of Qwen. Both halves are now closed against each other.
+
+**Backend.** Five routes in `src/web/api/hf.rs`: `GET`/`PUT /api/hf/community-sources`,
+`POST`/`DELETE /api/hf/community-sources/entry`, `POST /api/hf/community-sources/reset`. The
+role gates stay in `upsert_entry` so they hold for every caller, not just this one. Two details
+worth keeping: an entry arriving with `bundled: true` is forced to `false`, or `remove_entry`
+would later refuse to delete it; and the sub-paths are registered before the bare
+`community-sources` filter, which would otherwise reject them and end the chain.
+
+Verified against a live server rather than only in tests — the whole point of this register is
+that green tests are not evidence of reachability. `GET` returns the 10 bundled entries and the
+role vocabulary; unauthenticated `GET` returns 401; `POST` persists to
+`community-source-catalog.json` on disk with `bundled` forced false; adding `bartowski` as an
+original author is refused by the role gate; deleting a bundled entry returns `removed: false`
+while deleting a user entry succeeds; and `reset` restores the 10 entries while preserving a
+preference set through `PUT`.
+
+**Frontend.** `resolveAuthorRole` now reads the catalog, fetched once per page and awaited
+before results render. A multi-role owner is resolved by the repo's own format tags — Unsloth
+authors finetunes *and* quantizes them, so `unsloth/*-GGUF` reads as GGUF quantizer while their
+finetunes read as original author. Owners absent from the catalog fall back to the repo-name
+heuristic, which is what removes the Qwen misclassification. The badge's tooltip is the role's
+own `description()` from the Rust enum, so the vocabulary has one source; `GET` serves
+`CommunitySourceRole::ALL` for that reason. `core/hf-role-badges.spec.js` covers all four cases
+including catalog-unreachable.
+
+Removing the module's blanket `#![allow(dead_code)]` — it was there because nothing called the
+module — surfaced `entries_for_role`, which has no callers anywhere including tests. Deleted
+rather than re-suppressed.
+
+**Not addressed here:** there is still no UI for editing the catalog. The endpoints exist and
+are exercised, but a user cannot yet add a source without calling the API directly. That is a
+smaller, better-defined gap than the one this closes, and it is now a UI task rather than an
+architectural one.

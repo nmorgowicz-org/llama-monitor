@@ -81,34 +81,99 @@ function resolveCategories(tags) {
 
 // ── Author/converter role (Phase 8B1) ─────────────────────────────────────────
 
-const KNOWN_CONVERTER_PATTERNS = [
-  /^bartowski\//, /^mlx-community\//, /^Undi95\//, /^TheBloke\//,
-  /^Mradermacher\//, /^cjpais\//, /^lmstudio-community\//,
-  /^mrm8488\//, /^runpod\//, /^TuringEnterprises\//, /^Qwen\//,
-];
+// Roles come from the CommunitySourceCatalog on the server, not from a list in this file.
+// The list that used to live here classified `Qwen/` as a converter — Qwen is the original
+// author of Qwen — and it had three roles against the catalog's seven, with no way for the
+// user to correct either. The catalog is editable and evidence-bearing; this is just its view.
+//
+// `_catalogPromise` is the in-flight or settled load. A failed load caches `null` rather than
+// retrying per card, so a server hiccup costs the badges, not the search.
+let _catalogPromise = null;
+let _sourcesByUsername = null;
+let _roleMeta = null;
 
-function isLikelyConverter(repoId) {
-  return KNOWN_CONVERTER_PATTERNS.some(p => p.test(repoId));
+async function _fetchCommunitySources() {
+  try {
+    const res = await fetch('/api/hf/community-sources', { headers: getAuthHeaders() });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data?.ok) return null;
+
+    const byUser = new Map();
+    for (const e of data.catalog?.entries || []) {
+      const key = (e.username || '').toLowerCase();
+      if (!key) continue;
+      if (!byUser.has(key)) byUser.set(key, []);
+      byUser.get(key).push(e);
+    }
+    const roles = new Map();
+    for (const r of data.roles || []) roles.set(r.id, r);
+    _sourcesByUsername = byUser;
+    _roleMeta = roles;
+    return byUser;
+  } catch {
+    return null;
+  }
+}
+
+/** Load the catalog once per page. Safe to call repeatedly. */
+export function ensureCommunitySourceCatalog() {
+  if (!_catalogPromise) _catalogPromise = _fetchCommunitySources();
+  return _catalogPromise;
+}
+
+/** Test seam: drop the cached catalog so the next call refetches. */
+export function _resetCommunitySourceCatalog() {
+  _catalogPromise = null;
+  _sourcesByUsername = null;
+  _roleMeta = null;
+}
+
+// Role ids are snake_case on the wire (the Rust enum's serde form); the badge CSS classes are
+// kebab-case.
+function _roleBadge(roleId) {
+  const meta = _roleMeta?.get(roleId);
+  // If the catalog could not be loaded the label is derived from the id. Sentence-case it
+  // rather than keeping a second copy of the labels here: deriving the presentation is a
+  // formatting rule, whereas a hardcoded label table would be the duplicated vocabulary this
+  // change exists to remove, and it would drift from the enum the first time a role is added.
+  const derived = roleId.replace(/_/g, ' ');
+  return {
+    role: roleId.replace(/_/g, '-'),
+    label: meta?.label || derived.charAt(0).toUpperCase() + derived.slice(1),
+    description: meta?.description || '',
+  };
 }
 
 function resolveAuthorRole(repoId, tags) {
   const lowerTags = (tags || []).map(t => t.toLowerCase());
   const hasMlxTag = lowerTags.some(t => t.includes('mlx'));
   const hasGgufTag = lowerTags.some(t => t.includes('gguf') || t.includes('gguf-file'));
-  const isConverter = isLikelyConverter(repoId);
-
-  if (isConverter) {
-    if (hasMlxTag) return { role: 'mlx-converter', label: 'MLX converter' };
-    if (hasGgufTag) return { role: 'gguf-quantizer', label: 'GGUF quantizer' };
-    return { role: 'converter', label: 'Converter' };
-  }
 
   const parts = (repoId || '').split('/');
   const owner = parts[0] || '';
   const repoName = (parts[1] || '').toLowerCase();
 
+  const entries = _sourcesByUsername?.get(owner.toLowerCase());
+  if (entries?.length) {
+    // Several catalog entries can share a username, and one entity can hold several roles
+    // (Unsloth authors finetunes *and* quantizes). The repo's own format tags say which role
+    // applies to *this* repo, so prefer a role the owner is actually known for and that the
+    // tags corroborate; otherwise fall back to their primary entry.
+    const held = new Set();
+    for (const e of entries) {
+      held.add(e.role);
+      for (const r of e.also_known_for || e.alsoKnownFor || []) held.add(r);
+    }
+    if (hasMlxTag && held.has('mlx_converter')) return _roleBadge('mlx_converter');
+    if (hasGgufTag && held.has('gguf_quantizer')) return _roleBadge('gguf_quantizer');
+    return _roleBadge(entries[0].role);
+  }
+
+  // Not in the catalog. Fall back to the repo name, which is the only evidence available:
+  // a `-gguf`/`-mlx`/`quant` suffix marks a derived repo, anything else reads as first-party.
   if (owner && repoName && !repoName.includes('-gguf') && !repoName.includes('-mlx') && !repoName.includes('quant')) {
-    return { role: 'original-author', label: 'Original author' };
+    return _roleBadge('original_author');
   }
 
   return null;
@@ -381,6 +446,8 @@ function createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel
     const roleBadge = document.createElement('span');
     roleBadge.className = `hf-sg-role-badge hf-sg-role-badge--${roleInfo.role}`;
     roleBadge.textContent = roleInfo.label;
+    // The role's own explanation, straight from the catalog, so the badge says what it means.
+    if (roleInfo.description) roleBadge.title = roleInfo.description;
     variant.appendChild(roleBadge);
   }
 
@@ -568,6 +635,11 @@ export async function hfSearch({
 }) {
   if (!container) return;
 
+  // Kick the catalog load off alongside the search rather than before it; it is awaited below,
+  // just before the results are rendered, so the badges never render against a half-loaded
+  // catalog and the first search is not serialised behind an extra round trip.
+  const catalogReady = ensureCommunitySourceCatalog();
+
   if (!append) {
     container.innerHTML = '<div class="hf-search-loading">Searching HuggingFace…</div>';
     container.style.display = '';
@@ -635,6 +707,9 @@ export async function hfSearch({
     const allModels = data.models || [];
     const nextCursor = data.next_cursor || null;
     const hasMore = !!nextCursor;
+
+    // Role badges are rendered synchronously from here on, so the catalog has to be in hand.
+    await catalogReady;
 
     clearPillLoading();
 
