@@ -504,17 +504,21 @@ pub struct SettingsValidateRequest {
 
 fn command_preview_route(ctx: ApiCtx) -> ApiRoute {
     let config = ctx.config;
+    let state = ctx.state;
     warp::path!("api" / "rapid-mlx" / "command-preview")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
         .and(super::super::safe_json_body::<CommandPreviewRequest>())
         .and_then(move |auth: Option<String>, req: CommandPreviewRequest| {
             let config = config.clone();
+            let state = state.clone();
             async move {
                 if !check_api_token(&auth, &config) {
                     return Ok(unauthorized_api_token());
                 }
-                let reply = build_command_preview(req).await;
+                let models_dir = super::models::get_effective_models_dir(&state)
+                    .unwrap_or_else(|| config.default_models_dir.clone());
+                let reply = build_command_preview(req, models_dir).await;
                 Ok::<ApiReply, warp::Rejection>(reply)
             }
         })
@@ -545,28 +549,46 @@ pub struct CommandPreviewResponse {
     pub reasons: Vec<String>,
 }
 
-async fn build_command_preview(req: CommandPreviewRequest) -> ApiReply {
+async fn build_command_preview(
+    req: CommandPreviewRequest,
+    models_dir: std::path::PathBuf,
+) -> ApiReply {
     use crate::inference::rapid_mlx::compatibility::ServeCapabilities;
     use crate::inference::rapid_mlx::model_resolver::{self, RapidMlxResolveContext};
     use std::path::PathBuf;
 
     let config = req.config;
+    // A preview that demands the caller already know the binary path is a preview no UI can
+    // call, which is why this endpoint had no consumer. Fall back to the same resolution the
+    // launcher uses (explicit -> managed -> PATH) so the frontend can just post a config.
     let binary_path = match req.executable_path {
-        Some(path) => PathBuf::from(path),
+        Some(path) => {
+            let path = PathBuf::from(path);
+            if !path.exists() {
+                return json_error(
+                    StatusCode::BAD_REQUEST,
+                    format!("Executable not found: {}", path.display()),
+                );
+            }
+            path
+        }
         None => {
-            return json_error(
-                StatusCode::BAD_REQUEST,
-                "executable_path is required for command preview",
-            );
+            match crate::inference::rapid_mlx::discovery::Discovery::resolve_binary(
+                config.executable_path.as_deref(),
+                config.managed_runtime_path.as_deref(),
+            )
+            .await
+            {
+                Ok((path, _source)) => path,
+                Err(e) => {
+                    return json_error(
+                        StatusCode::BAD_REQUEST,
+                        format!("Could not locate the Rapid-MLX executable: {}", e),
+                    );
+                }
+            }
         }
     };
-
-    if !binary_path.exists() {
-        return json_error(
-            StatusCode::BAD_REQUEST,
-            format!("Executable not found: {}", binary_path.display()),
-        );
-    }
 
     let model_source = match &config.model_source {
         Some(src) => src.clone(),
@@ -581,14 +603,13 @@ async fn build_command_preview(req: CommandPreviewRequest) -> ApiReply {
         },
     };
 
-    let models_dir = std::path::PathBuf::from("models");
-
     let model = match model_resolver::resolve(
         model_source,
         &RapidMlxResolveContext {
             models_dir,
-            python_executable: "python3".into(),
-            runtime_version: String::new(),
+            python_executable: PathBuf::from(if cfg!(windows) { "python.exe" } else { "python3" }),
+            runtime_version: crate::inference::rapid_mlx::compatibility::LATEST_QUALIFIED_VERSION_TEXT
+                .into(),
             hf_token: None,
             verified_aliases: Vec::new(),
             execute_conversion: false,
