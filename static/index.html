@@ -3268,6 +3268,55 @@
                                        <div class="pe-field-hint">Not required for bundled UI. Traversal and absolute paths rejected.</div>
                                    </div>
                                </div>
+                            <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-parser-overrides" style="display:none;">
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-tool-call-parser">Tool-call parser</label>
+                                    <select class="pe-select" id="modal-rapid-tool-call-parser">
+                                        <option value="">Auto — Rapid alias profile</option>
+                                        <option value="qwen3">qwen3</option><option value="qwen3_xml">qwen3_xml</option>
+                                        <option value="qwen3_coder">qwen3_coder</option><option value="qwen3_coder_xml">qwen3_coder_xml</option>
+                                        <option value="gemma4">gemma4</option><option value="hermes">hermes</option>
+                                        <option value="mistral">mistral</option><option value="llama3">llama3</option>
+                                        <option value="deepseek_v31">deepseek_v31</option><option value="kimi_k2">kimi_k2</option>
+                                        <option value="glm4">glm4</option><option value="minimax_m2">minimax_m2</option>
+                                        <option value="gpt_oss">gpt_oss</option>
+                                    </select>
+                                    <div class="pe-field-hint">Auto uses the detected Rapid alias profile.</div>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-reasoning-parser">Reasoning parser</label>
+                                    <select class="pe-select" id="modal-rapid-reasoning-parser">
+                                        <option value="">Auto — Rapid alias profile</option>
+                                        <option value="qwen3">qwen3</option><option value="gemma4">gemma4</option>
+                                        <option value="hy_v3">hy_v3</option><option value="hy3">hy3</option>
+                                        <option value="deepseek_r1">deepseek_r1</option><option value="vibethinker">vibethinker</option>
+                                        <option value="glm4">glm4</option><option value="gpt_oss">gpt_oss</option>
+                                        <option value="harmony">harmony</option><option value="minimax">minimax</option>
+                                        <option value="ui_tars">ui_tars</option>
+                                    </select>
+                                    <div class="pe-field-hint">Explicit overrides are intended for misdetected finetunes.</div>
+                                </div>
+                            </div>
+                            <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-architecture-overrides" style="display:none;">
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-hybrid-mode">Hybrid architecture</label>
+                                    <select class="pe-select" id="modal-rapid-hybrid-mode">
+                                        <option value="auto">Auto — model/profile detection</option>
+                                        <option value="force">Force hybrid</option>
+                                        <option value="disable">Disable hybrid</option>
+                                    </select>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-prefill-step-size">Prefill step size</label>
+                                    <select class="pe-select" id="modal-rapid-prefill-step-size">
+                                        <option value="512" selected>512 — qualified text default</option>
+                                        <option value="1024">1024 — vision fallback</option>
+                                        <option value="1536">1536 — vision fallback</option>
+                                        <option value="2048">2048 — maximum</option>
+                                    </select>
+                                    <div class="pe-field-hint">Never exceeds 2048.</div>
+                                </div>
+                            </div>
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-max-tokens" title="Maximum tokens to generate per request. Empty = unlimited (model's context limit).">Max Tokens</label>
@@ -3357,56 +3406,6 @@
             </div>
             <button type="button" class="wizard-close" id="spawn-wizard-close" aria-label="Close">&times;</button>
         </div>
-        <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-parser-overrides" style="display:none;">
-            <div class="pe-field">
-                <label class="pe-label" for="modal-rapid-tool-call-parser">Tool-call parser</label>
-                <select class="pe-select" id="modal-rapid-tool-call-parser">
-                    <option value="">Auto — Rapid alias profile</option>
-                    <option value="qwen3">qwen3</option><option value="qwen3_xml">qwen3_xml</option>
-                    <option value="qwen3_coder">qwen3_coder</option><option value="qwen3_coder_xml">qwen3_coder_xml</option>
-                    <option value="gemma4">gemma4</option><option value="hermes">hermes</option>
-                    <option value="mistral">mistral</option><option value="llama3">llama3</option>
-                    <option value="deepseek_v31">deepseek_v31</option><option value="kimi_k2">kimi_k2</option>
-                    <option value="glm4">glm4</option><option value="minimax_m2">minimax_m2</option>
-                    <option value="gpt_oss">gpt_oss</option>
-                </select>
-                <div class="pe-field-hint">Auto uses the detected Rapid alias profile.</div>
-            </div>
-            <div class="pe-field">
-                <label class="pe-label" for="modal-rapid-reasoning-parser">Reasoning parser</label>
-                <select class="pe-select" id="modal-rapid-reasoning-parser">
-                    <option value="">Auto — Rapid alias profile</option>
-                    <option value="qwen3">qwen3</option><option value="gemma4">gemma4</option>
-                    <option value="hy_v3">hy_v3</option><option value="hy3">hy3</option>
-                    <option value="deepseek_r1">deepseek_r1</option><option value="vibethinker">vibethinker</option>
-                    <option value="glm4">glm4</option><option value="gpt_oss">gpt_oss</option>
-                    <option value="harmony">harmony</option><option value="minimax">minimax</option>
-                    <option value="ui_tars">ui_tars</option>
-                </select>
-                <div class="pe-field-hint">Explicit overrides are intended for misdetected finetunes.</div>
-            </div>
-        </div>
-        <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-architecture-overrides" style="display:none;">
-            <div class="pe-field">
-                <label class="pe-label" for="modal-rapid-hybrid-mode">Hybrid architecture</label>
-                <select class="pe-select" id="modal-rapid-hybrid-mode">
-                    <option value="auto">Auto — model/profile detection</option>
-                    <option value="force">Force hybrid</option>
-                    <option value="disable">Disable hybrid</option>
-                </select>
-            </div>
-            <div class="pe-field">
-                <label class="pe-label" for="modal-rapid-prefill-step-size">Prefill step size</label>
-                <select class="pe-select" id="modal-rapid-prefill-step-size">
-                    <option value="512" selected>512 — qualified text default</option>
-                    <option value="1024">1024 — vision fallback</option>
-                    <option value="1536">1536 — vision fallback</option>
-                    <option value="2048">2048 — maximum</option>
-                </select>
-                <div class="pe-field-hint">Never exceeds 2048.</div>
-            </div>
-        </div>
-
         <!-- Binary prerequisite banner — shown when llama-server binary is missing -->
         <div class="wizard-prereq" id="wizard-binary-prereq" style="display:none;">
             <div class="wizard-prereq-icon" aria-hidden="true">

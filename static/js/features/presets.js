@@ -1717,7 +1717,7 @@ function _configureBackendPresetEditor(preset) {
     modal?.classList.toggle('preset-editor--rapid-mlx', isRapid);
 
     // Phase 7: Toggle Rapid-MLX advanced rows based on backend (inline styles override CSS).
-    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-reasoning-mode', 'pe-row-rapid-webui', 'pe-row-rapid-webui-expert', 'pe-row-rapid-parser-overrides'];
+    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-reasoning-mode', 'pe-row-rapid-webui', 'pe-row-rapid-webui-expert', 'pe-row-rapid-parser-overrides', 'pe-row-rapid-architecture-overrides'];
     rapidRows.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = isRapid ? '' : 'none';
