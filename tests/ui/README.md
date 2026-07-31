@@ -17,6 +17,20 @@ npm test -- --headless=false
 npm test -- --debug
 ```
 
+### Reading a local result
+
+The suite runs **one worker, serially** — locally and in CI alike (`fullyParallel: false`,
+`workers: 1`). Do not pass `--workers=N` to "speed things up" and then treat what comes back
+as a verdict on the tests. Several specs share module-level wizard state and a single test
+server; running them concurrently produces failures that say nothing about the code, and CI
+will never reproduce them because CI never runs that way.
+
+If you want parallelism deliberately, set `PLAYWRIGHT_PARALLEL=1`. Results from such a run
+are for your own iteration speed only and must not be reported as a suite status.
+
+Local retries are 0 where CI uses 2, on purpose: local is stricter, so a local pass implies
+a CI pass. A local failure is worth investigating; it is not automatically a CI failure.
+
 To exercise form-auth mode, pass extra server args through `LLAMA_MONITOR_TEST_ARGS`:
 
 ```bash

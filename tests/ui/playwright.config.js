@@ -29,8 +29,18 @@ const config = {
   testDir: '.',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
+  // Local runs must be AT LEAST AS STRICT as CI, never looser and never differently
+  // shaped. This used to read `workers: process.env.CI ? 1 : undefined`, which meant CI ran
+  // serially while a local run went parallel across files. A local run could then invent
+  // concurrency the suite is configured never to have, and manufacture failures in specs
+  // that are fine — which cost real time chasing "races" that did not exist.
+  //
+  // So: one worker everywhere. Retries stay at 0 locally, which is stricter than CI's 2,
+  // so a local pass implies a CI pass. Set PLAYWRIGHT_PARALLEL=1 to opt into parallelism
+  // deliberately; results from such a run do not predict CI and should not be reported as
+  // if they do.
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: process.env.PLAYWRIGHT_PARALLEL ? undefined : 1,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: process.env.LLAMA_MONITOR_UI_URL ||
