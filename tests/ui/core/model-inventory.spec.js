@@ -6,6 +6,12 @@ const inventory = [
     model_name: 'Local GGUF', filename: 'local.gguf', path: '/models/gguf/local.gguf',
     format: 'gguf', source: 'local', lifecycle: 'ready', compatibility: 'verified',
     supported_backends: ['llama_cpp'], size_display: '4.2 GiB', quant_type: 'Q4_K_M',
+    download_provenance: {
+      repoId: 'bartowski/local-model-GGUF',
+      revision: 'abcdef1234567890',
+      pinned: true,
+      sourceUrl: 'https://huggingface.co/bartowski/local-model-GGUF/resolve/abcdef1234567890/local.gguf',
+    },
   },
   {
     model_name: 'HF MLX', filename: 'mlx-community/model', path: '/models/cache/hf/model',
@@ -104,6 +110,58 @@ async function openInventory(page, options) {
 }
 
 test.describe('typed model inventory', () => {
+  test('@fake-data-bypass local MLX Explain consumes introspection evidence', async ({ page }) => {
+    let requestedPath = null;
+    await page.route('**/api/models/mlx-introspect', async route => {
+      requestedPath = (await route.request().postDataJSON()).model_path;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        ok: true,
+        model_path: requestedPath,
+        data: {
+          recursive_size_bytes: 7623566950,
+          config: {
+            model_type: 'qwen3', num_layers: 36, max_position_embeddings: 32768,
+            quantization: { bits: 4, group_size: 64 }, vision_confidence: 'confirmed', vision_source: 'config.json',
+          },
+        },
+      }) });
+    });
+    await openInventory(page);
+    const card = page.locator('.mm-model-card').filter({ hasText: 'HF MLX' });
+    await card.getByRole('button', { name: 'Explain' }).click();
+    await expect(page.locator('#evidence-drawer')).toHaveClass(/open/);
+    await expect(page.locator('.evidence-drawer-summary')).toContainText('architecture metadata');
+    await page.locator('.evidence-drawer-details > summary').click();
+    await expect(page.locator('.evidence-drawer-technical')).toContainText('Native context: 32,768 tokens');
+    expect(requestedPath).toBe('/models/cache/hf/model');
+  });
+
+  test('@fake-data-bypass renders pinned and unpinned lineage without inventing reproducibility', async ({ page }) => {
+    await openInventory(page);
+
+    const pinnedCard = page.locator('.mm-model-card').filter({ hasText: 'Local GGUF' });
+    const pinnedRow = pinnedCard.locator('.mm-card-lineage');
+    await expect(pinnedRow).toBeVisible();
+    const pinnedLink = pinnedRow.getByRole('link', { name: 'bartowski/local-model-GGUF' });
+    await expect(pinnedLink).toHaveAttribute(
+      'href',
+      'https://huggingface.co/bartowski/local-model-GGUF/resolve/abcdef1234567890/local.gguf',
+    );
+    await expect(pinnedRow.locator('.mm-lineage-rev')).toHaveText('abcdef1…');
+    await expect(pinnedRow.locator('.mm-lineage-rev')).toHaveAttribute(
+      'title',
+      'Pinned to commit abcdef1234567890',
+    );
+
+    const unpinnedCard = page.locator('.mm-model-card').filter({ hasText: 'HF MLX' });
+    const unpinnedRow = unpinnedCard.locator('.mm-card-lineage');
+    await expect(unpinnedRow.getByRole('link', { name: 'mlx-community/model' })).toBeVisible();
+    await expect(unpinnedRow.locator('.mm-lineage-rev')).toHaveCount(0);
+
+    const localOnlyCard = page.locator('.mm-model-card').filter({ hasText: 'Invalid model' });
+    await expect(localOnlyCard.locator('.mm-card-lineage')).toHaveCount(0);
+  });
+
   test('@fake-data-bypass renders every inventory dimension and companion as accessible first-class badges', async ({ page }) => {
     await openInventory(page);
 

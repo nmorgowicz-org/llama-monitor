@@ -1,9 +1,8 @@
 // tests/ui/core/phase7-presets.spec.js
 //
 // Phase 7 preset serialization tests (7.5A).
-// Verifies Phase 7 Rapid-MLX fields (kv_cache_dtype, turboquant_mode, reasoning_mode,
-// sampling_mode, tool_call_parser, enable_auto_tool_choice) serialize correctly through
-// wizard buildSpawnPayload() and preset payloads.
+// Verifies concrete Phase 7 Rapid-MLX fields serialize through wizard/preset payloads,
+// canonical estimates preserve Rapid prefill vs llama ubatch, and stale keys stay absent.
 //
 // workload_scenario is deliberately not in that list. It is an estimator input, not a
 // launch setting, and `RapidMlxConfig` has no field for it.
@@ -14,6 +13,44 @@ import { test, expect } from '@playwright/test';
 import { dismissAuthShell } from '../helpers.js';
 
 test.describe('Phase 7 preset serialization', () => {
+  test('@in-memory-test canonical estimates keep Rapid prefill separate from llama ubatch', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('html.modules-ready');
+
+    const bodies = await page.evaluate(async () => {
+      const {
+        buildEstimateBody,
+        rapidEstimatePolicyFromConfig,
+        rapidEstimatePolicyFromWizardHardware,
+      } = await import('/js/features/vram-estimate.js');
+      return {
+        rapidFromPreset: buildEstimateBody({
+          backend: 'rapid_mlx',
+          model_path: 'mlx-community/model',
+          ubatch_size: 2048,
+          ...rapidEstimatePolicyFromConfig({ prefill_step_size: 1536 }),
+        }),
+        rapidFromWizard: buildEstimateBody({
+          backend: 'rapid_mlx',
+          model_path: 'mlx-community/model',
+          ...rapidEstimatePolicyFromWizardHardware({ prefillStepSize: 1024 }),
+        }),
+        llama: buildEstimateBody({
+          backend: 'llama_cpp',
+          model_path: '/models/model.gguf',
+          ubatch_size: 768,
+          prefill_step_size: 1536,
+        }),
+      };
+    });
+
+    expect(bodies.rapidFromPreset.prefill_step_size).toBe(1536);
+    expect(bodies.rapidFromPreset).not.toHaveProperty('ubatch_size');
+    expect(bodies.rapidFromWizard.prefill_step_size).toBe(1024);
+    expect(bodies.llama.ubatch_size).toBe(768);
+    expect(bodies.llama).not.toHaveProperty('prefill_step_size');
+  });
+
   test('@in-memory-test workload profile reaches the estimator, not the spawn payload', async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
@@ -93,9 +130,17 @@ test.describe('Phase 7 preset serialization', () => {
 
       // Set Phase 7 fields directly in wizardState (simulates advanced controls)
       wizardState.hardware.kvCacheDtype = 'int8';
-      wizardState.hardware.reasoningMode = 'enable';
+      wizardState.hardware.rapidReasoningMode = 'off';
       wizardState.hardware.toolCallParser = 'openai';
-      wizardState.hardware.enableAutoToolChoice = true;
+      wizardState.hardware.samplingMode = 'explicit_client';
+      wizardState.hardware.prefillStepSize = 1536;
+      wizardState.hardware.temperature = 0.42;
+      wizardState.hardware.autoToolChoice = true;
+      wizardState.hardware.speculativeEnabled = true;
+      wizardState.hardware.speculativeSource = 'external';
+      wizardState.hardware.speculativeModel = 'mlx-community/Qwen3-MTP-sidecar';
+      wizardState.hardware.speculativeTokens = 3;
+      wizardState.hardware.speculativeDisableAutoK = true;
 
       return buildSpawnPayload();
     });
@@ -104,6 +149,43 @@ test.describe('Phase 7 preset serialization', () => {
     expect(payload.rapid_mlx.model_source).toEqual({
       kind: 'hugging_face_repo',
       repo_id: 'mlx-community/Qwen3-0.6B-4bit',
+    });
+    expect(payload.rapid_mlx).toMatchObject({
+      kv_cache_dtype: 'int8',
+      reasoning_mode: 'off',
+      tool_call_parser: 'openai',
+      sampling_mode: 'explicit_client',
+      prefill_step_size: 1536,
+      default_temperature: 0.42,
+      auto_tool_choice: true,
+      no_thinking: true,
+      speculative_config: {
+        method: 'mtp',
+        model: 'mlx-community/Qwen3-MTP-sidecar',
+        num_speculative_tokens: 3,
+        disable_auto_k: true,
+      },
+    });
+    expect(payload.rapid_mlx).not.toHaveProperty('workload_scenario');
+  });
+
+  test('@in-memory-test Rapid MTP defaults off and embedded config never invents a model', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('html.modules-ready');
+    const result = await page.evaluate(async () => {
+      const { buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js');
+      wizardState.engine.selected = 'rapid_mlx';
+      wizardState.model.rapidMlxSource = { kind: 'hugging_face_repo', repo_id: 'mlx-community/model' };
+      const off = buildSpawnPayload().rapid_mlx;
+      wizardState.hardware.speculativeEnabled = true;
+      wizardState.hardware.speculativeSource = 'embedded';
+      wizardState.hardware.speculativeModel = 'stale/sidecar';
+      const embedded = buildSpawnPayload().rapid_mlx;
+      return { off, embedded };
+    });
+    expect(result.off).not.toHaveProperty('speculative_config');
+    expect(result.embedded.speculative_config).toEqual({
+      method: 'mtp', num_speculative_tokens: 2, disable_auto_k: false,
     });
   });
 });

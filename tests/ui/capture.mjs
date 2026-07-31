@@ -173,6 +173,8 @@ Scenarios:
     models-v2        Models modal: typed inventory, Import Lab, and HF download panel
     preset-editor    Preset editor: model/context, GPU, and advanced tabs
     rapid-preset     Rapid-MLX welcome cards and preset editor (legacy and typed sources)
+    evidence-drawer  Shared decision evidence drawer: dark, expanded, light, and narrow reduced-motion
+    community-sources Model Manager source catalog: list and editor in dark/light/narrow states
 
   Configuration
     settings         Settings modal, preferences, persona, models, shortcuts
@@ -1294,6 +1296,27 @@ async function scenarioRapidPreset(ctx) {
     await sleep(200);
     await captureShot(page, 'rapid-mlx-preset-editor-advanced-narrow.png', { fullPage: true });
     await page.setViewport(DEFAULT_VIEWPORT);
+
+    await page.evaluate(() => {
+        const enabled = document.getElementById('modal-rapid-speculative-enabled');
+        if (enabled && !enabled.checked) enabled.click();
+        const content = document.querySelector('#preset-modal .preset-editor-content');
+        if (content) content.scrollTop = content.scrollHeight;
+    });
+    await sleep(150);
+    await captureElementScreenshot(page, '#pe-row-rapid-speculative', 'rapid-mlx-preset-speculative-enabled-dark.png', { padding: 24 });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(150);
+    await captureElementScreenshot(page, '#pe-row-rapid-speculative', 'rapid-mlx-preset-speculative-enabled-light.png', { padding: 24 });
+    await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
+    await page.evaluate(() => {
+        const content = document.querySelector('#preset-modal .preset-editor-content');
+        if (content) content.scrollTop = content.scrollHeight;
+    });
+    await sleep(150);
+    await captureElementScreenshot(page, '#pe-row-rapid-speculative', 'rapid-mlx-preset-speculative-enabled-narrow.png', { padding: 12 });
+    await page.setViewport(DEFAULT_VIEWPORT);
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     await page.evaluate(() => document.getElementById('preset-modal-close')?.click());
     await page.waitForSelector('#preset-modal.open', { hidden: true });
 
@@ -1344,6 +1367,80 @@ async function scenarioRapidPreset(ctx) {
     });
     await sleep(200);
     await captureShot(page, 'welcome-rapid-mlx-restore-key-light.png', { fullPage: true });
+}
+
+async function scenarioEvidenceDrawer(ctx) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    const evidence = {
+        title: 'Rapid-MLX launch policy evidence',
+        status: 'blocked',
+        summary: 'Speculative decoding is not recommended for normal coding-agent traffic in the qualified runtime.',
+        consequence: 'Sampled and constrained-tool requests fall through without MTP acceleration.',
+        remediation: 'Leave speculative decoding off unless you are deliberately reproducing the greedy qualification lane.',
+        evidence: [
+            'rapid-mlx 0.11.1 bypassed MTP for nonzero-temperature requests.',
+            'Normal constrained-tool requests showed no speculative activity.',
+        ],
+        adjustments: ['KV cache dtype: int4 → int8 because the Rapid reasoning-quality policy is always enabled.'],
+        fallthroughs: ['Sampling or a logits processor disables MTP in the qualified build.'],
+        warnings: ['The 95%+ user-impact figure is a product-owner estimate, not a population measurement.'],
+        provenance: ['Runtime: rapid-mlx 0.11.1', 'Evidence status: measured qualification receipt'],
+    };
+    await page.evaluate(data => window.openEvidenceDrawer(data), evidence);
+    await page.waitForSelector('#evidence-drawer.open', { visible: true });
+    await sleep(200);
+    await captureShot(page, 'evidence-drawer-dark.png', { fullPage: true });
+
+    await page.click('.evidence-drawer-details > summary');
+    await sleep(150);
+    await captureShot(page, 'evidence-drawer-expanded-dark.png', { fullPage: true });
+
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(150);
+    await captureShot(page, 'evidence-drawer-expanded-light.png', { fullPage: true });
+
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+    await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
+    await sleep(100);
+    await captureShot(page, 'evidence-drawer-narrow-reduced-motion.png', { fullPage: true });
+}
+
+async function scenarioCommunitySources(ctx) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    await page.evaluate(async () => {
+        const { openModelsModal } = await import('/js/features/models.js');
+        openModelsModal();
+    });
+    await page.waitForSelector('#models-modal.open', { visible: true });
+    await page.click('#models-modal .mm-tab[data-tab="sources"]');
+    await page.waitForFunction(() => {
+        const status = document.getElementById('mm-sources-status');
+        return status && !status.textContent.includes('Loading');
+    });
+    await sleep(200);
+    await captureShot(page, 'community-sources-list-dark.png', { fullPage: true });
+
+    await page.click('#mm-sources-add');
+    await page.waitForSelector('#mm-sources-editor:not([hidden])', { visible: true });
+    await page.type('#mm-source-username', 'example-org');
+    await page.type('#mm-source-display-name', 'Example Organization');
+    await page.type('#mm-source-description', 'Capture fixture for a user-managed source.');
+    await sleep(150);
+    await captureShot(page, 'community-sources-editor-dark.png', { fullPage: true });
+
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(150);
+    await captureShot(page, 'community-sources-editor-light.png', { fullPage: true });
+
+    await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
+    await page.evaluate(() => {
+        const panel = document.getElementById('mm-sources-panel');
+        if (panel) panel.scrollTop = panel.scrollHeight;
+    });
+    await sleep(150);
+    await captureShot(page, 'community-sources-editor-narrow.png', { fullPage: true });
 }
 
 // ── Core Chat ───────────────────────────────────────────────────────────────────
@@ -3835,6 +3932,20 @@ async function scenarioSpawnWizardEngines(ctx) {
     await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-reasoning-mode-on.png') });
     console.log('[CAPTURE] Saved spawn-wizard-reasoning-mode-on.png');
 
+    await page.evaluate(() => {
+        const enabled = document.getElementById('spawn-rapid-speculative-enabled');
+        if (enabled && !enabled.checked) enabled.click();
+    });
+    await scrollToElement('#spawn-rapid-speculative-enabled', 30);
+    await sleep(250);
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-speculative-enabled-dark.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-speculative-enabled-dark.png');
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(150);
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-speculative-enabled-light.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-speculative-enabled-light.png');
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+
     // spawn-wizard-parser-detected.png — Parser/hybrid dropdowns with "Detected:" hints.
     await page.evaluate(() => {
         const reasoningCheckbox = document.getElementById('spawn-rapid-reasoning-mode');
@@ -5135,7 +5246,7 @@ async function scenarioRapidMlxRuntime(ctx, options) {
 }
 
 // model-library captures the HF Download tab with Phase 8B1 discovery controls:
-// scope selector (Auto/GGUF/MLX/All), sort control, category badges, author roles.
+// scope selector (GGUF/MLX/All), sort control, category badges, author roles.
 // Uses REAL HF data — hf-token is copied to temp config (see runCli filesToCopy).
 async function scenarioModelLibrary(ctx, options) {
     const { page, baseUrl } = ctx;
@@ -5260,6 +5371,8 @@ const SCENARIOS = {
     welcome: scenarioWelcome,
     'free-cache': scenarioFreeCache,
     'rapid-preset': scenarioRapidPreset,
+    'evidence-drawer': scenarioEvidenceDrawer,
+    'community-sources': scenarioCommunitySources,
     chat: scenarioChat,
     // Chat features
     'guided-gen': scenarioGuidedGen,

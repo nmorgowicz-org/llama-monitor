@@ -114,4 +114,52 @@ test.describe('HF role badges come from the community source catalog', () => {
     expect(rows.find(r => r.id === 'Qwen/Qwen3-8B').label).toBe('Original author');
     expect(rows.find(r => r.id === 'bartowski/Qwen3-8B-GGUF').label).toBe('');
   });
+
+  test('@in-memory-test selection payload preserves the Hub commit instead of mutable main', async ({ page }) => {
+    await page.goto('/');
+    const selection = await page.evaluate(async () => {
+      const { buildSelectionPayload } = await import('/js/features/hf-browse.js');
+      return buildSelectionPayload({
+        id: 'mlx-community/Qwen3-8B-4bit',
+        revision: 'abcdef1234567890',
+        format: 'mlx',
+      }, null);
+    });
+    expect(selection).toMatchObject({
+      repoId: 'mlx-community/Qwen3-8B-4bit',
+      revision: 'abcdef1234567890',
+      format: 'mlx',
+    });
+  });
+
+  test('@fake-data-bypass qualification and identity feed the shared evidence drawer', async ({ page }) => {
+    const requests = [];
+    await page.route('**/api/hf/qualify', async route => {
+      requests.push(await route.request().postDataJSON());
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        repoId: 'mlx-community/Qwen3-8B-4bit', revision: 'a'.repeat(40),
+        backendHint: 'rapid_mlx', backendQualified: true, qualificationReason: 'MLX config is compatible.',
+        qualifiedAt: 1785456000, config: { architecture: 'Qwen3ForCausalLM', contextLength: 32768 }, errors: [],
+      }) });
+    });
+    await page.route('**/api/hf/identity', async route => {
+      requests.push(await route.request().postDataJSON());
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        repoId: 'mlx-community/Qwen3-8B-4bit', revision: 'a'.repeat(40), resolutionConfidence: 'catalog',
+        roles: [{ role: 'mlx_converter', username: 'mlx-community', confidence: 'catalog' }], errors: [],
+      }) });
+    });
+    await page.goto('/');
+    await page.waitForSelector('html.modules-ready');
+    await page.evaluate(async sha => {
+      const { openHfEvidence } = await import('/js/features/hf-browse.js');
+      await openHfEvidence('mlx-community/Qwen3-8B-4bit', sha, 'rapid_mlx');
+    }, 'a'.repeat(40));
+    await expect(page.locator('#evidence-drawer')).toHaveClass(/open/);
+    await expect(page.locator('.evidence-drawer-summary')).toContainText('provisionally qualified');
+    await page.locator('.evidence-drawer-details > summary').click();
+    await expect(page.locator('.evidence-drawer-technical')).toContainText('MLX config is compatible.');
+    expect(requests).toHaveLength(2);
+    expect(requests.every(request => !('configDir' in request))).toBe(true);
+  });
 });

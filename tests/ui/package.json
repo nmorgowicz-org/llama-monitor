@@ -4,6 +4,9 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
+    "test:in-memory": "playwright test --grep @in-memory-test",
+    "test:fake-data": "playwright test --grep @fake-data-bypass",
+    "test:runtime": "LLAMA_MONITOR_HAS_RUNTIME=1 playwright test --grep @runtime-required",
     "test:ssh": "playwright test remote-agent-ssh.integration.spec.js",
     "test:ai": "LLAMA_MONITOR_HAS_AI=1 playwright test",
     "test:headed": "playwright test --headless=false",

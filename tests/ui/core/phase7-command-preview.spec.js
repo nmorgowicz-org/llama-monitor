@@ -5,7 +5,7 @@
 // - Returns valid argv with Phase 7 fields
 // - Requires auth
 // - Respects tool_call_parser value (not bare flag)
-// - Respects workload_scenario
+// - Emits concrete Phase 7 argv and excludes disabled controls
 //
 // These tests work against real endpoints in CI — Phase 7 backend is implemented.
 //
@@ -34,8 +34,9 @@ test.describe('Rapid-MLX command preview endpoint', () => {
       port: 9123,
       kv_cache_dtype: 'int4',
       tool_call_parser: 'openai',
-      enable_auto_tool_choice: true,
-      workload_scenario: 'interactive_coding_agent',
+      auto_tool_choice: true,
+      reasoning_mode: 'off',
+      prefill_step_size: 1536,
     };
 
     const res = await page.evaluate(async (token, body) => {
@@ -54,12 +55,16 @@ test.describe('Rapid-MLX command preview endpoint', () => {
     expect(data.argv).toBeDefined();
     expect(Array.isArray(data.argv)).toBe(true);
 
-    // Verify tool_call_parser has a value, not a bare flag
-    const hasToolParser = data.argv.some(a => a.includes('--tool-call-parser') && !a.endsWith('--tool-call-parser'));
-    expect(hasToolParser, 'tool_call_parser should have a value, not be a bare flag').toBe(true);
+    const flagIndex = (flag) => data.argv.indexOf(flag);
+    expect(flagIndex('--tool-call-parser')).toBeGreaterThanOrEqual(0);
+    expect(data.argv[flagIndex('--tool-call-parser') + 1]).toBe('openai');
+    expect(data.argv).toContain('--enable-auto-tool-choice');
+    expect(data.argv).toContain('--reasoning');
+    expect(data.argv).toContain('--no-thinking');
+    expect(data.argv[flagIndex('--prefill-step-size') + 1]).toBe('1536');
   });
 
-  test('@runtime-required command preview returns valid argv for tool_research_agent workload', async ({ page }) => {
+  test('@runtime-required command preview omits disabled optional Phase 7 flags', async ({ page }) => {
     const hasRuntime = !!process.env.LLAMA_MONITOR_HAS_RUNTIME;
     test.skip(!hasRuntime, 'Set LLAMA_MONITOR_HAS_RUNTIME=1 to run runtime-dependent tests.');
 
@@ -75,9 +80,8 @@ test.describe('Rapid-MLX command preview endpoint', () => {
       port: 9123,
       kv_cache_dtype: 'int8',
       reasoning_mode: 'on',
-      tool_call_parser: 'openai',
-      enable_auto_tool_choice: true,
-      workload_scenario: 'tool_research_agent',
+      auto_tool_choice: false,
+      prefill_step_size: 512,
     };
 
     const res = await page.evaluate(async (token, body) => {
@@ -95,6 +99,10 @@ test.describe('Rapid-MLX command preview endpoint', () => {
     const data = await page.evaluate(async (r) => r.json(), res);
     expect(data.argv).toBeDefined();
     expect(Array.isArray(data.argv)).toBe(true);
+    expect(data.argv).toContain('--reasoning');
+    expect(data.argv).not.toContain('--no-thinking');
+    expect(data.argv).not.toContain('--enable-auto-tool-choice');
+    expect(data.argv).not.toContain('--tool-call-parser');
   });
 
   test('@runtime-required command preview requires auth', async ({ page }) => {

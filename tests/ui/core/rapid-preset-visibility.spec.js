@@ -57,5 +57,10 @@ test.describe('Rapid-MLX preset editor control reachability', () => {
       if (!seen) hidden.push(id);
     }
     expect(hidden, 'controls read on save but never rendered').toEqual([]);
+
+    await page.locator('#preset-modal .preset-nav-item[data-section="advanced"]').click();
+    await expect(page.locator('#pe-row-rapid-speculative')).toBeVisible();
+    await page.locator('#modal-rapid-speculative-enabled').check();
+    await expect(page.locator('#modal-rapid-speculative-source')).toBeVisible();
   });
 });
