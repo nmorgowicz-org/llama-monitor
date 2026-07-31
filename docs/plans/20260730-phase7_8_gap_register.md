@@ -334,3 +334,54 @@ the runtime that has one, while offering to configure the web UI of the runtime 
 `--response-cache-entries` (greedy-only response cache), `--speculative-config`, and llama.cpp's
 real web-UI flags are all genuine capabilities with no UI after this change. Exposing them is a
 separate decision, not part of removing the phantoms.
+
+## 12. The three real fields, exposed (2026-07-31)
+
+The other half of the same audit. `hybrid_cache_entries`, `prefill_batch_size` and
+`completion_batch_size` map to flags that genuinely exist in `rapid-mlx serve --help`, were
+plumbed end to end (`RapidMlxConfig` → adapter → `command.rs`) and validated in `settings.rs`
+— and had no control on any surface. The only value anyone could launch with was the default.
+
+Now in both the preset editor and the spawn wizard, with both CSS allowlist chains updated.
+
+### Where they were put, and why
+
+- **Retained prefix entries** sits with the retained-cache toggle and memory ceiling, because
+  it is meaningless without them. It is an entry *count*, not a size: raising it keeps more
+  branches alive but splits the same memory budget, and the hint says so.
+- **Prefill / completion batch size** are their own row, defaulted to Auto and labelled as
+  counting *sequences, not tokens*. At the single-stream settings this app defaults to
+  (`--max-num-seqs 1`, `--max-concurrent-requests 1`) they do nothing on the text path, and on
+  the vision path a prefill batch that never fills can stall generation outright
+  (`mlx_vlm/generate/ar.py:2695`). They are exposed because they are real and measurable, not
+  because they are recommended.
+
+### A second defect found while wiring them
+
+`_buildFormPreset` spreads `out` over the stored `rapid_mlx` object, so a key the save path
+omits keeps its previous value. The four throughput fields shipped with the
+`if (value) out.x = value` idiom, which meant **selecting Auto on a preset that already had a
+value silently did nothing** — the old number survived the spread and kept reaching argv. For
+`hybrid_cache_entries` this was worse than cosmetic: `command.rs:393` emits
+`--hybrid-cache-entries` on the field alone without consulting the retained-cache toggle, so a
+stale entry count would be passed to a server whose prefix cache the user had just turned off.
+
+All seven now write `null` on Auto rather than omitting the key. Serde reads null into the same
+`None` the missing key produced, and the load path fills every one of these controls, so
+re-reading them preserves untouched values without relying on the spread.
+
+`core/rapid-preset-throughput.spec.js` gained a test for exactly this — set a stored value back
+to Auto, assert it clears — since the old spec asserted the spread behaviour approvingly and
+would have kept passing.
+
+### Coverage
+
+`core/rapid-preset-cache-batch.spec.js` (new, 4 tests): load, edit round-trip, the
+cache-off gate, and Auto. `core/rapid-preset-visibility.spec.js` derives its id list from
+presets.js and so covers the new controls without being edited — which is what it was for.
+
+### Collateral
+
+`_configureBackendPresetEditor` still listed `pe-row-rapid-webui` and
+`pe-row-rapid-webui-expert`, ids deleted in `9527e35`. Removed, along with the two one-off
+`prefix-cache`/`cache-memory` lines that duplicated what the loop already does.

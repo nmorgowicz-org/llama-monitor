@@ -3194,6 +3194,17 @@
                                   <select id="modal-rapid-cache-memory-mib" class="pe-select"><option value="0">Off</option><option value="8192">8 GiB — recommended</option><option value="16384">16 GiB — retain branches</option></select>
                                   <div class="pe-field-hint">Optional unified-memory growth. Disk checkpoints stay disabled for interactive use.</div>
                               </div>
+                              <div class="pe-field pe-row-rapid-prefix-cache" id="pe-row-rapid-hybrid-cache-entries" style="display:none;">
+                                  <label class="pe-label" for="modal-rapid-hybrid-cache-entries" title="How many distinct retained prompt branches the cache can hold. Only takes effect while the retained cache is on.">Retained prefix entries</label>
+                                  <select id="modal-rapid-hybrid-cache-entries" class="pe-select">
+                                      <option value="0" selected>Auto — runtime default</option>
+                                      <option value="8">8 — one conversation</option>
+                                      <option value="16">16 — benchmark default</option>
+                                      <option value="32">32 — several branches</option>
+                                      <option value="64">64 — many branches</option>
+                                  </select>
+                                  <div class="pe-field-hint">Entry count, not size: the memory ceiling above still applies. More entries keep more branches alive but split the same budget.</div>
+                              </div>
         <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-advanced" style="display:none;">
                                    <div class="pe-field">
                                        <label class="pe-label" for="modal-rapid-kv-cache-dtype" title="KV cache dtype controls memory vs precision for Rapid-MLX. int8 recommended for tool calling.">KV Cache Dtype</label>
@@ -3338,6 +3349,34 @@
                                         <option value="on">On — force PFlash</option>
                                     </select>
                                     <div class="pe-field-hint">On bypasses TurboQuant reusable prompt storage.</div>
+                                </div>
+                            </div>
+                            <!-- Scheduler batch sizes. These count *sequences*, not tokens, so at the
+                                 single-stream settings this app defaults to they do nothing on the text
+                                 path and can stall the vision path, where a prefill batch that never
+                                 fills never runs. Left on Auto unless a measurement says otherwise. -->
+                            <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-batch-sizes" style="display:none;">
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-prefill-batch-size" title="Sequences the scheduler prefills together. Runtime default is 8.">Prefill batch size</label>
+                                    <select class="pe-select" id="modal-rapid-prefill-batch-size">
+                                        <option value="" selected>Auto — runtime default (8)</option>
+                                        <option value="1">1 — prefill immediately</option>
+                                        <option value="4">4</option>
+                                        <option value="8">8</option>
+                                        <option value="16">16</option>
+                                    </select>
+                                    <div class="pe-field-hint">Sequences, not tokens. No effect at one concurrent request.</div>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-completion-batch-size" title="Sequences decoded together. Runtime default is 32, and it is raised to the prefill batch size if you set it lower.">Completion batch size</label>
+                                    <select class="pe-select" id="modal-rapid-completion-batch-size">
+                                        <option value="" selected>Auto — runtime default (32)</option>
+                                        <option value="1">1 — decode one at a time</option>
+                                        <option value="8">8</option>
+                                        <option value="32">32</option>
+                                        <option value="64">64</option>
+                                    </select>
+                                    <div class="pe-field-hint">The runtime raises this to the prefill batch size when it is set lower.</div>
                                 </div>
                             </div>
                             <div class="pe-row pe-row-3">
@@ -3928,6 +3967,42 @@
                                          <option value="on">On — force PFlash</option>
                                      </select>
                                      <div class="field-hint">On bypasses TurboQuant, so it cannot be combined with a TurboQuant reusable-prompt-storage mode.</div>
+                                 </div>
+                                 <div class="hardware-field">
+                                     <label for="spawn-rapid-hybrid-cache-entries" title="How many distinct retained prompt branches the cache can hold. Only takes effect while the retained cache is on.">Retained prefix entries</label>
+                                     <select id="spawn-rapid-hybrid-cache-entries">
+                                         <option value="0" selected>Auto — runtime default</option>
+                                         <option value="8">8 — one conversation</option>
+                                         <option value="16">16 — benchmark default</option>
+                                         <option value="32">32 — several branches</option>
+                                         <option value="64">64 — many branches</option>
+                                     </select>
+                                     <div class="field-hint">Entry count, not size. More entries keep more branches alive but split the same retained-cache memory budget.</div>
+                                 </div>
+                                 <!-- Batch sizes count sequences, not tokens: at one concurrent request they
+                                      change nothing on the text path, and a prefill batch that never fills
+                                      stalls the vision path. Auto unless a measurement says otherwise. -->
+                                 <div class="hardware-field">
+                                     <label for="spawn-rapid-prefill-batch-size" title="Sequences the scheduler prefills together. Runtime default is 8.">Prefill batch size</label>
+                                     <select id="spawn-rapid-prefill-batch-size">
+                                         <option value="" selected>Auto — runtime default (8)</option>
+                                         <option value="1">1 — prefill immediately</option>
+                                         <option value="4">4</option>
+                                         <option value="8">8</option>
+                                         <option value="16">16</option>
+                                     </select>
+                                     <div class="field-hint">Sequences, not tokens. No effect at one concurrent request.</div>
+                                 </div>
+                                 <div class="hardware-field">
+                                     <label for="spawn-rapid-completion-batch-size" title="Sequences decoded together. Runtime default is 32, and it is raised to the prefill batch size if you set it lower.">Completion batch size</label>
+                                     <select id="spawn-rapid-completion-batch-size">
+                                         <option value="" selected>Auto — runtime default (32)</option>
+                                         <option value="1">1 — decode one at a time</option>
+                                         <option value="8">8</option>
+                                         <option value="32">32</option>
+                                         <option value="64">64</option>
+                                     </select>
+                                     <div class="field-hint">The runtime raises this to the prefill batch size when it is set lower.</div>
                                  </div>
                                  <!-- Sampling mode (D27) -->
                                  <div class="hardware-field">

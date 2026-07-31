@@ -1309,6 +1309,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
             document.getElementById('modal-rapid-prefix-cache-enabled').checked = prefixCacheEnabled;
         }
         setOpt('modal-rapid-cache-memory-mib', String(p.rapid_mlx?.retained_cache_mib ?? (prefixCacheEnabled ? 8192 : 0)));
+        setOpt('modal-rapid-hybrid-cache-entries', String(p.rapid_mlx?.hybrid_cache_entries ?? 0));
         // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
         setOpt('modal-rapid-kv-cache-dtype', p.rapid_mlx?.kv_cache_dtype || '');
         setOpt('modal-rapid-prefill-step-size', String(p.rapid_mlx?.prefill_step_size || 512));
@@ -1316,6 +1317,8 @@ export function openPresetModal(mode, section, seedPreset = null) {
         setOpt('modal-rapid-gpu-memory-utilization', p.rapid_mlx?.gpu_memory_utilization == null ? '' : String(p.rapid_mlx.gpu_memory_utilization));
         setOpt('modal-rapid-max-num-seqs', p.rapid_mlx?.max_num_seqs == null ? '' : String(p.rapid_mlx.max_num_seqs));
         setOpt('modal-rapid-max-concurrent-requests', p.rapid_mlx?.max_concurrent_requests == null ? '' : String(p.rapid_mlx.max_concurrent_requests));
+        setOpt('modal-rapid-prefill-batch-size', p.rapid_mlx?.prefill_batch_size == null ? '' : String(p.rapid_mlx.prefill_batch_size));
+        setOpt('modal-rapid-completion-batch-size', p.rapid_mlx?.completion_batch_size == null ? '' : String(p.rapid_mlx.completion_batch_size));
         setOpt('modal-rapid-pflash-policy', p.rapid_mlx?.pflash_policy || 'off');
         setOpt('modal-rapid-tool-call-parser', p.rapid_mlx?.tool_call_parser || '');
         setOpt('modal-rapid-reasoning-parser', p.rapid_mlx?.reasoning_parser || '');
@@ -1718,15 +1721,13 @@ function _configureBackendPresetEditor(preset) {
     modal?.classList.toggle('preset-editor--rapid-mlx', isRapid);
 
     // Phase 7: Toggle Rapid-MLX advanced rows based on backend (inline styles override CSS).
-    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-reasoning-mode', 'pe-row-rapid-webui', 'pe-row-rapid-webui-expert', 'pe-row-rapid-parser-overrides', 'pe-row-rapid-architecture-overrides', 'pe-row-rapid-throughput'];
+    // The webui rows are gone from this list because they are gone from index.html: they were
+    // gated on llama.cpp's --ui/--path, which rapid-mlx does not have.
+    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-reasoning-mode', 'pe-row-rapid-parser-overrides', 'pe-row-rapid-architecture-overrides', 'pe-row-rapid-throughput', 'pe-row-rapid-batch-sizes', 'pe-row-rapid-prefix-cache', 'pe-row-rapid-cache-memory', 'pe-row-rapid-hybrid-cache-entries'];
     rapidRows.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = isRapid ? '' : 'none';
     });
-    const prefixCacheRow = document.getElementById('pe-row-rapid-prefix-cache');
-    if (prefixCacheRow) prefixCacheRow.style.display = isRapid ? '' : 'none';
-    const cacheMemoryRow = document.getElementById('pe-row-rapid-cache-memory');
-    if (cacheMemoryRow) cacheMemoryRow.style.display = isRapid ? '' : 'none';
 
     // MTP/concurrency teaching panel removed (Phase 7B2).
 
@@ -1794,6 +1795,12 @@ function _buildFormPreset(existing) {
                     out.prefix_cache_enabled = retainedCacheEnabled;
                     out.retained_cache_mib = retainedCacheEnabled ? cacheMib : null;
                     out.disk_checkpoint_interval = 0;
+                    // Entry count is meaningless with the cache off, so it follows the toggle
+                    // rather than persisting a number that would never reach the runtime --
+                    // the argv builder emits --hybrid-cache-entries on the field alone, without
+                    // consulting the toggle, so a stale value would still reach the server.
+                    const hybridEntries = Number(strVal('modal-rapid-hybrid-cache-entries') || 0);
+                    out.hybrid_cache_entries = retainedCacheEnabled && hybridEntries > 0 ? hybridEntries : null;
                     // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
                     const kvDtype = strVal('modal-rapid-kv-cache-dtype');
                     const tqMode = strVal('modal-rapid-turboquant-mode');
@@ -1809,15 +1816,19 @@ function _buildFormPreset(existing) {
                     if (rmInput) out.reasoning_mode = rmInput.checked ? 'on' : 'off';
                     const prefillStepSize = Number(strVal('modal-rapid-prefill-step-size') || 512);
                     if (prefillStepSize && prefillStepSize !== 512) out.prefill_step_size = prefillStepSize;
-                    // Throughput / memory. '' means omit: an absent flag and an explicit
-                    // runtime default are different states, so never write a placeholder.
-                    const gpuUtil = strVal('modal-rapid-gpu-memory-utilization');
-                    const maxSeqs = strVal('modal-rapid-max-num-seqs');
-                    const maxConc = strVal('modal-rapid-max-concurrent-requests');
+                    // Throughput / memory. Auto ('') means "omit the flag and take the runtime
+                    // default", which is not the same as an explicit value -- so Auto writes
+                    // null, not a placeholder number. It has to write *something*: `out` is
+                    // spread over the stored rapid_mlx, so an omitted key leaves the old value
+                    // in place and selecting Auto would never stick. The load path fills every
+                    // one of these controls, so re-reading them preserves untouched values.
+                    const numOrNull = (id) => { const v = strVal(id); return v ? Number(v) : null; };
+                    out.gpu_memory_utilization = numOrNull('modal-rapid-gpu-memory-utilization');
+                    out.max_num_seqs = numOrNull('modal-rapid-max-num-seqs');
+                    out.max_concurrent_requests = numOrNull('modal-rapid-max-concurrent-requests');
+                    out.prefill_batch_size = numOrNull('modal-rapid-prefill-batch-size');
+                    out.completion_batch_size = numOrNull('modal-rapid-completion-batch-size');
                     const pflash = strVal('modal-rapid-pflash-policy');
-                    if (gpuUtil) out.gpu_memory_utilization = Number(gpuUtil);
-                    if (maxSeqs) out.max_num_seqs = Number(maxSeqs);
-                    if (maxConc) out.max_concurrent_requests = Number(maxConc);
                     if (pflash) out.pflash_policy = pflash;
                     // Sampling defaults (--default-* flags for Rapid-MLX)
                     const temp = floatOrNull('modal-temperature');

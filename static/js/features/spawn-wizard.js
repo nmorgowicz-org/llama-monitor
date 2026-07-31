@@ -280,6 +280,11 @@ export const wizardState = {
     maxNumSeqs: '',
     maxConcurrentRequests: '',
     pflashPolicy: 'off',
+    // Entry count, so 0 rather than '' is the omit value -- it matches the backend default
+    // and the argv builder, which only emits --hybrid-cache-entries above zero.
+    hybridCacheEntries: 0,
+    prefillBatchSize: '',
+    completionBatchSize: '',
       retainedCacheMib: 8192,
     workloadScenario: 'interactive_coding_agent',
     reasoningMode: null,         // llama.cpp thinking/reasoning select
@@ -662,6 +667,9 @@ function resetWizardState() {
   wizardState.hardware.maxNumSeqs = '';
   wizardState.hardware.maxConcurrentRequests = '';
   wizardState.hardware.pflashPolicy = 'off';
+  wizardState.hardware.hybridCacheEntries = 0;
+  wizardState.hardware.prefillBatchSize = '';
+  wizardState.hardware.completionBatchSize = '';
   wizardState.hardware.workloadScenario = 'interactive_coding_agent';
   wizardState.hardware.samplingMode = 'auto';
   if (dom.kvUnifiedSelect) dom.kvUnifiedSelect.value = '';
@@ -866,6 +874,9 @@ function cacheDom() {
    dom.maxNumSeqsSelect = document.getElementById('spawn-rapid-max-num-seqs');
    dom.maxConcurrentRequestsSelect = document.getElementById('spawn-rapid-max-concurrent-requests');
    dom.pflashPolicySelect = document.getElementById('spawn-rapid-pflash-policy');
+   dom.hybridCacheEntriesSelect = document.getElementById('spawn-rapid-hybrid-cache-entries');
+   dom.prefillBatchSizeSelect = document.getElementById('spawn-rapid-prefill-batch-size');
+   dom.completionBatchSizeSelect = document.getElementById('spawn-rapid-completion-batch-size');
    dom.retainedCacheMibSelect = document.getElementById('spawn-retained-cache-mib');
    dom.workloadScenarioSelect = document.getElementById('spawn-workload-scenario'); // hidden select for compat
    dom.reasoningModeCheck   = document.getElementById('spawn-rapid-reasoning-mode');
@@ -1406,6 +1417,9 @@ function _bindRapidMlxAdvancedControls() {
   bindSel(dom.maxNumSeqsSelect, 'maxNumSeqs');
   bindSel(dom.maxConcurrentRequestsSelect, 'maxConcurrentRequests');
   bindSel(dom.pflashPolicySelect, 'pflashPolicy');
+  bindSel(dom.hybridCacheEntriesSelect, 'hybridCacheEntries');
+  bindSel(dom.prefillBatchSizeSelect, 'prefillBatchSize');
+  bindSel(dom.completionBatchSizeSelect, 'completionBatchSize');
   [
     dom.turboquantModeSelect,
     dom.pflashPolicySelect,
@@ -10261,9 +10275,15 @@ export function buildSpawnPayload() {
         ...(h.maxNumSeqs && { max_num_seqs: Number(h.maxNumSeqs) }),
         ...(h.maxConcurrentRequests && { max_concurrent_requests: Number(h.maxConcurrentRequests) }),
         ...(h.pflashPolicy && { pflash_policy: h.pflashPolicy }),
+        ...(h.prefillBatchSize && { prefill_batch_size: Number(h.prefillBatchSize) }),
+        ...(h.completionBatchSize && { completion_batch_size: Number(h.completionBatchSize) }),
         prefix_cache_enabled: Number(h.retainedCacheMib ?? 8192) > 0,
         ...(Number(h.retainedCacheMib ?? 8192) > 0 && {
           retained_cache_mib: Number(h.retainedCacheMib ?? 8192),
+          // Entry count only means something while the cache is on, so it rides the same gate.
+          ...(Number(h.hybridCacheEntries || 0) > 0 && {
+            hybrid_cache_entries: Number(h.hybridCacheEntries),
+          }),
         }),
         disk_checkpoint_interval: 0,
         // No workload_scenario here: `RapidMlxConfig` has no such field, so serde dropped it

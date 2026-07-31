@@ -77,7 +77,31 @@ test.describe('Rapid-MLX preset editor throughput fields', () => {
     expect(body.rapid_mlx.max_concurrent_requests).toBe(32);
   });
 
-  test('@in-memory-test Auto omits the key rather than pinning a default', async ({ page }) => {
+  // The reason Auto writes null instead of omitting the key: `out` is spread over the stored
+  // rapid_mlx object, so an omitted key leaves the previous value untouched and selecting Auto
+  // on a preset that already had a value would silently do nothing.
+  test('@in-memory-test selecting Auto clears a stored value', async ({ page }) => {
+    await openSeeded(page);
+    await expect(page.locator('#modal-rapid-max-concurrent-requests')).toHaveValue('32');
+    await page.selectOption('#modal-rapid-max-concurrent-requests', '');
+
+    let body = null;
+    await page.route('**/api/presets/**', async (route, request) => {
+      if (request.method() === 'PUT') body = request.postDataJSON();
+      await route.fulfill({ status: 200, contentType: 'application/json', body: '{"id":"probe"}' });
+    });
+    for (const _ of [0, 1]) {
+      await page.evaluate(async () => {
+        const mod = await import('/js/features/presets.js');
+        await mod.savePreset(new Event('submit'));
+      });
+    }
+
+    expect(body, 'save request was never issued').not.toBeNull();
+    expect(body.rapid_mlx.max_concurrent_requests).toBeNull();
+  });
+
+  test('@in-memory-test Auto writes null rather than pinning a default', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.evaluate(async () => {
@@ -100,8 +124,11 @@ test.describe('Rapid-MLX preset editor throughput fields', () => {
     });
 
     expect(body, 'save request was never issued').not.toBeNull();
-    expect(body.rapid_mlx).not.toHaveProperty('gpu_memory_utilization');
-    expect(body.rapid_mlx).not.toHaveProperty('max_num_seqs');
-    expect(body.rapid_mlx).not.toHaveProperty('max_concurrent_requests');
+    // null, not absent: `out` is spread over the stored rapid_mlx, so Auto has to write
+    // something or it could never clear a value that was already there. Serde reads null
+    // into the same None the missing key would have produced.
+    expect(body.rapid_mlx.gpu_memory_utilization).toBeNull();
+    expect(body.rapid_mlx.max_num_seqs).toBeNull();
+    expect(body.rapid_mlx.max_concurrent_requests).toBeNull();
   });
 });
