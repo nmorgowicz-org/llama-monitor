@@ -5,11 +5,12 @@ use crate::inference::rapid_mlx::model_resolver::{
 use crate::models::gguf_recovery::{
     ExperimentalInventoryCacheKind, validate_experimental_inventory_cache,
 };
+use crate::models::provenance::DownloadProvenance;
 use crate::models::{DiscoveredModel, scan_models_dir};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -93,6 +94,13 @@ pub struct ModelInventoryEntry {
     pub model_source: Option<RapidMlxModelSource>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provenance: Option<serde_json::Value>,
+    /// Where this file was downloaded from, when it was downloaded through the app.
+    ///
+    /// Kept separate from `provenance` rather than folded into it: `provenance` is the
+    /// untyped MLX conversion recipe, and overloading one key with two unrelated shapes
+    /// would leave the frontend guessing which it had.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_provenance: Option<crate::models::provenance::DownloadProvenanceView>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -264,17 +272,32 @@ fn add_gguf_directory(
     if !root.is_dir() {
         return Ok(());
     }
+    // One sidecar read per directory, not per model: a `gguf/` directory holds many quants
+    // and the scan may descend into subdirectories, each with its own sidecar.
+    let mut sidecars: HashMap<PathBuf, BTreeMap<String, DownloadProvenance>> = HashMap::new();
+
     for model in scan_models_dir(root)? {
         let canonical = model.path.canonicalize()?;
         if !seen.insert(canonical) {
             continue;
         }
-        entries.push(from_gguf(model, legacy));
+        let recorded = model.path.parent().and_then(|dir| {
+            sidecars
+                .entry(dir.to_path_buf())
+                .or_insert_with(|| crate::models::provenance::load_directory(dir))
+                .get(&model.filename)
+                .cloned()
+        });
+        entries.push(from_gguf(model, legacy, recorded));
     }
     Ok(())
 }
 
-fn from_gguf(model: DiscoveredModel, legacy: bool) -> ModelInventoryEntry {
+fn from_gguf(
+    model: DiscoveredModel,
+    legacy: bool,
+    download_provenance: Option<DownloadProvenance>,
+) -> ModelInventoryEntry {
     let companion_kind = if model.is_mmproj {
         Some(CompanionKind::Mmproj)
     } else if model.is_draft_assistant {
@@ -313,6 +336,7 @@ fn from_gguf(model: DiscoveredModel, legacy: bool) -> ModelInventoryEntry {
             path: model.path.clone(),
         }),
         provenance: None,
+        download_provenance: download_provenance.as_ref().map(Into::into),
     }
 }
 
@@ -558,6 +582,10 @@ fn directory_entry(
 ) -> Result<ModelInventoryEntry> {
     let metadata = fs::symlink_metadata(path)?;
     let (size_bytes, size_known) = bounded_directory_size(path, library_root, 20_000)?;
+    // An MLX model is downloaded file by file into one directory, so its origin is the one
+    // its files agree on -- see `directory_origin` for why disagreement yields nothing.
+    let download_provenance = crate::models::provenance::directory_origin(path);
+    let download_provenance = download_provenance.as_ref().map(Into::into);
     let name = path
         .file_name()
         .and_then(|v| v.to_str())
@@ -595,6 +623,7 @@ fn directory_entry(
         legacy_location: legacy,
         model_source,
         provenance,
+        download_provenance,
     })
 }
 
@@ -632,6 +661,9 @@ fn file_entry(
         legacy_location: legacy,
         model_source: None,
         provenance: None,
+        // `file_entry` builds the card for a `.part` -- an interrupted download. The sidecar
+        // is only written once the stream closes cleanly, so there is nothing to attach yet.
+        download_provenance: None,
     })
 }
 

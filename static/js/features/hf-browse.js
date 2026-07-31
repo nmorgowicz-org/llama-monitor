@@ -145,7 +145,10 @@ function _roleBadge(roleId) {
   };
 }
 
-function resolveAuthorRole(repoId, tags) {
+// Exported for the library cards in models.js, which resolve the same question about a
+// downloaded model's repo. A second implementation there would be a second place for the
+// Qwen-is-a-converter class of bug to reappear.
+export function resolveAuthorRole(repoId, tags) {
   const lowerTags = (tags || []).map(t => t.toLowerCase());
   const hasMlxTag = lowerTags.some(t => t.includes('mlx'));
   const hasGgufTag = lowerTags.some(t => t.includes('gguf') || t.includes('gguf-file'));

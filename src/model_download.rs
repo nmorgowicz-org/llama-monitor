@@ -357,6 +357,22 @@ async fn run_download(
     // Populate total_bytes from Content-Length so the status endpoint can compute ETA.
     let content_length = resp.content_length();
 
+    // The commit `main` actually resolved to, for the provenance sidecar written on
+    // completion. This is the only point it is knowable: the redirect Hugging Face serves
+    // carries it, and once the body starts streaming the header is gone. Absent means the
+    // file came from whatever the branch pointed at, which is recorded as such rather than
+    // guessed at.
+    let resolved_revision = resp
+        .headers()
+        .get("x-repo-commit")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+        .filter(|sha| {
+            !sha.is_empty()
+                && sha.len() <= 128
+                && sha.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        });
+
     // When resuming, perform a basic sanity check to avoid corrupting the file
     // if the server-side content changed or our partial is invalid.
     if resume_from > 0 {
@@ -555,6 +571,32 @@ async fn run_download(
     };
     t.status = "completed".into();
     t.message = "Download completed.".into();
+
+    // Record where this file came from while the answer is still in scope. The library scan
+    // sees only a filename on disk, so without this the origin is unrecoverable -- which is
+    // exactly why the lineage row on the model cards had never rendered.
+    if let (Some(dir), Some(name)) = (
+        local_path.parent(),
+        local_path.file_name().and_then(|n| n.to_str()),
+    ) && let Err(e) = crate::models::provenance::record_download(
+        dir,
+        name,
+        crate::models::provenance::DownloadProvenance {
+            repo_id: repo_id.clone(),
+            revision: resolved_revision.clone(),
+            remote_path: file_path.clone(),
+            downloaded_at: std::time::SystemTime::UNIX_EPOCH
+                .elapsed()
+                .unwrap_or_default()
+                .as_secs(),
+            size_bytes: written,
+        },
+    ) {
+        // The file downloaded fine; only its lineage is missing. Report it and leave the
+        // download successful rather than failing a multi-gigabyte transfer over a sidecar.
+        eprintln!("[warn] could not record provenance  file={file_path}  error={e}");
+    }
+
     if is_tty {
         let elapsed = stream_start.elapsed().as_secs_f64();
         let transferred = written.saturating_sub(resume_from);

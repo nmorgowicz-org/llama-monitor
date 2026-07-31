@@ -1808,6 +1808,15 @@ fn api_delete_model_file(
 
                 match std::fs::remove_file(&canon) {
                     Ok(_) => {
+                        // Drop the file's provenance with the file. Leaving it behind would
+                        // let a later, unrelated download that happens to reuse the name
+                        // inherit an origin it does not have.
+                        if let (Some(dir), Some(name)) =
+                            (canon.parent(), canon.file_name().and_then(|n| n.to_str()))
+                            && let Err(e) = crate::models::provenance::forget(dir, name)
+                        {
+                            eprintln!("[warn] could not clear provenance for {name}: {e}");
+                        }
                         let mut models = st.discovered_models.lock().unwrap();
                         models.retain(|m| m.path.to_str() != Some(&path_str));
                         Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(

@@ -12,6 +12,7 @@ pub mod import_lab;
 pub mod gguf_recovery;
 pub mod library;
 pub mod local_adopt;
+pub mod provenance;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DiscoveredModel {

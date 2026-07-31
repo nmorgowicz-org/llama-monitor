@@ -23,6 +23,8 @@ import {
     getRecommendedMmproj,
     hfCreateScopeSelector,
     hfCreateSortSelector,
+    ensureCommunitySourceCatalog,
+    resolveAuthorRole,
     HF_SCOPE,
     HF_SORT,
 } from './hf-browse.js';
@@ -255,6 +257,13 @@ async function loadModels({ refresh = false } = {}) {
             ? 'mm-model-grid mm-model-grid--list'
             : 'mm-model-grid';
 
+        // The lineage row asks the community source catalog for the uploader's role. Awaiting
+        // here rather than inside the card keeps it to one fetch for the whole grid, and
+        // without it every card would silently fall back to the repo-name heuristic on the
+        // first render. It resolves even when the fetch fails, so a catalog outage delays the
+        // grid by one request rather than blocking it.
+        await ensureCommunitySourceCatalog();
+
         grid.innerHTML = '';
         result.forEach(m => {
             grid.appendChild(buildModelCard(m));
@@ -393,6 +402,81 @@ function applySearch(models) {
     });
 }
 
+// Where a model came from, for the card's lineage row.
+//
+// This row shipped in Phase 8B2 reading `hf_repo_id || originRepo || repo_id`. None of those
+// three ever existed on an inventory entry, so it had never rendered. Both sources below are
+// real fields the backend populates: `download_provenance` is written when the app downloads
+// a file, and `model_source` carries the repo for snapshot directories imported from the
+// shared Hugging Face cache.
+function resolveLineage(m) {
+    const dp = m.download_provenance;
+    if (dp?.repoId) {
+        return {
+            repoId: dp.repoId,
+            revision: dp.revision || '',
+            pinned: !!dp.pinned,
+            sourceUrl: dp.sourceUrl || '',
+        };
+    }
+    // A snapshot directory records its repo and the snapshot's own commit, so it is always
+    // pinned -- the commit is the directory name, not a branch we happened to read.
+    if (m.model_source?.kind === 'hugging_face_repo' && m.model_source.repo_id) {
+        const revision = m.model_source.revision || '';
+        return {
+            repoId: m.model_source.repo_id,
+            revision,
+            pinned: !!revision && revision !== 'main',
+            sourceUrl: `https://huggingface.co/${m.model_source.repo_id}`,
+        };
+    }
+    return null;
+}
+
+function buildLineageRow(m) {
+    const lineage = resolveLineage(m);
+    if (!lineage) return null;
+
+    const lineageEl = document.createElement('div');
+    lineageEl.className = 'mm-card-lineage';
+
+    const repoLink = document.createElement('a');
+    repoLink.className = 'mm-lineage-repo';
+    repoLink.textContent = lineage.repoId;
+    repoLink.href = lineage.sourceUrl;
+    repoLink.target = '_blank';
+    repoLink.rel = 'noopener noreferrer';
+    lineageEl.appendChild(repoLink);
+
+    // A commit is shown only when there is one. An unpinned download came from whatever the
+    // branch pointed at, and rendering "main" as though it were a revision would present a
+    // model as reproducible when it is not.
+    if (lineage.pinned && lineage.revision) {
+        lineageEl.appendChild(document.createTextNode(' · '));
+        const revSpan = document.createElement('span');
+        revSpan.className = 'mm-lineage-rev';
+        const short = lineage.revision.slice(0, 7);
+        revSpan.textContent = short === lineage.revision ? short : short + '…';
+        revSpan.title = `Pinned to commit ${lineage.revision}`;
+        lineageEl.appendChild(revSpan);
+    }
+
+    // The uploader's role comes from the community source catalog, the same lookup the HF
+    // browse results use. The format stands in for the repo tags the browse path has: a
+    // locally downloaded GGUF is the evidence a `gguf` tag would have been.
+    const roleInfo = resolveAuthorRole(lineage.repoId, m.format ? [m.format] : []);
+    if (roleInfo) {
+        lineageEl.appendChild(document.createTextNode(' · '));
+        const roleSpan = document.createElement('span');
+        roleSpan.className = `mm-lineage-role mm-lineage-role--${roleInfo.role}`;
+        roleSpan.textContent = roleInfo.label;
+        if (roleInfo.description) roleSpan.title = roleInfo.description;
+        lineageEl.appendChild(roleSpan);
+    }
+
+    return lineageEl;
+}
+
 function buildModelCard(m) {
     const name = m.model_name || m.filename || 'Unnamed model';
     const quant = m.quant_type || 'unknown';
@@ -516,57 +600,8 @@ function buildModelCard(m) {
         card.appendChild(barWrap);
     }
 
-    // Phase 8B2: Lineage info for HF-sourced models (repo/revision/original author/converter)
-    const hfRepoId = m.hf_repo_id || m.originRepo || m.repo_id || '';
-    const hfRevision = m.hf_revision || m.revision || '';
-    const hfOriginalAuthor = m.original_author || m.hf_source_info?.original_author || '';
-    const hfConverter = m.converter || m.hf_source_info?.converter || '';
-    if (hfRepoId) {
-        const lineageEl = document.createElement('div');
-        lineageEl.className = 'mm-card-lineage';
-
-        // Repo name
-        const repoSpan = document.createElement('span');
-        repoSpan.textContent = hfRepoId;
-        lineageEl.appendChild(repoSpan);
-
-        // Revision badge
-        if (hfRevision && hfRevision !== 'main') {
-            const revPrefix = hfRevision.length > 7 ? hfRevision.substring(0, 7) : hfRevision;
-            const dot = document.createElement('span');
-            dot.textContent = ' · ';
-            lineageEl.appendChild(dot);
-            const revSpan = document.createElement('span');
-            revSpan.className = 'mm-lineage-rev';
-            revSpan.textContent = hfRevision === revPrefix ? revPrefix : revPrefix + '…';
-            lineageEl.appendChild(revSpan);
-        }
-
-        // Original author (distinct from converter)
-        if (hfOriginalAuthor && hfOriginalAuthor !== hfConverter) {
-            const authDot = document.createElement('span');
-            authDot.textContent = ' · ';
-            lineageEl.appendChild(authDot);
-            const authSpan = document.createElement('span');
-            authSpan.className = 'mm-lineage-author';
-            authSpan.textContent = 'by ' + hfOriginalAuthor;
-            lineageEl.appendChild(authSpan);
-        }
-
-        // Converter
-        if (hfConverter) {
-            const convDot = document.createElement('span');
-            convDot.textContent = ' · ';
-            lineageEl.appendChild(convDot);
-            const convSpan = document.createElement('span');
-            convSpan.className = 'mm-lineage-converter';
-            const convLabel = m.format === 'mlx' ? 'MLX by' : 'via';
-            convSpan.textContent = convLabel + ' ' + hfConverter;
-            lineageEl.appendChild(convSpan);
-        }
-
-        card.appendChild(lineageEl);
-    }
+    const lineageEl = buildLineageRow(m);
+    if (lineageEl) card.appendChild(lineageEl);
 
     if (relatedPresets.length) {
         const presetMeta = document.createElement('div');

@@ -1669,13 +1669,26 @@ button:disabled {
   font-size: 9px;
 }
 
-.mm-card-lineage .mm-lineage-author {
+.mm-card-lineage .mm-lineage-repo {
   color: var(--color-text-secondary);
+  text-decoration: none;
 }
 
-.mm-card-lineage .mm-lineage-converter {
+.mm-card-lineage .mm-lineage-repo:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+/* The uploader's role. Deliberately quieter than the HF browse badges: on a library card
+   the model is already yours, so the role is context rather than a selection signal. */
+.mm-card-lineage .mm-lineage-role {
   color: var(--color-text-muted);
-  opacity: 0.8;
+  opacity: 0.85;
+}
+
+.mm-card-lineage .mm-lineage-role--original-author {
+  color: rgba(74, 222, 128, 0.85);
+  opacity: 1;
 }
 
 /* ── Card actions ── */
