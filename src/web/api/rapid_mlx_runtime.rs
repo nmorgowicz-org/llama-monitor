@@ -698,7 +698,7 @@ async fn build_command_preview(
     check_setting_warnings(&config, &mut reasons);
 
     // Build effective_policy snapshot from config fields that were actually applied
-    let effective_policy = build_effective_policy(&config);
+    let effective_policy = build_effective_policy(&config, &capabilities);
 
     // Build requested_vs_effective diff using the setting catalog
     let requested_vs_effective = build_requested_vs_effective(&config, &capabilities);
@@ -713,7 +713,10 @@ async fn build_command_preview(
     })) as ApiReply
 }
 
-fn build_effective_policy(config: &RapidMlxConfig) -> serde_json::Value {
+fn build_effective_policy(
+    config: &RapidMlxConfig,
+    capabilities: &crate::inference::rapid_mlx::compatibility::ServeCapabilities,
+) -> serde_json::Value {
     // Keep this snapshot honest: advanced TurboQuant requests are persisted so
     // the user can see and qualify them, but launch deliberately omits them
     // until an exact model/revision receipt exists. The requested-vs-effective
@@ -730,6 +733,17 @@ fn build_effective_policy(config: &RapidMlxConfig) -> serde_json::Value {
     // flag"). The VRAM estimator already models this as `reasoning_mode_overrides_kv_to_int8`;
     // reporting the requested dtype here would make this snapshot the one surface that
     // disagrees, on the interaction that matters most for memory.
+    // Same treatment as TurboQuant above, and for the same reason: the command builder omits
+    // --speculative on a runtime that lacks it, so reporting the requested value here would
+    // make this snapshot disagree with the argv beside it.
+    let effective_speculative_policy = match config.speculative_policy.as_deref() {
+        Some(policy)
+            if policy != "auto" && policy != "off" && !capabilities.contains("--speculative") =>
+        {
+            Some("off".to_string())
+        }
+        _ => config.speculative_policy.clone(),
+    };
     let reasoning_on = config.reasoning_mode.as_deref() == Some("on");
     let effective_kv_cache_dtype = if reasoning_on {
         Some(crate::inference::rapid_mlx::KvCacheConfig::Int8)
@@ -753,7 +767,7 @@ fn build_effective_policy(config: &RapidMlxConfig) -> serde_json::Value {
         "batching_policy": config.batching_policy,
         "concurrency_policy": config.concurrency_policy,
         "reasoning_mode": config.reasoning_mode,
-        "speculative_policy": config.speculative_policy,
+        "speculative_policy": effective_speculative_policy,
         "mllm_vision": config.mllm_vision,
         "embeddings": config.embeddings,
         "gpu_memory_utilization": config.gpu_memory_utilization,
@@ -863,6 +877,24 @@ fn build_requested_vs_effective(
                 }),
             );
         }
+    }
+
+    // Speculative decoding: omitted from argv when the runtime has no --speculative. Reported
+    // here for the same reason TurboQuant is -- the user asked for a throughput feature and
+    // needs to know it is not running. These two are independent: neither gates the other.
+    if let Some(ref policy) = config.speculative_policy
+        && policy != "auto"
+        && policy != "off"
+        && !capabilities.contains("--speculative")
+    {
+        diff.insert(
+            "speculative_policy".to_string(),
+            serde_json::json!({
+                "requested": policy,
+                "effective": "off",
+                "reason": "Speculative decoding is not supported by this runtime version; disabled"
+            }),
+        );
     }
 
     // Concurrency policy: overlap mode requires runtime support
@@ -2266,7 +2298,10 @@ mod settings_catalog_tests {
     #[test]
     fn effective_policy_snapshot_covers_exactly_the_catalog() {
         let config = RapidMlxConfig::default();
-        let policy = build_effective_policy(&config);
+        let policy = build_effective_policy(
+            &config,
+            &crate::inference::rapid_mlx::compatibility::ServeCapabilities::verified_baseline(),
+        );
         let policy_keys: std::collections::BTreeSet<&str> = policy
             .as_object()
             .expect("effective policy is an object")
@@ -2733,7 +2768,10 @@ Run with `--verbose` for details on each check.
         // revision-bound qualification receipt is available to the launch path.
         config.turboquant_mode = Some(crate::inference::rapid_mlx::TurboQuantMode::K8V4);
         assert_eq!(
-            build_effective_policy(&config)["turboquant_mode"],
+            build_effective_policy(
+                &config,
+                &crate::inference::rapid_mlx::compatibility::ServeCapabilities::verified_baseline(),
+            )["turboquant_mode"],
             serde_json::json!("none")
         );
     }

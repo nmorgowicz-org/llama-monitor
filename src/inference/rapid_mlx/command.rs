@@ -566,8 +566,19 @@ impl RapidMlxCommandBuilder {
             }
             value => anyhow::bail!("reasoning_mode must be on or off; got {value:?}"),
         }
-        if let Some(ref policy) = self.speculative_policy {
-            capabilities.require("--speculative")?;
+        // Speculative decoding is a throughput feature, like TurboQuant and PFlash, and is
+        // treated like them: if the installed runtime has no --speculative, omit it and let
+        // the caller report the downgrade, rather than failing the whole command build.
+        //
+        // It used to call capabilities.require("--speculative")?, which aborted the entire
+        // build. --speculative is absent from verified_baseline(), so on a baseline runtime a
+        // single speculative request blanked the command preview outright -- including the
+        // requested-vs-effective entries for every unrelated setting. TurboQuant and
+        // speculative decoding are independent features and one must not suppress the other's
+        // diagnostics.
+        if let Some(ref policy) = self.speculative_policy
+            && capabilities.contains("--speculative")
+        {
             args.push("--speculative".to_string());
             args.push(policy.clone());
         }
@@ -839,6 +850,37 @@ mod tests {
             .iter()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[test]
+    fn unsupported_speculative_is_omitted_without_failing_the_build() {
+        // verified_baseline() has no --speculative. This used to abort the whole command
+        // build, which blanked the command preview and every unrelated setting's diff with
+        // it. Speculative decoding and TurboQuant are independent features; neither may
+        // suppress the other, nor anything else.
+        let launch = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .port(9000)
+        .speculative_policy(Some("mtp".into()))
+        .prefill_step_size(Some(512))
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .expect("an unsupported speculative policy must not fail the build");
+
+        assert!(
+            !launch.args.iter().any(|a| a == "--speculative"),
+            "--speculative must be omitted when the runtime lacks it: {:?}",
+            launch.args
+        );
+        // The settings the runtime *does* support still have to make it through.
+        assert!(
+            launch
+                .args
+                .windows(2)
+                .any(|p| p == ["--prefill-step-size", "512"]),
+            "unrelated flags must survive: {:?}",
+            launch.args
+        );
     }
 
     #[test]
