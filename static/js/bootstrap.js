@@ -46,6 +46,7 @@ import { initRapidMlxUpdater } from './features/rapid-mlx-updater.js';
 import { initTemplateAutoupdater } from './features/template-autoupdater.js';
 import { HF_DISCOVER_CATEGORIES } from './features/hf-browse.js';
 import { initGlobalTooltip } from './core/tooltip.js';
+import { initEvidenceDrawer } from './features/evidence-drawer.js';
 import Router from './features/router.js';
 
 // Verify module loading works — if this fails, the page is broken.
@@ -100,6 +101,7 @@ async function initializeApp() {
     }
 
     initGlobalTooltip();
+    initEvidenceDrawer();
 
     // Phase 1: Initialize rendering functions, then WebSocket.
     initDashboardRender();

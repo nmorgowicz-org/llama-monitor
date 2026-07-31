@@ -2100,6 +2100,9 @@
 
 /* ── VRAM strip — sits between header and tab layout, full-width ── */
 .preset-vram-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   flex-shrink: 0;
   padding: 8px 20px;
   background: rgba(0, 0, 0, 0.1);
@@ -2107,6 +2110,7 @@
 }
 
 .preset-vram-strip .preset-vram-display {
+    flex: 1;
     background: none;
     border: none;
     border-radius: 0;
@@ -2336,16 +2340,15 @@
    section (thinking/preserve-thinking/reasoning/reasoning-budget/tool-call-format) is llama.cpp
    vocabulary; Rapid has its own `modal-rapid-enable-thinking` in advanced.
 
-   The webui-* and speculative-policy exemptions were removed with their controls: they were
-   gated on --ui/--path/--ui-config (llama.cpp flags, absent from rapid-mlx) and --speculative
-   (absent from every runtime). See settings.rs::serve_flag_literals_exist_in_the_real_runtime. */
+   The webui-* and legacy speculative-policy exemptions were removed with their controls. The
+   typed Rapid MTP row below is a separate vLLM-style --speculative-config contract. */
 #preset-modal.preset-editor--rapid-mlx .preset-nav-item:not([data-section="model"]):not([data-section="generation"]):not([data-section="advanced"]),
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-field:not(:has(#modal-name)):not(:has(#modal-model-path)),
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-row,
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-toggles,
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .preset-memory-warning,
-#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] > .pe-section-body > :not(.pe-row:has(#modal-port)):not(#pe-row-rapid-reasoning):not(#pe-row-rapid-reasoning-mode):not(#pe-row-rapid-prefix-cache):not(#pe-row-rapid-advanced):not(#pe-row-rapid-workload):not(#pe-row-rapid-parser-overrides):not(#pe-row-rapid-architecture-overrides):not(#pe-row-rapid-cache-memory):not(#pe-row-rapid-hybrid-cache-entries):not(#pe-row-rapid-throughput):not(#pe-row-rapid-batch-sizes):not(#pe-row-max-tokens-seed),
-#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] .pe-field:not(:has(#modal-port)):not(:has(#modal-rapid-enable-thinking)):not(:has(#modal-rapid-reasoning-effort)):not(:has(#modal-rapid-prefix-cache-enabled)):not(:has(#modal-rapid-kv-cache-dtype)):not(:has(#modal-rapid-turboquant-mode)):not(:has(#modal-rapid-reasoning-mode)):not(:has(#modal-rapid-sampling-mode)):not(:has(#modal-rapid-tool-call-parser)):not(:has(#modal-rapid-reasoning-parser)):not(:has(#modal-rapid-hybrid-mode)):not(:has(#modal-rapid-prefill-step-size)):not(:has(#modal-rapid-cache-memory-mib)):not(:has(#modal-rapid-hybrid-cache-entries)):not(:has(#modal-rapid-prefill-batch-size)):not(:has(#modal-rapid-completion-batch-size)):not(:has(#modal-rapid-gpu-memory-utilization)):not(:has(#modal-rapid-max-num-seqs)):not(:has(#modal-rapid-max-concurrent-requests)):not(:has(#modal-rapid-pflash-policy)):not(:has(#modal-max-tokens)),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] > .pe-section-body > :not(.pe-row:has(#modal-port)):not(#pe-row-rapid-reasoning):not(#pe-row-rapid-reasoning-mode):not(#pe-row-rapid-prefix-cache):not(#pe-row-rapid-advanced):not(#pe-row-rapid-workload):not(#pe-row-rapid-parser-overrides):not(#pe-row-rapid-architecture-overrides):not(#pe-row-rapid-speculative):not(#pe-row-rapid-cache-memory):not(#pe-row-rapid-hybrid-cache-entries):not(#pe-row-rapid-throughput):not(#pe-row-rapid-batch-sizes):not(#pe-row-max-tokens-seed),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] .pe-field:not(:has(#modal-port)):not(:has(#modal-rapid-enable-thinking)):not(:has(#modal-rapid-reasoning-effort)):not(:has(#modal-rapid-prefix-cache-enabled)):not(:has(#modal-rapid-kv-cache-dtype)):not(:has(#modal-rapid-turboquant-mode)):not(:has(#modal-rapid-reasoning-mode)):not(:has(#modal-rapid-sampling-mode)):not(:has(#modal-rapid-frequency-penalty)):not(:has(#modal-rapid-tool-call-parser)):not(:has(#modal-rapid-reasoning-parser)):not(:has(#modal-rapid-hybrid-mode)):not(:has(#modal-rapid-prefill-step-size)):not(:has(#modal-rapid-speculative-enabled)):not(:has(#modal-rapid-speculative-source)):not(:has(#modal-rapid-speculative-model)):not(:has(#modal-rapid-speculative-tokens)):not(:has(#modal-rapid-speculative-disable-auto-k)):not(:has(#modal-rapid-auto-tool-choice)):not(:has(#modal-rapid-cache-memory-mib)):not(:has(#modal-rapid-hybrid-cache-entries)):not(:has(#modal-rapid-prefill-batch-size)):not(:has(#modal-rapid-completion-batch-size)):not(:has(#modal-rapid-gpu-memory-utilization)):not(:has(#modal-rapid-max-num-seqs)):not(:has(#modal-rapid-max-concurrent-requests)):not(:has(#modal-rapid-pflash-policy)):not(:has(#modal-max-tokens)),
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="generation"] .pe-field:not(:has(#modal-temperature)):not(:has(#modal-top-p)):not(:has(#modal-top-k)):not(:has(#modal-min-p)):not(:has(#modal-repeat-penalty)):not(:has(#modal-presence-penalty)),
 #preset-modal.preset-editor--rapid-mlx #preset-browse-model-btn,
 #preset-modal.preset-editor--rapid-mlx #preset-vram-strip {

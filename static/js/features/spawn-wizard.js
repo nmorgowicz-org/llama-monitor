@@ -23,6 +23,7 @@ import {
 } from './chat-template-registry.js';
 import Router, { routeForCurrentView } from './router.js';
 import { scheduleEstimate, cancelEstimate, buildEstimateBody, rapidEstimatePolicyFromWizardHardware } from './vram-estimate.js';
+import { openEvidenceDrawer, openEstimateEvidenceDrawer, evidenceFromCommandPreview } from './evidence-drawer.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune, requestDepthSweep, renderDepthSweep, requestBatchSweep, renderBatchSweep } from './tuning-cards.js';
 import { setHeaderMode } from './attach-detach.js';
@@ -207,7 +208,6 @@ export const wizardState = {
     hfTokenSet: false,
     rapidMlxSource: null,
     rapidMlxProfile: null,          // live profile from rapid-mlx info <model>
-    rapidMlxSpeculativeConfig: null, // --speculative-config JSON string
     rapidMlxMllm: true,              // --mllm toggle (vision enabled by default when available)
     rapidMlxEmbeddingModel: null,    // --embedding-model repo ID/alias
     delivery: 'local_file', // 'local_file' | 'imported_local' | 'stream_hf' | 'downloaded_hf'
@@ -293,6 +293,12 @@ export const wizardState = {
     reasoningParser: '',
     hybridMode: 'auto',
     prefillStepSize: 512,
+    speculativeEnabled: false,
+    speculativeSource: 'embedded',
+    speculativeModel: '',
+    speculativeTokens: 2,
+    speculativeDisableAutoK: false,
+    autoToolChoice: false,
     // Phase 7: Web UI (D26/A44)
     // Phase 7: Sampling mode (D27)
     samplingMode: 'auto',
@@ -618,7 +624,6 @@ function resetWizardState() {
   wizardState.model.hfTokenSet = false;
   wizardState.model.rapidMlxSource = null;
   wizardState.model.rapidMlxProfile = null;
-  wizardState.model.rapidMlxSpeculativeConfig = null;
   wizardState.model.rapidMlxMllm = true;
   wizardState.model.rapidMlxEmbeddingModel = null;
   wizardState.model._quantSwapRepo = '';
@@ -670,6 +675,14 @@ function resetWizardState() {
   wizardState.hardware.hybridCacheEntries = 0;
   wizardState.hardware.prefillBatchSize = '';
   wizardState.hardware.completionBatchSize = '';
+  wizardState.hardware.prefillStepSize = 512;
+  wizardState.hardware.rapidReasoningMode = 'on';
+  wizardState.hardware.speculativeEnabled = false;
+  wizardState.hardware.speculativeSource = 'embedded';
+  wizardState.hardware.speculativeModel = '';
+  wizardState.hardware.speculativeTokens = 2;
+  wizardState.hardware.speculativeDisableAutoK = false;
+  wizardState.hardware.autoToolChoice = false;
   wizardState.hardware.workloadScenario = 'interactive_coding_agent';
   wizardState.hardware.samplingMode = 'auto';
   if (dom.kvUnifiedSelect) dom.kvUnifiedSelect.value = '';
@@ -884,6 +897,12 @@ function cacheDom() {
    dom.reasoningParserSelect = document.getElementById('spawn-rapid-reasoning-parser');
    dom.hybridModeSelect = document.getElementById('spawn-rapid-hybrid-mode');
    dom.prefillStepSizeSelect = document.getElementById('spawn-rapid-prefill-step-size');
+   dom.speculativeEnabledCheck = document.getElementById('spawn-rapid-speculative-enabled');
+   dom.speculativeSourceSelect = document.getElementById('spawn-rapid-speculative-source');
+   dom.speculativeModelInput = document.getElementById('spawn-rapid-speculative-model');
+   dom.speculativeTokensSelect = document.getElementById('spawn-rapid-speculative-tokens');
+   dom.speculativeDisableAutoKCheck = document.getElementById('spawn-rapid-speculative-disable-auto-k');
+   dom.autoToolChoiceCheck = document.getElementById('spawn-rapid-auto-tool-choice');
    dom.samplingModeSelect   = document.getElementById('spawn-sampling-mode');
 
   // Step 4 (Summary)
@@ -1432,6 +1451,8 @@ function _bindRapidMlxAdvancedControls() {
   bindSel(dom.reasoningParserSelect, 'reasoningParser');
   bindSel(dom.hybridModeSelect, 'hybridMode');
   bindSel(dom.prefillStepSizeSelect, 'prefillStepSize');
+  bindSel(dom.speculativeSourceSelect, 'speculativeSource');
+  bindSel(dom.speculativeTokensSelect, 'speculativeTokens');
 
    // Web UI config JSON and static path inputs
    const bindInput = (el, key) => {
@@ -1442,6 +1463,21 @@ function _bindRapidMlxAdvancedControls() {
        scheduleVramUpdate();
      });
    };
+   bindInput(dom.speculativeModelInput, 'speculativeModel');
+
+   const bindCheck = (el, key, onChange) => {
+     if (!el || el.dataset.bound) return;
+     el.dataset.bound = '1';
+     el.addEventListener('change', () => {
+       wizardState.hardware[key] = el.checked;
+       onChange?.();
+       scheduleVramUpdate();
+     });
+   };
+   bindCheck(dom.speculativeEnabledCheck, 'speculativeEnabled', _syncRapidSpeculativeFields);
+   bindCheck(dom.speculativeDisableAutoKCheck, 'speculativeDisableAutoK');
+   bindCheck(dom.autoToolChoiceCheck, 'autoToolChoice');
+   dom.speculativeSourceSelect?.addEventListener('change', _syncRapidSpeculativeFields);
 
     if (dom.reasoningModeCheck && !dom.reasoningModeCheck.dataset.bound) {
      dom.reasoningModeCheck.dataset.bound = '1';
@@ -1453,36 +1489,38 @@ function _bindRapidMlxAdvancedControls() {
    }
 }
 
+function _syncRapidSpeculativeFields() {
+  const h = wizardState.hardware;
+  if (dom.speculativeEnabledCheck) dom.speculativeEnabledCheck.checked = !!h.speculativeEnabled;
+  if (dom.speculativeSourceSelect) dom.speculativeSourceSelect.value = h.speculativeSource || 'embedded';
+  if (dom.speculativeModelInput) dom.speculativeModelInput.value = h.speculativeModel || '';
+  if (dom.speculativeTokensSelect) dom.speculativeTokensSelect.value = String(h.speculativeTokens || 2);
+  if (dom.speculativeDisableAutoKCheck) dom.speculativeDisableAutoKCheck.checked = !!h.speculativeDisableAutoK;
+  if (dom.autoToolChoiceCheck) dom.autoToolChoiceCheck.checked = !!h.autoToolChoice;
+  const enabled = !!h.speculativeEnabled;
+  ['spawn-rapid-speculative-mode-wrap', 'spawn-rapid-speculative-tokens-wrap', 'spawn-rapid-speculative-auto-k-wrap']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = enabled ? '' : 'none'; });
+  const modelWrap = document.getElementById('spawn-rapid-speculative-model-wrap');
+  if (modelWrap) modelWrap.style.display = enabled && h.speculativeSource === 'external' ? '' : 'none';
+}
+
 function _applyReasoningModeLock() {
-  const locked = wizardState.hardware.rapidReasoningMode === 'on';
+  // The Rapid reasoning quality profile is always enabled and pins active KV to int8.
+  // The checkbox independently controls whether thinking output is allowed.
   if (!dom.kvCacheDtypeSelect) return;
 
-  if (locked) {
-    // Disable int4 option when reasoning is ON (pins KV to int8)
-    for (const opt of dom.kvCacheDtypeSelect.options) {
-      if (opt.value === 'int4') {
-        opt.disabled = true;
-        opt.setAttribute('data-disabled-by', 'reasoning');
-      }
+  for (const opt of dom.kvCacheDtypeSelect.options) {
+    if (opt.value === 'int4') {
+      opt.disabled = true;
+      opt.setAttribute('data-disabled-by', 'reasoning');
     }
-    // If int4 was selected, switch to int8
-    if (dom.kvCacheDtypeSelect.value === 'int4') {
-      dom.kvCacheDtypeSelect.value = 'int8';
-      wizardState.hardware.kvCacheDtype = 'int8';
-    }
-    dom.kvCacheDtypeSelect.classList.add('kv-dtype-locked');
-    dom.kvCacheDtypeSelect.title = 'Reasoning mode pins KV to int8';
-  } else {
-    // Re-enable int4 when reasoning is OFF
-    for (const opt of dom.kvCacheDtypeSelect.options) {
-      if (opt.getAttribute('data-disabled-by') === 'reasoning') {
-        opt.disabled = false;
-        opt.removeAttribute('data-disabled-by');
-      }
-    }
-    dom.kvCacheDtypeSelect.classList.remove('kv-dtype-locked');
-    dom.kvCacheDtypeSelect.title = '';
   }
+  if (dom.kvCacheDtypeSelect.value === 'int4') {
+    dom.kvCacheDtypeSelect.value = 'int8';
+    wizardState.hardware.kvCacheDtype = 'int8';
+  }
+  dom.kvCacheDtypeSelect.classList.add('kv-dtype-locked');
+  dom.kvCacheDtypeSelect.title = 'The Rapid reasoning quality profile pins KV to int8';
 }
 
 function _applyRapidMlxDefaults() {
@@ -4829,7 +4867,8 @@ function _renderRapidMlxProfileHints() {
     hintsEl.appendChild(row);
   }
 
-  // Spec-decode eligibility readout + --speculative-config JSON builder
+  // Spec-decode eligibility readout. Configuration remains hidden until the typed,
+  // MTP-only vLLM-style schema and truthful admission UX are wired end to end.
   if (profile.spec_decode) {
     const row = document.createElement('div');
     row.className = 'rapid-mlx-hint-row rapid-mlx-hint-row--spec';
@@ -4843,26 +4882,6 @@ function _renderRapidMlxProfileHints() {
     }
     hintsEl.appendChild(row);
 
-    // JSON builder for --speculative-config
-    const configRow = document.createElement('div');
-    configRow.className = 'rapid-mlx-config-row';
-    const configLabel = document.createElement('span');
-    configLabel.className = 'rapid-mlx-config-label';
-    configLabel.textContent = '--speculative-config';
-    configRow.appendChild(configLabel);
-    const configInput = document.createElement('input');
-    configInput.className = 'rapid-mlx-config-input';
-    configInput.type = 'text';
-    configInput.placeholder = 'e.g. {"draft_model": "alias", "max_tokens": 4}';
-    configInput.disabled = spec !== 'supported';
-    if (spec !== 'supported') {
-      configInput.title = 'Speculative decoding not supported for this model';
-    }
-    configInput.addEventListener('input', () => {
-      wizardState.model.rapidMlxSpeculativeConfig = configInput.value || null;
-    });
-    configRow.appendChild(configInput);
-    hintsEl.appendChild(configRow);
   }
 
   // DFlash / DDTree eligibility
@@ -5886,6 +5905,9 @@ function updateVramDisplay() {
         ? ' (Architecture metadata incomplete — this estimate is a rough heuristic.)'
         : '';
     const note = (est.note || '') + evidenceSuffix;
+
+    const explain = document.getElementById('wizard-vram-explain');
+    if (explain) explain.onclick = () => openEstimateEvidenceDrawer(est, 'Setup memory estimate', explain);
 
     updateMlockWarning(availVram, free);
 
@@ -9324,6 +9346,7 @@ function _syncStructuredOutputFields() {
 
 function _syncThinkingFields() {
   const h = wizardState.hardware;
+  _syncRapidSpeculativeFields();
   const section = document.getElementById('spawn-thinking-section');
   const hasThinking =
     h.enableThinking != null ||
@@ -9754,8 +9777,7 @@ function _renderPresetParamsStep() {
       const rapidRows = [];
        // Show requested vs effective when reasoning overrides the selection
        const requestedKv = h.kvCacheDtype || 'int4';
-       const effectiveKv = h.rapidReasoningMode === 'on' ? 'int8' : requestedKv;
-       if (h.rapidReasoningMode === 'on' && requestedKv !== 'int8') {
+       if (requestedKv !== 'int8') {
         rapidRows.push({ label: 'KV cache dtype', value: requestedKv.toUpperCase() + ' → INT8 (reasoning profile)' });
       } else {
         rapidRows.push({ label: 'KV cache dtype', value: requestedKv.toUpperCase() });
@@ -9773,7 +9795,8 @@ function _renderPresetParamsStep() {
        rapidRows.push({ label: 'Sampling mode', value: { general: 'General', coding: 'Coding/Agentic', precise: 'Precise/Deterministic', creative: 'Creative/Roleplay', custom: 'Custom' }[h.samplingMode] || h.samplingMode });
      }
       if (h.rapidReasoningMode) {
-        rapidRows.push({ label: 'Reasoning mode', value: h.rapidReasoningMode === 'on' ? 'On' : 'Off' });
+        rapidRows.push({ label: 'Reasoning quality profile', value: 'On' });
+        rapidRows.push({ label: 'Thinking output', value: h.rapidReasoningMode === 'off' ? 'Disabled' : 'Allowed' });
       }
      if (rapidRows.length > 0) {
        sections.push({ label: 'Rapid-MLX advanced', rows: rapidRows });
@@ -9904,6 +9927,10 @@ async function _renderCommandPreview(host) {
     }
   });
   hdr.appendChild(copyBtn);
+  const explainBtn = mk('button', 'evidence-trigger', 'Explain');
+  explainBtn.type = 'button';
+  explainBtn.addEventListener('click', () => openEvidenceDrawer(evidenceFromCommandPreview(data), explainBtn));
+  hdr.appendChild(explainBtn);
   host.appendChild(hdr);
 
   host.appendChild(mk('pre', 'spawn-command-preview-argv', argvText));
@@ -10264,6 +10291,8 @@ export function buildSpawnPayload() {
         ...(h.enableThinking != null && { enable_thinking: h.enableThinking }),
         ...(h.toolCallParser && { tool_call_parser: h.toolCallParser }),
         ...(h.reasoningParser && { reasoning_parser: h.reasoningParser }),
+        auto_tool_choice: !!h.autoToolChoice,
+        no_thinking: h.rapidReasoningMode === 'off',
         hybrid_mode: h.hybridMode || 'auto',
         prefill_step_size: Number(h.prefillStepSize || 512),
         ...(escapeHatchFlags.length > 0 && { escape_hatch_flags: escapeHatchFlags }),
@@ -10292,6 +10321,14 @@ export function buildSpawnPayload() {
         // vram-estimate.js — and it steers the wizard's own KV-dtype and context choices,
         // which do get sent. Left over from the workload-profile picker removed in 712c261.
         reasoning_mode: h.rapidReasoningMode || 'on',
+        ...(h.speculativeEnabled && {
+          speculative_config: {
+            method: 'mtp',
+            ...(h.speculativeSource === 'external' && { model: h.speculativeModel.trim() }),
+            num_speculative_tokens: Number(h.speculativeTokens || 2),
+            disable_auto_k: !!h.speculativeDisableAutoK,
+          },
+        }),
         // Auto deliberately omits a flag; Off maps to Rapid's real
         // --no-mllm escape hatch for incomplete vision-tower checkpoints.
         ...(m.rapidMlxMllm === false && { mllm_vision: 'off' }),

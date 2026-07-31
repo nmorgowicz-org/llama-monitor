@@ -14,12 +14,6 @@ export const HF_SCOPE = {
   ALL: 'all',
 };
 
-export const HF_SCOPE_LABELS = {
-  [HF_SCOPE.GGUF]: 'GGUF',
-  [HF_SCOPE.MLX]: 'MLX',
-  [HF_SCOPE.ALL]: 'All',
-};
-
 // Guide tooltips for scope buttons
 export const HF_SCOPE_TOOLTIPS = {
   [HF_SCOPE.MLX]: 'Rapid-MLX native format. Faster inference on Apple Silicon. macOS only.',
@@ -35,14 +29,6 @@ export const HF_SORT = {
   SIZE: 'size',
   LAST_UPDATED: 'last_updated',
   DOWNLOADS: 'downloads',
-};
-
-export const HF_SORT_LABELS = {
-  [HF_SORT.RELEVANCE]: 'Relevance',
-  [HF_SORT.NAME]: 'Name',
-  [HF_SORT.SIZE]: 'Size',
-  [HF_SORT.LAST_UPDATED]: 'Last updated',
-  [HF_SORT.DOWNLOADS]: 'Most downloaded',
 };
 
 // ── Category mapping from HF tags (Phase 8B1) ─────────────────────────────────
@@ -318,6 +304,53 @@ export function buildSelectionPayload(model, variantInfo) {
   };
 }
 
+// Expensive qualification and identity resolution is intentionally on-demand. Search results
+// are discovery hints; this drawer is the post-selection truth surface.
+export async function openHfEvidence(repoId, revision, backend = 'rapid_mlx', opener = null) {
+  const { openEvidenceDrawer } = await import('./evidence-drawer.js');
+  const pinned = /^[0-9a-f]{40}$/i.test(revision || '');
+  const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
+  const request = async (url, body) => {
+    try {
+      const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+      const data = await response.json().catch(() => ({}));
+      return response.ok ? data : { error: data.error || `${response.status} ${response.statusText}` };
+    } catch (error) {
+      return { error: error?.message || String(error) };
+    }
+  };
+  const [qualification, identity] = await Promise.all([
+    request('/api/hf/qualify', { repoId, revision: revision || '', backend }),
+    request('/api/hf/identity', { repoId, revision: revision || '' }),
+  ]);
+  const errors = [qualification.error, identity.error, ...(qualification.errors || []), ...(identity.errors || [])].filter(Boolean);
+  const qualified = qualification.backendQualified === true;
+  openEvidenceDrawer({
+    title: `${repoId} evidence`,
+    status: errors.length || !qualified || !pinned ? 'caution' : 'good',
+    summary: qualified
+      ? `The repository is provisionally qualified for ${qualification.backendHint || backend}.`
+      : 'This repository is not yet qualified for the selected backend.',
+    consequence: pinned
+      ? 'The evidence is bound to an immutable Hugging Face commit.'
+      : 'This result is not reproducible because the selected revision is mutable or unavailable.',
+    remediation: pinned ? '' : 'Resolve and select an immutable commit before granting trust or recording qualification.',
+    evidence: [
+      qualification.qualificationReason,
+      qualification.config?.architecture ? `Architecture: ${qualification.config.architecture}` : '',
+      qualification.config?.contextLength ? `Native context: ${Number(qualification.config.contextLength).toLocaleString()} tokens` : '',
+      ...(identity.roles || []).map(role => `${role.role}: ${role.username} (${role.confidence})`),
+    ].filter(Boolean),
+    warnings: errors,
+    provenance: [
+      `Repository: ${repoId}`,
+      `Revision: ${revision || qualification.revision || identity.revision || 'mutable default'}`,
+      qualification.qualifiedAt ? `Qualified at: ${new Date(qualification.qualifiedAt * 1000).toISOString()}` : '',
+      identity.resolutionConfidence ? `Identity confidence: ${identity.resolutionConfidence}` : '',
+    ].filter(Boolean),
+  }, opener);
+}
+
 // ── Scope resolution (Phase 8B1) ──────────────────────────────────────────────
 // Additive toggles: MLX and GGUF can both be active. All = everything (including NVFP4/unsupported).
 
@@ -480,6 +513,22 @@ function createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel
   });
   variant.appendChild(cardLink);
 
+  const evidenceBtn = document.createElement('button');
+  evidenceBtn.type = 'button';
+  evidenceBtn.className = 'hf-sg-card-link hf-sg-evidence-link';
+  evidenceBtn.title = 'Explain qualification and lineage';
+  evidenceBtn.setAttribute('aria-label', `Explain qualification and lineage for ${m.id}`);
+  evidenceBtn.textContent = '?';
+  evidenceBtn.addEventListener('click', async e => {
+    e.stopPropagation();
+    evidenceBtn.disabled = true;
+    evidenceBtn.textContent = '…';
+    await openHfEvidence(m.id, m.revision || null, format === 'mlx' ? 'rapid_mlx' : 'llama_cpp', evidenceBtn);
+    evidenceBtn.disabled = false;
+    evidenceBtn.textContent = '?';
+  });
+  variant.appendChild(evidenceBtn);
+
   // Selection handler for MLX variants (direct select)
   if (format === 'mlx') {
     const selectVariant = () => {
@@ -603,8 +652,8 @@ function createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel
 //
 // params:
 //   query, author, sort, limit          – search params
-//   scope                               – discovery scope (HF_SCOPE.AUTO/GGUF/MLX/ALL)
-//   hfSort                              – sorting mode (HF_SORT.AUTO/RELEVANCE/NAME/SIZE/LAST_UPDATED)
+//   scope                               – discovery scope (HF_SCOPE.GGUF/MLX/ALL)
+//   hfSort                              – sorting mode (HF_SORT.RELEVANCE/NAME/SIZE/LAST_UPDATED/DOWNLOADS)
 //   minParamB                           – minimum parameter count filter
 //   cursor                              – pagination cursor
 //   append                              – append results instead of replacing

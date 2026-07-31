@@ -1424,6 +1424,326 @@ button:disabled {
   font-size: 0.84rem;
 }
 
+/* ── Community Sources editor ── */
+.mm-sources-panel {
+  overflow-y: auto;
+}
+
+.mm-sources-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: radial-gradient(circle at 10% 20%, var(--acc-10), transparent 42%);
+}
+
+.mm-sources-hero h3,
+.mm-sources-editor-head h3 {
+  margin: 3px 0 5px;
+  color: var(--color-text-primary);
+  font-size: 1rem;
+}
+
+.mm-sources-hero p {
+  max-width: 590px;
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.mm-sources-hero-actions,
+.mm-sources-editor-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.mm-sources-status {
+  min-height: 32px;
+  padding: 8px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+}
+
+.mm-sources-status[data-tone="error"] {
+  color: var(--color-error);
+}
+
+.mm-sources-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  padding: 16px 20px 20px;
+}
+
+.mm-sources-layout:has(.mm-sources-editor:not([hidden])) {
+  grid-template-columns: minmax(280px, 0.9fr) minmax(330px, 1.1fr);
+}
+
+.mm-sources-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+
+.mm-source-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.mm-source-card-head,
+.mm-source-card-actions,
+.mm-sources-editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mm-source-name {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mm-source-username,
+.mm-source-description,
+.mm-source-note {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.mm-source-description,
+.mm-source-note {
+  overflow-wrap: anywhere;
+}
+
+.mm-source-note {
+  padding-left: 8px;
+  border-left: 2px solid var(--acc-30);
+}
+
+.mm-source-badge,
+.mm-source-category {
+  display: inline-flex;
+  width: fit-content;
+  padding: 2px 7px;
+  border: 1px solid var(--acc-30);
+  border-radius: 999px;
+  background: var(--acc-08);
+  color: var(--color-primary-light);
+  font-size: 0.64rem;
+  font-weight: 650;
+}
+
+.mm-source-badge--bundled {
+  border-color: rgba(148, 163, 184, 0.2);
+  background: rgba(148, 163, 184, 0.06);
+  color: var(--color-text-muted);
+}
+
+.mm-source-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mm-source-card-actions {
+  justify-content: flex-end;
+  margin-top: auto;
+  padding-top: 3px;
+}
+
+.mm-source-card-actions button {
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.68rem;
+}
+
+.mm-source-card-actions button:hover {
+  border-color: var(--acc-40);
+  color: var(--color-text-primary);
+}
+
+.mm-sources-editor {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 15px;
+  border: 1px solid var(--acc-25);
+  border-radius: 10px;
+  background: rgba(15, 20, 27, 0.78);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+}
+
+.mm-sources-editor[hidden] {
+  display: none;
+}
+
+.mm-sources-editor label,
+.mm-sources-editor legend {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.mm-sources-editor input,
+.mm-sources-editor select,
+.mm-sources-editor textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-weight: 400;
+}
+
+.mm-sources-editor textarea {
+  resize: vertical;
+}
+
+.mm-sources-editor fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.mm-source-role-help,
+.mm-field-optional {
+  color: var(--color-text-muted);
+  font-size: 0.66rem;
+  font-weight: 400;
+}
+
+.mm-source-role-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 10px;
+  margin-top: 6px;
+}
+
+.mm-source-role-checks label {
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
+  font-weight: 400;
+}
+
+.mm-source-role-checks input {
+  width: auto;
+}
+
+[data-theme="light"] .mm-source-card {
+  border-color: rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.54);
+}
+
+[data-theme="light"] .mm-sources-editor {
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.1);
+}
+
+[data-theme="light"] .mm-sources-editor input,
+[data-theme="light"] .mm-sources-editor select,
+[data-theme="light"] .mm-sources-editor textarea {
+  border-color: rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+@media (max-width: 760px) {
+  .models-manager-header {
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .models-manager-tabs {
+    min-width: 0;
+    flex: 1;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .models-manager-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mm-tab {
+    flex: 0 0 auto;
+    padding-inline: 9px;
+  }
+
+  .models-manager-header-right {
+    flex: 0 0 auto;
+  }
+
+  .mm-sources-hero,
+  .mm-sources-hero-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mm-sources-layout:has(.mm-sources-editor:not([hidden])) {
+    grid-template-columns: 1fr;
+  }
+
+  .mm-sources-editor {
+    position: static;
+  }
+}
+
+@media (max-width: 500px) {
+  .models-manager-header {
+    padding-inline: 6px;
+  }
+
+  .models-manager-tabs {
+    gap: 0;
+  }
+
+  .mm-tab {
+    gap: 2px;
+    padding-inline: 7px;
+    font-size: 0.68rem;
+  }
+
+  .mm-tab svg,
+  .mm-tab-count,
+  .mm-tab-beta,
+  .mm-refresh-btn {
+    display: none;
+  }
+
+  .models-manager-header-right {
+    gap: 2px;
+  }
+}
+
 .mm-hint {
   font-size: 11px;
   color: var(--color-text-muted, #94a3b8);

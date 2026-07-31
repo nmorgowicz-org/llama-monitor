@@ -14,15 +14,17 @@ let currentRequestId = 0;
 // Keeping this at the canonical request boundary prevents the wizard, preset
 // editor, and welcome cards from quietly using different defaults.
 export function rapidEstimatePolicyFromConfig(rapidMlx = {}) {
-  const reasoning = rapidMlx.reasoning_mode;
   return {
     kv_cache_dtype: rapidMlx.kv_cache_dtype || null,
     turboquant_mode: rapidMlx.turboquant_mode || null,
-    reasoning_mode: reasoning === true || reasoning === 'on' || reasoning === 'enable',
+    // llama-monitor always emits Rapid's qualified --reasoning quality/KV profile.
+    // A persisted "off" now means a separate thinking-output opt-out.
+    reasoning_mode: true,
     // No workload_scenario: a persisted RapidMlxConfig has no such field, so reading one here
     // only ever produced null. Scenario is a wizard-side input, derived from the page-1
     // use-case cards; every other surface takes the estimator default.
     retained_cache_mib: rapidMlx.prefix_cache_enabled === false ? 0 : (rapidMlx.retained_cache_mib ?? 8192),
+    prefill_step_size: Number(rapidMlx.prefill_step_size ?? 512),
   };
 }
 
@@ -30,10 +32,11 @@ export function rapidEstimatePolicyFromWizardHardware(hardware = {}) {
   return {
     kv_cache_dtype: hardware.kvCacheDtype || null,
     turboquant_mode: hardware.turboquantMode || null,
-    reasoning_mode: hardware.reasoningMode === true || hardware.reasoningMode === 'on',
+    reasoning_mode: true,
     workload_scenario: hardware.workloadScenario || null,
     mtp_config: hardware.mtpConfig || null,
     retained_cache_mib: Number(hardware.retainedCacheMib ?? 8192),
+    prefill_step_size: Number(hardware.prefillStepSize ?? 512),
   };
 }
 
@@ -52,7 +55,8 @@ export function rapidEstimatePolicyFromWizardHardware(hardware = {}) {
 // @param {number|null} params.model_size_bytes — explicit size override
 // @param {number} params.n_ctx — context size (tokens)
 // @param {number} params.parallel_slots — parallel generation slots
-// @param {number} params.ubatch_size — ubatch size
+// @param {number} params.ubatch_size — llama.cpp ubatch size
+// @param {number} params.prefill_step_size — Rapid prefill working width
 // @param {string} params.ctk — KV key quant (llama.cpp only; e.g. 'q8_0')
 // @param {string} params.ctv — KV value quant (llama.cpp only; e.g. 'q8_0')
 // @param {string|null} params.kv_cache_dtype — Rapid KV dtype: 'bf16'|'int8'|'int4'
@@ -79,7 +83,6 @@ export function buildEstimateBody(params) {
     model_path: params.model_path || '',
     n_ctx: params.n_ctx || 4096,
     parallel_slots: params.parallel_slots || 1,
-    ubatch_size: params.ubatch_size || 2048,
     n_cpu_moe: params.n_cpu_moe || 0,
     gpu_layers: Number.isFinite(params.gpu_layers) ? params.gpu_layers : -1,
     available_vram_bytes: params.available_vram_bytes || 0,
@@ -90,6 +93,12 @@ export function buildEstimateBody(params) {
   };
 
   const isMlxBackend = params.backend === 'mlx' || params.backend === 'rapid_mlx';
+
+  if (isMlxBackend) {
+    body.prefill_step_size = params.prefill_step_size || 512;
+  } else {
+    body.ubatch_size = params.ubatch_size || 2048;
+  }
 
   // llama.cpp KV quant (ignored by Rapid path; kept for backward compatibility).
   if (!isMlxBackend) {

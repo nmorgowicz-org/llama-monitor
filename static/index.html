@@ -29,6 +29,7 @@
     <link rel="stylesheet" href="/css/logs.css">
     <link rel="stylesheet" href="/css/spawn-wizard.css">
     <link rel="stylesheet" href="/css/tune-panel.css">
+    <link rel="stylesheet" href="/css/evidence-drawer.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap">
 <!-- Self-hosted vendor scripts (no CDN) -->
 <script src="/vendor/js/marked.min.js"></script>
@@ -2513,6 +2514,7 @@
         <!-- VRAM estimate strip — always visible above all tabs -->
         <div class="preset-vram-strip" id="preset-vram-strip" style="display:none;">
             <div id="preset-vram-display" class="preset-vram-display"></div>
+            <button type="button" class="evidence-trigger" id="preset-vram-explain">Explain</button>
         </div>
 
         <form id="preset-form">
@@ -3243,19 +3245,20 @@
                                            <option value="custom">Custom — use explicit values</option>
                                        </select>
                                    </div>
+                                   <div class="pe-field">
+                                       <label class="pe-label" for="modal-rapid-frequency-penalty" title="Rapid-MLX --default-frequency-penalty override. OpenAI-style scale, valid range -2.0 to 2.0. Empty = use model default.">Frequency Penalty</label>
+                                       <input type="number" class="pe-input" id="modal-rapid-frequency-penalty" step="any" min="-2" max="2" placeholder="disabled">
+                                   </div>
                                </div>
                                 <div class="pe-row pe-row-rapid-reasoning" id="pe-row-rapid-reasoning-mode" style="display:none;">
                                     <div class="pe-field">
-                                        <label class="pe-label pe-toggle-label" for="modal-rapid-reasoning-mode" title="Reasoning mode for Rapid-MLX. Overrides KV dtype to int8 when enabled.">Reasoning Mode</label>
+                                        <label class="pe-label pe-toggle-label" for="modal-rapid-reasoning-mode" title="Allow the model to emit thinking. The Rapid reasoning quality profile remains enabled and pins KV to int8.">Allow Thinking</label>
                                        <div class="pe-toggle">
                                            <input type="checkbox" class="pe-toggle-input" id="modal-rapid-reasoning-mode">
                                            <span class="pe-toggle-slider"></span>
                                        </div>
                                    </div>
                                </div>
-                                <!-- MTP/concurrency teaching (Phase 7B4, D25) — Rapid-MLX only -->
-                                <div id="pe-mtp-concurrency-teaching" class="pe-mtp-concurrency-teaching" style="display:none;"></div>
-
                                 <!-- Web UI group (D26/A44) — Advanced only -->
                             <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-parser-overrides" style="display:none;">
                                 <div class="pe-field">
@@ -3304,6 +3307,33 @@
                                         <option value="2048">2048 — maximum</option>
                                     </select>
                                     <div class="pe-field-hint">Never exceeds 2048.</div>
+                                </div>
+                            </div>
+                            <div class="pe-row pe-row-rapid-speculative" id="pe-row-rapid-speculative" style="display:none;">
+                                <div class="pe-field">
+                                    <label class="pe-label pe-toggle-label" for="modal-rapid-speculative-enabled">Experimental MTP speculation</label>
+                                    <div class="pe-toggle"><input type="checkbox" class="pe-toggle-input" id="modal-rapid-speculative-enabled"><span class="pe-toggle-slider"></span></div>
+                                    <div class="pe-field-hint">Off by default and not recommended for normal chat/coding. Rapid 0.11.1 only engages for greedy, unconstrained requests; sampled and constrained-tool requests fall through.</div>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-speculative-source">MTP source</label>
+                                    <select class="pe-select" id="modal-rapid-speculative-source"><option value="embedded">Embedded prediction heads</option><option value="external">External sidecar model</option></select>
+                                </div>
+                                <div class="pe-field" id="modal-rapid-speculative-model-wrap">
+                                    <label class="pe-label" for="modal-rapid-speculative-model">Resolved sidecar</label>
+                                    <input class="pe-input" id="modal-rapid-speculative-model" placeholder="owner/repo or /absolute/model/path">
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-speculative-tokens">Speculative tokens</label>
+                                    <select class="pe-select" id="modal-rapid-speculative-tokens"><option value="1">1</option><option value="2">2 — conservative</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8 — maximum</option></select>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label pe-toggle-label" for="modal-rapid-speculative-disable-auto-k">Disable automatic K selection</label>
+                                    <div class="pe-toggle"><input type="checkbox" class="pe-toggle-input" id="modal-rapid-speculative-disable-auto-k"><span class="pe-toggle-slider"></span></div>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label pe-toggle-label" for="modal-rapid-auto-tool-choice">Automatic tool choice</label>
+                                    <div class="pe-toggle"><input type="checkbox" class="pe-toggle-input" id="modal-rapid-auto-tool-choice"><span class="pe-toggle-slider"></span></div>
                                 </div>
                             </div>
                             <!-- Throughput / memory. Parity with the spawn wizard's Phase 7 controls: a preset
@@ -3917,6 +3947,46 @@
                                      </select>
                                      <div class="field-hint">Never exceeds 2048. Text defaults to the benchmark-qualified 512.</div>
                                  </div>
+                                 <div class="hardware-field">
+                                     <label class="kv-unified-toggle" for="spawn-rapid-speculative-enabled">
+                                         <input type="checkbox" id="spawn-rapid-speculative-enabled">
+                                         <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
+                                         <span class="kv-unified-text">Experimental MTP speculation</span>
+                                     </label>
+                                     <div class="field-hint">Not recommended for normal chat or coding: Rapid 0.11.1 only engages on greedy, unconstrained requests. Sampling and constrained tool calls silently fall through.</div>
+                                 </div>
+                                 <div class="hardware-field" id="spawn-rapid-speculative-mode-wrap" style="display:none;">
+                                     <label for="spawn-rapid-speculative-source">MTP source</label>
+                                     <select id="spawn-rapid-speculative-source">
+                                         <option value="embedded" selected>Embedded prediction heads</option>
+                                         <option value="external">External sidecar model</option>
+                                     </select>
+                                     <div class="field-hint">Use an external sidecar only when its exact model and revision have been resolved separately.</div>
+                                 </div>
+                                 <div class="hardware-field" id="spawn-rapid-speculative-model-wrap" style="display:none;">
+                                     <label for="spawn-rapid-speculative-model">Resolved sidecar</label>
+                                     <input type="text" id="spawn-rapid-speculative-model" placeholder="owner/repo or /absolute/model/path">
+                                     <div class="field-hint">No mutable <code>repo@main</code> consent is inferred here.</div>
+                                 </div>
+                                 <div class="hardware-field" id="spawn-rapid-speculative-tokens-wrap" style="display:none;">
+                                     <label for="spawn-rapid-speculative-tokens">Speculative tokens</label>
+                                     <select id="spawn-rapid-speculative-tokens"><option value="1">1</option><option value="2" selected>2 — conservative</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8 — maximum</option></select>
+                                 </div>
+                                 <div class="hardware-field" id="spawn-rapid-speculative-auto-k-wrap" style="display:none;">
+                                     <label class="kv-unified-toggle" for="spawn-rapid-speculative-disable-auto-k">
+                                         <input type="checkbox" id="spawn-rapid-speculative-disable-auto-k">
+                                         <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
+                                         <span class="kv-unified-text">Disable automatic K selection</span>
+                                     </label>
+                                 </div>
+                                 <div class="hardware-field">
+                                     <label class="kv-unified-toggle" for="spawn-rapid-auto-tool-choice">
+                                         <input type="checkbox" id="spawn-rapid-auto-tool-choice">
+                                         <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
+                                         <span class="kv-unified-text">Automatic tool choice</span>
+                                     </label>
+                                     <div class="field-hint">Enable only for models with a compatible tool-call parser.</div>
+                                 </div>
                                  <!-- Reusable prompt storage (D31) -->
                                  <div class="hardware-field">
                                       <label for="spawn-turboquant-mode" title="Reusable prompt storage policy. Compresses retained prefix snapshots only — does not reduce active-generation KV or model weights.">Reusable prompt storage</label>
@@ -4020,17 +4090,17 @@
                                      <div class="field-hint">Creates server defaults; explicit client parameters always win. Model/author defaults recommended for finetunes.</div>
                                  </div>
                              </div>
-                            <!-- Reasoning mode toggle (Phase 7) -->
+                            <!-- Thinking-output toggle; Rapid reasoning quality remains always on. -->
                             <div class="kv-inline-row" style="margin-top:8px;">
                                 <div class="kv-inline-field">
                                     <label class="kv-unified-toggle">
                                         <input type="checkbox" id="spawn-rapid-reasoning-mode">
                                         <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
-                                        <span class="kv-unified-text">Reasoning mode</span>
+                                        <span class="kv-unified-text">Allow thinking</span>
                                     </label>
                                 </div>
                                  <div class="kv-inline-field" style="flex:999 1 320px;">
-                                      <div class="field-hint" style="margin:0;">Pins active KV cache to int8 (blocks int4). Required for reasoning-capable models to maintain tool-call and math accuracy.</div>
+                                      <div class="field-hint" style="margin:0;">The reasoning quality profile always pins active KV to int8. Turning this off adds <code>--no-thinking</code> without disabling that quality profile.</div>
                                  </div>
                              </div>
                          </div>
@@ -4467,6 +4537,7 @@
                     <div class="vram-panel" id="vram-panel">
                         <div class="vram-panel-header">
                             <span class="vram-panel-label" id="vram-panel-label">VRAM budget</span>
+                            <button type="button" class="evidence-trigger" id="wizard-vram-explain">Explain</button>
                             <span class="vram-panel-total" id="vram-panel-total">— GB</span>
                         </div>
 
@@ -4917,6 +4988,10 @@
                     Disk
                     <span class="mm-tab-count" id="mm-disk-tab-count"></span>
                 </button>
+                <button class="mm-tab" type="button" data-tab="sources">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.6v-.1A1.7 1.7 0 0 0 8.55 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3V9.6h.1A1.7 1.7 0 0 0 4.6 8.55a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.45 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.24.36.6.72 1 .9.34.15.72.2 1.1.2h.1v4h-.1a1.7 1.7 0 0 0-1.5.9z"/></svg>
+                    Sources
+                </button>
             </div>
             <div class="models-manager-header-right">
                 <button class="mm-refresh-btn" type="button" id="models-refresh-btn" title="Rescan models directory">
@@ -5125,6 +5200,58 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Sources tab: user-editable community role catalog -->
+        <div class="mm-tab-panel mm-sources-panel" data-tab="sources" id="mm-sources-panel">
+            <div class="mm-sources-hero">
+                <div>
+                    <span class="mm-import-kicker">Discovery provenance</span>
+                    <h3>Community sources</h3>
+                    <p>Teach discovery who publishes, converts, quantizes, or curates models. Roles describe provenance; they do not imply compatibility or qualification.</p>
+                </div>
+                <div class="mm-sources-hero-actions">
+                    <button type="button" class="mm-lib-btn mm-lib-btn--labeled" id="mm-sources-add">Add source</button>
+                    <button type="button" class="mm-lib-btn mm-lib-btn--labeled mm-lib-btn--danger" id="mm-sources-reset">Restore bundled sources</button>
+                </div>
+            </div>
+            <div class="mm-sources-status" id="mm-sources-status" role="status" aria-live="polite">Loading sources…</div>
+            <div class="mm-sources-layout">
+                <div class="mm-sources-list" id="mm-sources-list" aria-label="Community sources"></div>
+                <form class="mm-sources-editor" id="mm-sources-editor" hidden>
+                    <div class="mm-sources-editor-head">
+                        <div><span class="mm-import-kicker">Source details</span><h3 id="mm-sources-editor-title">Add source</h3></div>
+                        <button type="button" class="models-manager-close" id="mm-sources-editor-close" aria-label="Close source editor">&times;</button>
+                    </div>
+                    <label>Hugging Face username or organization
+                        <input id="mm-source-username" name="username" type="text" autocomplete="off" required maxlength="128" placeholder="bartowski">
+                    </label>
+                    <label>Display name
+                        <input id="mm-source-display-name" name="displayName" type="text" autocomplete="off" required maxlength="160">
+                    </label>
+                    <label>Primary role
+                        <select id="mm-source-role" name="role" required></select>
+                        <span class="mm-source-role-help" id="mm-source-role-help"></span>
+                    </label>
+                    <fieldset>
+                        <legend>Also known for</legend>
+                        <div class="mm-source-role-checks" id="mm-source-role-checks"></div>
+                    </fieldset>
+                    <label>Description
+                        <textarea id="mm-source-description" name="description" rows="3" maxlength="1000" required></textarea>
+                    </label>
+                    <label>Discovery categories <span class="mm-field-optional">optional, comma separated</span>
+                        <input id="mm-source-categories" name="categories" type="text" autocomplete="off" placeholder="heretic, uncensored">
+                    </label>
+                    <label>Note <span class="mm-field-optional">optional</span>
+                        <textarea id="mm-source-note" name="note" rows="2" maxlength="1000"></textarea>
+                    </label>
+                    <div class="mm-sources-editor-actions">
+                        <button type="button" class="mm-lib-btn mm-lib-btn--labeled" id="mm-source-cancel">Cancel</button>
+                        <button type="submit" class="mm-action-btn mm-action-btn--switch" id="mm-source-save">Save source</button>
+                    </div>
+                </form>
             </div>
         </div>
 

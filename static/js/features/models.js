@@ -24,6 +24,7 @@ import {
     hfCreateScopeSelector,
     hfCreateSortSelector,
     ensureCommunitySourceCatalog,
+    _resetCommunitySourceCatalog,
     resolveAuthorRole,
     HF_SCOPE,
     HF_SORT,
@@ -91,6 +92,13 @@ let rapidMlxLocalRequirement = 'Rapid-MLX local execution requires macOS on Appl
 
 let initialized = false;
 let inventoryCache = null;
+
+let communitySourcesState = {
+    initialized: false,
+    catalog: null,
+    roles: [],
+    editingIndex: null,
+};
 
 // State for the HF download tab
 let hfState = {
@@ -477,6 +485,43 @@ function buildLineageRow(m) {
     return lineageEl;
 }
 
+async function openMlxIntrospectionEvidence(model, opener) {
+    const { openEvidenceDrawer } = await import('./evidence-drawer.js');
+    let payload = {};
+    try {
+        const response = await fetch('/api/models/mlx-introspect', {
+            method: 'POST',
+            headers: { ...(window.authHeaders ? window.authHeaders() : {}), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model_path: model.path || '' }),
+        });
+        payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) throw new Error(payload.error || `Introspection failed (${response.status})`);
+    } catch (error) {
+        payload = { error: error?.message || String(error) };
+    }
+    const data = payload.data || {};
+    const config = data.config || {};
+    const errors = [payload.error, ...(data.errors || [])].filter(Boolean);
+    openEvidenceDrawer({
+        title: `${model.model_name || model.filename || 'MLX model'} evidence`,
+        status: errors.length || !Object.keys(config).length ? 'caution' : 'good',
+        summary: Object.keys(config).length
+            ? 'Local MLX architecture metadata was read from the configured model directory.'
+            : 'Local MLX architecture metadata could not be fully resolved.',
+        consequence: 'This introspection is used to ground memory and compatibility decisions in local artifacts.',
+        remediation: errors.length ? 'Verify the model directory contains a readable config.json and weight index.' : '',
+        evidence: [
+            config.model_type ? `Model type: ${config.model_type}` : '',
+            config.num_layers ? `Layers: ${config.num_layers}` : '',
+            config.max_position_embeddings ? `Native context: ${Number(config.max_position_embeddings).toLocaleString()} tokens` : '',
+            config.quantization ? `Quantization: ${JSON.stringify(config.quantization)}` : '',
+            config.vision_confidence ? `Vision evidence: ${config.vision_confidence} (${config.vision_source || 'source unavailable'})` : '',
+        ].filter(Boolean),
+        warnings: errors,
+        provenance: [payload.model_path ? `Local path: ${payload.model_path}` : ''].filter(Boolean),
+    }, opener);
+}
+
 function buildModelCard(m) {
     const name = m.model_name || m.filename || 'Unnamed model';
     const quant = m.quant_type || 'unknown';
@@ -742,6 +787,20 @@ function buildModelCard(m) {
         });
     });
     if (pathToCopy) actions.appendChild(copyBtn);
+
+    if (inventory.format === 'mlx' && m.path) {
+        const explainBtn = document.createElement('button');
+        explainBtn.type = 'button';
+        explainBtn.className = 'mm-action-btn';
+        explainBtn.textContent = 'Explain';
+        explainBtn.title = 'Inspect local MLX architecture evidence';
+        explainBtn.addEventListener('click', async () => {
+            explainBtn.disabled = true;
+            await openMlxIntrospectionEvidence(m, explainBtn);
+            explainBtn.disabled = false;
+        });
+        actions.appendChild(explainBtn);
+    }
 
     // Two delete paths, because a single-file model and a directory-shaped one have
     // different endpoints and different safety arguments. A GGUF goes through the
@@ -2103,6 +2162,326 @@ function renderImportJobs(container, jobs) {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+function sourceStatus(message, tone = '') {
+    const status = document.getElementById('mm-sources-status');
+    if (!status) return;
+    status.textContent = message;
+    if (tone) status.dataset.tone = tone;
+    else delete status.dataset.tone;
+}
+
+async function communitySourcesRequest(url, options = {}) {
+    const response = await fetch(url, {
+        ...options,
+        headers: {
+            ...(window.authHeaders ? window.authHeaders() : {}),
+            ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+            ...(options.headers || {}),
+        },
+    });
+    let data;
+    try {
+        data = await response.json();
+    } catch {
+        throw new Error(`Community sources returned an invalid response (${response.status})`);
+    }
+    if (!response.ok || data?.ok !== true) {
+        throw new Error(data?.error || `Community sources request failed (${response.status})`);
+    }
+    return data;
+}
+
+function roleMeta(roleId) {
+    return communitySourcesState.roles.find(role => role.id === roleId) || null;
+}
+
+function appendSourceBadge(parent, text, bundled = false) {
+    const badge = document.createElement('span');
+    badge.className = bundled ? 'mm-source-badge mm-source-badge--bundled' : 'mm-source-badge';
+    badge.textContent = text;
+    parent.appendChild(badge);
+}
+
+function renderCommunitySources() {
+    const list = document.getElementById('mm-sources-list');
+    const entries = communitySourcesState.catalog?.entries || [];
+    if (!list) return;
+    list.replaceChildren();
+
+    if (!entries.length) {
+        const empty = document.createElement('div');
+        empty.className = 'mm-empty';
+        empty.textContent = 'No community sources yet. Add one or restore the bundled catalog.';
+        list.appendChild(empty);
+        return;
+    }
+
+    entries.forEach((entry, index) => {
+        const card = document.createElement('article');
+        card.className = 'mm-source-card';
+        card.dataset.username = entry.username;
+
+        const head = document.createElement('div');
+        head.className = 'mm-source-card-head';
+        const name = document.createElement('div');
+        name.className = 'mm-source-name';
+        name.textContent = entry.displayName || entry.username;
+        head.appendChild(name);
+        if (entry.bundled) appendSourceBadge(head, 'Bundled', true);
+
+        const username = document.createElement('div');
+        username.className = 'mm-source-username';
+        username.textContent = `@${entry.username}`;
+
+        const badges = document.createElement('div');
+        badges.className = 'mm-source-categories';
+        appendSourceBadge(badges, roleMeta(entry.role)?.label || entry.role.replaceAll('_', ' '));
+        for (const secondaryRole of entry.alsoKnownFor || []) {
+            appendSourceBadge(badges, roleMeta(secondaryRole)?.label || secondaryRole.replaceAll('_', ' '));
+        }
+
+        const description = document.createElement('div');
+        description.className = 'mm-source-description';
+        description.textContent = entry.description;
+
+        card.append(head, username, badges, description);
+
+        if (entry.categories?.length) {
+            const categories = document.createElement('div');
+            categories.className = 'mm-source-categories';
+            for (const category of entry.categories) {
+                const chip = document.createElement('span');
+                chip.className = 'mm-source-category';
+                chip.textContent = category;
+                categories.appendChild(chip);
+            }
+            card.appendChild(categories);
+        }
+        if (entry.note) {
+            const note = document.createElement('div');
+            note.className = 'mm-source-note';
+            note.textContent = entry.note;
+            card.appendChild(note);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'mm-source-card-actions';
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.textContent = 'Edit';
+        edit.setAttribute('aria-label', `Edit ${entry.displayName || entry.username}`);
+        edit.addEventListener('click', () => openCommunitySourceEditor(index));
+        actions.appendChild(edit);
+        if (!entry.bundled) {
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.textContent = 'Remove';
+            remove.setAttribute('aria-label', `Remove ${entry.displayName || entry.username}`);
+            remove.addEventListener('click', () => removeCommunitySource(index));
+            actions.appendChild(remove);
+        }
+        card.appendChild(actions);
+        list.appendChild(card);
+    });
+}
+
+function buildCommunityRoleControls() {
+    const select = document.getElementById('mm-source-role');
+    const checks = document.getElementById('mm-source-role-checks');
+    if (!select || !checks) return;
+    select.replaceChildren();
+    checks.replaceChildren();
+    for (const role of communitySourcesState.roles) {
+        const option = document.createElement('option');
+        option.value = role.id;
+        option.textContent = role.label;
+        select.appendChild(option);
+
+        const label = document.createElement('label');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.name = 'alsoKnownFor';
+        checkbox.value = role.id;
+        label.append(checkbox, document.createTextNode(role.label));
+        checks.appendChild(label);
+    }
+    select.addEventListener('change', updateCommunityRoleHelp);
+}
+
+function updateCommunityRoleHelp() {
+    const roleId = document.getElementById('mm-source-role')?.value;
+    const help = document.getElementById('mm-source-role-help');
+    if (help) help.textContent = roleMeta(roleId)?.description || '';
+    document.querySelectorAll('#mm-source-role-checks input').forEach(input => {
+        input.disabled = input.value === roleId;
+        if (input.disabled) input.checked = false;
+    });
+}
+
+function closeCommunitySourceEditor() {
+    const editor = document.getElementById('mm-sources-editor');
+    if (editor) editor.hidden = true;
+    communitySourcesState.editingIndex = null;
+}
+
+function openCommunitySourceEditor(index = null) {
+    const editor = document.getElementById('mm-sources-editor');
+    const entry = index == null ? null : communitySourcesState.catalog?.entries?.[index];
+    if (!editor || (index != null && !entry)) return;
+    communitySourcesState.editingIndex = index;
+    editor.reset();
+    document.getElementById('mm-sources-editor-title').textContent = entry ? 'Edit source' : 'Add source';
+    document.getElementById('mm-source-username').value = entry?.username || '';
+    document.getElementById('mm-source-display-name').value = entry?.displayName || '';
+    document.getElementById('mm-source-role').value = entry?.role || communitySourcesState.roles[0]?.id || '';
+    document.getElementById('mm-source-description').value = entry?.description || '';
+    document.getElementById('mm-source-categories').value = (entry?.categories || []).join(', ');
+    document.getElementById('mm-source-note').value = entry?.note || '';
+    const heldRoles = new Set(entry?.alsoKnownFor || []);
+    document.querySelectorAll('#mm-source-role-checks input').forEach(input => {
+        input.checked = heldRoles.has(input.value);
+    });
+    updateCommunityRoleHelp();
+    editor.hidden = false;
+    document.getElementById('mm-source-username').focus();
+}
+
+function communitySourceFromEditor() {
+    const categories = document.getElementById('mm-source-categories').value
+        .split(',')
+        .map(value => value.trim())
+        .filter(Boolean);
+    const role = document.getElementById('mm-source-role').value;
+    const alsoKnownFor = [...document.querySelectorAll('#mm-source-role-checks input:checked')]
+        .map(input => input.value)
+        .filter(value => value !== role);
+    const note = document.getElementById('mm-source-note').value.trim();
+    return {
+        username: document.getElementById('mm-source-username').value.trim(),
+        displayName: document.getElementById('mm-source-display-name').value.trim(),
+        description: document.getElementById('mm-source-description').value.trim(),
+        role,
+        alsoKnownFor,
+        categories: [...new Set(categories)],
+        ...(note ? { note } : {}),
+        bundled: false,
+    };
+}
+
+function sourceRoleCombinationIsValid(candidate, editingIndex) {
+    const converterRoles = new Set(['mlx_converter', 'gguf_quantizer']);
+    return !(communitySourcesState.catalog?.entries || []).some((entry, index) => {
+        if (index === editingIndex || entry.username.toLowerCase() !== candidate.username.toLowerCase()) return false;
+        return (entry.role === 'original_author' && converterRoles.has(candidate.role))
+            || (candidate.role === 'original_author' && converterRoles.has(entry.role));
+    });
+}
+
+async function saveCommunitySource(event) {
+    event.preventDefault();
+    const editor = event.currentTarget;
+    if (!editor.reportValidity()) return;
+    const entry = communitySourceFromEditor();
+    const index = communitySourcesState.editingIndex;
+    if (!sourceRoleCombinationIsValid(entry, index)) {
+        sourceStatus('An original author cannot also be registered as a converter or quantizer for the same username.', 'error');
+        return;
+    }
+
+    const save = document.getElementById('mm-source-save');
+    save.disabled = true;
+    sourceStatus(index == null ? 'Adding source…' : 'Saving source…');
+    try {
+        if (index == null) {
+            await communitySourcesRequest('/api/hf/community-sources/entry', {
+                method: 'POST',
+                body: JSON.stringify(entry),
+            });
+        } else {
+            const existing = communitySourcesState.catalog.entries[index];
+            const catalog = structuredClone(communitySourcesState.catalog);
+            catalog.entries[index] = { ...entry, bundled: existing.bundled === true };
+            await communitySourcesRequest('/api/hf/community-sources', {
+                method: 'PUT',
+                body: JSON.stringify(catalog),
+            });
+        }
+        closeCommunitySourceEditor();
+        await loadCommunitySources();
+        showToast(index == null ? 'Community source added' : 'Community source updated', 'success');
+    } catch (error) {
+        sourceStatus(error.message, 'error');
+    } finally {
+        save.disabled = false;
+    }
+}
+
+async function removeCommunitySource(index) {
+    const entry = communitySourcesState.catalog?.entries?.[index];
+    if (!entry || entry.bundled) return;
+    const confirmed = await _showConfirm(
+        'Remove community source?',
+        `Remove ${entry.displayName || entry.username} from discovery provenance?`,
+    );
+    if (!confirmed) return;
+    sourceStatus('Removing source…');
+    try {
+        const params = new URLSearchParams({ username: entry.username, role: entry.role });
+        const data = await communitySourcesRequest(`/api/hf/community-sources/entry?${params}`, { method: 'DELETE' });
+        if (data.removed !== true) throw new Error('The source was not removed');
+        await loadCommunitySources();
+        showToast('Community source removed', 'success');
+    } catch (error) {
+        sourceStatus(error.message, 'error');
+    }
+}
+
+async function resetCommunitySources() {
+    const confirmed = await _showConfirm(
+        'Restore bundled sources?',
+        'This replaces every catalog entry with the bundled defaults. Discovery preferences are preserved, but user-added sources and source edits are removed.',
+    );
+    if (!confirmed) return;
+    sourceStatus('Restoring bundled sources…');
+    try {
+        await communitySourcesRequest('/api/hf/community-sources/reset', { method: 'POST' });
+        closeCommunitySourceEditor();
+        await loadCommunitySources();
+        showToast('Bundled community sources restored', 'success');
+    } catch (error) {
+        sourceStatus(error.message, 'error');
+    }
+}
+
+async function loadCommunitySources() {
+    sourceStatus('Loading sources…');
+    try {
+        const data = await communitySourcesRequest('/api/hf/community-sources');
+        communitySourcesState.catalog = data.catalog;
+        communitySourcesState.roles = data.roles || [];
+        buildCommunityRoleControls();
+        renderCommunitySources();
+        _resetCommunitySourceCatalog();
+        sourceStatus(`${data.catalog?.entries?.length || 0} sources · roles and descriptions supplied by the server`);
+    } catch (error) {
+        sourceStatus(error.message, 'error');
+        const list = document.getElementById('mm-sources-list');
+        if (list) list.replaceChildren();
+    }
+}
+
+function initCommunitySourcesTab() {
+    if (!communitySourcesState.initialized) {
+        communitySourcesState.initialized = true;
+        document.getElementById('mm-sources-add')?.addEventListener('click', () => openCommunitySourceEditor());
+        document.getElementById('mm-sources-reset')?.addEventListener('click', resetCommunitySources);
+        document.getElementById('mm-sources-editor-close')?.addEventListener('click', closeCommunitySourceEditor);
+        document.getElementById('mm-source-cancel')?.addEventListener('click', closeCommunitySourceEditor);
+        document.getElementById('mm-sources-editor')?.addEventListener('submit', saveCommunitySource);
+    }
+    loadCommunitySources();
+}
+
 export function initModels() {
     if (initialized) return;
     initialized = true;
@@ -2137,6 +2516,8 @@ export function initModels() {
                 initImportLab();
             } else if (target === 'disk') {
                 initDiskTab();
+            } else if (target === 'sources') {
+                initCommunitySourcesTab();
             } else if (target === 'library' && !inventoryCache) {
                 loadModels();
             }

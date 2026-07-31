@@ -16,6 +16,7 @@ import {
     detectCommunityTemplateFamily,
 } from './chat-template-registry.js';
 import { buildEstimateBody, rapidEstimatePolicyFromConfig } from './vram-estimate.js';
+import { openEstimateEvidenceDrawer } from './evidence-drawer.js';
 
 
 let newPresetSeed = null;
@@ -1097,6 +1098,8 @@ function _renderPresetVram(el, data) {
         ${systemLine}
     `);
     el.style.display = '';
+    const explain = document.getElementById('preset-vram-explain');
+    if (explain) explain.onclick = () => openEstimateEvidenceDrawer(data, 'Preset memory estimate', explain);
 }
 
 // Empirically auto-tune n_cpu_moe for the preset's model via llama-bench.
@@ -1313,6 +1316,19 @@ export function openPresetModal(mode, section, seedPreset = null) {
         // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
         setOpt('modal-rapid-kv-cache-dtype', p.rapid_mlx?.kv_cache_dtype || '');
         setOpt('modal-rapid-prefill-step-size', String(p.rapid_mlx?.prefill_step_size || 512));
+        const speculative = p.rapid_mlx?.speculative_config || null;
+        const speculativeEnabled = !!speculative;
+        const speculativeSource = speculative?.model ? 'external' : 'embedded';
+        const speculativeEnabledEl = document.getElementById('modal-rapid-speculative-enabled');
+        if (speculativeEnabledEl) speculativeEnabledEl.checked = speculativeEnabled;
+        setOpt('modal-rapid-speculative-source', speculativeSource);
+        setVal('modal-rapid-speculative-model', speculative?.model || '');
+        setOpt('modal-rapid-speculative-tokens', String(speculative?.num_speculative_tokens || 2));
+        const disableAutoKEl = document.getElementById('modal-rapid-speculative-disable-auto-k');
+        if (disableAutoKEl) disableAutoKEl.checked = !!speculative?.disable_auto_k;
+        const autoToolChoiceEl = document.getElementById('modal-rapid-auto-tool-choice');
+        if (autoToolChoiceEl) autoToolChoiceEl.checked = !!p.rapid_mlx?.auto_tool_choice;
+        _syncRapidSpeculativeEditor();
         setOpt('modal-rapid-turboquant-mode', p.rapid_mlx?.turboquant_mode || 'none');
         setOpt('modal-rapid-gpu-memory-utilization', p.rapid_mlx?.gpu_memory_utilization == null ? '' : String(p.rapid_mlx.gpu_memory_utilization));
         setOpt('modal-rapid-max-num-seqs', p.rapid_mlx?.max_num_seqs == null ? '' : String(p.rapid_mlx.max_num_seqs));
@@ -1323,7 +1339,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
         setOpt('modal-rapid-tool-call-parser', p.rapid_mlx?.tool_call_parser || '');
         setOpt('modal-rapid-reasoning-parser', p.rapid_mlx?.reasoning_parser || '');
         setOpt('modal-rapid-sampling-mode', p.rapid_mlx?.sampling_mode || 'auto');
-        const reasoningModeChecked = !!p.rapid_mlx?.reasoning_mode && p.rapid_mlx?.reasoning_mode !== 'off';
+        const reasoningModeChecked = !p.rapid_mlx?.no_thinking && p.rapid_mlx?.reasoning_mode !== 'off';
         if (document.getElementById('modal-rapid-reasoning-mode')) {
             document.getElementById('modal-rapid-reasoning-mode').checked = reasoningModeChecked;
         }
@@ -1334,6 +1350,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
         if (p.rapid_mlx?.default_min_p != null) numOrEmpty('modal-min-p', p.rapid_mlx.default_min_p);
         if (p.rapid_mlx?.default_repetition_penalty != null) numOrEmpty('modal-repeat-penalty', p.rapid_mlx.default_repetition_penalty);
         if (p.rapid_mlx?.default_presence_penalty != null) numOrEmpty('modal-presence-penalty', p.rapid_mlx.default_presence_penalty);
+        if (p.rapid_mlx?.default_frequency_penalty != null) numOrEmpty('modal-rapid-frequency-penalty', p.rapid_mlx.default_frequency_penalty);
         if (p.rapid_mlx?.max_tokens != null) numOrEmpty('modal-max-tokens', p.rapid_mlx.max_tokens);
         setVal('modal-api-key', p.api_key || '');
         numOrEmpty('modal-max-tokens', p.max_tokens);
@@ -1723,7 +1740,7 @@ function _configureBackendPresetEditor(preset) {
     // Phase 7: Toggle Rapid-MLX advanced rows based on backend (inline styles override CSS).
     // The webui rows are gone from this list because they are gone from index.html: they were
     // gated on llama.cpp's --ui/--path, which rapid-mlx does not have.
-    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-reasoning-mode', 'pe-row-rapid-parser-overrides', 'pe-row-rapid-architecture-overrides', 'pe-row-rapid-throughput', 'pe-row-rapid-batch-sizes', 'pe-row-rapid-prefix-cache', 'pe-row-rapid-cache-memory', 'pe-row-rapid-hybrid-cache-entries'];
+    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-reasoning-mode', 'pe-row-rapid-parser-overrides', 'pe-row-rapid-architecture-overrides', 'pe-row-rapid-speculative', 'pe-row-rapid-throughput', 'pe-row-rapid-batch-sizes', 'pe-row-rapid-prefix-cache', 'pe-row-rapid-cache-memory', 'pe-row-rapid-hybrid-cache-entries'];
     rapidRows.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = isRapid ? '' : 'none';
@@ -1769,6 +1786,19 @@ function _configureBackendPresetEditor(preset) {
             : 'TCP port llama-server listens on. Default 8001. Change if you run multiple servers simultaneously.';
     }
 }
+
+function _syncRapidSpeculativeEditor() {
+    const enabled = !!document.getElementById('modal-rapid-speculative-enabled')?.checked;
+    const external = document.getElementById('modal-rapid-speculative-source')?.value === 'external';
+    const modelWrap = document.getElementById('modal-rapid-speculative-model-wrap');
+    if (modelWrap) modelWrap.style.display = enabled && external ? '' : 'none';
+}
+
+document.addEventListener('change', (event) => {
+    if (event.target?.id === 'modal-rapid-speculative-enabled' || event.target?.id === 'modal-rapid-speculative-source') {
+        _syncRapidSpeculativeEditor();
+    }
+});
 
 function _buildFormPreset(existing) {
     if (existing.backend === 'rapid_mlx') {
@@ -1821,6 +1851,17 @@ function _buildFormPreset(existing) {
                     out.reasoning_parser = reasoningParser || null;
                     out.sampling_mode = samplingMode && samplingMode !== 'auto' ? samplingMode : null;
                     if (rmInput) out.reasoning_mode = rmInput.checked ? 'on' : 'off';
+                    out.no_thinking = rmInput ? !rmInput.checked : false;
+                    out.auto_tool_choice = !!document.getElementById('modal-rapid-auto-tool-choice')?.checked;
+                    const specEnabled = !!document.getElementById('modal-rapid-speculative-enabled')?.checked;
+                    const specSource = strVal('modal-rapid-speculative-source') || 'embedded';
+                    const specModel = strVal('modal-rapid-speculative-model').trim();
+                    out.speculative_config = specEnabled ? {
+                        method: 'mtp',
+                        ...(specSource === 'external' ? { model: specModel } : {}),
+                        num_speculative_tokens: Number(strVal('modal-rapid-speculative-tokens') || 2),
+                        disable_auto_k: !!document.getElementById('modal-rapid-speculative-disable-auto-k')?.checked,
+                    } : null;
                     // prefill_step_size is a plain u32 backend-side, not an Option, so it takes
                     // the control's value directly rather than a null.
                     out.prefill_step_size = Number(strVal('modal-rapid-prefill-step-size') || 512);
@@ -1845,6 +1886,7 @@ function _buildFormPreset(existing) {
                     const minP = floatOrNull('modal-min-p');
                     const repeatPen = floatOrNull('modal-repeat-penalty');
                     const presencePen = floatOrNull('modal-presence-penalty');
+                    const frequencyPen = floatOrNull('modal-rapid-frequency-penalty');
                     const maxTok = intOrNull('modal-max-tokens');
                     // Same rule as above: clearing one of these inputs has to write null, or
                     // the spread would keep the old default and it could never be cleared.
@@ -1854,6 +1896,7 @@ function _buildFormPreset(existing) {
                     out.default_min_p = minP;
                     out.default_repetition_penalty = repeatPen;
                     out.default_presence_penalty = presencePen;
+                    out.default_frequency_penalty = frequencyPen;
                     out.max_tokens = maxTok;
                     return out;
                 })(),
@@ -1987,7 +2030,8 @@ const RAPID_CHANGE_LABELS = {
     prefill_batch_size: 'Prefill Batch Size', completion_batch_size: 'Completion Batch Size',
     default_temperature: 'Temperature', default_top_p: 'Top-P', default_top_k: 'Top-K',
     default_min_p: 'Min-P', default_repetition_penalty: 'Repeat Penalty',
-    default_presence_penalty: 'Presence Penalty', max_tokens: 'Max Tokens',
+    default_presence_penalty: 'Presence Penalty', default_frequency_penalty: 'Frequency Penalty',
+    max_tokens: 'Max Tokens',
 };
 
 function _buildChangeSummary(existing, incoming) {
@@ -2407,7 +2451,7 @@ function _renderGenerationPresetPills(presets) {
 
 function _applyGenerationPreset(preset) {
     if (preset.id === 'model_default') {
-        ['modal-temperature', 'modal-top-p', 'modal-top-k', 'modal-min-p', 'modal-repeat-penalty', 'modal-presence-penalty', 'modal-max-tokens', 'modal-reasoning-budget']
+        ['modal-temperature', 'modal-top-p', 'modal-top-k', 'modal-min-p', 'modal-repeat-penalty', 'modal-presence-penalty', 'modal-rapid-frequency-penalty', 'modal-max-tokens', 'modal-reasoning-budget']
             .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
         ['modal-enable-thinking', 'modal-preserve-thinking', 'modal-tool-call-format', 'modal-reasoning']
             .forEach(id => setOpt(id, ''));

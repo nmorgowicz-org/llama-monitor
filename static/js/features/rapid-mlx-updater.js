@@ -25,6 +25,17 @@ export function initRapidMlxUpdater() {
     pill.addEventListener('click', openRapidMlxModal);
   }
 
+  const actionRow = document.querySelector('#rapid-mlx-modal .rapid-mlx-modal-actions');
+  if (actionRow && !document.getElementById('rapid-mlx-settings-evidence-btn')) {
+    const evidenceBtn = document.createElement('button');
+    evidenceBtn.id = 'rapid-mlx-settings-evidence-btn';
+    evidenceBtn.type = 'button';
+    evidenceBtn.className = 'rapid-mlx-action-btn rapid-mlx-action-btn-soft';
+    evidenceBtn.textContent = 'Runtime support';
+    evidenceBtn.addEventListener('click', () => openRuntimeSettingsEvidence(evidenceBtn));
+    actionRow.appendChild(evidenceBtn);
+  }
+
   // Modal: Upgrade button
   const upgradeBtn = document.getElementById('rapid-mlx-upgrade-btn');
   if (upgradeBtn) {
@@ -154,6 +165,39 @@ export function initRapidMlxUpdater() {
       fetchReleases();
     }
   });
+}
+
+async function openRuntimeSettingsEvidence(opener) {
+  opener.disabled = true;
+  try {
+    const response = await fetch('/api/rapid-mlx/settings', {
+      headers: window.authHeaders ? window.authHeaders() : {},
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) throw new Error(data.error || `Settings catalog failed (${response.status})`);
+    const settings = Array.isArray(data.settings) ? data.settings : [];
+    const unsupported = settings.filter(setting => setting.unsupported_reason);
+    const { openEvidenceDrawer } = await import('./evidence-drawer.js');
+    openEvidenceDrawer({
+      title: 'Rapid-MLX runtime support',
+      status: data.snapshot_source === 'discovered' ? (unsupported.length ? 'caution' : 'good') : 'caution',
+      summary: data.snapshot_source === 'discovered'
+        ? `${settings.length - unsupported.length} of ${settings.length} catalog settings are supported by the active runtime snapshot.`
+        : 'Runtime capabilities could not be discovered, so support is not confirmed.',
+      consequence: 'Unsupported settings are omitted or downgraded rather than passed as invalid launch flags.',
+      remediation: unsupported.length ? 'Review unsupported settings before launching or update the Rapid-MLX runtime.' : '',
+      evidence: settings.filter(setting => !setting.unsupported_reason).map(setting => `${setting.id}: supported`),
+      warnings: unsupported.map(setting => `${setting.id}: ${setting.unsupported_reason}`),
+      provenance: [
+        `Snapshot source: ${data.snapshot_source || 'none'}`,
+        data.rapid_mlx_version ? `Rapid-MLX version: ${data.rapid_mlx_version}` : '',
+      ].filter(Boolean),
+    }, opener);
+  } catch (error) {
+    showToast(`Could not load runtime support: ${error.message}`, 'error');
+  } finally {
+    opener.disabled = false;
+  }
 }
 
 export async function fetchRuntimeStatus() {
