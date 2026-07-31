@@ -616,6 +616,37 @@ implemented and receipt-backed; do not redo it unless a regression appears.
    compatibility checks, explicit lifecycle/memory status, and revision-scoped
    `trust_remote_code` consent. Keep MTP default-off and clearly marked as greedy/unconstrained-only
    until the qualification harness proves sampled and constrained-tool dispatch.
+
+   **2026-07-31 checkpoint — read-only preflight resolver shipped, still incomplete:**
+   - Investigation found the launch-time consent gate (`validate_trust_consent` in
+     `src/inference/rapid_mlx/command.rs`) and the local-disk detector
+     (`needs_trust_remote_code` in `model_resolver.rs`) already existed and were already
+     fail-closed and unit-tested — that part of this item was done before this session started.
+   - The actual gap: nothing could resolve an *external* `owner/repo` reference (the speculative
+     `model` field) to a pinned revision or a `trust_remote_code_required` verdict without a full
+     download, and nothing surfaced either fact anywhere — not via API, not via UI. Any repo that
+     needed it was permanently unlaunchable with no diagnostic.
+   - Added `crate::hf::resolve_speculative_model_preflight(repo_id)` (`src/hf/mod.rs`): one HF
+     `/api/models/{repo_id}` call resolves the immutable commit `sha` and checks the returned
+     `siblings` list for `main.py`/`modeling_*.py`/`configuration_*.py`; if none are found it fetches
+     `config.json` at that pinned revision and mirrors the exact `main_class`/`auto_map` heuristic
+     `needs_trust_remote_code` uses locally. Read-only — does not download weights, does not touch
+     consent.
+   - Exposed as `GET /api/hf/mtp-preflight?repo=owner/repo` (`src/web/api/hf.rs`), auth-gated and
+     `validate_hf_repo_id`-checked like the other HF endpoints; returns
+     `{ok, repoId, revision, trustRemoteCodeRequired}`.
+   - Verified live (not just unit-tested) against three real repos, then the throwaway test was
+     removed: `mlx-community/Qwen2.5-0.5B-Instruct-4bit` → sha resolved, `false`; a deliberately
+     invalid repo id → clean `HTTP 404` error; `THUDM/chatglm3-6b` (a real custom-code repo) →
+     sha resolved, `true`. `cargo test --lib` 1067/13/0 unchanged; `cargo fmt --check` clean.
+   - **Still not done, and this is the larger remaining part of item 1:** no UI consumes this
+     endpoint. There is no consent-collection control anywhere in the Preset Editor for MTP's
+     `model`/speculative-config, so entering a repo that needs `trust_remote_code` still just fails
+     silently at launch with no explanation. There is also no "immutable sidecar" concept beyond
+     this one-shot resolution — no caching of the resolved pin, no re-check if the upstream repo
+     changes, no explicit lifecycle/memory-status surfacing (the "explicit lifecycle/memory status"
+     sub-clause of this item has not been started at all). Do not mark item 1 done from this
+     checkpoint alone.
 2. ~~**Frequency penalty decision**~~ — done, see checkpoint above.
 3. **Legacy quant-style migration:** move the remaining `/api/hf/quantizers` and
    `/api/hf/community-picks` quick-pick behavior onto the typed community-source catalog while
