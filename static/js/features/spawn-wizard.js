@@ -273,6 +273,14 @@ export const wizardState = {
     reasoningBudgetMessage: null,
     kvCacheDtype: 'int4',
     turboquantMode: 'none',
+    // Phase 7 Rapid-MLX fields. '' means "omit the flag and take the runtime default",
+    // which is not the same as an explicit value, so these stay strings and are only
+    // written into the payload when non-empty.
+    gpuMemoryUtilization: '',
+    maxNumSeqs: '',
+    maxConcurrentRequests: '',
+    pflashPolicy: 'off',
+    speculativePolicy: '',
     retainedCacheMib: 8192,
     workloadScenario: 'interactive_coding_agent',
     reasoningMode: null,         // llama.cpp thinking/reasoning select
@@ -654,6 +662,11 @@ function resetWizardState() {
   wizardState.hardware.reasoningBudgetMessage = null;
   wizardState.hardware.kvCacheDtype = '';
   wizardState.hardware.turboquantMode = 'none';
+  wizardState.hardware.gpuMemoryUtilization = '';
+  wizardState.hardware.maxNumSeqs = '';
+  wizardState.hardware.maxConcurrentRequests = '';
+  wizardState.hardware.pflashPolicy = 'off';
+  wizardState.hardware.speculativePolicy = '';
   wizardState.hardware.workloadScenario = 'interactive_coding_agent';
   wizardState.hardware.webUiAvailability = 'auto';
   wizardState.hardware.webUiStaticPath = '';
@@ -857,6 +870,11 @@ function cacheDom() {
    dom.rapidAdvancedFields  = document.getElementById('spawn-rapid-advanced-fields');
    dom.kvCacheDtypeSelect   = document.getElementById('spawn-kv-cache-dtype');
    dom.turboquantModeSelect = document.getElementById('spawn-turboquant-mode');
+   dom.gpuMemoryUtilizationSelect = document.getElementById('spawn-rapid-gpu-memory-utilization');
+   dom.maxNumSeqsSelect = document.getElementById('spawn-rapid-max-num-seqs');
+   dom.maxConcurrentRequestsSelect = document.getElementById('spawn-rapid-max-concurrent-requests');
+   dom.pflashPolicySelect = document.getElementById('spawn-rapid-pflash-policy');
+   dom.speculativePolicySelect = document.getElementById('spawn-rapid-speculative-policy');
    dom.retainedCacheMibSelect = document.getElementById('spawn-retained-cache-mib');
    dom.workloadScenarioSelect = document.getElementById('spawn-workload-scenario'); // hidden select for compat
    dom.reasoningModeCheck   = document.getElementById('spawn-rapid-reasoning-mode');
@@ -1396,6 +1414,17 @@ function _bindRapidMlxAdvancedControls() {
 
    bindSel(dom.kvCacheDtypeSelect, 'kvCacheDtype');
   bindSel(dom.turboquantModeSelect, 'turboquantMode');
+  bindSel(dom.gpuMemoryUtilizationSelect, 'gpuMemoryUtilization');
+  bindSel(dom.maxNumSeqsSelect, 'maxNumSeqs');
+  bindSel(dom.maxConcurrentRequestsSelect, 'maxConcurrentRequests');
+  bindSel(dom.pflashPolicySelect, 'pflashPolicy');
+  bindSel(dom.speculativePolicySelect, 'speculativePolicy');
+  [
+    dom.turboquantModeSelect,
+    dom.pflashPolicySelect,
+    dom.maxNumSeqsSelect,
+    dom.speculativePolicySelect,
+  ].forEach((el) => el && el.addEventListener('change', renderRapidExclusionWarnings));
   bindSel(dom.retainedCacheMibSelect, 'retainedCacheMib');
    // workloadScenario is derived from page-1 use-case selection
    bindSel(dom.samplingModeSelect, 'samplingMode');
@@ -10178,6 +10207,51 @@ function _threadsValue(v) {
   return null;
 }
 
+/**
+ * Mirrors the two Rapid-MLX mutual-exclusion rules that involve the Phase 7 throughput
+ * fields, so an invalid pair is visible while it is being chosen rather than only at launch.
+ *
+ * These duplicate `mutual_exclusion_rules()` in src/inference/rapid_mlx/settings.rs. The
+ * backend stays authoritative -- this is a nearer warning, not a replacement for it.
+ */
+function renderRapidExclusionWarnings() {
+  const h = wizardState.hardware;
+  const conflicts = [];
+
+  if (h.pflashPolicy === 'on' && (h.turboquantMode === 'v4' || h.turboquantMode === 'k8v4')) {
+    conflicts.push('PFlash bypasses TurboQuant, so “On” cannot be combined with a TurboQuant reusable-prompt-storage mode.');
+  }
+  if (h.speculativePolicy === 'on' && h.maxNumSeqs) {
+    conflicts.push('Speculative decoding owns its own scheduling; an explicit max batched sequences may conflict with MTP.');
+  }
+
+  const host = dom.pflashPolicySelect?.closest('.hardware-grid');
+  if (!host) return;
+  let box = document.getElementById('spawn-rapid-exclusion-warning');
+  if (conflicts.length === 0) {
+    if (box) box.remove();
+    return;
+  }
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'spawn-rapid-exclusion-warning';
+    box.className = 'spawn-command-preview-error';
+    box.style.gridColumn = '1 / -1';
+    host.appendChild(box);
+  }
+  box.innerHTML = '';
+  const title = document.createElement('div');
+  title.className = 'spawn-command-preview-error-title';
+  title.textContent = conflicts.length === 1 ? 'Conflicting setting' : 'Conflicting settings';
+  box.appendChild(title);
+  conflicts.forEach((text) => {
+    const detail = document.createElement('div');
+    detail.className = 'spawn-command-preview-error-detail';
+    detail.textContent = text;
+    box.appendChild(detail);
+  });
+}
+
 export function buildSpawnPayload() {
   const h = wizardState.hardware, m = wizardState.model;
   if (wizardState.engine.selected === 'rapid_mlx') {
@@ -10205,6 +10279,12 @@ export function buildSpawnPayload() {
         // Phase 7: KV/cache policy (D6 catalog IDs)
         ...(h.kvCacheDtype && h.kvCacheDtype !== 'int4' && { kv_cache_dtype: h.kvCacheDtype }),
         ...(h.turboquantMode && h.turboquantMode !== 'none' && h.turboquantMode !== 'auto' && { turboquant_mode: h.turboquantMode }),
+        // '' means omit: an absent flag and an explicit runtime default are different states.
+        ...(h.gpuMemoryUtilization && { gpu_memory_utilization: Number(h.gpuMemoryUtilization) }),
+        ...(h.maxNumSeqs && { max_num_seqs: Number(h.maxNumSeqs) }),
+        ...(h.maxConcurrentRequests && { max_concurrent_requests: Number(h.maxConcurrentRequests) }),
+        ...(h.pflashPolicy && { pflash_policy: h.pflashPolicy }),
+        ...(h.speculativePolicy && { speculative_policy: h.speculativePolicy }),
         prefix_cache_enabled: Number(h.retainedCacheMib ?? 8192) > 0,
         ...(Number(h.retainedCacheMib ?? 8192) > 0 && {
           retained_cache_mib: Number(h.retainedCacheMib ?? 8192),

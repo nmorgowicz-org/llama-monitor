@@ -3865,6 +3865,57 @@
                                       </select>
                                       <div class="field-hint">Retained-prefix compression only. Does not save active KV or weights. K8V4 showed 40–100% slower TTFT in Phase 6 benchmarks; requires re-validation post rapid-mlx v0.11.0.</div>
                                  </div>
+                                 <!-- Throughput / memory (Phase 7 fields, previously backend-only) -->
+                                 <div class="hardware-field">
+                                     <label for="spawn-rapid-gpu-memory-utilization" title="Fraction of unified memory Rapid-MLX may use. Auto omits the flag and takes the runtime default.">GPU memory utilization</label>
+                                     <select id="spawn-rapid-gpu-memory-utilization">
+                                         <option value="" selected>Auto — runtime default</option>
+                                         <option value="0.75">0.75 — leave room for other apps</option>
+                                         <option value="0.85">0.85 — balanced</option>
+                                         <option value="0.95">0.95 — dedicate the machine</option>
+                                     </select>
+                                     <div class="field-hint">Valid range is 0.50–1.00. Higher values leave less memory for everything else on the machine.</div>
+                                 </div>
+                                 <div class="hardware-field">
+                                     <label for="spawn-rapid-max-num-seqs" title="Maximum sequences the scheduler batches at once.">Max batched sequences</label>
+                                     <select id="spawn-rapid-max-num-seqs">
+                                         <option value="" selected>Auto — runtime default</option>
+                                         <option value="1">1 — single stream</option>
+                                         <option value="4">4</option>
+                                         <option value="8">8</option>
+                                         <option value="16">16 — high concurrency</option>
+                                     </select>
+                                     <div class="field-hint">Range 1–256. Cannot be combined with speculative decoding, which owns its own scheduling.</div>
+                                 </div>
+                                 <div class="hardware-field">
+                                     <label for="spawn-rapid-max-concurrent-requests" title="Maximum in-flight requests the server accepts.">Max concurrent requests</label>
+                                     <select id="spawn-rapid-max-concurrent-requests">
+                                         <option value="" selected>Auto — runtime default</option>
+                                         <option value="1">1 — serialize</option>
+                                         <option value="4">4</option>
+                                         <option value="8">8</option>
+                                         <option value="32">32</option>
+                                     </select>
+                                     <div class="field-hint">Admission limit, separate from how many sequences are batched together.</div>
+                                 </div>
+                                 <div class="hardware-field">
+                                     <label for="spawn-rapid-pflash-policy" title="PFlash attention path. Off is the qualified default.">PFlash</label>
+                                     <select id="spawn-rapid-pflash-policy">
+                                         <option value="off" selected>Off — qualified default</option>
+                                         <option value="auto">Auto — runtime decides</option>
+                                         <option value="on">On — force PFlash</option>
+                                     </select>
+                                     <div class="field-hint">On bypasses TurboQuant, so it cannot be combined with a TurboQuant reusable-prompt-storage mode.</div>
+                                 </div>
+                                 <div class="hardware-field">
+                                     <label for="spawn-rapid-speculative-policy" title="Speculative decoding (MTP). Requires a runtime built with --speculative and a qualified draft path.">Speculative decoding</label>
+                                     <select id="spawn-rapid-speculative-policy">
+                                         <option value="" selected>Auto — leave to the runtime</option>
+                                         <option value="on">On — enable MTP</option>
+                                         <option value="off">Off</option>
+                                     </select>
+                                     <div class="field-hint">Omitted automatically if the installed runtime has no --speculative; the launch command preview reports it when that happens.</div>
+                                 </div>
                                  <!-- Sampling mode (D27) -->
                                  <div class="hardware-field">
                                      <label for="spawn-sampling-mode" title="Sampling mode sets server-level defaults for temperature, top_p, etc. Explicit client values always override.">Sampling mode</label>
