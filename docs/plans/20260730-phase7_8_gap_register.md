@@ -223,3 +223,43 @@ the argv beside it.
 Fixed in `7948ff3`. Regression test `unsupported_speculative_is_omitted_without_failing_the_build`,
 negative-control checked. Verified live: a payload setting both features returns argv plus two
 independent diff entries, with an unrelated `max_num_seqs` still reaching argv.
+
+## 10. Resolved — nine Rapid-MLX preset-editor controls were unreachable (2026-07-31)
+
+`presets.js` reads sixteen `modal-rapid-*` controls when saving a Rapid-MLX preset. Nine of
+them rendered nowhere, so the save path wrote their hardcoded defaults over whatever the
+spawn wizard had set. The controls existed, the save path worked, and unit tests were green;
+nobody had asked whether a user could reach them.
+
+Three separate causes, found by measuring computed style up the ancestor chain rather than
+by reading selectors:
+
+- `pe-row-rapid-parser-overrides` (tool_call_parser, reasoning_parser) and
+  `pe-row-rapid-architecture-overrides` (hybrid_mode, prefill_step_size) were nested inside
+  `#spawn-wizard-overlay`, not the preset modal, while using `pe-*` classes and
+  `modal-rapid-*` ids. Invisible in both surfaces.
+- `#pe-row-rapid-webui` / `-webui-expert` had no Rapid-mode display override, so the group
+  was hidden for every backend. The comment calling these llama.cpp-only was wrong —
+  `web_ui_availability`, `web_ui_static_path` and `web_ui_config_json` are `RapidMlxConfig`
+  fields the Rapid command builder emits.
+- `#pe-row-rapid-reasoning-mode` and `#pe-row-rapid-cache-memory` were missing from the
+  deny-by-default allowlist in `modal-premium.css:2343`.
+
+That allowlist is the structural cause worth remembering: it hides Rapid controls unless
+both the row **and** the field are exempted by id, so every control added to the modal is
+invisible until someone edits two `:not()` chains. `rapid-preset-visibility.spec.js` now
+derives its list by scanning `presets.js` for `modal-rapid-*`, so a control added later is
+covered without anyone updating the test.
+
+Whole-suite negative control: against the unfixed tree the new spec is the only failure in
+236 tests. Fixed in `b7f7437`.
+
+### Carried — the full UI suite fails 2-3 tests per run, at random
+
+Four full 241-test serial runs on 2026-07-31 each failed 2-3 tests, never the same ones:
+`tls-certificates`, `settings-modal`, `phase7-presets`, `preset-flow`. None reproduce solo
+or in combination. It reproduces on the **unmodified tree**, so it is not attributable to
+any Phase 7/8 change, and CI's `retries: 2` almost certainly masks it. The shared long-lived
+test server accumulating state across ~240 tests is the leading suspect. Unresolved; it
+means the suite cannot currently certify a change by pass count alone — attribution requires
+re-running the stashed tree.
