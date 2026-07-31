@@ -3246,28 +3246,6 @@
                                 <div id="pe-mtp-concurrency-teaching" class="pe-mtp-concurrency-teaching" style="display:none;"></div>
 
                                 <!-- Web UI group (D26/A44) — Advanced only -->
-                                <div class="pe-row pe-row-rapid-webui" id="pe-row-rapid-webui" style="display:none;">
-                                   <div class="pe-field">
-                                       <label class="pe-label" for="modal-rapid-webui-availability" title="Controls whether the bundled Web UI is served. Auto follows the upstream build default.">Web UI Availability</label>
-                                       <select class="pe-select" id="modal-rapid-webui-availability">
-                                           <option value="auto">Auto — follow upstream</option>
-                                           <option value="">(unset)</option>
-                                           <option value="on">On — force enable</option>
-                                           <option value="off">Off — disable</option>
-                                       </select>
-                                   </div>
-                                   <div class="pe-field">
-                                       <label class="pe-label" for="modal-rapid-webui-config-json" title="Validated JSON for --ui-config or path for --ui-config-file.">Config JSON / file</label>
-                                       <input type="text" class="pe-input" id="modal-rapid-webui-config-json" placeholder="JSON or config file path">
-                                   </div>
-                               </div>
-                               <div class="pe-row pe-row-rapid-webui-expert" id="pe-row-rapid-webui-expert" style="display:none;">
-                                   <div class="pe-field">
-                                       <label class="pe-label" for="modal-rapid-webui-static-path" title="Expert-only: custom static UI path via --path. Must be relative, no traversal.">Custom Static Path <span style="color:#f85149; font-size:10px;">EXPERT</span></label>
-                                       <input type="text" class="pe-input" id="modal-rapid-webui-static-path" placeholder="relative/path/to/ui">
-                                       <div class="pe-field-hint">Not required for bundled UI. Traversal and absolute paths rejected.</div>
-                                   </div>
-                               </div>
                             <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-parser-overrides" style="display:none;">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-rapid-tool-call-parser">Tool-call parser</label>
@@ -3360,15 +3338,6 @@
                                         <option value="on">On — force PFlash</option>
                                     </select>
                                     <div class="pe-field-hint">On bypasses TurboQuant reusable prompt storage.</div>
-                                </div>
-                                <div class="pe-field">
-                                    <label class="pe-label" for="modal-rapid-speculative-policy" title="Speculative decoding (MTP). Requires a runtime built with --speculative.">Speculative decoding</label>
-                                    <select class="pe-select" id="modal-rapid-speculative-policy">
-                                        <option value="" selected>Auto — leave to the runtime</option>
-                                        <option value="on">On — enable MTP</option>
-                                        <option value="off">Off</option>
-                                    </select>
-                                    <div class="pe-field-hint">Omitted automatically when the runtime has no --speculative.</div>
                                 </div>
                             </div>
                             <div class="pe-row pe-row-3">
@@ -3959,15 +3928,6 @@
                                          <option value="on">On — force PFlash</option>
                                      </select>
                                      <div class="field-hint">On bypasses TurboQuant, so it cannot be combined with a TurboQuant reusable-prompt-storage mode.</div>
-                                 </div>
-                                 <div class="hardware-field">
-                                     <label for="spawn-rapid-speculative-policy" title="Speculative decoding (MTP). Requires a runtime built with --speculative and a qualified draft path.">Speculative decoding</label>
-                                     <select id="spawn-rapid-speculative-policy">
-                                         <option value="" selected>Auto — leave to the runtime</option>
-                                         <option value="on">On — enable MTP</option>
-                                         <option value="off">Off</option>
-                                     </select>
-                                     <div class="field-hint">Omitted automatically if the installed runtime has no --speculative; the launch command preview reports it when that happens.</div>
                                  </div>
                                  <!-- Sampling mode (D27) -->
                                  <div class="hardware-field">

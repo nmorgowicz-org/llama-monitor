@@ -1112,27 +1112,15 @@ mod tests {
                 turboquant_mode: Some(TurboQuantMode::K8V4),
                 hybrid_cache_entries: Some(256),
                 pflash_policy: Some("auto".into()),
-                response_cache_policy: Some("on".into()),
-                disk_checkpoint_policy: Some("off".into()),
                 max_num_seqs: Some(128),
                 max_concurrent_requests: Some(64),
                 prefill_batch_size: Some(2048),
                 completion_batch_size: Some(512),
-                batching_policy: Some("auto".into()),
-                concurrency_policy: Some("single_active".into()),
                 reasoning_mode: Some("on".into()),
-                speculative_policy: Some("auto".into()),
                 mllm_vision: Some("auto".into()),
                 embeddings: Some("off".into()),
                 gpu_memory_utilization: Some(0.85),
-                web_ui_availability: Some("auto".into()),
-                web_ui_static_path: None,
-                web_ui_config_json: None,
-                endpoint_compatibility: Some("openai_v1".into()),
-                request_safety_policy: Some("auto".into()),
                 sampling_mode: Some("auto".into()),
-                parser_policy: Some("auto".into()),
-                security_policy: Some("loopback_only".into()),
                 ..Default::default()
             }),
             ..Default::default()
@@ -1148,25 +1136,15 @@ mod tests {
         assert_eq!(rapid.turboquant_mode, Some(TurboQuantMode::K8V4));
         assert_eq!(rapid.hybrid_cache_entries, Some(256));
         assert_eq!(rapid.pflash_policy, Some("auto".into()));
-        assert_eq!(rapid.response_cache_policy, Some("on".into()));
-        assert_eq!(rapid.disk_checkpoint_policy, Some("off".into()));
         assert_eq!(rapid.max_num_seqs, Some(128));
         assert_eq!(rapid.max_concurrent_requests, Some(64));
         assert_eq!(rapid.prefill_batch_size, Some(2048));
         assert_eq!(rapid.completion_batch_size, Some(512));
-        assert_eq!(rapid.batching_policy, Some("auto".into()));
-        assert_eq!(rapid.concurrency_policy, Some("single_active".into()));
         assert_eq!(rapid.reasoning_mode, Some("on".into()));
-        assert_eq!(rapid.speculative_policy, Some("auto".into()));
         assert_eq!(rapid.mllm_vision, Some("auto".into()));
         assert_eq!(rapid.embeddings, Some("off".into()));
         assert_eq!(rapid.gpu_memory_utilization, Some(0.85));
-        assert_eq!(rapid.web_ui_availability, Some("auto".into()));
-        assert_eq!(rapid.endpoint_compatibility, Some("openai_v1".into()));
-        assert_eq!(rapid.request_safety_policy, Some("auto".into()));
         assert_eq!(rapid.sampling_mode, Some("auto".into()));
-        assert_eq!(rapid.parser_policy, Some("auto".into()));
-        assert_eq!(rapid.security_policy, Some("loopback_only".into()));
     }
 
     #[test]
@@ -1197,24 +1175,14 @@ mod tests {
         // aliases, and the 2026-07-24 verdict measured needle recall collapsing 0-40% above
         // the 32768-token threshold there. A legacy preset must not inherit that.
         assert_eq!(rapid.pflash_policy.as_deref(), Some("off"));
-        assert!(rapid.response_cache_policy.is_none());
-        assert!(rapid.disk_checkpoint_policy.is_none());
         assert!(rapid.max_num_seqs.is_none());
         assert!(rapid.max_concurrent_requests.is_none());
         assert!(rapid.prefill_batch_size.is_none());
         assert!(rapid.completion_batch_size.is_none());
-        assert!(rapid.batching_policy.is_none());
-        assert!(rapid.concurrency_policy.is_none());
         assert!(rapid.reasoning_mode.is_none());
-        assert!(rapid.speculative_policy.is_none());
         assert!(rapid.mllm_vision.is_none());
         assert!(rapid.embeddings.is_none());
         assert!(rapid.gpu_memory_utilization.is_none());
-        assert!(rapid.web_ui_availability.is_none());
-        assert!(rapid.endpoint_compatibility.is_none());
-        assert!(rapid.request_safety_policy.is_none());
         assert!(rapid.sampling_mode.is_none());
-        assert!(rapid.parser_policy.is_none());
-        assert!(rapid.security_policy.is_none());
     }
 }

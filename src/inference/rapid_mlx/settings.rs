@@ -67,27 +67,15 @@ pub enum RapidMlxSetting {
     PrefixCachePolicy,
     HybridCacheEntries,
     PflashPolicy,
-    ResponseCachePolicy,
-    DiskCheckpointPolicy,
     MaxNumSeqs,
     MaxConcurrentRequests,
     PrefillBatchSize,
     CompletionBatchSize,
-    BatchingPolicy,
-    ConcurrencyPolicy,
     ReasoningMode,
-    SpeculativePolicy,
     MllmVision,
     Embeddings,
     GpuMemoryUtilization,
-    WebUiAvailability,
-    WebUiStaticPath,
-    WebUiConfigJson,
-    EndpointCompatibility,
-    RequestSafetyPolicy,
     SamplingMode,
-    ParserPolicy,
-    SecurityPolicy,
 }
 
 impl RapidMlxSetting {
@@ -99,27 +87,15 @@ impl RapidMlxSetting {
             Self::PrefixCachePolicy => "prefix_cache_policy",
             Self::HybridCacheEntries => "hybrid_cache_entries",
             Self::PflashPolicy => "pflash_policy",
-            Self::ResponseCachePolicy => "response_cache_policy",
-            Self::DiskCheckpointPolicy => "disk_checkpoint_policy",
             Self::MaxNumSeqs => "max_num_seqs",
             Self::MaxConcurrentRequests => "max_concurrent_requests",
             Self::PrefillBatchSize => "prefill_batch_size",
             Self::CompletionBatchSize => "completion_batch_size",
-            Self::BatchingPolicy => "batching_policy",
-            Self::ConcurrencyPolicy => "concurrency_policy",
             Self::ReasoningMode => "reasoning_mode",
-            Self::SpeculativePolicy => "speculative_policy",
             Self::MllmVision => "mllm_vision",
             Self::Embeddings => "embeddings",
             Self::GpuMemoryUtilization => "gpu_memory_utilization",
-            Self::WebUiAvailability => "web_ui_availability",
-            Self::WebUiStaticPath => "web_ui_static_path",
-            Self::WebUiConfigJson => "web_ui_config_json",
-            Self::EndpointCompatibility => "endpoint_compatibility",
-            Self::RequestSafetyPolicy => "request_safety_policy",
             Self::SamplingMode => "sampling_mode",
-            Self::ParserPolicy => "parser_policy",
-            Self::SecurityPolicy => "security_policy",
         }
     }
 
@@ -133,16 +109,11 @@ impl RapidMlxSetting {
             Self::PrefixCachePolicy => has_flag("--max-cache-blocks"),
             Self::HybridCacheEntries => has_flag("--hybrid-cache-entries"),
             Self::PflashPolicy => has_flag("--pflash"),
-            Self::ResponseCachePolicy => has_flag("--response-cache"),
-            Self::DiskCheckpointPolicy => has_flag("--disk-checkpoint"),
             Self::MaxNumSeqs => has_flag("--max-num-seqs"),
             Self::MaxConcurrentRequests => has_flag("--max-concurrent-requests"),
             Self::PrefillBatchSize => has_flag("--prefill-batch-size"),
             Self::CompletionBatchSize => has_flag("--completion-batch-size"),
-            Self::BatchingPolicy => has_flag("--batching-policy"),
-            Self::ConcurrencyPolicy => has_flag("--concurrency-policy"),
             Self::ReasoningMode => has_flag("--reasoning"),
-            Self::SpeculativePolicy => has_flag("--speculative"),
             Self::MllmVision => {
                 matches!(
                     snapshot.qualified_features.vision,
@@ -156,14 +127,7 @@ impl RapidMlxSetting {
                 )
             }
             Self::GpuMemoryUtilization => has_flag("--gpu-memory-utilization"),
-            Self::WebUiAvailability => has_flag("--ui") || has_flag("--no-ui"),
-            Self::WebUiStaticPath => has_flag("--path"),
-            Self::WebUiConfigJson => has_flag("--ui-config") || has_flag("--ui-config-file"),
-            Self::EndpointCompatibility => true, // Inferred from snapshot features
-            Self::RequestSafetyPolicy => true,   // Default policy always available
             Self::SamplingMode => true, // Always available via --default-* flags or request-level
-            Self::ParserPolicy => has_flag("--tool-call-parser"),
-            Self::SecurityPolicy => true, // Default policy always available
         }
     }
 
@@ -178,27 +142,15 @@ impl RapidMlxSetting {
             // catalog describes what llama-monitor will actually launch with, and llama-monitor
             // launches `--pflash off` on every config.
             Self::PflashPolicy => serde_json::json!("off"),
-            Self::ResponseCachePolicy => serde_json::json!("auto"),
-            Self::DiskCheckpointPolicy => serde_json::json!("auto"),
             Self::MaxNumSeqs => serde_json::json!(4),
             Self::MaxConcurrentRequests => serde_json::json!(16),
             Self::PrefillBatchSize => serde_json::json!(null),
             Self::CompletionBatchSize => serde_json::json!(null),
-            Self::BatchingPolicy => serde_json::json!("auto"),
-            Self::ConcurrencyPolicy => serde_json::json!("single_active"),
             Self::ReasoningMode => serde_json::json!("auto"),
-            Self::SpeculativePolicy => serde_json::json!("auto"),
             Self::MllmVision => serde_json::json!("auto"),
             Self::Embeddings => serde_json::json!("auto"),
             Self::GpuMemoryUtilization => serde_json::json!(0.9),
-            Self::WebUiAvailability => serde_json::json!("auto"),
-            Self::WebUiStaticPath => serde_json::json!(null),
-            Self::WebUiConfigJson => serde_json::json!(null),
-            Self::EndpointCompatibility => serde_json::json!("openai_v1"),
-            Self::RequestSafetyPolicy => serde_json::json!("auto"),
             Self::SamplingMode => serde_json::json!("auto"),
-            Self::ParserPolicy => serde_json::json!("auto"),
-            Self::SecurityPolicy => serde_json::json!("loopback_only"),
         }
     }
 
@@ -287,29 +239,6 @@ impl RapidMlxSetting {
                 }
                 Ok(())
             }
-            Self::WebUiStaticPath => {
-                if let Some(path) = value.as_str()
-                    && (path.contains("..") || (cfg!(unix) && path.starts_with('/')))
-                {
-                    return invalid(
-                        "web_ui_static_path must be a relative path without traversal".into(),
-                        "web_ui_static_path_traversal",
-                    );
-                }
-                Ok(())
-            }
-            Self::WebUiConfigJson => {
-                if let Some(json) = value.as_str()
-                    && !json.is_empty()
-                    && let Err(e) = serde_json::from_str::<serde_json::Value>(json)
-                {
-                    return invalid(
-                        format!("web_ui_config_json is not valid JSON: {}", e),
-                        "web_ui_config_json_invalid",
-                    );
-                }
-                Ok(())
-            }
             _ => Ok(()),
         }
     }
@@ -387,22 +316,6 @@ impl RapidMlxSetting {
                     args.push(format!("{f}"));
                 }
             }
-            Self::WebUiStaticPath => {
-                if let Some(path) = value.as_str()
-                    && !path.is_empty()
-                {
-                    args.push("--path".into());
-                    args.push(path.into());
-                }
-            }
-            Self::WebUiConfigJson => {
-                if let Some(json) = value.as_str()
-                    && !json.is_empty()
-                {
-                    args.push("--ui-config".into());
-                    args.push(json.into());
-                }
-            }
             _ => {}
         }
 
@@ -464,12 +377,10 @@ impl RapidMlxSetting {
             Self::KvCacheDtype => "Current runtime does not support --kv-cache-dtype".into(),
             Self::TurboquantMode => "Current runtime does not support --kv-cache-turboquant".into(),
             Self::ReasoningMode => "Current runtime does not support --reasoning".into(),
-            Self::SpeculativePolicy => "Current runtime does not support --speculative".into(),
             Self::MllmVision => "Vision extra (mlx-vlm) is not installed or not qualified".into(),
             Self::Embeddings => {
                 "Embeddings extra (mlx-embed) is not installed or not qualified".into()
             }
-            Self::WebUiAvailability => "Web UI is not supported by this build".into(),
             Self::MaxNumSeqs => "Current runtime does not support --max-num-seqs".into(),
             Self::MaxConcurrentRequests => {
                 "Current runtime does not support --max-concurrent-requests".into()
@@ -487,27 +398,15 @@ pub fn all_settings() -> &'static [RapidMlxSetting] {
         RapidMlxSetting::PrefixCachePolicy,
         RapidMlxSetting::HybridCacheEntries,
         RapidMlxSetting::PflashPolicy,
-        RapidMlxSetting::ResponseCachePolicy,
-        RapidMlxSetting::DiskCheckpointPolicy,
         RapidMlxSetting::MaxNumSeqs,
         RapidMlxSetting::MaxConcurrentRequests,
         RapidMlxSetting::PrefillBatchSize,
         RapidMlxSetting::CompletionBatchSize,
-        RapidMlxSetting::BatchingPolicy,
-        RapidMlxSetting::ConcurrencyPolicy,
         RapidMlxSetting::ReasoningMode,
-        RapidMlxSetting::SpeculativePolicy,
         RapidMlxSetting::MllmVision,
         RapidMlxSetting::Embeddings,
         RapidMlxSetting::GpuMemoryUtilization,
-        RapidMlxSetting::WebUiAvailability,
-        RapidMlxSetting::WebUiStaticPath,
-        RapidMlxSetting::WebUiConfigJson,
-        RapidMlxSetting::EndpointCompatibility,
-        RapidMlxSetting::RequestSafetyPolicy,
         RapidMlxSetting::SamplingMode,
-        RapidMlxSetting::ParserPolicy,
-        RapidMlxSetting::SecurityPolicy,
     ]
 }
 
@@ -516,16 +415,16 @@ pub fn all_settings() -> &'static [RapidMlxSetting] {
 pub enum ExclusionMatch {
     /// Participates only at these exact values.
     OneOf(&'static [&'static str]),
-    /// Participates whenever the user set it at all, whatever the value. For numeric
-    /// settings, which have no "on" value to compare a string against.
-    Present,
+    // A `Present` variant (participates whenever set at all, for numeric settings with no "on"
+    // value) lived here for the speculative_policy/max_num_seqs rule. That rule was built on
+    // `--speculative`, a flag no rapid-mlx release has, so both went. Re-add it when a real
+    // numeric participant needs it rather than keeping an unused mechanism warm.
 }
 
 impl ExclusionMatch {
     fn matches(&self, value: &serde_json::Value) -> bool {
         match self {
             Self::OneOf(allowed) => value.as_str().is_some_and(|found| allowed.contains(&found)),
-            Self::Present => true,
         }
     }
 }
@@ -567,13 +466,6 @@ pub fn mutual_exclusion_rules() -> &'static [MutualExclusionRule] {
             ],
             error: "pflash_policy bypasses TurboQuant; these policies cannot be combined",
         },
-        MutualExclusionRule {
-            participants: &[
-                ("speculative_policy", ExclusionMatch::OneOf(&["on"])),
-                ("max_num_seqs", ExclusionMatch::Present),
-            ],
-            error: "speculative_decoding requires dedicated runtime qualification; explicit max_num_seqs may conflict with MTP scheduling",
-        },
     ]
 }
 
@@ -611,6 +503,83 @@ mod tests {
         pairs.iter().cloned().collect()
     }
 
+    /// Every `--flag` literal this module and the command builder test against must be a flag
+    /// the runtime actually has.
+    ///
+    /// `ServeCapabilities::from_help` derives capabilities by parsing `rapid-mlx serve --help`,
+    /// so a flag that is not in that help text can never be detected. A field gated on an
+    /// invented flag is therefore permanently unavailable — and worse, `require()` on such a
+    /// flag returns `Err`, which aborts the *entire* command build and blanks the preview for
+    /// every unrelated setting too.
+    ///
+    /// This shipped: `--response-cache`, `--disk-checkpoint`, `--batching-policy`,
+    /// `--concurrency-policy`, `--speculative`, `--ui`, `--no-ui`, `--path`, `--ui-config` and
+    /// `--ui-config-file` were all wired up against a runtime that has none of them. The unit
+    /// tests passed because they built a synthetic capability set that declared the invented
+    /// flags, so the tests confirmed the mistake instead of catching it. Hence checking source
+    /// literals against a captured inventory rather than against another hand-written list.
+    #[test]
+    fn serve_flag_literals_exist_in_the_real_runtime() {
+        let inventory: std::collections::BTreeSet<&str> =
+            include_str!("testdata/serve-flags.txt")
+                .lines()
+                .map(str::trim)
+                .filter(|l| l.starts_with("--"))
+                .collect();
+        assert!(
+            inventory.len() > 50,
+            "flag inventory looks truncated: {} entries",
+            inventory.len()
+        );
+
+        // Only probe and emission sites matter. A flag literal inside `assert!(!args...)` is a
+        // test asserting the flag is *absent*, which is legitimate and must not trip the guard.
+        let is_live_site = |line: &str| {
+            let line = line.split("//").next().unwrap_or("");
+            (line.contains("has_flag(")
+                || line.contains(".require(")
+                || line.contains(".contains(")
+                || line.contains("args.push("))
+                && !line.contains("assert!(!")
+        };
+
+        let mut offenders: Vec<(&str, &str)> = Vec::new();
+        for (file, src) in [
+            ("settings.rs", include_str!("settings.rs")),
+            ("command.rs", include_str!("command.rs")),
+        ] {
+            // All literals on the line, not just the first: `has_flag("--ui") ||
+            // has_flag("--no-ui")` hides a second flag behind the first.
+            for (idx, _) in src
+                .lines()
+                .filter(|l| is_live_site(l))
+                .flat_map(|l| l.match_indices("\"--").map(move |(i, _)| (&l[i + 1..], ())))
+            {
+                let Some(end) = idx.find('"') else { continue };
+                let flag = &idx[..end];
+                // Skip anything that is not a plain long flag (format strings, joined lists).
+                if flag.len() < 3
+                    || !flag[2..]
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                {
+                    continue;
+                }
+                if !inventory.contains(flag) {
+                    offenders.push((file, flag));
+                }
+            }
+        }
+        offenders.sort_unstable();
+        offenders.dedup();
+        assert!(
+            offenders.is_empty(),
+            "flags referenced in source but absent from `rapid-mlx serve --help`: {offenders:?}\n\
+             Either the flag was invented, or the runtime changed and \
+             testdata/serve-flags.txt needs regenerating."
+        );
+    }
+
     #[test]
     fn one_setting_alone_is_not_a_mutual_exclusion() {
         // `reasoning_mode=on` is an ordinary choice. It used to report a conflict with a
@@ -621,8 +590,7 @@ mod tests {
             ("reasoning_mode", serde_json::json!("on")),
             ("sampling_mode", serde_json::json!("model_default")),
             ("pflash_policy", serde_json::json!("on")),
-            ("speculative_policy", serde_json::json!("on")),
-            ("max_num_seqs", serde_json::json!(8)),
+            ("turboquant_mode", serde_json::json!("k8v4")),
         ] {
             let id = lone.0;
             assert!(
@@ -664,18 +632,6 @@ mod tests {
             ]))
             .is_err(),
             "pflash + an explicit TurboQuant mode is a conflict"
-        );
-    }
-
-    #[test]
-    fn a_numeric_participant_conflicts_by_being_set_at_all() {
-        // `max_num_seqs` has no "on" value to compare against, so its presence is the signal.
-        assert!(
-            check_mutual_exclusions(&values(&[
-                ("speculative_policy", serde_json::json!("on")),
-                ("max_num_seqs", serde_json::json!(4)),
-            ]))
-            .is_err()
         );
     }
 
@@ -831,31 +787,6 @@ mod tests {
     }
 
     #[test]
-    fn web_ui_static_path_traversal_rejected() {
-        let setting = RapidMlxSetting::WebUiStaticPath;
-        let ctx = ValidationContext::default();
-
-        let err = setting
-            .validate(&serde_json::json!("../escape"), &ctx)
-            .unwrap_err();
-        assert_eq!(err.code, "web_ui_static_path_traversal");
-    }
-
-    #[test]
-    fn web_ui_config_json_validates_json() {
-        let setting = RapidMlxSetting::WebUiConfigJson;
-        let ctx = ValidationContext::default();
-
-        assert!(setting.validate(&serde_json::json!("{}"), &ctx).is_ok());
-        assert!(setting.validate(&serde_json::json!(""), &ctx).is_ok());
-
-        let err = setting
-            .validate(&serde_json::json!("not json"), &ctx)
-            .unwrap_err();
-        assert_eq!(err.code, "web_ui_config_json_invalid");
-    }
-
-    #[test]
     fn to_cli_args_kvcache_dtype() {
         let setting = RapidMlxSetting::KvCacheDtype;
         let args = setting.to_cli_args(&serde_json::json!({"effective": "int8"}));
@@ -909,10 +840,7 @@ mod tests {
                 !default.is_null()
                     || matches!(
                         setting,
-                        RapidMlxSetting::PrefillBatchSize
-                            | RapidMlxSetting::CompletionBatchSize
-                            | RapidMlxSetting::WebUiStaticPath
-                            | RapidMlxSetting::WebUiConfigJson
+                        RapidMlxSetting::PrefillBatchSize | RapidMlxSetting::CompletionBatchSize
                     )
             );
         }

@@ -263,3 +263,74 @@ any Phase 7/8 change, and CI's `retries: 2` almost certainly masks it. The share
 test server accumulating state across ~240 tests is the leading suspect. Unresolved; it
 means the suite cannot currently certify a change by pass count alone — attribution requires
 re-running the stashed tree.
+
+## 11. Twelve Rapid-MLX config fields were gated on flags that do not exist
+
+Found while answering "what exactly are the missing fields?". The manual audit found five;
+a guard test found twelve. All were removed.
+
+### How they were found
+
+`ServeCapabilities::from_help` derives capabilities by parsing `rapid-mlx serve --help`, so a
+flag absent from that help can never be detected. That makes the defect mechanically
+checkable: capture the runtime's real flag inventory and compare it against every `--flag`
+literal in the source. `settings.rs::serve_flag_literals_exist_in_the_real_runtime` does
+exactly that against `testdata/serve-flags.txt` (85 flags, rapid-mlx 0.11.1). It scans only
+probe and emission sites — `has_flag(`, `.require(`, `.contains(`, `args.push(` — so
+`assert!(!args…)` negative assertions do not trip it.
+
+### Why the existing tests did not catch it
+
+`command.rs`'s Phase 7 argv test built its capability set from a hand-written help string that
+**declared all twelve invented flags**. The assertions then confirmed the builder's mistakes.
+Green tests were not merely silent here; they were actively wrong. The synthetic string is now
+constrained to real flags by the same guard.
+
+### Severity
+
+Every one of the twelve called `capabilities.require()`, which returns `Err` and aborts the
+*entire* command build. Setting any of them blanked the command preview and failed the launch —
+the same defect fixed for the throughput flags in `ac31388`, but twelve times over. Four of them
+(`endpoint_compatibility`, `request_safety_policy`, `parser_policy`, `security_policy`) were the
+worst combination: `settings.rs` reported them `=> true`, *always available*, while the builder
+required a nonexistent flag. The UI advertised support, then the launch hard-failed.
+
+### Two distinct origins, established by comparing against both runtimes
+
+**Group A — llama.cpp cross-contamination (3 fields).** `web_ui_availability`,
+`web_ui_static_path`, `web_ui_config_json` probed `--ui`/`--no-ui`/`--path`/`--ui-config`/
+`--ui-config-file`. All five are real `llama-server` flags, verbatim, including the `--ui`/
+`--no-ui` pairing. They were copied into the wrong builder. Note the inversion: `ServerConfig`
+(llama.cpp) has **no** web-UI fields at all, so llama-monitor could not configure the web UI of
+the runtime that has one, while offering to configure the web UI of the runtime that does not.
+
+`abc6419` earlier the same day added CSS making this group visible for
+`.preset-editor--rapid-mlx` — the one backend where it can never work. Reverted here.
+
+**Group B — invented, present in neither runtime (9 fields).**
+
+- *Near-misses of real rapid-mlx capabilities:* `response_cache_policy` → the real flag is
+  `--response-cache-entries`; `disk_checkpoint_policy` → `--kv-disk-checkpoint-interval`;
+  `speculative_policy` → `--speculative-config`. All three real flags take an integer or a JSON
+  object, not a policy word, so these are shape mismatches and not renames. `disk_checkpoint_policy`
+  was also redundant: the real `disk_checkpoint_interval: u32` already sat beside it.
+- *No equivalent anywhere:* `batching_policy`, `concurrency_policy`, `endpoint_compatibility`,
+  `request_safety_policy`, `parser_policy`, `security_policy`. Five of six end in `-policy` — a
+  designed vocabulary rather than an observed one.
+
+### Collateral
+
+- `ExclusionMatch::Present` became dead code: its only user was the
+  `speculative_policy`/`max_num_seqs` exclusion rule. Removed rather than kept warm.
+- `build_effective_policy` no longer needs its `capabilities` parameter.
+- `vram-estimate.js` — `concurrency_policy` is a **real** estimator input
+  (`workload_scenarios.rs:525`, read at `vram.rs:388`), not a CLI flag. But both its JS sources
+  are now dead: `rapidMlx.concurrency_policy` was the deleted field, and
+  `hardware.concurrencyPolicy` is written by no surface and was already dead. The estimator now
+  always takes its default. Tracked separately; not silently repaired.
+
+### Left unexposed on purpose
+
+`--response-cache-entries` (greedy-only response cache), `--speculative-config`, and llama.cpp's
+real web-UI flags are all genuine capabilities with no UI after this change. Exposing them is a
+separate decision, not part of removing the phantoms.

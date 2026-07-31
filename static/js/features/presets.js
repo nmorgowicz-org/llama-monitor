@@ -1317,13 +1317,9 @@ export function openPresetModal(mode, section, seedPreset = null) {
         setOpt('modal-rapid-max-num-seqs', p.rapid_mlx?.max_num_seqs == null ? '' : String(p.rapid_mlx.max_num_seqs));
         setOpt('modal-rapid-max-concurrent-requests', p.rapid_mlx?.max_concurrent_requests == null ? '' : String(p.rapid_mlx.max_concurrent_requests));
         setOpt('modal-rapid-pflash-policy', p.rapid_mlx?.pflash_policy || 'off');
-        setOpt('modal-rapid-speculative-policy', p.rapid_mlx?.speculative_policy || '');
         setOpt('modal-rapid-tool-call-parser', p.rapid_mlx?.tool_call_parser || '');
         setOpt('modal-rapid-reasoning-parser', p.rapid_mlx?.reasoning_parser || '');
         setOpt('modal-rapid-sampling-mode', p.rapid_mlx?.sampling_mode || 'auto');
-        setOpt('modal-rapid-webui-availability', p.rapid_mlx?.web_ui_availability || 'auto');
-        setVal('modal-rapid-webui-config-json', p.rapid_mlx?.web_ui_config_json || '');
-        setVal('modal-rapid-webui-static-path', p.rapid_mlx?.web_ui_static_path || '');
         const reasoningModeChecked = !!p.rapid_mlx?.reasoning_mode && p.rapid_mlx?.reasoning_mode !== 'off';
         if (document.getElementById('modal-rapid-reasoning-mode')) {
             document.getElementById('modal-rapid-reasoning-mode').checked = reasoningModeChecked;
@@ -1804,9 +1800,6 @@ function _buildFormPreset(existing) {
                     const toolParser = strVal('modal-rapid-tool-call-parser');
                     const reasoningParser = strVal('modal-rapid-reasoning-parser');
                     const samplingMode = strVal('modal-rapid-sampling-mode');
-                    const webUiAvail = strVal('modal-rapid-webui-availability');
-                    const webUiConfig = strVal('modal-rapid-webui-config-json');
-                    const webUiStatic = strVal('modal-rapid-webui-static-path');
                     const rmInput = document.getElementById('modal-rapid-reasoning-mode');
                     if (kvDtype) out.kv_cache_dtype = kvDtype;
                     if (tqMode && tqMode !== 'auto') out.turboquant_mode = tqMode;
@@ -1816,22 +1809,16 @@ function _buildFormPreset(existing) {
                     if (rmInput) out.reasoning_mode = rmInput.checked ? 'on' : 'off';
                     const prefillStepSize = Number(strVal('modal-rapid-prefill-step-size') || 512);
                     if (prefillStepSize && prefillStepSize !== 512) out.prefill_step_size = prefillStepSize;
-                    // Web UI (D26/A44)
-                    if (webUiAvail && webUiAvail !== 'auto') out.web_ui_availability = webUiAvail;
-                    if (webUiConfig) out.web_ui_config_json = webUiConfig;
-                    if (webUiStatic) out.web_ui_static_path = webUiStatic;
                     // Throughput / memory. '' means omit: an absent flag and an explicit
                     // runtime default are different states, so never write a placeholder.
                     const gpuUtil = strVal('modal-rapid-gpu-memory-utilization');
                     const maxSeqs = strVal('modal-rapid-max-num-seqs');
                     const maxConc = strVal('modal-rapid-max-concurrent-requests');
                     const pflash = strVal('modal-rapid-pflash-policy');
-                    const specPolicy = strVal('modal-rapid-speculative-policy');
                     if (gpuUtil) out.gpu_memory_utilization = Number(gpuUtil);
                     if (maxSeqs) out.max_num_seqs = Number(maxSeqs);
                     if (maxConc) out.max_concurrent_requests = Number(maxConc);
                     if (pflash) out.pflash_policy = pflash;
-                    if (specPolicy) out.speculative_policy = specPolicy;
                     // Sampling defaults (--default-* flags for Rapid-MLX)
                     const temp = floatOrNull('modal-temperature');
                     const topP = floatOrNull('modal-top-p');
@@ -1975,9 +1962,8 @@ const RAPID_CHANGE_LABELS = {
     prefill_step_size: 'Prefill Step Size', hybrid_mode: 'Hybrid Architecture',
     gpu_memory_utilization: 'GPU Memory Utilization', max_num_seqs: 'Max Batched Sequences',
     max_concurrent_requests: 'Max Concurrent Requests', pflash_policy: 'PFlash',
-    speculative_policy: 'Speculative Decoding',
-    web_ui_availability: 'Web UI', web_ui_static_path: 'Web UI Static Path',
-    web_ui_config_json: 'Web UI Config',
+    hybrid_cache_entries: 'Retained Prefix Entries',
+    prefill_batch_size: 'Prefill Batch Size', completion_batch_size: 'Completion Batch Size',
     default_temperature: 'Temperature', default_top_p: 'Top-P', default_top_k: 'Top-K',
     default_min_p: 'Min-P', default_repetition_penalty: 'Repeat Penalty',
     default_presence_penalty: 'Presence Penalty', max_tokens: 'Max Tokens',

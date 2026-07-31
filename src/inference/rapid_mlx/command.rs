@@ -28,8 +28,6 @@ pub struct RapidMlxCommandBuilder {
     hybrid_cache_entries: Option<u64>,
     hybrid_mode: RapidMlxHybridMode,
     pflash_policy: Option<String>,
-    response_cache_policy: Option<String>,
-    disk_checkpoint_policy: Option<String>,
     retained_cache_mib: Option<u32>,
     prefix_cache_enabled: Option<bool>,
     disk_checkpoint_interval: Option<u32>,
@@ -39,23 +37,15 @@ pub struct RapidMlxCommandBuilder {
     prefill_batch_size: Option<u64>,
     completion_batch_size: Option<u64>,
     prefill_step_size: Option<u32>,
-    batching_policy: Option<String>,
-    concurrency_policy: Option<String>,
     // Phase 7: reasoning/speculative
     reasoning_mode: Option<String>,
-    speculative_policy: Option<String>,
     // Phase 7: MLLM/embeddings
     mllm_vision: Option<String>,
     embeddings: Option<String>,
     // Phase 7: GPU
     gpu_memory_utilization: Option<f64>,
     // Phase 7: Web UI
-    web_ui_availability: Option<String>,
-    web_ui_static_path: Option<String>,
-    web_ui_config_json: Option<String>,
     // Phase 7: endpoint/safety
-    endpoint_compatibility: Option<String>,
-    request_safety_policy: Option<String>,
     sampling_mode: Option<String>,
     default_temperature: Option<f64>,
     default_top_p: Option<f64>,
@@ -65,8 +55,6 @@ pub struct RapidMlxCommandBuilder {
     default_presence_penalty: Option<f64>,
     default_frequency_penalty: Option<f64>,
     max_tokens: Option<u64>,
-    parser_policy: Option<String>,
-    security_policy: Option<String>,
 }
 
 /// KV cache dtype argument for CLI.
@@ -98,8 +86,6 @@ impl RapidMlxCommandBuilder {
             hybrid_cache_entries: None,
             hybrid_mode: RapidMlxHybridMode::Auto,
             pflash_policy: None,
-            response_cache_policy: None,
-            disk_checkpoint_policy: None,
             retained_cache_mib: None,
             prefix_cache_enabled: None,
             disk_checkpoint_interval: None,
@@ -108,18 +94,10 @@ impl RapidMlxCommandBuilder {
             prefill_batch_size: None,
             completion_batch_size: None,
             prefill_step_size: None,
-            batching_policy: None,
-            concurrency_policy: None,
             reasoning_mode: None,
-            speculative_policy: None,
             mllm_vision: None,
             embeddings: None,
             gpu_memory_utilization: None,
-            web_ui_availability: None,
-            web_ui_static_path: None,
-            web_ui_config_json: None,
-            endpoint_compatibility: None,
-            request_safety_policy: None,
             sampling_mode: None,
             default_temperature: None,
             default_top_p: None,
@@ -129,8 +107,6 @@ impl RapidMlxCommandBuilder {
             default_presence_penalty: None,
             default_frequency_penalty: None,
             max_tokens: None,
-            parser_policy: None,
-            security_policy: None,
         }
     }
 
@@ -214,14 +190,6 @@ impl RapidMlxCommandBuilder {
         self.pflash_policy = policy;
         self
     }
-    pub fn response_cache_policy(mut self, policy: Option<String>) -> Self {
-        self.response_cache_policy = policy;
-        self
-    }
-    pub fn disk_checkpoint_policy(mut self, policy: Option<String>) -> Self {
-        self.disk_checkpoint_policy = policy;
-        self
-    }
     pub fn retained_cache_mib(mut self, mib: Option<u32>) -> Self {
         self.retained_cache_mib = mib;
         self
@@ -254,20 +222,8 @@ impl RapidMlxCommandBuilder {
         self.prefill_step_size = size;
         self
     }
-    pub fn batching_policy(mut self, policy: Option<String>) -> Self {
-        self.batching_policy = policy;
-        self
-    }
-    pub fn concurrency_policy(mut self, policy: Option<String>) -> Self {
-        self.concurrency_policy = policy;
-        self
-    }
     pub fn reasoning_mode(mut self, mode: Option<String>) -> Self {
         self.reasoning_mode = mode;
-        self
-    }
-    pub fn speculative_policy(mut self, policy: Option<String>) -> Self {
-        self.speculative_policy = policy;
         self
     }
     pub fn mllm_vision(mut self, vision: Option<String>) -> Self {
@@ -280,26 +236,6 @@ impl RapidMlxCommandBuilder {
     }
     pub fn gpu_memory_utilization(mut self, util: Option<f64>) -> Self {
         self.gpu_memory_utilization = util;
-        self
-    }
-    pub fn web_ui_availability(mut self, avail: Option<String>) -> Self {
-        self.web_ui_availability = avail;
-        self
-    }
-    pub fn web_ui_static_path(mut self, path: Option<String>) -> Self {
-        self.web_ui_static_path = path;
-        self
-    }
-    pub fn web_ui_config_json(mut self, config: Option<String>) -> Self {
-        self.web_ui_config_json = config;
-        self
-    }
-    pub fn endpoint_compatibility(mut self, compat: Option<String>) -> Self {
-        self.endpoint_compatibility = compat;
-        self
-    }
-    pub fn request_safety_policy(mut self, policy: Option<String>) -> Self {
-        self.request_safety_policy = policy;
         self
     }
     pub fn sampling_mode(mut self, mode: Option<String>) -> Self {
@@ -326,14 +262,6 @@ impl RapidMlxCommandBuilder {
         self.default_presence_penalty = presence_penalty;
         self.default_frequency_penalty = frequency_penalty;
         self.max_tokens = max_tokens;
-        self
-    }
-    pub fn parser_policy(mut self, policy: Option<String>) -> Self {
-        self.parser_policy = policy;
-        self
-    }
-    pub fn security_policy(mut self, policy: Option<String>) -> Self {
-        self.security_policy = policy;
         self
     }
 
@@ -490,20 +418,6 @@ impl RapidMlxCommandBuilder {
                 args.push(policy.clone());
             }
         }
-        if let Some(ref policy) = self.response_cache_policy
-            && policy != "auto"
-        {
-            capabilities.require("--response-cache")?;
-            args.push("--response-cache".to_string());
-            args.push(policy.clone());
-        }
-        if let Some(ref policy) = self.disk_checkpoint_policy
-            && policy != "auto"
-        {
-            capabilities.require("--disk-checkpoint")?;
-            args.push("--disk-checkpoint".to_string());
-            args.push(policy.clone());
-        }
         if let Some(interval) = self.disk_checkpoint_interval {
             capabilities.require("--kv-disk-checkpoint-interval")?;
             args.push("--kv-disk-checkpoint-interval".to_string());
@@ -547,21 +461,7 @@ impl RapidMlxCommandBuilder {
             args.push("--prefill-step-size".to_string());
             args.push(size.to_string());
         }
-        if let Some(ref policy) = self.batching_policy
-            && policy != "auto"
-        {
-            capabilities.require("--batching-policy")?;
-            args.push("--batching-policy".to_string());
-            args.push(policy.clone());
-        }
-        if let Some(ref policy) = self.concurrency_policy
-            && policy != "single_active"
-        {
-            capabilities.require("--concurrency-policy")?;
-            args.push("--concurrency-policy".to_string());
-            args.push(policy.clone());
-        }
-        // Phase 7: reasoning/speculative flags (on/off only, no auto; default ON)
+        // Phase 7: reasoning flags (on/off only, no auto; default ON)
         match self.reasoning_mode.as_deref().unwrap_or("on") {
             "on" => {
                 capabilities.require("--reasoning")?;
@@ -575,22 +475,13 @@ impl RapidMlxCommandBuilder {
             }
             value => anyhow::bail!("reasoning_mode must be on or off; got {value:?}"),
         }
-        // Speculative decoding is a throughput feature, like TurboQuant and PFlash, and is
-        // treated like them: if the installed runtime has no --speculative, omit it and let
-        // the caller report the downgrade, rather than failing the whole command build.
+        // Speculative decoding is deliberately absent here. `--speculative` does not exist in
+        // any rapid-mlx release; the real flag is `--speculative-config`, which takes a
+        // vLLM-style JSON object ({method, model, num_speculative_tokens, ...}), not a policy
+        // word. A policy-string field cannot express it, so the field was removed rather than
+        // renamed. scripts/rapid-mlx-benchmark-suite.mjs already builds the real flag correctly
+        // and is the reference for whatever exposes it next.
         //
-        // It used to call capabilities.require("--speculative")?, which aborted the entire
-        // build. --speculative is absent from verified_baseline(), so on a baseline runtime a
-        // single speculative request blanked the command preview outright -- including the
-        // requested-vs-effective entries for every unrelated setting. TurboQuant and
-        // speculative decoding are independent features and one must not suppress the other's
-        // diagnostics.
-        if let Some(ref policy) = self.speculative_policy
-            && capabilities.contains("--speculative")
-        {
-            args.push("--speculative".to_string());
-            args.push(policy.clone());
-        }
         // Vision has only the real Rapid-MLX tri-state: Auto omits a flag,
         // On forces MLLM, and Off forces the text lane. A model-specific smoke
         // test still owns whether Auto is actually qualified.
@@ -620,44 +511,6 @@ impl RapidMlxCommandBuilder {
         {
             args.push("--gpu-memory-utilization".to_string());
             args.push(util.to_string());
-        }
-        // Phase 7: Web UI flags (D26/A44)
-        if let Some(ref avail) = self.web_ui_availability
-            && avail != "auto"
-        {
-            if avail == "off" {
-                capabilities.require("--no-ui")?;
-                args.push("--no-ui".to_string());
-            } else {
-                capabilities.require("--ui")?;
-                args.push("--ui".to_string());
-                args.push(avail.clone());
-            }
-        }
-        if let Some(ref path) = self.web_ui_static_path {
-            capabilities.require("--path")?;
-            args.push("--path".to_string());
-            args.push(path.clone());
-        }
-        if let Some(ref config) = self.web_ui_config_json {
-            capabilities.require("--ui-config")?;
-            args.push("--ui-config".to_string());
-            args.push(config.clone());
-        }
-        // Phase 7: endpoint/safety flags
-        if let Some(ref compat) = self.endpoint_compatibility
-            && compat != "openai_v1"
-        {
-            capabilities.require("--endpoint-compatibility")?;
-            args.push("--endpoint-compatibility".to_string());
-            args.push(compat.clone());
-        }
-        if let Some(ref policy) = self.request_safety_policy
-            && policy != "auto"
-        {
-            capabilities.require("--request-safety-policy")?;
-            args.push("--request-safety-policy".to_string());
-            args.push(policy.clone());
         }
         // `sampling_mode` is persisted selection metadata. Phase 2 deliberately
         // does not turn it into a Rapid argv flag: per-field server-default
@@ -690,20 +543,6 @@ impl RapidMlxCommandBuilder {
                 args.push(flag.to_string());
                 args.push(value);
             }
-        }
-        if let Some(ref policy) = self.parser_policy
-            && policy != "auto"
-        {
-            capabilities.require("--parser-policy")?;
-            args.push("--parser-policy".to_string());
-            args.push(policy.clone());
-        }
-        if let Some(ref policy) = self.security_policy
-            && policy != "loopback_only"
-        {
-            capabilities.require("--security-policy")?;
-            args.push("--security-policy".to_string());
-            args.push(policy.clone());
         }
 
         let os_args: Vec<OsString> = args.into_iter().map(OsString::from).collect();
@@ -903,16 +742,10 @@ mod tests {
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
         )
         .port(9000)
-        .speculative_policy(Some("mtp".into()))
         .prefill_step_size(Some(512))
         .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
         .expect("an unsupported speculative policy must not fail the build");
 
-        assert!(
-            !launch.args.iter().any(|a| a == "--speculative"),
-            "--speculative must be omitted when the runtime lacks it: {:?}",
-            launch.args
-        );
         // The settings the runtime *does* support still have to make it through.
         assert!(
             launch
@@ -1223,14 +1056,17 @@ mod tests {
         use crate::inference::rapid_mlx::compatibility::ServeCapabilities;
         // Phase 7 runtime with all flags present
         let capabilities = ServeCapabilities::from_help(
+            // Every flag here must exist in rapid-mlx's real `serve --help`; see
+            // settings.rs::serve_flag_literals_exist_in_the_real_runtime. This string used to
+            // declare a dozen invented flags, which made the assertions below confirm the
+            // builder's mistakes instead of catching them.
             "--host --port --served-model-name --timeout --max-cache-blocks \
              --kv-cache-dtype --kv-cache-turboquant --max-num-seqs --max-concurrent-requests \
-             --prefill-batch-size --completion-batch-size --batching-policy --concurrency-policy \
+             --prefill-batch-size --completion-batch-size \
              --prefill-step-size --force-hybrid --no-hybrid \
-             --reasoning --speculative --mllm --no-mllm --gpu-memory-utilization \
-             --ui --no-ui --path --ui-config --pflash --hybrid-cache-entries \
-             --response-cache --disk-checkpoint --endpoint-compatibility \
-             --request-safety-policy --sampling-mode --parser-policy --security-policy \
+             --reasoning --mllm --no-mllm --gpu-memory-utilization \
+             --pflash --hybrid-cache-entries --kv-disk-checkpoint-interval \
+             --response-cache-entries \
              --default-temperature --default-top-p --default-top-k --default-min-p \
              --default-repetition-penalty --default-presence-penalty \
              --default-frequency-penalty --max-tokens",
@@ -1248,17 +1084,9 @@ mod tests {
         .prefill_batch_size(Some(256))
         .completion_batch_size(Some(64))
         .prefill_step_size(Some(512))
-        .batching_policy(Some("fixed".into()))
-        .concurrency_policy(Some("allow_overlap".into()))
         .reasoning_mode(Some("on".into()))
-        .speculative_policy(Some("mtp_v1".into()))
         .mllm_vision(Some("on".into()))
         .gpu_memory_utilization(Some(0.85))
-        .web_ui_availability(Some("on".into()))
-        .web_ui_static_path(Some("custom-ui/".into()))
-        .web_ui_config_json(Some("{\"theme\":\"dark\"}".into()))
-        .endpoint_compatibility(Some("openai_v1,anthropic".into()))
-        .request_safety_policy(Some("strict".into()))
         .sampling_mode(Some("explicit_client".into()))
         .sampling_defaults(
             Some(0.7),
@@ -1270,8 +1098,6 @@ mod tests {
             Some(0.0),
             Some(32768),
         )
-        .parser_policy(Some("native".into()))
-        .security_policy(Some("authenticated".into()))
         .build("rapid-mlx".into(), &capabilities)
         .unwrap();
         let args = args(&launch);
@@ -1298,11 +1124,6 @@ mod tests {
             args.windows(2)
                 .any(|p| p == ["--completion-batch-size", "64"])
         );
-        assert!(args.windows(2).any(|p| p == ["--batching-policy", "fixed"]));
-        assert!(
-            args.windows(2)
-                .any(|p| p == ["--concurrency-policy", "allow_overlap"])
-        );
         assert!(args.iter().any(|p| p == "--reasoning"));
         assert!(!args.windows(2).any(|p| p == ["--reasoning", "on"]));
         assert!(args.windows(2).any(|p| p == ["--prefill-step-size", "512"]));
@@ -1314,7 +1135,6 @@ mod tests {
         assert!(args.windows(2).any(|p| p == ["--default-top-k", "40"]));
         assert!(args.windows(2).any(|p| p == ["--default-min-p", "0.05"]));
         assert!(args.windows(2).any(|p| p == ["--max-tokens", "32768"]));
-        assert!(args.windows(2).any(|p| p == ["--speculative", "mtp_v1"]));
         assert!(args.iter().any(|arg| arg == "--mllm"));
         assert!(!args.iter().any(|arg| arg == "--vision"));
         assert!(!args.iter().any(|arg| arg == "--embeddings"));
@@ -1322,26 +1142,7 @@ mod tests {
             args.windows(2)
                 .any(|p| p == ["--gpu-memory-utilization", "0.85"])
         );
-        assert!(args.windows(2).any(|p| p == ["--ui", "on"]));
-        assert!(args.windows(2).any(|p| p == ["--path", "custom-ui/"]));
-        assert!(
-            args.windows(2)
-                .any(|p| p == ["--ui-config", "{\"theme\":\"dark\"}"])
-        );
-        assert!(
-            args.windows(2)
-                .any(|p| p == ["--endpoint-compatibility", "openai_v1,anthropic"])
-        );
-        assert!(
-            args.windows(2)
-                .any(|p| p == ["--request-safety-policy", "strict"])
-        );
         assert!(!args.iter().any(|arg| arg == "--sampling-mode"));
-        assert!(args.windows(2).any(|p| p == ["--parser-policy", "native"]));
-        assert!(
-            args.windows(2)
-                .any(|p| p == ["--security-policy", "authenticated"])
-        );
     }
 
     #[test]
@@ -1354,14 +1155,7 @@ mod tests {
         .reasoning_mode(Some("on".into()))
         .mllm_vision(Some("auto".into()))
         .embeddings(Some("auto".into()))
-        .web_ui_availability(Some("auto".into()))
-        .batching_policy(Some("auto".into()))
-        .concurrency_policy(Some("single_active".into()))
-        .endpoint_compatibility(Some("openai_v1".into()))
-        .request_safety_policy(Some("auto".into()))
         .sampling_mode(Some("auto".into()))
-        .parser_policy(Some("auto".into()))
-        .security_policy(Some("loopback_only".into()))
         .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
         .unwrap();
         let args = args(&launch);
@@ -1370,23 +1164,7 @@ mod tests {
         assert!(!args.iter().any(|a| a.starts_with("--mllm")));
         assert!(!args.iter().any(|a| a.starts_with("--no-mllm")));
         assert!(!args.iter().any(|a| a.starts_with("--embeddings")));
-        assert!(!args.iter().any(|a| a.starts_with("--ui")));
-        assert!(!args.iter().any(|a| a.starts_with("--no-ui")));
-        assert!(!args.iter().any(|a| a.starts_with("--batching-policy")));
-        assert!(!args.iter().any(|a| a.starts_with("--concurrency-policy")));
-        assert!(
-            !args
-                .iter()
-                .any(|a| a.starts_with("--endpoint-compatibility"))
-        );
-        assert!(
-            !args
-                .iter()
-                .any(|a| a.starts_with("--request-safety-policy"))
-        );
         assert!(!args.iter().any(|a| a.starts_with("--sampling-mode")));
-        assert!(!args.iter().any(|a| a.starts_with("--parser-policy")));
-        assert!(!args.iter().any(|a| a.starts_with("--security-policy")));
     }
 
     #[test]

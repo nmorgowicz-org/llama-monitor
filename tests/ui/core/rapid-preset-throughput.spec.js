@@ -16,7 +16,6 @@ test.describe('Rapid-MLX preset editor throughput fields', () => {
       max_num_seqs: 8,
       max_concurrent_requests: 32,
       pflash_policy: 'auto',
-      speculative_policy: 'on',
     },
   };
 
@@ -43,7 +42,6 @@ test.describe('Rapid-MLX preset editor throughput fields', () => {
     await expect(page.locator('#modal-rapid-max-num-seqs')).toHaveValue('8');
     await expect(page.locator('#modal-rapid-max-concurrent-requests')).toHaveValue('32');
     await expect(page.locator('#modal-rapid-pflash-policy')).toHaveValue('auto');
-    await expect(page.locator('#modal-rapid-speculative-policy')).toHaveValue('on');
   });
 
   test('@in-memory-test edited values reach the save request', async ({ page }) => {
@@ -77,7 +75,6 @@ test.describe('Rapid-MLX preset editor throughput fields', () => {
     expect(body.rapid_mlx.pflash_policy).toBe('on');
     // Untouched controls keep the seeded values rather than reverting to a default.
     expect(body.rapid_mlx.max_concurrent_requests).toBe(32);
-    expect(body.rapid_mlx.speculative_policy).toBe('on');
   });
 
   test('@in-memory-test Auto omits the key rather than pinning a default', async ({ page }) => {
@@ -106,6 +103,5 @@ test.describe('Rapid-MLX preset editor throughput fields', () => {
     expect(body.rapid_mlx).not.toHaveProperty('gpu_memory_utilization');
     expect(body.rapid_mlx).not.toHaveProperty('max_num_seqs');
     expect(body.rapid_mlx).not.toHaveProperty('max_concurrent_requests');
-    expect(body.rapid_mlx).not.toHaveProperty('speculative_policy');
   });
 });

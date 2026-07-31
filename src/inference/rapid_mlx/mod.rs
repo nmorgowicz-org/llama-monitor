@@ -136,12 +136,6 @@ pub struct RapidMlxConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub pflash_policy: Option<String>,
-    /// Response cache policy.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response_cache_policy: Option<String>,
-    /// Disk checkpoint policy.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub disk_checkpoint_policy: Option<String>,
     // ── Phase 7: batching/concurrency ──────────────────────────────────
     /// Max number of sequences.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -158,19 +152,10 @@ pub struct RapidMlxConfig {
     /// Prompt chunk processed per prefill step.
     #[serde(default = "default_prefill_step_size")]
     pub prefill_step_size: u32,
-    /// Batching policy.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub batching_policy: Option<String>,
-    /// Concurrency policy (single_active/allow_overlap).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub concurrency_policy: Option<String>,
     // ── Phase 7: reasoning/speculative ─────────────────────────────────
     /// Reasoning mode (auto/on/off).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_mode: Option<String>,
-    /// Speculative decoding policy.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub speculative_policy: Option<String>,
     // ── Phase 7: MLLM/embeddings ───────────────────────────────────────
     /// MLLM vision support (auto/on/off).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -183,22 +168,7 @@ pub struct RapidMlxConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gpu_memory_utilization: Option<f64>,
     // ── Phase 7: Web UI (D26/A44) ──────────────────────────────────────
-    /// Web UI availability (auto/on/off).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web_ui_availability: Option<String>,
-    /// Expert custom static path for Web UI.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web_ui_static_path: Option<String>,
-    /// Validated Web UI config JSON.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web_ui_config_json: Option<String>,
     // ── Phase 7: endpoint/safety ───────────────────────────────────────
-    /// Endpoint compatibility mode.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub endpoint_compatibility: Option<String>,
-    /// Request safety policy.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub request_safety_policy: Option<String>,
     /// Sampling mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sampling_mode: Option<String>,
@@ -218,12 +188,6 @@ pub struct RapidMlxConfig {
     pub default_frequency_penalty: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u64>,
-    /// Parser policy.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parser_policy: Option<String>,
-    /// Security policy.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub security_policy: Option<String>,
 }
 
 fn default_disk_checkpoint_interval() -> u32 {
@@ -375,31 +339,21 @@ impl Default for RapidMlxConfig {
             hybrid_cache_entries: Some(16),
             hybrid_mode: RapidMlxHybridMode::Auto,
             pflash_policy: Some("off".into()),
-            response_cache_policy: None,
-            disk_checkpoint_policy: None,
             // Phase 7: batching/concurrency
             max_num_seqs: None,
             max_concurrent_requests: None,
             prefill_batch_size: None,
             completion_batch_size: None,
             prefill_step_size: default_prefill_step_size(),
-            batching_policy: None,
-            concurrency_policy: None,
             // Phase 7: reasoning/speculative
             reasoning_mode: None,
-            speculative_policy: None,
             // Phase 7: MLLM/embeddings
             mllm_vision: None,
             embeddings: None,
             // Phase 7: GPU
             gpu_memory_utilization: None,
             // Phase 7: Web UI
-            web_ui_availability: None,
-            web_ui_static_path: None,
-            web_ui_config_json: None,
             // Phase 7: endpoint/safety
-            endpoint_compatibility: None,
-            request_safety_policy: None,
             sampling_mode: None,
             default_temperature: None,
             default_top_p: None,
@@ -409,8 +363,6 @@ impl Default for RapidMlxConfig {
             default_presence_penalty: None,
             default_frequency_penalty: None,
             max_tokens: None,
-            parser_policy: None,
-            security_policy: None,
         }
     }
 }
@@ -479,8 +431,6 @@ pub struct RapidMlxAdapter {
     pub hybrid_cache_entries: Option<u64>,
     pub hybrid_mode: RapidMlxHybridMode,
     pub pflash_policy: Option<String>,
-    pub response_cache_policy: Option<String>,
-    pub disk_checkpoint_policy: Option<String>,
     pub prefix_cache_enabled: bool,
     pub retained_cache_mib: Option<u32>,
     pub disk_checkpoint_interval: u32,
@@ -489,18 +439,10 @@ pub struct RapidMlxAdapter {
     pub prefill_batch_size: Option<u64>,
     pub completion_batch_size: Option<u64>,
     pub prefill_step_size: u32,
-    pub batching_policy: Option<String>,
-    pub concurrency_policy: Option<String>,
     pub reasoning_mode: Option<String>,
-    pub speculative_policy: Option<String>,
     pub mllm_vision: Option<String>,
     pub embeddings: Option<String>,
     pub gpu_memory_utilization: Option<f64>,
-    pub web_ui_availability: Option<String>,
-    pub web_ui_static_path: Option<String>,
-    pub web_ui_config_json: Option<String>,
-    pub endpoint_compatibility: Option<String>,
-    pub request_safety_policy: Option<String>,
     pub sampling_mode: Option<String>,
     pub default_temperature: Option<f64>,
     pub default_top_p: Option<f64>,
@@ -510,8 +452,6 @@ pub struct RapidMlxAdapter {
     pub default_presence_penalty: Option<f64>,
     pub default_frequency_penalty: Option<f64>,
     pub max_tokens: Option<u64>,
-    pub parser_policy: Option<String>,
-    pub security_policy: Option<String>,
     api_key: Option<String>,
     compatibility: CompatibilityProfile,
     capabilities: CapabilitySet,
@@ -563,8 +503,6 @@ impl RapidMlxAdapter {
             hybrid_cache_entries: None,
             hybrid_mode: RapidMlxHybridMode::Auto,
             pflash_policy: Some("off".into()),
-            response_cache_policy: None,
-            disk_checkpoint_policy: None,
             prefix_cache_enabled: true,
             retained_cache_mib: Some(8192),
             disk_checkpoint_interval: 0,
@@ -573,18 +511,10 @@ impl RapidMlxAdapter {
             prefill_batch_size: None,
             completion_batch_size: None,
             prefill_step_size: default_prefill_step_size(),
-            batching_policy: None,
-            concurrency_policy: None,
             reasoning_mode: None,
-            speculative_policy: None,
             mllm_vision: None,
             embeddings: None,
             gpu_memory_utilization: None,
-            web_ui_availability: None,
-            web_ui_static_path: None,
-            web_ui_config_json: None,
-            endpoint_compatibility: None,
-            request_safety_policy: None,
             sampling_mode: None,
             default_temperature: None,
             default_top_p: None,
@@ -594,8 +524,6 @@ impl RapidMlxAdapter {
             default_presence_penalty: None,
             default_frequency_penalty: None,
             max_tokens: None,
-            parser_policy: None,
-            security_policy: None,
             api_key: None,
             compatibility: CompatibilityProfile::verified_baseline(),
             capabilities: verified_capabilities(),
@@ -631,8 +559,6 @@ impl RapidMlxAdapter {
         self.hybrid_cache_entries = config.hybrid_cache_entries;
         self.hybrid_mode = config.hybrid_mode;
         self.pflash_policy = config.pflash_policy.clone();
-        self.response_cache_policy = config.response_cache_policy.clone();
-        self.disk_checkpoint_policy = config.disk_checkpoint_policy.clone();
         self.prefix_cache_enabled = config.prefix_cache_enabled;
         self.retained_cache_mib = config.retained_cache_mib;
         self.disk_checkpoint_interval = config.disk_checkpoint_interval;
@@ -641,18 +567,10 @@ impl RapidMlxAdapter {
         self.prefill_batch_size = config.prefill_batch_size;
         self.completion_batch_size = config.completion_batch_size;
         self.prefill_step_size = config.prefill_step_size;
-        self.batching_policy = config.batching_policy.clone();
-        self.concurrency_policy = config.concurrency_policy.clone();
         self.reasoning_mode = config.reasoning_mode.clone();
-        self.speculative_policy = config.speculative_policy.clone();
         self.mllm_vision = config.mllm_vision.clone();
         self.embeddings = config.embeddings.clone();
         self.gpu_memory_utilization = config.gpu_memory_utilization;
-        self.web_ui_availability = config.web_ui_availability.clone();
-        self.web_ui_static_path = config.web_ui_static_path.clone();
-        self.web_ui_config_json = config.web_ui_config_json.clone();
-        self.endpoint_compatibility = config.endpoint_compatibility.clone();
-        self.request_safety_policy = config.request_safety_policy.clone();
         self.sampling_mode = config.sampling_mode.clone();
         self.default_temperature = config.default_temperature;
         self.default_top_p = config.default_top_p;
@@ -662,8 +580,6 @@ impl RapidMlxAdapter {
         self.default_presence_penalty = config.default_presence_penalty;
         self.default_frequency_penalty = config.default_frequency_penalty;
         self.max_tokens = config.max_tokens;
-        self.parser_policy = config.parser_policy.clone();
-        self.security_policy = config.security_policy.clone();
     }
 
     /// Builds an adapter that exists only to carry a config into the shared argv mapping.
@@ -994,25 +910,15 @@ pub(crate) fn apply_phase7_adapter_config(
         .hybrid_cache_entries(adapter.hybrid_cache_entries)
         .hybrid_mode(adapter.hybrid_mode)
         .pflash_policy(adapter.pflash_policy.clone())
-        .response_cache_policy(adapter.response_cache_policy.clone())
-        .disk_checkpoint_policy(adapter.disk_checkpoint_policy.clone())
         .max_num_seqs(adapter.max_num_seqs)
         .max_concurrent_requests(adapter.max_concurrent_requests)
         .prefill_batch_size(adapter.prefill_batch_size)
         .completion_batch_size(adapter.completion_batch_size)
         .prefill_step_size(Some(adapter.prefill_step_size))
-        .batching_policy(adapter.batching_policy.clone())
-        .concurrency_policy(adapter.concurrency_policy.clone())
         .reasoning_mode(adapter.reasoning_mode.clone())
-        .speculative_policy(adapter.speculative_policy.clone())
         .mllm_vision(adapter.mllm_vision.clone())
         .embeddings(adapter.embeddings.clone())
         .gpu_memory_utilization(adapter.gpu_memory_utilization)
-        .web_ui_availability(adapter.web_ui_availability.clone())
-        .web_ui_static_path(adapter.web_ui_static_path.clone())
-        .web_ui_config_json(adapter.web_ui_config_json.clone())
-        .endpoint_compatibility(adapter.endpoint_compatibility.clone())
-        .request_safety_policy(adapter.request_safety_policy.clone())
         .sampling_mode(adapter.sampling_mode.clone())
         .sampling_defaults(
             adapter.default_temperature,
@@ -1024,8 +930,6 @@ pub(crate) fn apply_phase7_adapter_config(
             adapter.default_frequency_penalty,
             adapter.max_tokens,
         )
-        .parser_policy(adapter.parser_policy.clone())
-        .security_policy(adapter.security_policy.clone())
 }
 
 pub fn map_provisional_chat_request(body: &[u8]) -> Result<Vec<u8>> {
@@ -1131,25 +1035,15 @@ mod tests {
             hybrid_cache_entries: Some(100),
             hybrid_mode: RapidMlxHybridMode::Auto,
             pflash_policy: Some("auto".into()),
-            response_cache_policy: Some("auto".into()),
-            disk_checkpoint_policy: Some("auto".into()),
             max_num_seqs: Some(8),
             max_concurrent_requests: Some(32),
             prefill_batch_size: Some(256),
             completion_batch_size: Some(64),
             prefill_step_size: 512,
-            batching_policy: Some("auto".into()),
-            concurrency_policy: Some("single_active".into()),
             reasoning_mode: Some("on".into()),
-            speculative_policy: Some("auto".into()),
             mllm_vision: Some("auto".into()),
             embeddings: Some("auto".into()),
             gpu_memory_utilization: Some(0.85),
-            web_ui_availability: Some("auto".into()),
-            web_ui_static_path: Some("ui/".into()),
-            web_ui_config_json: Some("{}".into()),
-            endpoint_compatibility: Some("openai_v1".into()),
-            request_safety_policy: Some("auto".into()),
             sampling_mode: Some("auto".into()),
             default_temperature: Some(0.7),
             default_top_p: Some(0.9),
@@ -1159,8 +1053,6 @@ mod tests {
             default_presence_penalty: Some(0.0),
             default_frequency_penalty: Some(0.0),
             max_tokens: Some(32768),
-            parser_policy: Some("auto".into()),
-            security_policy: Some("loopback_only".into()),
             ..Default::default()
         };
         let json = serde_json::to_value(&config).unwrap();
@@ -1173,8 +1065,6 @@ mod tests {
             restored.gpu_memory_utilization,
             config.gpu_memory_utilization
         );
-        assert_eq!(restored.web_ui_availability, config.web_ui_availability);
-        assert_eq!(restored.security_policy, config.security_policy);
     }
 
     #[test]

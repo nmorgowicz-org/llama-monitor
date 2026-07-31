@@ -280,8 +280,7 @@ export const wizardState = {
     maxNumSeqs: '',
     maxConcurrentRequests: '',
     pflashPolicy: 'off',
-    speculativePolicy: '',
-    retainedCacheMib: 8192,
+      retainedCacheMib: 8192,
     workloadScenario: 'interactive_coding_agent',
     reasoningMode: null,         // llama.cpp thinking/reasoning select
     rapidReasoningMode: 'on',    // Rapid-MLX checkbox (defaults to on)
@@ -290,9 +289,6 @@ export const wizardState = {
     hybridMode: 'auto',
     prefillStepSize: 512,
     // Phase 7: Web UI (D26/A44)
-    webUiAvailability: 'auto',
-    webUiStaticPath: '',
-    webUiConfigJson: '',
     // Phase 7: Sampling mode (D27)
     samplingMode: 'auto',
     grammar: '',
@@ -666,11 +662,7 @@ function resetWizardState() {
   wizardState.hardware.maxNumSeqs = '';
   wizardState.hardware.maxConcurrentRequests = '';
   wizardState.hardware.pflashPolicy = 'off';
-  wizardState.hardware.speculativePolicy = '';
   wizardState.hardware.workloadScenario = 'interactive_coding_agent';
-  wizardState.hardware.webUiAvailability = 'auto';
-  wizardState.hardware.webUiStaticPath = '';
-  wizardState.hardware.webUiConfigJson = '';
   wizardState.hardware.samplingMode = 'auto';
   if (dom.kvUnifiedSelect) dom.kvUnifiedSelect.value = '';
   if (dom.fitEnableSelect) dom.fitEnableSelect.value = '';
@@ -874,7 +866,6 @@ function cacheDom() {
    dom.maxNumSeqsSelect = document.getElementById('spawn-rapid-max-num-seqs');
    dom.maxConcurrentRequestsSelect = document.getElementById('spawn-rapid-max-concurrent-requests');
    dom.pflashPolicySelect = document.getElementById('spawn-rapid-pflash-policy');
-   dom.speculativePolicySelect = document.getElementById('spawn-rapid-speculative-policy');
    dom.retainedCacheMibSelect = document.getElementById('spawn-retained-cache-mib');
    dom.workloadScenarioSelect = document.getElementById('spawn-workload-scenario'); // hidden select for compat
    dom.reasoningModeCheck   = document.getElementById('spawn-rapid-reasoning-mode');
@@ -883,9 +874,6 @@ function cacheDom() {
    dom.hybridModeSelect = document.getElementById('spawn-rapid-hybrid-mode');
    dom.prefillStepSizeSelect = document.getElementById('spawn-rapid-prefill-step-size');
    dom.samplingModeSelect   = document.getElementById('spawn-sampling-mode');
-  dom.webUiAvailabilitySelect = document.getElementById('spawn-webui-availability');
-  dom.webUiConfigJsonInput  = document.getElementById('spawn-webui-config-json');
-  dom.webUiStaticPathInput  = document.getElementById('spawn-webui-static-path');
 
   // Step 4 (Summary)
   dom.summaryList      = document.getElementById('spawn-summary-list');
@@ -1418,12 +1406,10 @@ function _bindRapidMlxAdvancedControls() {
   bindSel(dom.maxNumSeqsSelect, 'maxNumSeqs');
   bindSel(dom.maxConcurrentRequestsSelect, 'maxConcurrentRequests');
   bindSel(dom.pflashPolicySelect, 'pflashPolicy');
-  bindSel(dom.speculativePolicySelect, 'speculativePolicy');
   [
     dom.turboquantModeSelect,
     dom.pflashPolicySelect,
     dom.maxNumSeqsSelect,
-    dom.speculativePolicySelect,
   ].forEach((el) => el && el.addEventListener('change', renderRapidExclusionWarnings));
   bindSel(dom.retainedCacheMibSelect, 'retainedCacheMib');
    // workloadScenario is derived from page-1 use-case selection
@@ -1432,7 +1418,6 @@ function _bindRapidMlxAdvancedControls() {
   bindSel(dom.reasoningParserSelect, 'reasoningParser');
   bindSel(dom.hybridModeSelect, 'hybridMode');
   bindSel(dom.prefillStepSizeSelect, 'prefillStepSize');
-   bindSel(dom.webUiAvailabilitySelect, 'webUiAvailability');
 
    // Web UI config JSON and static path inputs
    const bindInput = (el, key) => {
@@ -1443,8 +1428,6 @@ function _bindRapidMlxAdvancedControls() {
        scheduleVramUpdate();
      });
    };
-   bindInput(dom.webUiConfigJsonInput, 'webUiConfigJson');
-   bindInput(dom.webUiStaticPathInput, 'webUiStaticPath');
 
     if (dom.reasoningModeCheck && !dom.reasoningModeCheck.dataset.bound) {
      dom.reasoningModeCheck.dataset.bound = '1';
@@ -9778,9 +9761,6 @@ function _renderPresetParamsStep() {
       if (h.rapidReasoningMode) {
         rapidRows.push({ label: 'Reasoning mode', value: h.rapidReasoningMode === 'on' ? 'On' : 'Off' });
       }
-     if (h.webUiAvailability && h.webUiAvailability !== 'auto') {
-       rapidRows.push({ label: 'Web UI', value: h.webUiAvailability === 'on' ? 'On' : 'Off' });
-     }
      if (rapidRows.length > 0) {
        sections.push({ label: 'Rapid-MLX advanced', rows: rapidRows });
      }
@@ -10221,9 +10201,6 @@ function renderRapidExclusionWarnings() {
   if (h.pflashPolicy === 'on' && (h.turboquantMode === 'v4' || h.turboquantMode === 'k8v4')) {
     conflicts.push('PFlash bypasses TurboQuant, so “On” cannot be combined with a TurboQuant reusable-prompt-storage mode.');
   }
-  if (h.speculativePolicy === 'on' && h.maxNumSeqs) {
-    conflicts.push('Speculative decoding owns its own scheduling; an explicit max batched sequences may conflict with MTP.');
-  }
 
   const host = dom.pflashPolicySelect?.closest('.hardware-grid');
   if (!host) return;
@@ -10284,7 +10261,6 @@ export function buildSpawnPayload() {
         ...(h.maxNumSeqs && { max_num_seqs: Number(h.maxNumSeqs) }),
         ...(h.maxConcurrentRequests && { max_concurrent_requests: Number(h.maxConcurrentRequests) }),
         ...(h.pflashPolicy && { pflash_policy: h.pflashPolicy }),
-        ...(h.speculativePolicy && { speculative_policy: h.speculativePolicy }),
         prefix_cache_enabled: Number(h.retainedCacheMib ?? 8192) > 0,
         ...(Number(h.retainedCacheMib ?? 8192) > 0 && {
           retained_cache_mib: Number(h.retainedCacheMib ?? 8192),
@@ -10300,9 +10276,6 @@ export function buildSpawnPayload() {
         // --no-mllm escape hatch for incomplete vision-tower checkpoints.
         ...(m.rapidMlxMllm === false && { mllm_vision: 'off' }),
         // Phase 7: Web UI (D26/A44)
-        ...(h.webUiAvailability && h.webUiAvailability !== 'auto' && { web_ui_availability: h.webUiAvailability }),
-        ...(h.webUiStaticPath && { web_ui_static_path: h.webUiStaticPath }),
-        ...(h.webUiConfigJson && { web_ui_config_json: h.webUiConfigJson }),
         // Phase 7: Sampling mode (D27)
         ...(h.samplingMode && h.samplingMode !== 'auto' && { sampling_mode: h.samplingMode }),
         ...(h.temperature != null && { default_temperature: h.temperature }),

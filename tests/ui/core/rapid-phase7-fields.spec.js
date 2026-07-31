@@ -31,7 +31,6 @@ test.describe('Rapid-MLX Phase 7 throughput fields', () => {
       set('spawn-rapid-max-num-seqs', '8');
       set('spawn-rapid-max-concurrent-requests', '32');
       set('spawn-rapid-pflash-policy', 'auto');
-      set('spawn-rapid-speculative-policy', 'on');
       return buildSpawnPayload().rapid_mlx;
     });
 
@@ -39,7 +38,6 @@ test.describe('Rapid-MLX Phase 7 throughput fields', () => {
     expect(payload.max_num_seqs).toBe(8);
     expect(payload.max_concurrent_requests).toBe(32);
     expect(payload.pflash_policy).toBe('auto');
-    expect(payload.speculative_policy).toBe('on');
   });
 
   test('@in-memory-test "Auto" omits the key rather than sending a default', async ({ page }) => {
@@ -55,10 +53,11 @@ test.describe('Rapid-MLX Phase 7 throughput fields', () => {
     expect(payload).not.toHaveProperty('gpu_memory_utilization');
     expect(payload).not.toHaveProperty('max_num_seqs');
     expect(payload).not.toHaveProperty('max_concurrent_requests');
-    expect(payload).not.toHaveProperty('speculative_policy');
   });
 
-  test('@in-memory-test the two mutual-exclusion rules are surfaced', async ({ page }) => {
+  // Only one exclusion rule remains. The second paired speculative_policy with max_num_seqs;
+  // it was built on --speculative, which no rapid-mlx release has, and went with the field.
+  test('@in-memory-test the mutual-exclusion rule is surfaced', async ({ page }) => {
     await openRapidHardware(page);
 
     const set = async (id, value) => {
@@ -77,10 +76,5 @@ test.describe('Rapid-MLX Phase 7 throughput fields', () => {
     // Clearing one side clears the warning.
     await set('spawn-turboquant-mode', 'none');
     await expect(page.locator('#spawn-rapid-exclusion-warning')).toHaveCount(0);
-
-    // Rule 2: speculative_policy=on with an explicit max_num_seqs.
-    await set('spawn-rapid-speculative-policy', 'on');
-    await set('spawn-rapid-max-num-seqs', '8');
-    await expect(page.locator('#spawn-rapid-exclusion-warning')).toContainText('Speculative decoding owns its own scheduling');
   });
 });

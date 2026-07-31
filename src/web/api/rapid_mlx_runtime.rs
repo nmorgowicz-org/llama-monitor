@@ -698,7 +698,7 @@ async fn build_command_preview(
     check_setting_warnings(&config, &mut reasons);
 
     // Build effective_policy snapshot from config fields that were actually applied
-    let effective_policy = build_effective_policy(&config, &capabilities);
+    let effective_policy = build_effective_policy(&config);
 
     // Build requested_vs_effective diff using the setting catalog
     let requested_vs_effective = build_requested_vs_effective(&config, &capabilities);
@@ -713,10 +713,7 @@ async fn build_command_preview(
     })) as ApiReply
 }
 
-fn build_effective_policy(
-    config: &RapidMlxConfig,
-    capabilities: &crate::inference::rapid_mlx::compatibility::ServeCapabilities,
-) -> serde_json::Value {
+fn build_effective_policy(config: &RapidMlxConfig) -> serde_json::Value {
     // Keep this snapshot honest: advanced TurboQuant requests are persisted so
     // the user can see and qualify them, but launch deliberately omits them
     // until an exact model/revision receipt exists. The requested-vs-effective
@@ -733,17 +730,6 @@ fn build_effective_policy(
     // flag"). The VRAM estimator already models this as `reasoning_mode_overrides_kv_to_int8`;
     // reporting the requested dtype here would make this snapshot the one surface that
     // disagrees, on the interaction that matters most for memory.
-    // Same treatment as TurboQuant above, and for the same reason: the command builder omits
-    // --speculative on a runtime that lacks it, so reporting the requested value here would
-    // make this snapshot disagree with the argv beside it.
-    let effective_speculative_policy = match config.speculative_policy.as_deref() {
-        Some(policy)
-            if policy != "auto" && policy != "off" && !capabilities.contains("--speculative") =>
-        {
-            Some("off".to_string())
-        }
-        _ => config.speculative_policy.clone(),
-    };
     let reasoning_on = config.reasoning_mode.as_deref() == Some("on");
     let effective_kv_cache_dtype = if reasoning_on {
         Some(crate::inference::rapid_mlx::KvCacheConfig::Int8)
@@ -758,27 +744,15 @@ fn build_effective_policy(
         "disk_checkpoint_interval": config.disk_checkpoint_interval,
         "hybrid_cache_entries": config.hybrid_cache_entries,
         "pflash_policy": config.pflash_policy,
-        "response_cache_policy": config.response_cache_policy,
-        "disk_checkpoint_policy": config.disk_checkpoint_policy,
         "max_num_seqs": config.max_num_seqs,
         "max_concurrent_requests": config.max_concurrent_requests,
         "prefill_batch_size": config.prefill_batch_size,
         "completion_batch_size": config.completion_batch_size,
-        "batching_policy": config.batching_policy,
-        "concurrency_policy": config.concurrency_policy,
         "reasoning_mode": config.reasoning_mode,
-        "speculative_policy": effective_speculative_policy,
         "mllm_vision": config.mllm_vision,
         "embeddings": config.embeddings,
         "gpu_memory_utilization": config.gpu_memory_utilization,
-        "web_ui_availability": config.web_ui_availability,
-        "web_ui_static_path": config.web_ui_static_path,
-        "web_ui_config_json": config.web_ui_config_json,
-        "endpoint_compatibility": config.endpoint_compatibility,
-        "request_safety_policy": config.request_safety_policy,
         "sampling_mode": config.sampling_mode,
-        "parser_policy": config.parser_policy,
-        "security_policy": config.security_policy,
     })
 }
 
@@ -879,24 +853,6 @@ fn build_requested_vs_effective(
         }
     }
 
-    // Speculative decoding: omitted from argv when the runtime has no --speculative. Reported
-    // here for the same reason TurboQuant is -- the user asked for a throughput feature and
-    // needs to know it is not running. These two are independent: neither gates the other.
-    if let Some(ref policy) = config.speculative_policy
-        && policy != "auto"
-        && policy != "off"
-        && !capabilities.contains("--speculative")
-    {
-        diff.insert(
-            "speculative_policy".to_string(),
-            serde_json::json!({
-                "requested": policy,
-                "effective": "off",
-                "reason": "Speculative decoding is not supported by this runtime version; disabled"
-            }),
-        );
-    }
-
     // The three throughput tuning values below are dropped from argv on a runtime that lacks
     // the flag rather than failing the launch. Each is reported so the user sees that the
     // runtime, not their choice, is deciding scheduling and memory headroom.
@@ -928,22 +884,6 @@ fn build_requested_vs_effective(
                     "reason": format!("{flag} is not supported by this runtime version; omitted")
                 }),
             );
-        }
-    }
-
-    // Concurrency policy: overlap mode requires runtime support
-    if let Some(ref policy) = config.concurrency_policy
-        && policy == "allow_overlap"
-    {
-        // If speculative decoding is also set, note MTP incompatibility
-        if let Some(ref spec) = config.speculative_policy
-            && spec != "auto"
-        {
-            diff.insert("concurrency_policy".to_string(), serde_json::json!({
-                "requested": policy,
-                "effective": "single_active",
-                "reason": "Allow overlap with speculative decoding requires MTP support; falling back to single active generation"
-            }));
         }
     }
 
@@ -2325,17 +2265,14 @@ mod settings_catalog_tests {
         }
     }
 
-    /// `build_effective_policy` writes all 26 setting keys by hand. That hand-written list is
+    /// `build_effective_policy` writes every setting key by hand. That hand-written list is
     /// how the catalog went stale the first time: a setting added to one and not the other
     /// silently stops appearing in the policy snapshot the UI reads. Neither is derived from
     /// the other, so pin them together here.
     #[test]
     fn effective_policy_snapshot_covers_exactly_the_catalog() {
         let config = RapidMlxConfig::default();
-        let policy = build_effective_policy(
-            &config,
-            &crate::inference::rapid_mlx::compatibility::ServeCapabilities::verified_baseline(),
-        );
+        let policy = build_effective_policy(&config);
         let policy_keys: std::collections::BTreeSet<&str> = policy
             .as_object()
             .expect("effective policy is an object")
@@ -2747,25 +2684,15 @@ Run with `--verbose` for details on each check.
             hybrid_cache_entries: None,
             hybrid_mode: crate::inference::rapid_mlx::RapidMlxHybridMode::Auto,
             pflash_policy: None,
-            response_cache_policy: None,
-            disk_checkpoint_policy: None,
             max_num_seqs: None,
             max_concurrent_requests: None,
             prefill_batch_size: None,
             completion_batch_size: None,
             prefill_step_size: 512,
-            batching_policy: None,
-            concurrency_policy: None,
             reasoning_mode: None,
-            speculative_policy: None,
             mllm_vision: None,
             embeddings: None,
             gpu_memory_utilization: None,
-            web_ui_availability: None,
-            web_ui_static_path: None,
-            web_ui_config_json: None,
-            endpoint_compatibility: None,
-            request_safety_policy: None,
             sampling_mode: None,
             default_temperature: None,
             default_top_p: None,
@@ -2775,8 +2702,6 @@ Run with `--verbose` for details on each check.
             default_presence_penalty: None,
             default_frequency_penalty: None,
             max_tokens: None,
-            parser_policy: None,
-            security_policy: None,
         };
 
         let findings = build_flag_advisor_findings(&profile, &config, &None);
@@ -2802,10 +2727,7 @@ Run with `--verbose` for details on each check.
         // revision-bound qualification receipt is available to the launch path.
         config.turboquant_mode = Some(crate::inference::rapid_mlx::TurboQuantMode::K8V4);
         assert_eq!(
-            build_effective_policy(
-                &config,
-                &crate::inference::rapid_mlx::compatibility::ServeCapabilities::verified_baseline(),
-            )["turboquant_mode"],
+            build_effective_policy(&config)["turboquant_mode"],
             serde_json::json!("none")
         );
     }
@@ -2841,25 +2763,15 @@ Run with `--verbose` for details on each check.
             hybrid_cache_entries: None,
             hybrid_mode: crate::inference::rapid_mlx::RapidMlxHybridMode::Auto,
             pflash_policy: None,
-            response_cache_policy: None,
-            disk_checkpoint_policy: None,
             max_num_seqs: None,
             max_concurrent_requests: None,
             prefill_batch_size: None,
             completion_batch_size: None,
             prefill_step_size: 512,
-            batching_policy: None,
-            concurrency_policy: None,
             reasoning_mode: None,
-            speculative_policy: None,
             mllm_vision: None,
             embeddings: None,
             gpu_memory_utilization: None,
-            web_ui_availability: None,
-            web_ui_static_path: None,
-            web_ui_config_json: None,
-            endpoint_compatibility: None,
-            request_safety_policy: None,
             sampling_mode: None,
             default_temperature: None,
             default_top_p: None,
@@ -2869,8 +2781,6 @@ Run with `--verbose` for details on each check.
             default_presence_penalty: None,
             default_frequency_penalty: None,
             max_tokens: None,
-            parser_policy: None,
-            security_policy: None,
         };
 
         let findings = build_flag_advisor_findings(&profile, &config, &None);
@@ -2912,25 +2822,15 @@ Run with `--verbose` for details on each check.
             hybrid_cache_entries: None,
             hybrid_mode: crate::inference::rapid_mlx::RapidMlxHybridMode::Auto,
             pflash_policy: None,
-            response_cache_policy: None,
-            disk_checkpoint_policy: None,
             max_num_seqs: None,
             max_concurrent_requests: None,
             prefill_batch_size: None,
             completion_batch_size: None,
             prefill_step_size: 512,
-            batching_policy: None,
-            concurrency_policy: None,
             reasoning_mode: None,
-            speculative_policy: None,
             mllm_vision: None,
             embeddings: None,
             gpu_memory_utilization: None,
-            web_ui_availability: None,
-            web_ui_static_path: None,
-            web_ui_config_json: None,
-            endpoint_compatibility: None,
-            request_safety_policy: None,
             sampling_mode: None,
             default_temperature: None,
             default_top_p: None,
@@ -2940,8 +2840,6 @@ Run with `--verbose` for details on each check.
             default_presence_penalty: None,
             default_frequency_penalty: None,
             max_tokens: None,
-            parser_policy: None,
-            security_policy: None,
         };
 
         let findings = build_flag_advisor_findings(&profile, &config, &None);
