@@ -3317,6 +3317,60 @@
                                     <div class="pe-field-hint">Never exceeds 2048.</div>
                                 </div>
                             </div>
+                            <!-- Throughput / memory. Parity with the spawn wizard's Phase 7 controls: a preset
+                                 that cannot express these silently drops them on every save. -->
+                            <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-throughput" style="display:none;">
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-gpu-memory-utilization" title="Fraction of unified memory Rapid-MLX may use. Auto omits the flag and takes the runtime default.">GPU memory utilization</label>
+                                    <select class="pe-select" id="modal-rapid-gpu-memory-utilization">
+                                        <option value="" selected>Auto — runtime default</option>
+                                        <option value="0.75">0.75 — leave room for other apps</option>
+                                        <option value="0.85">0.85 — balanced</option>
+                                        <option value="0.95">0.95 — dedicate the machine</option>
+                                    </select>
+                                    <div class="pe-field-hint">Valid range is 0.50–1.00.</div>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-max-num-seqs" title="Maximum sequences the scheduler batches at once.">Max batched sequences</label>
+                                    <select class="pe-select" id="modal-rapid-max-num-seqs">
+                                        <option value="" selected>Auto — runtime default</option>
+                                        <option value="1">1 — single stream</option>
+                                        <option value="4">4</option>
+                                        <option value="8">8</option>
+                                        <option value="16">16 — high concurrency</option>
+                                    </select>
+                                    <div class="pe-field-hint">Range 1–256. Cannot be combined with speculative decoding.</div>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-max-concurrent-requests" title="Maximum in-flight requests the server accepts.">Max concurrent requests</label>
+                                    <select class="pe-select" id="modal-rapid-max-concurrent-requests">
+                                        <option value="" selected>Auto — runtime default</option>
+                                        <option value="1">1 — serialize</option>
+                                        <option value="4">4</option>
+                                        <option value="8">8</option>
+                                        <option value="32">32</option>
+                                    </select>
+                                    <div class="pe-field-hint">Admission limit, separate from batching.</div>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-pflash-policy" title="PFlash attention path. Off is the qualified default.">PFlash</label>
+                                    <select class="pe-select" id="modal-rapid-pflash-policy">
+                                        <option value="off" selected>Off — qualified default</option>
+                                        <option value="auto">Auto — runtime decides</option>
+                                        <option value="on">On — force PFlash</option>
+                                    </select>
+                                    <div class="pe-field-hint">On bypasses TurboQuant reusable prompt storage.</div>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-rapid-speculative-policy" title="Speculative decoding (MTP). Requires a runtime built with --speculative.">Speculative decoding</label>
+                                    <select class="pe-select" id="modal-rapid-speculative-policy">
+                                        <option value="" selected>Auto — leave to the runtime</option>
+                                        <option value="on">On — enable MTP</option>
+                                        <option value="off">Off</option>
+                                    </select>
+                                    <div class="pe-field-hint">Omitted automatically when the runtime has no --speculative.</div>
+                                </div>
+                            </div>
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-max-tokens" title="Maximum tokens to generate per request. Empty = unlimited (model's context limit).">Max Tokens</label>

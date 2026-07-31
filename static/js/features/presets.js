@@ -1313,6 +1313,11 @@ export function openPresetModal(mode, section, seedPreset = null) {
         setOpt('modal-rapid-kv-cache-dtype', p.rapid_mlx?.kv_cache_dtype || '');
         setOpt('modal-rapid-prefill-step-size', String(p.rapid_mlx?.prefill_step_size || 512));
         setOpt('modal-rapid-turboquant-mode', p.rapid_mlx?.turboquant_mode || 'none');
+        setOpt('modal-rapid-gpu-memory-utilization', p.rapid_mlx?.gpu_memory_utilization == null ? '' : String(p.rapid_mlx.gpu_memory_utilization));
+        setOpt('modal-rapid-max-num-seqs', p.rapid_mlx?.max_num_seqs == null ? '' : String(p.rapid_mlx.max_num_seqs));
+        setOpt('modal-rapid-max-concurrent-requests', p.rapid_mlx?.max_concurrent_requests == null ? '' : String(p.rapid_mlx.max_concurrent_requests));
+        setOpt('modal-rapid-pflash-policy', p.rapid_mlx?.pflash_policy || 'off');
+        setOpt('modal-rapid-speculative-policy', p.rapid_mlx?.speculative_policy || '');
         setOpt('modal-rapid-tool-call-parser', p.rapid_mlx?.tool_call_parser || '');
         setOpt('modal-rapid-reasoning-parser', p.rapid_mlx?.reasoning_parser || '');
         setOpt('modal-rapid-sampling-mode', p.rapid_mlx?.sampling_mode || 'auto');
@@ -1717,7 +1722,7 @@ function _configureBackendPresetEditor(preset) {
     modal?.classList.toggle('preset-editor--rapid-mlx', isRapid);
 
     // Phase 7: Toggle Rapid-MLX advanced rows based on backend (inline styles override CSS).
-    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-reasoning-mode', 'pe-row-rapid-webui', 'pe-row-rapid-webui-expert', 'pe-row-rapid-parser-overrides', 'pe-row-rapid-architecture-overrides'];
+    const rapidRows = ['pe-row-rapid-advanced', 'pe-row-rapid-workload', 'pe-row-rapid-reasoning', 'pe-row-rapid-reasoning-mode', 'pe-row-rapid-webui', 'pe-row-rapid-webui-expert', 'pe-row-rapid-parser-overrides', 'pe-row-rapid-architecture-overrides', 'pe-row-rapid-throughput'];
     rapidRows.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = isRapid ? '' : 'none';
@@ -1815,6 +1820,18 @@ function _buildFormPreset(existing) {
                     if (webUiAvail && webUiAvail !== 'auto') out.web_ui_availability = webUiAvail;
                     if (webUiConfig) out.web_ui_config_json = webUiConfig;
                     if (webUiStatic) out.web_ui_static_path = webUiStatic;
+                    // Throughput / memory. '' means omit: an absent flag and an explicit
+                    // runtime default are different states, so never write a placeholder.
+                    const gpuUtil = strVal('modal-rapid-gpu-memory-utilization');
+                    const maxSeqs = strVal('modal-rapid-max-num-seqs');
+                    const maxConc = strVal('modal-rapid-max-concurrent-requests');
+                    const pflash = strVal('modal-rapid-pflash-policy');
+                    const specPolicy = strVal('modal-rapid-speculative-policy');
+                    if (gpuUtil) out.gpu_memory_utilization = Number(gpuUtil);
+                    if (maxSeqs) out.max_num_seqs = Number(maxSeqs);
+                    if (maxConc) out.max_concurrent_requests = Number(maxConc);
+                    if (pflash) out.pflash_policy = pflash;
+                    if (specPolicy) out.speculative_policy = specPolicy;
                     // Sampling defaults (--default-* flags for Rapid-MLX)
                     const temp = floatOrNull('modal-temperature');
                     const topP = floatOrNull('modal-top-p');
@@ -1946,6 +1963,26 @@ const CHANGE_LABELS = {
     system_prompt_file: 'System Prompt File', grammar: 'Grammar', json_schema: 'JSON Schema', extra_args: 'Extra Args',
 };
 
+// Every Rapid-MLX setting lives under preset.rapid_mlx.*, which _buildChangeSummary used to
+// ignore entirely -- so the "confirm these changes" dialog was blind to the whole backend and
+// a user could change reusable prompt storage or speculative decoding and be shown nothing.
+const RAPID_CHANGE_LABELS = {
+    port: 'Port', model_source: 'Model', enable_thinking: 'Thinking Mode',
+    reasoning_mode: 'Reasoning Mode', reasoning_parser: 'Reasoning Parser',
+    tool_call_parser: 'Tool-call Parser', sampling_mode: 'Sampling Mode',
+    kv_cache_dtype: 'KV Cache Type', turboquant_mode: 'Reusable Prompt Storage',
+    prefix_cache_enabled: 'Prefix Cache', retained_cache_mib: 'Retained Cache (MiB)',
+    prefill_step_size: 'Prefill Step Size', hybrid_mode: 'Hybrid Architecture',
+    gpu_memory_utilization: 'GPU Memory Utilization', max_num_seqs: 'Max Batched Sequences',
+    max_concurrent_requests: 'Max Concurrent Requests', pflash_policy: 'PFlash',
+    speculative_policy: 'Speculative Decoding',
+    web_ui_availability: 'Web UI', web_ui_static_path: 'Web UI Static Path',
+    web_ui_config_json: 'Web UI Config',
+    default_temperature: 'Temperature', default_top_p: 'Top-P', default_top_k: 'Top-K',
+    default_min_p: 'Min-P', default_repetition_penalty: 'Repeat Penalty',
+    default_presence_penalty: 'Presence Penalty', max_tokens: 'Max Tokens',
+};
+
 function _buildChangeSummary(existing, incoming) {
     const changes = [];
     const fmt = v => {
@@ -1962,6 +1999,17 @@ function _buildChangeSummary(existing, incoming) {
         const fNext = fmt(next);
         if (fPrev !== fNext) {
             changes.push({ label: CHANGE_LABELS[key], from: fPrev, to: fNext });
+        }
+    }
+    const prevRapid = existing?.rapid_mlx;
+    const nextRapid = incoming?.rapid_mlx;
+    if (prevRapid || nextRapid) {
+        for (const key of Object.keys(RAPID_CHANGE_LABELS)) {
+            const fPrev = fmt(prevRapid?.[key] ?? null);
+            const fNext = fmt(nextRapid?.[key] ?? null);
+            if (fPrev !== fNext) {
+                changes.push({ label: RAPID_CHANGE_LABELS[key], from: fPrev, to: fNext });
+            }
         }
     }
     return changes;
