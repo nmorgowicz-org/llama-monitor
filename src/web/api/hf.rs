@@ -813,6 +813,8 @@ fn api_hf_mtp_preflight(
                                     fresh.trust_remote_code_required;
                                 new_pin.estimated_memory_bytes =
                                     fresh.estimated_memory_bytes;
+                                new_pin.mtp_sidecar = fresh.mtp_sidecar;
+                                new_pin.mtp_depth_max = fresh.mtp_depth_max;
                                 new_pin.resolved_at = chrono::Utc::now().to_rfc3339();
                                 let _ = cache.insert(new_pin);
                             }
@@ -824,6 +826,8 @@ fn api_hf_mtp_preflight(
                                 "revision": pin.revision,
                                 "trustRemoteCodeRequired": pin.trust_remote_code_required,
                                 "estimatedMemoryBytes": pin.estimated_memory_bytes,
+                                "mtpSidecar": pin.mtp_sidecar,
+                                "mtpDepthMax": pin.mtp_depth_max,
                                 "resolvedAt": pin.resolved_at,
                                 "lastRecheckAt": pin.last_recheck_at,
                                 "upstreamUnchanged": pin.upstream_unchanged,
@@ -844,6 +848,8 @@ fn api_hf_mtp_preflight(
                                 last_recheck_at: String::new(),
                                 upstream_unchanged: None,
                                 estimated_memory_bytes: preflight.estimated_memory_bytes,
+                                mtp_sidecar: preflight.mtp_sidecar.clone(),
+                                mtp_depth_max: preflight.mtp_depth_max,
                             };
                             let _ = cache.insert(pin);
 
@@ -854,6 +860,8 @@ fn api_hf_mtp_preflight(
                                     "revision": preflight.revision,
                                     "trustRemoteCodeRequired": preflight.trust_remote_code_required,
                                     "estimatedMemoryBytes": preflight.estimated_memory_bytes,
+                                    "mtpSidecar": preflight.mtp_sidecar,
+                                    "mtpDepthMax": preflight.mtp_depth_max,
                                     "resolvedAt": chrono::Utc::now().to_rfc3339(),
                                     "lastRecheckAt": "",
                                     "upstreamUnchanged": null,
@@ -921,6 +929,8 @@ fn api_hf_mtp_preflight_recheck(
                                 "revision": pin.revision,
                                 "trustRemoteCodeRequired": pin.trust_remote_code_required,
                                 "estimatedMemoryBytes": pin.estimated_memory_bytes,
+                                "mtpSidecar": pin.mtp_sidecar,
+                                "mtpDepthMax": pin.mtp_depth_max,
                                 "resolvedAt": pin.resolved_at,
                                 "lastRecheckAt": pin.last_recheck_at,
                                 "upstreamUnchanged": pin.upstream_unchanged,
@@ -960,6 +970,8 @@ fn api_hf_mtp_pins(
                             "revision": p.revision,
                             "trustRemoteCodeRequired": p.trust_remote_code_required,
                             "estimatedMemoryBytes": p.estimated_memory_bytes,
+                            "mtpSidecar": p.mtp_sidecar,
+                            "mtpDepthMax": p.mtp_depth_max,
                             "resolvedAt": p.resolved_at,
                             "lastRecheckAt": p.last_recheck_at,
                             "upstreamUnchanged": p.upstream_unchanged,

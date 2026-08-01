@@ -48,9 +48,15 @@ pub struct MtpPin {
     /// `None` means never re-checked (first resolution).
     #[serde(default)]
     pub upstream_unchanged: Option<bool>,
-    /// Rough estimate of companion memory in bytes (Q4 quantization).
+    /// Rough estimate of companion memory in bytes.
     #[serde(default)]
     pub estimated_memory_bytes: Option<u64>,
+    /// The quantization of the MTP sidecar (e.g., "bf16", "q4", "q6").
+    #[serde(default)]
+    pub mtp_sidecar: Option<String>,
+    /// The maximum MTP depth.
+    #[serde(default)]
+    pub mtp_depth_max: Option<i64>,
 }
 
 impl MtpPin {
@@ -228,6 +234,8 @@ mod tests {
             trust_remote_code_required: true,
             resolved_at: "2026-08-01T00:00:00Z".into(),
             estimated_memory_bytes: None,
+            mtp_sidecar: None,
+            mtp_depth_max: None,
             last_recheck_at: "".into(),
             upstream_unchanged: None,
         };
@@ -247,6 +255,8 @@ mod tests {
             trust_remote_code_required: false,
             resolved_at: "2026-08-01T00:00:00Z".into(),
             estimated_memory_bytes: None,
+            mtp_sidecar: None,
+            mtp_depth_max: None,
             last_recheck_at: "".into(),
             upstream_unchanged: None,
         };
@@ -269,6 +279,8 @@ mod tests {
             last_recheck_at: "".into(),
             upstream_unchanged: None,
             estimated_memory_bytes: None,
+            mtp_sidecar: None,
+            mtp_depth_max: None,
         };
         assert!(pin.is_stale());
     }
@@ -283,6 +295,8 @@ mod tests {
             last_recheck_at: "".into(),
             upstream_unchanged: None,
             estimated_memory_bytes: None,
+            mtp_sidecar: None,
+            mtp_depth_max: None,
         };
         assert!(!pin.is_stale());
     }
@@ -296,6 +310,8 @@ mod tests {
             trust_remote_code_required: false,
             resolved_at: "2026-08-01T00:00:00Z".into(),
             estimated_memory_bytes: None,
+            mtp_sidecar: None,
+            mtp_depth_max: None,
             last_recheck_at: "".into(),
             upstream_unchanged: None,
         };
@@ -305,6 +321,8 @@ mod tests {
             trust_remote_code_required: true,
             resolved_at: "2026-08-01T00:00:00Z".into(),
             estimated_memory_bytes: None,
+            mtp_sidecar: None,
+            mtp_depth_max: None,
             last_recheck_at: "".into(),
             upstream_unchanged: None,
         };

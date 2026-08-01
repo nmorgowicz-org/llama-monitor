@@ -304,6 +304,8 @@ export const wizardState = {
     speculativeTrustRepoId: '',
     speculativeTrustRevision: '',
     speculativeTrustEstimatedMemoryBytes: null,
+    speculativeTrustSidecar: null,
+    speculativeTrustDepth: null,
     autoToolChoice: false,
     // Phase 7: Web UI (D26/A44)
     // Phase 7: Sampling mode (D27)
@@ -1556,6 +1558,8 @@ function _renderSpawnPinStatus() {
   const stale = !!h.speculativeTrustStale;
   const trust = h.speculativeTrustRequired;
   const mem = h.speculativeTrustEstimatedMemoryBytes;
+  const sidecar = h.speculativeTrustSidecar;
+  const depth = h.speculativeTrustDepth;
 
   let parts = [];
   parts.push('<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:' + (stale ? 'var(--warn,#e6a41c)' : 'var(--success,#5ce68a)') + '"></span>');
@@ -1571,6 +1575,9 @@ function _renderSpawnPinStatus() {
       memStr = '~' + Math.round(mem / 1048576) + ' MB';
     }
     parts.push('<span style="color:var(--text-muted,#888);">~' + memStr + ' VRAM</span>');
+  }
+  if (sidecar) {
+    parts.push('<span style="color:var(--text-muted,#888);">sidecar:' + sidecar + (depth != null ? ' d' + depth : '') + '</span>');
   }
   parts.push('<span style="color:var(--text-muted,#888);">resolved ' + _timeAgoSpawn(h.speculativeTrustResolvedAt) + '</span>');
 
@@ -1661,6 +1668,8 @@ async function _spawnCheckTrust(repoId) {
     h.speculativeTrustUpstreamUnchanged = data.upstreamUnchanged ?? null;
     h.speculativeTrustStale = !!data.stale;
     h.speculativeTrustEstimatedMemoryBytes = data.estimatedMemoryBytes ?? null;
+    h.speculativeTrustSidecar = data.mtpSidecar ?? null;
+    h.speculativeTrustDepth = data.mtpDepthMax ?? null;
     _renderSpawnPinStatus();
     if (h.speculativeTrustRequired) {
       h.speculativeTrustConsent = false;

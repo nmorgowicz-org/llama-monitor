@@ -1836,6 +1836,8 @@ let _speculativeTrustState = {
     upstreamUnchanged: null,
     stale: false,
     estimatedMemoryBytes: null,
+    mtpSidecar: null,
+    mtpDepthMax: null,
 };
 
 function _timeAgo(dt) {
@@ -1862,6 +1864,8 @@ function _renderSpeculativePinStatus() {
     const stale = _speculativeTrustState.stale;
     const trust = _speculativeTrustState.trustRequired;
     const mem = _speculativeTrustState.estimatedMemoryBytes;
+    const sidecar = _speculativeTrustState.mtpSidecar;
+    const depth = _speculativeTrustState.mtpDepthMax;
 
     let parts = [];
     /* Status indicator */
@@ -1881,6 +1885,10 @@ function _renderSpeculativePinStatus() {
             memStr = '~' + Math.round(mem / 1048576) + ' MB';
         }
         parts.push('<span style="color:var(--text-muted,#888);">~' + memStr + ' VRAM</span>');
+    }
+    /* Quantization info (from mtplx_runtime.json) */
+    if (sidecar) {
+        parts.push('<span style="color:var(--text-muted,#888);">sidecar:' + sidecar + (depth != null ? ' d' + depth : '') + '</span>');
     }
     /* Resolved time */
     parts.push('<span style="color:var(--text-muted,#888);">resolved ' + _timeAgo(_speculativeTrustState.resolvedAt) + '</span>');
@@ -1937,7 +1945,7 @@ async function _checkSpeculativeModelTrust(repoId) {
     if (!trustWrap || !warningEl || !consentCheck) return;
 
     /* Reset */
-    _speculativeTrustState = { repoId: '', revision: '', trustRequired: false, loading: false, timeout: null, resolvedAt: '', lastRecheckAt: '', upstreamUnchanged: null, stale: false, estimatedMemoryBytes: null };
+    _speculativeTrustState = { repoId: '', revision: '', trustRequired: false, loading: false, timeout: null, resolvedAt: '', lastRecheckAt: '', upstreamUnchanged: null, stale: false, estimatedMemoryBytes: null, mtpSidecar: null, mtpDepthMax: null };
     trustWrap.style.display = 'none';
     consentCheck.checked = false;
     warningEl.textContent = '';
@@ -1965,6 +1973,8 @@ async function _checkSpeculativeModelTrust(repoId) {
         _speculativeTrustState.upstreamUnchanged = data.upstreamUnchanged ?? null;
         _speculativeTrustState.stale = !!data.stale;
         _speculativeTrustState.estimatedMemoryBytes = data.estimatedMemoryBytes ?? null;
+        _speculativeTrustState.mtpSidecar = data.mtpSidecar ?? null;
+        _speculativeTrustState.mtpDepthMax = data.mtpDepthMax ?? null;
         _speculativeTrustState.loading = false;
 
         /* Pin status UI — always show when pinned */

@@ -551,10 +551,21 @@ pub struct SpeculativeModelPreflight {
     pub repo_id: String,
     pub revision: String,
     pub trust_remote_code_required: bool,
-    /// Rough estimate of companion memory in bytes, derived from the
-    /// `safetensors.total` parameter count at Q4 quantization (0.5 B/param).
-    /// `None` if the HF API did not return parameter info.
+    /// Rough estimate of companion memory in bytes. Derived from:
+    /// 1. `mtp.safetensors` file size from the HF tree API (best), or
+    /// 2. Parameter count from `mtplx_runtime.json` quantization, or
+    /// 3. Conservative bf16 fallback if no provenance data.
+    ///
+    /// `None` if no data is available.
     pub estimated_memory_bytes: Option<u64>,
+    /// The quantization of the MTP sidecar (e.g., "bf16", "q4", "q6").
+    /// Populated from `mtplx_runtime.json.mtp_sidecar` if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mtp_sidecar: Option<String>,
+    /// The maximum MTP depth (e.g., 3).
+    /// Populated from `mtplx_runtime.json.mtp_depth_max` if available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mtp_depth_max: Option<i64>,
 }
 
 pub async fn resolve_speculative_model_preflight(
@@ -611,18 +622,129 @@ pub async fn resolve_speculative_model_preflight(
             .is_ok_and(|config| config_json_needs_trust_remote_code(&config))
     };
 
-    let estimated_memory_bytes = body
-        .get("safetensors")
-        .and_then(|st| st.get("total"))
-        .and_then(|v| v.as_u64())
-        .map(|total_params| total_params / 2);
+    // 3-tier estimate for companion VRAM:
+    // 1. Tree API → mtp.safetensors file size (most accurate)
+    // 2. mtplx_runtime.json → quantization + param estimate
+    // 3. Conservative bf16 fallback
+
+    let (estimated_memory_bytes, mtp_sidecar, mtp_depth_max) =
+        fetch_mtp_companion_info(repo_id, &revision, token.as_deref()).await;
 
     Ok(SpeculativeModelPreflight {
         repo_id: repo_id.to_string(),
         revision,
         trust_remote_code_required,
         estimated_memory_bytes,
+        mtp_sidecar,
+        mtp_depth_max,
     })
+}
+
+/// Fetches `mtplx_runtime.json` from a HF repo. Returns parsed JSON if
+/// available, `None` if the file does not exist or cannot be fetched.
+async fn fetch_mtplx_runtime_json(
+    repo_id: &str,
+    revision: &str,
+    token: Option<&str>,
+) -> Option<serde_json::Value> {
+    let url = format!(
+        "https://huggingface.co/{repo_id}/resolve/{revision}/mtplx_runtime.json"
+    );
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(tok) = token {
+        req = req.bearer_auth(tok);
+    }
+    let resp = req.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.json::<serde_json::Value>().await.ok()
+}
+
+/// Introspects the MTP companion of a HF repo to produce an accurate VRAM
+/// estimate. Makes two parallel requests:
+///
+/// 1. **Tree API** — fetch file list, find `mtp.safetensors` file size (works
+///    for any repo with an MTP sidecar, MTPLX or not).
+/// 2. **mtplx_runtime.json** — read `mtp_sidecar` quantization label and
+///    `mtp_depth_max` (only available for MTPLX-provenance repos).
+///
+/// Falls back to a conservative bf16 estimate only if neither succeeds.
+async fn fetch_mtp_companion_info(
+    repo_id: &str,
+    revision: &str,
+    token: Option<&str>,
+) -> (Option<u64>, Option<String>, Option<i64>) {
+    // Run both requests in parallel
+    let (size_result, runtime_result) = tokio::join!(
+        fetch_mtp_safetensors_size(repo_id, revision, token),
+        fetch_mtplx_runtime_json(repo_id, revision, token),
+    );
+
+    // Tree API gives the most accurate estimate
+    if let Some(size) = size_result {
+        if let Some(runtime) = runtime_result {
+            let sidecar = runtime
+                .get("mtp_sidecar")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let depth = runtime.get("mtp_depth_max").and_then(|v| v.as_i64());
+            return (Some(size), sidecar, depth);
+        }
+        return (Some(size), None, None);
+    }
+
+    // No tree API data — try mtplx_runtime.json for quantization
+    if let Some(runtime) = runtime_result {
+        let sidecar = runtime
+            .get("mtp_sidecar")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let depth = runtime.get("mtp_depth_max").and_then(|v| v.as_i64());
+        // Without the tree API we can't estimate VRAM from quantization alone
+        // (MTP sidecars are small — ~400M params at bf16 ≈ 849 MB).
+        return (None, sidecar, depth);
+    }
+
+    // No data — return None
+    (None, None, None)
+}
+
+/// Fetches the HF tree API and returns the file size of `mtp.safetensors`
+/// if present. Also handles sharded variants like `mtp-00001-of-00002.safetensors`.
+async fn fetch_mtp_safetensors_size(
+    repo_id: &str,
+    revision: &str,
+    token: Option<&str>,
+) -> Option<u64> {
+    let url = format!(
+        "https://huggingface.co/api/models/{repo_id}/tree/{revision}"
+    );
+    let mut req = HF_HTTP_CLIENT.get(&url);
+    if let Some(tok) = token {
+        req = req.bearer_auth(tok);
+    }
+    let resp = req.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let files: Vec<serde_json::Value> = resp.json().await.ok()?;
+    let mut total: u64 = 0;
+    for file in &files {
+        let path = file.get("path").and_then(|v| v.as_str())?;
+        if path == "mtp.safetensors"
+            || (path.starts_with("mtp-")
+                && path.ends_with(".safetensors")
+                && path.contains("of-"))
+        {
+            total += file.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+        }
+    }
+    if total > 0 {
+        Some(total)
+    } else {
+        None
+    }
 }
 
 /// Mirrors the `main_class`/`auto_map` heuristic in
