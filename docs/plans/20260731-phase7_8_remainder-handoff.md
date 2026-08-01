@@ -681,15 +681,21 @@ implemented and receipt-backed; do not redo it unless a regression appears.
             sidecar" concept is implemented in the pin cache but not surfaced as a distinct UX.
             `cargo clippy` clean; `cargo test` 1073/0/13; `cargo build --release` passes.
          - **2026-08-01 checkpoint — pin status UI delivered, item 1 closed:**
-           - Pin status UI added to both Preset Editor and Spawn Wizard. Shows pinned revision
-             (repo@sha), staleness indicator (green dot = fresh, yellow = stale), trust_remote_code
-             flag, resolved time, and in-line re-check button.
-           - Pin status appears when a companion model repo id is entered and preflighted, regardless
-             of whether trust is required. Re-check updates the pin cache and refreshes the display.
-           - `GET /api/hf/mtp-pins` and `DELETE /api/hf/mtp-pins/{repo_id}` provide programmatic
-             cache management.
-           - `cargo clippy` clean; `cargo test` 2220/0/26; `npm run lint` clean;
-             `npm run validate-js` clean.
+            - Pin status UI added to both Preset Editor and Spawn Wizard. Shows pinned revision
+              (repo@sha), staleness indicator (green dot = fresh, yellow = stale), trust_remote_code
+              flag, resolved time, and in-line re-check button.
+            - Pin status appears when a companion model repo id is entered and preflighted, regardless
+              of whether trust is required. Re-check updates the pin cache and refreshes the display.
+            - `GET /api/hf/mtp-pins` and `DELETE /api/hf/mtp-pins/{repo_id}` provide programmatic
+              cache management.
+            - `cargo clippy` clean; `cargo test` 2220/0/26; `npm run lint` clean;
+              `npm run validate-js` clean.
+          - **2026-08-01 checkpoint — VRAM memory estimate delivered, item 1 fully closed:**
+            - Memory status surfaced in pin status UI: shows "~X MB VRAM" or "~X GB VRAM"
+              derived from the HF API's `safetensors.total` parameter count (Q4 quantization
+              estimate, 0.5 bytes/param). Covers the "explicit memory status" requirement.
+            - `estimated_memory_bytes` stored in pin cache and included in all preflight responses.
+            - `cargo clippy` clean; `cargo test` 1074/0/13; `npm run lint` clean.
 2. ~~**Frequency penalty decision**~~ — done, see checkpoint above.
 3. **Legacy quant-style migration:** move the remaining `/api/hf/quantizers` and
    `/api/hf/community-picks` quick-pick behavior onto the typed community-source catalog while
