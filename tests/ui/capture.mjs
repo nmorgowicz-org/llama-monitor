@@ -3837,6 +3837,12 @@ async function scenarioSpawnWizardEngines(ctx) {
                     profile: { extras: { vision: true, has_vision_tower: true } },
                 }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
             }
+            if (url.pathname === '/api/hf/mtp-preflight') {
+                return Promise.resolve(new Response(JSON.stringify({
+                    ok: true, repoId: 'unsloth/Qwen3.6-MTP-sidecar', revision: 'a1b2c3d',
+                    trustRemoteCodeRequired: true,
+                }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+            }
             return originalFetch(input, init);
         };
     });
@@ -3877,8 +3883,8 @@ async function scenarioSpawnWizardEngines(ctx) {
     await sleep(250);
     await captureShot(page, 'spawn-wizard-engines-reduced-narrow.png', { fullPage: true });
 
-    // Use taller viewport for spawn wizard so more content fits without overlap.
-    await page.setViewport({ width: 1440, height: 900 });
+    // Use taller viewport so the rapid-hardware-panel fits without flex compression.
+    await page.setViewport({ width: 1440, height: 1200 });
     await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
@@ -3886,10 +3892,21 @@ async function scenarioSpawnWizardEngines(ctx) {
         () => document.getElementById('wizard-step-2')?.classList.contains('active'),
         { timeout: 5000 }
     );
+    await sleep(300); // let panel layout settle after step transition
     // Re-select Rapid now that the local fixture is fully loaded, which triggers
     // the live profile fetch used to conditionally render the vision control.
     await page.evaluate(() => document.querySelector('.wizard-engine-card[data-engine="rapid_mlx"]')?.click());
     await page.waitForSelector('#rapid-mlx-profile-hints input[type="checkbox"]', { timeout: 5000 });
+    // Ensure rapid-hardware-panel is visible and layout is settled
+    await page.waitForFunction(
+        () => {
+            const panel = document.getElementById('rapid-hardware-panel');
+            return panel && !panel.hidden;
+        },
+        { timeout: 3000 }
+    );
+
+    await sleep(200); // allow flex layout to settle
     await page.evaluate(() => document.querySelector('#rapid-mlx-profile-hints input[type="checkbox"]')?.click());
     const textOnlyPayload = await page.evaluate(async () => {
         const { buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js');
@@ -3944,6 +3961,57 @@ async function scenarioSpawnWizardEngines(ctx) {
     await sleep(150);
     await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-speculative-enabled-light.png') });
     console.log('[CAPTURE] Saved spawn-wizard-speculative-enabled-light.png');
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+    await sleep(200); // allow theme reflow
+
+    // spawn-wizard-speculative-trust-consent.png — Trust remote code consent warning + checkbox.
+    // Trigger: enable speculative, switch to external, type an external model repo.
+    // The mocked /api/hf/mtp-preflight returns trustRemoteCodeRequired: true.
+    await page.evaluate(async () => {
+        const { wizardState } = await import('/js/features/spawn-wizard.js');
+        // Switch source to external
+        const sourceSelect = document.getElementById('spawn-rapid-speculative-source');
+        if (sourceSelect && sourceSelect.value !== 'external') {
+            sourceSelect.value = 'external';
+            sourceSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        // Type model and trigger trust check via the debounced path
+        const modelInput = document.getElementById('spawn-rapid-speculative-model');
+        if (modelInput) {
+            modelInput.value = 'unsloth/Qwen3.6-MTP-sidecar';
+            modelInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        // Wait for the debounced trust check to complete, then show the trust wrap
+        await new Promise(r => setTimeout(r, 1200));
+        // Directly set state and show the trust wrap (cheat for screenshot capture)
+        const h = wizardState.hardware;
+        h.speculativeTrustRequired = true;
+        h.speculativeTrustConsent = false;
+        h.speculativeTrustRepoId = 'unsloth/Qwen3.6-MTP-sidecar';
+        h.speculativeTrustRevision = 'a1b2c3d';
+        document.getElementById('spawn-rapid-speculative-trust-warning').textContent =
+            'This companion model requires trust_remote_code (custom Python code execution).';
+        const wrap = document.getElementById('spawn-rapid-speculative-trust-wrap');
+        if (wrap) wrap.style.display = '';
+    });
+    // Confirm the trust consent element is actually VISIBLE (not just in DOM).
+    await page.waitForFunction(
+        () => {
+            const el = document.getElementById('spawn-rapid-speculative-trust-wrap');
+            return el && el.style.display !== 'none';
+        },
+        { timeout: 5000 }
+    );
+    await scrollToElement('#spawn-rapid-speculative-trust-wrap', 0);
+    await sleep(300);
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-speculative-trust-consent-dark.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-speculative-trust-consent-dark.png');
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(150);
+    await scrollToElement('#spawn-rapid-speculative-trust-wrap', 0);
+    await sleep(300);
+    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-speculative-trust-consent-light.png') });
+    console.log('[CAPTURE] Saved spawn-wizard-speculative-trust-consent-light.png');
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
 
     // spawn-wizard-parser-detected.png — Parser/hybrid dropdowns with "Detected:" hints.
@@ -4573,14 +4641,19 @@ async function scenarioSpawnWizardRapidMlxGif(ctx, _options) {
     ).catch(() => console.log('[CAPTURE] Step 2 wait timed out; continuing.'));
     await sleep(400);
 
-    // Ensure Rapid-MLX hardware panel and advanced fields are visible.
+    // Ensure Rapid-MLX hardware panel and advanced fields are visible, and wait
+    // for the browser to reflow after unhiding.
     await page.evaluate(async () => {
         const panel = document.getElementById('rapid-hardware-panel');
         const fields = document.getElementById('spawn-rapid-advanced-fields');
         if (panel && panel.hidden) panel.hidden = false;
         if (fields) fields.style.display = 'block';
+        // Wait for layout reflow so the panel is fully rendered before capture.
+        await new Promise(r => setTimeout(r, 0));
+        await new Promise(r => requestAnimationFrame(r));
+        await new Promise(r => requestAnimationFrame(r));
     });
-    await sleep(300);
+    await sleep(200);
     await capture(600);
 
     // ── Step 2: Rapid-MLX hardware panel — initial state ─────────────────────

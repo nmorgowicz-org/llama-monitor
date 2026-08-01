@@ -3323,6 +3323,12 @@
                                     <label class="pe-label" for="modal-rapid-speculative-model">Resolved sidecar</label>
                                     <input class="pe-input" id="modal-rapid-speculative-model" placeholder="owner/repo or /absolute/model/path">
                                 </div>
+                                <div class="pe-field" id="modal-rapid-speculative-trust-wrap" style="display:none;">
+                                    <div class="pe-field-hint" id="modal-rapid-speculative-trust-warning" style="color:var(--warn,#e6a41c); margin-bottom:4px;"></div>
+                                    <label class="pe-label pe-toggle-label" for="modal-rapid-speculative-trust-consent">Trust remote code for this companion model</label>
+                                    <div class="pe-toggle"><input type="checkbox" class="pe-toggle-input" id="modal-rapid-speculative-trust-consent"><span class="pe-toggle-slider"></span></div>
+                                    <div class="pe-field-hint">This companion model runs custom Python code (trust_remote_code). Consent is scoped to this exact repo and revision; changing the model or revision requires re-consent.</div>
+                                </div>
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-rapid-speculative-tokens">Speculative tokens</label>
                                     <select class="pe-select" id="modal-rapid-speculative-tokens"><option value="1">1</option><option value="2">2 — conservative</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8 — maximum</option></select>
@@ -3963,11 +3969,20 @@
                                      </select>
                                      <div class="field-hint">Use an external sidecar only when its exact model and revision have been resolved separately.</div>
                                  </div>
-                                 <div class="hardware-field" id="spawn-rapid-speculative-model-wrap" style="display:none;">
-                                     <label for="spawn-rapid-speculative-model">Resolved sidecar</label>
-                                     <input type="text" id="spawn-rapid-speculative-model" placeholder="owner/repo or /absolute/model/path">
-                                     <div class="field-hint">No mutable <code>repo@main</code> consent is inferred here.</div>
-                                 </div>
+                                  <div class="hardware-field" id="spawn-rapid-speculative-model-wrap" style="display:none;">
+                                      <label for="spawn-rapid-speculative-model">Resolved sidecar</label>
+                                      <input type="text" id="spawn-rapid-speculative-model" placeholder="owner/repo or /absolute/model/path">
+                                      <div class="field-hint">No mutable <code>repo@main</code> consent is inferred here.</div>
+                                  </div>
+                                  <div class="hardware-field" id="spawn-rapid-speculative-trust-wrap" style="display:none;">
+                                      <div class="field-hint" id="spawn-rapid-speculative-trust-warning" style="color:var(--warn,#e6a41c);"></div>
+                                      <label class="kv-unified-toggle" for="spawn-rapid-speculative-trust-consent">
+                                          <input type="checkbox" id="spawn-rapid-speculative-trust-consent">
+                                          <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
+                                          <span class="kv-unified-text">Trust remote code for this companion model</span>
+                                      </label>
+                                      <div class="field-hint">This companion model runs custom Python code. Consent is scoped to this exact repo and revision; changing the model or revision requires re-consent.</div>
+                                  </div>
                                  <div class="hardware-field" id="spawn-rapid-speculative-tokens-wrap" style="display:none;">
                                      <label for="spawn-rapid-speculative-tokens">Speculative tokens</label>
                                      <select id="spawn-rapid-speculative-tokens"><option value="1">1</option><option value="2" selected>2 — conservative</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8 — maximum</option></select>

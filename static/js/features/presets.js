@@ -1326,6 +1326,20 @@ export function openPresetModal(mode, section, seedPreset = null) {
         setOpt('modal-rapid-speculative-tokens', String(speculative?.num_speculative_tokens || 2));
         const disableAutoKEl = document.getElementById('modal-rapid-speculative-disable-auto-k');
         if (disableAutoKEl) disableAutoKEl.checked = !!speculative?.disable_auto_k;
+        /* Restore trust_remote_code_consent for MTP companion if previously granted */
+        const trustWrap = document.getElementById('modal-rapid-speculative-trust-wrap');
+        const trustCheck = document.getElementById('modal-rapid-speculative-trust-consent');
+        const trustWarning = document.getElementById('modal-rapid-speculative-trust-warning');
+        const storedConsent = p.rapid_mlx?.trust_remote_code_consent || null;
+        if (trustWrap && trustCheck && trustWarning && storedConsent) {
+            _speculativeTrustState.repoId = storedConsent.split('@')[0] || '';
+            _speculativeTrustState.revision = storedConsent.split('@').slice(1).join('@') || '';
+            _speculativeTrustState.trustRequired = true;
+            trustWarning.textContent =
+                'This companion model requires trust_remote_code (custom Python code execution).';
+            trustCheck.checked = true;
+            trustWrap.style.display = '';
+        }
         const autoToolChoiceEl = document.getElementById('modal-rapid-auto-tool-choice');
         if (autoToolChoiceEl) autoToolChoiceEl.checked = !!p.rapid_mlx?.auto_tool_choice;
         _syncRapidSpeculativeEditor();
@@ -1792,12 +1806,81 @@ function _syncRapidSpeculativeEditor() {
     const external = document.getElementById('modal-rapid-speculative-source')?.value === 'external';
     const modelWrap = document.getElementById('modal-rapid-speculative-model-wrap');
     if (modelWrap) modelWrap.style.display = enabled && external ? '' : 'none';
+    // If toggling off or switching away from external, also hide trust section
+    const trustWrap = document.getElementById('modal-rapid-speculative-trust-wrap');
+    if (trustWrap && (!enabled || !external)) {
+        trustWrap.style.display = 'none';
+    }
 }
 
 document.addEventListener('change', (event) => {
     if (event.target?.id === 'modal-rapid-speculative-enabled' || event.target?.id === 'modal-rapid-speculative-source') {
         _syncRapidSpeculativeEditor();
     }
+});
+
+/* ── Trust remote code: MTP companion preflight ─────────────────────────── */
+
+let _speculativeTrustState = {
+    repoId: '',
+    revision: '',
+    trustRequired: false,
+    loading: false,
+    timeout: null,
+};
+
+async function _checkSpeculativeModelTrust(repoId) {
+    const trustWrap = document.getElementById('modal-rapid-speculative-trust-wrap');
+    const warningEl = document.getElementById('modal-rapid-speculative-trust-warning');
+    const consentCheck = document.getElementById('modal-rapid-speculative-trust-consent');
+    if (!trustWrap || !warningEl || !consentCheck) return;
+
+    /* Reset */
+    _speculativeTrustState = { repoId: '', revision: '', trustRequired: false, loading: false, timeout: null };
+    trustWrap.style.display = 'none';
+    consentCheck.checked = false;
+    warningEl.textContent = '';
+
+    if (!repoId || !repoId.includes('/')) return;
+    if (!/^[\w._-]+\/[\w._-]+$/.test(repoId)) return;
+
+    _speculativeTrustState.loading = true;
+    try {
+        const resp = await fetch(
+            '/api/hf/mtp-preflight?repo=' + encodeURIComponent(repoId),
+            { headers: window.authHeaders ? window.authHeaders() : {} }
+        );
+        const data = await resp.json();
+        if (!data || data.ok !== true) {
+            _speculativeTrustState.loading = false;
+            return;
+        }
+        _speculativeTrustState.repoId = data.repoId;
+        _speculativeTrustState.revision = data.revision;
+        _speculativeTrustState.trustRequired = !!data.trustRemoteCodeRequired;
+        _speculativeTrustState.loading = false;
+
+        if (_speculativeTrustState.trustRequired) {
+            warningEl.textContent =
+                'This companion model requires trust_remote_code (custom Python code execution).';
+            consentCheck.checked = false;
+            trustWrap.style.display = '';
+        }
+    } catch {
+        _speculativeTrustState.loading = false;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const modelInput = document.getElementById('modal-rapid-speculative-model');
+    if (!modelInput) return;
+
+    modelInput.addEventListener('input', () => {
+        const value = (modelInput.value || '').trim();
+        if (_speculativeTrustState.timeout) clearTimeout(_speculativeTrustState.timeout);
+        if (!value || _speculativeTrustState.loading) return;
+        _speculativeTrustState.timeout = setTimeout(() => _checkSpeculativeModelTrust(value), 600);
+    });
 });
 
 function _buildFormPreset(existing) {
@@ -1862,6 +1945,15 @@ function _buildFormPreset(existing) {
                         num_speculative_tokens: Number(strVal('modal-rapid-speculative-tokens') || 2),
                         disable_auto_k: !!document.getElementById('modal-rapid-speculative-disable-auto-k')?.checked,
                     } : null;
+                    // Trust remote code consent for MTP companion: only set when required
+                    // and explicitly consented. If consent checkbox is off but trust is
+                    // required, launch will fail-closed — that's correct and safe.
+                    const tcCheck = document.getElementById('modal-rapid-speculative-trust-consent');
+                    if (_speculativeTrustState.trustRequired && tcCheck?.checked && _speculativeTrustState.repoId && _speculativeTrustState.revision) {
+                        out.trust_remote_code_consent = _speculativeTrustState.repoId + '@' + _speculativeTrustState.revision;
+                    } else {
+                        out.trust_remote_code_consent = null;
+                    }
                     // prefill_step_size is a plain u32 backend-side, not an Option, so it takes
                     // the control's value directly rather than a null.
                     out.prefill_step_size = Number(strVal('modal-rapid-prefill-step-size') || 512);

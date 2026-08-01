@@ -298,6 +298,10 @@ export const wizardState = {
     speculativeModel: '',
     speculativeTokens: 2,
     speculativeDisableAutoK: false,
+    speculativeTrustRequired: false,
+    speculativeTrustConsent: false,
+    speculativeTrustRepoId: '',
+    speculativeTrustRevision: '',
     autoToolChoice: false,
     // Phase 7: Web UI (D26/A44)
     // Phase 7: Sampling mode (D27)
@@ -901,8 +905,11 @@ function cacheDom() {
    dom.speculativeSourceSelect = document.getElementById('spawn-rapid-speculative-source');
    dom.speculativeModelInput = document.getElementById('spawn-rapid-speculative-model');
    dom.speculativeTokensSelect = document.getElementById('spawn-rapid-speculative-tokens');
-   dom.speculativeDisableAutoKCheck = document.getElementById('spawn-rapid-speculative-disable-auto-k');
-   dom.autoToolChoiceCheck = document.getElementById('spawn-rapid-auto-tool-choice');
+    dom.speculativeDisableAutoKCheck = document.getElementById('spawn-rapid-speculative-disable-auto-k');
+    dom.speculativeTrustWrap = document.getElementById('spawn-rapid-speculative-trust-wrap');
+    dom.speculativeTrustWarning = document.getElementById('spawn-rapid-speculative-trust-warning');
+    dom.speculativeTrustConsent = document.getElementById('spawn-rapid-speculative-trust-consent');
+    dom.autoToolChoiceCheck = document.getElementById('spawn-rapid-auto-tool-choice');
    dom.samplingModeSelect   = document.getElementById('spawn-sampling-mode');
 
   // Step 4 (Summary)
@@ -1463,7 +1470,22 @@ function _bindRapidMlxAdvancedControls() {
        scheduleVramUpdate();
      });
    };
-   bindInput(dom.speculativeModelInput, 'speculativeModel');
+    bindInput(dom.speculativeModelInput, 'speculativeModel');
+    if (dom.speculativeModelInput && !dom.speculativeModelInput.dataset.trustBound) {
+      dom.speculativeModelInput.dataset.trustBound = '1';
+      (function() {
+        let t = null;
+        dom.speculativeModelInput.addEventListener('input', () => {
+          const v = (dom.speculativeModelInput.value || '').trim();
+          if (t) clearTimeout(t);
+          if (!v) {
+            _hideSpawnTrust();
+            return;
+          }
+          t = setTimeout(() => _spawnCheckTrust(v), 600);
+        });
+      })();
+    }
 
    const bindCheck = (el, key, onChange) => {
      if (!el || el.dataset.bound) return;
@@ -1502,6 +1524,64 @@ function _syncRapidSpeculativeFields() {
     .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = enabled ? '' : 'none'; });
   const modelWrap = document.getElementById('spawn-rapid-speculative-model-wrap');
   if (modelWrap) modelWrap.style.display = enabled && h.speculativeSource === 'external' ? '' : 'none';
+  _updateSpawnTrustUI(h, enabled);
+}
+
+function _updateSpawnTrustUI(h, enabled) {
+  if (!dom.speculativeTrustWrap) return;
+  const show = enabled && h.speculativeSource === 'external' && h.speculativeTrustRequired;
+  dom.speculativeTrustWrap.style.display = show ? '' : 'none';
+  if (dom.speculativeTrustConsent) dom.speculativeTrustConsent.checked = !!h.speculativeTrustConsent;
+}
+
+function _hideSpawnTrust() {
+  const h = wizardState.hardware;
+  h.speculativeTrustRequired = false;
+  h.speculativeTrustConsent = false;
+  h.speculativeTrustRepoId = '';
+  h.speculativeTrustRevision = '';
+  _updateSpawnTrustUI(h, !!h.speculativeEnabled);
+}
+
+async function _spawnCheckTrust(repoId) {
+  const h = wizardState.hardware;
+  if (!repoId || !repoId.includes('/')) {
+    _hideSpawnTrust();
+    return;
+  }
+  if (!/^[\w._-]+\/[\w._-]+$/.test(repoId)) {
+    _hideSpawnTrust();
+    return;
+  }
+  try {
+    const resp = await fetch(
+      '/api/hf/mtp-preflight?repo=' + encodeURIComponent(repoId),
+      { headers: window.authHeaders ? window.authHeaders() : {} }
+    );
+    const data = await resp.json();
+    if (!data || data.ok !== true) {
+      _hideSpawnTrust();
+      return;
+    }
+    h.speculativeTrustRepoId = data.repoId;
+    h.speculativeTrustRevision = data.revision;
+    h.speculativeTrustRequired = !!data.trustRemoteCodeRequired;
+    if (h.speculativeTrustRequired) {
+      h.speculativeTrustConsent = false;
+      if (dom.speculativeTrustWarning) {
+        dom.speculativeTrustWarning.textContent =
+          'This companion model requires trust_remote_code (custom Python code execution).';
+      }
+    } else {
+      _hideSpawnTrust();
+    }
+    if (dom.speculativeTrustWrap) {
+      const enabled = !!h.speculativeEnabled && h.speculativeSource === 'external';
+      _updateSpawnTrustUI(h, enabled);
+    }
+  } catch {
+    _hideSpawnTrust();
+  }
 }
 
 function _applyReasoningModeLock() {
@@ -10328,6 +10408,11 @@ export function buildSpawnPayload() {
             num_speculative_tokens: Number(h.speculativeTokens || 2),
             disable_auto_k: !!h.speculativeDisableAutoK,
           },
+          ...(h.speculativeTrustRequired && h.speculativeTrustConsent &&
+            h.speculativeTrustRepoId && h.speculativeTrustRevision && {
+              trust_remote_code_consent: h.speculativeTrustRepoId + '@' + h.speculativeTrustRevision
+            }
+          ),
         }),
         // Auto deliberately omits a flag; Off maps to Rapid's real
         // --no-mllm escape hatch for incomplete vision-tower checkpoints.
