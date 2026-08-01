@@ -44,10 +44,15 @@ test.describe('Rapid-MLX preset editor control reachability', () => {
     expect(sections.length, 'expected a Rapid preset to expose at least one section')
       .toBeGreaterThan(0);
 
+    // Trust consent is conditionally visible (only after speculative enabled + companion
+    // model entered + preflight says trust required), so it's always hidden for this test.
+    const conditionalIds = new Set(['modal-rapid-speculative-trust-consent']);
+
     const hidden = [];
     for (const id of ids) {
-      const el = page.locator(`#${id}`);
       // A referenced id with no element is a separate defect, out of scope here.
+      if (conditionalIds.has(id)) continue;
+      const el = page.locator(`#${id}`);
       if (await el.count() === 0) continue;
       let seen = false;
       for (const section of sections) {
