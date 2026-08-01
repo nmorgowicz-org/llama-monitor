@@ -109,6 +109,16 @@ impl RapidMlxSpeculativeConfig {
         Ok(())
     }
 
+    /// Returns the companion model repo id if the `model` field is an HF repo
+    /// reference (owner/repo format). Returns `None` if it's a local path or empty.
+    pub fn companion_model_repo_id(&self) -> Option<&str> {
+        self.model.as_deref().filter(|m| {
+            !m.starts_with('/')
+                && m.split('/').count() == 2
+                && m.split('/').all(|part| !part.is_empty())
+        })
+    }
+
     pub fn to_cli_json(&self) -> Result<String> {
         self.validate()?;
         serde_json::to_string(self)

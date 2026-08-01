@@ -480,7 +480,7 @@ impl RapidMlxCommandBuilder {
         // Speculative decoding is opt-in and typed. An older runtime must not blank an
         // otherwise useful preview or suppress unrelated settings: omit the unsupported
         // throughput feature and let requested_vs_effective explain the downgrade.
-        if let Some(config) = self.speculative_config
+        if let Some(ref config) = self.speculative_config
             && capabilities.contains("--speculative-config")
         {
             args.push("--speculative-config".to_string());
@@ -567,8 +567,46 @@ impl RapidMlxCommandBuilder {
         // Security: enforce revision-scoped consent for repos requiring trust_remote_code.
         // When the resolved model marks trust_remote_code_required=true, launch is blocked
         // unless the user has explicitly consented for that specific repo@revision.
+        let mut trust_remote_code_enabled = false;
         if self.model.trust_remote_code_required == Some(true) {
             validate_trust_consent(&self.model, &self.trust_remote_code_consent)?;
+            trust_remote_code_enabled = true;
+        }
+
+        // Also validate trust consent for the MTP companion model if it's an external
+        // HF repo. The companion is not resolved through model_resolver, so we check
+        // its pin cache entry and validate consent against it. If no pin is cached
+        // (companion was never preflighted), we cannot fully validate — but the frontend
+        // should have called the preflight before setting consent. Block launch on
+        // missing pin when consent was provided, since that indicates a preflight was
+        // done but the pin was lost.
+        if let Some(ref spec_config) = self.speculative_config
+            && let Some(ref companion_repo) = spec_config.companion_model_repo_id()
+        {
+            let cache = crate::hf::mtp_pin_cache::pin_cache();
+            if let Some(pin) = cache.get(companion_repo) {
+                if pin.trust_remote_code_required {
+                    validate_trust_consent_simple(
+                        companion_repo,
+                        &pin.revision,
+                        &self.trust_remote_code_consent,
+                    )?;
+                    trust_remote_code_enabled = true;
+                }
+            } else if self.trust_remote_code_consent.is_some() {
+                // Consent was provided but no pin cached — this means the companion
+                // was preflighted (since consent was set) but the pin is missing.
+                // Block launch rather than silently skip validation.
+                anyhow::bail!(
+                    "Cannot validate MTP companion model {}: no cached pin for {}. \
+                         Re-run the preflight before launching.",
+                    companion_repo,
+                    companion_repo
+                );
+            }
+        }
+
+        if trust_remote_code_enabled {
             env.push((OsString::from("HF_TRUST_REMOTE_CODE"), OsString::from("1")));
         }
 
@@ -633,6 +671,42 @@ fn validate_trust_consent(
     Ok(())
 }
 
+/// Simplified trust_remote_code consent validation for the MTP companion model,
+/// which is not resolved through model_resolver. Takes the expected repo id and
+/// revision directly (from the pin cache) and validates consent against them.
+fn validate_trust_consent_simple(
+    expected_repo: &str,
+    expected_revision: &str,
+    consent: &Option<String>,
+) -> Result<()> {
+    let consent_str = consent
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("This MTP companion model requires trust_remote_code (custom Python code execution). Consent must be granted for this specific repo and revision before launching."))?;
+
+    if consent_str.is_empty() {
+        anyhow::bail!("trust_remote_code consent must not be empty");
+    }
+
+    let (consent_repo, consent_revision) = consent_str.rsplit_once('@').ok_or_else(|| {
+        anyhow::anyhow!(
+            "trust_remote_code consent must be in format repo_id@revision (e.g. org/model@main)"
+        )
+    })?;
+
+    if consent_repo != expected_repo {
+        anyhow::bail!(
+            "trust_remote_code consent repo mismatch for companion model: expected {expected_repo}, got {consent_repo}"
+        );
+    }
+    if consent_revision != expected_revision {
+        anyhow::bail!(
+            "trust_remote_code consent revision mismatch for companion model {expected_repo}: expected {expected_revision}, got {consent_revision}"
+        );
+    }
+
+    Ok(())
+}
+
 fn serde_value_to_flag_arg(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::Bool(true) => String::new(),
@@ -659,6 +733,11 @@ fn serde_value_to_flag_arg(value: &serde_json::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn init_test_pin_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::hf::mtp_pin_cache::init_pin_cache(dir.path());
+    }
 
     #[test]
     fn a_config_from_json_still_turns_pflash_off() {
@@ -776,6 +855,7 @@ mod tests {
 
     #[test]
     fn typed_mtp_config_serializes_exact_vllm_json_into_argv() {
+        init_test_pin_cache();
         let config = crate::inference::rapid_mlx::RapidMlxSpeculativeConfig {
             method: crate::inference::rapid_mlx::RapidMlxSpeculativeMethod::Mtp,
             model: Some("org/model-mtp".into()),

@@ -300,6 +300,7 @@ fn main() -> Result<()> {
     // store has to learn the resolved config directory before any capability snapshot is
     // generated.
     inference::rapid_mlx::spec_decode_store::set_store_root(&app_config.config_dir);
+    hf::mtp_pin_cache::init_pin_cache(&app_config.config_dir);
 
     if let Some(report) = args.ingest_spec_decode_report.clone() {
         return ingest_spec_decode_report(&report);

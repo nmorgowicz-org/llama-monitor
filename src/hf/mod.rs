@@ -9,6 +9,7 @@
 //! - Streaming download with resume support
 //! - HF token management
 
+pub mod mtp_pin_cache;
 pub mod qualify;
 #[allow(unused_imports)]
 pub use qualify::{

@@ -1827,6 +1827,10 @@ let _speculativeTrustState = {
     trustRequired: false,
     loading: false,
     timeout: null,
+    resolvedAt: '',
+    lastRecheckAt: '',
+    upstreamUnchanged: null,
+    stale: false,
 };
 
 async function _checkSpeculativeModelTrust(repoId) {
@@ -1836,7 +1840,7 @@ async function _checkSpeculativeModelTrust(repoId) {
     if (!trustWrap || !warningEl || !consentCheck) return;
 
     /* Reset */
-    _speculativeTrustState = { repoId: '', revision: '', trustRequired: false, loading: false, timeout: null };
+    _speculativeTrustState = { repoId: '', revision: '', trustRequired: false, loading: false, timeout: null, resolvedAt: '', lastRecheckAt: '', upstreamUnchanged: null, stale: false };
     trustWrap.style.display = 'none';
     consentCheck.checked = false;
     warningEl.textContent = '';
@@ -1858,12 +1862,26 @@ async function _checkSpeculativeModelTrust(repoId) {
         _speculativeTrustState.repoId = data.repoId;
         _speculativeTrustState.revision = data.revision;
         _speculativeTrustState.trustRequired = !!data.trustRemoteCodeRequired;
+        _speculativeTrustState.resolvedAt = data.resolvedAt || '';
+        _speculativeTrustState.lastRecheckAt = data.lastRecheckAt || '';
+        _speculativeTrustState.upstreamUnchanged = data.upstreamUnchanged ?? null;
+        _speculativeTrustState.stale = !!data.stale;
         _speculativeTrustState.loading = false;
 
         if (_speculativeTrustState.trustRequired) {
-            warningEl.textContent =
-                'This companion model requires trust_remote_code (custom Python code execution).';
+            let msg = 'This companion model requires trust_remote_code (custom Python code execution).';
+            msg += '\nPinned to ' + data.repoId + '@' + data.revision.substring(0, 12);
+            if (_speculativeTrustState.stale) {
+                msg += ' (stale — consider re-checking)';
+            }
+            if (data.upstreamUnchanged === false) {
+                msg += ' (upstream changed)';
+            }
+            warningEl.textContent = msg;
             consentCheck.checked = false;
+            trustWrap.style.display = '';
+        } else {
+            warningEl.textContent = 'Pinned to ' + data.repoId + '@' + data.revision.substring(0, 12) + ' (no trust_remote_code needed)';
             trustWrap.style.display = '';
         }
     } catch {
@@ -1881,6 +1899,61 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!value || _speculativeTrustState.loading) return;
         _speculativeTrustState.timeout = setTimeout(() => _checkSpeculativeModelTrust(value), 600);
     });
+
+    /* Re-check pin button */
+    const recheckBtn = document.getElementById('modal-rapid-speculative-recheck');
+    const recheckStatus = document.getElementById('modal-rapid-speculative-recheck-status');
+    if (recheckBtn) {
+        recheckBtn.addEventListener('click', async () => {
+            if (!_speculativeTrustState.repoId) return;
+            recheckBtn.disabled = true;
+            recheckBtn.textContent = 'Re-checking...';
+            try {
+                const resp = await fetch(
+                    '/api/hf/mtp-preflight/recheck?repo=' + encodeURIComponent(_speculativeTrustState.repoId),
+                    { method: 'POST', headers: window.authHeaders ? window.authHeaders() : {} }
+                );
+                const data = await resp.json();
+                if (!data || data.ok !== true) {
+                    recheckStatus.textContent = 'Re-check failed: ' + (data?.error || 'unknown error');
+                    recheckStatus.style.display = '';
+                    recheckStatus.style.color = 'var(--err,#e65c5c)';
+                    return;
+                }
+                /* Update state */
+                _speculativeTrustState.revision = data.revision;
+                _speculativeTrustState.trustRequired = !!data.trustRemoteCodeRequired;
+                _speculativeTrustState.lastRecheckAt = data.lastRecheckAt || '';
+                _speculativeTrustState.upstreamUnchanged = data.upstreamUnchanged ?? null;
+                _speculativeTrustState.resolvedAt = data.resolvedAt || '';
+                _speculativeTrustState.stale = false;
+
+                /* Update warning text */
+                const warningEl = document.getElementById('modal-rapid-speculative-trust-warning');
+                if (_speculativeTrustState.trustRequired) {
+                    let msg = 'This companion model requires trust_remote_code (custom Python code execution).';
+                    msg += '\nPinned to ' + data.repoId + '@' + data.revision.substring(0, 12);
+                    if (data.upstreamUnchanged === false) {
+                        msg += ' (upstream changed)';
+                    }
+                    warningEl.textContent = msg;
+                } else {
+                    warningEl.textContent = 'Pinned to ' + data.repoId + '@' + data.revision.substring(0, 12) + ' (no trust_remote_code needed)';
+                }
+
+                recheckStatus.textContent = 'Pin verified at ' + new Date(data.lastRecheckAt).toLocaleTimeString();
+                recheckStatus.style.display = '';
+                recheckStatus.style.color = 'var(--success,#5ce68a)';
+            } catch (e) {
+                recheckStatus.textContent = 'Re-check failed: ' + e.message;
+                recheckStatus.style.display = '';
+                recheckStatus.style.color = 'var(--err,#e65c5c)';
+            } finally {
+                recheckBtn.disabled = false;
+                recheckBtn.textContent = 'Re-check pin';
+            }
+        });
+    }
 });
 
 function _buildFormPreset(existing) {

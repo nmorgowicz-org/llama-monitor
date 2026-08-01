@@ -753,7 +753,9 @@ fn api_hf_meta(
 /// it would require `trust_remote_code`. Does not download weights and does
 /// not grant consent — the launch-time gate in
 /// `inference::rapid_mlx::command::validate_trust_consent` still fail-closes
-/// independently of this result.
+/// independently of this result. Uses the MTP pin cache to avoid redundant HF
+/// API calls. Returns cached data if present and not stale; otherwise resolves
+/// via HF API, caches the result, then returns.
 fn api_hf_mtp_preflight(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
@@ -792,15 +794,68 @@ fn api_hf_mtp_preflight(
                             ),
                         ));
                     }
-                    match crate::hf::resolve_speculative_model_preflight(&repo).await {
-                        Ok(preflight) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                            Box::new(warp::reply::json(&serde_json::json!({
+
+                    let cache = crate::hf::mtp_pin_cache::pin_cache();
+                    let force_recheck = params.get("force").map(|v| v == "1").unwrap_or(false);
+
+                    // Check cache first (unless force-recheck)
+                    if !force_recheck && let Some(pin) = cache.get(&repo) {
+                        // Return cached data; resolve fresh if stale
+                        let stale = pin.is_stale();
+                        if stale {
+                            // Resolve fresh in background and cache
+                            if let Ok(fresh) =
+                                crate::hf::resolve_speculative_model_preflight(&repo).await
+                            {
+                                let mut new_pin = pin.clone();
+                                new_pin.revision = fresh.revision.clone();
+                                new_pin.trust_remote_code_required =
+                                    fresh.trust_remote_code_required;
+                                new_pin.resolved_at = chrono::Utc::now().to_rfc3339();
+                                let _ = cache.insert(new_pin);
+                            }
+                        }
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
                                 "ok": true,
-                                "repoId": preflight.repo_id,
-                                "revision": preflight.revision,
-                                "trustRemoteCodeRequired": preflight.trust_remote_code_required,
-                            }))),
-                        ),
+                                "repoId": pin.repo_id,
+                                "revision": pin.revision,
+                                "trustRemoteCodeRequired": pin.trust_remote_code_required,
+                                "resolvedAt": pin.resolved_at,
+                                "lastRecheckAt": pin.last_recheck_at,
+                                "upstreamUnchanged": pin.upstream_unchanged,
+                                "stale": stale,
+                            })),
+                        ));
+                    }
+
+                    // Resolve via HF API
+                    match crate::hf::resolve_speculative_model_preflight(&repo).await {
+                        Ok(preflight) => {
+                            // Cache the result
+                            let pin = crate::hf::mtp_pin_cache::MtpPin {
+                                repo_id: preflight.repo_id.clone(),
+                                revision: preflight.revision.clone(),
+                                trust_remote_code_required: preflight.trust_remote_code_required,
+                                resolved_at: chrono::Utc::now().to_rfc3339(),
+                                last_recheck_at: String::new(),
+                                upstream_unchanged: None,
+                            };
+                            let _ = cache.insert(pin);
+
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": true,
+                                    "repoId": preflight.repo_id,
+                                    "revision": preflight.revision,
+                                    "trustRemoteCodeRequired": preflight.trust_remote_code_required,
+                                    "resolvedAt": chrono::Utc::now().to_rfc3339(),
+                                    "lastRecheckAt": "",
+                                    "upstreamUnchanged": null,
+                                    "stale": false,
+                                })),
+                            ))
+                        }
                         Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::json(&serde_json::json!({"ok": false, "error": e})),
                         )),
@@ -808,6 +863,145 @@ fn api_hf_mtp_preflight(
                 }
             },
         )
+}
+
+/// Re-check a cached MTP companion pin against upstream: re-resolve the repo
+/// via HF API and compare the sha. Updates the pin in the cache with the new
+/// revision if the upstream has changed.
+fn api_hf_mtp_preflight_recheck(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "mtp-preflight" / "recheck")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::query::<std::collections::HashMap<String, String>>())
+        .and_then(
+            move |auth: Option<String>, params: std::collections::HashMap<String, String>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let repo = match params.get("repo") {
+                        Some(r) if !r.is_empty() => r.clone(),
+                        _ => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({
+                                        "ok": false, "error": "missing repo param"
+                                    })),
+                                    StatusCode::BAD_REQUEST,
+                                ),
+                            ));
+                        }
+                    };
+                    if !validate_hf_repo_id(&repo) {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Invalid repo id format. Expected: owner/repo"
+                                })),
+                                StatusCode::BAD_REQUEST,
+                            ),
+                        ));
+                    }
+
+                    let cache = crate::hf::mtp_pin_cache::pin_cache();
+                    match cache.recheck(&repo).await {
+                        Ok(pin) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": true,
+                                "repoId": pin.repo_id,
+                                "revision": pin.revision,
+                                "trustRemoteCodeRequired": pin.trust_remote_code_required,
+                                "resolvedAt": pin.resolved_at,
+                                "lastRecheckAt": pin.last_recheck_at,
+                                "upstreamUnchanged": pin.upstream_unchanged,
+                            })),
+                        )),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": e.to_string()}),
+                            ),
+                        )),
+                    }
+                }
+            },
+        )
+}
+
+/// Return all cached MTP companion model pins.
+fn api_hf_mtp_pins(
+    _app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "mtp-pins")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = _app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let cache = crate::hf::mtp_pin_cache::pin_cache();
+                let pins = cache.all();
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "pins": pins.iter().map(|p| serde_json::json!({
+                            "repoId": p.repo_id,
+                            "revision": p.revision,
+                            "trustRemoteCodeRequired": p.trust_remote_code_required,
+                            "resolvedAt": p.resolved_at,
+                            "lastRecheckAt": p.last_recheck_at,
+                            "upstreamUnchanged": p.upstream_unchanged,
+                            "stale": p.is_stale(),
+                        })).collect::<Vec<_>>(),
+                    }),
+                )))
+            }
+        })
+}
+
+/// Remove a cached MTP companion model pin.
+fn api_hf_mtp_pin_remove(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "mtp-pins" / String)
+        .and(warp::delete())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |repo: String, auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                if !validate_hf_repo_id(&repo) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Invalid repo id: {}", repo),
+                        })),
+                    ));
+                }
+                let cache = crate::hf::mtp_pin_cache::pin_cache();
+                match cache.remove(&repo) {
+                    Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": true,
+                            "repoId": repo,
+                        })),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": e.to_string(),
+                        })),
+                    )),
+                }
+            }
+        })
 }
 
 fn api_hf_resolve_origin(
@@ -1314,6 +1508,12 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     r = r.or(api_hf_card(config.clone())).unify().boxed();
     r = r.or(api_hf_meta(config.clone())).unify().boxed();
     r = r.or(api_hf_mtp_preflight(config.clone())).unify().boxed();
+    r = r
+        .or(api_hf_mtp_preflight_recheck(config.clone()))
+        .unify()
+        .boxed();
+    r = r.or(api_hf_mtp_pins(config.clone())).unify().boxed();
+    r = r.or(api_hf_mtp_pin_remove(config.clone())).unify().boxed();
     r = r.or(api_hf_resolve_origin(config.clone())).unify().boxed();
     r = r.or(api_hf_token_get(config.clone())).unify().boxed();
     r = r.or(api_hf_token_put(config.clone())).unify().boxed();

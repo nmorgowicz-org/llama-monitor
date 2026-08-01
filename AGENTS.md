@@ -1,5 +1,43 @@
 # Llama Monitor Project Rules
 
+## Serena (IDE-level symbolic tools via MCP)
+
+Serena is connected via MCP and provides IDE-level, symbol-aware tools for navigating and editing this codebase.
+
+> **Current status**: Serena is configured for local use via OpenCode only (not in Codex or Claude Code right now). The `.serena/` directory is in the repo so Serena can operate locally on this project.
+
+### When to use Serena
+
+- **Use Serena tools for any symbol-level operation** — finding symbols, finding references, renaming symbols, replacing symbol bodies, inserting before/after symbols, safe-delete. This is faster and more reliable than naive search-and-replace.
+- **Use Serena for refactoring** — cross-file renames, moves, inlining, propagating deletions.
+- **Use Serena for exploring structure** — symbol overview (file outline), type hierarchy, diagnostics.
+- **Use OpenCode built-in tools for** — small text edits, non-code work, quick reads, shell commands, git.
+
+### How Serena is configured for this project
+
+- Context: `ide` (single-project, focused on symbolic tools; basic file/terminal tools are left to OpenCode).
+- Project is pre-activated on startup via `--project ~/SCRIPTS/CLAUDE/llama-monitor`.
+- On first use, Serena will run an onboarding pass to build memories about the project. Let it complete — this is a one-time cost.
+- Once onboarding is done, Serena will draw on its memories for better context about conventions, structure, and patterns.
+
+### Key Serena tools (names as the agent sees them)
+
+- `find_symbol` — locate a symbol by name across the project.
+- `symbol_overview` — file outline for a given file.
+- `find_references` — find all references to a symbol.
+- `replace_symbol_body` — replace the body of a function/method/struct implementation.
+- `insert_after_symbol` / `insert_before_symbol` — insert code relative to a symbol.
+- `safe_delete` — delete a symbol, propagating the change.
+- `rename_symbol` — rename a symbol across all references.
+
+### Example workflow
+
+To refactor the `AppConfig` struct:
+1. `find_symbol("AppConfig")` → get the struct's location.
+2. `find_references("AppConfig")` → see where it's used.
+3. `replace_symbol_body("AppConfig", <new body>)` → make the change.
+4. Run `cargo clippy` via shell to verify.
+
 ## UI/UX Collaboration
 
 For all UI/UX work (bars, cards, modals, layout changes, visual polish), use the screenshot harness to iterate with the user, not just code descriptions.

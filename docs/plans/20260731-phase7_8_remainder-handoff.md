@@ -660,10 +660,26 @@ implemented and receipt-backed; do not redo it unless a regression appears.
       - Screenshots captured in dark and light modes via the harness.
       - Auth pattern in both `spawn-wizard.js` and `presets.js` corrected to use
         `window.authHeaders()` instead of a bare `API_TOKEN` variable (not defined).
-      - **Still incomplete — this does not close item 1:** no caching of resolved pins, no
-        re-check on upstream repo changes, no explicit lifecycle/memory-status surfacing. The
-        backend preflight resolver (`resolve_speculative_model_preflight`) is live but uncached.
-        The "immutable sidecar" concept remains unimplemented beyond the one-shot resolution.
+       - **2026-08-01 checkpoint — pin cache, re-check, trust consent security fix, partial close:**
+         - Pin cache: `MtpPinCache` in `src/hf/mtp_pin_cache.rs` with 24-hour freshness window.
+           Persistent JSON store at `$CONFIG_DIR/mtp_pin_cache.json`. `init_pin_cache()` called at
+           startup in `main.rs`. Preflight endpoint checks cache first; stale pins re-resolve in
+           background. `GET /api/hf/mtp-pins` returns all cached pins with staleness info.
+         - Re-check: `POST /api/hf/mtp-preflight/recheck?repo=owner/repo` endpoint; re-resolves
+           repo via HF API, compares sha, updates pin. UI has re-check buttons in both Preset
+           Editor and Spawn Wizard.
+         - Security fix: companion model trust consent now validates against the companion model's
+           pin cache entry, not the main model. `validate_trust_consent_simple()` added in
+           `command.rs`. Launch blocked if companion needs trust but no pin cached or no consent.
+           `HF_TRUST_REMOTE_CODE=1` set if either main or companion needs trust.
+         - Cache management: `DELETE /api/hf/mtp-pins/{repo_id}` endpoint for pin removal.
+           `MtpPinCache::remove()` method.
+         - UI: pin info fields (revision, staleness, upstream change) shown in trust modals.
+           Re-check buttons wired.
+         - **Still incomplete — does not fully close item 1:** no explicit lifecycle/memory-status
+           surfacing (no dedicated cache management UI, no memory status display). The "immutable
+           sidecar" concept is implemented in the pin cache but not surfaced as a distinct UX.
+           `cargo clippy` clean; `cargo test` 1073/0/13; `cargo build --release` passes.
 2. ~~**Frequency penalty decision**~~ — done, see checkpoint above.
 3. **Legacy quant-style migration:** move the remaining `/api/hf/quantizers` and
    `/api/hf/community-picks` quick-pick behavior onto the typed community-source catalog while
