@@ -483,6 +483,18 @@ impl RapidMlxCommandBuilder {
         if let Some(ref config) = self.speculative_config
             && capabilities.contains("--speculative-config")
         {
+            // Rapid-MLX 0.11.1 resolves an HF repo sidecar with an unpinned
+            // snapshot_download(repo_id). It has no revision field in the MTP schema, so
+            // forwarding owner/repo would execute a mutable artifact different from the
+            // revision recorded by llama-monitor's preflight/consent flow. Only an immutable
+            // local companion path may launch until the runtime grows a pinned-revision API.
+            if let Some(repo) = config.companion_model_repo_id() {
+                anyhow::bail!(
+                    "External MTP companion {repo} cannot launch safely: Rapid-MLX 0.11.1 does \
+                     not support revision-pinned Hugging Face sidecars. Build or select an \
+                     immutable local sidecar directory instead."
+                );
+            }
             args.push("--speculative-config".to_string());
             args.push(config.to_cli_json()?);
 
@@ -491,7 +503,9 @@ impl RapidMlxCommandBuilder {
             if let Some(companion_path) = config.companion_model_local_path() {
                 let companion = std::path::Path::new(companion_path);
                 if let Some(vram) =
-                    crate::inference::rapid_mlx::sidecar_inventory::estimate_local_companion_vram(companion)
+                    crate::inference::rapid_mlx::sidecar_inventory::estimate_local_companion_vram(
+                        companion,
+                    )
                 {
                     let mb = vram / 1_048_576;
                     eprintln!(
@@ -607,10 +621,10 @@ impl RapidMlxCommandBuilder {
                     )?;
                     trust_remote_code_enabled = true;
                 }
-            } else if self.trust_remote_code_consent.is_some() {
-                // Consent was provided but no pin cached — this means the companion
-                // was preflighted (since consent was set) but the pin is missing.
-                // Block launch rather than silently skip validation.
+            } else {
+                // A missing pin means the companion was never authenticated to a concrete
+                // revision. Do not rely on a frontend preflight having run: direct API clients
+                // and lost cache state must fail closed as well.
                 anyhow::bail!(
                     "Cannot validate MTP companion model {}: no cached pin for {}. \
                          Re-run the preflight before launching.",
@@ -872,13 +886,13 @@ mod tests {
         init_test_pin_cache();
         let config = crate::inference::rapid_mlx::RapidMlxSpeculativeConfig {
             method: crate::inference::rapid_mlx::RapidMlxSpeculativeMethod::Mtp,
-            model: Some("org/model-mtp".into()),
+            model: Some("/models/model-mtp".into()),
             num_speculative_tokens: 4,
             disable_auto_k: true,
         };
         assert_eq!(
             config.to_cli_json().unwrap(),
-            r#"{"method":"mtp","model":"org/model-mtp","num_speculative_tokens":4,"disable_auto_k":true}"#
+            r#"{"method":"mtp","model":"/models/model-mtp","num_speculative_tokens":4,"disable_auto_k":true}"#
         );
         let launch = RapidMlxCommandBuilder::new(
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
@@ -889,9 +903,28 @@ mod tests {
         assert!(launch.args.windows(2).any(|pair| {
             pair == [
                 "--speculative-config",
-                r#"{"method":"mtp","model":"org/model-mtp","num_speculative_tokens":4,"disable_auto_k":true}"#,
+                r#"{"method":"mtp","model":"/models/model-mtp","num_speculative_tokens":4,"disable_auto_k":true}"#,
             ]
         }));
+    }
+
+    #[test]
+    fn external_hf_mtp_companion_fails_closed_until_runtime_supports_pinning() {
+        let config = crate::inference::rapid_mlx::RapidMlxSpeculativeConfig {
+            method: crate::inference::rapid_mlx::RapidMlxSpeculativeMethod::Mtp,
+            model: Some("org/model-mtp".into()),
+            num_speculative_tokens: 4,
+            disable_auto_k: false,
+        };
+
+        let error = RapidMlxCommandBuilder::new(
+            ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
+        )
+        .speculative_config(Some(config))
+        .build("rapid-mlx".into(), &ServeCapabilities::verified_baseline())
+        .unwrap_err();
+
+        assert!(error.to_string().contains("revision-pinned"));
     }
 
     #[test]

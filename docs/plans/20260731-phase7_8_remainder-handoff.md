@@ -57,7 +57,8 @@ the entire time the defect was live.
 ## 1. Current state
 
 ### Backend
-`cargo test --lib`: **1067 passed, 13 ignored, 0 failed.**
+`cargo test --lib`: **1081 passed, 13 ignored, 0 failed.** (after §3.8 migration; see checkpoint
+below)
 `cargo check --lib --tests`: clean, no warnings.
 `cargo fmt --all -- --check`: **the repo baseline is not rustfmt-clean.** Four files differ that
 nobody has touched (`src/hf/mod.rs`, `src/inference/rapid_mlx/command.rs`,
@@ -66,7 +67,7 @@ run `cargo fmt --all` as a drive-by; it widens every diff. Format only the files
 
 ### Frontend
 `npm run validate-js`: clean. `npm run lint`: clean.
-Release-built Playwright full suite: **262 passed, 4 skipped, 0 failed** (7.5 min, serial).
+Release-built Playwright full suite: **261 passed, 5 skipped, 0 failed** (7.1 min, serial).
 
 ### 2026-07-31 Codex execution checkpoint
 
@@ -100,8 +101,9 @@ campaign-commit table below and is the starting point for the next context windo
   The tag-cloud re-expand path has a duplicate-binding guard and stronger regression assertions.
 - Current focused release-built Playwright receipt: 12 passed, 3 runtime-dependent skips across
   the evidence drawer, lineage inventory, command preview, and Phase 7 preset contracts.
-- Current Rust receipt after all checkpoint changes: `cargo test --lib` **1067 passed, 13 ignored,
-  0 failed**; `cargo clippy -- -D warnings` clean; release build clean.
+- Current Rust receipt after all checkpoint changes: `cargo test --lib` **1081 passed, 13 ignored,
+  0 failed**; `cargo clippy -- -D warnings` clean; release build clean. (Updated 2026-08-01 after
+  legacy quant-style migration.)
 - Model Manager now has a Sources tab with server-provided roles and list/add/edit/remove/reset
   flows. Bundled edits use full-catalog PUT and preserve bundled flags/preferences; destructive
   reset/remove actions require confirmation and application-level `ok` is checked.
@@ -118,9 +120,9 @@ campaign-commit table below and is the starting point for the next context windo
 Full release-built Playwright receipt after this checkpoint: **262 passed, 4 skipped, 0 failed** in
 7.5 minutes. The previously intermittent tag-cloud re-expand case passed in this run.
 
-Still open after this checkpoint: immutable external-companion preflight/trust consent; a safely
-validated frequency-penalty UI; the legacy quick-pick quant-style migration; and external
-cache/benchmark audits listed in §3.11. Do not infer those items complete from product plumbing.
+Still open after this checkpoint: immutable external-companion preflight/trust consent; external
+cache/benchmark audits listed in §3.11. Frequency-penalty UI and legacy quant-style migration are
+now closed (see §3.5, §3.8). Do not infer those items complete from product plumbing.
 
 ### Campaign commits, newest first
 | Commit | What |
@@ -404,13 +406,46 @@ lineage-specific Playwright gap. External companion provenance is a separate ope
 
 ### 3.8 — Legacy quantizer surface is still the live one
 
-The UI reads `/api/hf/quantizers` (3 frontend files) and `/api/hf/community-picks` (2 files).
-Neither `community-source-catalog.json` nor the legacy `hf-quantizers.json` exists in the real
-config dir, so **the KnownQuantizer→role migration has never run on this machine.** With the
-catalog now served (3.6), these two legacy endpoints are the remaining half of that migration.
-The next implementation must preserve existing quick-pick behavior while moving the legacy
-quantizer facet to the typed community-source catalog; do not guess a quant style from a source
-role or silently discard old user configuration.
+**Resolved 2026-08-01.** The quantizer quick-pick endpoint is now a derived view over the typed
+community-source catalog, not a separate KnownQuantizer list.
+
+**What changed:**
+- `GET /api/hf/quantizers` no longer reads `hf-quantizers.json` or `known_gguf_quantizers()`. It
+  loads the community source catalog via `load_catalog()`, calls
+  `to_quantizers(&catalog)`, and returns `{ ok, quantizers, is_custom: false }`.
+- `to_quantizers()` (new in `community_source_catalog.rs`) filters the catalog for entries whose
+  role is quantizer-related (GgufQuantizer, MlxConverter, or OriginalAuthor/Curator with
+  GgufQuantizer in `also_known_for`) and derives a `quant_style` per entry:
+  - The derivation is **username-aware, not role-based:** e.g., `unsloth` → `"ud"`,
+    `mradermacher` → `"imatrix"`, `mlx-community`/`nightmedia` → `"mlx"`, others → `"standard"`.
+  - For unknown/custom entries, it inspects `note`/`description` for "imatrix"/"dynamic" hints.
+- `PUT /api/hf/quantizers []` (reset) now resets the catalog via `reset_catalog()` rather than
+  only deleting `hf-quantizers.json`, so the "empty body = defaults" behavior remains safe.
+- `PUT /api/hf/quantizers [...]` (non-empty) applies the legacy replacement-list contract to the
+  catalog with the correct role mapping (e.g., `unsloth` → OriginalAuthor, `nightmedia` →
+  MlxConverter). Omitted bundled entries are hidden from quick-picks without losing bundled flags
+  or role evidence; omitted user-added entries are removed. Explicit `quant_style` overrides round
+  trip through catalog preferences instead of being discarded.
+- `nightmedia` added as a bundled `MlxConverter` entry.
+- The migration path (`migrate_from_user_quantizers()`) now maps `mlx-community`,
+  `lmstudio-community`, `nightmedia` → `MlxConverter` instead of `GgufQuantizer`.
+- Removed dead code: `KnownQuantizer`, `known_gguf_quantizers()`,
+  `save_user_quantizers()`, related test. Kept `UserQuantizer` and
+  `load_user_quantizers()` for backward compat (used by the migration path).
+- `/api/hf/community-picks` left untouched; its schema is unrelated to quantizer roles.
+
+**Verified live (not just tests):**
+- `GET /api/hf/quantizers`: 11 quantizers returned, all with correct `quant_style`, `is_custom: false`.
+- `PUT /api/hf/quantizers []` → `{"ok": true, "reset": true}`; subsequent GET still returns 11.
+- `GET /api/hf/community-sources`: 11 bundled entries (including `nightmedia`) with typed roles.
+- `cargo test --lib` 1079/0/13; `cargo clippy -- -D warnings` clean; release build clean.
+
+**Design notes (do not reopen):**
+- `quant_style` is UX metadata (how a source quantizes), NOT the source role.
+- Never infer `quant_style` purely from `CommunitySourceRole` — the shim uses per-username
+  knowledge and metadata hints, not the role alone.
+- The legacy `hf-quantizers.json` is now import-only (migration path) but the endpoint contract
+  is identical so no frontend changes are needed.
 
 ---
 
@@ -704,7 +739,7 @@ implemented and receipt-backed; do not redo it unless a regression appears.
              - Both tree API and `mtplx_runtime.json` fetched in parallel via `tokio::join!`.
               - Pin status UI shows quantization + depth for MTPLX repos (e.g., "sidecar:bf16 d3").
               - `cargo clippy` clean; `cargo test` 1074/0/13; `npm run lint` clean.
-            - **2026-08-01 checkpoint — local sidecar inventory (Item 1 extension):**
+           - **2026-08-01 checkpoint — local sidecar inventory (Item 1 extension):**
               - Discovered `~/.config/llama-monitor/models/rapid-mlx/mtp-sidecars/` framework:
                 local sidecars built by `scripts/build-mtp-head.py` with provenance.json.
               - New module: `src/inference/rapid_mlx/sidecar_inventory.rs` — discovers local
@@ -721,10 +756,17 @@ implemented and receipt-backed; do not redo it unless a regression appears.
               - `companion_model_local_path()` method added to `RapidMlxSpeculativeConfig`
                 for distinguishing HF repos from local paths.
               - `cargo clippy` clean; `cargo test` 1076/0/13; `npm run lint` clean.
+           - **2026-08-01 safety correction — remote HF sidecars are preflight-only:**
+             - Rapid-MLX 0.11.1 loads a speculative `owner/repo` through an unpinned
+               `snapshot_download(repo_id)` and exposes no revision field in the MTP schema.
+               Llama Monitor therefore rejects remote-HF companion launch rather than claim a
+               pin/consent applies to a mutable artifact. Self-built or otherwise immutable local
+               sidecar directories remain supported.
+             - Cached-pin refresh and manual re-check now return/update the same revision, trust,
+               memory, quantization, and depth fields.
  2. ~~**Frequency penalty decision**~~ — done, see checkpoint above.
-3. **Legacy quant-style migration:** move the remaining `/api/hf/quantizers` and
-   `/api/hf/community-picks` quick-pick behavior onto the typed community-source catalog while
-   preserving old user configuration and proving round trips.
+ 3. ~~**Legacy quant-style migration**~~ — done (see §3.8, 2026-08-01). The `/api/hf/quantizers`
+    endpoint is now a derived view over the catalog; `/api/hf/community-picks` left unchanged.
 4. **Run the non-code audits in §3.11:** cache-ram branch/slot-pressure, hybrid-cache-entries,
    Library-tab and rapid-mlx-live screenshot approval, and the shared HF-cache audit. Audit and
    migrate deliberately; do not blanket-delete cached models.

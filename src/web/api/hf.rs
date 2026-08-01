@@ -296,15 +296,18 @@ fn api_hf_quantizers(
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
                 }
-                if let Some(user_list) = crate::hf::load_user_quantizers(&cfg.config_dir) {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                        &serde_json::json!({ "ok": true, "quantizers": user_list, "is_custom": true }),
-                    )));
-                }
-                let defaults: Vec<crate::hf::UserQuantizer> = crate::hf::known_gguf_quantizers()
-                    .iter().map(Into::into).collect();
+                // The quantizer list is now a derived view over the typed community-source
+                // catalog rather than a separate KnownQuantizer struct. This ensures:
+                // - Single source of truth for who does what
+                // - User edits in the catalog are respected
+                // - Existing quick-pick behavior (quant_style, etc) is preserved
+                let catalog =
+                    crate::models::community_source_catalog::load_catalog(&cfg.config_dir);
+                let quantizers =
+                    crate::models::community_source_catalog::to_quantizers(&catalog);
+                // is_custom is false: the list is catalog-derived, not user-overridden
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                    &serde_json::json!({ "ok": true, "quantizers": defaults, "is_custom": false }),
+                    &serde_json::json!({ "ok": true, "quantizers": quantizers, "is_custom": false }),
                 )))
             }
         })
@@ -328,14 +331,46 @@ fn api_hf_quantizers_put(
                     if !check_api_token(&auth, &cfg) {
                         return Ok(unauthorized_api_token());
                     }
-                    // Empty list = reset to defaults (remove user file)
+
+                    // Empty list = reset to defaults (remove legacy file + reset catalog)
                     if body.is_empty() {
                         let _ = std::fs::remove_file(cfg.config_dir.join("hf-quantizers.json"));
+                        return match crate::models::community_source_catalog::reset_catalog(
+                            &cfg.config_dir,
+                        ) {
+                            Ok(_) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(
+                                    &serde_json::json!({ "ok": true, "reset": true }),
+                                ),
+                            )),
+                            Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(
+                                    &serde_json::json!({ "ok": false, "error": format!("{e}") }),
+                                ),
+                            )),
+                        };
+                    }
+
+                    // A non-empty legacy payload is a replacement list, not a partial update.
+                    // The catalog helper preserves bundled role metadata and reports conflicts
+                    // instead of silently accepting a payload it could not apply.
+                    let mut catalog =
+                        crate::models::community_source_catalog::load_catalog(&cfg.config_dir);
+                    if let Err(e) = crate::models::community_source_catalog::replace_quantizers(
+                        &mut catalog,
+                        body,
+                    ) {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({ "ok": true, "reset": true })),
+                            warp::reply::json(
+                                &serde_json::json!({ "ok": false, "error": format!("{e}") }),
+                            ),
                         ));
                     }
-                    match crate::hf::save_user_quantizers(&cfg.config_dir, &body) {
+
+                    match crate::models::community_source_catalog::save_catalog(
+                        &cfg.config_dir,
+                        &catalog,
+                    ) {
                         Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::json(&serde_json::json!({ "ok": true })),
                         )),
@@ -799,25 +834,20 @@ fn api_hf_mtp_preflight(
                     let force_recheck = params.get("force").map(|v| v == "1").unwrap_or(false);
 
                     // Check cache first (unless force-recheck)
-                    if !force_recheck && let Some(pin) = cache.get(&repo) {
-                        // Return cached data; resolve fresh if stale
-                        let stale = pin.is_stale();
-                        if stale {
-                            // Resolve fresh in background and cache
-                            if let Ok(fresh) =
+                    if !force_recheck && let Some(mut pin) = cache.get(&repo) {
+                        // Refresh a stale pin before replying, so the revision, consent state,
+                        // and memory metadata shown to the user describe the same cached pin
+                        // that launch validation will consult.
+                        let mut stale = pin.is_stale();
+                        if stale
+                            && let Ok(fresh) =
                                 crate::hf::resolve_speculative_model_preflight(&repo).await
-                            {
-                                let mut new_pin = pin.clone();
-                                new_pin.revision = fresh.revision.clone();
-                                new_pin.trust_remote_code_required =
-                                    fresh.trust_remote_code_required;
-                                new_pin.estimated_memory_bytes =
-                                    fresh.estimated_memory_bytes;
-                                new_pin.mtp_sidecar = fresh.mtp_sidecar;
-                                new_pin.mtp_depth_max = fresh.mtp_depth_max;
-                                new_pin.resolved_at = chrono::Utc::now().to_rfc3339();
-                                let _ = cache.insert(new_pin);
-                            }
+                        {
+                            let mut new_pin = pin.clone();
+                            new_pin.refresh_from_preflight(&fresh);
+                            let _ = cache.insert(new_pin);
+                            pin = cache.get(&repo).unwrap_or(pin);
+                            stale = pin.is_stale();
                         }
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::json(&serde_json::json!({

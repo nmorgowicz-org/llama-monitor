@@ -3317,7 +3317,7 @@
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-rapid-speculative-source">MTP source</label>
-                                    <select class="pe-select" id="modal-rapid-speculative-source"><option value="embedded">Embedded prediction heads</option><option value="external">External sidecar model</option></select>
+                                    <select class="pe-select" id="modal-rapid-speculative-source"><option value="embedded">Embedded prediction heads</option><option value="external">External local sidecar</option></select>
                                 </div>
                                 <div class="pe-field" id="modal-rapid-speculative-sidecars-wrap" style="display:none;">
                                     <label class="pe-label">Available sidecars</label>
@@ -3325,7 +3325,8 @@
                                 </div>
                                 <div class="pe-field" id="modal-rapid-speculative-model-wrap">
                                     <label class="pe-label" for="modal-rapid-speculative-model">Resolved sidecar</label>
-                                    <input class="pe-input" id="modal-rapid-speculative-model" placeholder="owner/repo or /absolute/model/path">
+                                    <input class="pe-input" id="modal-rapid-speculative-model" placeholder="/absolute/local-sidecar-path">
+                                    <div class="pe-field-hint">Remote Hugging Face sidecars can be preflighted, but Rapid 0.11.1 cannot launch them at a pinned revision. Use an immutable local sidecar.</div>
                                 </div>
                                 <div class="pe-field" id="modal-rapid-speculative-pin-status-wrap" style="display:none;">
                                     <div class="pe-field-hint" id="modal-rapid-speculative-pin-status" style="display:flex; align-items:center; gap:6px; font-size:12px;"></div>
@@ -3974,9 +3975,9 @@
                                      <label for="spawn-rapid-speculative-source">MTP source</label>
                                      <select id="spawn-rapid-speculative-source">
                                          <option value="embedded" selected>Embedded prediction heads</option>
-                                         <option value="external">External sidecar model</option>
+                                         <option value="external">External local sidecar</option>
                                      </select>
-                                      <div class="field-hint">Use an external sidecar only when its exact model and revision have been resolved separately.</div>
+                                      <div class="field-hint">Use an immutable local sidecar. Remote Hugging Face sidecars can be preflighted but Rapid 0.11.1 cannot launch them at a pinned revision.</div>
                                   </div>
                                     <div class="hardware-field" id="spawn-rapid-speculative-sidecars-wrap" style="display:none;">
                                         <label>Available sidecars</label>
@@ -3984,8 +3985,8 @@
                                     </div>
                                     <div class="hardware-field" id="spawn-rapid-speculative-model-wrap" style="display:none;">
                                        <label for="spawn-rapid-speculative-model">Resolved sidecar</label>
-                                       <input type="text" id="spawn-rapid-speculative-model" placeholder="owner/repo or /absolute/model/path">
-                                       <div class="field-hint">No mutable <code>repo@main</code> consent is inferred here.</div>
+                                       <input type="text" id="spawn-rapid-speculative-model" placeholder="/absolute/local-sidecar-path">
+                                       <div class="field-hint">Remote <code>owner/repo</code> references are preflight-only; select a local immutable sidecar to launch.</div>
                                    </div>
                                     <div class="hardware-field" id="spawn-rapid-speculative-pin-status-wrap" style="display:none;">
                                         <div class="field-hint" id="spawn-rapid-speculative-pin-status" style="display:flex; align-items:center; gap:6px; font-size:12px;"></div>

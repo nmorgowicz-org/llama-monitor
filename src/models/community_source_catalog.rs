@@ -163,6 +163,13 @@ pub struct CommunitySourcePreferences {
     /// Custom categories the user recognizes
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_categories: Vec<String>,
+    /// Bundled quantizers hidden from the legacy quick-pick surface.
+    /// They remain in the authoritative role catalog and reset restores them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_quantizers: Vec<String>,
+    /// Explicit legacy quick-pick styles keyed by HF username.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub quantizer_styles: std::collections::BTreeMap<String, String>,
 }
 
 /// Configuration directory constants.
@@ -299,6 +306,186 @@ pub fn entries_for_username<'a>(
         .collect()
 }
 
+fn is_quantizer_entry(entry: &CommunitySourceEntry) -> bool {
+    match entry.role {
+        CommunitySourceRole::GgufQuantizer | CommunitySourceRole::MlxConverter => true,
+        CommunitySourceRole::Curator | CommunitySourceRole::OriginalAuthor => entry
+            .also_known_for
+            .contains(&CommunitySourceRole::GgufQuantizer),
+        _ => false,
+    }
+}
+
+fn legacy_quantizer_metadata(
+    username: &str,
+) -> (CommunitySourceRole, Vec<CommunitySourceRole>, Vec<String>) {
+    match username.to_ascii_lowercase().as_str() {
+        "unsloth" => (
+            CommunitySourceRole::OriginalAuthor,
+            vec![CommunitySourceRole::GgufQuantizer],
+            vec!["updated-finetune".into()],
+        ),
+        "davidau" => (
+            CommunitySourceRole::OriginalAuthor,
+            vec![
+                CommunitySourceRole::MergerDistiller,
+                CommunitySourceRole::GgufQuantizer,
+            ],
+            vec!["heretic".into(), "uncensored".into()],
+        ),
+        "mudler" => (
+            CommunitySourceRole::Curator,
+            vec![CommunitySourceRole::GgufQuantizer],
+            Vec::new(),
+        ),
+        "mlx-community" | "lmstudio-community" | "nightmedia" => {
+            (CommunitySourceRole::MlxConverter, Vec::new(), Vec::new())
+        }
+        _ => (CommunitySourceRole::GgufQuantizer, Vec::new(), Vec::new()),
+    }
+}
+
+/// Apply the legacy `/api/hf/quantizers` replacement-list contract to the catalog.
+///
+/// Omitted bundled entries are hidden from quick-picks but retain their role evidence and
+/// bundled flag. Omitted user-added quantizer entries are removed, matching the old list's
+/// behavior. Changes are atomic: a rejected entry leaves the input catalog untouched.
+pub fn replace_quantizers(
+    catalog: &mut CommunitySourceCatalog,
+    quantizers: Vec<crate::hf::UserQuantizer>,
+) -> anyhow::Result<()> {
+    let mut next = catalog.clone();
+    let mut submitted = std::collections::HashSet::new();
+
+    for quantizer in &quantizers {
+        let username = quantizer.username.trim();
+        if username.is_empty() {
+            return Err(anyhow::anyhow!("Quantizer username cannot be empty"));
+        }
+        if !submitted.insert(username.to_string()) {
+            return Err(anyhow::anyhow!("Duplicate quantizer username: {username}"));
+        }
+
+        if let Some(existing) = next
+            .entries
+            .iter_mut()
+            .find(|entry| entry.username == username && is_quantizer_entry(entry))
+        {
+            existing.display_name = quantizer.display_name.clone();
+            existing.description = quantizer.description.clone();
+            existing.note = quantizer.note.clone();
+            next.preferences
+                .quantizer_styles
+                .insert(username.to_string(), quantizer.quant_style.clone());
+        } else {
+            let (role, also_known_for, categories) = legacy_quantizer_metadata(username);
+            upsert_entry(
+                &mut next,
+                CommunitySourceEntry {
+                    username: username.to_string(),
+                    display_name: quantizer.display_name.clone(),
+                    description: quantizer.description.clone(),
+                    role,
+                    also_known_for,
+                    categories,
+                    note: quantizer.note.clone(),
+                    bundled: false,
+                },
+            )?;
+            next.preferences
+                .quantizer_styles
+                .insert(username.to_string(), quantizer.quant_style.clone());
+        }
+    }
+
+    next.entries.retain(|entry| {
+        !is_quantizer_entry(entry) || entry.bundled || submitted.contains(&entry.username)
+    });
+    next.preferences
+        .hidden_quantizers
+        .retain(|username| submitted.contains(username));
+    next.preferences
+        .quantizer_styles
+        .retain(|username, _| submitted.contains(username));
+    for entry in &next.entries {
+        if is_quantizer_entry(entry)
+            && entry.bundled
+            && !submitted.contains(&entry.username)
+            && !next.preferences.hidden_quantizers.contains(&entry.username)
+        {
+            next.preferences
+                .hidden_quantizers
+                .push(entry.username.clone());
+        }
+    }
+
+    *catalog = next;
+    Ok(())
+}
+
+/// Derive a backward-compatible quantizer list from the catalog for the
+/// `/api/hf/quantizers` endpoint.
+///
+/// Rules:
+/// - Include entries whose primary role is quantizer-related (GgufQuantizer,
+///   MlxConverter) or whose also_known_for includes GgufQuantizer.
+/// - Do NOT include OriginalAuthor entries unless they also have GgufQuantizer
+///   in also_known_for (i.e. they actually publish quants).
+/// - quant_style is NEVER guessed from role alone; it uses per-username
+///   heuristics (and for unknown/custom entries, note/description hints).
+/// - This keeps the UI behavior identical (same classes, same tooltips).
+pub fn to_quantizers(catalog: &CommunitySourceCatalog) -> Vec<crate::hf::UserQuantizer> {
+    catalog
+        .entries
+        .iter()
+        .filter_map(|e| {
+            if !is_quantizer_entry(e) || catalog.preferences.hidden_quantizers.contains(&e.username)
+            {
+                return None;
+            }
+
+            // Derive quant_style from username and metadata — never from role alone.
+            let username_lower = e.username.to_ascii_lowercase();
+            let derived_style = match username_lower.as_str() {
+                "mradermacher" => "imatrix",
+                "unsloth" => "ud",
+                "mlx-community" | "nightmedia" => "mlx",
+                "lmstudio-community" => "mlx",
+                // For known standard quantizers:
+                "bartowski" | "llmfan46" | "davidau" | "mudler" | "jackrong" | "prithivmlmods" => {
+                    "standard"
+                }
+                // For unknown/custom entries, inspect note/description for hints
+                _ => {
+                    let note = e.note.as_deref().unwrap_or("");
+                    let desc = e.description.to_ascii_lowercase();
+                    let text = format!("{note} {desc}");
+                    if text.contains("imatrix") || text.contains(".i1-") {
+                        "imatrix"
+                    } else if text.contains("ud ") || text.contains("dynamic") {
+                        "ud"
+                    } else {
+                        "standard"
+                    }
+                }
+            };
+
+            Some(crate::hf::UserQuantizer {
+                username: e.username.clone(),
+                display_name: e.display_name.clone(),
+                description: e.description.clone(),
+                quant_style: catalog
+                    .preferences
+                    .quantizer_styles
+                    .get(&e.username)
+                    .cloned()
+                    .unwrap_or_else(|| derived_style.to_string()),
+                note: e.note.clone(),
+            })
+        })
+        .collect()
+}
+
 /// Build the default (bundled) catalog with known community contributors.
 ///
 /// This encodes the current knowledge of who does what in the ecosystem without
@@ -408,6 +595,16 @@ fn default_catalog() -> CommunitySourceCatalog {
                 note: None,
                 bundled: true,
             },
+            CommunitySourceEntry {
+                username: "nightmedia".into(),
+                display_name: "nightmedia".into(),
+                description: "MLX model conversions, high-quality MLX quantizations.".into(),
+                role: CommunitySourceRole::MlxConverter,
+                also_known_for: Vec::new(),
+                categories: Vec::new(),
+                note: None,
+                bundled: true,
+            },
         ],
         preferences: CommunitySourcePreferences::default(),
     }
@@ -418,16 +615,26 @@ fn default_catalog() -> CommunitySourceCatalog {
 fn migrate_from_user_quantizers(
     quantizers: Vec<crate::hf::UserQuantizer>,
 ) -> CommunitySourceCatalog {
+    let quantizer_styles = quantizers
+        .iter()
+        .map(|quantizer| (quantizer.username.clone(), quantizer.quant_style.clone()))
+        .collect();
     let entries: Vec<CommunitySourceEntry> = quantizers
         .into_iter()
         .map(|q| {
             let username_lower = q.username.to_ascii_lowercase();
+            let is_mlx = username_lower == "mlx-community"
+                || username_lower == "lmstudio-community"
+                || username_lower == "nightmedia";
+
             let role = if username_lower == "unsloth" {
                 CommunitySourceRole::OriginalAuthor
             } else if username_lower == "mudler" {
                 CommunitySourceRole::Curator
             } else if username_lower == "davidau" {
                 CommunitySourceRole::OriginalAuthor
+            } else if is_mlx {
+                CommunitySourceRole::MlxConverter
             } else {
                 CommunitySourceRole::GgufQuantizer
             };
@@ -453,6 +660,13 @@ fn migrate_from_user_quantizers(
                         Vec::new()
                     }
                 }
+                CommunitySourceRole::Curator => {
+                    if username_lower == "mudler" {
+                        vec![CommunitySourceRole::GgufQuantizer]
+                    } else {
+                        Vec::new()
+                    }
+                }
                 _ => Vec::new(),
             };
 
@@ -472,7 +686,10 @@ fn migrate_from_user_quantizers(
     CommunitySourceCatalog {
         version: 1,
         entries,
-        preferences: CommunitySourcePreferences::default(),
+        preferences: CommunitySourcePreferences {
+            quantizer_styles,
+            ..CommunitySourcePreferences::default()
+        },
     }
 }
 
@@ -495,6 +712,58 @@ mod tests {
         let mlx_community = entries_for_username(&catalog, "mlx-community");
         assert_eq!(mlx_community.len(), 1);
         assert_eq!(mlx_community[0].role, CommunitySourceRole::MlxConverter);
+
+        let nightmedia = entries_for_username(&catalog, "nightmedia");
+        assert_eq!(nightmedia.len(), 1);
+        assert_eq!(nightmedia[0].role, CommunitySourceRole::MlxConverter);
+    }
+
+    #[test]
+    fn to_quantizers_preserves_quant_styles() {
+        let catalog = default_catalog();
+        let q = to_quantizers(&catalog);
+        let by_user: std::collections::HashMap<_, _> =
+            q.iter().map(|u| (u.username.clone(), u)).collect();
+
+        // Check key users (use actual catalog usernames, which preserve case)
+        assert_eq!(by_user.get("bartowski").unwrap().quant_style, "standard");
+        assert_eq!(by_user.get("mradermacher").unwrap().quant_style, "imatrix");
+        assert_eq!(by_user.get("unsloth").unwrap().quant_style, "ud");
+        assert_eq!(by_user.get("mlx-community").unwrap().quant_style, "mlx");
+        assert_eq!(
+            by_user.get("lmstudio-community").unwrap().quant_style,
+            "mlx"
+        );
+        assert_eq!(by_user.get("nightmedia").unwrap().quant_style, "mlx");
+        assert_eq!(by_user.get("llmfan46").unwrap().quant_style, "standard");
+        assert_eq!(by_user.get("DavidAU").unwrap().quant_style, "standard");
+        assert_eq!(by_user.get("mudler").unwrap().quant_style, "standard");
+        assert_eq!(by_user.get("Jackrong").unwrap().quant_style, "standard");
+        assert_eq!(
+            by_user.get("prithivMLmods").unwrap().quant_style,
+            "standard"
+        );
+
+        // Ensure we get all 11 quantizers from bundled entries
+        assert!(q.len() >= 11, "to_quantizers returned too few: {}", q.len());
+    }
+
+    #[test]
+    fn to_quantizers_includes_original_author_with_gguf_quantizer_role() {
+        let catalog = default_catalog();
+        let q = to_quantizers(&catalog);
+        let usernames: Vec<_> = q.iter().map(|u| u.username.as_str()).collect();
+        // unsloth (OriginalAuthor with also_known_for=[GgufQuantizer]) should be included
+        assert!(
+            usernames.contains(&"unsloth"),
+            "unsloth should appear in quantizers"
+        );
+        // DavidAU (OriginalAuthor with also_known_for=[MergerDistiller, GgufQuantizer]) should
+        // be included
+        assert!(
+            usernames.contains(&"DavidAU"),
+            "DavidAU should appear in quantizers"
+        );
     }
 
     #[test]
@@ -621,5 +890,72 @@ mod tests {
         let david = entries_for_username(&catalog, "davidau");
         assert_eq!(david[0].role, CommunitySourceRole::OriginalAuthor);
         assert!(david[0].categories.contains(&"heretic".into()));
+    }
+
+    #[test]
+    fn replace_quantizers_preserves_bundled_entries_and_explicit_style() {
+        let mut catalog = default_catalog();
+        let mut submitted = to_quantizers(&catalog);
+        submitted.retain(|quantizer| quantizer.username == "bartowski");
+        submitted[0].quant_style = "imatrix".into();
+
+        replace_quantizers(&mut catalog, submitted).unwrap();
+
+        assert_eq!(catalog.entries.len(), 11);
+        assert!(entries_for_username(&catalog, "bartowski")[0].bundled);
+        assert_eq!(to_quantizers(&catalog).len(), 1);
+        assert_eq!(to_quantizers(&catalog)[0].quant_style, "imatrix");
+        assert!(
+            catalog
+                .preferences
+                .hidden_quantizers
+                .contains(&"mradermacher".to_string())
+        );
+    }
+
+    #[test]
+    fn replace_quantizers_removes_omitted_user_entry_and_is_atomic_on_conflict() {
+        let mut catalog = default_catalog();
+        let mut submitted = to_quantizers(&catalog);
+        submitted.push(crate::hf::UserQuantizer {
+            username: "myuser".into(),
+            display_name: "My User".into(),
+            description: "Custom quantizer".into(),
+            quant_style: "standard".into(),
+            note: None,
+        });
+        replace_quantizers(&mut catalog, submitted).unwrap();
+        assert_eq!(entries_for_username(&catalog, "myuser").len(), 1);
+
+        let without_custom: Vec<_> = to_quantizers(&catalog)
+            .into_iter()
+            .filter(|quantizer| quantizer.username != "myuser")
+            .collect();
+        replace_quantizers(&mut catalog, without_custom).unwrap();
+        assert!(entries_for_username(&catalog, "myuser").is_empty());
+
+        catalog.entries.push(CommunitySourceEntry {
+            username: "author-only".into(),
+            display_name: "Author only".into(),
+            description: "An original author".into(),
+            role: CommunitySourceRole::OriginalAuthor,
+            also_known_for: Vec::new(),
+            categories: Vec::new(),
+            note: None,
+            bundled: false,
+        });
+        let before = serde_json::to_string(&catalog).unwrap();
+        let result = replace_quantizers(
+            &mut catalog,
+            vec![crate::hf::UserQuantizer {
+                username: "author-only".into(),
+                display_name: "Author only".into(),
+                description: "Should not overwrite role evidence".into(),
+                quant_style: "standard".into(),
+                note: None,
+            }],
+        );
+        assert!(result.is_err());
+        assert_eq!(serde_json::to_string(&catalog).unwrap(), before);
     }
 }

@@ -107,7 +107,11 @@ pub fn discover_sidecars() -> Result<Vec<SidecarEntry>> {
         }
 
         // Skip hidden/dot directories (quarantine dirs start with dot).
-        if dir_path.file_name().and_then(|n| n.to_str()).is_some_and(|name| name.starts_with('.')) {
+        if dir_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|name| name.starts_with('.'))
+        {
             continue;
         }
 
@@ -201,7 +205,8 @@ fn parse_provenance(
     // Quantization hint: if the slug or bf16_source contains quant info
     let quantization = {
         let slug_lower = slug.to_lowercase();
-        if slug_lower.contains("8bit") || slug_lower.contains("q8") || slug_lower.contains("mxfp8") {
+        if slug_lower.contains("8bit") || slug_lower.contains("q8") || slug_lower.contains("mxfp8")
+        {
             Some("8-bit".to_string())
         } else if slug_lower.contains("4bit") || slug_lower.contains("q4") {
             Some("4-bit".to_string())
@@ -211,18 +216,14 @@ fn parse_provenance(
     };
 
     // File size estimate
-    let estimated_memory_bytes = weights_path
-        .metadata()
-        .ok()
-        .map(|m| m.len())
-        .or_else(|| {
-            // If the weights file doesn't exist yet, we can't estimate.
-            // But the provenance might have a size from the build time.
-            provenance
-                .get("validation")
-                .and_then(|v| v.get("estimated_memory_bytes"))
-                .and_then(|v| v.as_u64())
-        });
+    let estimated_memory_bytes = weights_path.metadata().ok().map(|m| m.len()).or_else(|| {
+        // If the weights file doesn't exist yet, we can't estimate.
+        // But the provenance might have a size from the build time.
+        provenance
+            .get("validation")
+            .and_then(|v| v.get("estimated_memory_bytes"))
+            .and_then(|v| v.as_u64())
+    });
 
     Ok(SidecarEntry {
         slug: slug.to_string(),
@@ -258,7 +259,9 @@ pub fn estimate_local_companion_vram(companion_path: &Path) -> Option<u64> {
 #[allow(dead_code)]
 pub fn find_sidecar_for_path(companion_path: &Path) -> Option<SidecarEntry> {
     discover_sidecars().ok().and_then(|entries| {
-        entries.into_iter().find(|e| e.path == companion_path.to_string_lossy())
+        entries
+            .into_iter()
+            .find(|e| e.path == companion_path.to_string_lossy())
     })
 }
 

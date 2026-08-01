@@ -353,142 +353,33 @@ pub struct HfFileInfo {
     pub size: Option<u64>,
 }
 
-// ── Known GGUF quantizer list ─────────────────────────────────────────────────
+// ── Quantizer shim types (backward compat) ────────────────────────────────────
+//
+// These are kept solely for the /api/hf/quantizers endpoint contract:
+// the frontend still expects UserQuantizer-shaped objects (username,
+// display_name, description, quant_style, note). The actual source of
+// truth is the CommunitySourceCatalog; `to_quantizers()` in
+// `community_source_catalog` derives this shape on the fly.
 
-/// Curated list of well-known GGUF quantizers shown as quick-picks in the wizard.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct KnownQuantizer {
-    pub username: String,
-    pub display_name: String,
-    pub description: String,
-    pub quant_style: &'static str, // "standard" | "imatrix" | "ud"
-    pub note: Option<String>,
-}
-
-/// User-editable version of KnownQuantizer (all owned strings, round-trips through JSON).
+/// Shape expected by frontend for quick-pick buttons and the quantizer editor.
+///
+/// Backward-compatible with legacy hf-quantizers.json for migration.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UserQuantizer {
     pub username: String,
     pub display_name: String,
     pub description: String,
-    pub quant_style: String, // "standard" | "imatrix" | "ud"
+    pub quant_style: String, // "standard" | "imatrix" | "ud" | "mlx"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
 
-impl From<&KnownQuantizer> for UserQuantizer {
-    fn from(q: &KnownQuantizer) -> Self {
-        UserQuantizer {
-            username: q.username.clone(),
-            display_name: q.display_name.clone(),
-            description: q.description.clone(),
-            quant_style: q.quant_style.to_string(),
-            note: q.note.clone(),
-        }
-    }
-}
-
 /// Load user-customized quantizers from `config_dir/hf-quantizers.json`.
-/// Returns None if the file does not exist (caller should fall back to defaults).
+/// Used only by the community-source-catalog migration path.
 pub fn load_user_quantizers(config_dir: &std::path::Path) -> Option<Vec<UserQuantizer>> {
     let path = config_dir.join("hf-quantizers.json");
     let text = std::fs::read_to_string(&path).ok()?;
     serde_json::from_str(&text).ok()
-}
-
-/// Persist user-customized quantizers to `config_dir/hf-quantizers.json`.
-pub fn save_user_quantizers(
-    config_dir: &std::path::Path,
-    quantizers: &[UserQuantizer],
-) -> Result<()> {
-    let path = config_dir.join("hf-quantizers.json");
-    let json =
-        serde_json::to_string_pretty(quantizers).context("Failed to serialize quantizers")?;
-    std::fs::write(&path, json).context("Failed to write hf-quantizers.json")?;
-    Ok(())
-}
-
-pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
-    vec![
-        KnownQuantizer {
-            username: "bartowski".into(),
-            display_name: "bartowski".into(),
-            description: "Standard GGUF quants — Q4_K_M through Q8_0. Most popular, extremely reliable.".into(),
-            quant_style: "standard",
-            note: None,
-        },
-        KnownQuantizer {
-            username: "mradermacher".into(),
-            display_name: "mradermacher".into(),
-            description: "imatrix specialist. i1-* files use importance calibration for better quality at same bpw. Validates quantizations.".into(),
-            quant_style: "imatrix",
-            note: Some("i1-* files are imatrix quants; others are standard".into()),
-        },
-        KnownQuantizer {
-            username: "unsloth".into(),
-            display_name: "Unsloth".into(),
-            description: "UD (Unsloth Dynamic) quants — mixed bpw per layer. Excellent quality/size. Also does fine-tuning and finetune-GGUF releases.".into(),
-            quant_style: "ud",
-            note: Some("UD-* files are dynamic quants; projector recommendations depend on the model family".into()),
-        },
-        KnownQuantizer {
-            username: "mlx-community".into(),
-            display_name: "MLX Community".into(),
-            description: "Official MLX community org — native MLX models (parakeet TTS, gpt-oss, Kimi-K2.5) plus optimized MLX conversions.".into(),
-            quant_style: "mlx",
-            note: None,
-        },
-        KnownQuantizer {
-            username: "lmstudio-community".into(),
-            display_name: "LM Studio".into(),
-            description: "Primary MLX quant provider (all major models in MLX format) plus GGUF conversions.".into(),
-            quant_style: "mlx",
-            note: None,
-        },
-        KnownQuantizer {
-            username: "nightmedia".into(),
-            display_name: "nightmedia".into(),
-            description: "MLX model conversions, high-quality MLX quantizations.".into(),
-            quant_style: "mlx",
-            note: None,
-        },
-        KnownQuantizer {
-            username: "llmfan46".into(),
-            display_name: "llmfan46".into(),
-            description: "Community GGUF releases, wide model coverage.".into(),
-            quant_style: "standard",
-            note: None,
-        },
-        // Community finetune quantizers of interest
-        KnownQuantizer {
-            username: "DavidAU".into(),
-            display_name: "DavidAU".into(),
-            description: "Fine-tune and merge specialist, often heretic/abliterated and uncensored variants.".into(),
-            quant_style: "standard",
-            note: None,
-        },
-        KnownQuantizer {
-            username: "mudler".into(),
-            display_name: "mudler".into(),
-            description: "LocalAI author. Curated model selections and gguf releases.".into(),
-            quant_style: "standard",
-            note: None,
-        },
-        KnownQuantizer {
-            username: "Jackrong".into(),
-            display_name: "Jackrong".into(),
-            description: "GGUF releases, often larger models.".into(),
-            quant_style: "standard",
-            note: None,
-        },
-        KnownQuantizer {
-            username: "prithivMLmods".into(),
-            display_name: "prithivMLmods".into(),
-            description: "Wide coverage of recent models, high-quality GGUF quants.".into(),
-            quant_style: "standard",
-            note: None,
-        },
-    ]
 }
 
 // ── Core API functions ────────────────────────────────────────────────────────
@@ -647,9 +538,7 @@ async fn fetch_mtplx_runtime_json(
     revision: &str,
     token: Option<&str>,
 ) -> Option<serde_json::Value> {
-    let url = format!(
-        "https://huggingface.co/{repo_id}/resolve/{revision}/mtplx_runtime.json"
-    );
+    let url = format!("https://huggingface.co/{repo_id}/resolve/{revision}/mtplx_runtime.json");
     let mut req = HF_HTTP_CLIENT.get(&url);
     if let Some(tok) = token {
         req = req.bearer_auth(tok);
@@ -717,9 +606,7 @@ async fn fetch_mtp_safetensors_size(
     revision: &str,
     token: Option<&str>,
 ) -> Option<u64> {
-    let url = format!(
-        "https://huggingface.co/api/models/{repo_id}/tree/{revision}"
-    );
+    let url = format!("https://huggingface.co/api/models/{repo_id}/tree/{revision}");
     let mut req = HF_HTTP_CLIENT.get(&url);
     if let Some(tok) = token {
         req = req.bearer_auth(tok);
@@ -733,18 +620,12 @@ async fn fetch_mtp_safetensors_size(
     for file in &files {
         let path = file.get("path").and_then(|v| v.as_str())?;
         if path == "mtp.safetensors"
-            || (path.starts_with("mtp-")
-                && path.ends_with(".safetensors")
-                && path.contains("of-"))
+            || (path.starts_with("mtp-") && path.ends_with(".safetensors") && path.contains("of-"))
         {
             total += file.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
         }
     }
-    if total > 0 {
-        Some(total)
-    } else {
-        None
-    }
+    if total > 0 { Some(total) } else { None }
 }
 
 /// Mirrors the `main_class`/`auto_map` heuristic in
@@ -3437,20 +3318,6 @@ mod tests {
                 .is_empty(),
             "missing Hub metadata must stay unpinned rather than inventing main"
         );
-    }
-
-    #[test]
-    fn test_known_quantizers_has_expected_entries() {
-        let quantizers = known_gguf_quantizers();
-        let usernames: Vec<&str> = quantizers.iter().map(|q| q.username.as_str()).collect();
-        assert!(usernames.contains(&"bartowski"));
-        assert!(usernames.contains(&"mradermacher"));
-        assert!(usernames.contains(&"unsloth"));
-        assert!(usernames.contains(&"DavidAU"));
-        assert!(usernames.contains(&"mudler"));
-        assert!(usernames.contains(&"Jackrong"));
-        assert!(usernames.contains(&"llmfan46"));
-        assert!(usernames.contains(&"prithivMLmods"));
     }
 
     #[test]

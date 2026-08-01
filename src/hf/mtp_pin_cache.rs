@@ -72,6 +72,16 @@ impl MtpPin {
             })
             .unwrap_or(true)
     }
+
+    /// Refresh every field that comes from the read-only HF preflight.
+    pub fn refresh_from_preflight(&mut self, fresh: &crate::hf::SpeculativeModelPreflight) {
+        self.revision = fresh.revision.clone();
+        self.trust_remote_code_required = fresh.trust_remote_code_required;
+        self.estimated_memory_bytes = fresh.estimated_memory_bytes;
+        self.mtp_sidecar = fresh.mtp_sidecar.clone();
+        self.mtp_depth_max = fresh.mtp_depth_max;
+        self.resolved_at = chrono::Utc::now().to_rfc3339();
+    }
 }
 
 /// On-disk shape.
@@ -143,12 +153,10 @@ impl MtpPinCache {
         new_pin.last_recheck_at = chrono::Utc::now().to_rfc3339();
         new_pin.upstream_unchanged = Some(upstream_unchanged);
 
-        // If the upstream sha changed, update the pin with the new revision.
-        if !upstream_unchanged {
-            new_pin.revision = fresh.revision.clone();
-            new_pin.trust_remote_code_required = fresh.trust_remote_code_required;
-            new_pin.resolved_at = chrono::Utc::now().to_rfc3339();
-        }
+        // A recheck refreshes every preflight-derived field, not just the SHA. Keeping old
+        // memory or sidecar metadata beside a new revision would make the displayed lifecycle
+        // state internally inconsistent.
+        new_pin.refresh_from_preflight(&fresh);
 
         self.insert(new_pin.clone())?;
         Ok(new_pin)
@@ -298,6 +306,38 @@ mod tests {
             mtp_sidecar: None,
             mtp_depth_max: None,
         };
+        assert!(!pin.is_stale());
+    }
+
+    #[test]
+    fn refresh_from_preflight_updates_all_displayed_metadata() {
+        let mut pin = MtpPin {
+            repo_id: "org/model".into(),
+            revision: "old-sha".into(),
+            trust_remote_code_required: false,
+            resolved_at: "2020-01-01T00:00:00Z".into(),
+            last_recheck_at: "".into(),
+            upstream_unchanged: None,
+            estimated_memory_bytes: Some(1),
+            mtp_sidecar: Some("q4".into()),
+            mtp_depth_max: Some(1),
+        };
+        let fresh = crate::hf::SpeculativeModelPreflight {
+            repo_id: "org/model".into(),
+            revision: "new-sha".into(),
+            trust_remote_code_required: true,
+            estimated_memory_bytes: Some(2),
+            mtp_sidecar: Some("bf16".into()),
+            mtp_depth_max: Some(3),
+        };
+
+        pin.refresh_from_preflight(&fresh);
+
+        assert_eq!(pin.revision, "new-sha");
+        assert!(pin.trust_remote_code_required);
+        assert_eq!(pin.estimated_memory_bytes, Some(2));
+        assert_eq!(pin.mtp_sidecar.as_deref(), Some("bf16"));
+        assert_eq!(pin.mtp_depth_max, Some(3));
         assert!(!pin.is_stale());
     }
 
