@@ -690,12 +690,20 @@ implemented and receipt-backed; do not redo it unless a regression appears.
               cache management.
             - `cargo clippy` clean; `cargo test` 2220/0/26; `npm run lint` clean;
               `npm run validate-js` clean.
-          - **2026-08-01 checkpoint — VRAM memory estimate delivered, item 1 fully closed:**
-            - Memory status surfaced in pin status UI: shows "~X MB VRAM" or "~X GB VRAM"
-              derived from the HF API's `safetensors.total` parameter count (Q4 quantization
-              estimate, 0.5 bytes/param). Covers the "explicit memory status" requirement.
-            - `estimated_memory_bytes` stored in pin cache and included in all preflight responses.
-            - `cargo clippy` clean; `cargo test` 1074/0/13; `npm run lint` clean.
+           - **2026-08-01 checkpoint — VRAM memory estimate delivered, item 1 fully closed:**
+             - Memory status surfaced in pin status UI: shows "~X MB VRAM" or "~X GB VRAM"
+               derived from the HF API's `safetensors.total` parameter count (Q4 quantization
+               estimate, 0.5 bytes/param). Covers the "explicit memory status" requirement.
+             - `estimated_memory_bytes` stored in pin cache and included in all preflight responses.
+             - `cargo clippy` clean; `cargo test` 1074/0/13; `npm run lint` clean.
+           - **2026-08-01 checkpoint — MTP companion introspection (no Q4 assumption):**
+             - Replaced hardcoded Q4 estimate with 3-tier fallback: (1) HF tree API →
+               `mtp.safetensors` file size (exact VRAM for any MTP sidecar repo), (2)
+               `mtplx_runtime.json` → quantization label (`mtp_sidecar`) and depth
+               (`mtp_depth_max`), (3) no estimate if neither available.
+             - Both tree API and `mtplx_runtime.json` fetched in parallel via `tokio::join!`.
+             - Pin status UI shows quantization + depth for MTPLX repos (e.g., "sidecar:bf16 d3").
+             - `cargo clippy` clean; `cargo test` 1074/0/13; `npm run lint` clean.
 2. ~~**Frequency penalty decision**~~ — done, see checkpoint above.
 3. **Legacy quant-style migration:** move the remaining `/api/hf/quantizers` and
    `/api/hf/community-picks` quick-pick behavior onto the typed community-source catalog while
