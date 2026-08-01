@@ -302,7 +302,13 @@ What remains is lifecycle and safety, not another UI wiring pass:
   compatibility before launch, and make its download/memory/lifecycle state explicit. Do not accept
   a mutable branch or silently stage a different artifact.
 - **Trust consent:** expose revision-scoped consent for repositories that require
-  `trust_remote_code`; launch must remain fail-closed on missing or mismatched consent.
+   `trust_remote_code`; launch must remain fail-closed on missing or mismatched consent.
+  **2026-08-01: Partially done.** Frontend modal trust-consent flow built for both Preset Editor
+  and Spawn Wizard. The modal appears when MTP preflight reports `trustRemoteCodeRequired: true`,
+  explains the risk, and blocks launch on decline. Consent is sent as `trustRemoteCode: true` in
+  the request payload so the backend `validate_trust_consent` gate passes. Still incomplete: no
+  revision-scoped persistence, no caching of resolved pins, no re-check on upstream changes, and
+  no explicit lifecycle/memory-status surfacing.
 - **Hybrid K rules:** preserve server-derived architecture depth and the observed K=1 clamp for
   Qwen3.6-27B; never infer this from the known-wrong `aliases.json` metadata.
 
@@ -639,14 +645,25 @@ implemented and receipt-backed; do not redo it unless a regression appears.
      removed: `mlx-community/Qwen2.5-0.5B-Instruct-4bit` → sha resolved, `false`; a deliberately
      invalid repo id → clean `HTTP 404` error; `THUDM/chatglm3-6b` (a real custom-code repo) →
      sha resolved, `true`. `cargo test --lib` 1067/13/0 unchanged; `cargo fmt --check` clean.
-   - **Still not done, and this is the larger remaining part of item 1:** no UI consumes this
-     endpoint. There is no consent-collection control anywhere in the Preset Editor for MTP's
-     `model`/speculative-config, so entering a repo that needs `trust_remote_code` still just fails
-     silently at launch with no explanation. There is also no "immutable sidecar" concept beyond
-     this one-shot resolution — no caching of the resolved pin, no re-check if the upstream repo
-     changes, no explicit lifecycle/memory-status surfacing (the "explicit lifecycle/memory status"
-     sub-clause of this item has not been started at all). Do not mark item 1 done from this
-     checkpoint alone.
+    - **2026-08-01 checkpoint — trust consent frontend delivered (partial item 1):**
+      - Built a modal trust-consent flow for MTP preflight. When `/api/hf/mtp-preflight` reports
+        `trustRemoteCodeRequired: true`, a modal now appears before launch explaining the risk and
+        asking for explicit consent. The flow exists in both the Preset Editor and the Spawn Wizard.
+      - The consent gate works as a two-level preflight: first the MTP-specific endpoint
+        (`/api/hf/mtp-preflight`), then a secondary call to the general preflight to verify the
+        `model_size_bytes` field is present. If the model is significantly larger than the user
+        selected (e.g., asking about 84B when 2B was chosen), the modal shows a warning that the
+        model may not be what was intended.
+      - The modal is dismissible (decline) or confirmable (proceed). Declining prevents launch;
+        confirming sets `trustRemoteCode: true` in the request payload so the backend consent gate
+        (`validate_trust_consent`) passes.
+      - Screenshots captured in dark and light modes via the harness.
+      - Auth pattern in both `spawn-wizard.js` and `presets.js` corrected to use
+        `window.authHeaders()` instead of a bare `API_TOKEN` variable (not defined).
+      - **Still incomplete — this does not close item 1:** no caching of resolved pins, no
+        re-check on upstream repo changes, no explicit lifecycle/memory-status surfacing. The
+        backend preflight resolver (`resolve_speculative_model_preflight`) is live but uncached.
+        The "immutable sidecar" concept remains unimplemented beyond the one-shot resolution.
 2. ~~**Frequency penalty decision**~~ — done, see checkpoint above.
 3. **Legacy quant-style migration:** move the remaining `/api/hf/quantizers` and
    `/api/hf/community-picks` quick-pick behavior onto the typed community-source catalog while
