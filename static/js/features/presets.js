@@ -1835,6 +1835,7 @@ let _speculativeTrustState = {
     lastRecheckAt: '',
     upstreamUnchanged: null,
     stale: false,
+    estimatedMemoryBytes: null,
 };
 
 function _timeAgo(dt) {
@@ -1860,6 +1861,7 @@ function _renderSpeculativePinStatus() {
     const rev = _speculativeTrustState.revision.substring(0, 12);
     const stale = _speculativeTrustState.stale;
     const trust = _speculativeTrustState.trustRequired;
+    const mem = _speculativeTrustState.estimatedMemoryBytes;
 
     let parts = [];
     /* Status indicator */
@@ -1869,6 +1871,16 @@ function _renderSpeculativePinStatus() {
     /* Trust flag */
     if (trust) {
         parts.push('<span style="color:var(--err,#e65c5c);">(trust_remote_code)</span>');
+    }
+    /* Memory estimate */
+    if (mem != null) {
+        let memStr;
+        if (mem >= 1073741824) {
+            memStr = '~' + (mem / 1073741824).toFixed(1) + ' GB';
+        } else {
+            memStr = '~' + Math.round(mem / 1048576) + ' MB';
+        }
+        parts.push('<span style="color:var(--text-muted,#888);">~' + memStr + ' VRAM</span>');
     }
     /* Resolved time */
     parts.push('<span style="color:var(--text-muted,#888);">resolved ' + _timeAgo(_speculativeTrustState.resolvedAt) + '</span>');
@@ -1925,7 +1937,7 @@ async function _checkSpeculativeModelTrust(repoId) {
     if (!trustWrap || !warningEl || !consentCheck) return;
 
     /* Reset */
-    _speculativeTrustState = { repoId: '', revision: '', trustRequired: false, loading: false, timeout: null, resolvedAt: '', lastRecheckAt: '', upstreamUnchanged: null, stale: false };
+    _speculativeTrustState = { repoId: '', revision: '', trustRequired: false, loading: false, timeout: null, resolvedAt: '', lastRecheckAt: '', upstreamUnchanged: null, stale: false, estimatedMemoryBytes: null };
     trustWrap.style.display = 'none';
     consentCheck.checked = false;
     warningEl.textContent = '';
@@ -1952,6 +1964,7 @@ async function _checkSpeculativeModelTrust(repoId) {
         _speculativeTrustState.lastRecheckAt = data.lastRecheckAt || '';
         _speculativeTrustState.upstreamUnchanged = data.upstreamUnchanged ?? null;
         _speculativeTrustState.stale = !!data.stale;
+        _speculativeTrustState.estimatedMemoryBytes = data.estimatedMemoryBytes ?? null;
         _speculativeTrustState.loading = false;
 
         /* Pin status UI — always show when pinned */

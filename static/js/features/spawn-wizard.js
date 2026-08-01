@@ -303,6 +303,7 @@ export const wizardState = {
     speculativeTrustConsent: false,
     speculativeTrustRepoId: '',
     speculativeTrustRevision: '',
+    speculativeTrustEstimatedMemoryBytes: null,
     autoToolChoice: false,
     // Phase 7: Web UI (D26/A44)
     // Phase 7: Sampling mode (D27)
@@ -1554,12 +1555,22 @@ function _renderSpawnPinStatus() {
   const rev = h.speculativeTrustRevision.substring(0, 12);
   const stale = !!h.speculativeTrustStale;
   const trust = h.speculativeTrustRequired;
+  const mem = h.speculativeTrustEstimatedMemoryBytes;
 
   let parts = [];
   parts.push('<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:' + (stale ? 'var(--warn,#e6a41c)' : 'var(--success,#5ce68a)') + '"></span>');
   parts.push('<span>' + h.speculativeTrustRepoId + '@' + rev + '</span>');
   if (trust) {
     parts.push('<span style="color:var(--err,#e65c5c);">(trust_remote_code)</span>');
+  }
+  if (mem != null) {
+    let memStr;
+    if (mem >= 1073741824) {
+      memStr = '~' + (mem / 1073741824).toFixed(1) + ' GB';
+    } else {
+      memStr = '~' + Math.round(mem / 1048576) + ' MB';
+    }
+    parts.push('<span style="color:var(--text-muted,#888);">~' + memStr + ' VRAM</span>');
   }
   parts.push('<span style="color:var(--text-muted,#888);">resolved ' + _timeAgoSpawn(h.speculativeTrustResolvedAt) + '</span>');
 
@@ -1649,6 +1660,7 @@ async function _spawnCheckTrust(repoId) {
     h.speculativeTrustLastRecheckAt = data.lastRecheckAt || '';
     h.speculativeTrustUpstreamUnchanged = data.upstreamUnchanged ?? null;
     h.speculativeTrustStale = !!data.stale;
+    h.speculativeTrustEstimatedMemoryBytes = data.estimatedMemoryBytes ?? null;
     _renderSpawnPinStatus();
     if (h.speculativeTrustRequired) {
       h.speculativeTrustConsent = false;

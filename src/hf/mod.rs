@@ -551,6 +551,10 @@ pub struct SpeculativeModelPreflight {
     pub repo_id: String,
     pub revision: String,
     pub trust_remote_code_required: bool,
+    /// Rough estimate of companion memory in bytes, derived from the
+    /// `safetensors.total` parameter count at Q4 quantization (0.5 B/param).
+    /// `None` if the HF API did not return parameter info.
+    pub estimated_memory_bytes: Option<u64>,
 }
 
 pub async fn resolve_speculative_model_preflight(
@@ -607,10 +611,17 @@ pub async fn resolve_speculative_model_preflight(
             .is_ok_and(|config| config_json_needs_trust_remote_code(&config))
     };
 
+    let estimated_memory_bytes = body
+        .get("safetensors")
+        .and_then(|st| st.get("total"))
+        .and_then(|v| v.as_u64())
+        .map(|total_params| total_params / 2);
+
     Ok(SpeculativeModelPreflight {
         repo_id: repo_id.to_string(),
         revision,
         trust_remote_code_required,
+        estimated_memory_bytes,
     })
 }
 

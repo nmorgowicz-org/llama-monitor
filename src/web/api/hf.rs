@@ -811,6 +811,8 @@ fn api_hf_mtp_preflight(
                                 new_pin.revision = fresh.revision.clone();
                                 new_pin.trust_remote_code_required =
                                     fresh.trust_remote_code_required;
+                                new_pin.estimated_memory_bytes =
+                                    fresh.estimated_memory_bytes;
                                 new_pin.resolved_at = chrono::Utc::now().to_rfc3339();
                                 let _ = cache.insert(new_pin);
                             }
@@ -821,6 +823,7 @@ fn api_hf_mtp_preflight(
                                 "repoId": pin.repo_id,
                                 "revision": pin.revision,
                                 "trustRemoteCodeRequired": pin.trust_remote_code_required,
+                                "estimatedMemoryBytes": pin.estimated_memory_bytes,
                                 "resolvedAt": pin.resolved_at,
                                 "lastRecheckAt": pin.last_recheck_at,
                                 "upstreamUnchanged": pin.upstream_unchanged,
@@ -840,6 +843,7 @@ fn api_hf_mtp_preflight(
                                 resolved_at: chrono::Utc::now().to_rfc3339(),
                                 last_recheck_at: String::new(),
                                 upstream_unchanged: None,
+                                estimated_memory_bytes: preflight.estimated_memory_bytes,
                             };
                             let _ = cache.insert(pin);
 
@@ -849,6 +853,7 @@ fn api_hf_mtp_preflight(
                                     "repoId": preflight.repo_id,
                                     "revision": preflight.revision,
                                     "trustRemoteCodeRequired": preflight.trust_remote_code_required,
+                                    "estimatedMemoryBytes": preflight.estimated_memory_bytes,
                                     "resolvedAt": chrono::Utc::now().to_rfc3339(),
                                     "lastRecheckAt": "",
                                     "upstreamUnchanged": null,
@@ -915,6 +920,7 @@ fn api_hf_mtp_preflight_recheck(
                                 "repoId": pin.repo_id,
                                 "revision": pin.revision,
                                 "trustRemoteCodeRequired": pin.trust_remote_code_required,
+                                "estimatedMemoryBytes": pin.estimated_memory_bytes,
                                 "resolvedAt": pin.resolved_at,
                                 "lastRecheckAt": pin.last_recheck_at,
                                 "upstreamUnchanged": pin.upstream_unchanged,
@@ -953,6 +959,7 @@ fn api_hf_mtp_pins(
                             "repoId": p.repo_id,
                             "revision": p.revision,
                             "trustRemoteCodeRequired": p.trust_remote_code_required,
+                            "estimatedMemoryBytes": p.estimated_memory_bytes,
                             "resolvedAt": p.resolved_at,
                             "lastRecheckAt": p.last_recheck_at,
                             "upstreamUnchanged": p.upstream_unchanged,

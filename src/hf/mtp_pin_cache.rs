@@ -48,6 +48,9 @@ pub struct MtpPin {
     /// `None` means never re-checked (first resolution).
     #[serde(default)]
     pub upstream_unchanged: Option<bool>,
+    /// Rough estimate of companion memory in bytes (Q4 quantization).
+    #[serde(default)]
+    pub estimated_memory_bytes: Option<u64>,
 }
 
 impl MtpPin {
@@ -224,6 +227,7 @@ mod tests {
             revision: "abc123".into(),
             trust_remote_code_required: true,
             resolved_at: "2026-08-01T00:00:00Z".into(),
+            estimated_memory_bytes: None,
             last_recheck_at: "".into(),
             upstream_unchanged: None,
         };
@@ -242,6 +246,7 @@ mod tests {
             revision: "abc123".into(),
             trust_remote_code_required: false,
             resolved_at: "2026-08-01T00:00:00Z".into(),
+            estimated_memory_bytes: None,
             last_recheck_at: "".into(),
             upstream_unchanged: None,
         };
@@ -263,6 +268,7 @@ mod tests {
                 .to_rfc3339(),
             last_recheck_at: "".into(),
             upstream_unchanged: None,
+            estimated_memory_bytes: None,
         };
         assert!(pin.is_stale());
     }
@@ -276,6 +282,7 @@ mod tests {
             resolved_at: (chrono::Utc::now() - chrono::Duration::hours(12)).to_rfc3339(),
             last_recheck_at: "".into(),
             upstream_unchanged: None,
+            estimated_memory_bytes: None,
         };
         assert!(!pin.is_stale());
     }
@@ -288,6 +295,7 @@ mod tests {
             revision: "abc123".into(),
             trust_remote_code_required: false,
             resolved_at: "2026-08-01T00:00:00Z".into(),
+            estimated_memory_bytes: None,
             last_recheck_at: "".into(),
             upstream_unchanged: None,
         };
@@ -296,6 +304,7 @@ mod tests {
             revision: "def456".into(),
             trust_remote_code_required: true,
             resolved_at: "2026-08-01T00:00:00Z".into(),
+            estimated_memory_bytes: None,
             last_recheck_at: "".into(),
             upstream_unchanged: None,
         };
