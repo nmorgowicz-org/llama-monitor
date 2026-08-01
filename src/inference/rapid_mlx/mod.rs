@@ -10,6 +10,7 @@ pub mod model_resolver;
 pub mod poller;
 pub mod runtime;
 pub mod settings;
+pub mod sidecar_inventory;
 pub mod spec_decode_store;
 // The managed-updater module is complete and unit-tested but has no caller in the
 // running binary yet; its wiring belongs to the Phase 12 dependency/watchlist work.
@@ -117,6 +118,12 @@ impl RapidMlxSpeculativeConfig {
                 && m.split('/').count() == 2
                 && m.split('/').all(|part| !part.is_empty())
         })
+    }
+
+    /// Returns the companion model path if the `model` field is an absolute local
+    /// path (starts with `/`). Returns `None` if it's an HF repo id or empty.
+    pub fn companion_model_local_path(&self) -> Option<&str> {
+        self.model.as_deref().filter(|m| m.starts_with('/'))
     }
 
     pub fn to_cli_json(&self) -> Result<String> {

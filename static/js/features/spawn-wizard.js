@@ -1517,6 +1517,76 @@ function _bindRapidMlxAdvancedControls() {
    }
 }
 
+async function _fetchSpawnSidecars() {
+  const listEl = document.getElementById('spawn-rapid-speculative-sidecars-list');
+  if (!listEl) return;
+
+  listEl.innerHTML = '<span style="color:var(--text-muted,#888);">Loading…</span>';
+
+  try {
+    const resp = await fetch('/api/hf/mtp-sidecars', { headers: window.authHeaders ? window.authHeaders() : {} });
+    const data = await resp.json();
+
+    if (!data.ok || !data.sidecars || data.sidecars.length === 0) {
+      listEl.innerHTML = '<span style="color:var(--text-muted,#888);">No local sidecars found. Build one with scripts/build-mtp-head.py</span>';
+      return;
+    }
+
+    const h = wizardState.hardware;
+    const modelInput = document.getElementById('spawn-rapid-speculative-model');
+
+    // Build sidecar list
+    let html = '';
+    data.sidecars.forEach((s, i) => {
+      const vram = s.estimatedMemoryBytes != null
+        ? '~' + (s.estimatedMemoryBytes >= 1073741824
+            ? (s.estimatedMemoryBytes / 1073741824).toFixed(1) + ' GB'
+            : Math.round(s.estimatedMemoryBytes / 1048576) + ' MB')
+        : '? VRAM';
+
+      const trunkShort = s.trunk ? s.trunk.split('/').pop() : '?';
+
+      html += '<button type="button" class="hw-action-btn" data-sidecar-index="' + i + '" style="display:block; width:100%; text-align:left; padding:6px 8px; margin-bottom:4px; font-size:11px; background:var(--color-surface,#1a1d24); border:1px solid var(--color-border,#2a2d34); border-radius:4px; cursor:pointer;">';
+      html += '<strong>' + DOMPurify.sanitize(s.slug) + '</strong> ';
+      html += '<span style="color:var(--text-muted,#888);">' + vram + '</span>';
+      if (s.trunk) html += ' <span style="color:var(--text-muted,#888);">for ' + DOMPurify.sanitize(trunkShort) + '</span>';
+      if (s.builtAt) html += ' <span style="color:var(--text-muted,#888);">(' + _timeAgoSpawn(s.builtAt) + ')</span>';
+      if (!s.normCheckPassed) html += ' <span style="color:var(--err,#e65c5c);">⚠ norm check failed</span>';
+      html += '</button>';
+    });
+
+    // eslint-disable-next-line no-unsanitized/property -- sidecar list built from our own API, all server strings are safe
+    listEl.innerHTML = html;
+
+    // Wire click handlers
+    listEl.querySelectorAll('[data-sidecar-index]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const idx = parseInt(btn.getAttribute('data-sidecar-index'));
+        const sidecar = data.sidecars[idx];
+
+        // Set the companion model path
+        if (modelInput) {
+          modelInput.value = sidecar.path;
+          h.speculativeModel = sidecar.path;
+        }
+
+        // Populate pin status from sidecar data
+        h.speculativeTrustRepoId = sidecar.slug;
+        h.speculativeTrustRevision = sidecar.sha256 ? sidecar.sha256.substring(0, 12) : '';
+        h.speculativeTrustRequired = false; // local sidecars don't need trust
+        h.speculativeTrustEstimatedMemoryBytes = sidecar.estimatedMemoryBytes;
+        h.speculativeTrustResolvedAt = sidecar.builtAt;
+        h.speculativeTrustStale = false;
+        _renderSpawnPinStatus();
+        _updateSpawnTrustUI(h, !!h.speculativeEnabled);
+      });
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-unsanitized/property -- error message sanitized via DOMPurify
+    listEl.innerHTML = '<span style="color:var(--err,#e65c5c);">Failed to load sidecars: ' + DOMPurify.sanitize(err.message) + '</span>';
+  }
+}
+
 function _syncRapidSpeculativeFields() {
   const h = wizardState.hardware;
   if (dom.speculativeEnabledCheck) dom.speculativeEnabledCheck.checked = !!h.speculativeEnabled;
@@ -1530,6 +1600,15 @@ function _syncRapidSpeculativeFields() {
     .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = enabled ? '' : 'none'; });
   const modelWrap = document.getElementById('spawn-rapid-speculative-model-wrap');
   if (modelWrap) modelWrap.style.display = enabled && h.speculativeSource === 'external' ? '' : 'none';
+  const sidecarsWrap = document.getElementById('spawn-rapid-speculative-sidecars-wrap');
+  if (sidecarsWrap) {
+    if (enabled && h.speculativeSource === 'external') {
+      sidecarsWrap.style.display = '';
+      _fetchSpawnSidecars();
+    } else {
+      sidecarsWrap.style.display = 'none';
+    }
+  }
   _updateSpawnTrustUI(h, enabled);
 }
 
@@ -1554,6 +1633,10 @@ function _renderSpawnPinStatus() {
     return;
   }
 
+  // Determine if this is a local sidecar (no revision sha, no trust required)
+  // or an HF repo pin (has revision sha, may need trust)
+  const isLocalSidecar = !h.speculativeTrustRevision || h.speculativeTrustRevision.length > 12;
+
   const rev = h.speculativeTrustRevision.substring(0, 12);
   const stale = !!h.speculativeTrustStale;
   const trust = h.speculativeTrustRequired;
@@ -1563,7 +1646,16 @@ function _renderSpawnPinStatus() {
 
   let parts = [];
   parts.push('<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:' + (stale ? 'var(--warn,#e6a41c)' : 'var(--success,#5ce68a)') + '"></span>');
-  parts.push('<span>' + h.speculativeTrustRepoId + '@' + rev + '</span>');
+
+  if (isLocalSidecar) {
+    // Local sidecar: show slug + sidecar label
+    parts.push('<span>' + h.speculativeTrustRepoId + '</span>');
+    parts.push('<span style="color:var(--text-muted,#888);">(local sidecar)</span>');
+  } else {
+    // HF repo pin: show repo@sha
+    parts.push('<span>' + h.speculativeTrustRepoId + '@' + rev + '</span>');
+  }
+
   if (trust) {
     parts.push('<span style="color:var(--err,#e65c5c);">(trust_remote_code)</span>');
   }
@@ -1579,9 +1671,14 @@ function _renderSpawnPinStatus() {
   if (sidecar) {
     parts.push('<span style="color:var(--text-muted,#888);">sidecar:' + sidecar + (depth != null ? ' d' + depth : '') + '</span>');
   }
-  parts.push('<span style="color:var(--text-muted,#888);">resolved ' + _timeAgoSpawn(h.speculativeTrustResolvedAt) + '</span>');
+  if (h.speculativeTrustResolvedAt) {
+    parts.push('<span style="color:var(--text-muted,#888);">resolved ' + _timeAgoSpawn(h.speculativeTrustResolvedAt) + '</span>');
+  }
 
-  parts.push('<button type="button" class="hw-action-btn" id="spawn-rapid-speculative-pin-recheck" style="font-size:11px; padding:2px 8px; margin-left:4px;">Re-check</button>');
+  // Re-check button only for HF repo pins
+  if (!isLocalSidecar) {
+    parts.push('<button type="button" class="hw-action-btn" id="spawn-rapid-speculative-pin-recheck" style="font-size:11px; padding:2px 8px; margin-left:4px;">Re-check</button>');
+  }
 
   // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
   el.innerHTML = DOMPurify.sanitize(parts.join(' '));

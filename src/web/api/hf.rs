@@ -984,6 +984,40 @@ fn api_hf_mtp_pins(
 }
 
 /// Remove a cached MTP companion model pin.
+/// List all locally-built MTP sidecars under the managed sidecar root.
+/// Returns each sidecar's slug, path, whether weights exist, and parsed
+/// provenance data (trunk, build date, norm check status, VRAM estimate).
+fn api_hf_mtp_sidecars(
+    _app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "mtp-sidecars")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = _app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                match crate::inference::rapid_mlx::sidecar_inventory::discover_sidecars() {
+                    Ok(entries) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": true,
+                            "sidecars": entries,
+                        })),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": e.to_string(),
+                        })),
+                    )),
+                }
+            }
+        })
+}
+
 fn api_hf_mtp_pin_remove(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
@@ -1533,6 +1567,7 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r.or(api_hf_mtp_pins(config.clone())).unify().boxed();
     r = r.or(api_hf_mtp_pin_remove(config.clone())).unify().boxed();
+    r = r.or(api_hf_mtp_sidecars(config.clone())).unify().boxed();
     r = r.or(api_hf_resolve_origin(config.clone())).unify().boxed();
     r = r.or(api_hf_token_get(config.clone())).unify().boxed();
     r = r.or(api_hf_token_put(config.clone())).unify().boxed();

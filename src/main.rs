@@ -301,6 +301,7 @@ fn main() -> Result<()> {
     // generated.
     inference::rapid_mlx::spec_decode_store::set_store_root(&app_config.config_dir);
     hf::mtp_pin_cache::init_pin_cache(&app_config.config_dir);
+    inference::rapid_mlx::sidecar_inventory::init_sidecar_root(&app_config.config_dir);
 
     if let Some(report) = args.ingest_spec_decode_report.clone() {
         return ingest_spec_decode_report(&report);

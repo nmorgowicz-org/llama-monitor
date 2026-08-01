@@ -3319,6 +3319,10 @@
                                     <label class="pe-label" for="modal-rapid-speculative-source">MTP source</label>
                                     <select class="pe-select" id="modal-rapid-speculative-source"><option value="embedded">Embedded prediction heads</option><option value="external">External sidecar model</option></select>
                                 </div>
+                                <div class="pe-field" id="modal-rapid-speculative-sidecars-wrap" style="display:none;">
+                                    <label class="pe-label">Available sidecars</label>
+                                    <div id="modal-rapid-speculative-sidecars-list" class="pe-field-hint" style="font-size:12px;"></div>
+                                </div>
                                 <div class="pe-field" id="modal-rapid-speculative-model-wrap">
                                     <label class="pe-label" for="modal-rapid-speculative-model">Resolved sidecar</label>
                                     <input class="pe-input" id="modal-rapid-speculative-model" placeholder="owner/repo or /absolute/model/path">
@@ -3972,9 +3976,13 @@
                                          <option value="embedded" selected>Embedded prediction heads</option>
                                          <option value="external">External sidecar model</option>
                                      </select>
-                                     <div class="field-hint">Use an external sidecar only when its exact model and revision have been resolved separately.</div>
-                                 </div>
-                                   <div class="hardware-field" id="spawn-rapid-speculative-model-wrap" style="display:none;">
+                                      <div class="field-hint">Use an external sidecar only when its exact model and revision have been resolved separately.</div>
+                                  </div>
+                                    <div class="hardware-field" id="spawn-rapid-speculative-sidecars-wrap" style="display:none;">
+                                        <label>Available sidecars</label>
+                                        <div id="spawn-rapid-speculative-sidecars-list" class="field-hint" style="font-size:12px;"></div>
+                                    </div>
+                                    <div class="hardware-field" id="spawn-rapid-speculative-model-wrap" style="display:none;">
                                        <label for="spawn-rapid-speculative-model">Resolved sidecar</label>
                                        <input type="text" id="spawn-rapid-speculative-model" placeholder="owner/repo or /absolute/model/path">
                                        <div class="field-hint">No mutable <code>repo@main</code> consent is inferred here.</div>

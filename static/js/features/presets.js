@@ -1801,6 +1801,73 @@ function _configureBackendPresetEditor(preset) {
     }
 }
 
+async function _fetchSidecarsForPreset() {
+    const listEl = document.getElementById('modal-rapid-speculative-sidecars-list');
+    if (!listEl) return;
+
+    listEl.innerHTML = '<span style="color:var(--text-muted,#888);">Loading…</span>';
+
+    try {
+        const resp = await fetch('/api/hf/mtp-sidecars', { headers: window.authHeaders ? window.authHeaders() : {} });
+        const data = await resp.json();
+
+        if (!data.ok || !data.sidecars || data.sidecars.length === 0) {
+            listEl.innerHTML = '<span style="color:var(--text-muted,#888);">No local sidecars found. Build one with scripts/build-mtp-head.py</span>';
+            return;
+        }
+
+        const modelInput = document.getElementById('modal-rapid-speculative-model');
+
+        // Build sidecar list
+        let html = '';
+        data.sidecars.forEach((s, i) => {
+            const vram = s.estimatedMemoryBytes != null
+                ? '~' + (s.estimatedMemoryBytes >= 1073741824
+                    ? (s.estimatedMemoryBytes / 1073741824).toFixed(1) + ' GB'
+                    : Math.round(s.estimatedMemoryBytes / 1048576) + ' MB')
+                : '? VRAM';
+
+            const trunkShort = s.trunk ? s.trunk.split('/').pop() : '?';
+
+            html += '<button type="button" class="pe-action-btn" data-sidecar-index="' + i + '" style="display:block; width:100%; text-align:left; padding:6px 8px; margin-bottom:4px; font-size:11px; background:var(--color-surface,#1a1d24); border:1px solid var(--color-border,#2a2d34); border-radius:4px; cursor:pointer;">';
+            html += '<strong>' + DOMPurify.sanitize(s.slug) + '</strong> ';
+            html += '<span style="color:var(--text-muted,#888);">' + vram + '</span>';
+            if (s.trunk) html += ' <span style="color:var(--text-muted,#888);">for ' + DOMPurify.sanitize(trunkShort) + '</span>';
+            if (s.builtAt) html += ' <span style="color:var(--text-muted,#888);">(' + (function(dt) { if (!dt) return ''; const d = new Date(dt); const diff = (Date.now() - d.getTime()) / 1000; if (diff < 60) return 'just now'; if (diff < 3600) return Math.floor(diff / 60) + 'm ago'; if (diff < 86400) return Math.floor(diff / 3600) + 'h ago'; return Math.floor(diff / 86400) + 'd ago'; })(s.builtAt) + ')</span>';
+            if (!s.normCheckPassed) html += ' <span style="color:var(--err,#e65c5c);">⚠ norm check failed</span>';
+            html += '</button>';
+        });
+
+        // eslint-disable-next-line no-unsanitized/property -- sidecar list built from our own API, all server strings are safe
+        listEl.innerHTML = html;
+
+        // Wire click handlers
+        listEl.querySelectorAll('[data-sidecar-index]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const idx = parseInt(btn.getAttribute('data-sidecar-index'));
+                const sidecar = data.sidecars[idx];
+
+                // Set the companion model path
+                if (modelInput) {
+                    modelInput.value = sidecar.path;
+                }
+
+                // Update trust state for pin status display
+                _speculativeTrustState.repoId = sidecar.slug;
+                _speculativeTrustState.revision = sidecar.sha256 ? sidecar.sha256.substring(0, 12) : '';
+                _speculativeTrustState.trustRequired = false;
+                _speculativeTrustState.estimatedMemoryBytes = sidecar.estimatedMemoryBytes;
+                _speculativeTrustState.resolvedAt = sidecar.builtAt;
+                _speculativeTrustState.stale = false;
+                _renderSpeculativePinStatus();
+            });
+        });
+    } catch (err) {
+        // eslint-disable-next-line no-unsanitized/property -- error message sanitized via DOMPurify
+        listEl.innerHTML = '<span style="color:var(--err,#e65c5c);">Failed to load sidecars: ' + DOMPurify.sanitize(err.message) + '</span>';
+    }
+}
+
 function _syncRapidSpeculativeEditor() {
     const enabled = !!document.getElementById('modal-rapid-speculative-enabled')?.checked;
     const external = document.getElementById('modal-rapid-speculative-source')?.value === 'external';
@@ -1814,6 +1881,15 @@ function _syncRapidSpeculativeEditor() {
     const pinWrap = document.getElementById('modal-rapid-speculative-pin-status-wrap');
     if (pinWrap && (!enabled || !external)) {
         pinWrap.style.display = 'none';
+    }
+    const sidecarsWrap = document.getElementById('modal-rapid-speculative-sidecars-wrap');
+    if (sidecarsWrap) {
+        if (enabled && external) {
+            sidecarsWrap.style.display = '';
+            _fetchSidecarsForPreset();
+        } else {
+            sidecarsWrap.style.display = 'none';
+        }
     }
 }
 
@@ -1867,11 +1943,22 @@ function _renderSpeculativePinStatus() {
     const sidecar = _speculativeTrustState.mtpSidecar;
     const depth = _speculativeTrustState.mtpDepthMax;
 
+    // Determine if this is a local sidecar (no revision sha or revision is a hash)
+    const isLocalSidecar = !_speculativeTrustState.revision || _speculativeTrustState.revision.length > 12;
+
     let parts = [];
     /* Status indicator */
     parts.push('<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:' + (stale ? 'var(--warn,#e6a41c)' : 'var(--success,#5ce68a)') + '"></span>');
-    /* Repo + revision */
-    parts.push('<span>' + _speculativeTrustState.repoId + '@' + rev + '</span>');
+
+    if (isLocalSidecar) {
+        /* Local sidecar: show slug + label */
+        parts.push('<span>' + _speculativeTrustState.repoId + '</span>');
+        parts.push('<span style="color:var(--text-muted,#888);">(local sidecar)</span>');
+    } else {
+        /* HF repo pin: show repo@sha */
+        parts.push('<span>' + _speculativeTrustState.repoId + '@' + rev + '</span>');
+    }
+
     /* Trust flag */
     if (trust) {
         parts.push('<span style="color:var(--err,#e65c5c);">(trust_remote_code)</span>');
@@ -1891,10 +1978,14 @@ function _renderSpeculativePinStatus() {
         parts.push('<span style="color:var(--text-muted,#888);">sidecar:' + sidecar + (depth != null ? ' d' + depth : '') + '</span>');
     }
     /* Resolved time */
-    parts.push('<span style="color:var(--text-muted,#888);">resolved ' + _timeAgo(_speculativeTrustState.resolvedAt) + '</span>');
+    if (_speculativeTrustState.resolvedAt) {
+        parts.push('<span style="color:var(--text-muted,#888);">resolved ' + _timeAgo(_speculativeTrustState.resolvedAt) + '</span>');
+    }
 
-    /* Re-check button */
-    parts.push('<button type="button" class="pe-action-btn" id="modal-rapid-speculative-pin-recheck" style="font-size:11px; padding:2px 8px; margin-left:4px;">Re-check</button>');
+    /* Re-check button only for HF repo pins */
+    if (!isLocalSidecar) {
+        parts.push('<button type="button" class="pe-action-btn" id="modal-rapid-speculative-pin-recheck" style="font-size:11px; padding:2px 8px; margin-left:4px;">Re-check</button>');
+    }
 
     // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
     el.innerHTML = DOMPurify.sanitize(parts.join(' '));

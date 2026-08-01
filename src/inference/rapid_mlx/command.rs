@@ -485,6 +485,20 @@ impl RapidMlxCommandBuilder {
         {
             args.push("--speculative-config".to_string());
             args.push(config.to_cli_json()?);
+
+            // Estimate companion VRAM for local paths at launch time.
+            // For HF repos this is handled by the preflight + pin cache.
+            if let Some(companion_path) = config.companion_model_local_path() {
+                let companion = std::path::Path::new(companion_path);
+                if let Some(vram) =
+                    crate::inference::rapid_mlx::sidecar_inventory::estimate_local_companion_vram(companion)
+                {
+                    let mb = vram / 1_048_576;
+                    eprintln!(
+                        "MTP companion VRAM estimate (local path): {mb} MB from {companion_path}"
+                    );
+                }
+            }
         }
 
         // Vision has only the real Rapid-MLX tri-state: Auto omits a flag,

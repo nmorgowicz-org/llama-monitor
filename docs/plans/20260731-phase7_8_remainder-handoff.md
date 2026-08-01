@@ -702,9 +702,26 @@ implemented and receipt-backed; do not redo it unless a regression appears.
                `mtplx_runtime.json` → quantization label (`mtp_sidecar`) and depth
                (`mtp_depth_max`), (3) no estimate if neither available.
              - Both tree API and `mtplx_runtime.json` fetched in parallel via `tokio::join!`.
-             - Pin status UI shows quantization + depth for MTPLX repos (e.g., "sidecar:bf16 d3").
-             - `cargo clippy` clean; `cargo test` 1074/0/13; `npm run lint` clean.
-2. ~~**Frequency penalty decision**~~ — done, see checkpoint above.
+              - Pin status UI shows quantization + depth for MTPLX repos (e.g., "sidecar:bf16 d3").
+              - `cargo clippy` clean; `cargo test` 1074/0/13; `npm run lint` clean.
+            - **2026-08-01 checkpoint — local sidecar inventory (Item 1 extension):**
+              - Discovered `~/.config/llama-monitor/models/rapid-mlx/mtp-sidecars/` framework:
+                local sidecars built by `scripts/build-mtp-head.py` with provenance.json.
+              - New module: `src/inference/rapid_mlx/sidecar_inventory.rs` — discovers local
+                sidecars, reads provenance.json, estimates VRAM from mtp.safetensors file size.
+              - API endpoint: `GET /api/hf/mtp-sidecars` lists all sidecars with provenance
+                (trunk, build date, norm check status, VRAM estimate, quantization).
+              - Frontend: sidecar list rendered in both spawn wizard and preset editor when
+                "external" source is selected. Clicking a sidecar populates the companion
+                model input with the sidecar path.
+              - Pin status distinguishes local sidecars (shows "(local sidecar)", no re-check)
+                from HF repo pins (shows repo@sha, re-check button).
+              - Launch-time VRAM estimate for local companion paths via
+                `estimate_local_companion_vram()`.
+              - `companion_model_local_path()` method added to `RapidMlxSpeculativeConfig`
+                for distinguishing HF repos from local paths.
+              - `cargo clippy` clean; `cargo test` 1076/0/13; `npm run lint` clean.
+ 2. ~~**Frequency penalty decision**~~ — done, see checkpoint above.
 3. **Legacy quant-style migration:** move the remaining `/api/hf/quantizers` and
    `/api/hf/community-picks` quick-pick behavior onto the typed community-source catalog while
    preserving old user configuration and proving round trips.
