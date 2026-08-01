@@ -3323,6 +3323,9 @@
                                     <label class="pe-label" for="modal-rapid-speculative-model">Resolved sidecar</label>
                                     <input class="pe-input" id="modal-rapid-speculative-model" placeholder="owner/repo or /absolute/model/path">
                                 </div>
+                                <div class="pe-field" id="modal-rapid-speculative-pin-status-wrap" style="display:none;">
+                                    <div class="pe-field-hint" id="modal-rapid-speculative-pin-status" style="display:flex; align-items:center; gap:6px; font-size:12px;"></div>
+                                </div>
                                 <div class="pe-field" id="modal-rapid-speculative-trust-wrap" style="display:none;">
                                     <div class="pe-field-hint" id="modal-rapid-speculative-trust-warning" style="color:var(--warn,#e6a41c); margin-bottom:4px;"></div>
                                     <label class="pe-label pe-toggle-label" for="modal-rapid-speculative-trust-consent">Trust remote code for this companion model</label>
@@ -3971,12 +3974,15 @@
                                      </select>
                                      <div class="field-hint">Use an external sidecar only when its exact model and revision have been resolved separately.</div>
                                  </div>
-                                  <div class="hardware-field" id="spawn-rapid-speculative-model-wrap" style="display:none;">
-                                      <label for="spawn-rapid-speculative-model">Resolved sidecar</label>
-                                      <input type="text" id="spawn-rapid-speculative-model" placeholder="owner/repo or /absolute/model/path">
-                                      <div class="field-hint">No mutable <code>repo@main</code> consent is inferred here.</div>
-                                  </div>
-                                   <div class="hardware-field" id="spawn-rapid-speculative-trust-wrap" style="display:none;">
+                                   <div class="hardware-field" id="spawn-rapid-speculative-model-wrap" style="display:none;">
+                                       <label for="spawn-rapid-speculative-model">Resolved sidecar</label>
+                                       <input type="text" id="spawn-rapid-speculative-model" placeholder="owner/repo or /absolute/model/path">
+                                       <div class="field-hint">No mutable <code>repo@main</code> consent is inferred here.</div>
+                                   </div>
+                                    <div class="hardware-field" id="spawn-rapid-speculative-pin-status-wrap" style="display:none;">
+                                        <div class="field-hint" id="spawn-rapid-speculative-pin-status" style="display:flex; align-items:center; gap:6px; font-size:12px;"></div>
+                                    </div>
+                                    <div class="hardware-field" id="spawn-rapid-speculative-trust-wrap" style="display:none;">
                                        <div class="field-hint" id="spawn-rapid-speculative-trust-warning" style="color:var(--warn,#e6a41c);"></div>
                                        <label class="kv-unified-toggle" for="spawn-rapid-speculative-trust-consent">
                                            <input type="checkbox" id="spawn-rapid-speculative-trust-consent">

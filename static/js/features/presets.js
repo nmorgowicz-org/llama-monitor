@@ -1806,10 +1806,14 @@ function _syncRapidSpeculativeEditor() {
     const external = document.getElementById('modal-rapid-speculative-source')?.value === 'external';
     const modelWrap = document.getElementById('modal-rapid-speculative-model-wrap');
     if (modelWrap) modelWrap.style.display = enabled && external ? '' : 'none';
-    // If toggling off or switching away from external, also hide trust section
+    // If toggling off or switching away from external, also hide trust section and pin status
     const trustWrap = document.getElementById('modal-rapid-speculative-trust-wrap');
     if (trustWrap && (!enabled || !external)) {
         trustWrap.style.display = 'none';
+    }
+    const pinWrap = document.getElementById('modal-rapid-speculative-pin-status-wrap');
+    if (pinWrap && (!enabled || !external)) {
+        pinWrap.style.display = 'none';
     }
 }
 
@@ -1833,10 +1837,91 @@ let _speculativeTrustState = {
     stale: false,
 };
 
+function _timeAgo(dt) {
+    if (!dt) return '';
+    const d = new Date(dt);
+    const diff = (Date.now() - d.getTime()) / 1000;
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+}
+
+function _renderSpeculativePinStatus() {
+    const wrap = document.getElementById('modal-rapid-speculative-pin-status-wrap');
+    const el = document.getElementById('modal-rapid-speculative-pin-status');
+    if (!wrap || !el) return;
+
+    if (!_speculativeTrustState.repoId) {
+        wrap.style.display = 'none';
+        return;
+    }
+
+    const rev = _speculativeTrustState.revision.substring(0, 12);
+    const stale = _speculativeTrustState.stale;
+    const trust = _speculativeTrustState.trustRequired;
+
+    let parts = [];
+    /* Status indicator */
+    parts.push('<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:' + (stale ? 'var(--warn,#e6a41c)' : 'var(--success,#5ce68a)') + '"></span>');
+    /* Repo + revision */
+    parts.push('<span>' + _speculativeTrustState.repoId + '@' + rev + '</span>');
+    /* Trust flag */
+    if (trust) {
+        parts.push('<span style="color:var(--err,#e65c5c);">(trust_remote_code)</span>');
+    }
+    /* Resolved time */
+    parts.push('<span style="color:var(--text-muted,#888);">resolved ' + _timeAgo(_speculativeTrustState.resolvedAt) + '</span>');
+
+    /* Re-check button */
+    parts.push('<button type="button" class="pe-action-btn" id="modal-rapid-speculative-pin-recheck" style="font-size:11px; padding:2px 8px; margin-left:4px;">Re-check</button>');
+
+    // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+    el.innerHTML = DOMPurify.sanitize(parts.join(' '));
+    wrap.style.display = '';
+
+    /* Wire re-check button */
+    const btn = document.getElementById('modal-rapid-speculative-pin-recheck');
+    if (btn) {
+        btn.addEventListener('click', async () => {
+            if (!_speculativeTrustState.repoId) return;
+            btn.disabled = true;
+            btn.textContent = '…';
+            try {
+                const resp = await fetch(
+                    '/api/hf/mtp-preflight/recheck?repo=' + encodeURIComponent(_speculativeTrustState.repoId),
+                    { method: 'POST', headers: window.authHeaders ? window.authHeaders() : {} }
+                );
+                const data = await resp.json();
+                if (!data || data.ok !== true) {
+                    // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+                    el.innerHTML = DOMPurify.sanitize('<span style="color:var(--err,#e65c5c);">Re-check failed: ' + (data?.error || 'unknown') + '</span>');
+                    setTimeout(_renderSpeculativePinStatus, 3000);
+                    return;
+                }
+                _speculativeTrustState.revision = data.revision;
+                _speculativeTrustState.trustRequired = !!data.trustRemoteCodeRequired;
+                _speculativeTrustState.lastRecheckAt = data.lastRecheckAt || '';
+                _speculativeTrustState.upstreamUnchanged = data.upstreamUnchanged ?? null;
+                _speculativeTrustState.resolvedAt = data.resolvedAt || '';
+                _speculativeTrustState.stale = false;
+                _renderSpeculativePinStatus();
+            } catch (e) {
+                // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+                el.innerHTML = DOMPurify.sanitize('<span style="color:var(--err,#e65c5c);">Re-check failed: ' + e.message + '</span>');
+                setTimeout(_renderSpeculativePinStatus, 3000);
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    }
+}
+
 async function _checkSpeculativeModelTrust(repoId) {
     const trustWrap = document.getElementById('modal-rapid-speculative-trust-wrap');
     const warningEl = document.getElementById('modal-rapid-speculative-trust-warning');
     const consentCheck = document.getElementById('modal-rapid-speculative-trust-consent');
+    const pinWrap = document.getElementById('modal-rapid-speculative-pin-status-wrap');
     if (!trustWrap || !warningEl || !consentCheck) return;
 
     /* Reset */
@@ -1844,6 +1929,7 @@ async function _checkSpeculativeModelTrust(repoId) {
     trustWrap.style.display = 'none';
     consentCheck.checked = false;
     warningEl.textContent = '';
+    if (pinWrap) pinWrap.style.display = 'none';
 
     if (!repoId || !repoId.includes('/')) return;
     if (!/^[\w._-]+\/[\w._-]+$/.test(repoId)) return;
@@ -1867,6 +1953,9 @@ async function _checkSpeculativeModelTrust(repoId) {
         _speculativeTrustState.upstreamUnchanged = data.upstreamUnchanged ?? null;
         _speculativeTrustState.stale = !!data.stale;
         _speculativeTrustState.loading = false;
+
+        /* Pin status UI — always show when pinned */
+        _renderSpeculativePinStatus();
 
         if (_speculativeTrustState.trustRequired) {
             let msg = 'This companion model requires trust_remote_code (custom Python code execution).';
