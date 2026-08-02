@@ -7,6 +7,7 @@ import { getPlatformInfo } from '../core/platform-info.js';
 import { escapeHtml } from '../core/format.js';
 import { buildArchitectureLabel, isMoEEligible } from './setup-view.js';
 import { openModelFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
+import { configureMlxPresetEditor } from './preset-editor-mlx.js';
 import { applySettings, saveSettings } from './settings.js';
 import { showToast, showToastWithActions, showConfirmDialog } from './toast.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune } from './tuning-cards.js';
@@ -906,7 +907,7 @@ export function updatePresetVram() {
         const currentPreset = _currentModalPreset();
         const isRapidMlx = currentPreset?.backend === 'rapid_mlx';
         const backend = isRapidMlx ? 'rapid_mlx' : 'llama_cpp';
-        const rapidPolicy = isRapidMlx ? rapidEstimatePolicyFromConfig(currentPreset?.rapid_mlx) : {};
+        const rapidPolicy = isRapidMlx ? _rapidEstimatePolicyFromForm(currentPreset?.rapid_mlx) : {};
 
         // Builder item 6: use canonical body builder for cross-surface equality.
         const body = buildEstimateBody({
@@ -940,6 +941,31 @@ export function updatePresetVram() {
             updatePresetMlockWarning(data);
         } catch { if (seq === _presetVramSeq && strip) strip.style.display = 'none'; }
     }, 350);
+}
+
+function _rapidEstimatePolicyFromForm(fallback = {}) {
+    const prefixEnabled = document.getElementById('modal-rapid-prefix-cache-enabled')?.checked !== false;
+    const speculativeEnabled = !!document.getElementById('modal-rapid-speculative-enabled')?.checked;
+    const speculativeSource = document.getElementById('modal-rapid-speculative-source')?.value || 'embedded';
+    const speculativeModel = document.getElementById('modal-rapid-speculative-model')?.value?.trim() || '';
+    const speculativeReady = speculativeEnabled && (speculativeSource !== 'external' || speculativeModel);
+    const config = {
+        ...fallback,
+        kv_cache_dtype: document.getElementById('modal-rapid-kv-cache-dtype')?.value || null,
+        turboquant_mode: document.getElementById('modal-rapid-turboquant-mode')?.value || null,
+        prefix_cache_enabled: prefixEnabled,
+        retained_cache_mib: prefixEnabled
+            ? Number(document.getElementById('modal-rapid-cache-memory-mib')?.value || 8192)
+            : 0,
+        prefill_step_size: Number(document.getElementById('modal-rapid-prefill-step-size')?.value || 512),
+        speculative_config: speculativeReady ? {
+            method: 'mtp',
+            model: speculativeSource === 'external' ? speculativeModel : null,
+            num_speculative_tokens: Number(document.getElementById('modal-rapid-speculative-tokens')?.value || 2),
+            disable_auto_k: !!document.getElementById('modal-rapid-speculative-disable-auto-k')?.checked,
+        } : null,
+    };
+    return rapidEstimatePolicyFromConfig(config);
 }
 
 function _renderPresetVram(el, data) {
@@ -1799,6 +1825,7 @@ function _configureBackendPresetEditor(preset) {
             ? 'TCP port Rapid-MLX listens on.'
             : 'TCP port llama-server listens on. Default 8001. Change if you run multiple servers simultaneously.';
     }
+    configureMlxPresetEditor(modal, isRapid);
 }
 
 async function _fetchSidecarsForPreset() {

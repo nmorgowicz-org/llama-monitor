@@ -82,6 +82,8 @@ pub const FEATURES_MODELS_JS: &str = include_str!("../../static/js/features/mode
 pub const FEATURES_NAV_JS: &str = include_str!("../../static/js/features/nav.js");
 pub const FEATURES_NETWORK_DETECTION_JS: &str =
     include_str!("../../static/js/features/network-detection.js");
+pub const FEATURES_PRESET_EDITOR_MLX_JS: &str =
+    include_str!("../../static/js/features/preset-editor-mlx.js");
 pub const FEATURES_PRESETS_JS: &str = include_str!("../../static/js/features/presets.js");
 pub const FEATURES_RAPID_MLX_CARDS_JS: &str =
     include_str!("../../static/js/features/rapid-mlx-cards.js");

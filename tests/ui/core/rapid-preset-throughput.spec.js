@@ -33,7 +33,7 @@ test.describe('Rapid-MLX preset editor throughput fields', () => {
       sel.value = 'probe';
       mod.openPresetModal('edit');
     }, SEED);
-    await page.locator('#preset-modal .preset-nav-item[data-section="advanced"]').click();
+    await page.locator('#preset-modal .preset-nav-item[data-section="context"]').click();
   }
 
   test('@in-memory-test stored values load into the controls', async ({ page }) => {
@@ -126,22 +126,21 @@ test.describe('Rapid-MLX preset editor throughput fields', () => {
       sel.value = 'probe';
       mod.openPresetModal('edit');
     });
-    await page.locator('#preset-modal .preset-nav-item[data-section="advanced"]').click();
-
     // Return every control to the option that means "do not send this".
+    await page.locator('#preset-modal .preset-nav-item[data-section="generation"]').click();
     await page.selectOption('#modal-rapid-enable-thinking', '');
-    await page.selectOption('#modal-rapid-kv-cache-dtype', '');
-    await page.selectOption('#modal-rapid-turboquant-mode', 'auto');
     await page.selectOption('#modal-rapid-tool-call-parser', '');
     await page.selectOption('#modal-rapid-reasoning-parser', '');
     await page.selectOption('#modal-rapid-sampling-mode', 'auto');
-    await page.fill('#modal-max-tokens', '');
-    // The sampling inputs live in the generation section, which a Rapid preset can now open.
-    await page.locator('#preset-modal .preset-nav-item[data-section="generation"]').click();
     for (const id of ['modal-temperature', 'modal-top-p', 'modal-top-k', 'modal-min-p',
                       'modal-repeat-penalty', 'modal-presence-penalty']) {
       await page.fill(`#${id}`, '');
     }
+    await page.locator('#preset-modal .preset-nav-item[data-section="context"]').click();
+    await page.selectOption('#modal-rapid-kv-cache-dtype', '');
+    await page.selectOption('#modal-rapid-turboquant-mode', 'auto');
+    await page.locator('#preset-modal .preset-nav-item[data-section="generation"]').click();
+    await page.fill('#modal-max-tokens', '');
 
     let body = null;
     await page.route('**/api/presets/**', async (route, request) => {
@@ -184,7 +183,7 @@ test.describe('Rapid-MLX preset editor throughput fields', () => {
         rapid_mlx: { port: 8080, model_source: '/tmp/Qwen3-8B-4bit' },
       });
     });
-    await page.locator('#preset-modal .preset-nav-item[data-section="advanced"]').click();
+    await page.locator('#preset-modal .preset-nav-item[data-section="context"]').click();
 
     let body = null;
     await page.route('**/api/presets', async (route, request) => {

@@ -1279,11 +1279,30 @@ async function scenarioRapidPreset(ctx) {
 
     await page.click('.launch-card[data-preset-id="capture-rapid-mlx"] .launch-card-btn-edit');
     await page.waitForSelector('#preset-modal.open.preset-editor--rapid-mlx', { visible: true });
-    await sleep(200);
+    await page.waitForFunction(() => {
+        const strip = document.getElementById('preset-vram-strip');
+        const display = document.getElementById('preset-vram-display');
+        return strip && getComputedStyle(strip).display !== 'none'
+            && display && !display.textContent.includes('Estimating');
+    }, { timeout: 10000 }).catch(() => {});
+    await sleep(150);
     await captureShot(page, 'rapid-mlx-preset-editor-model.png', { fullPage: true });
 
-    // Phase 7B1: Capture Rapid-MLX advanced tab with Phase 7 controls (KV dtype,
-    // reusable prompt storage, workload scenario, sampling mode, reasoning mode, Web UI).
+    // MLX-native editor: each capture name matches the visible section.
+    await page.click('#preset-modal .preset-editor-nav [data-section="generation"]');
+    await page.waitForSelector('.preset-editor-section[data-section="generation"].active');
+    await sleep(150);
+    await captureShot(page, 'rapid-mlx-preset-editor-generation.png', { fullPage: true });
+
+    await page.click('#preset-modal .preset-editor-nav [data-section="context"]');
+    await page.waitForSelector('.preset-editor-section[data-section="context"].active');
+    await sleep(150);
+    await captureShot(page, 'rapid-mlx-preset-editor-cache-performance.png', { fullPage: true });
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await sleep(150);
+    await captureShot(page, 'rapid-mlx-preset-editor-cache-performance-light.png', { fullPage: true });
+
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     await page.evaluate(() => {
         const navBtn = document.querySelector('#preset-modal .preset-editor-nav [data-section="advanced"]');
         if (navBtn) navBtn.click();
@@ -1293,34 +1312,40 @@ async function scenarioRapidPreset(ctx) {
         { timeout: 5000 }
     );
     await sleep(250);
-    await captureShot(page, 'rapid-mlx-preset-editor-advanced.png', { fullPage: true });
+    await captureShot(page, 'rapid-mlx-preset-editor-server-safety.png', { fullPage: true });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
     await sleep(200);
-    await captureShot(page, 'rapid-mlx-preset-editor-advanced-light.png', { fullPage: true });
+    await captureShot(page, 'rapid-mlx-preset-editor-server-safety-light.png', { fullPage: true });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
     await sleep(200);
-    await captureShot(page, 'rapid-mlx-preset-editor-advanced-narrow.png', { fullPage: true });
+    await captureShot(page, 'rapid-mlx-preset-editor-server-safety-narrow.png', { fullPage: true });
     await page.setViewport(DEFAULT_VIEWPORT);
 
     await page.evaluate(() => {
+        const companions = document.querySelector('[data-mlx-group="companions"]');
+        if (companions) companions.open = true;
         const enabled = document.getElementById('modal-rapid-speculative-enabled');
         if (enabled && !enabled.checked) enabled.click();
         const content = document.querySelector('#preset-modal .preset-editor-content');
         if (content) content.scrollTop = content.scrollHeight;
     });
+    await page.waitForFunction(() => {
+        const display = document.getElementById('preset-vram-display');
+        return display && !display.textContent.includes('Estimating');
+    }, { timeout: 10000 });
     await sleep(150);
-    await captureElementScreenshot(page, '#pe-row-rapid-speculative', 'rapid-mlx-preset-speculative-enabled-dark.png', { padding: 24 });
+    await captureShot(page, 'rapid-mlx-preset-server-safety-speculative-dark.png', { fullPage: true });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
     await sleep(150);
-    await captureElementScreenshot(page, '#pe-row-rapid-speculative', 'rapid-mlx-preset-speculative-enabled-light.png', { padding: 24 });
+    await captureShot(page, 'rapid-mlx-preset-server-safety-speculative-light.png', { fullPage: true });
     await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
     await page.evaluate(() => {
         const content = document.querySelector('#preset-modal .preset-editor-content');
         if (content) content.scrollTop = content.scrollHeight;
     });
     await sleep(150);
-    await captureElementScreenshot(page, '#pe-row-rapid-speculative', 'rapid-mlx-preset-speculative-enabled-narrow.png', { padding: 12 });
+    await captureShot(page, 'rapid-mlx-preset-server-safety-speculative-narrow.png', { fullPage: true });
     await page.setViewport(DEFAULT_VIEWPORT);
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     await page.evaluate(() => document.getElementById('preset-modal-close')?.click());

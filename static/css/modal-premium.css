@@ -2342,17 +2342,144 @@
 
    The webui-* and legacy speculative-policy exemptions were removed with their controls. The
    typed Rapid MTP row below is a separate vLLM-style --speculative-config contract. */
-#preset-modal.preset-editor--rapid-mlx .preset-nav-item:not([data-section="model"]):not([data-section="generation"]):not([data-section="advanced"]),
+#preset-modal.preset-editor--rapid-mlx .preset-nav-item:not([data-section="model"]):not([data-section="generation"]):not([data-section="context"]):not([data-section="advanced"]),
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-field:not(:has(#modal-name)):not(:has(#modal-model-path)),
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-row,
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-toggles,
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .preset-memory-warning,
-#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] > .pe-section-body > :not(.pe-row:has(#modal-port)):not(#pe-row-rapid-reasoning):not(#pe-row-rapid-reasoning-mode):not(#pe-row-rapid-prefix-cache):not(#pe-row-rapid-advanced):not(#pe-row-rapid-workload):not(#pe-row-rapid-parser-overrides):not(#pe-row-rapid-architecture-overrides):not(#pe-row-rapid-speculative):not(#pe-row-rapid-cache-memory):not(#pe-row-rapid-hybrid-cache-entries):not(#pe-row-rapid-throughput):not(#pe-row-rapid-batch-sizes):not(#pe-row-max-tokens-seed),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="context"] > .pe-section-body > :not(.mlx-native-group),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] > .pe-section-body > :not(.pe-row:has(#modal-port)):not(.mlx-native-group),
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="advanced"] .pe-field:not(:has(#modal-port)):not(:has(#modal-rapid-enable-thinking)):not(:has(#modal-rapid-reasoning-effort)):not(:has(#modal-rapid-prefix-cache-enabled)):not(:has(#modal-rapid-kv-cache-dtype)):not(:has(#modal-rapid-turboquant-mode)):not(:has(#modal-rapid-reasoning-mode)):not(:has(#modal-rapid-sampling-mode)):not(:has(#modal-rapid-frequency-penalty)):not(:has(#modal-rapid-tool-call-parser)):not(:has(#modal-rapid-reasoning-parser)):not(:has(#modal-rapid-hybrid-mode)):not(:has(#modal-rapid-prefill-step-size)):not(:has(#modal-rapid-speculative-enabled)):not(:has(#modal-rapid-speculative-source)):not(:has(#modal-rapid-speculative-model)):not(:has(#modal-rapid-speculative-tokens)):not(:has(#modal-rapid-speculative-disable-auto-k)):not(:has(#modal-rapid-auto-tool-choice)):not(:has(#modal-rapid-cache-memory-mib)):not(:has(#modal-rapid-hybrid-cache-entries)):not(:has(#modal-rapid-prefill-batch-size)):not(:has(#modal-rapid-completion-batch-size)):not(:has(#modal-rapid-gpu-memory-utilization)):not(:has(#modal-rapid-max-num-seqs)):not(:has(#modal-rapid-max-concurrent-requests)):not(:has(#modal-rapid-pflash-policy)):not(:has(#modal-rapid-speculative-trust-consent)):not(:has(#modal-max-tokens)),
-#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="generation"] .pe-field:not(:has(#modal-temperature)):not(:has(#modal-top-p)):not(:has(#modal-top-k)):not(:has(#modal-min-p)):not(:has(#modal-repeat-penalty)):not(:has(#modal-presence-penalty)),
-#preset-modal.preset-editor--rapid-mlx #preset-browse-model-btn,
-#preset-modal.preset-editor--rapid-mlx #preset-vram-strip {
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="generation"] > .pe-section-body > .pe-field:not(:has(#modal-temperature)):not(:has(#modal-top-p)):not(:has(#modal-top-k)):not(:has(#modal-min-p)):not(:has(#modal-repeat-penalty)):not(:has(#modal-presence-penalty)):not(:has(#modal-max-tokens)),
+#preset-modal.preset-editor--rapid-mlx [data-mlx-group="output"] .pe-field:not(:has(#modal-max-tokens)),
+#preset-modal.preset-editor--rapid-mlx #preset-browse-model-btn {
   display: none !important;
+}
+
+#preset-modal.preset-editor--rapid-mlx .preset-vram-strip {
+  padding: 12px 20px;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(45, 212, 191, 0.11), transparent 42%),
+    rgba(7, 18, 22, 0.78);
+  border-bottom-color: rgba(45, 212, 191, 0.2);
+  box-shadow: inset 0 -1px 0 rgba(45, 212, 191, 0.05);
+}
+
+#preset-modal.preset-editor--rapid-mlx .preset-editor-shell {
+  width: min(1040px, 96vw);
+}
+
+#preset-modal.preset-editor--rapid-mlx .preset-editor-nav {
+  width: 210px;
+}
+
+.mlx-native-group {
+  display: grid;
+  gap: 14px;
+  margin: 0 0 18px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 20%, rgba(255, 255, 255, 0.07));
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(20, 33, 39, 0.82), rgba(12, 20, 27, 0.62));
+}
+
+.mlx-native-group-header {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+details.mlx-native-group > .mlx-native-group-header {
+  cursor: pointer;
+  list-style: none;
+  padding-right: 86px;
+}
+
+details.mlx-native-group > .mlx-native-group-header::-webkit-details-marker {
+  display: none;
+}
+
+.mlx-native-group-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 3px 8px;
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  border-radius: 999px;
+  background: rgba(124, 58, 237, 0.1);
+  color: #c4b5fd;
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+details.mlx-native-group:not([open]) > .mlx-native-group-header {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.mlx-native-group-title {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 0.88rem;
+  font-weight: 720;
+  letter-spacing: 0.01em;
+}
+
+.mlx-native-group-description {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+#preset-modal.preset-editor--rapid-mlx .mlx-native-row {
+  display: grid;
+}
+
+[data-theme="light"] #preset-modal.preset-editor--rapid-mlx .preset-vram-strip {
+  background:
+    radial-gradient(circle at 20% 0%, rgba(13, 148, 136, 0.1), transparent 42%),
+    rgba(244, 250, 250, 0.96);
+  border-bottom-color: rgba(13, 148, 136, 0.18);
+}
+
+[data-theme="light"] .mlx-native-group {
+  background: linear-gradient(145deg, rgba(247, 252, 252, 0.98), rgba(239, 247, 248, 0.9));
+  border-color: rgba(13, 148, 136, 0.16);
+}
+
+@media (max-width: 768px) {
+  #preset-modal.preset-editor--rapid-mlx .preset-editor-shell {
+    width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+
+  #preset-modal.preset-editor--rapid-mlx .preset-editor-layout {
+    flex-direction: column;
+  }
+
+  #preset-modal.preset-editor--rapid-mlx .preset-editor-nav {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: visible;
+    padding: 8px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  #preset-modal.preset-editor--rapid-mlx .preset-nav-item {
+    width: 100%;
+  }
+
+  #preset-modal.preset-editor--rapid-mlx .mlx-native-group {
+    padding: 14px;
+  }
 }
 
 @keyframes pe-section-enter {

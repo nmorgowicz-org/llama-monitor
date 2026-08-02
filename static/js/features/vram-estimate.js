@@ -25,16 +25,23 @@ export function rapidEstimatePolicyFromConfig(rapidMlx = {}) {
     // use-case cards; every other surface takes the estimator default.
     retained_cache_mib: rapidMlx.prefix_cache_enabled === false ? 0 : (rapidMlx.retained_cache_mib ?? 8192),
     prefill_step_size: Number(rapidMlx.prefill_step_size ?? 512),
+    speculative_config: rapidMlx.speculative_config || null,
   };
 }
 
 export function rapidEstimatePolicyFromWizardHardware(hardware = {}) {
+  const speculativeConfig = hardware.speculativeEnabled ? {
+    method: 'mtp',
+    model: hardware.speculativeSource === 'external' ? (hardware.speculativeModel || null) : null,
+    num_speculative_tokens: Number(hardware.speculativeTokens || 2),
+    disable_auto_k: !!hardware.speculativeDisableAutoK,
+  } : null;
   return {
     kv_cache_dtype: hardware.kvCacheDtype || null,
     turboquant_mode: hardware.turboquantMode || null,
     reasoning_mode: true,
     workload_scenario: hardware.workloadScenario || null,
-    mtp_config: hardware.mtpConfig || null,
+    speculative_config: speculativeConfig,
     retained_cache_mib: Number(hardware.retainedCacheMib ?? 8192),
     prefill_step_size: Number(hardware.prefillStepSize ?? 512),
   };
@@ -73,7 +80,7 @@ export function rapidEstimatePolicyFromWizardHardware(hardware = {}) {
 // @param {number|null} params.rapid_planning_context_tokens — Rapid planning context tokens
 // @param {number|null} params.rapid_retained_cache_tokens — Rapid retained cache tokens
 // @param {string|null} params.client_type — 'app' or 'external_client'
-// @param {Object|null} params.mtp_config — MTP configuration object
+// @param {Object|null} params.speculative_config — typed Rapid speculative configuration
 // @param {string|null} params.hf_repo_revision — pinned revision (Phase 8B2)
 // @param {string|null} params.hf_quant_label — quant label/variant name (Phase 8B2)
 // @returns {Object} request body ready for JSON.stringify
@@ -127,6 +134,9 @@ export function buildEstimateBody(params) {
     if (params.kv_cache_dtype) body.kv_cache_dtype = params.kv_cache_dtype;
     if (params.reasoning_mode) body.reasoning_mode = params.reasoning_mode;
     if (params.turboquant_mode) body.turboquant_mode = params.turboquant_mode;
+    if (Number.isFinite(Number(params.retained_cache_mib))) {
+      body.retained_cache_mib = Number(params.retained_cache_mib);
+    }
   }
 
     // Workload scenario (Phase 5a Part 4: scenario-aware estimates).
@@ -136,7 +146,7 @@ export function buildEstimateBody(params) {
     if (params.rapid_retained_cache_tokens != null)
         body.rapid_retained_cache_tokens = params.rapid_retained_cache_tokens;
     if (params.client_type) body.client_type = params.client_type;
-    if (params.mtp_config) body.mtp_config = params.mtp_config;
+    if (params.speculative_config) body.speculative_config = params.speculative_config;
     // Phase 5b Part C: max_cache_blocks from preset for prelaunch estimates.
 
     return body;

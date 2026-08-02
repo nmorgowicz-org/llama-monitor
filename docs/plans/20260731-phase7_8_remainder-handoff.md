@@ -964,14 +964,18 @@ near future without presenting it as a Rapid-MLX mode or speculative-decoding to
 
 - **Spawn Wizard:** allow a genuinely MLX-native route where it improves comprehension rather than
   forcing the GGUF/llama.cpp sequence. Replace the dense, two-column `Rapid-MLX advanced` control
-  dump with progressive decisions. Keep the estimator prominent during MLX model search/selection
-  and fit review, at the same decision-making level as the llama.cpp route; group Generation
+  dump with progressive decisions. Once a model is selected, keep a persistent MLX fit rail visible
+  through memory/performance, generation, and review—not hidden by the Rapid route. It must show
+  model weights/quantization, active context/KV, retained cache, companion overhead, safety
+  headroom, and live impact from changed controls using the server estimator as the sole authority.
+  Keep the same immediate fit signal during MLX model search/selection; group Generation
   (thinking, sampling, parsers), Cache & Performance (KV precision, retained cache/entries,
   prefill and batching), and Server & Safety (port, auth, concurrency, companion constraints)
   behind clear follow-up affordances.
 - **Preset Editor:** replace the overloaded three-tab Rapid layout with a backend-native Model /
   Generation / Cache & Performance / Server & Safety information architecture. Retain the same
-  estimator and fit explanation as a first-class Model/Performance decision. Do not recreate
+  estimator as a persistent cross-section fit strip with Explain and context-appropriate Auto-size,
+  so users see the memory impact of model, quantization, context, cache, and companion changes. Do not recreate
   llama.cpp-only tabs or expose unqualified knobs. Wizard and editor must use the identical labels,
   defaults, explanations, save/load behavior, command preview, and review summary.
 - **Dashboard:** give every trustworthy Rapid telemetry signal the same premium, modern visual
@@ -994,3 +998,209 @@ owns unrelated generation, caching, and safety decisions; dashboard recommendati
 evidence-tiered; and reference captures must crop to their relevant panel rather than spend their
 resolution on empty backdrop. The former teal active-step outline was a capture-only
 Puppeteer/Chromium focus-visible artifact and is fixed with a capture-scoped marker.
+
+### 2026-08-02 MLX-native redesign continuation checkpoint
+
+#### Authority, scope, and clean base
+
+- Clean pre-redesign checkpoint: `feb4728 feat(spawn): qualify cache retention and Rapid chat
+  safety`. It contains the completed cache receipts/policy, chat reasoning-cap adapter, archived
+  sweep plan, read-only cache audit, and functional Library/Rapid-live evidence. The worktree was
+  clean and no Rapid/capture process remained immediately after that commit.
+- Redesign scope is **only** Spawn Wizard, Preset Editor, and Dashboard. Do not turn this into a
+  chat UI redesign. Shared chat compatibility work is separate.
+- The presentation must be **MLX-family**, not a second set of Rapid-only conditionals. Rapid-MLX
+  supplies today's capability/config adapter; future MTPLX must be able to reuse the same shell,
+  section vocabulary, estimator presentation, and metric visual system without pretending to be
+  Rapid-MLX.
+- Hard estimator invariant, stated twice by the user: the authoritative VRAM/unified-memory fit bar
+  must remain visible in **both** the Spawn Wizard and Preset Editor everywhere a model,
+  quantization, context/KV, retained cache, companion, or performance control can change memory.
+  `/api/vram-estimate` remains the sole formula source.
+
+#### Completed Preset Editor slice (checkpoint next)
+
+The following files are intentionally dirty after `feb4728`:
+
+- `static/js/features/preset-editor-mlx.js` (new): presentation-only MLX information architecture.
+  It preserves every existing form-control ID and moves existing Rapid rows at runtime, with comment
+  anchors restoring their original llama.cpp positions. It relabels/reorders four existing sections:
+  `Model & Fit`, `Generation`, `Cache & Performance`, `Server & Safety`. This avoids duplicate fields
+  or a second serialization path. It also groups thinking/protocol, active memory, retained cache,
+  scheduler, and companions. Companions/MTP is an advanced collapsed disclosure because current MTP
+  qualification is parked and must not dominate the normal flow.
+- `static/js/features/presets.js`: imports/configures that module and now builds Rapid estimates from
+  **live unsaved form values** rather than the stored preset. KV dtype, TurboQuant, retained-cache
+  toggle/memory, prefill step, and typed speculative configuration therefore affect the visible bar
+  before save.
+- `static/js/features/vram-estimate.js`: fixes two cross-surface contract bugs discovered during the
+  redesign. `retained_cache_mib` was calculated by callers but never serialized; MTP was emitted as
+  unused `mtp_config` while Rust accepts typed `speculative_config`. The canonical builder now sends
+  `retained_cache_mib` and `speculative_config`; Wizard hardware constructs the same typed structure.
+- `static/css/modal-premium.css`: removes the rule that hid `#preset-vram-strip` for Rapid, widens the
+  MLX editor/nav, adds premium grouped surfaces and light-theme treatment, makes the four MLX tabs a
+  two-by-two narrow layout, and supplies the collapsed advanced-companion disclosure. It retains
+  reduced-motion behavior from the shared editor. The high-specificity generation-field override
+  is paired with direct-row markers so the six shared sampling controls remain visible while
+  llama.cpp-only Generation rows stay hidden. Max Tokens now lives in an MLX Output Limit group;
+  Seed remains llama.cpp-only. Switching back removes all MLX markers and restores original rows.
+- `tests/ui/capture.mjs`: `rapid-preset` now waits for the estimator and captures the actual named
+  sections (`model`, `generation`, `cache-performance`, `server-safety`). Old `advanced` names were
+  stale. Speculative captures are now full-screen modal/backdrop captures after scrolling/opening the
+  correct disclosure—not element closeups. This matches the user's explicit capture preference.
+- Focused specs: cache/batch and throughput tests now navigate to `context` (Cache & Performance),
+  not the old Advanced tab. `rapid-preset-visibility.spec.js` asserts exact visible MLX nav order,
+  persistent fit strip, group reachability, live estimator payload changes, and advanced companion
+  access.
+- `src/gen/routes.rs` and `src/gen/static_assets.rs` changed only because a release build registered
+  the new static module. Keep them with the module.
+
+Validation completed for this slice on 2026-08-02:
+
+- `npm run validate-js` passed after every JavaScript change, including the new module.
+- `npm run lint` passed after every JavaScript change.
+- `rtk cargo build --release` passed after the final product changes and regenerated the embedded
+  static asset route.
+- The focused release-binary Playwright set passed outside the sandbox: `PASS (23) FAIL (0)`.
+  It covers MLX information architecture, every Rapid control's reachable unset state, estimator
+  payload updates, cache/batch/throughput persistence, Phase 7 preset behavior, save/duplicate
+  preservation, and llama.cpp restoration.
+- `rapid-preset` and `preset-editor` capture scenarios both completed outside the sandbox. Original-
+  resolution inspection covered Model, Generation, Cache & Performance, Server & Safety, dark/light,
+  2x2 narrow navigation, expanded speculative controls, and restored llama.cpp Model/Context/Advanced
+  screens. Captures retain the full application/modal backdrop as requested.
+- The speculative capture now waits for the estimator to settle after enabling MTP; the earlier
+  `Estimating VRAM...` artifact is no longer possible without failing the capture scenario.
+- `rtk git diff --check` passed.
+- An earlier focused Playwright attempt inside the sandbox reported `PASS (0) FAIL (0)` after the
+  180-second web-server timeout because sandbox loopback bind returns `EPERM`. This is not a test
+  result; retain it only as a warning to run future browser validation outside the sandbox.
+
+Receipts used for the completed Preset slice (rerun only if this slice changes):
+
+1. Release build: `rtk cargo build --release`.
+2. Escalated Rapid capture:
+   `SCREENSHOT_PORT=<free> rtk node tests/ui/capture.mjs --scenario rapid-preset --no-attach`.
+3. Original-resolution visual inspection:
+   `rapid-mlx-preset-editor-model.png`, `-generation.png`, `-cache-performance.png`,
+   `-server-safety.png`, light variants, narrow Server/Safety, and full-screen speculative states.
+   Confirm Generation controls are visible after the specificity fix; confirm narrow tabs are 2x2;
+   confirm the estimator has settled and remains visible on every section.
+4. Focused Playwright **outside sandbox**:
+   `CI=1 LLAMA_MONITOR_USE_RELEASE=1 LLAMA_MONITOR_TEST_PORT=17778 rtk npx playwright test
+   core/rapid-preset-visibility.spec.js core/rapid-preset-cache-batch.spec.js
+   core/rapid-preset-throughput.spec.js core/phase7-presets.spec.js core/preset-flow.spec.js`.
+5. Check llama.cpp editor restoration by running the `preset-editor` capture and its existing specs;
+   the move/restore anchors must not reorder or hide llama.cpp fields after switching backend types.
+
+#### Spawn Wizard rearchitecture: implement next
+
+`static/js/features/spawn-wizard.js` is about 11,168 lines. Rapid is currently an overlay inside a
+llama.cpp flow; CSS hides the reusable `wizard-main` and `hw-vram-sidebar` on step 2 even though the
+server estimate is still calculated. Do not merely restyle `#rapid-hardware-panel`.
+
+Create `static/js/features/spawn-wizard-mlx.js` as a capability/presentation controller and keep the
+shared wizard shell in `spawn-wizard.js`:
+
+- Shared: open/close, step navigation, use-case selection, engine/model/HF search, typed model source,
+  server-authoritative estimate scheduling, persistent fit rail, preset/save/review/start lifecycle,
+  validation/error focus, command preview, and evidence drawer.
+- llama.cpp flow: GGUF quant selection, GPU layers, mmap/mlock, CPU MoE, llama batching, RoPE, llama
+  speculative flags, and llama-only fit decisions remain isolated in the existing path (extract later
+  only when behavior-preserving tests make it safe).
+- MLX flow: model profile/capabilities, active KV/storage, retained cache, prefill/scheduler policy,
+  thinking/sampling/parser protocol, server/safety, and qualified companions. Backend adapters own
+  actual flag names/ranges; never reuse `RapidMlxConfig` as the future MTPLX contract.
+
+Recommended MLX progression using the existing six-step shell:
+
+1. Use case/profile (shared).
+2. Engine + MLX model/HF selection (shared shell, MLX-specific qualification and immediate fit).
+3. **Memory & Fit:** persistent estimator is the visual center; active memory and retained-cache
+   choices are progressive cards, with weights/quant, active KV, retained cache, companion overhead,
+   and safety headroom visible. Never hide the estimator/sidebar for MLX.
+4. **Generation & Runtime:** sampling/thinking/protocol first; Cache & Performance and Server & Safety
+   are organized subsections/disclosures, not one giant two-column advanced dump. Single-user
+   defaults stay prominent; batching/concurrency and parked MTP remain advanced.
+5. Save preset with the same MLX section vocabulary and final fit strip.
+6. Review/start with memory composition, effective policy, deviations from recommended defaults,
+   command preview/evidence, and launch blockers.
+
+Behavior-preserving extraction candidates from `spawn-wizard.js`:
+
+- `_bindRapidMlxAdvancedControls`, `_syncRapidSpeculativeFields`, trust/pin/sidecar helpers,
+  `_applyRapidMlxDefaults`, `_applyReasoningModeLock`.
+- `_fetchRapidMlxModelProfile`, `_scheduleRapidMlxProfileFetch`, `_renderRapidMlxProfileHints`.
+- `renderRapidExclusionWarnings` and Rapid request/config construction should become adapter helpers,
+  while shared payload submission stays in the shell.
+- Preserve current control IDs until round-trip tests pass; introduce semantic MLX components before
+  changing serialized contracts.
+
+Required Wizard tests/captures:
+
+- Keep server estimator parity and add assertions that the fit rail is visible on MLX steps 2–5 and
+  updates for KV dtype, retained memory, prefill size, model/quant, and companion changes.
+- Preserve `spawn-wizard.spec.js`, `phase7-presets.spec.js`, `rapid-phase7-fields.spec.js`, and
+  command-preview coverage.
+- Add a still-focused MLX scenario derived from `scenarioSpawnWizardRapidMlxGif`; do not rely on the
+  GIF for design review. Captures must be full screen with backdrop, scroll the intended subsection
+  into view, and use names matching the visible state.
+
+#### Dashboard premium visual system: implement after Wizard/Preset contracts settle
+
+Rapid telemetry currently parks the llama.cpp cards and renders uniform label/value cards through
+`static/js/features/rapid-mlx-cards.js`. Available trustworthy signals are:
+
+- runtime model/health/readiness/uptime;
+- prompt and generation tokens/sec;
+- running/waiting requests;
+- Metal active/peak/cache memory;
+- cache hit rate, entry count, and cache memory;
+- completed requests, prompt/completion totals, scheduler steps;
+- optional sanitized active-request state and normalized progress.
+
+Rapid currently provides **no trustworthy TTFT history or speculative-acceptance/speedup metric**;
+do not invent either and remove `observed TTFT` from visual requirements until the backend supplies
+it. Recommended premium composition:
+
+- hero throughput card with prompt/generation sparklines and current generation stage;
+- unified-memory composition/pressure visual (stacked bar or ring) with active, cache, peak, and
+  headroom semantics where a trustworthy capacity exists;
+- queue/admission card with active/waiting pressure and active-request rail;
+- prefix-cache card with hit-rate gauge, entries, memory, and clear unavailable/zero/stale states;
+- cumulative work card with compact totals and deltas derived only from locally observed snapshots;
+- runtime/effective-policy status strip with evidence/staleness grade.
+
+Reuse the premium primitives/helpers in `cards-inference.css` and `dashboard-render.js` where their
+semantics fit, or extract backend-neutral primitives. Do not copy llama DOM IDs while
+`parkLlamaCards()` owns them. Prefer a capability-driven metric model so MTPLX can provide a subset
+or superset without another dashboard rewrite. Client-side transient history may drive sparklines;
+it must be labeled live-session history and must not masquerade as persisted server telemetry.
+
+Dashboard capture/test corrections still required:
+
+- `dashboard-rapid-mlx` must assert visual hierarchy, zero/unavailable/stale states, DOM stability,
+  accessibility, dark/light, narrow, and reduced motion.
+- `rapid-mlx-live` currently captures telemetry **before** chat, so the dashboard shot has zero totals;
+  move/add a live dashboard capture after the request and before stop. Keep the stopped/historic frame
+  separate. Its status assertion reported `model stopped: false` even though process inspection found
+  no Rapid process; fix the assertion to inspect the active session/process contract rather than the
+  managed-runtime installation status.
+
+#### Capture-script cleanup remaining
+
+- The scenario named `model-library` captures HF Download/discovery, not the actual Library tab.
+  Either rename it to `model-discovery` and update help/docs, or make it capture the Library tab;
+  `models-v2` is the current valid Library evidence.
+- Never return to capture-element closeups for these redesign reviews. Use full-screen/modal backdrop,
+  scroll to the intended section, wait for asynchronous estimator/telemetry state, and ensure artifact
+  names describe what is visibly captured.
+
+#### Final gates before the next checkpoint commit
+
+After all three surfaces are complete, run the mandatory order from `AGENTS.md`: clippy, full Rust
+tests, JS validation, lint, diff check, release build, formatting check, clean status. Then run the
+full isolated release Playwright suite on port 17778 outside sandbox. Inspect all dark/light/narrow
+artifacts manually. Run `scripts/check-unused-screenshots.sh`; artifacts remain ignored unless a
+reference doc actually uses them. Use a conventional commit and do not push or label a PR without
+explicit user direction.

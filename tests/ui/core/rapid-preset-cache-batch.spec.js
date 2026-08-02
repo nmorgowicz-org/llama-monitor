@@ -35,7 +35,7 @@ test.describe('Rapid-MLX preset editor cache-entry and batch-size fields', () =>
       sel.value = 'probe';
       mod.openPresetModal('edit');
     }, seed);
-    await page.locator('#preset-modal .preset-nav-item[data-section="advanced"]').click();
+    await page.locator('#preset-modal .preset-nav-item[data-section="context"]').click();
   }
 
   async function savePut(page) {
@@ -103,7 +103,7 @@ test.describe('Rapid-MLX preset editor cache-entry and batch-size fields', () =>
         rapid_mlx: { port: 8080, model_source: '/tmp/Qwen3-8B-4bit' },
       });
     });
-    await page.locator('#preset-modal .preset-nav-item[data-section="advanced"]').click();
+    await page.locator('#preset-modal .preset-nav-item[data-section="context"]').click();
 
     await expect(page.locator('#modal-rapid-hybrid-cache-entries')).toHaveValue('16');
 
