@@ -1,0 +1,54 @@
+{
+  "model": "ailexleon/gemma-4-26B-A4B-it-qat-uncensored-heretic-mlx-lm-4Bit",
+  "suite": "cache-entries",
+  "trial_protocol": {
+    "trials": 1,
+    "ordering": "single-pass",
+    "settle_seconds": 0
+  },
+  "speculative_lane": null,
+  "qualification_eligible": true,
+  "positive_control": null,
+  "greedy_parity": null,
+  "sampling_lane": {
+    "mode": "recommended",
+    "recommendation_known": true,
+    "model_type": "gemma4",
+    "reasoning": "on",
+    "source": "generation_config.json",
+    "do_sample": true,
+    "temperature": 1,
+    "top_p": 0.95,
+    "top_k": 64,
+    "vendor_alternative": {
+      "source": "vendor profile",
+      "vendor_family": "gemma4",
+      "variant": "default",
+      "citation": "Google's default Gemma 4 parameters, as republished by Unsloth, reasoning enabled",
+      "reasoning": "on",
+      "temperature": 1,
+      "top_p": 0.95,
+      "top_k": 64
+    },
+    "disagrees_with_vendor_on": [],
+    "reasoning_control": {
+      "control": "enable_thinking",
+      "evidence": "chat template references enable_thinking"
+    },
+    "reasoning_effective": "on"
+  },
+  "performance_claim_eligible": true,
+  "receipts": [
+    {
+      "label": "00-cache-entries-a-32k-e1",
+      "receipt": "00-00-cache-entries-a-32k-e1.json",
+      "server_log": "00-00-cache-entries-a-32k-e1.server.log",
+      "harness_log": "00-00-cache-entries-a-32k-e1.harness.log",
+      "manifest": null,
+      "clamp_verdict": "not_probed",
+      "observed_lane": "not_applicable"
+    }
+  ],
+  "complete": true,
+  "failure": null
+}

@@ -120,9 +120,10 @@ campaign-commit table below and is the starting point for the next context windo
 Full release-built Playwright receipt after this checkpoint: **262 passed, 4 skipped, 0 failed** in
 7.5 minutes. The previously intermittent tag-cloud re-expand case passed in this run.
 
-Still open after this checkpoint: immutable external-companion preflight/trust consent; external
-cache/benchmark audits listed in §3.11. Frequency-penalty UI and legacy quant-style migration are
-now closed (see §3.5, §3.8). Do not infer those items complete from product plumbing.
+At that checkpoint, immutable external-companion preflight/trust consent and the external
+cache/benchmark audits in §3.11 were still open. The companion boundary, frequency-penalty UI,
+legacy quant-style migration, and bounded cache audits are now closed by the later checkpoints
+below; the remaining current work is enumerated in §7.
 
 ### Campaign commits, newest first
 | Commit | What |
@@ -280,7 +281,10 @@ decoding without dropping their request semantics.
 ### 3.3 — Speculative decoding as a product feature (`--speculative-config`)
 
 **Status:** typed backend/argv/estimator and default-off Wizard/Preset controls are built and
-capture-verified. Immutable external-companion preflight and trust consent remain open.
+capture-verified. Companion lifecycle work is closed for the current runtime boundary: immutable
+local sidecars are inventoried and estimated, while mutable remote-HF companion launches fail
+closed because Rapid-MLX 0.11.1 cannot request a pinned revision. Remote preflight/pin/trust data
+remains diagnostic only.
 
 The capability is **proven**, but only as a qualification path: the benchmark suite builds the flag
 correctly (`rapid-mlx-benchmark-suite.mjs:726`) and MTP measures **59–61% acceptance on
@@ -349,15 +353,15 @@ so the precondition that previously made it uncallable is gone.
 
 ---
 
-### 3.5 — Config fields and safety controls still open
+### 3.5 — Config fields and safety-control disposition
 
-Only two product-facing controls still require product work; the two runtime path fields remain
-internal by decision.
+The product-facing controls below are resolved for the current runtime boundary; the two runtime
+path fields remain internal by decision.
 
 | Field | Disposition |
 | --- | --- |
 | `executable_path`, `managed_runtime_path` | Runtime-resolution internals. **Keep hidden** — settled. |
-| `trust_remote_code_consent` | **Open:** add revision-scoped consent/preflight UX. This is a safety control; do not make it an unlabelled checkbox or bypass it. |
+| `trust_remote_code_consent` | **Resolved for the current boundary:** revision-scoped remote preflight/pin/trust UX exists, but remote-HF companion launch remains fail-closed because Rapid-MLX 0.11.1 cannot load the resolved immutable revision. Immutable local sidecars remain supported. |
 | `auto_tool_choice` | **Resolved:** Wizard/Preset control and serialization built. |
 | `no_thinking` | **Resolved:** explicit thinking opt-out serializes this while `--reasoning` remains always-on. |
 | `default_frequency_penalty` | **Resolved:** backend rejects launch outside -2.0..2.0; Preset Editor exposes `modal-rapid-frequency-penalty` in the Rapid Sampling Mode row, CSS allowlist and save/load/reset paths updated, visibility spec passed. |
@@ -400,7 +404,8 @@ recorded, merge-not-clobber confirmed, delete-forgets confirmed.
 **Resolved in the current worktree:** Playwright pins lineage-row rendering for pinned, unpinned,
 and local-only models. `SimpleModelInfo.revision` is populated from the HF API commit and the
 selection payload preserves it; tests reject an invented `main` revision. There is no remaining
-lineage-specific Playwright gap. External companion provenance is a separate open item in §3.3.
+lineage-specific Playwright gap. External companion provenance is resolved for immutable local
+sidecars; mutable remote-HF companion launch remains fail-closed as recorded in §7.
 
 ---
 
@@ -486,20 +491,165 @@ lanes by tag; config comments describe the executable contract rather than decor
 
 ### 3.11 — Carried from earlier phases (not code)
 
-- **`--cache-ram` multi-branch / slot-pressure run** (Phase 6 item 9) — still outstanding. Note the
-  qualified policy is already `cache-ram 0`: 0 vs 8192 measured identical through 200K, and the
-  test that produced 8192 was not discriminating.
-- **`--hybrid-cache-entries` sweep** — the plan doc exists at
-  `docs/plans/20260731-hybrid-cache-entries-sweep.md`; **the sweep has not been run.** This doc
-  stays; it is a live work order.
-- **Library tab UI** from the Disk/cache-audit work was never visually verified.
-- **Phase 8B3** depends on "8B2 verified + screenshots approved". 8B2 is verified; screenshots are
-  **not approved**. 8B3's headline deliverable (additive MLX+GGUF scope toggles) is already
-  implemented at `models.js:2264`.
-- **`rapid-mlx-live` (7.5B)** is coherent but has not been run in this campaign; its three
-  screenshots were not re-approved.
-- **~337 GB shared HF cache** still to audit. Standing direction: get all models inside
-  `~/.config/llama-monitor/models/`. Audit, do not blanket-delete.
+**2026-08-01 cache-entry checkpoint — parked on Gemma template fidelity, not a
+cache verdict.** The bounded 32k Gemma 1-entry positive control initially had
+an invalid benchmark prompt (it referred to an unspecified branch question).
+After repairing that prompt, the 2,048-token diagnostic run produced 4/5
+marker recall on cold/repeat, but each fork exhausted its entire budget in
+reasoning and emitted no final answer. A watched production-representative
+retry used the production ceilings (text prefill 512, 32k request/server,
+8,192 reasoning tokens), but a harness audit found the stronger blocker:
+`reasoning_content` and final `content` were concatenated. That let hidden
+reasoning satisfy marker recall and then replayed the reasoning trace as the
+assistant turn before each fork. The generator itself does inject all five
+markers exactly once; a runtime invariant and self-test now enforce that.
+Reasoning and final output are separated, reasoning-only exhaustion fails,
+and only final content is scored/replayed. The old synthetic `PRESERVED`
+branch prompt is replaced by alternating self-contained SAFE/UNSAFE code-diff
+reviews with exact final-answer gates. Matrix quality cells require at least
+4/5 marker recall. The proposed watched e1 rerun was completed; its cache result and
+corrected control design are recorded immediately below. No Rapid-MLX child was
+left behind. Do not read any earlier attempt as a `--hybrid-cache-entries`
+result or recommendation. Qwen3.6 still needs a separate stock-template
+baseline — ideally the 35B-A3B model actually used in production (otherwise the
+already-qualified 27B) — because a Gemma result is non-transferable.
+
+**2026-08-01 e1 cache-control result — valid negative control, invalid positive
+control.** The repaired Gemma cell completed every fidelity gate, but its exact
+repeat had the same request hash and 33,116 prompt tokens while recording zero
+prefix-cache hits and zero tokens saved; repeat TTFT was 15.30 s versus 13.22 s
+cold. This is not a request-shape or launch defect. The exact argv enabled the
+radix prefix cache with 8 GiB, INT8 KV, prefill 512, and
+`--hybrid-cache-entries 1`. Runtime counters and logs prove the lifecycle: cold
+stored two non-trimmable snapshots (prompt-only and prompt+output), inserted two
+radix entries, immediately evicted one, and ended with one entry. Repeat then
+missed, inserted two, evicted two, and again ended with one. Rapid-MLX 0.11.1
+cannot trim the remaining prompt+output supersequence, so e1 cannot reuse even
+an identical prompt by design. The suite now treats e1 as a metric-gated
+negative control, e2 as the minimum exact-repeat positive control, and e4 as
+the minimum branch positive control. Direct hit/miss/tokens-saved/eviction
+gates replace TTFT inference. Next run only the 32k e2 cell; it must record at
+least one repeat hit and 28,000 saved prompt tokens before any e4 or broad
+sweep work resumes.
+
+**2026-08-02 e2 preflight correction:** the first e2 attempt never reached its
+repeat request because Gemma's sampled cold marker recall varied from the prior
+4/5 to 3/5. That is a model/template quality observation, not a cache-mechanism
+result. A0/e1 and A1/e2 now record marker recall without using one temperature-1
+sample as a hard gate; their direct cache metrics decide the negative/positive
+mechanism controls. A2/e4 and the broader matrix retain fidelity gates. The
+Qwen3.6 35B-A3B checkpoint also reports the implementation model type
+`qwen3_5_moe`; vendor-profile matching now includes text/MoE wrapper variants,
+preventing a silent greedy, thinking-off fallback. Its dry plan resolves the
+required 1.0/0.95/20 sampling policy with thinking enabled.
+
+**2026-08-02 corrected e2 result — cache mechanics pass, benefit not yet
+proven.** The run completed after decoupling sampled marker recall from the
+mechanism gate. Cold recorded one miss and no eviction; the identical repeat
+recorded one hit, zero misses, and all 33,116 prompt tokens saved. This proves
+two retained snapshots are sufficient for exact-repeat reuse. It does not prove
+a latency benefit: observed TTFT was 13.40 s cold and 15.35 s repeat. Proceed
+only to the e4 branch-positive control; require its direct reuse counters and
+exact SAFE/UNSAFE final verdicts before any matrix or recommendation. A2/e4
+therefore uses its exact branch verdicts as the quality gate while retaining
+marker recall as diagnostic data.
+
+**2026-08-02 corrected e4 result — branch reuse passes.** The Gemma control
+completed all four phases. Cold missed once; repeat and both forks each hit
+once and saved all 33,116 shared prompt tokens. The two forks returned the
+exact required final verdicts (`BRANCH_1=SAFE`, `BRANCH_2=UNSAFE`) and recorded
+TTFTs of 0.938 s and 0.967 s, compared with 13.39 s cold and 15.34 s on the
+exact repeat. This proves useful branch reuse at four retained entries for this
+pinned model/runtime/configuration. It does not yet select a product default:
+the run is a single sample, Gemma is not transferable to Qwen3.6, the cold and
+fork requests are not identical request shapes, and e4 was not compared with
+e2 under branch pressure. Run the bounded Qwen3.6 35B-A3B e2 and e4 controls
+next, then require repeated/matched branch-pressure evidence before changing a
+default or publishing the observed speedup magnitude.
+
+**2026-08-02 Qwen3.6 e2 startup-warmup correction.** The first bounded
+35B-A3B e2 attempt stopped after cold reported two evictions. The backend log
+shows why: Rapid-MLX runs a real two-token request to compile hybrid
+GatedDeltaNet kernels and leaves that request's prompt-only and prompt+output
+snapshots in the cache. The measured 32k cold request then missed, displaced
+those two warmup entries, and stored its own two snapshots. This is startup
+contamination of the cold eviction count, not evidence that Qwen needs more
+than two entries. There is no working HTTP clear operation for the
+memory-aware prefix cache in 0.11.1. Cold controls therefore require a miss and
+zero hits but treat eviction count as diagnostic; repeat/fork hit, miss, and
+saved-token counters remain the qualification gates. Preserve the failed
+attempt and backend log as the regression receipt, then rerun e2 in a new
+receipt directory.
+
+The corrected Qwen e2 rerun passed: cold missed once with 5/5 marker recall;
+repeat hit once, missed zero times, and reported 31,769 prompt tokens saved,
+again with 5/5 recall. TTFT still worsened from 15.83 s to 18.72 s. For hybrid
+Qwen, an exact cache hit is counted before the scheduler's correctness-first
+non-trimmable fallback discards the reused state and performs a full prefill;
+the server log's `tokens_to_prefill=31769` confirms that the saved-token counter
+is not an effective-compute claim on this path.
+
+The first Qwen e4 attempt then produced the correct `BRANCH_1=SAFE` answer but
+correctly missed its cache gate. A completed hybrid turn is a non-trimmable
+supersequence of the next turn's message boundary. The first branch must prefill
+that boundary and create a dedicated `boundary_snapshot`; only a later sibling
+branch can reuse it. The Qwen control is therefore architecture-aware: fork 1
+is the required boundary-seeding miss, while fork 2 must hit and save the shared
+prefix. This does not relax the recommendation gate; if e4 evicts the boundary
+snapshot before fork 2, four entries are insufficient for this Qwen workload.
+
+The corrected Qwen e4 rerun passed. Fork 1 was the expected boundary-seeding
+miss, returned `BRANCH_1=SAFE`, and had 20.78 s TTFT. Fork 2 hit the newly
+stored 31,816-token boundary, prefilling only a 913-token suffix, returned
+`BRANCH_2=UNSAFE`, and had 0.965 s TTFT. This reconciles the new control with
+the original Phase 6 `cold → repeat → follow-up → fork` receipts: their
+follow-up performed the same boundary-seeding role before the measured fork.
+The old `--hybrid-cache-entries 16` was deliberately non-binding during
+cache-memory calibration, not a measured entry-count recommendation. Four is
+now sufficient for this bounded sequential-sibling control; the branch-pressure
+sweep must determine whether it remains sufficient across a wider working set.
+
+The bounded workload sweep now supplies the missing product policy. At 32K,
+e2 missed all eight branches; e4 and e16 both kept the active shared boundary
+hot with essentially identical ~1.2–1.3 s fork TTFT. Separate-session controls
+then showed the retention difference: e4 lost both roots in a parallel-1
+main-plus-one-child sequence, while e8 retained both; e4 lost three alternating
+roots, while e16 retained all three. All exact SAFE/UNSAFE verdicts passed.
+Keep 16 as the general agent-workflow default, present 8 as the strict
+main-plus-one-child option, and present 4 as solo-history only. The separate
+8 GiB retained-memory baseline remains unchanged.
+
+- **`--cache-ram` multi-branch / slot-pressure run** (Phase 6 item 9) — completed for the product
+  floor: one live slot, parallel 1, main plus one sequential child. Through 32K, `0` lost both
+  roots while 2048 MiB and 8192 MiB retained both; 2048 MiB is the smallest tested positive cap.
+  Keep `0` for one linear conversation and use 2048 conditionally when the delegated root must
+  resume and unified-memory headroom permits. Multi-slot testing was deliberately stopped because
+  the target llama.cpp MTP workflow is parallel 1.
+- **`--hybrid-cache-entries` sweep** — completed for the bounded sequential agent-workload policy
+  in `docs/archive/rapid-mlx/20260731-hybrid-cache-entries-sweep.md`. Qwen3.6 evidence supports 4 for one hot
+  history, 8 for main plus one sequential child, and 16 as the general agent-workflow default.
+  True concurrent-arrival stress remains a separate follow-up; it is not required to select the
+  parallel-1 default.
+- **Library tab UI — audited 2026-08-02.** Release-built `models-v2` captures verified the actual
+  Library inventory in dark, light, narrow, and non-Apple states. Cards, lifecycle/compatibility
+  badges, backend actions, fixed footer, and narrow stacking are coherent. The separately named
+  `model-library` scenario captures HF Download/discovery rather than the Library tab; do not use
+  its name as evidence of Library coverage. Phase 8B2/8B3 functional screenshot approval is closed,
+  while the broader MLX Wizard/Preset/Dashboard redesign below remains open.
+- **`rapid-mlx-live` — audited 2026-08-02 with the cached Qwen3-0.6B-4bit control.** Live spawn on
+  an isolated port, telemetry, real chat, supervised stop, fallback cleanup, and temporary-preset
+  cleanup completed. No Rapid process remained. The dashboard is functionally coherent but visually
+  sparse and below the llama.cpp inference-metrics bar; its pre-chat telemetry capture also shows
+  zero totals, while meaningful request totals appear only in the stopped/historic capture. Treat
+  this as functional approval and direct input to the deferred premium Dashboard redesign, not as
+  final visual approval of the release design.
+- **Shared HF cache — read-only audit completed 2026-08-02; nothing deleted or moved.** The Hub
+  cache is about 337 GiB and `~/.config/llama-monitor/models` is about 746 GiB. Preserve the active
+  preset/session, benchmark, and MTP control set. Separately approved cleanup candidates are about
+  26 GiB of local `.staging/downloads` partials, 3.4 GiB of Rapid mirror `.safetensors.part` files,
+  one 54 MiB nonempty HF `.incomplete`, zero-byte locks/incompletes, and a physically duplicated
+  335 MiB Qwen3-0.6B-4bit snapshot. Reconcile the migration journal and snapshot reachability before
+  any cleanup; do not blanket-prune repositories or revisions.
 
 ---
 
@@ -767,13 +917,80 @@ implemented and receipt-backed; do not redo it unless a regression appears.
  2. ~~**Frequency penalty decision**~~ — done, see checkpoint above.
  3. ~~**Legacy quant-style migration**~~ — done (see §3.8, 2026-08-01). The `/api/hf/quantizers`
     endpoint is now a derived view over the catalog; `/api/hf/community-picks` left unchanged.
-4. **Run the non-code audits in §3.11:** cache-ram branch/slot-pressure, hybrid-cache-entries,
-   Library-tab and rapid-mlx-live screenshot approval, and the shared HF-cache audit. Audit and
-   migrate deliberately; do not blanket-delete cached models.
+4. ~~**Run the remaining non-code audits in §3.11**~~ — completed read-only on 2026-08-02.
+   Library and Rapid-live functional evidence is recorded above; the shared HF cache was inventoried
+   without deletion or migration. Any cleanup requires a separate, explicitly approved staged pass.
 5. **Small integrity cleanup — done except the intermittent:** the capture.mjs stale-scenario check
    and the unused HF label exports are resolved (see §3.10 checkpoints). Still open: investigate the
    tag-cloud intermittent if it recurs. Run `rtk git diff --check` after documentation or code edits.
-6. **Only then consider MTP requalification:** use the future-build harness with nonzero-temperature
-   sampled and constrained-tool requests, observable nonzero MTP activity, parity/fidelity, and
-   explicit fallback evidence. A greedy 0-temperature acceptance result alone is not a promotion
-   gate.
+6. **MTP requalification is parked on an upstream runtime fix, not active work.** Do not rerun the
+   matrix against another known greedy-only build. Reopen only after a Rapid-MLX release claims
+   sampling/logits-processor support, then use the future-build harness with nonzero-temperature
+   sampled and constrained-tool requests, reasoning enabled, observable nonzero MTP activity,
+   parity/fidelity, and explicit semantics-preserving fallback evidence. A greedy 0-temperature
+   acceptance result alone is never a promotion gate.
+
+### 2026-08-02 Qwen3.5 chat-loop diagnosis and backend contract correction
+
+The Qwen3.5-9B loop was not reproduced as a deterministic template or hybrid-cache defect. With
+the same sampled Qwen defaults, Froggeric v20, Froggeric v21.3, and the bundled template all
+stopped normally; forced-hybrid and no-hybrid runs also stopped normally. A greedy ordinary-chat
+control repeated to the full 8,192-token ceiling, so the earlier greedy tool receipt only proved
+that constrained tool generation supplied a structural exit. It did not qualify greedy chat.
+
+The application-level trigger was the shared role-boundary scaffold. The concise prompt stopped
+in 199–361 output tokens with the chat UI's sampling values, while adding the full boundary pushed
+reasoning beyond 2,048 tokens. The intended safety cap was ineffective because the shared client
+sent llama.cpp's `thinking_budget_tokens`; Rapid-MLX 0.11.1 expects
+`reasoning_max_tokens`. A corrected watched probe emitted exactly 2,048 reasoning chunks, then 18
+content chunks, and finished normally (`finish_reason: stop`, 2,068 output tokens reported by the
+server).
+
+The Rapid adapter now maps the shared reasoning budget to `reasoning_max_tokens`, while preserving
+an explicitly supplied Rapid-native value. This is a backend compatibility and safety correction,
+not part of the MLX-native UI/UX redesign below. Any later chat-policy work (sampling defaults,
+template/thinking kwargs, parser policy, or prompt scaffolding) is a separate scope and must not
+expand or delay the Spawn Wizard, Preset Editor, and Dashboard release-polish work.
+
+### Deferred addendum — MLX release-polish UX pass (after the runnable audits above)
+
+**Priority:** high for the release branch once this handoff's remaining audits and gates are complete;
+not authority to delay or expand those items now. This is a bounded premium-polish pass over the
+three customer-facing Rapid-MLX surfaces, using llama.cpp's clarity and confidence as the quality
+bar without copying controls Rapid-MLX does not support. Treat the current layout as replaceable:
+avoid substantial interim polish that will be discarded. The redesign must establish an MLX-native
+information architecture that serves Rapid-MLX now and can add MTPLX as a first-class backend in the
+near future without presenting it as a Rapid-MLX mode or speculative-decoding toggle.
+
+- **Spawn Wizard:** allow a genuinely MLX-native route where it improves comprehension rather than
+  forcing the GGUF/llama.cpp sequence. Replace the dense, two-column `Rapid-MLX advanced` control
+  dump with progressive decisions. Keep the estimator prominent during MLX model search/selection
+  and fit review, at the same decision-making level as the llama.cpp route; group Generation
+  (thinking, sampling, parsers), Cache & Performance (KV precision, retained cache/entries,
+  prefill and batching), and Server & Safety (port, auth, concurrency, companion constraints)
+  behind clear follow-up affordances.
+- **Preset Editor:** replace the overloaded three-tab Rapid layout with a backend-native Model /
+  Generation / Cache & Performance / Server & Safety information architecture. Retain the same
+  estimator and fit explanation as a first-class Model/Performance decision. Do not recreate
+  llama.cpp-only tabs or expose unqualified knobs. Wizard and editor must use the identical labels,
+  defaults, explanations, save/load behavior, command preview, and review summary.
+- **Dashboard:** give every trustworthy Rapid telemetry signal the same premium, modern visual
+  treatment as llama.cpp inference metrics: clear hierarchy, polished charts, sparklines, gauges,
+  and state transitions where the data supports them. Make current effective policy, cache reuse
+  (hits, reused prompt tokens, observed TTFT), throughput/latency, concurrency, and memory state
+  readable at a glance. Do not invent a metric or show a speculative-speedup claim until it has a
+  naturally-eligible, repeated, fidelity-qualified receipt. Use the same scale, terminology, and
+  confidence treatment as llama.cpp's performance surfaces.
+- **Release proof:** review at desktop and narrow widths with capture artifacts, build the release
+  binary before each changed scenario, and run the normal JS/lint/Playwright validation. Promoted
+  documentation screenshots must be capture-clean and actually referenced by docs.
+
+**Scope boundary:** this redesign covers only the Spawn Wizard, Preset Editor, and Dashboard. It
+must remain MLX-broad so MTPLX can reuse the information architecture and visual system without a
+second redesign. It does not authorize a chat UI redesign.
+
+**Known starting defects:** Rapid controls are visually over-compressed; the editor's `Server` tab
+owns unrelated generation, caching, and safety decisions; dashboard recommendations must remain
+evidence-tiered; and reference captures must crop to their relevant panel rather than spend their
+resolution on empty backdrop. The former teal active-step outline was a capture-only
+Puppeteer/Chromium focus-visible artifact and is fixed with a capture-scoped marker.

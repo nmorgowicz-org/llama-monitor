@@ -126,6 +126,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         expect(payloads.spawn.rapid_mlx.prefill_step_size).toBe(512);
         expect(payloads.spawn.rapid_mlx.prefix_cache_enabled).toBe(true);
         expect(payloads.spawn.rapid_mlx.retained_cache_mib).toBe(8192);
+        expect(payloads.spawn.rapid_mlx.hybrid_cache_entries).toBe(16);
         expect(payloads.spawn.rapid_mlx.disk_checkpoint_interval).toBe(0);
         // Phase 7 sampling defaults should be serialized when set
         expect(payloads.spawn.rapid_mlx.default_temperature).toBe(0.42);

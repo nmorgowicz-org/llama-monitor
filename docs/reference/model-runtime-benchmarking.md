@@ -339,6 +339,14 @@ only `--cache-ram-mib 0,8192` across the requested `--cache-contexts`. A
 one-slot repeat/fork test measures live-slot reuse even at `-cram 0`; it does
 not by itself qualify an extra host-cache reservation.
 
+Use `--suite cache-pressure` for the discriminating host-cache lane. Its default
+is one live slot with two sequential independent roots and `--cache-ram-mib
+0,2048,8192`; `--cache-contexts` selects the per-root context target. The
+server's total `-c` allocation preserves the requested per-slot capacity. Each
+root is created, primed, displaced, and revisited with exact patch-review
+verdict gates. The product lane remains parallel 1 so it matches the normal
+single-generation and llama.cpp MTP operating profile.
+
 ## Tool protocol traces
 
 `workload.tools` sends real OpenAI function definitions. The initial response is scored for the declared `expected_tool_name` and `expected_tool_arguments` subset after streamed tool-call fragments are reassembled. To test stateful agent behavior, add `workload.tool_trace.steps`: each step injects a synthetic tool result after the preceding tool call, sends the resulting assistant-plus-tool history back to the server, and scores its required next function name and argument subset.

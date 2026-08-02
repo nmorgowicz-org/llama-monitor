@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 // hybrid_cache_entries, prefill_batch_size and completion_batch_size were plumbed all the way
 // from RapidMlxConfig to argv but had no control on any surface, so the only value a user could
 // ever launch with was the default. Same shape of defect as the throughput fields, same tests:
-// stored values must load, edited values must reach the request, and Auto must omit the key.
+// stored values must load, edited values must reach the request, and explicit Auto must omit the key.
 //
 // hybrid_cache_entries carries one extra rule -- it only reaches the runtime while the retained
 // cache is on, so the save path drops it when the toggle is off rather than storing a number
@@ -23,7 +23,7 @@ test.describe('Rapid-MLX preset editor cache-entry and batch-size fields', () =>
     },
   };
 
-  async function openSeeded(page) {
+  async function openSeeded(page, seed = SEED) {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.evaluate(async (seed) => {
@@ -34,7 +34,7 @@ test.describe('Rapid-MLX preset editor cache-entry and batch-size fields', () =>
       sel.innerHTML = '<option value="probe">cache probe</option>';
       sel.value = 'probe';
       mod.openPresetModal('edit');
-    }, SEED);
+    }, seed);
     await page.locator('#preset-modal .preset-nav-item[data-section="advanced"]').click();
   }
 
@@ -57,7 +57,11 @@ test.describe('Rapid-MLX preset editor cache-entry and batch-size fields', () =>
 
   test('@in-memory-test stored values load into the controls', async ({ page }) => {
     await openSeeded(page);
-    await expect(page.locator('#modal-rapid-hybrid-cache-entries')).toHaveValue('32');
+    const entries = page.locator('#modal-rapid-hybrid-cache-entries');
+    await expect(entries).toHaveValue('32');
+    await expect(entries.locator('option[value="4"]')).toHaveText('4 — one active history');
+    await expect(entries.locator('option[value="8"]')).toHaveText('8 — main + one child');
+    await expect(entries.locator('option[value="16"]')).toHaveText('16 — agent workflows (recommended)');
     await expect(page.locator('#modal-rapid-prefill-batch-size')).toHaveValue('4');
     await expect(page.locator('#modal-rapid-completion-batch-size')).toHaveValue('8');
   });
@@ -89,7 +93,7 @@ test.describe('Rapid-MLX preset editor cache-entry and batch-size fields', () =>
     expect(body.rapid_mlx.hybrid_cache_entries).toBeNull();
   });
 
-  test('@in-memory-test Auto writes null rather than pinning a default', async ({ page }) => {
+  test('@in-memory-test new Rapid presets use the measured agent-workflow default', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await page.evaluate(async () => {
@@ -100,6 +104,8 @@ test.describe('Rapid-MLX preset editor cache-entry and batch-size fields', () =>
       });
     });
     await page.locator('#preset-modal .preset-nav-item[data-section="advanced"]').click();
+
+    await expect(page.locator('#modal-rapid-hybrid-cache-entries')).toHaveValue('16');
 
     let body = null;
     await page.route('**/api/presets', async (route, request) => {
@@ -112,8 +118,20 @@ test.describe('Rapid-MLX preset editor cache-entry and batch-size fields', () =>
     });
 
     expect(body, 'save request was never issued').not.toBeNull();
-    expect(body.rapid_mlx.hybrid_cache_entries).toBeNull();
+    expect(body.rapid_mlx.hybrid_cache_entries).toBe(16);
     expect(body.rapid_mlx.prefill_batch_size).toBeNull();
     expect(body.rapid_mlx.completion_batch_size).toBeNull();
+  });
+
+  test('@in-memory-test explicit Auto remains a backward-compatible opt-out', async ({ page }) => {
+    await openSeeded(page, {
+      ...SEED,
+      rapid_mlx: { ...SEED.rapid_mlx, hybrid_cache_entries: null },
+    });
+    await expect(page.locator('#modal-rapid-hybrid-cache-entries')).toHaveValue('0');
+
+    const body = await savePut(page);
+    expect(body, 'save request was never issued').not.toBeNull();
+    expect(body.rapid_mlx.hybrid_cache_entries).toBeNull();
   });
 });

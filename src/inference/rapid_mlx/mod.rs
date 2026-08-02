@@ -1062,6 +1062,15 @@ fn map_chat_request_with_fields(body: &[u8], fields: &BTreeSet<&'static str>) ->
     for (key, value) in object {
         let output_key = if key == "repeat_penalty" {
             "repetition_penalty"
+        } else if key == "thinking_budget_tokens" {
+            // Llama.cpp and the shared chat UI use `thinking_budget_tokens` for
+            // the reasoning-only ceiling. Rapid-MLX names the same semantic
+            // control `reasoning_max_tokens`; forwarding the llama.cpp name is
+            // silently ignored and leaves reasoning effectively unbounded.
+            if object.contains_key("reasoning_max_tokens") {
+                continue;
+            }
+            "reasoning_max_tokens"
         } else {
             key.as_str()
         };
@@ -1129,6 +1138,7 @@ fn provisional_chat_fields() -> BTreeSet<&'static str> {
         "min_p",
         "max_tokens",
         "max_completion_tokens",
+        "reasoning_max_tokens",
         "stop",
         "repetition_penalty",
     ]
@@ -1440,6 +1450,7 @@ fn chat_fields_from_snapshot(
             "enable_thinking",
             "chat_template_kwargs",
             "reasoning_effort",
+            "reasoning_max_tokens",
         ]);
     }
 
@@ -1461,6 +1472,7 @@ fn verified_chat_fields() -> BTreeSet<&'static str> {
         "enable_thinking",
         "chat_template_kwargs",
         "reasoning_effort",
+        "reasoning_max_tokens",
     ]);
     fields
 }
@@ -1859,9 +1871,26 @@ mod chat_tests {
         assert_eq!(value["stream_options"]["include_usage"], true);
         assert!(value["tools"].is_array());
         assert_eq!(value["reasoning_effort"], "high");
+        assert_eq!(value["reasoning_max_tokens"], 2048);
         assert!(value.get("repeat_penalty").is_none());
         assert!(value.get("seed").is_none());
         assert!(value.get("cache_prompt").is_none());
+        assert!(value.get("thinking_budget_tokens").is_none());
+    }
+
+    #[test]
+    fn native_reasoning_cap_overrides_shared_alias() {
+        let mapped = adapter()
+            .map_chat_request(
+                br#"{
+                    "messages":[],
+                    "thinking_budget_tokens":2048,
+                    "reasoning_max_tokens":4096
+                }"#,
+            )
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&mapped).unwrap();
+        assert_eq!(value["reasoning_max_tokens"], 4096);
         assert!(value.get("thinking_budget_tokens").is_none());
     }
 

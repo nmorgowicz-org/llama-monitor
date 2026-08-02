@@ -52,6 +52,51 @@ const SAFE_MLLM_PREFILL_STEPS = new Set([512, 1024, 1536, 2048]);
 // over accepted/attempted counts that accumulate across the generation. 8k is
 // the floor for a spec-decode number worth recording.
 const DEFAULT_SPEC_COMPLETION_TOKENS = 8192;
+// Hybrid-cache qualification measures prefill and branch reuse. It needs a
+// faithful, thinking-enabled response, but not the 16k reasoning allowance
+// used by the speculative-decoding probes. Keeping this bounded prevents an
+// output-length experiment from turning a cache-entry positive control into a
+// multi-hour run.
+// Cache-entry probes follow the configured production ceiling: the task asks
+// for a short answer, but must not silently truncate a legitimate reasoning
+// trace.  These are ceilings, not requested output lengths.
+const CACHE_ENTRY_MAX_TOKENS = 32768;
+const CACHE_ENTRY_REASONING_TOKENS = 8192;
+
+// A suite owns the Rapid-MLX server it launches. Keeping an explicit registry
+// closes the orphan-server failure mode when the suite is interrupted (for
+// example Ctrl-C, a terminal closing, or a supervising runner sending
+// SIGTERM). The synchronous exit hook is a last resort; normal interruption
+// gives each child a short graceful shutdown window first.
+const ACTIVE_SERVERS = new Set();
+let shutdownInProgress = false;
+
+const delay = (milliseconds) => new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
+
+async function stopActiveServersForExit(signal) {
+  if (shutdownInProgress) return;
+  shutdownInProgress = true;
+  const servers = [...ACTIVE_SERVERS].filter((server) => server.exitCode === null);
+  if (servers.length) process.stderr.write(`Received ${signal}; stopping ${servers.length} Rapid-MLX server(s).\n`);
+  await Promise.all(servers.map(async (server) => {
+    const exited = new Promise((resolvePromise) => server.once('exit', resolvePromise));
+    server.kill('SIGTERM');
+    await Promise.race([exited, delay(10_000)]);
+    if (server.exitCode === null) server.kill('SIGKILL');
+  }));
+}
+
+for (const [signal, exitCode] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+  process.once(signal, () => {
+    void stopActiveServersForExit(signal).finally(() => process.exit(exitCode));
+  });
+}
+
+process.once('exit', () => {
+  for (const server of ACTIVE_SERVERS) {
+    if (server.exitCode === null) server.kill('SIGKILL');
+  }
+});
 
 function die(message) { throw new Error(message); }
 
@@ -65,6 +110,7 @@ function parseArgs(argv) {
     if (key === '--resume') { options.resume = true; continue; }
     if (key === '--force-hybrid') { options.forceHybrid = true; continue; }
     if (key === '--disable-speculative-auto-k') { options.disableSpeculativeAutoK = true; continue; }
+    if (key === '--debug-stream') { options.debugStream = true; continue; }
     const value = rest[index + 1];
     if (value === undefined) die(`Missing value for ${key}`);
     index += 1;
@@ -119,7 +165,7 @@ function parseArgs(argv) {
   if (options.settleSeconds !== undefined && (!Number.isFinite(options.settleSeconds) || options.settleSeconds < 0)) {
     die('--settle-seconds must be a non-negative number.');
   }
-  if (!['smoke', 'context', 'pflash', 'cache', 'tools', 'image', 'prefill', 'quant-baseline', 'turboquant-scale', 'ubatch', 'spec-decode', 'spec-decode-warm', 'all'].includes(options.suite)) {
+  if (!['smoke', 'context', 'pflash', 'cache', 'cache-entries', 'tools', 'image', 'prefill', 'quant-baseline', 'turboquant-scale', 'ubatch', 'spec-decode', 'spec-decode-warm', 'all'].includes(options.suite)) {
     die(`Unknown suite: ${options.suite}`);
   }
   if (options.suite.startsWith('spec-decode')) {
@@ -292,6 +338,127 @@ async function suiteCells(model, suite, imagePath, expectedVisualTerms = [], mll
       corpus: parsed.corpus,
       words,
     };
+  }
+  // One-time calibration of the retained hybrid-cache snapshot cap. This is
+  // deliberately excluded from `all`: it needs a branch-pressure workload and
+  // is too expensive for routine model comparisons. Rapid stores prompt-only
+  // and prompt+output snapshots for each completed request. Therefore e1 is a
+  // negative control (the useful prompt snapshot is immediately evicted), e2
+  // is the minimum exact-repeat positive control, and e4 is the minimum branch
+  // positive control. Do not interpret the wider sweep unless both pass their
+  // explicit metric gates.
+  if (suite === 'cache-entries') {
+    const makeBranchCell = (id, tokens, hybridCacheEntries, cacheMemoryMb, branches, prefixCacheExpectations = null, minimumMarkerRecallRate = 0.8) => {
+      const cached = cell(model, id, tokens, configuration({
+        dtype: 'int8', cache: true, cacheMemoryMb, hybridCacheEntries,
+        maxTokens: CACHE_ENTRY_MAX_TOKENS,
+      }), {
+        max_tokens: CACHE_ENTRY_MAX_TOKENS,
+        extra_body: { reasoning_max_tokens: CACHE_ENTRY_REASONING_TOKENS },
+        branch_workload: 'patch-review',
+        ...(minimumMarkerRecallRate === null ? {} : { minimum_marker_recall_rate: minimumMarkerRecallRate }),
+        extension_words: 500,
+        ...(prefixCacheExpectations ? { prefix_cache_expectations: prefixCacheExpectations } : {}),
+      });
+      cached.sequence = ['cold', 'repeat', ...Array.from({ length: branches }, (_, index) => `fork-wide-${index + 1}`)];
+      cached.configuration.cache_entries_branch_count = branches;
+      return cached;
+    };
+    const saved32kFloor = 28000;
+    // A0: e1 is intentionally incapable of reuse on 0.11.1 because its second
+    // store evicts the prompt-only snapshot. Keep it as the negative control so
+    // a future runtime semantic change is visible rather than silently folded
+    // into benchmark noise. Marker recall is recorded but not a hard gate on
+    // A0/A1: these two cells qualify cache mechanics under sampled production
+    // behavior, while A2 and the matrix retain the quality gate.
+    cells.push(makeBranchCell('cache-entries-a0-32k-e1-negative', 32000, 1, 8192, 0, {
+      cold: { max_hits: 0, min_misses: 1, min_evictions: 1 },
+      repeat: { max_hits: 0, min_misses: 1, min_evictions: 2, max_tokens_saved: 0 },
+    }, null));
+    // A1: two slots retain prompt-only + prompt/output snapshots, making this
+    // the cheapest valid exact-repeat positive control after the cold request.
+    // Hybrid models perform a real warmup request that leaves two cache entries;
+    // the measured cold request legitimately evicts those startup entries, so
+    // cold eviction count is diagnostic rather than a zero-valued gate. Its
+    // repeat hit/saved-token gate decides whether the mechanism passed.
+    cells.push(makeBranchCell('cache-entries-a1-32k-e2-repeat-positive', 32000, 2, 8192, 0, {
+      cold: { max_hits: 0, min_misses: 1 },
+      repeat: { min_hits: 1, max_misses: 0, min_tokens_saved: saved32kFloor },
+    }, null));
+    // A2: four slots are the already-observed minimum that keeps the shared
+    // cold prompt resident while two branch prompt/output pairs rotate. The
+    // branches have exact SAFE/UNSAFE final-answer gates, so the unrelated
+    // sampled marker task remains diagnostic rather than blocking this control.
+    cells.push(makeBranchCell('cache-entries-a2-32k-e4-branch-positive', 32000, 4, 8192, 2, {
+      cold: { max_hits: 0, min_misses: 1 },
+      repeat: { min_hits: 1, max_misses: 0, min_tokens_saved: saved32kFloor },
+      'fork-wide-1': { min_hits: 1, max_misses: 0, min_tokens_saved: saved32kFloor },
+      'fork-wide-2': { min_hits: 1, max_misses: 0, min_tokens_saved: saved32kFloor },
+    }, null));
+    // B: realistic coding-agent branch pressure. The two context tiers expose
+    // whether entry pressure appears only once prefix snapshots are substantial.
+    for (const tokens of [32000, 131072]) {
+      for (const entries of [2, 4, 16, 64]) {
+        cells.push(makeBranchCell(`cache-entries-b-${tokens}-e${entries}`, tokens, entries, 8192, 8));
+      }
+    }
+    // C: distinguish the entry cap from the independent cache-memory ceiling.
+    for (const entries of [4, 64]) {
+      cells.push(makeBranchCell(`cache-entries-c-131072-e${entries}-ram16384`, 131072, entries, 16384, 4));
+    }
+    // D: user-visible older-session retention. Three genuinely distinct root
+    // conversations are created, each receives one prime request that stores
+    // its message boundary, then every root is revisited. Unlike B's hot shared
+    // root, this directly reveals which older session boundaries survived LRU.
+    for (const entries of [4, 16]) {
+      const retained = makeBranchCell(
+        `cache-entries-d-8k-e${entries}-lineage-retention`,
+        8000,
+        entries,
+        8192,
+        0,
+        null,
+        null,
+      );
+      retained.sequence = [
+        'root-cold-1',
+        'root-prime-1',
+        'root-cold-2',
+        'root-prime-2',
+        'root-cold-3',
+        'root-prime-3',
+        'root-probe-1',
+        'root-probe-2',
+        'root-probe-3',
+      ];
+      retained.configuration.cache_entries_lineage_roots = 3;
+      cells.push(retained);
+    }
+    // D1: primary OpenCode floor — one main conversation and one sequential
+    // child/sub-agent root on a parallel-1 server. This distinguishes the
+    // smallest single-tree value from the value that survives one child task.
+    for (const entries of [4, 8]) {
+      const mainChild = makeBranchCell(
+        `cache-entries-d1-8k-e${entries}-main-child`,
+        8000,
+        entries,
+        8192,
+        0,
+        null,
+        null,
+      );
+      mainChild.sequence = [
+        'root-cold-1',
+        'root-prime-1',
+        'root-cold-2',
+        'root-prime-2',
+        'root-probe-1',
+        'root-probe-2',
+      ];
+      mainChild.configuration.cache_entries_lineage_roots = 2;
+      mainChild.configuration.cache_entries_workload = 'parallel-1-main-plus-one-child';
+      cells.push(mainChild);
+    }
   }
   if (include('smoke')) cells.push(cell(model, 'smoke-8k-int8', 8000, configuration({ dtype: 'int8' })));
   if (include('context')) {
@@ -970,7 +1137,15 @@ async function trunkDraftDepthFacts(baseIdentity, requestedK) {
 const VENDOR_SAMPLING_PROFILES = [
   {
     family: 'qwen3.5/3.6',
-    matches: (modelType) => modelType === 'qwen3_5' || modelType === 'qwen3_6',
+    // Published Qwen3.6 MLX checkpoints currently retain the Transformers
+    // architecture names qwen3_5/qwen3_5_moe. Text and MoE wrappers share the
+    // same documented sampling policy; do not silently fall back to greedy
+    // merely because config.json names the implementation rather than repo
+    // marketing family.
+    matches: (modelType) => [
+      'qwen3_5', 'qwen3_5_text', 'qwen3_5_moe', 'qwen3_5_moe_text',
+      'qwen3_6', 'qwen3_6_text', 'qwen3_6_moe', 'qwen3_6_moe_text',
+    ].includes(modelType),
     citation: 'Qwen/Unsloth published settings for Qwen3.5 and Qwen3.6 (identical across both), reasoning enabled',
     reasoning: 'on',
     variants: {
@@ -1051,6 +1226,24 @@ async function reasoningControlFacts(baseIdentity) {
 }
 
 async function resolveSamplingLane(baseIdentity, mode, variant, flags) {
+  if (mode === 'opencode-build') {
+    return {
+      mode: 'opencode-build',
+      source: 'OpenCode native Build agent defaults (upstream source)',
+      recommendation_known: false,
+      // OpenCode's native Build agent has neither value. For Gemma, its
+      // provider transform also returns undefined for all three sampling
+      // fields, so the OpenAI-compatible request intentionally omits them.
+      // Rapid-MLX then applies its model defaults. This is the behavioral
+      // lane, not a claim that those downstream defaults are vendor settings.
+      omit_sampling_parameters: true,
+      reasoning: 'off',
+      note: 'OpenCode Build-compatible lane: temperature, top_p, and top_k are omitted so Rapid-MLX uses the model defaults. Configure agent/model sampling in OpenCode or use --sampling explicit to benchmark an override.',
+      upstream_source: 'https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/agent/agent.ts',
+      request_preparation_source: 'https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/llm/request.ts',
+      transform_source: 'https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/provider/transform.ts',
+    };
+  }
   if (mode === 'greedy') {
     return { mode: 'greedy', source: 'harness default', temperature: 0, reasoning: 'off', recommendation_known: false };
   }
@@ -1324,6 +1517,7 @@ function runProcess(command, args, options = {}) {
     const child = spawn(command, args, {
       stdio: logPath ? ['ignore', 'pipe', 'pipe'] : (options.stdio ?? 'inherit'),
       cwd: options.cwd,
+      env: options.env,
     });
     const sink = logPath ? createWriteStream(logPath) : null;
     const tail = [];
@@ -1359,6 +1553,8 @@ function runProcess(command, args, options = {}) {
 function launchServer(command, args, env, logPath) {
   const output = [];
   const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], env });
+  ACTIVE_SERVERS.add(child);
+  child.once('exit', () => ACTIVE_SERVERS.delete(child));
   const sink = logPath ? createWriteStream(logPath) : null;
   const append = (chunk) => {
     if (sink) sink.write(chunk);
@@ -1556,7 +1752,10 @@ function checkGreedyLosslessParity(receiptCells) {
     const role = cell.configuration?.speculative_role ?? 'unknown';
     for (const attempt of cell.attempts ?? []) {
       const promptHash = attempt.request?.message_sha256;
-      const digest = attempt.response?.completion_sha256;
+      // New receipts separate hidden reasoning from final content. Compare the
+      // complete generated token stream; older receipts fall back to the field
+      // that historically contained both channels.
+      const digest = attempt.response?.generated_sha256 ?? attempt.response?.completion_sha256;
       if (!promptHash || !digest) continue;
       // Temperature is the whole basis of the lossless claim; a sampled
       // attempt would produce meaningless "mismatches".
@@ -1733,7 +1932,11 @@ async function runSuite(options, manifests, tempDir) {
     let backendLog = null;
     try {
       await waitForHealth(manifest.runtime.base_url, server);
-      await runProcess(process.execPath, [resolve('scripts/model-runtime-benchmark.mjs'), 'run', '--manifest', manifestPath, '--out', receiptPath, '--server-pid', String(server.pid)], { cwd: process.cwd(), logPath: harnessLogPath });
+      await runProcess(process.execPath, [resolve('scripts/model-runtime-benchmark.mjs'), 'run', '--manifest', manifestPath, '--out', receiptPath, '--server-pid', String(server.pid)], {
+        cwd: process.cwd(),
+        logPath: harnessLogPath,
+        env: options.debugStream ? { ...process.env, BENCHMARK_DEBUG_STREAM: '1' } : process.env,
+      });
       receipts.push({ label, receipt: basename(receiptPath), server_log: basename(serverLogPath), harness_log: basename(harnessLogPath), manifest: options.keepManifests ? manifestPath : null });
     } catch (error) {
       // Backend tail first, harness tail last: the harness message names the
@@ -1833,9 +2036,13 @@ if (options.suite.startsWith('spec-decode')) {
 const allCells = await suiteCells(options.model, options.suite, options.image, options.expectedVisualTerms, options.mllmPrefillStepSize ?? 1024, options.workspacePack, options.speculativeModel ?? null, options.speculativeControlModel ?? null, options.speculativeTokens ?? DEFAULT_SPECULATIVE_TOKENS, options.speculativeMethods ?? ['mtp'], options.speculativeWorkloads ?? ['code'], options.disableSpeculativeAutoK ?? false, options.specCompletionTokens ?? DEFAULT_SPEC_COMPLETION_TOKENS, options.specZeroActivity ?? 'required');
 // Applied after the matrix is built so the sampling lane is orthogonal to cell
 // selection: the same cells run in both lanes and stay comparable by id.
-const samplingMode = options.sampling ?? 'greedy';
-if (!['greedy', 'recommended', 'explicit'].includes(samplingMode)) {
-  die(`--sampling must be greedy, recommended, or explicit; got ${samplingMode}.`);
+// The operator configures OpenCode with the Unsloth-published defaults for
+// these families. Use that configured production behavior for cache-entry
+// qualification; `opencode-build` remains available only when explicitly
+// investigating an unconfigured native Build agent.
+const samplingMode = options.sampling ?? (options.suite === 'cache-entries' ? 'recommended' : 'greedy');
+if (!['opencode-build', 'greedy', 'recommended', 'explicit'].includes(samplingMode)) {
+  die(`--sampling must be opencode-build, greedy, recommended, or explicit; got ${samplingMode}.`);
 }
 const samplingLane = await resolveSamplingLane(identity, samplingMode, options.samplingVariant ?? 'default', options);
 // A profile asking for reasoning-on is a request, not an outcome; the chat
@@ -1847,7 +2054,7 @@ if (samplingLane.reasoning === 'on' && !reasoningRequested) {
   process.stderr.write(`Sampling lane requests reasoning-on, but ${samplingLane.reasoning_control.evidence}. Running reasoning-off and recording it.\n`);
 }
 if (samplingLane.note) process.stderr.write(`${samplingLane.note}\n`);
-process.stderr.write(`Sampling lane: ${samplingLane.mode} (source=${samplingLane.source}, temperature=${samplingLane.temperature}, top_p=${samplingLane.top_p ?? 'unset'}, top_k=${samplingLane.top_k ?? 'unset'}, reasoning=${samplingLane.reasoning_effective})\n`);
+process.stderr.write(`Sampling lane: ${samplingLane.mode} (source=${samplingLane.source}, temperature=${samplingLane.omit_sampling_parameters ? 'omitted' : samplingLane.temperature}, top_p=${samplingLane.top_p ?? 'unset'}, top_k=${samplingLane.top_k ?? 'unset'}, reasoning=${samplingLane.reasoning_effective})\n`);
 // Greedy-lossless parity is only defined at temperature 0 -- above it,
 // speculative decoding is distribution-preserving rather than token-identical,
 // so completions cannot be compared. Say so once here rather than letting the
@@ -1856,6 +2063,28 @@ if (samplingLane.temperature !== 0 && options.suite.startsWith('spec-decode')) {
   process.stderr.write('Greedy-lossless parity is not measurable in this lane.\n');
 }
 options.samplingLane = samplingLane;
+// Hybrid Qwen cannot trim a completed turn's recurrent state back to the
+// message boundary used by the first branch. That first branch therefore
+// performs the boundary prefill and stores a dedicated boundary snapshot;
+// only a later sibling branch can reuse it. Pure-transformer Gemma can trim
+// the prior supersequence and legitimately hits on the first fork. Keep the
+// control architecture-aware instead of treating Qwen's required boundary
+// seeding miss as a cache failure.
+const qwenHybridModelTypes = new Set([
+  'qwen3_5', 'qwen3_5_text', 'qwen3_5_moe', 'qwen3_5_moe_text',
+  'qwen3_6', 'qwen3_6_text', 'qwen3_6_moe', 'qwen3_6_moe_text',
+]);
+if (options.suite === 'cache-entries' && qwenHybridModelTypes.has(samplingLane.model_type)) {
+  const branchControl = allCells.find((cell) => cell.id === 'cache-entries-a2-32k-e4-branch-positive');
+  if (branchControl) {
+    branchControl.workload.prefix_cache_expectations = {
+      ...branchControl.workload.prefix_cache_expectations,
+      'fork-wide-1': { max_hits: 0, min_misses: 1, max_tokens_saved: 0 },
+      'fork-wide-2': { min_hits: 1, max_misses: 0, min_tokens_saved: 28000 },
+    };
+    branchControl.workload.hybrid_boundary_seed_phase = 'fork-wide-1';
+  }
+}
 // Neutral values are still worth sending: rapid-mlx defaulting to them is an
 // assumption, whereas sending them makes the receipt self-describing.
 const SAMPLING_PASSTHROUGH = ['top_p', 'top_k', 'min_p', 'presence_penalty', 'repetition_penalty'];
@@ -1866,12 +2095,14 @@ let cells = (options.cells
   ...cell,
   workload: {
     ...cell.workload,
-    temperature: samplingLane.temperature,
+    ...(samplingLane.omit_sampling_parameters
+      ? { omit_sampling_parameters: true }
+      : { temperature: samplingLane.temperature }),
     ...Object.fromEntries(SAMPLING_PASSTHROUGH
       .filter((key) => samplingLane[key] !== undefined)
       .map((key) => [key, samplingLane[key]])),
     ...(samplingLane.reasoning_control.control === 'enable_thinking'
-      ? { extra_body: { chat_template_kwargs: { enable_thinking: reasoningRequested } } }
+      ? { extra_body: { ...cell.workload.extra_body, chat_template_kwargs: { enable_thinking: reasoningRequested } } }
       : {}),
   },
 }));

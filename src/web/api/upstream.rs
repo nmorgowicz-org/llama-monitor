@@ -425,6 +425,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn attached_rapid_maps_shared_reasoning_budget_with_provisional_fields() {
+        let prepared = prepared(InferenceBackend::RapidMlx, Some("attached-model"), None).await;
+        let mapped = prepared
+            .map_chat_body(br#"{"messages":[],"thinking_budget_tokens":2048}"#)
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&mapped).unwrap();
+        assert_eq!(value["reasoning_max_tokens"], 2048);
+        assert!(value.get("thinking_budget_tokens").is_none());
+    }
+
+    #[tokio::test]
+    async fn rapid_spawn_maps_shared_reasoning_budget_to_native_cap() {
+        let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+        let adapter = RapidMlxAdapter::from_resolved(
+            RuntimeMetadata {
+                executable_path: "rapid-mlx".into(),
+                source: RuntimeSource::Managed,
+                version: "0.11.1".into(),
+                capability_snapshot: None,
+                resolved_receipt: None,
+                last_probe_result: None,
+                prefix_cache_enabled: false,
+                mlx_prefix_cache_bytes: None,
+            },
+            crate::inference::rapid_mlx::model_resolver::ResolvedRapidMlxLaunchModel::validated_alias(
+                "reasoning-cap-model",
+            )
+            .unwrap(),
+        );
+        let prepared = PreparedInferenceRequest {
+            url: "http://127.0.0.1:1/v1/chat/completions".into(),
+            permit: gate.acquire_owned().await.unwrap(),
+            backend: InferenceBackend::RapidMlx,
+            model_identity: Some("reasoning-cap-model".into()),
+            api_key: None,
+            adapter: Some(BackendAdapter::RapidMlx(std::sync::Arc::new(adapter))),
+        };
+
+        let mapped = prepared
+            .map_chat_body(br#"{"messages":[],"thinking_budget_tokens":2048,"stream":true}"#)
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&mapped).unwrap();
+        assert_eq!(value["reasoning_max_tokens"], 2048);
+        assert!(value.get("thinking_budget_tokens").is_none());
+    }
+
+    #[tokio::test]
     async fn upstream_auth_uses_transient_bearer_header() {
         let with_key = prepared(InferenceBackend::RapidMlx, None, Some("transient-secret")).await;
         let request = with_key

@@ -91,7 +91,7 @@ Several appearance and chat behaviors are configurable via Settings and are appl
 ## Messaging
 
 - **Streaming** — Real-time SSE streaming via `POST /api/chat`, which proxies to the active backend session (llama.cpp or Rapid-MLX) at `/v1/chat/completions`
-- **Backend-safe controls** — llama.cpp requests are forwarded as-is; Rapid-MLX requests are filtered and normalized by a compatibility profile (e.g., `repeat_penalty` → `repetition_penalty`, llama.cpp–specific flags dropped) and usage streaming is enabled automatically when the runtime supports it
+- **Backend-safe controls** — llama.cpp requests are forwarded as-is; Rapid-MLX requests are filtered and normalized by a compatibility profile (for example, `repeat_penalty` → `repetition_penalty` and `thinking_budget_tokens` → `reasoning_max_tokens`, with llama.cpp-specific flags dropped) and usage streaming is enabled automatically when the runtime supports it
 - **Markdown rendering** — Assistant output is rendered with Markdown, syntax-highlighted code blocks, and per-block copy controls
 - **Thinking blocks** — If the upstream model sends `reasoning_content`, the UI renders it in an expandable thinking block during the active browser session
 - **Stop behavior** — Stop immediately closes local SSE forwarding and aborts the in-flight request. For Rapid-MLX backends, native cancel endpoints are used only when the active profile exposes a verified public request-ID; otherwise the abort is handled locally via disconnect.
@@ -192,6 +192,9 @@ Per-tab controls for generation behavior. A dot indicator appears when the activ
 These parameters are applied for both llama.cpp and Rapid-MLX sessions. Rapid-MLX uses a compatibility profile:
 
 - `repeat_penalty` is renamed to `repetition_penalty` before being sent.
+- The shared `thinking_budget_tokens` reasoning ceiling is renamed to Rapid-MLX's
+  `reasoning_max_tokens`; this limits hidden reasoning separately from the overall
+  `max_tokens` response ceiling.
 - llama.cpp-specific flags not recognized by Rapid-MLX are dropped (e.g., MTP sweep settings, GGUF tuning knobs).
 - The `max_tokens` cap is enforced per-backend via the shared UI but is ultimately constrained by the active model's context window.
 

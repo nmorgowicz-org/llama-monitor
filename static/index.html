@@ -2737,7 +2737,7 @@
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-cache-ram-mib" title="-cram / --cache-ram. Maximum KV prefix-cache size in MiB. 0 disables it, -1 removes the limit, empty uses llama-server defaults.">Prefix Cache RAM (-cram)</label>
                                 <input type="number" class="pe-input" id="modal-cache-ram-mib" min="-1" step="1" placeholder="8192 (default)">
-                                <div class="pe-field-hint">Set to 0 to disable the extra host prompt-state cache while ordinary common-prefix reuse remains available. Leave empty for the llama-server default. Use -1 only for an explicit unlimited Advanced choice.</div>
+                                <div class="pe-field-hint">0 keeps one linear conversation lean. 2048 MiB retained a parallel-1 main + one sequential child through 32K. Empty uses llama-server's 8192 MiB default; the cap grows on use and is not preallocated. Use -1 only for explicit unlimited Advanced use.</div>
                             </div>
                             <!-- Vision tokens: shown only when mmproj is loaded -->
                             <div id="vision-tokens-wrap" style="display:none;">
@@ -3186,26 +3186,27 @@
                               <div class="pe-field pe-row-rapid-prefix-cache" id="pe-row-rapid-prefix-cache" style="display:none;">
                                   <label class="pe-label pe-toggle-label" for="modal-rapid-prefix-cache-enabled" title="Retain reusable Rapid-MLX prompt branches in unified memory.">Retained cache <span class="pe-toggle-hint" id="pe-prefix-cache-hint"></span></label>
                                   <div class="pe-toggle">
-                                      <input type="checkbox" class="pe-toggle-input" id="modal-rapid-prefix-cache-enabled">
+                                      <input type="checkbox" class="pe-toggle-input" id="modal-rapid-prefix-cache-enabled" checked>
                                       <span class="pe-toggle-slider"></span>
                                   </div>
                                   <div class="pe-field-hint" id="pe-prefix-cache-hint-detail">8 GiB is the measured one-user coding baseline. 16 GiB preserves more older branches; it is not a speed mode.</div>
                               </div>
                               <div class="pe-field pe-row-rapid-prefix-cache" id="pe-row-rapid-cache-memory" style="display:none;">
                                   <label class="pe-label" for="modal-rapid-cache-memory-mib">Retained cache memory</label>
-                                  <select id="modal-rapid-cache-memory-mib" class="pe-select"><option value="0">Off</option><option value="8192">8 GiB — recommended</option><option value="16384">16 GiB — retain branches</option></select>
+                                  <select id="modal-rapid-cache-memory-mib" class="pe-select"><option value="0">Off</option><option value="8192" selected>8 GiB — recommended</option><option value="16384">16 GiB — retain branches</option></select>
                                   <div class="pe-field-hint">Optional unified-memory growth. Disk checkpoints stay disabled for interactive use.</div>
                               </div>
                               <div class="pe-field pe-row-rapid-prefix-cache" id="pe-row-rapid-hybrid-cache-entries" style="display:none;">
-                                  <label class="pe-label" for="modal-rapid-hybrid-cache-entries" title="How many distinct retained prompt branches the cache can hold. Only takes effect while the retained cache is on.">Retained prefix entries</label>
+                                  <label class="pe-label" for="modal-rapid-hybrid-cache-entries" title="Caps retained hybrid prompt snapshots. Only takes effect while the retained cache is on; the separate memory ceiling still applies.">Retained prefix entries</label>
                                   <select id="modal-rapid-hybrid-cache-entries" class="pe-select">
-                                      <option value="0" selected>Auto — runtime default</option>
-                                      <option value="8">8 — one conversation</option>
-                                      <option value="16">16 — benchmark default</option>
+                                        <option value="0">Auto — Rapid default (0; reuse off)</option>
+                                      <option value="4">4 — one active history</option>
+                                      <option value="8">8 — main + one child</option>
+                                        <option value="16" selected>16 — agent workflows (recommended)</option>
                                       <option value="32">32 — several branches</option>
                                       <option value="64">64 — many branches</option>
                                   </select>
-                                  <div class="pe-field-hint">Entry count, not size: the memory ceiling above still applies. More entries keep more branches alive but split the same budget.</div>
+                                  <div class="pe-field-hint">Measured on Qwen3.6: 8 retained a main + one sequential child; 16 retained three alternating roots. Entry count is not memory—the ceiling above still applies.</div>
                               </div>
         <div class="pe-row pe-row-rapid-advanced" id="pe-row-rapid-advanced" style="display:none;">
                                    <div class="pe-field">
@@ -4075,15 +4076,16 @@
                                      <div class="field-hint">On bypasses TurboQuant, so it cannot be combined with a TurboQuant reusable-prompt-storage mode.</div>
                                  </div>
                                  <div class="hardware-field">
-                                     <label for="spawn-rapid-hybrid-cache-entries" title="How many distinct retained prompt branches the cache can hold. Only takes effect while the retained cache is on.">Retained prefix entries</label>
+                                     <label for="spawn-rapid-hybrid-cache-entries" title="Caps retained hybrid prompt snapshots. Only takes effect while the retained cache is on; the separate memory ceiling still applies.">Retained prefix entries</label>
                                      <select id="spawn-rapid-hybrid-cache-entries">
-                                         <option value="0" selected>Auto — runtime default</option>
-                                         <option value="8">8 — one conversation</option>
-                                         <option value="16">16 — benchmark default</option>
+                                           <option value="0">Auto — Rapid default (0; reuse off)</option>
+                                         <option value="4">4 — one active history</option>
+                                         <option value="8">8 — main + one child</option>
+                                           <option value="16" selected>16 — agent workflows (recommended)</option>
                                          <option value="32">32 — several branches</option>
                                          <option value="64">64 — many branches</option>
                                      </select>
-                                     <div class="field-hint">Entry count, not size. More entries keep more branches alive but split the same retained-cache memory budget.</div>
+                                     <div class="field-hint">Measured on Qwen3.6: 8 retained a main + one sequential child; 16 retained three alternating roots. Entry count is not memory.</div>
                                  </div>
                                  <!-- Batch sizes count sequences, not tokens: at one concurrent request they
                                       change nothing on the text path, and a prefill batch that never fills
@@ -4380,7 +4382,7 @@
                             <div class="hardware-field">
                                 <label for="spawn-cache-ram" title="-cram / --cache-ram: max size of the persistent KV prefix-cache in MiB. llama-server uses this to reuse KV states across requests. Default is 8192 MiB (8 GB) of system RAM. Set 0 to disable, -1 for no limit.">Prefix cache RAM <span class="label-badge">-cram</span></label>
                                 <input type="number" id="spawn-cache-ram" min="-1" step="1" placeholder="8192 (default)">
-                                <div class="field-hint">Extra host RAM for cached prompt states. 0 = disabled (ordinary common-prefix reuse remains available) · −1 = explicit unlimited Advanced choice.</div>
+                                <div class="field-hint">0 keeps one linear conversation lean. 2048 MiB retained a parallel-1 main + one sequential child through 32K. Empty uses the 8192 MiB runtime default; the cap grows on use. −1 is explicit unlimited Advanced use.</div>
                             </div>
                             <div class="hardware-field" style="grid-column: 1/-1;">
                                 <label for="spawn-fit-enable">Auto-fit context to memory</label>

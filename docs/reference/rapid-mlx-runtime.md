@@ -42,12 +42,44 @@ KV/context, runtime overhead, and a safety reserve. **16 GiB** is an explicit
 branch-retention choice: it can keep older conversation branches resident, but
 is not presented as a guaranteed speed upgrade for the newest turn.
 
+Hybrid entry count controls how many non-trimmable prompt snapshots may remain
+inside that memory ceiling. The measured Qwen3.6 policy is workload-based:
+
+- **4** is sufficient for one continuously active conversation tree, but not
+  for returning after a separate child session runs.
+- **8** retained both roots in a parallel-1 main-plus-one-sequential-child
+  control and reduced resume TTFT from about 3.7–3.9 seconds to 0.65–0.70 seconds.
+- **16** is the recommended general agent-workflow setting. It retained three
+  alternating roots in the stress control, covering occasional orchestrator
+  fan-out without improving or slowing the already-hot single-root path.
+
+New Rapid-MLX wizard and preset flows select 16. Existing presets that stored
+Auto/null remain backward-compatible and continue to omit the flag; Rapid-MLX
+0.11.1 then uses its own default of 0, which disables hybrid snapshot reuse.
+
+The entry count is not a memory allocation. More slots retain more candidate
+boundaries only while they fit under the configured retained-cache memory cap.
+Values 32 and 64 are advanced retention headroom, not measured speed presets.
+
 Rapid disk checkpoints are not an interactive lower cache tier. Current builds
 write snapshots but do not automatically reload evicted entries, so normal
 presets keep their interval disabled. Manual cache export/import is an advanced
 restart warm-start operation and is not offered as a memory-saving control.
 See [cache benchmark results](cache-benchmark-results.md) for the measured
 limits, runtime versions, and receipt locations.
+
+## Chat request adaptation
+
+The shared chat UI expresses backend-neutral intent, while the active backend
+adapter owns wire-format differences. For Rapid-MLX, Llama Monitor renames
+`repeat_penalty` to `repetition_penalty` and the reasoning-only
+`thinking_budget_tokens` ceiling to `reasoning_max_tokens`, filters unsupported
+llama.cpp fields, and requests stream usage when the qualified runtime supports
+it. An explicit Rapid-native field takes precedence over its shared alias.
+
+This distinction matters for reasoning models: `max_tokens` limits the complete
+response, whereas `reasoning_max_tokens` force-closes the hidden reasoning phase
+at its own ceiling so a long reasoning trace can still produce a final answer.
 
 ## Directory layout
 

@@ -1451,6 +1451,15 @@
   border-radius: var(--radius-sm, 6px);
 }
 
+/* Screenshot automation advances the wizard programmatically, which focuses
+   the step container for its screen-reader announcement. Chromium may then
+   apply :focus-visible to that full-page container even though no user-visible
+   control is focused. Capture mode suppresses only that artifact; normal
+   keyboard focus styling remains intact in the application. */
+html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
+  outline: none;
+}
+
 /* Ensure interactive elements are keyboard-focusable. */
 .profile-card:focus-visible,
 .model-source-card:focus-visible,

@@ -514,6 +514,10 @@ async function attachToServer(page, remoteServer = REMOTE_SERVER) {
 
 async function gotoApp(page, baseUrl, waitUntil = 'networkidle0') {
     await page.goto(baseUrl, { waitUntil });
+    // See the scoped CSS rule in spawn-wizard.css. This marker prevents
+    // Chromium's capture-only :focus-visible heuristic from outlining the
+    // entire programmatically focused wizard step.
+    await page.evaluate(() => { document.documentElement.dataset.screenshotCapture = 'true'; });
     await sleep(1500);
 }
 
@@ -526,6 +530,7 @@ async function loadAppDocument(page, baseUrl) {
 
     const hasAppShell = await page.$('#page-server') !== null;
     if (hasAppShell) {
+        await page.evaluate(() => { document.documentElement.dataset.screenshotCapture = 'true'; });
         await sleep(1500);
         return;
     }
@@ -539,6 +544,7 @@ async function loadAppDocument(page, baseUrl) {
         document.head.insertBefore(baseTag, document.head.firstChild);
     }, baseUrl);
     await page.waitForSelector('#page-server', { timeout: 10000 });
+    await page.evaluate(() => { document.documentElement.dataset.screenshotCapture = 'true'; });
     await page.evaluate(() => {
         document.getElementById('auth-shell')?.classList.add('hidden');
         document.body.classList.remove('auth-required');
@@ -2209,7 +2215,19 @@ async function scenarioPresetEditor(ctx, options) {
     // Capture Model+Context section (default active)
     await captureShot(page, 'preset-editor-model-tab.png', { fullPage: true });
 
-    // 2. Capture GPU section
+    // 2. Capture Context section at the host-cache recommendation.
+    await page.evaluate(() => {
+        const contextNav = document.querySelector('#preset-modal .preset-editor-nav [data-section="context"]');
+        if (contextNav) contextNav.click();
+    });
+    await sleep(300);
+    await page.evaluate(() => {
+        document.getElementById('modal-cache-ram-mib')?.scrollIntoView({ block: 'center' });
+    });
+    await sleep(300);
+    await captureShot(page, 'preset-editor-context-tab.png', { fullPage: true });
+
+    // 3. Capture GPU section
     await page.evaluate(() => {
         const gpuNav = document.querySelector('#preset-modal .preset-editor-nav [data-section="gpu"]');
         if (gpuNav) gpuNav.click();
@@ -2217,7 +2235,7 @@ async function scenarioPresetEditor(ctx, options) {
     await sleep(500);
     await captureShot(page, 'preset-editor-gpu-tab.png', { fullPage: true });
 
-    // 3. Capture Advanced section
+    // 4. Capture Advanced section
     await page.evaluate(() => {
         const advNav = document.querySelector('#preset-modal .preset-editor-nav [data-section="advanced"]');
         if (advNav) advNav.click();
@@ -2225,7 +2243,7 @@ async function scenarioPresetEditor(ctx, options) {
     await sleep(500);
     await captureShot(page, 'preset-editor-advanced-tab.png', { fullPage: true });
 
-    // 4. Close preset modal
+    // 5. Close preset modal
     await page.evaluate(() => {
         const close = document.getElementById('preset-modal-close');
         if (close) close.click();
@@ -3813,6 +3831,9 @@ async function scenarioSpawnWizard(ctx, options) {
 
 async function scenarioSpawnWizardEngines(ctx) {
     const { page, baseUrl } = ctx;
+    // Preserve a full-screen product frame while giving the Wizard enough
+    // visual weight for settings text to remain readable in artifacts.
+    await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 });
     const rapidFixture = join(TEMP_APP_CONFIG_DIR, 'models', 'capture-nested-mlx');
     await loadAppDocument(page, baseUrl);
 
@@ -4036,9 +4057,17 @@ async function scenarioSpawnWizardEngines(ctx) {
     });
     await sleep(300);
 
-    // spawn-wizard-rapid-mlx-advanced-controls.png — Phase 7 controls: KV dtype, prompt storage, sampling mode, reasoning.
-    await scrollToElement('#spawn-kv-cache-dtype', 0);
+    // spawn-wizard-rapid-mlx-advanced-controls.png — Phase 7 cache-entry
+    // recommendation and neighboring backend controls.
+    // Use the product-sized full-screen viewport for the final Wizard artifacts:
+    // it preserves the backdrop without making the settings illegibly small.
+    await page.setViewport({ width: 1280, height: 900, deviceScaleFactor: 1 });
+    // Put the measured retained-entry guidance in the readable center of the
+    // full modal instead of leaving it below the fold beneath MTP controls.
+    await scrollToElement('#spawn-rapid-hybrid-cache-entries', -180);
     await sleep(300);
+    // Keep the full-screen state: the Wizard context and backdrop are part of
+    // the visual evidence, rather than a separate close-up artifact.
     await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-rapid-mlx-advanced-controls.png') });
     console.log('[CAPTURE] Saved spawn-wizard-rapid-mlx-advanced-controls.png');
 
@@ -4074,6 +4103,12 @@ async function scenarioSpawnWizardEngines(ctx) {
         () => document.getElementById('wizard-next-btn')?.disabled === false,
         { timeout: 3000 }
     );
+    // This is a fit/estimator artifact, not another advanced-controls view.
+    // Reset the scrolled form so its full-screen frame starts at the hardware
+    // summary and sticky VRAM estimate rather than a cropped lower section.
+    await page.evaluate(() => {
+        document.querySelector('.wizard-body')?.scrollTo({ top: 0, behavior: 'instant' });
+    });
     await sleep(500);
     await captureShot(page, 'spawn-wizard-rapid-mlx-fit.png', { fullPage: true });
 
@@ -4918,6 +4953,8 @@ async function scenarioAppearancePalette(ctx, options) {
 async function scenarioRapidMlxLive(ctx, options) {
     const { page, baseUrl } = ctx;
     const presetId = 'rapid-live-test';
+    const liveModelRepo = process.env.RAPID_MLX_LIVE_MODEL || 'mlx-community/Qwen3-0.6B-4bit';
+    const liveModelPath = process.env.RAPID_MLX_LIVE_MODEL_PATH || '';
     // Derive a unique port from the capture harness port to avoid conflicts with fixed 9321.
     const harnessPort = parseInt(new URL(baseUrl).port || '8892', 10);
     const rapidPort = 9321 + (harnessPort - 8892);
@@ -4953,24 +4990,32 @@ async function scenarioRapidMlxLive(ctx, options) {
     }
 
     console.log('[CAPTURE] rapid-mlx-live: starting full runtime flow (developer-only)');
+    let presetCreated = false;
+    try {
 
-    // 1. Seed a Rapid-MLX preset with Qwen3-0.6B-4bit (HuggingFaceRepo typed source).
-    await page.evaluate(async ({ id, port }) => {
+    // 1. Seed a Rapid-MLX preset with a cached HuggingFaceRepo typed source.
+    await page.evaluate(async ({ id, port, modelRepo, modelPath }) => {
         const preset = {
             id,
-            name: 'Qwen3-0.6B-4bit · Live Test',
+            name: `${(modelPath || modelRepo).split('/').pop()} · Live Test`,
             backend: 'rapid_mlx',
             rapid_mlx: {
-                model_source: {
-                    kind: 'hugging_face_repo',
-                    repo_id: 'mlx-community/Qwen3-0.6B-4bit',
-                    revision: 'main',
-                },
+                model_source: modelPath
+                    ? { kind: 'mlx_directory', path: modelPath }
+                    : { kind: 'hugging_face_repo', repo_id: modelRepo, revision: 'main' },
                 served_model_name: 'qwen3-live',
                 host: '127.0.0.1',
                 port,
                 log_level: 'INFO',
                 workload_scenario: 'interactive_coding_agent',
+                enable_thinking: true,
+                default_temperature: 1.0,
+                default_top_p: 0.95,
+                default_top_k: 20,
+                default_min_p: 0.0,
+                default_presence_penalty: 0.0,
+                default_repetition_penalty: 1.0,
+                max_tokens: 2048,
             },
             port,
         };
@@ -4982,7 +5027,8 @@ async function scenarioRapidMlxLive(ctx, options) {
         const result = await resp.json();
         if (!result.ok) throw new Error('Failed to create preset: ' + (result.error || resp.statusText));
         console.log('[CAPTURE] rapid-mlx-live: preset created:', result.preset?.id);
-    }, { id: presetId, port: rapidPort });
+    }, { id: presetId, port: rapidPort, modelRepo: liveModelRepo, modelPath: liveModelPath });
+    presetCreated = true;
     await sleep(500);
 
     // 2. Reload presets and set as active preset.
@@ -5119,10 +5165,21 @@ async function scenarioRapidMlxLive(ctx, options) {
 
     await captureShot(page, 'rapid-mlx-live-stopped.png', { fullPage: true });
 
-    // 8. Cleanup: delete the test preset.
-    await deleteRapidLiveTestPreset(page, presetId);
-
     console.log('[CAPTURE] rapid-mlx-live: complete');
+    } finally {
+        // A failed health/chat/screenshot step must not strand the managed
+        // Rapid child or leave the temporary preset behind.
+        try {
+            await page.evaluate(async () => {
+                const { doStop } = await import('/js/features/attach-detach.js');
+                if (typeof doStop === 'function') await doStop();
+            });
+            await sleep(1000);
+        } catch (error) {
+            console.log('[CAPTURE] rapid-mlx-live: stop cleanup non-fatal:', error.message);
+        }
+        if (presetCreated) await deleteRapidLiveTestPreset(page, presetId);
+    }
 }
 
 // ── Rapid-MLX Runtime Manager, Engine Indicator, and Settings Card ──

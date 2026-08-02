@@ -103,4 +103,6 @@ The overall memory policy is:
 3. **Recommend baseline**: 8 GiB retained cache when it fits
 4. **Expose retention option**: 16 GiB as "retain more branches" option
 5. **Don't recommend disk checkpoints**: For normal interactive agents
-6. **Keep host cache at Auto=0**: Until multi-branch pressure tests prove otherwise
+6. **Use workload-scoped llama host cache**: Keep `0` for one linear active
+   conversation; use a bounded 2 GiB cap for the measured parallel-1 main plus
+   one sequential child profile through 32K when unified-memory headroom permits

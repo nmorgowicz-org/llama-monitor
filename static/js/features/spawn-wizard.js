@@ -281,9 +281,9 @@ export const wizardState = {
     maxNumSeqs: '',
     maxConcurrentRequests: '',
     pflashPolicy: 'off',
-    // Entry count, so 0 rather than '' is the omit value -- it matches the backend default
-    // and the argv builder, which only emits --hybrid-cache-entries above zero.
-    hybridCacheEntries: 0,
+    // Measured general agent-workflow default. Zero remains the explicit omit value,
+    // which takes Rapid-MLX's runtime default (0, hybrid reuse disabled).
+    hybridCacheEntries: 16,
     prefillBatchSize: '',
     completionBatchSize: '',
       retainedCacheMib: 8192,
@@ -680,7 +680,7 @@ function resetWizardState() {
   wizardState.hardware.maxNumSeqs = '';
   wizardState.hardware.maxConcurrentRequests = '';
   wizardState.hardware.pflashPolicy = 'off';
-  wizardState.hardware.hybridCacheEntries = 0;
+  wizardState.hardware.hybridCacheEntries = 16;
   wizardState.hardware.prefillBatchSize = '';
   wizardState.hardware.completionBatchSize = '';
   wizardState.hardware.prefillStepSize = 512;
