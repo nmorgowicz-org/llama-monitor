@@ -809,7 +809,7 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
         const modal = document.createElement('div');
         modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:9999;';
         const panel = document.createElement('div');
-        panel.style.cssText = 'background:var(--color-bg-secondary);border:1px solid var(--color-border);border-radius:8px;padding:16px;max-width:480px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);';
+        panel.style.cssText = 'background:var(--color-bg-secondary);border:1px solid var(--color-border);border-radius:8px;padding:16px;max-width:600px;width:95%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);';
         const title = document.createElement('strong');
         title.textContent = 'Create fix from discussion';
         title.style.fontSize = '13px';
@@ -838,8 +838,16 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
         titleInput.style.cssText = 'width:100%;margin-top:6px;padding:5px 8px;font-size:11px;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;';
 
         const contentTextarea = document.createElement('textarea');
+        contentTextarea.className = 'chat-template-fix-textarea';
+        contentTextarea.rows = 15;
         contentTextarea.placeholder = 'Paste the full template content here...';
-        contentTextarea.style.cssText = 'width:100%;margin-top:8px;padding:6px 8px;font-size:11px;font-family:monospace;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);min-height:200px;box-sizing:border-box;resize:vertical;';
+        contentTextarea.style.cssText = 'width:100%;margin-top:8px;padding:6px 8px;font-size:11px;font-family:monospace;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;resize:vertical;';
+        if (!document.getElementById('chat-template-fix-modal-styles')) {
+          const style = document.createElement('style');
+          style.id = 'chat-template-fix-modal-styles';
+          style.textContent = '.chat-template-fix-textarea { height: 250px !important; min-height: 250px !important; }';
+          document.head.appendChild(style);
+        }
 
         const statusDiv = document.createElement('div');
         statusDiv.style.fontSize = '10px';

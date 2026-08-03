@@ -2282,6 +2282,26 @@ async function scenarioPresetEditor(ctx, options) {
     await sleep(500);
     await captureShot(page, 'preset-editor-advanced-tab.png', { fullPage: true });
 
+    // 4b. Set a template path so "Create fix" button is active, then capture the modal
+    await page.evaluate(() => {
+        const input = document.getElementById('modal-chat-template-file');
+        if (input) input.value = '/path/to/qwen3.6-froggeric-v21.3.jinja';
+    });
+    await sleep(200);
+    await page.evaluate(() => {
+        document.getElementById('preset-chat-template-create-fix-btn')?.click();
+    });
+    await sleep(600);
+    await captureShot(page, 'preset-editor-create-fix-modal.png', { fullPage: true });
+    await page.evaluate(() => {
+        // Close modal by clicking Cancel button
+        const cancelBtn = document.querySelector('div[style*="position:fixed"] button')?.textContent === 'Cancel'
+            ? document.querySelector('div[style*="position:fixed"] button')
+            : document.querySelectorAll('div[style*="position:fixed"] button')[0];
+        if (cancelBtn) cancelBtn.click();
+    });
+    await sleep(300);
+
     // 5. Close preset modal
     await page.evaluate(() => {
         const close = document.getElementById('preset-modal-close');
