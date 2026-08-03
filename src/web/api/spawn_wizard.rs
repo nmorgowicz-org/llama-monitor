@@ -2010,6 +2010,275 @@ fn api_chat_template_transform(
         })
 }
 
+#[derive(serde::Serialize)]
+struct DiscussionMeta {
+    number: u64,
+    title: String,
+    status: String,
+    is_pull_request: bool,
+    num_comments: u64,
+    created_at: String,
+}
+
+#[derive(serde::Serialize)]
+struct DiscussionsResponse {
+    ok: bool,
+    template_name: String,
+    source_repo: Option<String>,
+    discussions: Vec<DiscussionMeta>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct InstallDiscussionRequest {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    discussion_source: DiscussionSource,
+    #[serde(default)]
+    content: String,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct DiscussionSource {
+    #[serde(default)]
+    repo: String,
+    #[serde(default)]
+    discussion_id: u64,
+    #[serde(default)]
+    title: String,
+}
+
+async fn fetch_hf_discussions(repo: &str) -> Result<Vec<DiscussionMeta>, String> {
+    let repo_clean = repo.trim_end_matches('/');
+    let url = format!("https://huggingface.co/api/models/{repo_clean}/discussions?limit=10");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch discussions: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("HF API returned {}", response.status()));
+    }
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("JSON parse: {e}"))?;
+    let discussions = body["discussions"]
+        .as_array()
+        .ok_or("No discussions array")?;
+    let mut result = Vec::new();
+    for item in discussions {
+        let title = item["title"].as_str().unwrap_or("").to_string();
+        if title.is_empty() {
+            continue;
+        }
+        result.push(DiscussionMeta {
+            number: item["num"].as_u64().unwrap_or(0),
+            title,
+            status: item["status"].as_str().unwrap_or("").to_string(),
+            is_pull_request: item["isPullRequest"].as_bool().unwrap_or(false),
+            num_comments: item["numComments"].as_u64().unwrap_or(0),
+            created_at: item["createdAt"].as_str().unwrap_or("").to_string(),
+        });
+    }
+    Ok(result)
+}
+
+fn resolve_template_source_repo(template_name: &str) -> Result<Option<String>, String> {
+    let base = chat_template_dir_path()
+        .ok_or_else(|| "Failed to determine template directory".to_string())?;
+    let index_path = base.join("releases").join(template_name).join("index.json");
+    let content = std::fs::read_to_string(&index_path)
+        .map_err(|e| format!("Failed to read release index for {template_name}: {e}"))?;
+    let index: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse release index: {e}"))?;
+    let source_repo = index["source"]
+        .get("repo")
+        .and_then(|r| r.as_str())
+        .map(|s| s.to_string());
+    Ok(source_repo)
+}
+
+fn api_chat_template_discussions(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "discussions")
+        .and(warp::get())
+        .and(warp::query::<serde_json::Value>())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |query: serde_json::Value, auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let name = query["name"].as_str().unwrap_or("").to_string();
+                if name.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({ "ok": false, "error": "Missing name parameter" }),
+                        ),
+                    ));
+                }
+                let name_clone = name.clone();
+                let source_repo = resolve_template_source_repo(&name);
+                let resp = match source_repo {
+                    Ok(Some(repo)) => match fetch_hf_discussions(&repo).await {
+                        Ok(discussions) => DiscussionsResponse {
+                            ok: true,
+                            template_name: name_clone,
+                            source_repo: Some(repo),
+                            discussions,
+                            error: None,
+                        },
+                        Err(e) => DiscussionsResponse {
+                            ok: false,
+                            template_name: name_clone,
+                            source_repo: Some(repo.clone()),
+                            discussions: Vec::new(),
+                            error: Some(e),
+                        },
+                    },
+                    Ok(None) => DiscussionsResponse {
+                        ok: false,
+                        template_name: name_clone,
+                        source_repo: None,
+                        discussions: Vec::new(),
+                        error: Some(
+                            "Template not installed from HF; no source repo to poll".into(),
+                        ),
+                    },
+                    Err(e) => DiscussionsResponse {
+                        ok: false,
+                        template_name: name_clone,
+                        source_repo: None,
+                        discussions: Vec::new(),
+                        error: Some(e),
+                    },
+                };
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &resp,
+                )))
+            }
+        })
+}
+
+fn api_chat_template_install_discussion(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "install-discussion")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<InstallDiscussionRequest>())
+        .and_then(move |auth: Option<String>, req: InstallDiscussionRequest| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                if req.name.is_empty() || req.content.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "name and content are required" })),
+                    ));
+                }
+                let base_dir = match chat_template_dir_path() {
+                    Some(d) => d,
+                    None => return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "Failed to get template directory" })),
+                    )),
+                };
+                let releases_dir = base_dir.join("releases").join(&req.name);
+                if let Err(e) = std::fs::create_dir_all(&releases_dir) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": format!("Failed to create releases dir: {}", e) })),
+                    ));
+                }
+                let repo_slug = if !req.discussion_source.repo.is_empty() {
+                    req.discussion_source.repo.replace('/', "-")
+                } else {
+                    "discussion".into()
+                };
+                let discussion_id = req.discussion_source.discussion_id;
+                let derived_name = format!("{name}-discussion-{slug}-{id}", name = req.name, slug = repo_slug, id = discussion_id);
+                let derived_dir = base_dir.join("releases").join(&derived_name);
+                if let Err(e) = std::fs::create_dir_all(&derived_dir) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": format!("Failed to create derived release dir: {}", e) })),
+                    ));
+                }
+                let content_sha = sha256_hex(req.content.as_bytes());
+                let version = format!("discussion-{}-{}", discussion_id, &content_sha[..8]);
+                let releases_subdir = derived_dir.join("releases");
+                if let Err(e) = std::fs::create_dir_all(&releases_subdir) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": format!("Failed to create releases subdir: {}", e) })),
+                    ));
+                }
+                let file_path = releases_subdir.join("v1.jinja");
+                if let Err(e) = std::fs::write(&file_path, &req.content) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": format!("Failed to write template file: {}", e) })),
+                    ));
+                }
+                let discussion_link = if !req.discussion_source.repo.is_empty() {
+                    format!(
+                        "https://huggingface.co/{}/discussions/{}",
+                        req.discussion_source.repo, discussion_id
+                    )
+                } else {
+                    format!("discussion-{}", discussion_id)
+                };
+                let source_repo = if !req.discussion_source.repo.is_empty() {
+                    Some(req.discussion_source.repo.clone())
+                } else {
+                    None
+                };
+                let index_data = serde_json::json!({
+                    "name": derived_name,
+                    "base_name": req.name,
+                    "source": {
+                        "type": "discussion",
+                        "repo": source_repo,
+                        "discussion_id": discussion_id,
+                        "discussion_title": req.discussion_source.title,
+                        "discussion_link": discussion_link,
+                    },
+                    "releases": [{
+                        "version": version,
+                        "file_path": file_path.to_string_lossy().to_string(),
+                        "content_sha256": content_sha,
+                        "content": req.content.clone(),
+                        "installed_at": chrono::Utc::now().to_rfc3339(),
+                        "provenance": "discussion-derived",
+                    }],
+                    "active_release": "v1",
+                });
+                let index_path = derived_dir.join("index.json");
+                if let Err(e) = std::fs::write(&index_path, serde_json::to_string_pretty(&index_data).unwrap_or_default()) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": format!("Failed to write index: {}", e) })),
+                    ));
+                }
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(&serde_json::json!({
+                    "ok": true,
+                    "release_name": derived_name,
+                    "version": version,
+                    "file_path": file_path.to_string_lossy().to_string(),
+                    "content_sha256": content_sha,
+                    "discussion_link": discussion_link,
+                }))))
+            }
+        })
+}
+
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let state = ctx.state.clone();
     let config = ctx.config.clone();
@@ -2066,6 +2335,17 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r
         .or(api_chat_template_transform(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_chat_template_discussions(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_chat_template_install_discussion(
+            state.clone(),
+            config.clone(),
+        ))
         .unify()
         .boxed();
     r
