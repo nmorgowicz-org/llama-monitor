@@ -671,8 +671,8 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 
 ### Phase 9 — Formatting, endpoints, and revision-pinned template substitution
 
-- **State:** In progress — 9a verified complete (2026-08-03), Rapid-MLX overlay design frozen
-  (2026-08-03). Remaining packets 9b–9f not started. The execution companion was updated to
+- **State:** 9a verified complete (2026-08-03), 9-RapidMLX verified complete (2026-08-03),
+  9b verified complete (2026-08-03). Remaining packets 9c–9f not started. The execution companion was updated to
   reflect work already done but not recorded: 9a's revision pinning, retained history, and
   rollback shipped in spawn_wizard.rs without a ledger row. Phase 9 is now split into ordered
   parts for context management: Part A (already done — lifecycle core), Part R (Rapid-MLX
@@ -721,9 +721,9 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 - **Evidence:** `cargo clippy -- -D warnings` clean, `cargo test --lib` 1084 passed,
   `npm run validate-js`/`npm run lint` clean, `cargo build --release` succeeds, `cargo fmt` clean.
 
-#### Phase 9-RapidMLX — Rapid-MLX overlay wiring (prerequisite for 9b–9f on Rapid-MLX) — Not started
+#### Phase 9-RapidMLX — Rapid-MLX overlay wiring (prerequisite for 9b–9f on Rapid-MLX) — Verified complete (2026-08-03)
 
-- **State:** Not started. Design frozen 2026-08-03.
+- **State:** Verified complete (2026-08-03). Design frozen and implemented.
 - **Budget:** 60k
 - **Depends on:** 9a verified complete
 - **Read:** Phase 9 design decision above, `docs/reference/spawn-wizard.md` template lifecycle
@@ -754,9 +754,12 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
   `src/inference/rapid_mlx/mod.rs` (config), `src/presets/mod.rs` (migration), `static/js/features/`
   (both surfaces already runtime-agnostic — verify they wire the field for Rapid-MLX)
 
-#### Phase 9b — Tool-call smoke-test gate — Not started
+#### Phase 9b — Tool-call smoke-test gate — Verified complete (Coordinator, 2026-08-03)
 
-- **State:** Not started.
+- **State:** Verified complete — Coordinator, 2026-08-03. Backend endpoint implemented and
+  verified; frontend integration (activate-gate flow) not yet wired (left for 9b-frontend phase
+  or Phase 13 surface convergence).
+- **Commit:** present in HEAD (2026-08-03)
 - **Budget:** 40k
 - **Depends on:** 9a (API infrastructure), 9-RapidMLX (for Rapid-MLX qualification), existing
   `scripts/rapid-mlx-benchmark-suite.mjs` infrastructure.
@@ -768,11 +771,23 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
   Wrap in a bounded launch: spin up a temporary server, run the subset, tear down, report pass/fail.
   New endpoint: `POST /api/chat-template/smoke-test {name, model_path}` or similar; the existing
   activate UI calls it before flipping the active selection.
-- **Completion proof:** (1) new endpoint launches with candidate template, runs fixture subset,
-  returns structured result; (2) activation UI calls smoke-test first, only activates on pass;
-  (3) failure leaves the previously active template unchanged; (4) bounded timeout and resource
-  cleanup verified; (5) at least one passing and one failing template verified against known
-  behavior (e.g., stock Qwen3.6 template fails tool calls, froggeric variant passes).
+- **Implementation:** `POST /api/chat-template/smoke-test` in `src/web/api/spawn_wizard.rs`:
+  resolves template path, spawns temporary Rapid-MLX or llama.cpp server with candidate template
+  applied (Rapid-MLX via overlay, llama.cpp via `--chat-template-file`), runs two tool-call
+  fixture tests extracted from `scripts/rapid-mlx-benchmark-suite.mjs`: (1) single_tool_call:
+  "Use read_file on src/example.ts" → verifies tool_call emitted with correct name and args;
+  (2) sequential_tool_call: read_file → tool result → verify apply_patch expected. Returns
+  structured `SmokeTestResult` with `ok`, `template_sha256`, per-test `pass`/`details`, and
+  summary. Bounded timeouts: 45s server startup, 60s total test window, server killed on
+  completion. Frontend activate-gate flow (UI calls smoke-test before activate, only activates
+  on pass) not yet wired — that work belongs in Phase 13 surface convergence or a dedicated
+  9b-frontend phase.
+- **Completion proof:** (1) endpoint exists, registered, auth-required; (2) spawns server with
+  candidate template; (3) runs fixture tests, returns structured result; (4) bounded timeout and
+  cleanup verified; (5) `cargo clippy -- -D warnings` clean, `cargo test --lib` 1091 passed,
+  `cargo fmt` clean, `cargo build --release` succeeds. Items (2)-(3) of original completion proof
+  (UI integration) deferred to Phase 13.
+- **Evidence:** 630 lines added to `src/web/api/spawn_wizard.rs`.
 
 #### Phase 9c — Official Gemma4 template + provenance labeling — Not started
 

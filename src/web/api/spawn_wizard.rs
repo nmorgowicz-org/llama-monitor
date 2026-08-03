@@ -1292,6 +1292,584 @@ fn api_chat_template_check_update(
         })
 }
 
+// Tool-call smoke-test fixtures (extracted from rapid-mlx-benchmark-suite.mjs tools suite)
+const SMOKE_TEST_TOOLS: &str = r#"
+[
+  {"type":"function","function":{"name":"read_file","description":"Read a source file.","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}}},
+  {"type":"function","function":{"name":"apply_patch","description":"Apply a small source edit.","parameters":{"type":"object","properties":{"path":{"type":"string"},"replacement":{"type":"string"}},"required":["path","replacement"],"additionalProperties":false}}},
+  {"type":"function","function":{"name":"list_files","description":"List files in a directory.","parameters":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}}},
+  {"type":"function","function":{"name":"search_code","description":"Search source files for a pattern.","parameters":{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string"}},"required":["pattern"],"additionalProperties":false}}},
+  {"type":"function","function":{"name":"run_command","description":"Execute a shell command and return its output.","parameters":{"type":"object","properties":{"command":{"type":"string"}},"required":["command"],"additionalProperties":false}}}
+]"#;
+
+#[derive(serde::Serialize)]
+struct SmokeTestResult {
+    ok: bool,
+    template_sha256: String,
+    backend: String,
+    model: String,
+    tests: Vec<SmokeTestItem>,
+    summary: String,
+}
+
+#[derive(serde::Serialize, Clone)]
+struct SmokeTestItem {
+    name: String,
+    pass: bool,
+    details: String,
+}
+
+fn chat_template_dir_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|h| {
+        h.join(".config")
+            .join("llama-monitor")
+            .join("chat-templates")
+    })
+}
+
+fn resolve_template_file_path(name: &str) -> Option<std::path::PathBuf> {
+    let base = chat_template_dir_path()?;
+    let path = base.join(format!("{name}.jinja"));
+    if path.is_file() { Some(path) } else { None }
+}
+
+fn find_available_port() -> Option<u16> {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .ok()
+        .and_then(|listener| listener.local_addr().ok().map(|a| a.port()))
+}
+
+async fn wait_for_server_ready(base_url: &str, timeout_secs: u64) -> bool {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+    let start = std::time::Instant::now();
+    while start.elapsed() < std::time::Duration::from_secs(timeout_secs) {
+        if client
+            .get(format!("{}/health", base_url))
+            .send()
+            .await
+            .ok()
+            .is_some_and(|r| r.status().is_success() || r.status().as_u16() == 404)
+        {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    false
+}
+
+async fn run_single_tool_call_test(base_url: &str) -> SmokeTestItem {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let body = serde_json::json!({
+        "model": "test",
+        "messages": [
+            {"role": "system", "content": "You are a coding assistant. Always use tools when appropriate."},
+            {"role": "user", "content": "Use read_file on src/example.ts."}
+        ],
+        "tools": serde_json::from_str::<serde_json::Value>(SMOKE_TEST_TOOLS).unwrap_or_default(),
+        "tool_choice": "required",
+        "max_tokens": 512,
+        "temperature": 0.0
+    });
+
+    match client
+        .post(format!("{}/v1/chat/completions", base_url))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+            Ok(json) => {
+                let tool_calls = &json["choices"][0]["message"]["tool_calls"];
+                if tool_calls.is_array() && !tool_calls.as_array().unwrap().is_empty() {
+                    let tc = &tool_calls[0];
+                    let func = &tc["function"];
+                    let name = func["name"].as_str().unwrap_or("");
+                    let args: serde_json::Value = func["arguments"].clone();
+                    let path_arg = args
+                        .as_object()
+                        .and_then(|m| m.get("path"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+
+                    if name == "read_file" && path_arg == "src/example.ts" {
+                        SmokeTestItem {
+                            name: "single_tool_call".into(),
+                            pass: true,
+                            details: "Correctly emitted read_file(path='src/example.ts')".into(),
+                        }
+                    } else {
+                        SmokeTestItem {
+                            name: "single_tool_call".into(),
+                            pass: false,
+                            details: format!(
+                                "Tool name or arguments incorrect: got name='{}' path='{}'",
+                                name, path_arg
+                            ),
+                        }
+                    }
+                } else {
+                    let content = json["choices"][0]["message"]["content"]
+                        .as_str()
+                        .unwrap_or("<no content>");
+                    SmokeTestItem {
+                        name: "single_tool_call".into(),
+                        pass: false,
+                        details: format!(
+                            "Expected tool_call but got text response: {}",
+                            content.chars().take(100).collect::<String>()
+                        ),
+                    }
+                }
+            }
+            Err(e) => SmokeTestItem {
+                name: "single_tool_call".into(),
+                pass: false,
+                details: format!("Failed to parse response JSON: {}", e),
+            },
+        },
+        Ok(resp) => SmokeTestItem {
+            name: "single_tool_call".into(),
+            pass: false,
+            details: format!("HTTP {} from chat completions", resp.status()),
+        },
+        Err(e) => SmokeTestItem {
+            name: "single_tool_call".into(),
+            pass: false,
+            details: format!("Request failed: {}", e),
+        },
+    }
+}
+
+async fn run_sequential_tool_call_test(base_url: &str) -> SmokeTestItem {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    // First turn: use read_file
+    let body1 = serde_json::json!({
+        "model": "test",
+        "messages": [
+            {"role": "system", "content": "You are a coding assistant."},
+            {"role": "user", "content": "Use read_file on src/example.ts. After seeing the file result, use apply_patch to replace the marked value."}
+        ],
+        "tools": serde_json::from_str::<serde_json::Value>(SMOKE_TEST_TOOLS).unwrap_or_default(),
+        "tool_choice": "required",
+        "max_tokens": 512,
+        "temperature": 0.0
+    });
+
+    let first_resp = match client
+        .post(format!("{}/v1/chat/completions", base_url))
+        .header("Content-Type", "application/json")
+        .json(&body1)
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => r.json::<serde_json::Value>().await.ok(),
+        _ => None,
+    };
+
+    let Some(first_json) = first_resp else {
+        return SmokeTestItem {
+            name: "sequential_tool_call".into(),
+            pass: false,
+            details: "First turn failed".into(),
+        };
+    };
+
+    let tool_calls = &first_json["choices"][0]["message"]["tool_calls"];
+    if !tool_calls.is_array() || tool_calls.as_array().unwrap().is_empty() {
+        return SmokeTestItem {
+            name: "sequential_tool_call".into(),
+            pass: false,
+            details: "First turn did not call read_file".into(),
+        };
+    }
+
+    // Second turn: tool result → expect apply_patch
+    let body2 = serde_json::json!({
+        "model": "test",
+        "messages": [
+            {"role": "system", "content": "You are a coding assistant."},
+            {"role": "user", "content": "Use read_file on src/example.ts. After seeing the file result, use apply_patch to replace the marked value."},
+            {"role": "assistant", "tool_calls": tool_calls.clone()},
+            {"role": "tool", "tool_call_id": tool_calls[0]["id"].as_str().unwrap_or("call_1"), "content": "export const MARKED_VALUE = \"before\";\n"}
+        ],
+        "tools": serde_json::from_str::<serde_json::Value>(SMOKE_TEST_TOOLS).unwrap_or_default(),
+        "tool_choice": "required",
+        "max_tokens": 512,
+        "temperature": 0.0
+    });
+
+    match client
+        .post(format!("{}/v1/chat/completions", base_url))
+        .header("Content-Type", "application/json")
+        .json(&body2)
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+            Ok(json) => {
+                let tc = &json["choices"][0]["message"]["tool_calls"];
+                if tc.is_array() && !tc.as_array().unwrap().is_empty() {
+                    let func = &tc[0]["function"];
+                    let name = func["name"].as_str().unwrap_or("");
+                    if name == "apply_patch" {
+                        SmokeTestItem {
+                            name: "sequential_tool_call".into(),
+                            pass: true,
+                            details: "Correctly chained read_file → apply_patch".into(),
+                        }
+                    } else {
+                        SmokeTestItem {
+                            name: "sequential_tool_call".into(),
+                            pass: false,
+                            details: format!("Expected apply_patch but got tool name='{}'", name),
+                        }
+                    }
+                } else {
+                    SmokeTestItem {
+                        name: "sequential_tool_call".into(),
+                        pass: false,
+                        details: "Second turn did not emit tool_call (loop/text response)".into(),
+                    }
+                }
+            }
+            Err(e) => SmokeTestItem {
+                name: "sequential_tool_call".into(),
+                pass: false,
+                details: format!("Failed to parse second-turn response: {}", e),
+            },
+        },
+        Ok(resp) => SmokeTestItem {
+            name: "sequential_tool_call".into(),
+            pass: false,
+            details: format!("HTTP {} from second turn", resp.status()),
+        },
+        Err(e) => SmokeTestItem {
+            name: "sequential_tool_call".into(),
+            pass: false,
+            details: format!("Second turn request failed: {}", e),
+        },
+    }
+}
+
+async fn spawn_rapid_mlx_server(
+    bin_path: &std::path::Path,
+    model_dir: &std::path::Path,
+    template_path: &std::path::Path,
+    port: u16,
+    tool_call_parser: Option<String>,
+) -> Result<std::process::Child, String> {
+    use std::process::Command;
+
+    // Create overlay with candidate template
+    let overlay = crate::inference::rapid_mlx::model_resolver::create_template_overlay(
+        model_dir.to_string_lossy().as_ref(),
+        Some(template_path.to_string_lossy().as_ref()),
+    )
+    .map_err(|e| format!("Failed to create template overlay: {}", e))?;
+
+    // Build minimal argv: just enough for a tool-call test
+    let mut args: Vec<String> = vec![
+        "serve".into(),
+        overlay,
+        "--port".into(),
+        port.to_string(),
+        "--host".into(),
+        "127.0.0.1".into(),
+        "--max-num-seqs".into(),
+        "1".into(),
+        "--max-concurrent-requests".into(),
+        "1".into(),
+        "--no-telemetry".into(),
+        "--disable-prefix-cache".into(),
+        "--log-level".into(),
+        "WARNING".into(),
+    ];
+
+    if let Some(parser) = tool_call_parser {
+        args.push("--tool-call-parser".into());
+        args.push(parser);
+        args.push("--enable-auto-tool-choice".into());
+    }
+
+    let mut cmd = Command::new(bin_path);
+    cmd.args(&args);
+    cmd.stdout(std::process::Stdio::null());
+    cmd.stderr(std::process::Stdio::null());
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to start Rapid-MLX server: {}", e))?;
+    Ok(child)
+}
+
+async fn spawn_llama_cpp_server(
+    bin_path: &std::path::Path,
+    model_path: &std::path::Path,
+    template_path: &std::path::Path,
+    port: u16,
+) -> Result<std::process::Child, String> {
+    use std::process::Command;
+
+    let mut cmd = Command::new(bin_path);
+    cmd.arg("-m").arg(model_path);
+    cmd.arg("--port").arg(port.to_string());
+    cmd.arg("--host").arg("127.0.0.1");
+    cmd.arg("-c").arg("4096");
+    cmd.arg("-n").arg("-1");
+    cmd.arg("--jinja");
+    cmd.arg("--no-warmup");
+    cmd.arg("--no-context-shift");
+    cmd.arg("-ngl").arg("all");
+    cmd.arg("--chat-template-file").arg(template_path);
+    cmd.stdout(std::process::Stdio::null());
+    cmd.stderr(std::process::Stdio::null());
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to start llama.cpp server: {}", e))?;
+    Ok(child)
+}
+
+fn kill_server(mut child: std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+// 11) POST /api/chat-template/smoke-test
+fn api_chat_template_smoke_test(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "smoke-test")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let name = body["name"].as_str().unwrap_or("").to_string();
+                let model = body["model"].as_str().unwrap_or("").to_string();
+                let backend = body["backend"].as_str().unwrap_or("rapid-mlx").to_string();
+
+                if name.is_empty() || model.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Missing 'name' or 'model' field"
+                        }))
+                    ));
+                }
+
+                let template_path = match resolve_template_file_path(&name) {
+                    Some(p) => p,
+                    None => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Template '{}' not found in active install directory", name)
+                            }))
+                        ));
+                    }
+                };
+
+                let template_sha256 = match std::fs::read(&template_path) {
+                    Ok(content) => sha256_hex(&content),
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Failed to read template: {}", e)
+                            }))
+                        ));
+                    }
+                };
+
+                let port = match find_available_port() {
+                    Some(p) => p,
+                    None => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Could not find available port for temporary server"
+                            }))
+                        ));
+                    }
+                };
+
+                let base_url = format!("http://127.0.0.1:{}", port);
+
+                // Resolve tool_call_parser hint from the model identifier
+                let tool_call_parser = if model.to_lowercase().contains("qwen") {
+                    Some("qwen".into())
+                } else {
+                    None
+                };
+
+                let server = match backend.as_str() {
+                    "rapid-mlx" => {
+                        let bin_path = match crate::inference::rapid_mlx::discovery::Discovery::resolve_binary(None, None).await {
+                            Ok((p, _)) => p,
+                            Err(e) => {
+                                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                    warp::reply::json(&serde_json::json!({
+                                        "ok": false,
+                                        "error": format!("Rapid-MLX binary not found: {}", e)
+                                    }))
+                                ));
+                            }
+                        };
+
+                        // Resolve model: try as local path first, then as HF repo
+                        let model_dir = if std::path::Path::new(&model).exists() {
+                            model.clone()
+                        } else {
+                            let hf_path = format!(
+                                "{}/.cache/huggingface/hub/models--{}",
+                                dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp")).display(),
+                                model.replace('/', "--")
+                            );
+                            hf_path
+                        };
+
+                        if !std::path::Path::new(&model_dir).exists() {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": format!("Model directory not found for '{}'. Ensure the model is downloaded first.", model)
+                                }))
+                            ));
+                        }
+
+                        match spawn_rapid_mlx_server(&bin_path, std::path::Path::new(&model_dir), &template_path, port, tool_call_parser).await {
+                            Ok(c) => c,
+                            Err(e) => {
+                                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                    warp::reply::json(&serde_json::json!({
+                                        "ok": false,
+                                        "error": e
+                                    }))
+                                ));
+                            }
+                        }
+                    }
+                    "llama-cpp" => {
+                        let bin_path = std::path::Path::new(&cfg.llama_server_path);
+                        if !bin_path.exists() {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "llama-server binary not found"
+                                }))
+                            ));
+                        }
+
+                        let model_path = if std::path::Path::new(&model).exists() {
+                            model.clone()
+                        } else {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": format!("Model file not found for '{}'. Provide a local GGUF path.", model)
+                                }))
+                            ));
+                        };
+
+                        match spawn_llama_cpp_server(bin_path, std::path::Path::new(&model_path), &template_path, port).await {
+                            Ok(c) => c,
+                            Err(e) => {
+                                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                    warp::reply::json(&serde_json::json!({
+                                        "ok": false,
+                                        "error": e
+                                    }))
+                                ));
+                            }
+                        }
+                    }
+                    _ => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Unsupported backend '{}'. Use 'rapid-mlx' or 'llama-cpp'.", backend)
+                            }))
+                        ));
+                    }
+                };
+
+                // Wait for server to be ready
+                if !wait_for_server_ready(&base_url, 45).await {
+                    kill_server(server);
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Server did not become ready within 45 seconds"
+                        }))
+                    ));
+                }
+
+                // Run tests with overall timeout guard
+                let test_start = std::time::Instant::now();
+                let test_timeout = std::time::Duration::from_secs(60);
+
+                let single_result = run_single_tool_call_test(&base_url).await;
+                let sequential_result = if test_start.elapsed() < test_timeout {
+                    run_sequential_tool_call_test(&base_url).await
+                } else {
+                    SmokeTestItem {
+                        name: "sequential_tool_call".into(),
+                        pass: false,
+                        details: "Skipped: overall test timeout exceeded".into(),
+                    }
+                };
+
+                kill_server(server);
+
+                let all_pass = single_result.pass && sequential_result.pass;
+                let tests = vec![single_result.clone(), sequential_result];
+                let summary = if all_pass {
+                    "PASS — template handles single and sequential tool calls correctly".into()
+                } else {
+                    let failures: Vec<_> = tests.iter()
+                        .filter(|t| !t.pass)
+                        .map(|t| t.details.clone())
+                        .collect();
+                    format!(
+                        "FAIL — {} test(s) did not pass: {}",
+                        failures.len(),
+                        failures.join("; ")
+                    )
+                };
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &SmokeTestResult {
+                        ok: all_pass,
+                        template_sha256,
+                        backend,
+                        model,
+                        tests,
+                        summary,
+                    }
+                )))
+            }
+        })
+}
+
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let state = ctx.state.clone();
     let config = ctx.config.clone();
@@ -1340,6 +1918,10 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r
         .or(api_chat_template_activate(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_chat_template_smoke_test(state.clone(), config.clone()))
         .unify()
         .boxed();
     r
