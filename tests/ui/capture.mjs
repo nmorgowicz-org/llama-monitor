@@ -2282,12 +2282,27 @@ async function scenarioPresetEditor(ctx, options) {
     await sleep(500);
     await captureShot(page, 'preset-editor-advanced-tab.png', { fullPage: true });
 
-    // 4b. Set a template path so "Create fix" button is active, then capture the modal
+    // 4b. Set a template path so Discussions and Create fix buttons are active
     await page.evaluate(() => {
         const input = document.getElementById('modal-chat-template-file');
         if (input) input.value = '/path/to/qwen3.6-froggeric-v21.3.jinja';
     });
     await sleep(200);
+
+    // 4c. Capture Chat Template row (shows Discussions + Create fix buttons)
+    await page.evaluate(() => {
+        const el = document.getElementById('modal-chat-template-file');
+        if (el) {
+            el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            // Also scroll the modal content area
+            const modalBody = el.closest('.modal-body') || el.closest('[class*="modal"]');
+            if (modalBody) modalBody.scrollTop = el.offsetTop - 100;
+        }
+    });
+    await sleep(500);
+    await captureShot(page, 'preset-editor-chat-template-row.png', { fullPage: true });
+
+    // 4d. Capture Create fix modal
     await page.evaluate(() => {
         document.getElementById('preset-chat-template-create-fix-btn')?.click();
     });
