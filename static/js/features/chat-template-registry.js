@@ -8,6 +8,7 @@ export const COMMUNITY_TEMPLATES = {
     description: 'Fixes tool calling, KV cache invalidation & agentic loop bugs for Qwen 3.5 / 3.6',
     sourceUrl: 'https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates',
     provenance: 'community',
+    transformed: true, // Uses -no_json-v21.3 transform at install time
   },
   gemma4: [
     {

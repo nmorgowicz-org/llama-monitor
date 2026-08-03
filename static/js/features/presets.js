@@ -191,7 +191,8 @@ async function installRecommendedChatTemplateForPreset() {
         if (!resp.ok || !data.ok || !data.path) {
             throw new Error(data.error || `HTTP ${resp.status}`);
         }
-        setVal('modal-chat-template-file', data.path);
+        const templatePath = (template.transformed && data.transformed_path) ? data.transformed_path : data.path;
+        setVal('modal-chat-template-file', templatePath);
         showToast(
             data.already_existed ? 'Recommended template selected' : 'Recommended template installed',
             'success',

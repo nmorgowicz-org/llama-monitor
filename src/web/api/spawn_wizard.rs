@@ -7,6 +7,48 @@ use crate::state::AppState;
 
 use super::common::{ApiCtx, ApiRoute, check_api_token, unauthorized_api_token};
 
+/// Runs the froggeric template transform script on the given input file.
+/// Returns the path to the transformed output file, or an error string.
+/// Transform output goes to same directory as `<name>-no_json-v21.3.jinja`.
+fn run_froggeric_transform(input_path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let script_path = std::env::current_dir()
+        .map_err(|e| format!("Cannot determine current directory: {e}"))?
+        .join("scripts")
+        .join("transform-froggeric-template.mjs");
+
+    if !script_path.exists() {
+        return Err(format!(
+            "Transform script not found at: {}",
+            script_path.display()
+        ));
+    }
+
+    let input_str = input_path
+        .to_str()
+        .ok_or_else(|| "Invalid input path".to_string())?;
+
+    let output = std::process::Command::new("node")
+        .arg(&script_path)
+        .arg(input_str)
+        .output()
+        .map_err(|e| format!("Failed to run transform script: {e}"))?;
+
+    if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Transform script failed: {err_msg}"));
+    }
+
+    // Parse output path from "Wrote: <path>" message
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let written_path = stdout
+        .lines()
+        .find(|l| l.starts_with("Wrote:"))
+        .and_then(|l| l.strip_prefix("Wrote:").map(str::trim))
+        .ok_or_else(|| "Transform script did not report output path".to_string())?;
+
+    Ok(std::path::PathBuf::from(written_path))
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ChatTemplateInstallMeta {
     source_url: String,
@@ -625,13 +667,31 @@ fn api_chat_template_install_hf(
                     let existing_meta = read_template_install_meta(&template_meta_path(&dest));
                     let source_url = existing_meta.as_ref().map(|m| m.source_url.clone());
                     let installed_at = existing_meta.as_ref().map(|m| m.installed_at.clone());
+
+                    // Check for existing transformed version for froggeric templates
+                    let transformed_path = if repo == "froggeric/Qwen-Fixed-Chat-Templates" {
+                        let base = dest
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or(&name);
+                        let transformed = dest.with_file_name(format!("{base}-no_json-v21.3.jinja"));
+                        if transformed.exists() {
+                            Some(transformed.to_string_lossy().to_string())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
                             "ok": true,
                             "path": dest.to_string_lossy(),
                             "already_existed": true,
                             "source_url": source_url,
-                            "installed_at": installed_at
+                            "installed_at": installed_at,
+                            "transformed_path": transformed_path
                         })),
                     ));
                 }
@@ -724,13 +784,27 @@ fn api_chat_template_install_hf(
                 );
                 record_release(&name, &meta, content.as_bytes());
 
+                // Auto-transform froggeric templates to XML-only variant (no JSON branch).
+                let transformed_path = if repo == "froggeric/Qwen-Fixed-Chat-Templates" {
+                    match run_froggeric_transform(&dest) {
+                        Ok(path) => Some(path.to_string_lossy().to_string()),
+                        Err(e) => {
+                            eprintln!("[warn] Froggeric transform failed (template still usable): {e}");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
                         "ok": true,
                         "path": dest.to_string_lossy(),
                         "already_existed": false,
                         "source_url": source_url,
-                        "revision": revision
+                        "revision": revision,
+                        "transformed_path": transformed_path
                     }),
                 )))
             }
@@ -1112,8 +1186,26 @@ fn api_chat_template_activate(
                     record.revision.clone(),
                 );
 
+                // Re-transform froggeric templates on rollback.
+                let transformed_path = if name.contains("froggeric") {
+                    match run_froggeric_transform(&dest) {
+                        Ok(path) => Some(path.to_string_lossy().to_string()),
+                        Err(e) => {
+                            eprintln!("[warn] Froggeric transform failed on rollback (template still usable): {e}");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                    &serde_json::json!({ "ok": true, "path": dest.to_string_lossy(), "sha256": record.sha256 }),
+                    &serde_json::json!({
+                        "ok": true,
+                        "path": dest.to_string_lossy(),
+                        "sha256": record.sha256,
+                        "transformed_path": transformed_path
+                    }),
                 )))
             }
         })
@@ -1870,6 +1962,54 @@ fn api_chat_template_smoke_test(
         })
 }
 
+// Transform endpoint: runs the froggeric no_json transform on an existing template file.
+fn api_chat_template_transform(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "transform")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let path = body["path"].as_str().unwrap_or("").to_string();
+                if path.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({ "ok": false, "error": "Missing path" }),
+                        ),
+                    ));
+                }
+                let input_path = std::path::Path::new(&path);
+                if !input_path.exists() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({ "ok": false, "error": "Input file not found" }),
+                        ),
+                    ));
+                }
+
+                match run_froggeric_transform(input_path) {
+                    Ok(output_path) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({
+                            "ok": true,
+                            "path": output_path.to_string_lossy(),
+                            "input_path": input_path.to_string_lossy(),
+                        }))),
+                    ),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": e })),
+                    )),
+                }
+            }
+        })
+}
+
 pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
     let state = ctx.state.clone();
     let config = ctx.config.clone();
@@ -1922,6 +2062,10 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r
         .or(api_chat_template_smoke_test(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_chat_template_transform(state.clone(), config.clone()))
         .unify()
         .boxed();
     r

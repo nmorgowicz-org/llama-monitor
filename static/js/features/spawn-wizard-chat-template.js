@@ -184,7 +184,7 @@ export async function autoInstallChatTemplate(force = false) {
   // Cache hit: template already installed for this family (skip when forcing a re-fetch)
   const cached = !force && _installedTemplateCache[tplForFamily.name];
   if (cached) {
-    wizardState.model.chatTemplatePath = cached.path;
+    wizardState.model.chatTemplatePath = (tplForFamily.transformed && cached.transformed_path) ? cached.transformed_path : cached.path;
     wizardState.model.chatTemplateMode = 'auto';
     _renderChatTemplateStatus('installed', family, tplForFamily, cached);
     return;
@@ -203,7 +203,7 @@ export async function autoInstallChatTemplate(force = false) {
     });
     const data = resp.ok ? await resp.json() : { ok: false, error: `HTTP ${resp.status}` };
     if (data.ok && data.path) {
-      wizardState.model.chatTemplatePath = data.path;
+      wizardState.model.chatTemplatePath = (tplForFamily.transformed && data.transformed_path) ? data.transformed_path : data.path;
       wizardState.model.chatTemplateMode = 'auto';
       // Cache the template metadata for this family (avoids re-downloading for
       // other models of the same family in the same session)
