@@ -2,9 +2,11 @@
 import { showToast } from './toast.js';
 import { openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
 import {
-  COMMUNITY_TEMPLATES,
   buildCommunityTemplateInstallRequest,
   detectCommunityTemplateFamily,
+  getDefaultTemplateForFamily,
+  getTemplateFamilies,
+  getTemplatesForFamily,
 } from './chat-template-registry.js';
 import { wizardState } from './spawn-wizard.js';
 import { awaitOriginResolve } from './spawn-wizard-hf-origin.js';
@@ -25,7 +27,7 @@ export function _applyCustomChatTemplate(path) {
   if (hiddenInput) hiddenInput.value = path || '';
   const identityName = wizardState.model.source === 'hf' ? wizardState.model.hfRepo : wizardState.model.path;
   const family = detectModelFamily(identityName);
-  const tpl = family ? COMMUNITY_TEMPLATES[family] : null;
+  const tpl = getDefaultTemplateForFamily(family);
   _renderChatTemplateStatus(path ? 'custom' : 'embedded', family, tpl, { path });
 }
 
@@ -132,7 +134,7 @@ export async function autoInstallChatTemplate(force = false) {
 
   // Fast path: family already known (from wizard state or filename)
   let family = wizardState.model.family || detectModelFamily(identityName);
-  const tpl = family ? COMMUNITY_TEMPLATES[family] : null;
+  const tpl = getDefaultTemplateForFamily(family);
 
   // If no family from fast path, we need to detect it.
   // For local/import models, await the origin resolver first (it fires from
@@ -155,7 +157,11 @@ export async function autoInstallChatTemplate(force = false) {
   // Update wizard state for future use
   if (family) wizardState.model.family = family;
 
-  const tplForFamily = family ? COMMUNITY_TEMPLATES[family] : null;
+  // Use explicitly chosen candidate (from force-family dropdown) or fall back to default for family
+  const candidates = getTemplatesForFamily(family);
+  const tplForFamily = wizardState.model.chatTemplateCandidate
+    ? candidates.find(c => c.name === wizardState.model.chatTemplateCandidate) || getDefaultTemplateForFamily(family)
+    : getDefaultTemplateForFamily(family);
 
   if (wizardState.model.chatTemplateMode === 'custom' && wizardState.model.chatTemplatePath) {
     _renderChatTemplateStatus('custom', family, tplForFamily, { path: wizardState.model.chatTemplatePath });
@@ -210,13 +216,13 @@ export async function autoInstallChatTemplate(force = false) {
 
       _renderChatTemplateStatus('installed', family, tplForFamily, displayData);
 
-      if (force) {
-        showToast(
-          tplForFamily.display + ' re-downloaded',
-          'success',
-          'Template has been refreshed from its upstream source',
-          3000
-        );
+       if (force) {
+         showToast(
+           _templateDisplayName(tplForFamily, family) + ' re-downloaded',
+           'success',
+           'Template has been refreshed from its upstream source',
+           3000
+         );
       }
     } else {
       _renderChatTemplateStatus('error', family, tplForFamily, data);
@@ -224,6 +230,16 @@ export async function autoInstallChatTemplate(force = false) {
   } catch (err) {
     _renderChatTemplateStatus('error', family, tplForFamily, { error: err.message || String(err) });
   }
+}
+
+// Formats display name with provenance label when multiple candidates exist for the family
+function _templateDisplayName(tpl, family) {
+  if (!tpl) return '';
+  const candidates = family ? getTemplatesForFamily(family) : [];
+  const provLabel = candidates.length > 1 && tpl.provenance
+    ? ` (${tpl.provenance === 'official' ? 'Official' : 'Community'})`
+    : '';
+  return tpl.display + provLabel;
 }
 
 function _renderChatTemplateStatus(state, family, tpl, data) {
@@ -242,11 +258,12 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       const recommendedBtn = document.createElement('button');
       recommendedBtn.type = 'button';
       recommendedBtn.className = 'btn-wizard-tertiary ct-action-btn';
-      const isUsing = wizardState.model.chatTemplateMode === 'auto';
-      const familyLabel = family ? ` (${family} family)` : '';
-      recommendedBtn.textContent = isUsing
-        ? `Re-fetch Recommended${familyLabel}`
-        : `Use ${tpl.display}${familyLabel}`;
+       const isUsing = wizardState.model.chatTemplateMode === 'auto';
+       const familyLabel = family ? ` (${family} family)` : '';
+       const displayName = _templateDisplayName(tpl, family);
+       recommendedBtn.textContent = isUsing
+         ? `Re-fetch Recommended${familyLabel}`
+         : `Use ${displayName}${familyLabel}`;
       recommendedBtn.title = isUsing
         ? 'Force re-download this template from source, even if already installed'
         : '';
@@ -328,34 +345,54 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
     forceFamilySelect.title = 'Override the auto-detected model family to force a specific chat template';
 
     const currentFamily = wizardState.model.family || '';
-    const families = Object.keys(COMMUNITY_TEMPLATES);
+    const currentCandidate = wizardState.model.chatTemplateCandidate || '';
+    const families = getTemplateFamilies();
 
     const autoOpt = document.createElement('option');
     autoOpt.value = '';
     autoOpt.textContent = 'auto-detect';
     if (!currentFamily) autoOpt.selected = true;
-
-    const autoLabel = document.createElement('optgroup');
-    autoLabel.label = 'Detection';
-    autoLabel.appendChild(autoOpt);
+    forceFamilySelect.appendChild(autoOpt);
 
     families.forEach(fam => {
-      const tpl = COMMUNITY_TEMPLATES[fam];
-      const opt = document.createElement('option');
-      opt.value = fam;
-      opt.textContent = `${fam} — ${tpl.display}`;
-      if (currentFamily === fam) opt.selected = true;
-      autoLabel.appendChild(opt);
+      const candidates = getTemplatesForFamily(fam);
+      if (candidates.length === 1) {
+        const tpl = candidates[0];
+        const opt = document.createElement('option');
+        opt.value = fam;
+        const provLabel = tpl.provenance ? ` (${tpl.provenance === 'official' ? 'Official' : 'Community'})` : '';
+        opt.textContent = `${fam} — ${tpl.display}${provLabel}`;
+        if (currentFamily === fam && !currentCandidate) opt.selected = true;
+        forceFamilySelect.appendChild(opt);
+      } else {
+        const group = document.createElement('optgroup');
+        const provLabels = {};
+        const famName = fam.charAt(0).toUpperCase() + fam.slice(1);
+        group.label = famName;
+        candidates.forEach(tpl => {
+          provLabels[tpl.name] = tpl.provenance ? ` (${tpl.provenance === 'official' ? 'Official' : 'Community'})` : '';
+          const opt = document.createElement('option');
+          opt.value = `${fam}:${tpl.name}`;
+          opt.textContent = `${tpl.display}${provLabels[tpl.name]}`;
+          if (currentFamily === fam && currentCandidate === tpl.name) opt.selected = true;
+          group.appendChild(opt);
+        });
+        forceFamilySelect.appendChild(group);
+      }
     });
 
-    forceFamilySelect.appendChild(autoLabel);
     forceFamilySelect.addEventListener('change', () => {
       const chosen = forceFamilySelect.value;
-      wizardState.model.family = chosen || null;
-      if (chosen && COMMUNITY_TEMPLATES[chosen]) {
-        wizardState.model.chatTemplateMode = 'auto';
-        autoInstallChatTemplate();
+      if (!chosen) {
+        wizardState.model.family = null;
+        wizardState.model.chatTemplateCandidate = null;
+        return;
       }
+      const [fam, candidateName] = chosen.split(':');
+      wizardState.model.family = fam;
+      wizardState.model.chatTemplateCandidate = candidateName || null;
+      wizardState.model.chatTemplateMode = 'auto';
+      autoInstallChatTemplate();
     });
 
     forceFamilyWrap.appendChild(forceFamilyLabel);
@@ -380,9 +417,9 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       bodyEl.textContent = '';
       const nameEl = document.createElement('span');
       nameEl.className = 'ct-name';
-      nameEl.textContent = tpl.display;
-      bodyEl.appendChild(nameEl);
-      bodyEl.appendChild(document.createTextNode(' — downloading…'));
+       nameEl.textContent = _templateDisplayName(tpl, family);
+       bodyEl.appendChild(nameEl);
+       bodyEl.appendChild(document.createTextNode(' — downloading…'));
     }
     return;
   }
@@ -421,8 +458,8 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
     if (bodyEl) {
       bodyEl.textContent = '';
       const nameEl = document.createElement('strong');
-      nameEl.textContent = tpl.display;
-      const descEl = document.createElement('span');
+       nameEl.textContent = _templateDisplayName(tpl, family);
+       const descEl = document.createElement('span');
       descEl.textContent = ` — ${tpl.description}`;
       const sourceUrl = data?.source_url || tpl?.sourceUrl;
       const link = sourceUrl

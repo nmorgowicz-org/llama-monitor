@@ -12,9 +12,9 @@ import { applySettings, saveSettings } from './settings.js';
 import { showToast, showToastWithActions, showConfirmDialog } from './toast.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune } from './tuning-cards.js';
 import {
-    COMMUNITY_TEMPLATES,
     buildCommunityTemplateInstallRequest,
     detectCommunityTemplateFamily,
+    getDefaultTemplateForFamily,
 } from './chat-template-registry.js';
 import { buildEstimateBody, rapidEstimatePolicyFromConfig } from './vram-estimate.js';
 import { openEstimateEvidenceDrawer } from './evidence-drawer.js';
@@ -169,7 +169,7 @@ function normalizeModelSourceInput(value) {
 async function installRecommendedChatTemplateForPreset() {
     const modelSource = strVal('modal-model-path');
     const family = detectCommunityTemplateFamily(modelSource);
-    const template = family ? COMMUNITY_TEMPLATES[family] : null;
+    const template = getDefaultTemplateForFamily(family);
     if (!template) {
         showToast('No community template recommendation for this model', 'warn');
         return;

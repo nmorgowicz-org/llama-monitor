@@ -7,16 +7,48 @@ export const COMMUNITY_TEMPLATES = {
     file: 'chat_template.jinja',
     description: 'Fixes tool calling, KV cache invalidation & agentic loop bugs for Qwen 3.5 / 3.6',
     sourceUrl: 'https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates',
+    provenance: 'community',
   },
-  gemma4: {
-    name: 'gemma4-jscott3201-agentic',
-    display: "jscott3201's Gemma 4 Agentic Template",
-    installEndpoint: '/api/chat-template/install-url',
-    url: 'https://raw.githubusercontent.com/jscott3201/llm-tuning/main/gemma4/chat_templates/custom_pub_chat_template_gemma4.jinja',
-    description: 'Improves thinking, tool calls, null arguments & multi-turn agentic workflows for Gemma 4',
-    sourceUrl: 'https://github.com/jscott3201/llm-tuning/blob/main/gemma4/chat_templates/custom_pub_chat_template_gemma4.jinja',
-  },
+  gemma4: [
+    {
+      name: 'gemma4-google-official',
+      display: "Google's Official Gemma 4 Template",
+      installEndpoint: '/api/chat-template/install-hf',
+      repo: 'google/gemma-4-31B-it',
+      file: 'chat_template.jinja',
+      description: 'Reference template shipped with Gemma 4 31B (from model repo)',
+      sourceUrl: 'https://huggingface.co/google/gemma-4-31B-it/blob/main/chat_template.jinja',
+      provenance: 'official',
+    },
+    {
+      name: 'gemma4-jscott3201-agentic',
+      display: "jscott3201's Gemma 4 Agentic Template",
+      installEndpoint: '/api/chat-template/install-url',
+      url: 'https://raw.githubusercontent.com/jscott3201/llm-tuning/main/gemma4/chat_templates/custom_pub_chat_template_gemma4.jinja',
+      description: 'Improves thinking, tool calls, null arguments & multi-turn agentic workflows for Gemma 4',
+      sourceUrl: 'https://github.com/jscott3201/llm-tuning/blob/main/gemma4/chat_templates/custom_pub_chat_template_gemma4.jinja',
+      provenance: 'community',
+    },
+  ],
 };
+
+/** Returns array of templates for a family (normalizes single object → array). */
+export function getTemplatesForFamily(family) {
+  if (!family) return [];
+  const entry = COMMUNITY_TEMPLATES[family];
+  if (!entry) return [];
+  return Array.isArray(entry) ? entry : [entry];
+}
+
+/** Returns the default template for a family (first candidate). */
+export function getDefaultTemplateForFamily(family) {
+  return getTemplatesForFamily(family)[0] || null;
+}
+
+/** Returns all family keys that have templates. */
+export function getTemplateFamilies() {
+  return Object.keys(COMMUNITY_TEMPLATES);
+}
 
 export function detectCommunityTemplateFamily(name) {
   const lower = (name || '').toLowerCase();

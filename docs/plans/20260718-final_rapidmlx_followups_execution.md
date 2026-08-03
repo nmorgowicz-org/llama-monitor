@@ -672,11 +672,12 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 ### Phase 9 — Formatting, endpoints, and revision-pinned template substitution
 
 - **State:** 9a verified complete (2026-08-03), 9-RapidMLX verified complete (2026-08-03),
-  9b verified complete (2026-08-03). Remaining packets 9c–9f not started. The execution companion was updated to
-  reflect work already done but not recorded: 9a's revision pinning, retained history, and
-  rollback shipped in spawn_wizard.rs without a ledger row. Phase 9 is now split into ordered
-  parts for context management: Part A (already done — lifecycle core), Part R (Rapid-MLX
-  overlay wiring — prerequisite for 9b–9f to work on Rapid-MLX), then 9b–9f.
+  9b verified complete (2026-08-03), 9c verified complete (2026-08-03). Remaining packets 9d–9f not started.
+  The execution companion was updated to reflect work already done but not recorded: 9a's revision
+  pinning, retained history, and rollback shipped in spawn_wizard.rs without a ledger row. Phase
+  9 is now split into ordered parts for context management: Part A (lifecycle core), Part R
+  (Rapid-MLX overlay wiring), Part B (smoke-test gate), Part C (Gemma4 official template + provenance),
+  then 9d–9f.
 - **Design decision (Rapid-MLX template override, 2026-08-03):** Rapid-MLX has no CLI flag for
   external templates. Template loading in `vllm_mlx/utils/tokenizer.py::_apply_chat_template_sidecar()`
   checks only the model directory for `chat_template.jinja`/`chat_template.json`, falling back to
@@ -789,9 +790,9 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
   (UI integration) deferred to Phase 13.
 - **Evidence:** 630 lines added to `src/web/api/spawn_wizard.rs`.
 
-#### Phase 9c — Official Gemma4 template + provenance labeling — Not started
+#### Phase 9c — Official Gemma4 template + provenance labeling — Verified complete (Coordinator, 2026-08-03)
 
-- **State:** Not started.
+- **State:** Verified complete.
 - **Budget:** 20k
 - **Depends on:** 9a (install/pin machinery)
 - **Primary output:** `google/gemma-4-31B-it`'s `chat_template.jinja` added as a second,
@@ -802,6 +803,17 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 - **Completion proof:** Both templates appear in the candidate list, each labeled with source
   provenance (official/community), both revision-pinned, both installable and activatable through
   existing UI.
+- **Implementation details:** Restructured `chat-template-registry.js` to support multiple
+  candidates per family via arrays. Added `provenance` field (official/community) and helper
+  functions: `getTemplatesForFamily()`, `getDefaultTemplateForFamily()`, `getTemplateFamilies()`.
+  Updated UI in `spawn-wizard-chat-template.js` force-family dropdown to show candidates grouped
+  by family with provenance labels. Added `_templateDisplayName()` helper that appends provenance
+  label when multiple candidates exist for a family. Preserved jscott3201 as default (proven
+  tool-call variant) — Google's official template is second candidate. `presets.js` updated to
+  use new helpers.
+- **Evidence:** `chat-template-registry.js` gemma4 array contains both templates with distinct
+  provenance values; `spawn-wizard-chat-template.js` force-family dropdown renders optgroups with
+  provenance labels; linting and validation pass on all modified JS files.
 
 #### Phase 9d — froggeric `-opencode-v3` transform script — Not started
 
@@ -1061,7 +1073,7 @@ Only the Coordinator updates this table after independent verification.
 
 **Last updated:** 2026-08-03 by Coordinator. Phase 5a/5b implementation is verified complete (`791635e`, `6a14cc7`); the independent runtime-evidence closeout is active and does not reopen the code gate. The mass UNVERIFIED flag raised 2026-07-25 over Phase 7 and Phase 8 (7A-8B2, plus 7.5A-C) is now fully reconciled against a running binary: every row carries a Coordinator verdict dated 2026-07-30. Six defects were found and fixed, all invisible to the 1041-test suite; three rows are corrected to "feature removed" because the promised UI was deleted after it was marked verified; and a set of built-but-unconsumed backends is recorded in the gap register (`docs/plans/20260730-phase7_8_gap_register.md`) rather than fixed inline. Phase 8B3 remains pending and its stated dependency ("8B2 verified + screenshots approved") is only half met: 8B2 is verified, the screenshots were never re-approved.
 
-Phase 9 work discovered: Phase 9 was marked "Not started" but packet 9a (revision-pinned install, retained history, rollback) had shipped without a ledger row. Reconciled 2026-08-03 by audit of `spawn_wizard.rs`. Phase 9 now split into ordered parts (9a verified, 9-RapidMLX design frozen, 9b–9f pending). Rapid-MLX overlay approach chosen (no CLI flag exists; overlay directory with symlinks preserves read-only cache contract).
+Phase 9 work discovered: Phase 9 was marked "Not started" but packet 9a (revision-pinned install, retained history, rollback) had shipped without a ledger row. Reconciled 2026-08-03 by audit of `spawn_wizard.rs`. Phase 9 split into ordered parts: 9a verified (reconciled), 9-RapidMLX verified (overlay wiring implemented), 9b verified (smoke-test endpoint), 9c verified (official Gemma4 template + provenance labels). Rapid-MLX overlay approach chosen (no CLI flag exists; overlay directory with symlinks preserves read-only cache contract). Remaining parts 9d–9f not started.
 
 **Amended 2026-07-30.** Phase 6.5 had no ledger row at all, so its state lived only in a separate working-handoff doc and a coordinator reading this table alone would have seen phase 6 → 7 and missed it. Rows for 6.5a and 6.5b are added below. That handoff is retired: its live state and open items are folded into the Phase 6.5 section of `20260718-final_rapidmlx_followups.md`, its harness prerequisites into §12.3a of `docs/reference/rapid-mlx-mtp-evidence.md`, and the document itself is **deleted** — recoverable from git history at `396644b`. Nothing outside this repo's plan/evidence pair is current MTP state. It was briefly archived with a stale-claims banner; keeping a corrected copy of a document whose content had already been absorbed was redundant, so the copy went rather than the corrections.
 
@@ -1091,8 +1103,10 @@ Phase 9 work discovered: Phase 9 was marked "Not started" but packet 9a (revisio
 | 8B2 | Verified complete — cards shipped, lineage did not | Coordinator, 2026-07-30 | PASS on the card hierarchy, FAIL on lineage and revision. Two-level group/variant cards, format badges, role badges and the in-app model-card panel (`openCardPanel`, not a new tab) are all live. But the lineage block in `models.js:518-568` is dead code: live-verified against the real tree, all 68 inventory entries lack `hf_repo_id`, `originRepo`, `repo_id`, `hf_revision`, `original_author`, `converter`, `hf_source_info` and `provenance`, so `if (hfRepoId)` is never true — `ModelInventoryEntry` has none of those fields, and zero `.llama-monitor-source.json` / `llama-monitor-conversion.json` sidecars exist on disk. "Revision-bound qualification badges" and "repo/revision preservation" are vacuous: `SimpleModelInfo` has no `revision`/`sha` field, so the selection payload's `revision` (`hf-browse.js:240`) is always null and the revision-pinned `/api/hf/qualify` is never called. | 7011f5c+0f0b575 | 8B3 depends on "8B2 verified + screenshots approved"; the screenshots were never re-approved |
 | 8B3 | Not started | — | — | — | 8B2 verified + screenshots approved (includes scope UX fix: additive MLX+GGUF+All toggles, platform-smart defaults) |
 | 9a | Verified complete (2026-08-03) | Reconciled by Coordinator audit | PASS — revision pinning, retained history, rollback, History UI all present in HEAD; full gate passed (1084 tests, clippy/lint/build/fmt clean) | present in HEAD | Rapid-MLX wiring pending (9-RapidMLX part) |
-| 9-RapidMLX | Design frozen (2026-08-03); not started | — | — | — | Overlay directory approach frozen; implementation pending |
-| 9b–9f | Not started | — | — | — | Depends on 9-RapidMLX (for Rapid-MLX coverage) |
+| 9-RapidMLX | Verified complete (2026-08-03) | Coordinator | PASS — overlay wiring implemented, 1091 tests, clippy/lint/build/fmt clean | committed and pushed | None |
+| 9b | Verified complete (2026-08-03) | Coordinator | PASS — smoke-test endpoint implemented, 630 lines, backend only; frontend activate-gate deferred to Phase 13 | committed and pushed | Frontend integration (Phase 13) |
+| 9c | Verified complete (2026-08-03) | Coordinator | PASS — Google official template + provenance labeling; registry supports multiple candidates per family; UI shows provenance labels in force-family dropdown and installed status | committed and pushed | None |
+| 9d–9f | Not started | — | — | — | Depends on prior parts (9d requires user-supplied reference files) |
 | 10 | Not started | — | — | — | Phases 7–9 and user IA decision |
 | 11 | Not started | — | — | — | Phases 3, 5–7 |
 | 12 | Not started | — | — | — | Phases 3, 8–11 |
