@@ -3412,9 +3412,9 @@ export function initPresets() {
         }
         const tplName = path.split(/[\\/]/).pop().replace(/\.jinja$/, '');
         const modal = document.createElement('div');
-        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:9999;';
+        modal.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.65);display:flex;align-items:center;justify-content:center;z-index:2000;width:100%;height:100%;';
         const panel = document.createElement('div');
-        panel.style.cssText = 'background:var(--color-bg-secondary);border:1px solid var(--color-border);border-radius:8px;padding:16px;max-width:600px;width:95%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);';
+        panel.style.cssText = 'background:radial-gradient(circle at 18% 16%, rgba(56, 72, 88, 0.6), transparent 28%),radial-gradient(circle at 84% 18%, rgba(48, 60, 72, 0.5), transparent 24%),linear-gradient(160deg, rgba(36, 44, 54, 0.99), rgba(24, 30, 38, 1.0));border:1px solid rgba(255, 255, 255, 0.12);border-radius:8px;padding:16px;min-width:550px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 12px 48px rgba(0,0,0,0.6),0 2px 12px rgba(0,0,0,0.4);flex-shrink:0;';
         const title = document.createElement('strong');
         title.textContent = 'Create fix from discussion';
         title.style.fontSize = '13px';
@@ -3445,7 +3445,7 @@ export function initPresets() {
         contentTextarea.className = 'chat-template-fix-textarea';
         contentTextarea.rows = 15;
         contentTextarea.placeholder = 'Paste the full template content here...';
-        contentTextarea.style.cssText = 'width:100%;margin-top:8px;padding:6px 8px;font-size:11px;font-family:monospace;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;resize:vertical;';
+        contentTextarea.style.cssText = 'width:100%;margin-top:8px;padding:6px 8px;font-size:11px;font-family:monospace;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;resize:vertical;height:250px;';
         // Inject a style rule to ensure textarea height is respected
         if (!document.getElementById('chat-template-fix-modal-styles')) {
           const style = document.createElement('style');
@@ -3480,8 +3480,9 @@ export function initPresets() {
         panel.appendChild(btnRow);
         modal.appendChild(panel);
 
+        const modalContainer = document.querySelector('#preset-modal .modal') || document.getElementById('preset-modal') || document.body;
         cancelBtn.addEventListener('click', () => {
-            document.body.removeChild(modal);
+            modalContainer.removeChild(modal);
         });
 
         submitBtn.addEventListener('click', async () => {
@@ -3551,7 +3552,7 @@ export function initPresets() {
                     if (actResp.ok && actResult.ok === true) {
                         showToast('Fix activated successfully', 'success');
                         document.getElementById('modal-chat-template-file').value = installResult.file_path;
-                        document.body.removeChild(modal);
+                        modalContainer.removeChild(modal);
                     } else {
                         statusDiv.style.color = 'var(--color-warning)';
                         statusDiv.textContent = 'Smoke test passed but activation failed: ' + (actResult.error || 'unknown');
@@ -3573,7 +3574,8 @@ export function initPresets() {
             }
         });
 
-        document.body.appendChild(modal);
+        modalContainer.style.position = 'relative';
+        modalContainer.appendChild(modal);
     });
     document.getElementById('preset-upload-chat-template-btn')?.addEventListener('click', async () => {
         try {

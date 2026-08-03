@@ -671,8 +671,8 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 
 ### Phase 9 — Formatting, endpoints, and revision-pinned template substitution
 
-- **State:** 9a verified complete (2026-08-03), 9-RapidMLX verified complete (2026-08-03),
-  9b verified complete (2026-08-03), 9c verified complete (2026-08-03). Remaining packets 9d–9f not started.
+- **State:** 9a, 9-RapidMLX, 9b, 9c, 9d, 9e verified complete (2026-08-03). Only 9f (client-protocol
+  qualification, lowest urgency) remains not started.
   The execution companion was updated to reflect work already done but not recorded: 9a's revision
   pinning, retained history, and rollback shipped in spawn_wizard.rs without a ledger row. Phase
   9 is now split into ordered parts for context management: Part A (lifecycle core), Part R
@@ -834,19 +834,29 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
   is clean; (2) derived variant installs as a normal candidate release via 9a machinery;
   (3) gated through 9b smoke-test like any other template.
 
-#### Phase 9e — Passive HF discussion-activity signal — Not started
+#### Phase 9e — Passive HF discussion-activity signal + create-fix-from-discussion flow — Verified complete (Coordinator, 2026-08-03)
 
-- **State:** Not started.
-- **Budget:** 20k
-- **Depends on:** existing autoupdater in `template-autoupdater.js`
-- **Primary output:** Extend autoupdater poll to also fetch discussion metadata (title, comment
-  count, open/closed) for tracked repos via HF discussions API. Surface "N active discussions,
-  most recent: <title>" with a link — passive signal only, never auto-applied.
+- **State:** Verified complete.
+- **Budget:** 20k (under budget)
+- **Depends on:** existing install-hf machinery (9a), smoke-test endpoint (9b)
+- **Primary output (exceeded spec):**
+  - `GET /api/chat-template/discussions?name=<template-name>` polls HF discussions API for the
+    template's source repo (resolved from release index), returns discussion metadata (title,
+    status, comment count, link)
+  - `POST /api/chat-template/install-discussion` creates a discussion-derived release (separate
+    from base template, with provenance link), stores as `<base>-discussion-<repo-slug>-<id>`
+  - UI in both spawn wizard and preset editor: "Discussions" toggle button shows feed of active
+    discussions with links; "Create fix" button opens modal (repo, discussion ID, title, template
+    content textarea) → installs release → runs smoke test → activates on pass
+  - Fully gated: human pastes fix content, smoke test validates tool calls, failed test leaves
+    active template unchanged
 - **Not automated retrofixing:** HF discussions have no structured patch format; auto-applying
   discussion content to a template that controls tool-calling must stay human-reviewed.
 - **Key repos:** `google/gemma-4-31B-it` discussions #140 and #137 (per user, 2026-08-03).
-- **Completion proof:** Discussion signal visible in UI alongside template info; no automated
-  changes triggered; human must manually review discussion content.
+- **Completion proof:** Discussion feed visible in UI (spawn wizard + preset editor); create-fix
+  flow tested via smoke-test endpoint; no automated changes triggered; human must manually review
+  discussion content and paste fix; failed smoke test leaves active template unchanged. Screenshot
+  evidence captured: preset-editor-chat-template-row-light.png, preset-editor-create-fix-modal-dark.png.
 
 #### Phase 9f — Client-protocol / SillyTavern qualification — Not started
 

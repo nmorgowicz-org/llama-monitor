@@ -2282,38 +2282,61 @@ async function scenarioPresetEditor(ctx, options) {
     await sleep(500);
     await captureShot(page, 'preset-editor-advanced-tab.png', { fullPage: true });
 
-    // 4b. Set a template path so Discussions and Create fix buttons are active
+    // 5. Switch back to Model tab for Chat Template row captures
+    await page.evaluate(() => {
+        const modelNav = document.querySelector('#preset-modal .preset-editor-nav [data-section="model"]');
+        if (modelNav) modelNav.click();
+    });
+    await sleep(400);
+
+    // 5a. Set a template path so Discussions and Create fix buttons are active
     await page.evaluate(() => {
         const input = document.getElementById('modal-chat-template-file');
         if (input) input.value = '/path/to/qwen3.6-froggeric-v21.3.jinja';
     });
     await sleep(200);
 
-    // 4c. Capture Chat Template row (shows Discussions + Create fix buttons)
+    // 5b. Switch to light theme, scroll to Chat Template row
     await page.evaluate(() => {
-        const el = document.getElementById('modal-chat-template-file');
-        if (el) {
-            el.scrollIntoView({ block: 'start', behavior: 'smooth' });
-            // Also scroll the modal content area
-            const modalBody = el.closest('.modal-body') || el.closest('[class*="modal"]');
-            if (modalBody) modalBody.scrollTop = el.offsetTop - 100;
+        document.documentElement.setAttribute('data-theme', 'light');
+    });
+    await sleep(300);
+    await page.evaluate(() => {
+        const row = document.getElementById('modal-chat-template-file');
+        if (row) {
+            row.scrollIntoView({ block: 'center' });
         }
     });
-    await sleep(500);
-    await captureShot(page, 'preset-editor-chat-template-row.png', { fullPage: true });
+    await sleep(400);
+    await captureShot(page, 'preset-editor-chat-template-row-light.png', { fullPage: true });
 
-    // 4d. Capture Create fix modal
+    // 5c. Capture Create fix modal in light theme
     await page.evaluate(() => {
         document.getElementById('preset-chat-template-create-fix-btn')?.click();
     });
     await sleep(600);
-    await captureShot(page, 'preset-editor-create-fix-modal.png', { fullPage: true });
+    await captureShot(page, 'preset-editor-create-fix-modal-light.png', { fullPage: true });
+
+    // Close light modal (modal is inside preset-modal .modal, not body)
     await page.evaluate(() => {
-        // Close modal by clicking Cancel button
-        const cancelBtn = document.querySelector('div[style*="position:fixed"] button')?.textContent === 'Cancel'
-            ? document.querySelector('div[style*="position:fixed"] button')
-            : document.querySelectorAll('div[style*="position:fixed"] button')[0];
-        if (cancelBtn) cancelBtn.click();
+        const modal = document.querySelector('#preset-modal .modal > div[style*="position:absolute"]');
+        if (modal) modal.remove();
+    });
+    await sleep(200);
+
+    // 5d. Switch back to dark theme and capture Create fix modal
+    await page.evaluate(() => {
+        document.documentElement.removeAttribute('data-theme');
+    });
+    await sleep(300);
+    await page.evaluate(() => {
+        document.getElementById('preset-chat-template-create-fix-btn')?.click();
+    });
+    await sleep(600);
+    await captureShot(page, 'preset-editor-create-fix-modal-dark.png', { fullPage: true });
+    await page.evaluate(() => {
+        const modal = document.querySelector('#preset-modal .modal > div[style*="position:absolute"]');
+        if (modal) modal.remove();
     });
     await sleep(300);
 

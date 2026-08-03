@@ -2612,6 +2612,11 @@ details.mlx-native-group:not([open]) > .mlx-native-group-header {
   flex: 1;
 }
 
+/* Chat template row wraps its buttons onto multiple lines */
+.pe-input-row:has(#modal-chat-template-file) {
+  flex-wrap: wrap;
+}
+
 /* ── Multi-column rows ── */
 .pe-row {
   display: grid;

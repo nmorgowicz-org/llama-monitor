@@ -807,9 +807,9 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
         : (tpl?.repo || '');
       createFixBtn.addEventListener('click', () => {
         const modal = document.createElement('div');
-        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:9999;';
+        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:10000;width:100vw;height:100vh;';
         const panel = document.createElement('div');
-        panel.style.cssText = 'background:var(--color-bg-secondary);border:1px solid var(--color-border);border-radius:8px;padding:16px;max-width:600px;width:95%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);';
+        panel.style.cssText = 'background:radial-gradient(circle at 18% 16%, var(--acc-12), transparent 28%),radial-gradient(circle at 84% 18%, var(--acc-08), transparent 24%),linear-gradient(160deg, rgba(40, 48, 58, 0.97), rgba(28, 34, 42, 0.99));border:1px solid rgba(255, 255, 255, 0.1);border-radius:8px;padding:16px;min-width:550px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 12px 48px rgba(0,0,0,0.5),0 2px 12px rgba(0,0,0,0.35);backdrop-filter:blur(22px);flex-shrink:0;';
         const title = document.createElement('strong');
         title.textContent = 'Create fix from discussion';
         title.style.fontSize = '13px';
@@ -875,8 +875,9 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
         panel.appendChild(btnRow);
         modal.appendChild(panel);
 
+        const container = document.querySelector('.spawn-wizard-modal') || document.body;
         cancelBtn.addEventListener('click', () => {
-          document.body.removeChild(modal);
+          container.removeChild(modal);
         });
 
         submitBtn.addEventListener('click', async () => {
@@ -951,7 +952,7 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
               const actResult = actResp.ok ? await actResp.json() : { ok: false };
               if (actResp.ok && actResult.ok === true) {
                 showToast('Fix activated successfully', 'success', null, 2400);
-                document.body.removeChild(modal);
+                container.removeChild(modal);
                 _renderChatTemplateStatus('installed', family, tpl, { ...data, _forceRefresh: true });
               } else {
                 statusDiv.style.color = 'var(--color-warning)';
@@ -974,7 +975,7 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
           }
         });
 
-        document.body.appendChild(modal);
+        container.appendChild(modal);
       });
 
       hint.appendChild(createFixBtn);
