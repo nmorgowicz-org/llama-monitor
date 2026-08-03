@@ -671,8 +671,10 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 
 ### Phase 9 — Formatting, endpoints, and revision-pinned template substitution
 
-- **State:** 9a, 9-RapidMLX, 9b, 9c, 9d, 9e verified complete (2026-08-03). Only 9f (client-protocol
-  qualification, lowest urgency) remains not started.
+- **State:** 9a, 9-RapidMLX, 9b, 9c, 9d, 9e infrastructure verified complete (2026-08-03). 9e UX
+  refinements in progress (modal theme, pre-populated editor, inline discussion viewer, upstream
+  template loading, chat-template row redesign, Rapid-MLX preset editor wiring). Only 9f
+  (client-protocol qualification, lowest urgency) remains not started.
   The execution companion was updated to reflect work already done but not recorded: 9a's revision
   pinning, retained history, and rollback shipped in spawn_wizard.rs without a ledger row. Phase
   9 is now split into ordered parts for context management: Part A (lifecycle core), Part R
@@ -834,29 +836,47 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
   is clean; (2) derived variant installs as a normal candidate release via 9a machinery;
   (3) gated through 9b smoke-test like any other template.
 
-#### Phase 9e — Passive HF discussion-activity signal + create-fix-from-discussion flow — Verified complete (Coordinator, 2026-08-03)
+#### Phase 9e — Passive HF discussion-activity signal + create-fix-from-discussion flow — Infrastructure complete; UX refinements in progress
 
-- **State:** Verified complete.
-- **Budget:** 20k (under budget)
+- **State:** Backend infrastructure and basic UI verified complete (2026-08-03). UX refinements
+  in progress based on screenshot review (2026-08-03).
+- **Budget:** 20k infrastructure (complete) + refinements TBD
 - **Depends on:** existing install-hf machinery (9a), smoke-test endpoint (9b)
-- **Primary output (exceeded spec):**
+- **Primary output (complete):**
   - `GET /api/chat-template/discussions?name=<template-name>` polls HF discussions API for the
     template's source repo (resolved from release index), returns discussion metadata (title,
     status, comment count, link)
   - `POST /api/chat-template/install-discussion` creates a discussion-derived release (separate
     from base template, with provenance link), stores as `<base>-discussion-<repo-slug>-<id>`
   - UI in both spawn wizard and preset editor: "Discussions" toggle button shows feed of active
-    discussions with links; "Create fix" button opens modal (repo, discussion ID, title, template
-    content textarea) → installs release → runs smoke test → activates on pass
-  - Fully gated: human pastes fix content, smoke test validates tool calls, failed test leaves
-    active template unchanged
+    discussions with links; "Create fix" button opens modal → installs release → runs smoke test
+    → activates on pass
+  - Fully gated: smoke test validates tool calls, failed test leaves active template unchanged
+- **UX refinements needed (in progress):**
+  1. **Modal theme:** Create fix modal should render light in light theme (currently dark opaque
+     background in both themes). Background dimming is okay, but modal content must be readable.
+  2. **Pre-populated editor:** Textarea must load current template content automatically — no blank
+     paste required. Fetch from template file path stored in release index.
+  3. **Inline discussion viewer:** Instead of just a link out to HF, render discussion thread
+     content inline (title, posts, proposed changes) — similar to existing model card rendering
+     from HF. User should be able to see proposed changes without leaving the app.
+  4. **Upstream template as base:** For a Gemma4 preset, show Google's official `gemma-4-31B-it`
+     chat_template.jinja as the editable base (latest commit), with dropdown to switch versions/commits.
+     This lets user see the recommended upstream and compare against discussion-proposed changes.
+  5. **Easy change extraction:** Highlight text in discussion → one-click copy to editor, or similar
+     mechanism to reduce manual copy/paste friction.
+  6. **Chat Template row redesign:** Input box currently truncated ("/pat"), buttons spill into
+     2 rows. Give input its own full-width row. Organize buttons logically (primary actions vs
+     secondary). Add more descriptions, hints, help text to guide user.
+  7. **Rapid-MLX preset editor wiring:** Chat Template row is hidden in Rapid-MLX preset editor
+     by CSS exclusion. Must add it to allowed fields in Model section. Same functionality applies:
+     template overrides work via overlay directory (9-RapidMLX).
 - **Not automated retrofixing:** HF discussions have no structured patch format; auto-applying
   discussion content to a template that controls tool-calling must stay human-reviewed.
 - **Key repos:** `google/gemma-4-31B-it` discussions #140 and #137 (per user, 2026-08-03).
-- **Completion proof:** Discussion feed visible in UI (spawn wizard + preset editor); create-fix
-  flow tested via smoke-test endpoint; no automated changes triggered; human must manually review
-  discussion content and paste fix; failed smoke test leaves active template unchanged. Screenshot
-  evidence captured: preset-editor-chat-template-row-light.png, preset-editor-create-fix-modal-dark.png.
+- **Completion proof (infrastructure):** Discussion feed visible in UI (spawn wizard + preset
+  editor); create-fix flow tested via smoke-test endpoint; screenshot evidence captured.
+- **Completion proof (refinements):** TBD — each refinement verified via screenshot capture.
 
 #### Phase 9f — Client-protocol / SillyTavern qualification — Not started
 
