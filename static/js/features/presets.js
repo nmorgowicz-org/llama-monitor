@@ -3344,6 +3344,228 @@ export function initPresets() {
             list.textContent = 'Failed to load history: ' + (err.message || String(err));
         }
     });
+    document.getElementById('preset-chat-template-discussions-btn')?.addEventListener('click', async () => {
+        const list = document.getElementById('preset-chat-template-discussions-list');
+        if (!list) return;
+        if (list.style.display !== 'none') {
+            list.style.display = 'none';
+            return;
+        }
+        const path = (document.getElementById('modal-chat-template-file')?.value || '').trim();
+        if (!path) {
+            showToast('No template selected to view discussions for', 'warn');
+            return;
+        }
+        const name = path.split(/[\\/]/).pop().replace(/\.jinja$/, '');
+        list.textContent = 'Loading…';
+        list.style.display = 'block';
+        list.style.maxWidth = '360px';
+        try {
+            const headers = window.authHeaders ? window.authHeaders() : {};
+            const resp = await fetch(`/api/chat-template/discussions?name=${encodeURIComponent(name)}`, { headers });
+            const result = resp.ok ? await resp.json() : { ok: false };
+            list.textContent = '';
+            if (!resp.ok || result.ok !== true) {
+                list.textContent = result.error || 'Failed to load discussions';
+                return;
+            }
+            const discussions = result.discussions || [];
+            if (discussions.length === 0) {
+                list.textContent = 'No discussions found for this template.';
+                return;
+            }
+            const header = document.createElement('div');
+            header.style.fontSize = '10px';
+            header.style.color = 'var(--color-text-muted)';
+            header.style.marginBottom = '4px';
+            header.textContent = `${discussions.length} active discussion${discussions.length === 1 ? '' : 's'} on ${result.source_repo || 'source repo'}`;
+            list.appendChild(header);
+            discussions.forEach((d) => {
+                const row = document.createElement('div');
+                row.style.fontSize = '10px';
+                row.style.color = 'var(--color-text-muted)';
+                row.style.marginTop = '3px';
+                const statusBadge = d.status === 'open' ? '●' : '○';
+                const prLabel = d.is_pull_request ? 'PR' : '';
+                const label = document.createElement('span');
+                label.textContent = `${statusBadge} ${prLabel ? prLabel + ' ' : ''}${d.title} (${d.num_comments})`;
+                row.appendChild(label);
+                const link = document.createElement('a');
+                link.href = `https://huggingface.co/${result.source_repo}/discussions/${d.number}`;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = ' ↗';
+                link.style.color = 'var(--color-accent)';
+                link.style.marginLeft = '4px';
+                row.appendChild(link);
+                list.appendChild(row);
+            });
+        } catch (err) {
+            list.textContent = 'Failed to load: ' + (err.message || String(err));
+        }
+    });
+    document.getElementById('preset-chat-template-create-fix-btn')?.addEventListener('click', () => {
+        const path = (document.getElementById('modal-chat-template-file')?.value || '').trim();
+        if (!path) {
+            showToast('No template selected', 'warn');
+            return;
+        }
+        const tplName = path.split(/[\\/]/).pop().replace(/\.jinja$/, '');
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:9999;';
+        const panel = document.createElement('div');
+        panel.style.cssText = 'background:var(--color-bg-secondary);border:1px solid var(--color-border);border-radius:8px;padding:16px;max-width:480px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);';
+        const title = document.createElement('strong');
+        title.textContent = 'Create fix from discussion';
+        title.style.fontSize = '13px';
+        panel.appendChild(title);
+        const desc = document.createElement('div');
+        desc.style.fontSize = '10px';
+        desc.style.color = 'var(--color-text-muted)';
+        desc.style.marginTop = '4px';
+        desc.textContent = 'Paste a proposed template fix. It will be stored as a separate release and tested before activation.';
+        panel.appendChild(desc);
+
+        const repoInput = document.createElement('input');
+        repoInput.type = 'text';
+        repoInput.placeholder = 'HF repo (e.g., Qwen/Qwen3.5-0.5B)';
+        repoInput.style.cssText = 'width:100%;margin-top:8px;padding:5px 8px;font-size:11px;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;';
+
+        const idInput = document.createElement('input');
+        idInput.type = 'text';
+        idInput.placeholder = 'Discussion ID (number)';
+        idInput.style.cssText = 'width:100%;margin-top:6px;padding:5px 8px;font-size:11px;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;';
+
+        const titleInput = document.createElement('input');
+        titleInput.type = 'text';
+        titleInput.placeholder = 'Discussion title (brief)';
+        titleInput.style.cssText = 'width:100%;margin-top:6px;padding:5px 8px;font-size:11px;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;';
+
+        const contentTextarea = document.createElement('textarea');
+        contentTextarea.placeholder = 'Paste the full template content here...';
+        contentTextarea.style.cssText = 'width:100%;margin-top:8px;padding:6px 8px;font-size:11px;font-family:monospace;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);min-height:200px;box-sizing:border-box;resize:vertical;';
+
+        const statusDiv = document.createElement('div');
+        statusDiv.style.fontSize = '10px';
+        statusDiv.style.marginTop = '8px';
+        statusDiv.style.minHeight = '14px';
+
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'margin-top:10px;display:flex;gap:8px;justify-content:flex-end;';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.className = 'btn-sm btn-preset';
+        cancelBtn.style.fontSize = '11px';
+        const submitBtn = document.createElement('button');
+        submitBtn.textContent = 'Create & test';
+        submitBtn.className = 'btn-sm btn-primary';
+        submitBtn.style.fontSize = '11px';
+        btnRow.appendChild(cancelBtn);
+        btnRow.appendChild(submitBtn);
+
+        panel.appendChild(repoInput);
+        panel.appendChild(idInput);
+        panel.appendChild(titleInput);
+        panel.appendChild(contentTextarea);
+        panel.appendChild(statusDiv);
+        panel.appendChild(btnRow);
+        modal.appendChild(panel);
+
+        cancelBtn.addEventListener('click', () => {
+            document.body.removeChild(modal);
+        });
+
+        submitBtn.addEventListener('click', async () => {
+            const repo = repoInput.value.trim();
+            const discussionId = idInput.value.trim();
+            const dTitle = titleInput.value.trim();
+            const content = contentTextarea.value;
+
+            if (!repo || !discussionId || !content) {
+                statusDiv.style.color = 'var(--color-danger)';
+                statusDiv.textContent = 'Repo, discussion ID, and content are required.';
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Creating release…';
+            statusDiv.textContent = '';
+
+            try {
+                const headers = window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' };
+                const installResp = await fetch('/api/chat-template/install-discussion', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        name: tplName,
+                        discussion_source: {
+                            repo: repo,
+                            discussion_id: parseInt(discussionId, 10),
+                            title: dTitle || `Fix from discussion #${discussionId}`,
+                        },
+                        content: content,
+                    }),
+                });
+                const installResult = installResp.ok ? await installResp.json() : { ok: false };
+
+                if (!installResp.ok || installResult.ok !== true) {
+                    statusDiv.style.color = 'var(--color-danger)';
+                    statusDiv.textContent = installResult.error || 'Failed to create release';
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Retry';
+                    return;
+                }
+
+                statusDiv.style.color = 'var(--color-success)';
+                statusDiv.textContent = 'Release created. Running tool-call smoke test…';
+
+                const smokeResp = await fetch('/api/chat-template/smoke-test', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        name: installResult.release_name,
+                        model: '',
+                    }),
+                });
+                const smokeResult = smokeResp.ok ? await smokeResp.json() : { ok: false };
+
+                if (smokeResp.ok && smokeResult.ok === true) {
+                    statusDiv.textContent = '✓ Smoke test passed. Activating release…';
+                    const actResp = await fetch('/api/chat-template/activate', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({ name: installResult.release_name }),
+                    });
+                    const actResult = actResp.ok ? await actResp.json() : { ok: false };
+                    if (actResp.ok && actResult.ok === true) {
+                        showToast('Fix activated successfully', 'success');
+                        document.getElementById('modal-chat-template-file').value = installResult.file_path;
+                        document.body.removeChild(modal);
+                    } else {
+                        statusDiv.style.color = 'var(--color-warning)';
+                        statusDiv.textContent = 'Smoke test passed but activation failed: ' + (actResult.error || 'unknown');
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Done';
+                    }
+                } else {
+                    const failReason = smokeResult.summary || smokeResult.error || 'test failed';
+                    statusDiv.style.color = 'var(--color-danger)';
+                    statusDiv.textContent = '✗ Smoke test failed: ' + failReason;
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Done';
+                }
+            } catch (err) {
+                statusDiv.style.color = 'var(--color-danger)';
+                statusDiv.textContent = 'Error: ' + (err.message || String(err));
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Retry';
+            }
+        });
+
+        document.body.appendChild(modal);
+    });
     document.getElementById('preset-upload-chat-template-btn')?.addEventListener('click', async () => {
         try {
             const uploaded = await uploadChatTemplateFromBrowser();
