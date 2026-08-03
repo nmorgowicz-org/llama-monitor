@@ -3412,9 +3412,9 @@ export function initPresets() {
         }
         const tplName = path.split(/[\\/]/).pop().replace(/\.jinja$/, '');
         const modal = document.createElement('div');
-        modal.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.65);display:flex;align-items:center;justify-content:center;z-index:2000;width:100%;height:100%;';
+        modal.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:2000;width:100%;height:100%;backdrop-filter:blur(6px);';
         const panel = document.createElement('div');
-        panel.style.cssText = 'background:radial-gradient(circle at 18% 16%, rgba(56, 72, 88, 0.6), transparent 28%),radial-gradient(circle at 84% 18%, rgba(48, 60, 72, 0.5), transparent 24%),linear-gradient(160deg, rgba(36, 44, 54, 0.99), rgba(24, 30, 38, 1.0));border:1px solid rgba(255, 255, 255, 0.12);border-radius:8px;padding:16px;min-width:550px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 12px 48px rgba(0,0,0,0.6),0 2px 12px rgba(0,0,0,0.4);flex-shrink:0;';
+        panel.style.cssText = 'background:var(--pe-panel-bg);border:1px solid var(--pe-panel-border);border-radius:8px;padding:16px;min-width:550px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 12px 48px rgba(0,0,0,0.5),0 2px 12px rgba(0,0,0,0.35);flex-shrink:0;';
         const title = document.createElement('strong');
         title.textContent = 'Create fix from discussion';
         title.style.fontSize = '13px';
@@ -3445,7 +3445,7 @@ export function initPresets() {
         contentTextarea.className = 'chat-template-fix-textarea';
         contentTextarea.rows = 15;
         contentTextarea.placeholder = 'Paste the full template content here...';
-        contentTextarea.style.cssText = 'width:100%;margin-top:8px;padding:6px 8px;font-size:11px;font-family:monospace;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;resize:vertical;height:250px;';
+        contentTextarea.style.cssText = 'width:100%;margin-top:8px;padding:6px 8px;font-size:11px;font-family:monospace;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;resize:vertical;height:250px;min-height:250px;flex-shrink:0;';
         // Inject a style rule to ensure textarea height is respected
         if (!document.getElementById('chat-template-fix-modal-styles')) {
           const style = document.createElement('style');
@@ -3576,6 +3576,24 @@ export function initPresets() {
 
         modalContainer.style.position = 'relative';
         modalContainer.appendChild(modal);
+
+        // Pre-populate textarea with current template content
+        if (path) {
+            statusDiv.textContent = 'Loading template content…';
+            statusDiv.style.color = 'var(--color-text-muted)';
+            fetch(`/api/chat-template/read?path=${encodeURIComponent(path)}`, {
+                headers: window.authHeaders ? window.authHeaders() : {}
+            })
+            .then(r => r.ok ? r.text() : Promise.reject(new Error('Failed to read template')))
+            .then(text => {
+                contentTextarea.value = text;
+                statusDiv.textContent = '';
+            })
+            .catch(err => {
+                statusDiv.textContent = 'Could not load template content: ' + (err.message || String(err)) + '. Paste fix manually.';
+                statusDiv.style.color = 'var(--color-warning)';
+            });
+        }
     });
     document.getElementById('preset-upload-chat-template-btn')?.addEventListener('click', async () => {
         try {

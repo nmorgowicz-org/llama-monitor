@@ -2343,7 +2343,7 @@
    The webui-* and legacy speculative-policy exemptions were removed with their controls. The
    typed Rapid MTP row below is a separate vLLM-style --speculative-config contract. */
 #preset-modal.preset-editor--rapid-mlx .preset-nav-item:not([data-section="model"]):not([data-section="generation"]):not([data-section="context"]):not([data-section="advanced"]),
-#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-field:not(:has(#modal-name)):not(:has(#modal-model-path)),
+#preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-field:not(:has(#modal-name)):not(:has(#modal-model-path)):not(:has(#modal-chat-template-file)),
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-row,
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .pe-toggles,
 #preset-modal.preset-editor--rapid-mlx .preset-editor-section[data-section="model"] .preset-memory-warning,
@@ -2925,4 +2925,24 @@ details.mlx-native-group:not([open]) > .mlx-native-group-header {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ── Create fix modal panel theming ── */
+
+/* Dark theme: subtle radial accents over deep base */
+:root:not([data-theme="light"]) {
+  --pe-panel-bg:
+    radial-gradient(circle at 18% 16%, rgba(56, 72, 88, 0.5), transparent 28%),
+    radial-gradient(circle at 84% 18%, rgba(48, 60, 72, 0.45), transparent 24%),
+    linear-gradient(160deg, rgba(38, 46, 56, 0.98), rgba(28, 34, 42, 1.0));
+  --pe-panel-border: rgba(255, 255, 255, 0.12);
+}
+
+/* Light theme: clean white/slate base with subtle warmth */
+[data-theme="light"] {
+  --pe-panel-bg:
+    radial-gradient(circle at 18% 16%, rgba(228, 234, 242, 0.8), transparent 30%),
+    radial-gradient(circle at 84% 18%, rgba(220, 230, 240, 0.6), transparent 25%),
+    linear-gradient(160deg, rgba(245, 247, 250, 0.98), rgba(235, 240, 245, 1.0));
+  --pe-panel-border: rgba(0, 0, 0, 0.12);
 }

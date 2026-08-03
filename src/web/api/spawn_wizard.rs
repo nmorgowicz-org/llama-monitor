@@ -1,3 +1,4 @@
+use std::path::{Component, PathBuf};
 use std::sync::Arc;
 
 use warp::Filter;
@@ -2105,6 +2106,53 @@ fn resolve_template_source_repo(template_name: &str) -> Result<Option<String>, S
     Ok(source_repo)
 }
 
+fn api_chat_template_read(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "read")
+        .and(warp::get())
+        .and(warp::query::<serde_json::Value>())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |query: serde_json::Value, auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let path = query["path"].as_str().unwrap_or("").to_string();
+                if path.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "path is required" })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ),
+                    ));
+                }
+                let p = PathBuf::from(&path);
+                if !p.is_absolute() || p.components().any(|c| matches!(c, Component::ParentDir)) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "absolute path required, no .." })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ),
+                    ));
+                }
+                match std::fs::read_to_string(&p) {
+                    Ok(text) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_header(warp::reply::with_status(text, warp::http::StatusCode::OK), "Content-Type", "text/plain; charset=utf-8"),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": format!("Failed to read template: {}", e) })),
+                            warp::http::StatusCode::NOT_FOUND,
+                        ),
+                    )),
+                }
+            }
+        })
+}
+
 fn api_chat_template_discussions(
     _state: AppState,
     app_config: Arc<AppConfig>,
@@ -2335,6 +2383,10 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r
         .or(api_chat_template_transform(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_chat_template_read(state.clone(), config.clone()))
         .unify()
         .boxed();
     r = r

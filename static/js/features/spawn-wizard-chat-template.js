@@ -807,9 +807,9 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
         : (tpl?.repo || '');
       createFixBtn.addEventListener('click', () => {
         const modal = document.createElement('div');
-        modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:10000;width:100vw;height:100vh;';
+        modal.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:2000;width:100%;height:100%;backdrop-filter:blur(6px);';
         const panel = document.createElement('div');
-        panel.style.cssText = 'background:radial-gradient(circle at 18% 16%, var(--acc-12), transparent 28%),radial-gradient(circle at 84% 18%, var(--acc-08), transparent 24%),linear-gradient(160deg, rgba(40, 48, 58, 0.97), rgba(28, 34, 42, 0.99));border:1px solid rgba(255, 255, 255, 0.1);border-radius:8px;padding:16px;min-width:550px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 12px 48px rgba(0,0,0,0.5),0 2px 12px rgba(0,0,0,0.35);backdrop-filter:blur(22px);flex-shrink:0;';
+        panel.style.cssText = 'background:var(--pe-panel-bg);border:1px solid var(--pe-panel-border);border-radius:8px;padding:16px;min-width:550px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 12px 48px rgba(0,0,0,0.5),0 2px 12px rgba(0,0,0,0.35);flex-shrink:0;';
         const title = document.createElement('strong');
         title.textContent = 'Create fix from discussion';
         title.style.fontSize = '13px';
@@ -976,6 +976,24 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
         });
 
         container.appendChild(modal);
+
+        // Pre-populate textarea with current template content
+        if (tplPath) {
+          statusDiv.textContent = 'Loading template content…';
+          statusDiv.style.color = 'var(--color-text-muted)';
+          fetch(`/api/chat-template/read?path=${encodeURIComponent(tplPath)}`, {
+            headers: { ...(window.authHeaders ? window.authHeaders() : {}) }
+          })
+            .then(r => r.ok ? r.text() : Promise.reject(new Error('Failed to read template')))
+            .then(text => {
+              contentTextarea.value = text;
+              statusDiv.textContent = '';
+            })
+            .catch(err => {
+              statusDiv.textContent = 'Could not load template content: ' + (err.message || String(err)) + '. Paste fix manually.';
+              statusDiv.style.color = 'var(--color-warning)';
+            });
+        }
       });
 
       hint.appendChild(createFixBtn);
