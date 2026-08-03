@@ -737,10 +737,14 @@ function renderHwBar(container, pct, tone, isAlert) {
         '</div>');
 }
 
+export function buildRingMarkup(pct, colorHex, isAlert) {
+    const cls = isAlert ? 'hw-ring-viz is-warming' : 'hw-ring-viz';
+    return '<div class="' + cls + '" style="--pct:' + pct.toFixed(1) + ';--gauge-color:' + colorHex + '"></div>';
+}
+
 function renderHwRing(container, pct, tone, isAlert) {
     if (!container) return;
-    const cls = isAlert ? 'hw-ring-viz is-warming' : 'hw-ring-viz';
-    setVizContent(container, '<div class="' + cls + '" style="--pct:' + pct.toFixed(1) + ';--gauge-color:' + tone.line + '"></div>');
+    setVizContent(container, buildRingMarkup(pct, tone.line, isAlert));
 }
 
 function renderHwSparkline(container, history, color) {
@@ -950,7 +954,7 @@ function renderHwClockRing(container, clock) {
         '</div>');
 }
 
-function buildSparklineSVG(points, cssClass, color) {
+export function buildSparklineSVG(points, cssClass, color) {
     var len = points.length;
     if (len < 2) return '';
     var w = 120, h = 24, pad = 5;
@@ -971,7 +975,7 @@ function buildSparklineSVG(points, cssClass, color) {
     var ratio = range > 0 ? (currentVal - min) / range : 0;
     var fillColor = getThemedSparklineFillColor(color, ratio);
     var fillId = nextSparklineGradientId(cssClass);
-    return '<svg class="metric-sparkline ' + cssClass + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style="color:' + color + ';">' +
+    return '<svg class="metric-sparkline ' + cssClass + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true" style="color:' + color + ';">' +
         buildSparklineFillDefs(fillId, fillColor, 0.80, 0.12, 0.02) +
         '<path class="sparkline-fill" d="' + fillPath + '" fill="url(#' + fillId + ')"/>' +
         '<line class="sparkline-grid" x1="' + plotLeft + '" y1="6" x2="' + plotRight + '" y2="6"/><line class="sparkline-grid" x1="' + plotLeft + '" y1="12" x2="' + plotRight + '" y2="12"/><line class="sparkline-grid" x1="' + plotLeft + '" y1="18" x2="' + plotRight + '" y2="18"/>' +

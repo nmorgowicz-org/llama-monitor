@@ -36,6 +36,7 @@
  *   | sidebar               | no           | no        | no           | no          | none                             |
  *   | chat-history-qa       | yes          | no        | no           | no          | none                             |
  *   | models-v2             | no           | no        | no           | no          | /api/models, /api/hf/*, import-lab |
+ *   | model-discovery       | no           | no        | no           | yes (HF)    | download-dir, platform-info, gpu/vram, system-ram |
  *   | rapid-preset          | no           | no        | no           | no          | none (seeded presets.json)       |
  *   | preset-editor         | no           | no        | no           | no          | none                             |
  *   | settings              | no           | no        | no           | no          | none                             |
@@ -171,6 +172,7 @@ Scenarios:
 
   Models and Presets
     models-v2        Models modal: typed inventory, Import Lab, and HF download panel
+    model-discovery  HF Download tab: scope selector, sort, category/qualification badges (real HF data)
     preset-editor    Preset editor: model/context, GPU, and advanced tabs
     rapid-preset     Rapid-MLX welcome cards and preset editor (legacy and typed sources)
     evidence-drawer  Shared decision evidence drawer: dark, expanded, light, and narrow reduced-motion
@@ -1027,6 +1029,18 @@ async function captureFrames(page, prefix, totalFrames, fps) {
     for (let i = 0; i < totalFrames; i += 1) {
         const path = join(FRAME_DIR, `${prefix}_${String(i).padStart(3, '0')}.png`);
         await page.screenshot({ path });
+        if (process.env.CAPTURE_DEBUG_WS) {
+            const dbg = await page.evaluate(async () => {
+                const { lastLlamaMetrics } = await import('/js/core/app-state.js');
+                return {
+                    slots_processing: lastLlamaMetrics?.slots_processing,
+                    prompt_tps: lastLlamaMetrics?.prompt_tokens_per_sec,
+                    gen_tps: lastLlamaMetrics?.generation_tokens_per_sec,
+                    status: lastLlamaMetrics?.status,
+                };
+            });
+            console.log(`[DEBUG frame ${i}]`, JSON.stringify(dbg));
+        }
         await sleep(1000 / fps);
     }
 }
@@ -2387,13 +2401,12 @@ async function scenarioDashboard(ctx, options) {
     await switchTab(page, 'server');
     // Wait for agent first poll (2s interval) + some render time.
     await sleep(3500);
-    // Scroll to top, capture the control bar + inference section viewport.
-    await page.evaluate(() => {
-        const pg = document.querySelector('.page.active');
-        if (pg) pg.scrollTop = 0;
-    });
-    await sleep(300);
-    await captureShot(page, 'dashboard-performance-section.png');
+    // Element-scoped capture: scrolls "Performance & metrics" to the top of frame and
+    // clips to the inference section's own bounds, instead of a full-page shot (which
+    // captures the whole scrollable document regardless of scroll position — using
+    // captureShot's default fullPage:true here previously made this identical to
+    // settings-server-tab.png).
+    await captureElementScreenshot(page, '#inference-section', 'dashboard-performance-section.png', { padding: 0 });
     await captureShot(page, 'settings-server-tab.png', { fullPage: true });
 
     // Wait up to 6s for hardware data to arrive (remote agent dependent).
@@ -2439,15 +2452,25 @@ async function scenarioDashboardRapidMlx(ctx) {
         document.querySelectorAll('.page').forEach(pageElement => {
             pageElement.classList.toggle('active', pageElement.id === 'page-server');
         });
-        renderRapidMlxCards({
-            health: 'Ok', ready: true, model: 'mlx-community/Qwen3-30B-A3B-4bit', uptime_seconds: 3723,
-            prompt_tokens_per_second: 812.4, generation_tokens_per_second: 38.7,
-            running_requests: 1, waiting_requests: 0,
-            active_memory_bytes: 12884901888, peak_memory_bytes: 15032385536, cache_memory_bytes: 536870912,
-            global_cache_hit_rate: 0.82, global_cache_entries: 184,
-            cache_metrics: { hit_rate: 0.82, entry_count: 184, current_memory_bytes: 536870912 },
-            completed_requests_total: 247, prompt_tokens_total: 182430, completion_tokens_total: 58420,
-        }, 1, false, 'capture-rapid');
+        // Render a short synthetic poll sequence so throughput sparklines/peak badges
+        // (which need >=2 samples of session history) are populated for the still capture,
+        // instead of showing their empty state as they would after a single render.
+        const samples = [
+            { prompt: 640.1, gen: 30.2 },
+            { prompt: 780.5, gen: 35.9 },
+            { prompt: 812.4, gen: 38.7 },
+        ];
+        samples.forEach((sampleValues, index) => {
+            renderRapidMlxCards({
+                health: 'Ok', ready: true, model: 'mlx-community/Qwen3-30B-A3B-4bit', uptime_seconds: 3723,
+                prompt_tokens_per_second: sampleValues.prompt, generation_tokens_per_second: sampleValues.gen,
+                running_requests: 1, waiting_requests: 0,
+                active_memory_bytes: 12884901888, peak_memory_bytes: 15032385536, cache_memory_bytes: 536870912,
+                global_cache_hit_rate: 0.82, global_cache_entries: 184,
+                cache_metrics: { hit_rate: 0.82, entry_count: 184, current_memory_bytes: 536870912 },
+                completed_requests_total: 247, prompt_tokens_total: 182430, completion_tokens_total: 58420,
+            }, index + 1, false, 'capture-rapid');
+        });
         const ids = [...document.querySelectorAll('#rapid-mlx-card-grid [data-card-id]')].map(card => card.dataset.cardId);
         const expected = ['runtime', 'throughput', 'queue', 'memory', 'cache', 'totals'];
         if (JSON.stringify(ids) !== JSON.stringify(expected)) throw new Error('Unexpected full Rapid card composition: ' + ids.join(','));
@@ -2472,6 +2495,91 @@ async function scenarioDashboardRapidMlx(ctx) {
     });
     await sleep(300);
     await captureElementScreenshot(page, '#inference-section', 'dashboard-rapid-mlx-partial.png', { padding: 24 });
+
+    // DOM stability + accessibility: re-render the same card set and confirm nodes are
+    // patched in place (identity preserved, per the in-place-patching contract) and each
+    // card exposes an aria-labelledby wired to its own heading id.
+    await page.evaluate(async () => {
+        const { renderRapidMlxCards } = await import('/js/features/rapid-mlx-cards.js');
+        const sample = {
+            health: 'Ok', ready: true, model: 'mlx-community/Qwen3-30B-A3B-4bit', uptime_seconds: 3800,
+            prompt_tokens_per_second: 820.1, generation_tokens_per_second: 39.0,
+            running_requests: 1, waiting_requests: 0,
+            active_memory_bytes: 12884901888, peak_memory_bytes: 15032385536, cache_memory_bytes: 536870912,
+            global_cache_hit_rate: 0.82, global_cache_entries: 184,
+            cache_metrics: { hit_rate: 0.82, entry_count: 184, current_memory_bytes: 536870912 },
+            completed_requests_total: 248, prompt_tokens_total: 182600, completion_tokens_total: 58500,
+        };
+        renderRapidMlxCards(sample, 10, false, 'capture-rapid-stability');
+        const before = new Map([...document.querySelectorAll('#rapid-mlx-card-grid [data-card-id]')].map(el => [el.dataset.cardId, el]));
+        renderRapidMlxCards({ ...sample, completed_requests_total: 249 }, 11, false, 'capture-rapid-stability');
+        const after = [...document.querySelectorAll('#rapid-mlx-card-grid [data-card-id]')];
+        for (const el of after) {
+            if (before.get(el.dataset.cardId) !== el) {
+                throw new Error('Card node identity not preserved across re-render for id=' + el.dataset.cardId);
+            }
+            const heading = el.querySelector('.widget-metric-label');
+            if (!heading || el.getAttribute('aria-labelledby') !== heading.id) {
+                throw new Error('Card missing aria-labelledby wiring for id=' + el.dataset.cardId);
+            }
+        }
+    });
+    console.log('[CAPTURE] dashboard-rapid-mlx: DOM identity + aria-labelledby check passed.');
+
+    // Zero/no-data state: cache hit rate ring must render its dashed "no data yet" state
+    // (not a filled 0% ring, which would be visually indistinguishable from "no lookups yet").
+    await page.evaluate(async () => {
+        const { renderRapidMlxCards } = await import('/js/features/rapid-mlx-cards.js');
+        renderRapidMlxCards({
+            health: 'Ok', ready: true, model: 'mlx-community/Qwen3-30B-A3B-4bit', uptime_seconds: 10,
+            running_requests: 0, waiting_requests: 0,
+            cache_metrics: { hit_rate: 0.0, entry_count: 0, current_memory_bytes: 0 },
+        }, 1, false, 'capture-rapid-zero');
+        const ring = document.querySelector('[data-card-id="cache"] .rapid-ring-row');
+        if (ring && !ring.classList.contains('is-no-data')) {
+            throw new Error('Cache ring should show "no data yet" state when hits+misses=0');
+        }
+    });
+    console.log('[CAPTURE] dashboard-rapid-mlx: zero/no-data cache state check passed.');
+
+    // Stale state: a failed poll on an already-rendered card set must mark it stale rather
+    // than reverting to an empty/unavailable card.
+    await page.evaluate(async () => {
+        const { renderRapidMlxCards } = await import('/js/features/rapid-mlx-cards.js');
+        renderRapidMlxCards({
+            health: 'Ok', ready: true, model: 'mlx-community/Qwen3-30B-A3B-4bit', uptime_seconds: 3800,
+        }, 1, false, 'capture-rapid-stale');
+        renderRapidMlxCards({
+            health: 'Ok', ready: true, model: 'mlx-community/Qwen3-30B-A3B-4bit', uptime_seconds: 3800,
+        }, 2, true, 'capture-rapid-stale');
+        const runtimeCard = document.querySelector('[data-card-id="runtime"]');
+        if (!runtimeCard || !runtimeCard.classList.contains('is-stale')) {
+            throw new Error('Runtime card should be marked is-stale after a failed poll');
+        }
+    });
+    await sleep(200);
+    await captureElementScreenshot(page, '#inference-section', 'dashboard-rapid-mlx-stale.png', { padding: 24 });
+    console.log('[CAPTURE] dashboard-rapid-mlx: stale-poll state check passed.');
+
+    // Narrow viewport + reduced motion, restoring the full card set for a readable still.
+    await page.evaluate(async () => {
+        const { renderRapidMlxCards } = await import('/js/features/rapid-mlx-cards.js');
+        renderRapidMlxCards({
+            health: 'Ok', ready: true, model: 'mlx-community/Qwen3-30B-A3B-4bit', uptime_seconds: 3800,
+            prompt_tokens_per_second: 820.1, generation_tokens_per_second: 39.0,
+            running_requests: 1, waiting_requests: 0,
+            active_memory_bytes: 12884901888, peak_memory_bytes: 15032385536, cache_memory_bytes: 536870912,
+            global_cache_hit_rate: 0.82, global_cache_entries: 184,
+            cache_metrics: { hit_rate: 0.82, entry_count: 184, current_memory_bytes: 536870912 },
+            completed_requests_total: 248, prompt_tokens_total: 182600, completion_tokens_total: 58500,
+        }, 20, false, 'capture-rapid-narrow');
+    });
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
+    await page.setViewport({ width: 430, height: 900, deviceScaleFactor: 1 });
+    await sleep(250);
+    await captureShot(page, 'dashboard-rapid-mlx-narrow-reduced-motion.png', { fullPage: true });
+    await page.setViewport(DEFAULT_VIEWPORT);
+    await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
 }
 
 // Validation pass for sparkline layouts and clipped section captures.
@@ -2497,6 +2605,8 @@ async function scenarioGifs(ctx, options) {
     const fps = 10;
     const durationSec = 6;
     const totalFrames = fps * durationSec;
+    const inferenceDurationSec = 10;
+    const inferenceTotalFrames = fps * inferenceDurationSec;
 
     await gotoApp(page, baseUrl);
     await attachToServer(page);
@@ -2504,9 +2614,17 @@ async function scenarioGifs(ctx, options) {
     if (!options.gpuOnly) {
         console.log('[CAPTURE] Capturing inference metrics GIF...');
         await switchTab(page, 'server');
+        // Scroll a bit so more of the "Performance & metrics" section (generation
+        // details, cache, etc. below the fold) is visible in the animated capture.
+        await page.evaluate(() => {
+            const section = document.getElementById('inference-section');
+            const pg = section?.closest('.page') || document.querySelector('.page.active');
+            if (pg && section) pg.scrollTop = section.offsetTop - 8;
+        });
+        await sleep(300);
         const generationPromise = startLiveGeneration();
         await sleep(1500);
-        await captureFrames(page, 'inference', totalFrames, fps);
+        await captureFrames(page, 'inference', inferenceTotalFrames, fps);
         await generationPromise;
         framesToGif('inference', join(ARTIFACTS_DIR, 'performance-metrics.gif'), fps);
         cleanupFrames();
@@ -2517,9 +2635,28 @@ async function scenarioGifs(ctx, options) {
         await switchTab(page, 'server');
         // Wait for agent hardware data if we haven't already (gpuOnly path skips inference wait).
         if (options.gpuOnly) await sleep(3500);
+        // GPU/system sections stay display:none (offsetTop 0) until hardware data
+        // actually arrives — wait for visibility before scrolling to them, otherwise
+        // the scroll silently no-ops and the GIF captures the wrong section.
+        const hwVisible = await page.evaluate(() => new Promise(resolve => {
+            const check = () => {
+                const gpu = document.getElementById('gpu-section');
+                const sys = document.getElementById('system-section');
+                if ((gpu && gpu.style.display !== 'none') || (sys && sys.style.display !== 'none')) {
+                    resolve(true);
+                }
+            };
+            check();
+            const obs = new MutationObserver(check);
+            obs.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['style'] });
+            setTimeout(() => { obs.disconnect(); resolve(false); }, 6000);
+        }));
+        if (!hwVisible) {
+            console.log('[CAPTURE] Hardware section not visible; capturing at current scroll position.');
+        }
         await page.evaluate(() => {
             const target = document.getElementById('gpu-section') || document.getElementById('system-section');
-            if (target) {
+            if (target && target.style.display !== 'none') {
                 const pg = target.closest('.page') || document.querySelector('.page.active');
                 if (pg) pg.scrollTop = target.offsetTop - 8;
             }
@@ -5131,11 +5268,13 @@ async function scenarioRapidMlxLive(ctx, options) {
 
     await sleep(2000); // Let telemetry initialize.
 
-    // 5. Capture dashboard telemetry cards with real data.
+    // 5. Capture dashboard telemetry cards right after spawn. Totals are legitimately zero
+    // here — no request has been sent yet — so this frame documents the pre-chat/idle state,
+    // not "the" dashboard. The post-chat capture below is the one with meaningful totals.
     await switchTab(page, 'server');
     await page.waitForSelector('#rapid-mlx-card-grid', { timeout: 15000 });
     await sleep(3000); // Wait for real telemetry to populate.
-    await captureElementScreenshot(page, '#inference-section', 'rapid-mlx-live-dashboard-telemetry.png', { padding: 24 });
+    await captureElementScreenshot(page, '#inference-section', 'rapid-mlx-live-dashboard-idle.png', { padding: 24 });
 
     // Verify cards show real data (not loading/empty states).
     const telemetryState = await page.evaluate(() => {
@@ -5165,6 +5304,15 @@ async function scenarioRapidMlxLive(ctx, options) {
         console.log('[CAPTURE] rapid-mlx-live: WARNING — response appears empty');
     }
 
+    // 6b. Capture dashboard telemetry cards after the request completes, while the session is
+    // still live, so this frame (unlike the idle one above) shows meaningful request/token
+    // totals rather than zeros. Keep this separate from the post-stop historic frame below,
+    // which reflects the runtime's final/cumulative state after teardown.
+    await switchTab(page, 'server');
+    await page.waitForSelector('#rapid-mlx-card-grid', { timeout: 15000 });
+    await sleep(2000); // Let the post-request telemetry poll land.
+    await captureElementScreenshot(page, '#inference-section', 'rapid-mlx-live-dashboard-active.png', { padding: 24 });
+
     // 7. Stop the model and verify cleanup.
     await switchTab(page, 'server');
     await sleep(500);
@@ -5176,12 +5324,18 @@ async function scenarioRapidMlxLive(ctx, options) {
     });
     await sleep(3000);
 
-    // Verify runtime is no longer active.
+    // Verify the session is no longer active. `/api/rapid-mlx/runtime/status` reflects the
+    // managed-runtime *installation*, not the spawned session, so it can stay "active" after
+    // doStop() tears down the process — check the actual session/process contract instead,
+    // the same one waitForRapidTelemetry() uses to detect a live session.
     const stopped = await page.evaluate(async () => {
         try {
-            const r = await fetch('/api/rapid-mlx/runtime/status');
+            const r = await fetch('/api/sessions/active', {
+                headers: window.authHeaders ? window.authHeaders() : {}
+            });
+            if (!r.ok) return true;
             const d = await r.json();
-            return d.runtime?.active === null || d.runtime?.status === 'stopped';
+            return d.error === 'No active session' || d.backend !== 'rapid_mlx' || d.status !== 'Running';
         } catch {
             return false;
         }
@@ -5400,10 +5554,12 @@ async function scenarioRapidMlxRuntime(ctx, options) {
     console.log('[CAPTURE] Scenario "rapid-mlx-runtime" complete.');
 }
 
-// model-library captures the HF Download tab with Phase 8B1 discovery controls:
+// model-discovery captures the HF Download tab with Phase 8B1 discovery controls:
 // scope selector (GGUF/MLX/All), sort control, category badges, author roles.
 // Uses REAL HF data — hf-token is copied to temp config (see runCli filesToCopy).
-async function scenarioModelLibrary(ctx, options) {
+// Named model-discovery (not model-library) because this is HF search/discovery,
+// not the installed-model Library tab; models-v2 is the Library evidence scenario.
+async function scenarioModelDiscovery(ctx, options) {
     const { page, baseUrl } = ctx;
     await gotoApp(page, baseUrl);
 
@@ -5467,7 +5623,7 @@ async function scenarioModelLibrary(ctx, options) {
     await sleep(2000);
 
     // Phase 8B2: Capture baseline discovery view (Phase 8B1 controls + Phase 8B2 group hierarchy)
-    await captureShot(page, 'panels-model-library-discovery.png', { fullPage: true });
+    await captureShot(page, 'panels-model-discovery.png', { fullPage: true });
 
     // Expand first group to show variants with qualification badges
     const expandBtn = await page.$('.hf-sg-toggle');
@@ -5477,7 +5633,7 @@ async function scenarioModelLibrary(ctx, options) {
     }
 
     // Phase 8B2: Capture expanded group with qualification badges on variants
-    await captureShot(page, 'panels-model-library-qualification-badges.png', { fullPage: true });
+    await captureShot(page, 'panels-model-discovery-qualification-badges.png', { fullPage: true });
 
     // Phase 8B3: Switch to MLX-only to show MLX-native view (additive toggle test)
     // Default state is MLX+GGUF both active. Click GGUF to deselect it → MLX-only.
@@ -5513,12 +5669,12 @@ async function scenarioModelLibrary(ctx, options) {
         } catch {
             // No MLX-only results for this query — acceptable
         }
-        await captureShot(page, 'panels-model-library-mlx-only.png', { fullPage: true });
+        await captureShot(page, 'panels-model-discovery-mlx-only.png', { fullPage: true });
     } else {
         console.log('[CAPTURE] GGUF scope button not found');
     }
 
-    console.log('[CAPTURE] Scenario "model-library" complete.');
+    console.log('[CAPTURE] Scenario "model-discovery" complete.');
 }
 
 const SCENARIOS = {
@@ -5534,7 +5690,7 @@ const SCENARIOS = {
     sidebar: scenarioSidebar,
     // Models and presets
     'models-v2': scenarioModelsV2,
-    'model-library': scenarioModelLibrary,
+    'model-discovery': scenarioModelDiscovery,
     'preset-editor': scenarioPresetEditor,
     // Configuration
     settings: scenarioSettings,

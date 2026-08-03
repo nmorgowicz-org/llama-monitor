@@ -10,6 +10,63 @@ The Spawn Wizard is the guided flow for creating a model server. It provides:
 - Per-backend settings isolation
 - Workload scenario mapping (page-1 use-case selection drives backend VRAM policy)
 
+## Frontend module map
+
+`static/js/features/spawn-wizard.js` was a single ~5,900-line file through Phase 7. It has
+since been decomposed into a shell plus focused feature modules — all under
+`static/js/features/`, all imported by the shell (`spawn-wizard.js`) or by each other.
+`spawn-wizard.js` still owns the wizard's shared state (`wizardState`), the `dom` lookup
+table, step navigation, and the top-level orchestration; everything else below is a
+peer module the shell composes.
+
+Module boundaries are behavior-preserving splits, not a redesign — a function's home
+module reflects which wizard concern it serves, not when it was written. When looking
+for a piece of wizard behavior, use this table first; only fall back to grepping
+`spawn-wizard.js` itself for shared state, step-navigation, or orchestration glue.
+
+| Module | Owns |
+|--------|------|
+| `spawn-wizard.js` | Shell: `wizardState`, `dom`, step navigation/orchestration, shared sizing helpers (`effectiveAvailBytes`, `getModelBytes`, `getSizingArch`, `isUnifiedMemory`), re-exports the Playwright test contract from the modules that now own it |
+| `spawn-wizard-format.js` | Shared formatting helpers (`formatCtx`, `formatGB`, `kvBpe`) used across other wizard modules |
+| `spawn-wizard-model-card.js` | HF markdown README viewer panel (also used by `models.js`'s HF search panel) |
+| `spawn-wizard-third-party-import.js` | Third-party model import: Ollama/LM Studio/Jan/GPT4All/HF-cache discovery |
+| `spawn-wizard-chat-template.js` | Chat template auto-install and model-family detection (`detectModelFamily`) |
+| `spawn-wizard-hf-origin.js` | HF-origin auto-resolve/widget/confirm cluster — detects which HF repo a local model file came from |
+| `spawn-wizard-hf-browse.js` | HF discover/search/quant-advisor/community-picks/quantizer-editor widgets |
+| `spawn-wizard-hf-download.js` | HF download panel (start/cancel/complete) plus companion mmproj concurrent download |
+| `spawn-wizard-hf-tags.js` | HF tag mapping/normalization and the hardware-step tag-pill UI |
+| `spawn-wizard-hardware-model.js` | Hardware-step model header (repo/quant display) and local-model quant-swap discovery flow |
+| `spawn-wizard-mmproj.js` | mmproj (multimodal projector) auto-select, dropdown UI, and HF auto-search/manual fetch fallback |
+| `spawn-wizard-mtp-draft.js` | llama.cpp GGUF speculative-decoding draft-model matching/checking/rendering (distinct from Rapid-MLX's sidecar flow and the future MTPLX runtime — three unrelated speculative-decoding mechanisms) |
+| `spawn-wizard-rapid-mlx.js` | Rapid-MLX backend adapter for the shared wizard (hardware panel fields, parser/reasoning detection, TurboQuant, etc.) |
+| `spawn-wizard-context-fit.js` | Context-size quick-picks, native-context warnings, use-case fit warnings |
+| `spawn-wizard-autosize.js` | One-click VRAM auto-size (`/api/vram/auto-size`), clamped against the same estimate math the hardware step's live display uses |
+| `spawn-wizard-vram-display.js` | Hardware-step VRAM/RAM breakdown rendering; backend-agnostic — renders whatever `/api/vram-estimate` returns, does not branch on engine |
+| `spawn-wizard-tuning.js` | Performance-advisor apply/auto-tune/sweep actions |
+| `spawn-wizard-binary-prereq.js` | llama.cpp binary prerequisite check & download |
+| `spawn-wizard-review-step.js` | Review-step summary card, sampling-field sync, preset save/load (`saveAsPreset`, `buildPresetPayload`), structured params-review table |
+| `spawn-wizard-spawn.js` | Final steps: command-preview card, spawn-server submission, canonical payload builders (`buildSpawnPayload`, `launchPortForPayload`, `supportsTunePanelForPayload`) |
+
+A few closely-related modules live alongside these but predate this decomposition and
+are not `spawn-wizard-*`-named: `vram-estimate.js` (shared `/api/vram-estimate` request
+builder, backend-agnostic), `tune-panel.js` and `evidence-drawer.js` (post-spawn UI),
+`attach-detach.js` (server lifecycle, imports `spawn-readiness.js`), and
+`spawn-readiness.js` itself. Note `spawn-wizard-spawn.js` has its own internal
+`waitForSpawnReadiness` helper that is unrelated to `spawn-readiness.js`'s
+function of the same name — a pre-existing naming coincidence, not a shared dependency.
+
+Two forms of intentional circular import exist between wizard modules (safe because
+the cross-references only occur inside function bodies, never at module-evaluation
+time): `spawn-wizard-context-fit.js` ↔ `spawn-wizard-vram-display.js`, and
+`spawn-wizard-spawn.js` ↔ `spawn-wizard-review-step.js` (`buildPresetPayload` /
+`buildSpawnPayload` reference each other's owning module).
+
+Playwright's `tests/ui/core/{spawn-wizard,phase7-presets,rapid-phase7-fields}.spec.js`
+dynamically `import()` `buildPresetPayload`, `buildSpawnPayload`, `launchPortForPayload`,
+and `supportsTunePanelForPayload` from `/js/features/spawn-wizard.js` at runtime — even
+though these now live in `spawn-wizard-review-step.js` / `spawn-wizard-spawn.js`, the
+shell keeps `export { ... } from './module.js';` re-export lines for the test contract.
+
 ## Steps
 
 | Step | Purpose |

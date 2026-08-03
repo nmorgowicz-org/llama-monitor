@@ -87,6 +87,7 @@ node tests/ui/capture.mjs --list-scenarios
 | `guided-gen` | Context notes, suggestions, quick guide, director, surprise, explicit mode |
 | `sidebar` | Chat sidebar, message-search flyout, context menu, title filter |
 | `models-v2` | Typed model inventory, Import Lab, and Hugging Face download surfaces |
+| `model-discovery` | HF Download tab search/discovery: scope selector, sort, category/qualification badges (real HF data, not the Library tab — `models-v2` covers Library) |
 | `preset-editor` | llama.cpp preset model, GPU, and advanced sections |
 | `rapid-preset` | Rapid-MLX welcome cards and preset editor with legacy and typed model-source fixtures |
 | `settings` | Settings modal, performance tab, advanced tab, user preferences, persona, models, shortcuts |

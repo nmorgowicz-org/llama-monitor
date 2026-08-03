@@ -99,6 +99,46 @@ pub const FEATURES_SETUP_VIEW_JS: &str = include_str!("../../static/js/features/
 pub const FEATURES_SHORTCUTS_JS: &str = include_str!("../../static/js/features/shortcuts.js");
 pub const FEATURES_SPAWN_READINESS_JS: &str =
     include_str!("../../static/js/features/spawn-readiness.js");
+pub const FEATURES_SPAWN_WIZARD_AUTOSIZE_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-autosize.js");
+pub const FEATURES_SPAWN_WIZARD_BINARY_PREREQ_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-binary-prereq.js");
+pub const FEATURES_SPAWN_WIZARD_CHAT_TEMPLATE_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-chat-template.js");
+pub const FEATURES_SPAWN_WIZARD_CONTEXT_FIT_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-context-fit.js");
+pub const FEATURES_SPAWN_WIZARD_FORMAT_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-format.js");
+pub const FEATURES_SPAWN_WIZARD_HARDWARE_MODEL_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-hardware-model.js");
+pub const FEATURES_SPAWN_WIZARD_HF_BROWSE_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-hf-browse.js");
+pub const FEATURES_SPAWN_WIZARD_HF_DOWNLOAD_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-hf-download.js");
+pub const FEATURES_SPAWN_WIZARD_HF_ORIGIN_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-hf-origin.js");
+pub const FEATURES_SPAWN_WIZARD_HF_TAGS_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-hf-tags.js");
+pub const FEATURES_SPAWN_WIZARD_MLX_IA_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-mlx-ia.js");
+pub const FEATURES_SPAWN_WIZARD_MMPROJ_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-mmproj.js");
+pub const FEATURES_SPAWN_WIZARD_MODEL_CARD_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-model-card.js");
+pub const FEATURES_SPAWN_WIZARD_MTP_DRAFT_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-mtp-draft.js");
+pub const FEATURES_SPAWN_WIZARD_RAPID_MLX_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-rapid-mlx.js");
+pub const FEATURES_SPAWN_WIZARD_REVIEW_STEP_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-review-step.js");
+pub const FEATURES_SPAWN_WIZARD_SPAWN_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-spawn.js");
+pub const FEATURES_SPAWN_WIZARD_THIRD_PARTY_IMPORT_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-third-party-import.js");
+pub const FEATURES_SPAWN_WIZARD_TUNING_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-tuning.js");
+pub const FEATURES_SPAWN_WIZARD_VRAM_DISPLAY_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-vram-display.js");
 pub const FEATURES_SPAWN_WIZARD_JS: &str = include_str!("../../static/js/features/spawn-wizard.js");
 pub const FEATURES_TELEMETRY_GRADE_JS: &str =
     include_str!("../../static/js/features/telemetry-grade.js");

@@ -360,7 +360,11 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
 
         await page.locator('#wizard-next-btn').click();
         await expect(page.locator('#rapid-hardware-panel')).toBeVisible();
-        await expect(page.locator('#wizard-step-2 > .hw-vram-sidebar')).toBeHidden();
+        // The MLX fit rail stays visible on the hardware step — hiding it was a
+        // defect fixed during the MLX presentation/IA redesign (only the
+        // llama.cpp-specific .wizard-main column is hidden for Rapid-MLX).
+        await expect(page.locator('#wizard-step-2 > .hw-vram-sidebar')).toBeVisible();
+        await expect(page.locator('#wizard-step-2 > .wizard-main')).toBeHidden();
     });
 
     test('@in-memory-test typed Rapid-MLX sources round-trip unchanged and llama.cpp payloads exclude Rapid-MLX config', async ({ page }) => {
@@ -782,7 +786,7 @@ test.describe('Spawn Wizard - Phases 3, 4, and Rapid-MLX Phase 6', () => {
         await page.waitForLoadState('networkidle');
 
         const payloads = await page.evaluate(async () => {
-            const { buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js?fit-payload-test=1');
+            const { buildSpawnPayload, wizardState } = await import('/js/features/spawn-wizard.js');
             wizardState.hardware.fitEnabled = null;
             wizardState.hardware.fitTarget = '';
             const defaults = buildSpawnPayload();

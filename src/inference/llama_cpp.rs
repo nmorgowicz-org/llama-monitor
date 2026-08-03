@@ -222,7 +222,7 @@ pub struct ServerConfig {
 }
 
 #[derive(Debug, Clone, Default)]
-struct CounterSnapshot {
+pub struct CounterSnapshot {
     prompt_tokens_total: f64,
     prompt_seconds_total: f64,
     predicted_tokens_total: f64,
@@ -754,17 +754,71 @@ impl LlamaCppAdapter {
 
     pub async fn poll_metrics(
         &self,
-        port: u16,
+        base: &str,
         session_id: &str,
     ) -> Result<InferenceMetricsSnapshot> {
+        let mut previous_counters = self.previous_counters.lock().unwrap().clone();
+        let mut previous_counter_session = self.previous_counter_session.lock().unwrap().clone();
+        let result = poll_llama_cpp_metrics(
+            base,
+            self.config.api_key.as_deref(),
+            session_id,
+            &mut previous_counters,
+            &mut previous_counter_session,
+        )
+        .await;
+        *self.previous_counters.lock().unwrap() = previous_counters;
+        *self.previous_counter_session.lock().unwrap() = previous_counter_session;
+        result
+    }
+
+    pub async fn cancel_request(&self, _port: u16, _request_id: &str) -> Result<()> {
+        Err(anyhow!(
+            "The active llama.cpp backend does not support native request cancellation"
+        ))
+    }
+
+    pub fn capabilities(&self) -> &CapabilitySet {
+        static CAPS: CapabilitySet = CapabilitySet {
+            vision: true,
+            mtp: false,
+            cancellation: false,
+            embeddings: true,
+            guided_generation: true,
+            audio: false,
+            tool_parsing: true,
+            automatic_tool_choice: true,
+            reasoning_parser: true,
+            thinking_controls: true,
+            mcp: true,
+            cache_telemetry: true,
+            status_memory_telemetry: true,
+            self_diagnostic: false,
+            interpretability: false,
+            one_shot_launch: false,
+        };
+        &CAPS
+    }
+}
+
+/// Poll normalized llama.cpp metrics from `base` (a full resolved endpoint URL).
+/// Does not require a `LlamaCppAdapter` — used directly by the shared poller loop for
+/// both spawned sessions and Attach sessions, since only Spawn sessions populate
+/// `state.backend` (attach never owns/launches a process, so there is no adapter to poll
+/// through there).
+pub async fn poll_llama_cpp_metrics(
+    base: &str,
+    api_key: Option<&str>,
+    session_id: &str,
+    previous_counters: &mut Option<CounterSnapshot>,
+    previous_counter_session: &mut Option<String>,
+) -> Result<InferenceMetricsSnapshot> {
+    {
         let client = Client::builder()
             .timeout(Duration::from_secs(5))
             .pool_max_idle_per_host(0)
             .pool_idle_timeout(Duration::from_secs(0))
             .build()?;
-
-        let base = format!("http://127.0.0.1:{}", port);
-        let api_key = &self.config.api_key;
 
         let mut snapshot = InferenceMetricsSnapshot {
             sampled_at: std::time::SystemTime::now(),
@@ -841,11 +895,10 @@ impl LlamaCppAdapter {
             };
 
             let (prompt_tps, gen_tps) = {
-                let prev_session = self.previous_counter_session.lock().unwrap();
-                let prev_counters = self.previous_counters.lock().unwrap();
-
-                if prev_session.as_deref() == Some(session_id) && prev_counters.is_some() {
-                    let prev = prev_counters.as_ref().unwrap();
+                if previous_counter_session.as_deref() == Some(session_id)
+                    && previous_counters.is_some()
+                {
+                    let prev = previous_counters.as_ref().unwrap();
                     (
                         counter_rate(
                             current_counters.prompt_tokens_total,
@@ -865,8 +918,8 @@ impl LlamaCppAdapter {
                 }
             };
 
-            *self.previous_counters.lock().unwrap() = Some(current_counters);
-            *self.previous_counter_session.lock().unwrap() = Some(session_id.to_string());
+            *previous_counters = Some(current_counters);
+            *previous_counter_session = Some(session_id.to_string());
 
             snapshot.prompt_tokens_per_second = Some(prompt_tps);
             snapshot.generation_tokens_per_second = Some(gen_tps);
@@ -913,34 +966,6 @@ impl LlamaCppAdapter {
         }
 
         Ok(snapshot)
-    }
-
-    pub async fn cancel_request(&self, _port: u16, _request_id: &str) -> Result<()> {
-        Err(anyhow!(
-            "The active llama.cpp backend does not support native request cancellation"
-        ))
-    }
-
-    pub fn capabilities(&self) -> &CapabilitySet {
-        static CAPS: CapabilitySet = CapabilitySet {
-            vision: true,
-            mtp: false,
-            cancellation: false,
-            embeddings: true,
-            guided_generation: true,
-            audio: false,
-            tool_parsing: true,
-            automatic_tool_choice: true,
-            reasoning_parser: true,
-            thinking_controls: true,
-            mcp: true,
-            cache_telemetry: true,
-            status_memory_telemetry: true,
-            self_diagnostic: false,
-            interpretability: false,
-            one_shot_launch: false,
-        };
-        &CAPS
     }
 }
 

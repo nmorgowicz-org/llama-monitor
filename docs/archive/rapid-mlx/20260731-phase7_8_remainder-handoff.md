@@ -1,5 +1,18 @@
 # Phase 7 / 8 remainder — handoff
 
+**Status: all sections closed as of 2026-08-03.** §7's resume checklist items 1-6 are done or
+intentionally parked (MTP requalification, item 6, awaits an upstream rapid-mlx release — not a
+gap). The Deferred addendum's three surfaces are all done: Spawn Wizard's 18-step decomposition
+(shell now 3,436 lines + 18 feature modules), the MLX-native Preset Editor, and the Dashboard
+premium visual system (archived to `docs/archive/rapid-mlx/20260802-dashboard-premium-visual-system.md`).
+`buildRapidMlxConfig` adapter extraction is done, the `model-library`→`model-discovery` capture
+rename is done, and `rapid-mlx-live`'s dashboard-after-chat capture and stop-check fixes are both
+in place. The mandatory pre-PR gate (clippy, cargo test 2240 passed, validate-js, lint, `git diff
+--check`, release build, `cargo fmt`) was run in full on 2026-08-03 and is clean (one stray
+trailing-blank-line-at-EOF in `spawn-wizard.js` found and fixed by `git diff --check`). This
+document is retained for its historical record and closed-decisions (§4); nothing here still
+blocks a checkpoint commit.
+
 **Written:** 2026-07-31, by Coordinator (Opus), at the close of the reconciliation campaign.
 **Reconciled:** 2026-07-31 against the current source tree and installed `rapid-mlx 0.11.1` after
 handoff review. The reconciliation clarifies prefill policy, estimator reachability, MTP product
@@ -665,6 +678,21 @@ take, not a torn-down modal), so it is recorded separately rather than assumed t
 It is not currently release-blocking, but the root cause is still unknown. Keep the regression test
 and investigate if it recurs; do not delete it or treat one green run as a diagnosis.
 
+**2026-08-02 follow-up investigation:** ran `phase8-tag-cloud.spec.js` with `--repeat-each=15`
+(180 test executions across all 12 specs in the file, release build) — 180/180 passed, no
+reproduction. Reviewed the toggle implementation
+(`chat-suggestions.js:setupTagCloudUI`/`initSuggestionsDropdown`) and found nothing that could
+race: the `.category-group-header` elements are static markup already present in `index.html`
+at page load (not built/rebuilt by JS), bound exactly once via a `dataset.tagCloudBound` guard,
+with a synchronous click handler that just flips the `aria-expanded` attribute — no async work,
+no re-render, no listener rebinding in the collapse/expand path. The collapse animation itself is
+pure CSS (`grid-template-rows` transition via the `[aria-expanded="false"] ~ .category-group-chips`
+sibling selector), so it can't desync JS state from the DOM either. Given 180 consecutive green
+runs and no plausible code-level race found, this is most likely a one-off CI/environmental blip
+rather than an app defect. No code changes made. Still keep the regression test; re-open this
+investigation only if it recurs with a reproducible pattern (e.g. always on the same run index,
+or correlated with a specific CI runner).
+
 ---
 
 ## 4. Closed decisions — do not reopen
@@ -1093,9 +1121,404 @@ Receipts used for the completed Preset slice (rerun only if this slice changes):
 5. Check llama.cpp editor restoration by running the `preset-editor` capture and its existing specs;
    the move/restore anchors must not reorder or hide llama.cpp fields after switching backend types.
 
-#### Spawn Wizard rearchitecture: implement next
+#### Spawn Wizard rearchitecture: capability extraction done, presentation redesign next
 
-`static/js/features/spawn-wizard.js` is about 11,168 lines. Rapid is currently an overlay inside a
+**2026-08-02 checkpoint:** `static/js/features/spawn-wizard-mlx.js` now exists (behavior-preserving
+extraction, ~10,168 lines net: spawn-wizard.js shrank from 11,168 to ~10,411 lines). Extracted:
+`bindRapidMlxAdvancedControls`, `syncRapidSpeculativeFields`, `applyReasoningModeLock`,
+`applyRapidMlxDefaults`, `renderRapidExclusionWarnings`, and the trust/pin/sidecar cluster
+(`_spawnCheckTrust`, `_spawnRecheckTrustPin`, `_hideSpawnTrust`, `_updateSpawnTrustUI`,
+`_renderSpawnPinStatus`, `_fetchSpawnSidecars`, `_timeAgoSpawn`), plus the live-profile cluster
+(`_fetchRapidMlxModelProfile`, `scheduleRapidMlxProfileFetch`, `_renderRapidMlxProfileHints`,
+`_applyUnifiedProfileRecommendations`, `_renderUnifiedProfileWarnings`). `spawn-wizard.js` exports
+`dom` (mutable live binding, mirroring the existing `wizardState` export) so the new module can
+read/write shared wizard state without a parameter-threading rewrite. All DOM control ids and
+event-wiring order are unchanged, including the module-parse-time `speculativeRecheckBtn` listener
+(now attached inside `bindRapidMlxAdvancedControls` at call time instead of at module-parse time —
+behaviorally equivalent since the shell always calls it once during `initSpawnWizard`).
+Validated: `npm run validate-js`, ESLint on both files, and the full `spawn-wizard.spec.js` +
+`phase7-presets.spec.js` + `rapid-phase7-fields.spec.js` suite (34/34 passed) on an isolated
+`LLAMA_MONITOR_TEST_PORT=17778` instance, leaving the user's live port-7778 instance untouched.
+`buildSpawnPayload`'s `rapid_mlx` branch (the request/config construction called out below) was
+**not** extracted this pass — it still lives in `spawn-wizard.js` and remains a candidate adapter
+extraction. The presentation/IA redesign (six-step MLX progression below) has not started.
+
+**2026-08-02 rename + 18-step decomposition plan:** `spawn-wizard-mlx.js` was renamed to
+`spawn-wizard-rapid-mlx.js` (plain `mv`, file was never `git add`ed; import path in `spawn-wizard.js`
+updated to match). Rationale: the 2026-07-29 Rapid-MLX/MTPLX runtime audit
+(`docs/reference/apple-silicon-mtp-runtime-comparison.md`) found MTPLX's config/cache/sampler surface
+is not parameter-compatible with Rapid — the extracted module is Rapid-MLX-specific, not MLX-generic,
+and its header comment now says so explicitly to stop it being copied as an MTPLX template.
+Re-validated after rename: `npm run validate-js`, ESLint on both files, and 34/34 Playwright
+(`spawn-wizard.spec.js phase7-presets.spec.js rapid-phase7-fields.spec.js`, isolated port 17778) — all
+green.
+
+An Opus planning pass then read the remaining ~10,400-line file directly (dependency scan below was
+corrected for cross-module *writes* to module-scoped `let`, which a call-site-only regex scan misses)
+and produced an 18-step, risk-ordered, sequential extraction plan for the rest of the monolith:
+
+**Done 2026-08-02 (steps 1-2):** `spawn-wizard-format.js` and `spawn-wizard-model-card.js` extracted.
+`openCardPanel` re-exported from the shell (models.js still imports it from `spawn-wizard.js`).
+Re-validated: `npm run validate-js` clean, ESLint clean on all three files, 34/34 Playwright
+(isolated port 17778). Removing ~90 lines from the top of the file shifted every downstream line
+number in this plan down by roughly that amount — re-locate each section by function/const name
+(e.g. `grep -n`) rather than trusting the line ranges below verbatim once execution reaches it.
+
+1. ~~`spawn-wizard-format.js` (56-136) — `kvBpe`/`formatCtx`/`formatGB`/`formatBytes`/etc. Pure, zero-state.~~ Done.
+2. ~~`spawn-wizard-model-card.js` (10089-10176) — `openCardPanel`/`_closeCardPanel`.~~ Done.
+3. ~~`spawn-wizard-binary-prereq.js` (10176-10411) — binary prereq check/download; owns `_platformInfo` (needs `setWizardPlatformInfo()` mutator for the write at old line 2524).~~ Done
+   2026-08-02. `_mtpUserConfigured` stayed in the shell (exported `let`), read-only import into the
+   new module, since it's still written by the shell-resident MTP block (moves with it in step 13).
+   34/34 Playwright, ESLint clean, validate-js clean.
+4. ~~`spawn-wizard-tuning.js` (5196-5350) — suggestion/auto-tune/batch+depth sweep wrappers around
+   `tuning-cards.js`/`tune-panel.js`.~~ Done 2026-08-02. `updateAdvisor` (and `_advisorTimer`/
+   `_advisorSeq`) stayed in the shell — the dependency scan had lumped them with this cluster, but
+   `updateAdvisor` actually belongs to step 14 (vram-display); the new module imports it back via a
+   normal circular import (same pattern as the Rapid-MLX cluster). `isUnifiedMemory`,
+   `effectiveAvailBytes`, `getEffectiveArch`, `getSizingArch`, `getModelBytes` had to be exported from
+   the shell (were plain module-locals) since this and future modules read them. 34/34 Playwright,
+   ESLint clean, validate-js clean.
+5. ~~`spawn-wizard-hf-origin.js` (1706-1707, 1722-2029) — HF-origin auto-resolve/widget/confirm cluster; needs exported mutators (`startOriginResolve`/`awaitOriginResolve`/`resetOriginState`) replacing illegal cross-module writes to `_originResolverPromise`/`_hfOriginWidgetData`. Unblocks 6/7/12.~~ Done 2026-08-02.
+   Extracted `_attachOriginTags`, `_autoResolveHfOrigin`, `_refreshHfOriginSection`,
+   `_renderHfOriginWidget` (module-local), `_confirmHfOrigin`, plus the `_originResolverPromise`/
+   `_hfOriginWidgetData` state. Added mutators `resetOriginState()`, `startOriginResolve()`,
+   `setOriginResolverPromise()`, and `awaitOriginResolve(timeoutMs)` (new — replaces the old inline
+   `Promise.race([_originResolverPromise, timeout])` read site) since the old plan's mutator list
+   didn't cover the read side. Shell also had to export `getAuthHeaders`, `_fetchAndShowQuantOptions`,
+   `renderHardwareModelHeader`, `_refreshHwTagsRow` (consumed by the new module), and gained a
+   `resetTagsRowOrigin()` mutator for the still shell-resident `_tagsRowOrigin` (moves to
+   `spawn-wizard-hf-tags.js` in step 10). 34/34 Playwright, ESLint clean, validate-js clean.
+6. ~~`spawn-wizard-chat-template.js` (3564-4181) — chat template auto-install/detection cluster.~~
+   Done 2026-08-02. Extracted `_chatTemplateDisplayName`, `_applyCustomChatTemplate`,
+   `detectModelFamily`, `_ggufArchToFamily` (module-local), `detectModelFamilyAsync`,
+   `autoInstallChatTemplate`, `_renderChatTemplateStatus` (module-local), plus the
+   `_installedTemplateCache` state. Dropped the dead `export { COMMUNITY_TEMPLATES };`
+   re-export from the shell (nothing imported it — `presets.js` already pulls
+   `COMMUNITY_TEMPLATES` straight from `chat-template-registry.js`). **Caught a real bug**:
+   the new module initially imported `awaitOriginResolve` from `./spawn-wizard.js`, but the
+   shell only *imports* that name from `spawn-wizard-hf-origin.js` without re-exporting it —
+   ES modules don't transitively re-export unless explicitly re-exported, so this threw
+   `does not provide an export named 'awaitOriginResolve'` at runtime (Playwright's
+   `html.modules-ready` wait timed out on all 34 tests). Fixed by importing
+   `awaitOriginResolve` directly from `spawn-wizard-hf-origin.js` instead. Also discovered
+   static assets are compiled into the binary (embed macro) — `cargo build` must be re-run
+   after JS changes before Playwright's dev-mode webServer will see them; a stale binary
+   masked the fix on the first re-run. 34/34 Playwright, ESLint clean, validate-js clean.
+7. ~~`spawn-wizard-third-party-import.js` (4619-4749) — third-party model import.~~
+   Done 2026-08-02. Extracted `TOOL_ICONS`, `loadThirdPartyModels`, `selectImportedModel`
+   (module-local, only called from within `loadThirdPartyModels`'s click/keydown handlers).
+   Shell had to export `renderLocalModelHint`, `refreshStepGuardrails`, `onModelPathChanged`
+   (were plain module-locals) since `selectImportedModel` reads them; imports `resetOriginState`/
+   `startOriginResolve` from `spawn-wizard-hf-origin.js` directly (not re-exported through the
+   shell — see step 6's `awaitOriginResolve` bug for why re-export chains are unsafe to assume).
+   34/34 Playwright, ESLint clean, validate-js clean.
+8. `spawn-wizard-hf-browse.js` (341-347, 366-416, 2217-2276, 4183-4618, 6526-6545, ~1,100 lines) — HF search/community-picks/quantizer-editor; highest risk of the search-adjacent group, touches `initSpawnWizard`.
+   - **Done 2026-08-02**: Extracted `hfBrowseState`, `hfSearchForWizard`, the quant advisor
+     (`triggerQuantAdvisor`/`loadQuantAdvisor`/`renderQuantAdvisor`), community picks
+     (`loadCommunityPicks`/`renderCommunityPicksTabs`/`renderCommunityPicksList`), the quantizer
+     editor (`bindQuantizerEditor`/`openQuantizerEditor`/`renderEditorList`/`saveQuantizerEdits`/
+     `resetQuantizersToDefaults`), and the HF search-controls cluster (`_reloadHfQuickPicks`,
+     `browseHfAuthor`, `triggerHfFileFetch`, `refireHfSearch`, `bindHfSearchControls`,
+     `fetchHfFiles`) into `spawn-wizard-hf-browse.js` (776 lines). `initSpawnWizard`'s inline
+     discover-pills/quickpicks/scope-selector/sort-selector/quants-only setup block (was lines
+     355-405) was wrapped into a new exported `initHfBrowseWidgets()` in the new module and
+     `initSpawnWizard` now just calls it — `bindHfSearchControls()` and `bindQuantizerEditor()`
+     stay as direct calls from `initSpawnWizard`, just now imported rather than local. `getRecommendedQuant`
+     and `_deriveMmprojSaveName` were deliberately left in the shell: the former is only used by
+     `renderHardwareModelHeader` (step 11 territory), the latter is shared between the HF-download
+     flow (step 9) and the mmproj section (step 12), not the browse cluster. Note: this repo already
+     has a lower-level `hf-browse.js` (widget primitives — `hfSearch`, `hfListFiles`, discover-pills
+     rendering, etc.) that both the shell and the new `spawn-wizard-hf-browse.js` import from; the
+     names are similar by design (same `spawn-wizard-` prefix convention as other extracted modules)
+     but are two different files.
+     Two new shell exports were needed for cross-module use: `ensureGpuVramFetched()` (wraps the
+     `if (!cachedVram) await fetchGpuVram()` check so the new module doesn't need direct access to
+     the shell's private `cachedVram`/`fetchGpuVram`) and `buildHeuristicArch` (was already used by
+     the quant advisor for `global_head_dim`). Also exported: `showValidationError`,
+     `clearValidationError`, `refreshEngineRecommendation`, `selectWizardEngine`,
+     `updateSelectedModelDisplay`, `inferParamBFromName`, `detectMtpFromName` — all pre-existing
+     shell functions the new module calls. `triggerQuantAdvisor` and `triggerHfFileFetch` had to be
+     re-exported back into the shell (imported from the new module) since they're still called from
+     shell-resident functions (`onModelPathChanged`, `doIntrospect`, and `bindEvents`'s HF repo-input
+     blur/Enter handlers) — caught both by ESLint's `no-undef` on the first pass, not a runtime bug
+     this time. Validated: `npm run validate-js` clean, ESLint clean on both files, `cargo build`
+     succeeded, focused Playwright 34/34 passed.
+9. `spawn-wizard-hf-download.js` (418-490, 1703-1721, 2029-2216) — download-panel wiring, quant options, companion mmproj download completion. Do immediately after 8 (interleaved in `initSpawnWizard`).
+   **Done 2026-08-02**: extracted `spawn-wizard-hf-download.js` (~205 lines). Owns
+   `bindHfDownloadPanel()` (replaces the inline download-panel button wiring that lived in
+   `initSpawnWizard` — start/use-hf/cancel/open-settings button handlers plus the
+   `settings-applied` listener that refreshes the download destination), `onHfDownloadComplete`
+   (the `hfStartDownload` `onComplete` callback), `_startCompanionMmprojDownload`, and
+   `_maybeAssociateCompanionOnMainFailure`, plus the module-local `_dlCurrentId`/
+   `_mmprojCompanionId`/`_mmprojCompanionLocalPath` state — all three were previously shell-module
+   state and are now fully contained in the new module since every read/write site moved with them
+   (verified via grep before deleting). `initSpawnWizard` now just calls `bindHfDownloadPanel()`.
+   Deliberately left in the shell: `getRecommendedQuant` and `_fetchAndShowQuantOptions` (both
+   candidates for step 11's hardware-model cluster, not download-specific), and `_deriveMmprojSaveName`
+   (shared with the not-yet-extracted step 12 mmproj cluster, now exported from the shell for both
+   step 9 and step 12 to import). New shell exports added for this step: `STEP_LABELS`,
+   `refreshHfTokenState`, `showStep`, `updateModelInputVisibility`, `_deriveMmprojSaveName`,
+   `renderMmprojSection`, `guessQuantFromName` — the last one had already been used inside the module
+   in an unexported form and its absence broke module resolution for the *entire* `spawn-wizard.js`
+   graph (a `SyntaxError` on non-existent named export fails module load, not just the call site),
+   which cascaded into all three focused Playwright specs failing on unrelated tests until the export
+   was added — a reminder that missing named exports in an ES module fail hard at parse/link time for
+   every consumer, not just the one importing the missing name. Also trimmed `hfCancelDownload` out of
+   the shell's `hf-browse.js` import (no longer called from the shell; `hfStartDownload`,
+   `hfShowDownloadPanel`, `hfHideDownloadPanel` remain since still used at other call sites, e.g. the
+   quant-swap re-download flow). Validated: `npm run validate-js` clean, ESLint clean on both files,
+   `cargo build` succeeded, focused Playwright 34/34 passed.
+10. `spawn-wizard-hf-tags.js` (6546-7265) — HF tag mapping/normalization/pill UI; owns `_tagsRowOrigin` (needs `resetTagsRowOrigin()` mutator).
+    **Done 2026-08-02**: extracted `spawn-wizard-hf-tags.js` (734 lines). Owns the full HF tag
+    cluster — `HF_TAG_MAP`, `HF_TAG_BLOCKLIST`, `HF_TAG_BLOCK_PATTERNS`, `HF_CATEGORY_LABEL`,
+    `ALL_KNOWN_TAGS`, `_normaliseTag`, `_isBlockedHfTag`, `_hfTagsToCategories`,
+    `_fetchHfTagsWithBaseModel`, the module-local `_tagsRowOrigin` state plus its
+    `resetTagsRowOrigin()` mutator, `_openHwRepoEditor`, `_refreshHwTagsRow`, `_renderHwTagPills`,
+    `_saveHwModelTags`, `_openHwTagPicker`, and `_appendTagPill`. Only `resetTagsRowOrigin`,
+    `_refreshHwTagsRow`, `_openHwRepoEditor`, and `_openHwTagPicker` needed to be exported —
+    the rest are purely internal to the cluster (confirmed via grep -c usage counts across the
+    shell before deleting). `_openHwRepoEditor` and `_openHwTagPicker` are called from shell code
+    outside the extraction boundary (`renderHardwareModelHeader`, `bindEvents`) and had to be
+    re-imported back into the shell, following the same re-export pattern used in steps 6 and 8.
+    New shell exports added for this step: `_hfFilesPost`, `_extractQuantLabel` (both needed by
+    the new module). A second-order dependency surfaced: `spawn-wizard-hf-origin.js` (extracted in
+    step 5) was importing `_refreshHwTagsRow`/`resetTagsRowOrigin` from `./spawn-wizard.js` — since
+    both moved to the new module, that import was repointed to `./spawn-wizard-hf-tags.js` directly
+    rather than round-tripping through the shell. Also fixed a stale direct-mutation bug: a
+    model-path-reset flow in the shell did `_tagsRowOrigin = '';` directly, which no longer compiles
+    once the variable is module-private to `spawn-wizard-hf-tags.js` — replaced with a call to the
+    exported `resetTagsRowOrigin()` mutator (same pattern as `_lastQuantSearchFile`/
+    `_quantSwapSearching` will need in step 11). Validated: `npm run validate-js` clean, ESLint clean
+    on all three touched files, `cargo build` succeeded, focused Playwright 34/34 passed.
+11. `spawn-wizard-hardware-model.js` (5993-6182, 7266-7632) — hardware-step model header + quant-swap discovery; owns `_lastQuantSearchFile`/`_quantSwapSearching` (needs `resetQuantSwapSearchState()` mutator).
+    **Done 2026-08-02**: extracted `spawn-wizard-hardware-model.js` (~558 lines) from three
+    non-contiguous shell segments — `getRecommendedQuant`/`_fetchAndShowQuantOptions` (had drifted
+    far from the rest of the cluster, sitting right after `getAuthHeaders`), `renderHardwareModelHeader`,
+    and the full quant-swap discovery block (`_autoDiscoverLocalModelQuants`,
+    `_showQuantSwapCandidateList`, `_showQuantSwapManualInput`, `_renderQuantSwapActions`, plus the
+    module-local `_lastQuantSearchFile`/`_quantSwapSearching` state). Added the anticipated
+    `resetQuantSwapSearchState()` mutator and used it to replace three shell call sites that had been
+    directly reassigning `_lastQuantSearchFile`/`_quantSwapSearching` (in `resetWizardState`, a
+    model-path-reset flow, and the quant-swap-trigger click handler) — same pattern as step 10's
+    `_tagsRowOrigin` fix. Deliberately left in the shell as shared utilities: `_hfFilesPost` and
+    `_extractQuantLabel` (both consumed by `spawn-wizard-hf-tags.js` as well, so keeping them
+    shell-resident avoids a three-way import tangle), and `_modelStemForSearch`/`_autoFindMmprojRepo`
+    (despite sitting inside the same source region, these are mmproj-specific — used by the
+    not-yet-extracted step 12 cluster — not hardware-model). New shell exports added: none required
+    (the four extracted functions needed re-export back into the shell instead, see below).
+    `renderHardwareModelHeader`, `_autoDiscoverLocalModelQuants`, `_renderQuantSwapActions`, and
+    `resetQuantSwapSearchState` are all called from shell code outside the extraction boundary
+    (`bindEvents`, `resetWizardState`, a model-path-reset flow) and were re-imported back into the
+    shell, following the step 6/8/10 re-export pattern. Two second-order dependencies surfaced:
+    `spawn-wizard-hf-origin.js` (step 5) and `spawn-wizard-hf-tags.js` (step 10) both imported
+    `renderHardwareModelHeader` (and `_fetchAndShowQuantOptions` for hf-origin) from `./spawn-wizard.js`
+    — both were repointed to import directly from `./spawn-wizard-hardware-model.js`. This introduces
+    a genuine circular import: `spawn-wizard-hardware-model.js` imports `_openHwRepoEditor`/
+    `_refreshHwTagsRow` from `spawn-wizard-hf-tags.js`, which in turn imports `renderHardwareModelHeader`
+    back from `spawn-wizard-hardware-model.js`. This works because all bindings involved are hoisted
+    function declarations invoked only at runtime (inside event handlers/renders), never during
+    top-level module evaluation — confirmed safe by the full 34/34 focused Playwright pass, but worth
+    watching if either module gains top-level side effects later. Validated: `npm run validate-js`
+    clean, ESLint clean on all four touched files, `cargo build` succeeded, focused Playwright 34/34
+    passed.
+12. `spawn-wizard-mmproj.js` (6183-6249, 6444-6525, 7633-7902) — mmproj recommendation/render/HF-fetch cluster.
+    **Done 2026-08-02**: extracted as `spawn-wizard-mmproj.js` (423 lines) from three non-contiguous
+    shell segments interleaved around two islands that stayed in the shell — the MTP-draft trio
+    (`_bestDraftForModel`/`_checkGemma4MtpDraft`/`_renderDraftCandidatePills`, reserved for step 13)
+    and the shared-utility trio (`_modelStemForSearch`/`_hfFilesPost`/`_extractQuantLabel`, consumed by
+    both mmproj and MTP-draft clusters so kept shell-resident). Moved: the mmproj name-matching helpers
+    (`_mmprojQuantLabel`, `_preferredMmprojQuant`, `_isRecommendedMmproj`, `_mmprojPracticalRank`,
+    `_bestMmprojForModel`), `renderMmprojSection`, and the HF auto-search/manual-fetch/download cluster
+    (`_autoFindMmprojRepo`, `_renderMmprojDownloadFromHf`, `_showMmprojHfFetchForm`,
+    `_downloadMmprojFromHf`, `_pollMmprojDownload`). New shell exports added so the new module could
+    import them: `_modelStemForSearch` and `_inferFamilyFromName` (both were previously module-private).
+    `_deriveMmprojSaveName` stayed shell-resident (already exported, shared with step 9's
+    `spawn-wizard-hf-download.js`). Two functions needed re-export back into the shell:
+    `renderMmprojSection` (called from two shell sites — a model-load block and a local-directory-scan
+    block) and `_bestMmprojForModel` (called from a local-directory mmproj-autopick block). One
+    second-order dependency fix: `spawn-wizard-hf-download.js` (step 9) imported `renderMmprojSection`
+    from `./spawn-wizard.js` — repointed to import directly from `./spawn-wizard-mmproj.js`. This adds
+    another circular import (`spawn-wizard-mmproj.js` imports shared utilities from `spawn-wizard.js`,
+    which imports `renderMmprojSection`/`_bestMmprojForModel` back) — same hoisted-function-declaration
+    pattern already validated safe in step 11, confirmed again by the 34/34 Playwright pass. Note: the
+    focused Playwright specs have since moved to `tests/ui/core/*.spec.js` (must run
+    `npx playwright test` from inside `tests/ui/`, not the repo root, since `tests/ui` has its own
+    Playwright install/config — running from the root picks up a different `@playwright/test` and fails
+    with "did not expect test.describe() to be called here"). Validated: `npm run validate-js` clean,
+    ESLint clean on all three touched files, `cargo build` succeeded, focused Playwright 34/34 passed.
+13. `spawn-wizard-mtp-draft.js` (6250-6443, 7903-8094) — **llama.cpp GGUF draft-model/MTP-tensor** logic; explicitly NOT the Rapid-MLX sidecar flow already in `spawn-wizard-rapid-mlx.js` — per the MTPLX audit these are three unrelated speculative-decoding mechanisms and must stay named/documented as distinct.
+    **Done 2026-08-02**: extracted as `spawn-wizard-mtp-draft.js` (378 lines) from two shell segments
+    (line numbers in the plan text above were stale by this point; re-derived fresh against the
+    post-step-12 6,303-line shell) separated by the shared-utility island left behind in step 12
+    (`_modelStemForSearch`/`_hfFilesPost`/`_extractQuantLabel`, which stayed shell-resident). Moved:
+    the draft-model matching/check/pill trio (`_bestDraftForModel`, `_checkGemma4MtpDraft`,
+    `_renderDraftCandidatePills`) and the MTP hardware-step section (`renderMtpSection`). Also moved
+    the `_mtpUserConfigured` exported `let` flag itself (previously shell-resident specifically pending
+    this step, per its own in-code comment) since every read/write site was inside the extracted
+    `renderMtpSection`. Three functions needed re-export back into the shell (call sites at model-load,
+    hardware-step-nav, and template-restore blocks): `renderMtpSection`, `_bestDraftForModel`,
+    `_checkGemma4MtpDraft`. One second-order dependency fix: `spawn-wizard-binary-prereq.js` (step 3)
+    imported `_mtpUserConfigured` from `./spawn-wizard.js` — repointed to import directly from
+    `./spawn-wizard-mtp-draft.js`. Module header comment documents the three-way distinction from the
+    Rapid-MLX sidecar flow and the future MTPLX runtime, as directed. Validated: `npm run validate-js`
+    clean, ESLint clean on all three touched files, `cargo build` succeeded, focused Playwright 34/34
+    passed (run from inside `tests/ui/`, per the invocation fix discovered in step 12).
+14. `spawn-wizard-vram-display.js` (5351-5787) — hottest render path (`updateVramDisplay`, called from 8 sites); do late once its callees already live in modules.
+    **Done 2026-08-02**: extracted as `spawn-wizard-vram-display.js` (~610 lines) from two shell
+    segments (re-derived fresh against the post-step-13 5,940-line shell; original plan line numbers
+    were stale). Segment A (`updateMlockWarning` → `renderScenarioCards`, contiguous) held the whole
+    entry-point cluster: `updateMlockWarning`, `updateVramDisplay`, `setSegWidth`,
+    `updateMoeSliderVisuals`, `updateContextRailSummary`, `renderScenarioCards`. Segment B
+    (`updateLegacyVramPill` → `_showMetalLimitFallback`, contiguous, separated from segment A by
+    `_refreshThreadsHint`/`_fetchSystemInfoAndRefreshHints`/the mmproj-era shared-utility island/
+    `_updateSpecHint`, all of which stayed shell-resident) held `updateLegacyVramPill`,
+    `applyMetalGpuLimit`, `_showMetalLimitFallback`. All of segment B's functions turned out to be
+    called only from within segment A, so nothing from segment B needed re-export back to the shell.
+    Confirmed the module is backend-agnostic by design: all VRAM math comes from the single
+    `/api/vram-estimate` backend endpoint via `scheduleEstimate`; this module only renders whichever
+    fields the response contains (llama.cpp's unified `kv_cache_bytes` vs. Rapid-MLX's active/
+    retained KV split and `mlx_prefix_cache_bytes`), so it needs no per-engine branching and will not
+    need to be split further when MTPLX lands — new engines just add new response fields and a new
+    conditional render branch, same pattern as the existing Rapid split.
+    Only two functions needed re-export back into the shell (7 external call sites for
+    `updateVramDisplay`, 1 for `updateMoeSliderVisuals`): `updateVramDisplay`, `updateMoeSliderVisuals`.
+    Exported a set of previously shell-private helpers/state for the new module to import back
+    (deliberately left in the shell rather than moved, since they're either used elsewhere in the
+    shell too or belong to a later step): `metalCap`, `suggestedMetalLimitMb`, `cachedRamTotal`,
+    `cachedRamUsed`, `cachedMetalGpuLimitMb`, `maybeResetHardwareStepScroll`,
+    `maybeRestoreHardwareStepScroll`, `fetchGpuVram`, `fetchMetalGpuLimit`, and — pre-emptively for
+    step 15 — `CTX_TARGETS`, `updateCtxModelMaxHint`, `updateCtxQuickPickActive`,
+    `updateCtxTrainWarning` (these will move to `spawn-wizard-context-fit.js` in step 15, at which
+    point this module's import of them gets repointed, same second-order-dependency pattern as step
+    13). No second-order dependency fixes were needed elsewhere — grepped every moved/exported symbol
+    across all other feature modules and found no external consumers besides two unrelated
+    identically-named locals in `models.js`/`setup-view.js`. Validated: `npm run validate-js` clean,
+    ESLint clean on both touched files, `cargo build` succeeded, focused Playwright 34/34 passed
+    (52.0s, run from inside `tests/ui/`).
+15. `spawn-wizard-context-fit.js` (5788-5992, 8309-8450) — context rail summary/quick-picks; owns `CTX_TARGETS`.
+    **Done 2026-08-02**: extracted as `spawn-wizard-context-fit.js` (146 lines) from a single contiguous
+    shell segment (re-derived fresh against the post-step-14 5,272-line shell; original plan line
+    numbers were stale). The cluster was the whole "Context quick-picks" section: `bindCtxQuickPicks`,
+    `updateCtxQuickPickActive`, `updateCtxModelMaxHint`, `updateCtxTrainWarning`, `CTX_TARGETS`,
+    `showCtxFitWarning` — all six symbols, so nothing context-related was left behind in the shell.
+    Five needed re-export back into the shell (`bindCtxQuickPicks` for the `bindEvents()` call site;
+    `updateCtxQuickPickActive`/`updateCtxModelMaxHint`/`updateCtxTrainWarning`/`showCtxFitWarning` for
+    remaining shell call sites in the model-load and autosize-result blocks); `CTX_TARGETS` itself has
+    no shell call site anymore, so it's imported by the new module only, not re-exported to the shell.
+    Confirmed the pre-emptive second-order fix anticipated in step 14: `spawn-wizard-vram-display.js`'s
+    import of `CTX_TARGETS`/`updateCtxModelMaxHint`/`updateCtxQuickPickActive`/`updateCtxTrainWarning`
+    was repointed from `./spawn-wizard.js` to `./spawn-wizard-context-fit.js`. This creates a
+    circular import between the two new modules (context-fit imports `updateVramDisplay` from
+    vram-display, vram-display imports the four context symbols back) — safe under ES modules since
+    all cross-references are used only inside function bodies, never at module-evaluation time. No
+    other second-order dependency fixes were needed — grepped every moved/exported symbol across all
+    other feature modules and found only one unrelated identically-named local (`updateCtxTrainWarning`
+    in `models.js`). Validated: `npm run validate-js` clean, ESLint clean on all three touched files,
+    `cargo build` succeeded, focused Playwright 34/34 passed (52.1s, run from inside `tests/ui/`).
+16. `spawn-wizard-autosize.js` (8095-8291) — Metal GPU limit application + auto-size trigger; optional merge into 15.
+    **Done 2026-08-02**: extracted as `spawn-wizard-autosize.js` (200 lines) from two non-contiguous
+    shell segments (re-derived fresh against the post-step-15 5,137-line shell; original plan line
+    numbers were stale and referred to functions already relocated). Confirmed
+    `applyMetalGpuLimit`/`_showMetalLimitFallback` had already moved into `spawn-wizard-vram-display.js`
+    during step 14, so this step's actual scope was just the two functions in the auto-size call chain:
+    `clampAutoSizeResultToSizingMath` (validates/binary-searches the auto-size result against
+    `/api/vram-estimate`, the same endpoint the live hardware-step display uses) and `triggerAutoSize`
+    (the button handler, its only caller — a shell `bindEvents()` listener re-exported and repointed to
+    the new module). Only `triggerAutoSize` needed re-export back to the shell;
+    `clampAutoSizeResultToSizingMath` had no shell callers left. `doIntrospect` was exported from the
+    shell for the first time (previously shell-private) since it's called both here and from a shell
+    debounce timer, so it stays shell-resident but importable. `showCtxFitWarning` lost its only shell
+    call site when `triggerAutoSize` moved, so its now-unused import was dropped from the shell
+    (still exported by `spawn-wizard-context-fit.js` for the new autosize module and any future
+    consumer). No second-order dependency fixes were needed elsewhere — grepped
+    `triggerAutoSize`/`clampAutoSizeResultToSizingMath` across all other feature modules (no hits) and
+    confirmed the two files mentioning `doIntrospect` in comments only, not imports. Validated:
+    `npm run validate-js` clean, ESLint clean on both touched files, `cargo build` succeeded, focused
+    Playwright 34/34 passed (54.2s, run from inside `tests/ui/`). Final line counts: `spawn-wizard.js`
+    = 4,951 lines, `spawn-wizard-autosize.js` = 200 lines.
+17. `spawn-wizard-review-step.js` (8560-9503) — summary/sampling-sync/save-preset/params-review; shell must **re-export `buildPresetPayload`** (Playwright test contract).
+    **Done 2026-08-02**: extracted as `spawn-wizard-review-step.js` (957 lines) from a single
+    contiguous shell segment (re-derived fresh against the post-step-16 4,951-line shell — the whole
+    "Model-specific sampling defaults" through "Preset parameters review (step 5)" run of sections,
+    ending right before "Spawn config preview card (step 6)", which stays shell-resident for step 18).
+    By far the largest single-segment extraction of the 18-step plan. Contained: model-sampling-preset
+    application/pills, `renderSummary` (step 4 summary card), the full sampling-field sync/bind cluster
+    (`_syncSamplingFields`, `_structuredOutputMode`, `_syncStructuredOutputFields`, `_syncThinkingFields`,
+    `_bindThinkingFields`, `_bindSamplingFields`), `saveAsPreset`, `buildPresetPayload`, `runHealthCheck`
+    (found to have no live caller anywhere — `dom.healthCheckBtn` is never assigned via
+    `getElementById` and nothing binds a click handler to it; left in place as dead code rather than
+    removed, since cleanup wasn't in scope), and `_renderPresetParamsStep` (step 5 params table). Six
+    functions needed re-export back to the shell: `renderSummary`, `_renderPresetParamsStep`,
+    `_bindSamplingFields`, `saveAsPreset`, `_fetchAndApplyModelSamplingDefaults`, and — separately, via
+    its own `export { buildPresetPayload } from './spawn-wizard-review-step.js'` line since the shell
+    itself has no remaining call site for it — `buildPresetPayload`, satisfying the Playwright
+    test-contract requirement (`tests/ui/core/{spawn-wizard,phase7-presets}.spec.js` dynamically
+    `import()` it from `/js/features/spawn-wizard.js`). New module imports directly from their owning
+    modules rather than through shell re-export, per established pattern: `detectModelFamily` from
+    `spawn-wizard-chat-template.js`, `syncRapidSpeculativeFields` from `spawn-wizard-rapid-mlx.js`,
+    `kvBpe`/`formatCtx`/`formatGB` from `spawn-wizard-format.js`,
+    `buildEstimateBody`/`rapidEstimatePolicyFromWizardHardware` from `vram-estimate.js`, `showToast`
+    from `toast.js`; `showStep`/`buildSpawnPayload`/`effectiveAvailBytes`/`getModelBytes`/
+    `getSizingArch`/`isUnifiedMemory`/`dom`/`wizardState` from the shell (all already exported, none
+    needed new `export` keywords). No second-order dependency fixes were needed — grepped every
+    moved/exported symbol across all other feature modules and found zero external consumers.
+    Validated: `npm run validate-js` clean, ESLint clean on both touched files, `cargo build` succeeded,
+    focused Playwright 34/34 passed (57.5s, run from inside `tests/ui/`, including the
+    "review step exposes structured output and full sampling defaults" and both `buildPresetPayload`
+    test-contract specs). Final line counts: `spawn-wizard.js` = 4,017 lines,
+    `spawn-wizard-review-step.js` = 957 lines.
+18. `spawn-wizard-spawn.js` (9504-10079) — command preview/spawn-server/payload building; shell must **re-export `buildSpawnPayload`, `launchPortForPayload`, `supportsTunePanelForPayload`** (test contract — `tests/ui/**` dynamically imports these from `/js/features/spawn-wizard.js`).
+    **Done 2026-08-02**: extracted as `spawn-wizard-spawn.js` (601 lines) from the shell's entire
+    remaining tail (old lines 3433-4017, everything from "Spawn config preview card (step 6)" through
+    EOF) — the final decomposition step. Contains: `_renderCommandPreview` (internal), the exported
+    command-preview/submission trio (`_renderSpawnConfigCard`, `spawnServer`, `resetSpawnStatus`), the
+    three Playwright test-contract payload builders (`buildSpawnPayload`, `launchPortForPayload`,
+    `supportsTunePanelForPayload`), an internal `waitForSpawnReadiness` (called only at its own call
+    site — confirmed via grep this is an unrelated, pre-existing same-named function from
+    `spawn-readiness.js` used by `attach-detach.js`/`presets.js`; a naming coincidence predating this
+    refactor, not a shared dependency), and small internal helpers (`_u32`, `_threadsValue`,
+    `_modelNameLower`, `_imageMinTokens`/`_imageMaxTokens`, the status-message helpers). Two real bugs
+    surfaced during extraction: (1) ESLint `no-undef` on `_binaryReady` — fixed by importing it directly
+    from `spawn-wizard-binary-prereq.js` (its owning module) rather than through the shell, then removing
+    the now-dead `_binaryReady` import left behind in the shell; (2) a genuine second-order dependency —
+    `spawn-wizard-review-step.js` (step 17) still imported `buildSpawnPayload` from `./spawn-wizard.js`,
+    but it had just moved here, so its import was repointed to `./spawn-wizard-spawn.js` directly. This
+    creates a second intentional circular-module relationship (`spawn-wizard-spawn.js` ↔
+    `spawn-wizard-review-step.js`, via `buildPresetPayload`/`buildSpawnPayload` cross-references), safe
+    for the same reason as the step-15 circular pair: both references occur only inside function bodies,
+    never at module-evaluation time. Validated: `npm run validate-js` clean, ESLint clean on all three
+    touched files, `cargo build` succeeded. The full Playwright suite (268 tests, not just the three
+    focused specs, since this is the final decomposition step) surfaced two additional issues, both now
+    fixed and re-verified: (a) `core/performance.spec.js`'s JS-module-count baseline was stale (61 vs the
+    now-correct 80-81 after 18 new modules) — updated via `cd tests/ui && LLAMA_MONITOR_UI_URL=http://127.0.0.1:<port> npm run update-baseline`
+    against a manually-started `run-server.mjs` instance, `61 → 81`; (b) a genuine regression in
+    `tests/ui/core/spawn-wizard.spec.js`'s "Spawn payload leaves fit parameters unset until the toggle is
+    enabled" test — it dynamically imported `spawn-wizard.js?fit-payload-test=1` (a cache-busting query
+    string, unique to this one test) to get an isolated module instance, then mutated that instance's
+    `wizardState.hardware.fitEnabled` and called `buildSpawnPayload()`. Pre-decomposition this worked
+    because both lived in the same module instance; post-decomposition `buildSpawnPayload` lives in
+    `spawn-wizard-spawn.js`, which always imports the canonical (non-cache-busted) `./spawn-wizard.js`
+    singleton — so the query-busted `wizardState` the test mutated was a different object than the one
+    `buildSpawnPayload`'s closure actually reads, and `fit_enabled` came back `null` instead of `false`.
+    Fixed by dropping the `?fit-payload-test=1` query string (the test already explicitly sets all three
+    states itself, so it doesn't need a pristine fresh instance — every other `wizardState`-mutating test
+    in the suite uses the plain cached import path for the same reason). This is a pattern worth
+    remembering: any future test that dynamically imports a cache-busted `spawn-wizard.js?...` and expects
+    it to share live state with a function now living in an extracted module will hit the same failure —
+    prefer the plain import path unless a genuinely fresh module graph is required. Re-ran
+    `core/performance.spec.js` + the three focused specs (36/36 passed, 54.4s) to confirm both fixes.
+    Final line counts: `spawn-wizard.js` = 3,435 lines, `spawn-wizard-spawn.js` = 601 lines. **All 18
+    steps of the spawn-wizard decomposition are now complete.**
+
+Only steps 1-2 are parallel-safe; 3-18 must run sequentially against the shrinking monolith (shared
+module-scoped state and `initSpawnWizard`/`bindEvents` mutations couple them). Validate after every
+step: `npm run validate-js`, ESLint, and the focused Playwright suite on `LLAMA_MONITOR_TEST_PORT=17778`.
+End state: shell shrinks to ~3.4k lines (state/DOM-cache/event-switchboard/step-nav/validation/engine
+selection/memory detection/sizing kernel/status helpers + test-contract re-export shims) plus 18
+feature modules. Merge candidates if file count feels excessive: 7↔8, 15↔16.
+
+`static/js/features/spawn-wizard.js` is about 11,168 lines (pre-extraction figure; see above for the
+post-extraction figure). Rapid is currently an overlay inside a
 llama.cpp flow; CSS hides the reusable `wizard-main` and `hw-vram-sidebar` on step 2 even though the
 server estimate is still calculated. Do not merely restyle `#rapid-hardware-panel`.
 
@@ -1128,11 +1551,15 @@ Recommended MLX progression using the existing six-step shell:
 
 Behavior-preserving extraction candidates from `spawn-wizard.js`:
 
-- `_bindRapidMlxAdvancedControls`, `_syncRapidSpeculativeFields`, trust/pin/sidecar helpers,
-  `_applyRapidMlxDefaults`, `_applyReasoningModeLock`.
-- `_fetchRapidMlxModelProfile`, `_scheduleRapidMlxProfileFetch`, `_renderRapidMlxProfileHints`.
-- `renderRapidExclusionWarnings` and Rapid request/config construction should become adapter helpers,
-  while shared payload submission stays in the shell.
+- ~~`_bindRapidMlxAdvancedControls`, `_syncRapidSpeculativeFields`, trust/pin/sidecar helpers,
+  `_applyRapidMlxDefaults`, `_applyReasoningModeLock`.~~ **Done 2026-08-02** — moved to
+  `spawn-wizard-mlx.js`.
+- ~~`_fetchRapidMlxModelProfile`, `_scheduleRapidMlxProfileFetch`, `_renderRapidMlxProfileHints`.~~
+  **Done 2026-08-02** — moved to `spawn-wizard-mlx.js`.
+- ~~`renderRapidExclusionWarnings`~~ **Done 2026-08-02** — moved to `spawn-wizard-mlx.js`. Rapid
+  request/config construction inside `buildSpawnPayload`'s `rapid_mlx` branch is still **not**
+  extracted; it should become an adapter helper (e.g. `buildRapidMlxConfig(h, m)`) while shared
+  payload submission stays in the shell.
 - Preserve current control IDs until round-trip tests pass; introduce semantic MLX components before
   changing serialized contracts.
 

@@ -123,14 +123,18 @@ impl BackendAdapter {
     }
 
     /// Fetch a normalized metrics snapshot. Called by the shared poller loop.
+    /// `base` is the full resolved endpoint (e.g. `http://127.0.0.1:8080` for a spawned
+    /// session, or the attached remote endpoint) — never assume localhost here, since
+    /// Attach sessions may point at a remote host.
     pub async fn poll_metrics(
         &self,
+        base: &str,
         port: u16,
         session_id: &str,
     ) -> Result<InferenceMetricsSnapshot> {
         match self {
-            Self::LlamaCpp(adapter) => adapter.poll_metrics(port, session_id).await,
-            Self::RapidMlx(adapter) => adapter.poll_metrics(port, session_id).await,
+            Self::LlamaCpp(adapter) => adapter.poll_metrics(base, session_id).await,
+            Self::RapidMlx(adapter) => adapter.poll_metrics(base, port, session_id).await,
         }
     }
 

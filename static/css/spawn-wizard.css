@@ -6658,6 +6658,18 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
 .rapid-hardware-content { flex:1; min-width:0; }
 .rapid-hardware-note { margin-top:12px; padding:10px 12px; border-radius:10px; color:#cfc1f4; background:rgba(109,70,180,.14); font-size:11px; }
 
+/* MLX hardware-step grouped IA (spawn-wizard-mlx-ia.js). Reuses the
+   .mlx-native-group box styling defined for the preset editor in
+   modal-premium.css so the wizard and preset editor share one MLX
+   visual system. */
+.mlx-wiz-ia { display:flex; flex-direction:column; gap:22px; margin-top:16px; }
+.mlx-wiz-supersection { display:flex; flex-direction:column; gap:12px; }
+.mlx-wiz-supersection-title { margin:0; font-size:13px; font-weight:750; letter-spacing:.01em; color:var(--text-primary); }
+.mlx-wiz-supersection-desc { margin:-6px 0 0; font-size:11.5px; line-height:1.5; color:var(--text-muted); }
+.mlx-wiz-group.mlx-native-group { margin:0; }
+.mlx-wiz-row.hardware-field { margin:0; }
+.mlx-wiz-row.kv-inline-row { margin:0; }
+
 /* Rapid-MLX model profile hints */
 .rapid-mlx-hint-row { font-size:11px; line-height:1.5; color:var(--color-text-secondary); padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.04); }
 .rapid-mlx-hint-row:last-child { border-bottom:none; }
@@ -6674,9 +6686,11 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
 
 .engine-rapid-mlx #wizard-step-1.active { grid-template-columns:minmax(0,1fr); }
 .engine-rapid-mlx #wizard-step-1 > .wizard-sidebar { display:none; }
-.engine-rapid-mlx #wizard-step-2.active { grid-template-columns:minmax(0,1fr); }
-.engine-rapid-mlx #wizard-step-2 > .wizard-main,
-.engine-rapid-mlx #wizard-step-2 > .hw-vram-sidebar { display:none; }
+/* The MLX fit rail (hw-vram-sidebar) stays visible here — the server estimate is
+   calculated for Rapid-MLX the same as llama.cpp, and hiding it was a defect, not
+   a design choice. Only the llama.cpp-specific wizard-main column is hidden. */
+.engine-rapid-mlx #wizard-step-2 > .wizard-main { display:none; }
+.engine-rapid-mlx .rapid-hardware-panel { width:auto; margin:0; }
 
 [data-theme="light"] .wizard-engine-section { background:linear-gradient(145deg,#f5f8ff,#fff); }
 [data-theme="light"] .wizard-engine-card { background:rgba(255,255,255,.9); }

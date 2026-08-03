@@ -878,6 +878,7 @@ impl RapidMlxAdapter {
 
     pub async fn poll_metrics(
         &self,
+        _base: &str,
         port: u16,
         _session_id: &str,
     ) -> Result<InferenceMetricsSnapshot> {

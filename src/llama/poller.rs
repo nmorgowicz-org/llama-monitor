@@ -67,6 +67,8 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
 
     let mut enabled = false;
     let mut rapid_poller: Option<crate::inference::rapid_mlx::poller::RapidMlxPoller> = None;
+    let mut llama_previous_counters: Option<crate::inference::llama_cpp::CounterSnapshot> = None;
+    let mut llama_previous_counter_session: Option<String> = None;
 
     loop {
         if !enabled {
@@ -183,10 +185,10 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             continue;
         }
 
-        // Use the backend adapter to poll normalized metrics. Attached Rapid-MLX
-        // sessions construct a transient poller from their protected session key;
-        // they do not have a spawned adapter in state.backend.
-        let backend = state.backend.lock().unwrap().clone();
+        // Use the backend adapter to poll normalized metrics. Attached Rapid-MLX and
+        // llama.cpp sessions construct their poll directly from the resolved endpoint;
+        // they do not have a spawned adapter in state.backend (Attach sessions never
+        // populate it — see poll_llama_cpp_metrics for the llama.cpp case).
         {
             let port = if let Some(sess) = {
                 let sessions = state.sessions.lock().unwrap();
@@ -224,9 +226,16 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
                     .expect("poller initialized")
                     .poll()
                     .await
-            } else if let (Some(backend), true) = (backend, port != 0) {
+            } else if port != 0 {
                 rapid_poller = None;
-                backend.poll_metrics(port, &active_id).await
+                crate::inference::llama_cpp::poll_llama_cpp_metrics(
+                    &base,
+                    api_key.as_deref(),
+                    &active_id,
+                    &mut llama_previous_counters,
+                    &mut llama_previous_counter_session,
+                )
+                .await
             } else {
                 Err(anyhow::anyhow!("active backend adapter unavailable"))
             };

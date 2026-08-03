@@ -1104,6 +1104,6 @@ Returns model-family sampling recommendations for the Step 4 wizard review form 
 | `src/web/api/vram.rs` | VRAM estimation route handlers |
 | `src/web/api/models.rs` | Model library and GGUF metadata routes |
 | `src/web/api/mod.rs` | API module registry (31 route modules) |
-| `static/js/features/spawn-wizard.js` | Wizard frontend (all 5 steps) |
+| `static/js/features/spawn-wizard.js` + `spawn-wizard-*.js` | Wizard frontend, split into a shell plus ~18 focused feature modules — see [Frontend module map](spawn-wizard.md#frontend-module-map) in spawn-wizard.md |
 | `static/css/spawn-wizard.css` | Wizard styles |
 | `docs/reference/vram-estimator.md` | VRAM estimation formulas and heuristics reference |
