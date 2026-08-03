@@ -598,11 +598,23 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
   workloads — so the D25 teaching is unreachable twice over, once by deleted UI and once by unreachable input.
 
 
-##### Phase 7B5 — GPU memory utilization welcome-screen control — NOT STARTED
+##### Phase 7B5 — GPU memory utilization welcome-screen control — Verified complete (Coordinator, 2026-08-03)
 
-- **State:** Not started; new item added 2026-07-24, see followups §3.12.
-- **Scope:** (1) correct `scripts/rapid-mlx-benchmark-suite.mjs` `DEFAULT_UTILIZATION` from `'0.88'` to `'0.90'` to match upstream `rapid-mlx serve --help`'s documented default; (2) expose `--gpu-memory-utilization` (already threaded through `command.rs`/`mod.rs`/`settings.rs`, validated `[0.5, 1.0]`) as a welcome-screen/setup control, colocated with the existing Metal `iogpu` wired-limit budget surface (`src/gpu/apple`, `src/web/api/system_tools.rs`/`vram.rs`); (3) recommendation copy for the 0.90→0.95 bump must key off upstream's stated 200GB+ model-size threshold, not raw system memory — verify there is no separate automatic system-tier default before writing copy that implies one.
-- **Files (expected):** scripts/rapid-mlx-benchmark-suite.mjs, static/js/features/setup-view.js (or spawn-wizard.js if colocated there instead), src/web/api/system_tools.rs or vram.rs (read-side), presets/mod.rs (if persisted).
+- **State:** Verified complete — found already fully done via other work, never marked here.
+  (1) `scripts/rapid-mlx-benchmark-suite.mjs`'s `DEFAULT_UTILIZATION` is already `'0.90'`. (2)
+  `--gpu-memory-utilization` is exposed as a real control in both the Spawn Wizard hardware step
+  (`#spawn-rapid-gpu-memory-utilization`, `static/index.html:4038-4044`) and the Preset Editor
+  (`#modal-rapid-gpu-memory-utilization`, `presets.js`), round-trips through `buildSpawnPayload`
+  into `command.rs` (`--gpu-memory-utilization`), and is covered by
+  `tests/ui/core/rapid-phase7-fields.spec.js` and `tests/ui/core/rapid-preset-throughput.spec.js`.
+  Not literally on a "welcome screen" — it lives with the other advanced hardware/runtime tuning
+  controls instead, which is the correct home for it; a first-run welcome screen is the wrong
+  surface for a Metal-tuning flag. (3) No auto-recommendation copy claiming a system-memory-tier
+  default exists anywhere in the UI (the dropdown hints — "leave room for other apps" / "balanced"
+  / "dedicate the machine" — are generic and don't imply a 200GB threshold or any other automatic
+  tier), so there was nothing misleading to correct.
+- **Files:** scripts/rapid-mlx-benchmark-suite.mjs, static/index.html, static/js/features/presets.js,
+  static/js/features/spawn-wizard.js, src/inference/rapid_mlx/command.rs.
 
 **Phase 7 exit gate:** one fresh Verifier evaluates the complete Phase 7 diff after all of 7A and 7B are verified.
 
@@ -659,7 +671,173 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 
 ### Phase 9 — Formatting, endpoints, and revision-pinned template substitution
 
-- **State:** Not started
+- **State:** In progress — 9a verified complete (2026-08-03), Rapid-MLX overlay design frozen
+  (2026-08-03). Remaining packets 9b–9f not started. The execution companion was updated to
+  reflect work already done but not recorded: 9a's revision pinning, retained history, and
+  rollback shipped in spawn_wizard.rs without a ledger row. Phase 9 is now split into ordered
+  parts for context management: Part A (already done — lifecycle core), Part R (Rapid-MLX
+  overlay wiring — prerequisite for 9b–9f to work on Rapid-MLX), then 9b–9f.
+- **Design decision (Rapid-MLX template override, 2026-08-03):** Rapid-MLX has no CLI flag for
+  external templates. Template loading in `vllm_mlx/utils/tokenizer.py::_apply_chat_template_sidecar()`
+  checks only the model directory for `chat_template.jinja`/`chat_template.json`, falling back to
+  the embedded tokenizer template. The chosen path is **overlay directory**: when a custom template
+  is active for Rapid-MLX, create an overlay at
+  `~/.config/llama-monitor/rapid-mlx/template-overlays/<model-hash>/` containing symlinks to all
+  model files plus llama-monitor's chosen `chat_template.jinja` (copied, not symlinked). Pass the
+  overlay path as the model argument to `rapid-mlx serve`. This preserves the read-only cache
+  contract, supports the full lifecycle (version switching = change one file in overlay), and
+  integrates with existing revision pinning/rollback machinery. The selection layer
+  (`chatTemplatePath`/`chatTemplateMode`, `/api/chat-template/*`, frontend UIs) is already
+  runtime-agnostic per `docs/reference/spawn-wizard.md` — adding Rapid-MLX support is a
+  command-builder change. Future runtimes (MTPLX, etc.) follow the same pattern: overlay directory
+  or runtime-native flag, wired through the same selection layer.
+### Phase 9 Parts (ordered; each part has its own Builder/Verifier context)
+
+#### Phase 9a — Revision-pinned install + retained history + rollback + Native — Verified complete (Coordinator, 2026-08-03)
+
+- **State:** Verified complete — Coordinator, 2026-08-03. This work shipped but had no ledger row;
+  reconciled by audit of `src/web/api/spawn_wizard.rs` and `static/js/features/spawn-wizard-chat-template.js`.
+- **Commit:** present in HEAD (shipped prior to execution companion; reconciled 2026-08-03)
+- **Files:** `src/web/api/spawn_wizard.rs` (revision pinning, release history, rollback endpoints),
+  `static/js/features/spawn-wizard-chat-template.js` (History UI)
+- **Scope:** Resolve and pin an exact commit SHA at install time (not `main`); keep every installed
+  release per template name on disk instead of overwriting; UI to switch among retained releases.
+  Closes the two highest-risk gaps: silent upstream drift and no way back.
+- **Native:** already existed (`chatTemplateMode: 'embedded'` + `chatTemplatePath: null`) — no gap
+  to close, confirmed during design.
+- **Revision pinning:** `resolve_hf_commit_sha()` in `spawn_wizard.rs:131-149` resolves the exact
+  commit SHA via `GET /api/models/{repo}`, then `install-hf` fetches from `raw/{sha}/{file}`
+  instead of `raw/main/{file}`; falls back to unpinned `raw/main` if SHA resolution fails rather
+  than failing the install. `revision: Option<String>` added to `ChatTemplateInstallMeta`.
+  `install-url` has no git-revision concept — sha256 remains its immutability anchor.
+- **Retained history:** every successful install (both endpoints) recorded into
+  `~/.config/llama-monitor/chat-templates/releases/{name}.index.json` via `record_release()`,
+  deduped by sha256, with standalone content copy per release so rollback survives later overwrites.
+- **Rollback:** `POST /api/chat-template/activate` (`{name, sha256}`) copies a retained release's
+  content back into the active `{name}.jinja` and re-writes its meta.json.
+- **UI:** `GET /api/chat-template/releases?name=...` + History button/list in
+  `spawn-wizard-chat-template.js`'s `installed` state, each non-active entry with an "Activate"
+  button.
+- **Evidence:** `cargo clippy -- -D warnings` clean, `cargo test --lib` 1084 passed,
+  `npm run validate-js`/`npm run lint` clean, `cargo build --release` succeeds, `cargo fmt` clean.
+
+#### Phase 9-RapidMLX — Rapid-MLX overlay wiring (prerequisite for 9b–9f on Rapid-MLX) — Not started
+
+- **State:** Not started. Design frozen 2026-08-03.
+- **Budget:** 60k
+- **Depends on:** 9a verified complete
+- **Read:** Phase 9 design decision above, `docs/reference/spawn-wizard.md` template lifecycle
+  section, llama.cpp wiring in `src/inference/llama_cpp.rs` for `--chat-template-file`.
+- **Primary output:** Rapid-MLX consumes `chat_template_file` via overlay directory approach.
+  When a custom template is active for a Rapid-MLX launch, create an overlay directory at
+  `~/.config/llama-monitor/rapid-mlx/template-overlays/<model-hash>/` with symlinks to all model
+  files plus llama-monitor's chosen `chat_template.jinja` (copied, not symlinked). Pass overlay
+  path as the model argument. `chat_template_file: None` = no overlay, use native model dir
+  directly. The selection layer is already runtime-agnostic — this is command-builder wiring only.
+- **Completion proof:** (1) selecting a chat template in wizard/preset editor applies to both
+  llama.cpp and Rapid-MLX launches; (2) overlay dir created with correct symlinks + template file;
+  (3) Rapid-MLX launch uses overlay path when template override active; (4) native template
+  selection (`chatTemplateMode: 'embedded'`) uses real model dir, no overlay; (5) template version
+  switching (via 9a's History/Activate API) takes effect on next Rapid-MLX launch; (6) no mutation
+  of HF cache or user model directories; (7) `chat_template_file` field survives preset
+  round-trip (save→load→save); (8) tests cover overlay creation, template resolution, and the
+  "no overlay when native" path.
+- **Implementation touches:** `src/inference/rapid_mlx/model_resolver.rs` (overlay creation),
+  `src/inference/rapid_mlx/command.rs` (resolve through overlay when template active),
+  `RapidMlxConfig` (new `chat_template_file` field mirroring llama.cpp), preset migration if
+  needed for schema versioning.
+- **Runtime-specific notes:** Rapid-MLX's `_apply_chat_template_sidecar()` prefers `chat_template.jinja`
+  over embedded tokenizer template. The overlay path is accepted by Rapid-MLX's model argument
+  (it supports local directory paths). Future runtimes follow the same pattern: overlay directory
+  or runtime-native flag, wired through the same selection layer.
+- **Files:** `src/inference/rapid_mlx/model_resolver.rs`, `src/inference/rapid_mlx/command.rs`,
+  `src/inference/rapid_mlx/mod.rs` (config), `src/presets/mod.rs` (migration), `static/js/features/`
+  (both surfaces already runtime-agnostic — verify they wire the field for Rapid-MLX)
+
+#### Phase 9b — Tool-call smoke-test gate — Not started
+
+- **State:** Not started.
+- **Budget:** 40k
+- **Depends on:** 9a (API infrastructure), 9-RapidMLX (for Rapid-MLX qualification), existing
+  `scripts/rapid-mlx-benchmark-suite.mjs` infrastructure.
+- **Primary output:** Candidate template only becomes active after passing a ~1-2 minute
+  tool-call fixture subset extracted from the existing benchmark suite. Failed test leaves
+  selection unchanged (hard gate: failed-test-leaves-selection-unchanged).
+- **Design:** Extract a short fixture subset from `scripts/rapid-mlx-benchmark-suite.mjs`
+  (workspace-fixture-driven repeated tool-call rounds with scattered-marker fidelity checks).
+  Wrap in a bounded launch: spin up a temporary server, run the subset, tear down, report pass/fail.
+  New endpoint: `POST /api/chat-template/smoke-test {name, model_path}` or similar; the existing
+  activate UI calls it before flipping the active selection.
+- **Completion proof:** (1) new endpoint launches with candidate template, runs fixture subset,
+  returns structured result; (2) activation UI calls smoke-test first, only activates on pass;
+  (3) failure leaves the previously active template unchanged; (4) bounded timeout and resource
+  cleanup verified; (5) at least one passing and one failing template verified against known
+  behavior (e.g., stock Qwen3.6 template fails tool calls, froggeric variant passes).
+
+#### Phase 9c — Official Gemma4 template + provenance labeling — Not started
+
+- **State:** Not started.
+- **Budget:** 20k
+- **Depends on:** 9a (install/pin machinery)
+- **Primary output:** `google/gemma-4-31B-it`'s `chat_template.jinja` added as a second,
+  provenance-distinct Gemma4 candidate alongside existing jscott3201 community fork, labeled
+  "Official" vs "Community". Reuses 9a install/pin machinery, no new plumbing.
+- **Source:** https://huggingface.co/google/gemma-4-31B-it/blob/main/chat_template.jinja (the
+  most actively updated Gemma4 model repo for this file).
+- **Completion proof:** Both templates appear in the candidate list, each labeled with source
+  provenance (official/community), both revision-pinned, both installable and activatable through
+  existing UI.
+
+#### Phase 9d — froggeric `-opencode-v3` transform script — Not started
+
+- **State:** Not started.
+- **Budget:** 30k
+- **Depends on:** 9a (install machinery), user-supplied reference files
+- **Primary output:** Deterministic transform script that derives `<upstream-version>-opencode-v3`
+  from any froggeric/Qwen-Fixed-Chat-Templates release. Anchored on Jinja control-flow markers,
+  not blind line-number edits. Self-validated against known v21.3 before trusting on v21.4+.
+- **Evidence:** User's hand-edited variant (removes JSON-handling blocks, ~227 of 328 lines
+  touched, iterated against live Qwen3.6-27B) fixes the majority of tool-call looping.
+- **Self-validation:** Run transform against upstream v21.3
+  (`/Users/nick/froggeric_qwen-chat_templat-v21.3.jinja`) and diff output against user's
+  hand-edited result
+  (`/Users/nick/SCRIPTS/CLAUDE/froggeric_qwen-chat_template-v21.3-opencode-v3.jinja`) before
+  trusting on v21.4+.
+- **Completion proof:** (1) transform script exists, runs deterministically, self-validation diff
+  is clean; (2) derived variant installs as a normal candidate release via 9a machinery;
+  (3) gated through 9b smoke-test like any other template.
+
+#### Phase 9e — Passive HF discussion-activity signal — Not started
+
+- **State:** Not started.
+- **Budget:** 20k
+- **Depends on:** existing autoupdater in `template-autoupdater.js`
+- **Primary output:** Extend autoupdater poll to also fetch discussion metadata (title, comment
+  count, open/closed) for tracked repos via HF discussions API. Surface "N active discussions,
+  most recent: <title>" with a link — passive signal only, never auto-applied.
+- **Not automated retrofixing:** HF discussions have no structured patch format; auto-applying
+  discussion content to a template that controls tool-calling must stay human-reviewed.
+- **Key repos:** `google/gemma-4-31B-it` discussions #140 and #137 (per user, 2026-08-03).
+- **Completion proof:** Discussion signal visible in UI alongside template info; no automated
+  changes triggered; human must manually review discussion content.
+
+#### Phase 9f — Client-protocol / SillyTavern qualification — Not started
+
+- **State:** Not started. Lowest urgency; can defer independently of 9a–9e.
+- **Budget:** 30k
+- **Depends on:** 9-RapidMLX (for full backend coverage)
+- **Primary output:** Qualify chat templates against external client protocols (SillyTavern raw
+  Text vs structured Chat paths, OpenAI compatibility modes). Each path verified to preserve
+  expected formatting and tool-call structure.
+- **Completion proof:** Each client protocol/template combination verified via actual request
+  round-trip; documented which templates work with which clients.
+
+**Frontend duplication (applies to all Phase 9 UI work):** chat-template UI is hand-duplicated in
+the Spawn Wizard (`spawn-wizard-chat-template.js`) and the Preset Editor (`presets.js` +
+`static/index.html`'s `modal-chat-template-file` row) — every packet below that adds UI needs
+changes landed in both places. No shared component, no automated parity check. See
+`docs/reference/spawn-wizard.md`.
+- **Budget:** 120k
 - **Budget:** 120k
 - **Depends on:** Phases 2–3; Phase 0 template-arg grep (item 9)
 - **Read:** gap 3.9 (rewritten by E1); D11/D21/D22; A10/A27 (both resolved by E1)/A38–A40; Phase 9; template and external-client matrices; Rapid/MLX-LM/SillyTavern evidence.
@@ -866,7 +1044,9 @@ Return a focused Builder handoff. A fresh verification pass will follow.
 
 Only the Coordinator updates this table after independent verification.
 
-**Last updated:** 2026-07-30 by Coordinator. Phase 5a/5b implementation is verified complete (`791635e`, `6a14cc7`); the independent runtime-evidence closeout is active and does not reopen the code gate. The mass UNVERIFIED flag raised 2026-07-25 over Phase 7 and Phase 8 (7A-8B2, plus 7.5A-C) is now fully reconciled against a running binary: every row carries a Coordinator verdict dated 2026-07-30. Six defects were found and fixed, all invisible to the 1041-test suite; three rows are corrected to "feature removed" because the promised UI was deleted after it was marked verified; and a set of built-but-unconsumed backends is recorded in the gap register (`docs/plans/20260730-phase7_8_gap_register.md`) rather than fixed inline. Phase 8B3 remains pending and its stated dependency ("8B2 verified + screenshots approved") is only half met: 8B2 is verified, the screenshots were never re-approved.
+**Last updated:** 2026-08-03 by Coordinator. Phase 5a/5b implementation is verified complete (`791635e`, `6a14cc7`); the independent runtime-evidence closeout is active and does not reopen the code gate. The mass UNVERIFIED flag raised 2026-07-25 over Phase 7 and Phase 8 (7A-8B2, plus 7.5A-C) is now fully reconciled against a running binary: every row carries a Coordinator verdict dated 2026-07-30. Six defects were found and fixed, all invisible to the 1041-test suite; three rows are corrected to "feature removed" because the promised UI was deleted after it was marked verified; and a set of built-but-unconsumed backends is recorded in the gap register (`docs/plans/20260730-phase7_8_gap_register.md`) rather than fixed inline. Phase 8B3 remains pending and its stated dependency ("8B2 verified + screenshots approved") is only half met: 8B2 is verified, the screenshots were never re-approved.
+
+Phase 9 work discovered: Phase 9 was marked "Not started" but packet 9a (revision-pinned install, retained history, rollback) had shipped without a ledger row. Reconciled 2026-08-03 by audit of `spawn_wizard.rs`. Phase 9 now split into ordered parts (9a verified, 9-RapidMLX design frozen, 9b–9f pending). Rapid-MLX overlay approach chosen (no CLI flag exists; overlay directory with symlinks preserves read-only cache contract).
 
 **Amended 2026-07-30.** Phase 6.5 had no ledger row at all, so its state lived only in a separate working-handoff doc and a coordinator reading this table alone would have seen phase 6 → 7 and missed it. Rows for 6.5a and 6.5b are added below. That handoff is retired: its live state and open items are folded into the Phase 6.5 section of `20260718-final_rapidmlx_followups.md`, its harness prerequisites into §12.3a of `docs/reference/rapid-mlx-mtp-evidence.md`, and the document itself is **deleted** — recoverable from git history at `396644b`. Nothing outside this repo's plan/evidence pair is current MTP state. It was briefly archived with a stale-claims banner; keeping a corrected copy of a document whose content had already been absorbed was redundant, so the copy went rather than the corrections.
 
@@ -895,7 +1075,9 @@ Only the Coordinator updates this table after independent verification.
 | 8B1 | Verified complete — shipped with three defects | Coordinator, 2026-07-30 | PASS on scopes and categories, FAIL on sorting and workload-awareness. `hf-browse.js` is genuinely wired (imported by `bootstrap.js`, `models.js`, `spawn-wizard.js`); scope buttons render MLX/GGUF/All with the documented tooltips and already toggle additively — the change 8B3 was scheduled to make. Defects: (1) `resolveSortParam` maps Name→`createdAt` and Size→`downloads`, so five visible sort options collapse to two behaviours, and picking "Name" silently sorts by creation date even though `SimpleModelInfo` carries `last_modified` and `model_size_bytes` and could sort correctly client-side; (2) the search body sends `workload_profile`, which `src/web/api/hf.rs` never reads — and `sessionState.workloadProfile` is read in four places and written in none, so it is permanently null, which also pins the Models-modal estimate to the hardcoded `interactive_coding_agent`; (3) "curated authors" are a hardcoded `KNOWN_CONVERTER_PATTERNS` regex list in JS with three roles, not the seven-role backend catalog, and it classifies `Qwen/` as a converter. `HF_SORT_LABELS` and `HF_SCOPE_LABELS` are exported and consumed by nothing; there is no `HF_SCOPE.AUTO`, so the documented four-way Auto/GGUF/MLX/All scope set is three. | f290273 | Sort and workload wiring both need a fix pass — see the gap register |
 | 8B2 | Verified complete — cards shipped, lineage did not | Coordinator, 2026-07-30 | PASS on the card hierarchy, FAIL on lineage and revision. Two-level group/variant cards, format badges, role badges and the in-app model-card panel (`openCardPanel`, not a new tab) are all live. But the lineage block in `models.js:518-568` is dead code: live-verified against the real tree, all 68 inventory entries lack `hf_repo_id`, `originRepo`, `repo_id`, `hf_revision`, `original_author`, `converter`, `hf_source_info` and `provenance`, so `if (hfRepoId)` is never true — `ModelInventoryEntry` has none of those fields, and zero `.llama-monitor-source.json` / `llama-monitor-conversion.json` sidecars exist on disk. "Revision-bound qualification badges" and "repo/revision preservation" are vacuous: `SimpleModelInfo` has no `revision`/`sha` field, so the selection payload's `revision` (`hf-browse.js:240`) is always null and the revision-pinned `/api/hf/qualify` is never called. | 7011f5c+0f0b575 | 8B3 depends on "8B2 verified + screenshots approved"; the screenshots were never re-approved |
 | 8B3 | Not started | — | — | — | 8B2 verified + screenshots approved (includes scope UX fix: additive MLX+GGUF+All toggles, platform-smart defaults) |
-| 9 | Not started | — | — | — | Phases 2–3 |
+| 9a | Verified complete (2026-08-03) | Reconciled by Coordinator audit | PASS — revision pinning, retained history, rollback, History UI all present in HEAD; full gate passed (1084 tests, clippy/lint/build/fmt clean) | present in HEAD | Rapid-MLX wiring pending (9-RapidMLX part) |
+| 9-RapidMLX | Design frozen (2026-08-03); not started | — | — | — | Overlay directory approach frozen; implementation pending |
+| 9b–9f | Not started | — | — | — | Depends on 9-RapidMLX (for Rapid-MLX coverage) |
 | 10 | Not started | — | — | — | Phases 7–9 and user IA decision |
 | 11 | Not started | — | — | — | Phases 3, 5–7 |
 | 12 | Not started | — | — | — | Phases 3, 8–11 |

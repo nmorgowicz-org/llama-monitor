@@ -578,7 +578,105 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       });
 
       hint.appendChild(checkBtn);
+
+      // "History" button — lists retained releases for this template name and lets the
+      // user roll back (or forward) to any previously installed revision.
+      const historyBtn = document.createElement('button');
+      historyBtn.type = 'button';
+      historyBtn.className = 'btn-wizard-tertiary';
+      historyBtn.style.fontSize = '11px';
+      historyBtn.style.fontWeight = '700';
+      historyBtn.style.marginLeft = '6px';
+      historyBtn.style.padding = '2px 8px';
+      historyBtn.style.color = 'var(--color-accent)';
+      historyBtn.style.textDecoration = 'underline';
+      historyBtn.textContent = 'History';
+
+      const historyList = document.createElement('div');
+      historyList.style.marginTop = '6px';
+      historyList.style.display = 'none';
+
+      const tplName = data?.name || tpl?.name;
+      historyBtn.addEventListener('click', async () => {
+        if (historyList.style.display !== 'none') {
+          historyList.style.display = 'none';
+          return;
+        }
+        if (!tplName) return;
+        historyList.textContent = 'Loading…';
+        historyList.style.display = 'block';
+        try {
+          const resp = await fetch(`/api/chat-template/releases?name=${encodeURIComponent(tplName)}`, {
+            headers: { ...(window.authHeaders ? window.authHeaders() : {}) },
+          });
+          const result = resp.ok ? await resp.json() : { ok: false };
+          historyList.textContent = '';
+          if (!resp.ok || result.ok !== true) {
+            historyList.textContent = result.error || 'Failed to load history';
+            return;
+          }
+          const releases = result.releases || [];
+          if (releases.length === 0) {
+            historyList.textContent = 'No retained releases yet.';
+            return;
+          }
+          releases.forEach((rel) => {
+            const row = document.createElement('div');
+            row.style.fontSize = '10px';
+            row.style.color = 'var(--color-text-muted)';
+            row.style.marginTop = '2px';
+            const isActive = rel.sha256 === result.active_sha256;
+            const label = document.createElement('span');
+            const when = rel.installed_at ? new Date(rel.installed_at).toLocaleString() : 'unknown date';
+            const rev = rel.revision ? ` (${rel.revision.slice(0, 8)})` : '';
+            label.textContent = `${when}${rev} — ${rel.sha256.slice(0, 10)}${isActive ? ' · active' : ''}`;
+            row.appendChild(label);
+            if (!isActive) {
+              const activateBtn = document.createElement('button');
+              activateBtn.type = 'button';
+              activateBtn.className = 'btn-wizard-tertiary';
+              activateBtn.style.fontSize = '10px';
+              activateBtn.style.marginLeft = '6px';
+              activateBtn.style.padding = '0 6px';
+              activateBtn.style.color = 'var(--color-accent)';
+              activateBtn.style.textDecoration = 'underline';
+              activateBtn.textContent = 'Activate';
+              activateBtn.addEventListener('click', async () => {
+                activateBtn.disabled = true;
+                try {
+                  const actResp = await fetch('/api/chat-template/activate', {
+                    method: 'POST',
+                    headers: {
+                      ...(window.authHeaders ? window.authHeaders() : {}),
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ name: tplName, sha256: rel.sha256 }),
+                  });
+                  const actResult = actResp.ok ? await actResp.json() : { ok: false };
+                  if (actResp.ok && actResult.ok === true) {
+                    showToast('Activated release ' + rel.sha256.slice(0, 10), 'success', null, 2400);
+                    _renderChatTemplateStatus('installed', family, tpl, { ...data, _forceRefresh: true });
+                  } else {
+                    showToast(actResult.error || 'Failed to activate release', 'error');
+                    activateBtn.disabled = false;
+                  }
+                } catch (err) {
+                  showToast('Activate failed: ' + (err.message || String(err)), 'error');
+                  activateBtn.disabled = false;
+                }
+              });
+              row.appendChild(activateBtn);
+            }
+            historyList.appendChild(row);
+          });
+        } catch (err) {
+          historyList.textContent = 'Failed to load history: ' + (err.message || String(err));
+        }
+      });
+
+      hint.appendChild(historyBtn);
       bodyEl.appendChild(hint);
+      bodyEl.appendChild(historyList);
     }
     return;
   }

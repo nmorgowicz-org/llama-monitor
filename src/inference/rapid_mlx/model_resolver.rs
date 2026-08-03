@@ -1756,6 +1756,89 @@ fn hex_digest(bytes: &[u8]) -> String {
     output
 }
 
+/// Returns the base directory where template overlay directories are stored.
+/// Creates it if it does not exist. Returns `None` only if home directory cannot be determined.
+fn template_overlay_base_dir() -> Option<PathBuf> {
+    let base = dirs::home_dir()?
+        .join(".config")
+        .join("llama-monitor")
+        .join("rapid-mlx")
+        .join("template-overlays");
+    let _ = std::fs::create_dir_all(&base);
+    Some(base)
+}
+
+/// Creates a template overlay directory for a Rapid-MLX model when a custom chat template is active.
+///
+/// The overlay directory contains:
+/// - Symlinks to all model files from the original model directory (weights, tokenizer, config, etc.)
+/// - A copy of the chat template file as `chat_template.jinja` (takes precedence over native template)
+///
+/// Returns the overlay directory path. If `chat_template_file` is `None` or empty, returns the original
+/// model directory path unchanged (no overlay needed).
+///
+/// The overlay directory is named by hashing the original model path to avoid collisions and
+/// keep directory names stable across launches.
+///
+/// This preserves the read-only cache contract: no mutation of HF cache or user model directories.
+/// Switching template versions means changing the `chat_template.jinja` in the overlay.
+pub(crate) fn create_template_overlay(
+    model_dir: &str,
+    chat_template_file: Option<&str>,
+) -> Result<String> {
+    // No custom template (None or empty string): use the original model directory directly
+    let Some(template_path) = chat_template_file else {
+        return Ok(model_dir.to_string());
+    };
+    if template_path.is_empty() {
+        return Ok(model_dir.to_string());
+    }
+
+    let model_path = Path::new(model_dir);
+
+    // Validate model directory exists and is a directory
+    if !model_path.is_dir() {
+        bail!(
+            "Model directory does not exist or is not a directory: {}",
+            model_dir
+        );
+    }
+
+    // Validate template file exists and is readable
+    let template_content = std::fs::read(template_path)
+        .with_context(|| format!("Chat template file not readable: {}", template_path))?;
+
+    // Create overlay directory named by hashing the original model path
+    let base =
+        template_overlay_base_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
+    let hash = hex_digest(model_dir.as_bytes());
+    let overlay_dir = base.join(&hash[..16]); // Use first 16 chars for shorter path
+    let _ = std::fs::create_dir_all(&overlay_dir);
+
+    // Symlink all files from the original model directory (skip existing symlinks to rebuild)
+    if let Ok(entries) = std::fs::read_dir(model_path) {
+        for entry in entries.flatten() {
+            let src = entry.path();
+            let dest = overlay_dir.join(src.file_name().unwrap());
+
+            // Remove existing symlink or file to rebuild fresh
+            let _ = std::fs::remove_file(&dest);
+
+            // Only symlink files (not subdirectories) — Rapid-MLX reads flat model files
+            if src.is_file() {
+                let _ = std::os::unix::fs::symlink(&src, &dest);
+            }
+        }
+    }
+
+    // Write the chat template as chat_template.jinja (takes precedence per Rapid-MLX's
+    // _apply_chat_template_sidecar(): it prefers chat_template.jinja over embedded tokenizer template)
+    std::fs::write(overlay_dir.join("chat_template.jinja"), &template_content)
+        .with_context(|| "Failed to write chat_template.jinja into overlay directory")?;
+
+    Ok(overlay_dir.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2271,5 +2354,139 @@ mod tests {
             serde_json::to_value(source).unwrap()["future_field"]["preserve"],
             true
         );
+    }
+
+    #[test]
+    fn template_overlay_none_returns_original_path() {
+        let result = create_template_overlay("/some/model/dir", None).unwrap();
+        assert_eq!(result, "/some/model/dir");
+    }
+
+    #[test]
+    fn template_overlay_empty_string_returns_original_path() {
+        let result = create_template_overlay("/some/model/dir", Some("")).unwrap();
+        assert_eq!(result, "/some/model/dir");
+    }
+
+    #[test]
+    fn template_overlay_missing_model_dir_fails() {
+        let result = create_template_overlay("/nonexistent/model", Some("/some/template.jinja"));
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Model directory does not exist")
+        );
+    }
+
+    #[test]
+    fn template_overlay_missing_template_file_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("config.json"), b"{}").unwrap();
+        let result = create_template_overlay(
+            dir.path().to_string_lossy().as_ref(),
+            Some("/nonexistent/template.jinja"),
+        );
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Chat template file not readable")
+        );
+    }
+
+    #[test]
+    fn template_overlay_creates_symlinks_and_template() {
+        // Create a fake model directory with some files
+        let model_dir = tempfile::tempdir().unwrap();
+        fs::write(model_dir.path().join("config.json"), b"{}").unwrap();
+        fs::write(model_dir.path().join("tokenizer.json"), b"{}").unwrap();
+        fs::write(model_dir.path().join("model.safetensors"), b"weights").unwrap();
+
+        // Create a fake template file
+        let template_dir = tempfile::tempdir().unwrap();
+        let template_path = template_dir.path().join("my-template.jinja");
+        fs::write(&template_path, b"user provided template content").unwrap();
+
+        // Create overlay
+        let overlay_path = create_template_overlay(
+            model_dir.path().to_string_lossy().as_ref(),
+            Some(template_path.to_string_lossy().as_ref()),
+        )
+        .unwrap();
+
+        let overlay = Path::new(&overlay_path);
+
+        // Overlay directory exists
+        assert!(overlay.is_dir());
+
+        // chat_template.jinja exists with the correct content
+        let template_content = fs::read(overlay.join("chat_template.jinja")).unwrap();
+        assert_eq!(template_content, b"user provided template content");
+
+        // Symlinks exist for model files
+        assert!(overlay.join("config.json").exists());
+        assert!(overlay.join("tokenizer.json").exists());
+        assert!(overlay.join("model.safetensors").exists());
+
+        // Symlinks point to original files (same content)
+        assert_eq!(fs::read(overlay.join("config.json")).unwrap(), b"{}");
+        assert_eq!(fs::read(overlay.join("tokenizer.json")).unwrap(), b"{}");
+        assert_eq!(
+            fs::read(overlay.join("model.safetensors")).unwrap(),
+            b"weights"
+        );
+    }
+
+    #[test]
+    fn template_overlay_does_not_mutate_original_model_dir() {
+        let model_dir = tempfile::tempdir().unwrap();
+        fs::write(model_dir.path().join("config.json"), b"{}").unwrap();
+
+        let template_dir = tempfile::tempdir().unwrap();
+        let template_path = template_dir.path().join("my-template.jinja");
+        fs::write(&template_path, b"template content").unwrap();
+
+        // Count files in original dir before
+        let files_before: Vec<_> = fs::read_dir(model_dir.path()).unwrap().collect();
+
+        // Create overlay
+        let _overlay_path = create_template_overlay(
+            model_dir.path().to_string_lossy().as_ref(),
+            Some(template_path.to_string_lossy().as_ref()),
+        )
+        .unwrap();
+
+        // Count files in original dir after
+        let files_after: Vec<_> = fs::read_dir(model_dir.path()).unwrap().collect();
+
+        // Original dir should have exactly the same files (no chat_template.jinja added)
+        assert_eq!(files_before.len(), files_after.len());
+        assert!(!model_dir.path().join("chat_template.jinja").exists());
+    }
+
+    #[test]
+    fn template_overlay_path_is_deterministic() {
+        // Same model dir should always produce the same overlay path
+        let model_dir = tempfile::tempdir().unwrap();
+        let model_path = model_dir.path().to_string_lossy().into_owned();
+        let template_dir = tempfile::tempdir().unwrap();
+        fs::write(template_dir.path().join("template.jinja"), b"template").unwrap();
+        let template_path = template_dir
+            .path()
+            .join("template.jinja")
+            .to_string_lossy()
+            .into_owned();
+
+        // First call
+        let path1 = create_template_overlay(&model_path, Some(&template_path)).unwrap();
+
+        // Second call with same inputs
+        let path2 = create_template_overlay(&model_path, Some(&template_path)).unwrap();
+
+        assert_eq!(path1, path2);
+        assert!(path1.contains(&hex_digest(model_path.as_bytes())[..16]));
     }
 }

@@ -269,6 +269,12 @@ pub struct RapidMlxConfig {
     /// Sampling mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sampling_mode: Option<String>,
+    // ── Phase 9: chat template lifecycle ───────────────────────────────
+    /// Chat template file path (Phase 9). When set for Rapid-MLX, an overlay directory
+    /// is created with symlinks to the model files plus this template as chat_template.jinja.
+    /// None means use the model's native template. Matches llama.cpp's chat_template_file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_template_file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_temperature: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -453,6 +459,8 @@ impl Default for RapidMlxConfig {
             // Phase 7: Web UI
             // Phase 7: endpoint/safety
             sampling_mode: None,
+            // Phase 9: chat template lifecycle
+            chat_template_file: None,
             default_temperature: None,
             default_top_p: None,
             default_top_k: None,
@@ -550,6 +558,8 @@ pub struct RapidMlxAdapter {
     pub embeddings: Option<String>,
     pub gpu_memory_utilization: Option<f64>,
     pub sampling_mode: Option<String>,
+    // Phase 9: chat template lifecycle
+    pub chat_template_file: Option<String>,
     pub default_temperature: Option<f64>,
     pub default_top_p: Option<f64>,
     pub default_top_k: Option<u64>,
@@ -623,6 +633,7 @@ impl RapidMlxAdapter {
             embeddings: None,
             gpu_memory_utilization: None,
             sampling_mode: None,
+            chat_template_file: None,
             default_temperature: None,
             default_top_p: None,
             default_top_k: None,
@@ -680,6 +691,7 @@ impl RapidMlxAdapter {
         self.embeddings = config.embeddings.clone();
         self.gpu_memory_utilization = config.gpu_memory_utilization;
         self.sampling_mode = config.sampling_mode.clone();
+        self.chat_template_file = config.chat_template_file.clone();
         self.default_temperature = config.default_temperature;
         self.default_top_p = config.default_top_p;
         self.default_top_k = config.default_top_k;
@@ -970,7 +982,38 @@ impl RapidMlxAdapter {
 /// empty `--api-key`, and dropped `--served-model-name`, `--reasoning-parser`, the eight
 /// sampling defaults, the hybrid switches, and `--prefill-step-size`.
 pub(crate) fn build_launch_argv(adapter: &RapidMlxAdapter) -> command::RapidMlxCommandBuilder {
-    let mut builder = RapidMlxCommandBuilder::new(adapter.resolved_model.clone())
+    // Phase 9: if a custom chat template is active, create an overlay directory
+    // and use that as the model argument instead of the original model dir.
+    let resolved_model = if let Some(ref ct_file) = adapter.chat_template_file
+        && !ct_file.is_empty()
+    {
+        match model_resolver::create_template_overlay(
+            &adapter.resolved_model.launch_argument,
+            Some(ct_file),
+        ) {
+            Ok(overlay_path) => {
+                // Clone the resolved model with the overlay path as the launch argument
+                ResolvedRapidMlxLaunchModel {
+                    launch_argument: overlay_path,
+                    ..adapter.resolved_model.clone()
+                }
+            }
+            Err(e) => {
+                // Overlay creation failed: continue with original model dir.
+                // The launch will use the native template; this allows graceful degradation
+                // if the template file is missing or overlay creation fails.
+                eprintln!(
+                    "Warning: Rapid-MLX chat template overlay failed ({}, template: {}): using native model template",
+                    e, ct_file
+                );
+                adapter.resolved_model.clone()
+            }
+        }
+    } else {
+        adapter.resolved_model.clone()
+    };
+
+    let mut builder = RapidMlxCommandBuilder::new(resolved_model)
         .host(adapter.host.clone())
         .port(adapter.port);
 

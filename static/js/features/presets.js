@@ -3264,6 +3264,85 @@ export function initPresets() {
             button.textContent = origText;
         }
     });
+    document.getElementById('preset-chat-template-history-btn')?.addEventListener('click', async () => {
+        const list = document.getElementById('preset-chat-template-history-list');
+        if (!list) return;
+        if (list.style.display !== 'none') {
+            list.style.display = 'none';
+            return;
+        }
+        const path = (document.getElementById('modal-chat-template-file')?.value || '').trim();
+        if (!path) {
+            showToast('No template selected to view history for', 'warn');
+            return;
+        }
+        // Template name is the file stem — the stable key releases/activate are keyed by.
+        const name = path.split(/[\\/]/).pop().replace(/\.jinja$/, '');
+        list.textContent = 'Loading…';
+        list.style.display = 'block';
+        try {
+            const headers = window.authHeaders ? window.authHeaders() : {};
+            const resp = await fetch(`/api/chat-template/releases?name=${encodeURIComponent(name)}`, { headers });
+            const result = resp.ok ? await resp.json() : { ok: false };
+            list.textContent = '';
+            if (!resp.ok || result.ok !== true) {
+                list.textContent = result.error || 'Failed to load history';
+                return;
+            }
+            const releases = result.releases || [];
+            if (releases.length === 0) {
+                list.textContent = 'No retained releases yet.';
+                return;
+            }
+            releases.forEach((rel) => {
+                const row = document.createElement('div');
+                row.style.fontSize = '10px';
+                row.style.color = 'var(--color-text-muted)';
+                row.style.marginTop = '2px';
+                const isActive = rel.sha256 === result.active_sha256;
+                const label = document.createElement('span');
+                const when = rel.installed_at ? new Date(rel.installed_at).toLocaleString() : 'unknown date';
+                const rev = rel.revision ? ` (${rel.revision.slice(0, 8)})` : '';
+                label.textContent = `${when}${rev} — ${rel.sha256.slice(0, 10)}${isActive ? ' · active' : ''}`;
+                row.appendChild(label);
+                if (!isActive) {
+                    const activateBtn = document.createElement('button');
+                    activateBtn.type = 'button';
+                    activateBtn.className = 'btn-sm btn-preset';
+                    activateBtn.style.marginLeft = '6px';
+                    activateBtn.textContent = 'Activate';
+                    activateBtn.addEventListener('click', async () => {
+                        activateBtn.disabled = true;
+                        try {
+                            const actHeaders = window.authHeaders
+                                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                                : { 'Content-Type': 'application/json' };
+                            const actResp = await fetch('/api/chat-template/activate', {
+                                method: 'POST',
+                                headers: actHeaders,
+                                body: JSON.stringify({ name, sha256: rel.sha256 }),
+                            });
+                            const actResult = actResp.ok ? await actResp.json() : { ok: false };
+                            if (actResp.ok && actResult.ok === true) {
+                                showToast('Activated release ' + rel.sha256.slice(0, 10), 'success');
+                                list.style.display = 'none';
+                            } else {
+                                showToast(actResult.error || 'Failed to activate release', 'error');
+                                activateBtn.disabled = false;
+                            }
+                        } catch (err) {
+                            showToast('Activate failed: ' + (err.message || String(err)), 'error');
+                            activateBtn.disabled = false;
+                        }
+                    });
+                    row.appendChild(activateBtn);
+                }
+                list.appendChild(row);
+            });
+        } catch (err) {
+            list.textContent = 'Failed to load history: ' + (err.message || String(err));
+        }
+    });
     document.getElementById('preset-upload-chat-template-btn')?.addEventListener('click', async () => {
         try {
             const uploaded = await uploadChatTemplateFromBrowser();

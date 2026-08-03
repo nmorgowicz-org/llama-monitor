@@ -13,6 +13,11 @@ struct ChatTemplateInstallMeta {
     fetch_url: String,
     installed_at: String,
     sha256: String,
+    /// Pinned HF commit SHA the content was fetched at, when resolvable. `None` for
+    /// install-url (no git revision concept — sha256 is the immutability anchor there)
+    /// or legacy installs that predate revision pinning.
+    #[serde(default)]
+    revision: Option<String>,
 }
 
 fn template_meta_path(dest: &std::path::Path) -> std::path::PathBuf {
@@ -30,33 +35,117 @@ fn sha256_hex(content: &[u8]) -> String {
         .collect::<String>()
 }
 
-fn write_template_install_meta(
-    dest: &std::path::Path,
-    source_url: &str,
-    fetch_url: &str,
-    content: &[u8],
-) {
-    write_template_install_meta_at(dest, source_url, fetch_url, content, None);
-}
-
-/// Like `write_template_install_meta`, but allows backdating `installed_at` (e.g. to a
-/// legacy install's file mtime when backfilling metadata that never existed).
+/// Allows backdating `installed_at` (e.g. to a
+/// legacy install's file mtime when backfilling metadata that never existed) and recording
+/// the pinned HF revision the content was fetched at.
 fn write_template_install_meta_at(
     dest: &std::path::Path,
     source_url: &str,
     fetch_url: &str,
     content: &[u8],
     installed_at_override: Option<String>,
-) {
+    revision: Option<String>,
+) -> ChatTemplateInstallMeta {
     let meta = ChatTemplateInstallMeta {
         source_url: source_url.to_string(),
         fetch_url: fetch_url.to_string(),
         installed_at: installed_at_override.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
         sha256: sha256_hex(content),
+        revision,
     };
     if let Ok(json) = serde_json::to_vec_pretty(&meta) {
         let _ = std::fs::write(template_meta_path(dest), json);
     }
+    meta
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+struct ReleaseRecord {
+    sha256: String,
+    #[serde(default)]
+    revision: Option<String>,
+    source_url: String,
+    fetch_url: String,
+    installed_at: String,
+    /// Retained copy of the content, relative to the chat-templates dir's `releases/` subdir.
+    file: String,
+}
+
+fn chat_templates_releases_dir() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|h| {
+        h.join(".config")
+            .join("llama-monitor")
+            .join("chat-templates")
+            .join("releases")
+    })
+}
+
+fn release_index_path(name: &str) -> Option<std::path::PathBuf> {
+    chat_templates_releases_dir().map(|d| d.join(format!("{name}.index.json")))
+}
+
+fn read_release_index(name: &str) -> Vec<ReleaseRecord> {
+    release_index_path(name)
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Records a successful template install into the retained release history for `name`,
+/// deduped by sha256. Stores a standalone copy of the content under `releases/` so that
+/// rollback works even after the active file has been overwritten by a later update.
+fn record_release(name: &str, meta: &ChatTemplateInstallMeta, content: &[u8]) {
+    let Some(dir) = chat_templates_releases_dir() else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&dir);
+
+    let mut index = read_release_index(name);
+    if index.iter().any(|r| r.sha256 == meta.sha256) {
+        return;
+    }
+
+    let file_name = format!("{name}-{}.jinja", &meta.sha256[..16.min(meta.sha256.len())]);
+    if std::fs::write(dir.join(&file_name), content).is_err() {
+        return;
+    }
+
+    index.push(ReleaseRecord {
+        sha256: meta.sha256.clone(),
+        revision: meta.revision.clone(),
+        source_url: meta.source_url.clone(),
+        fetch_url: meta.fetch_url.clone(),
+        installed_at: meta.installed_at.clone(),
+        file: file_name,
+    });
+
+    if let (Some(path), Ok(json)) = (release_index_path(name), serde_json::to_vec_pretty(&index)) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+/// Resolves the exact commit SHA for a HF repo's `main` ref via the models API, so template
+/// fetches can be pinned to an immutable revision instead of a moving branch. Returns `None`
+/// on any failure (network, parse, missing field) — callers must fall back to unpinned
+/// `raw/main/...` fetches rather than failing the install.
+async fn resolve_hf_commit_sha(
+    client: &reqwest::Client,
+    repo: &str,
+    hf_token: &Option<String>,
+) -> Option<String> {
+    let url = format!("https://huggingface.co/api/models/{repo}");
+    let mut req = client.get(&url);
+    if let Some(tok) = hf_token
+        && !tok.is_empty()
+    {
+        req = req.header("Authorization", format!("Bearer {tok}"));
+    }
+    let resp = req.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let json: serde_json::Value = resp.json().await.ok()?;
+    json["sha"].as_str().map(|s| s.to_string())
 }
 
 fn read_template_install_meta(path: &std::path::Path) -> Option<ChatTemplateInstallMeta> {
@@ -547,7 +636,6 @@ fn api_chat_template_install_hf(
                     ));
                 }
 
-                let url = format!("https://huggingface.co/{repo}/raw/main/{file}");
                 let hf_token = crate::hf::hf_load_token();
 
                 let client = match reqwest::Client::builder()
@@ -564,6 +652,14 @@ fn api_chat_template_install_hf(
                             })),
                         ))
                     }
+                };
+
+                // Best-effort pin to an exact commit SHA so re-fetches are reproducible and
+                // history/rollback records an immutable revision, not a moving branch ref.
+                let revision = resolve_hf_commit_sha(&client, &repo, &hf_token).await;
+                let url = match &revision {
+                    Some(sha) => format!("https://huggingface.co/{repo}/raw/{sha}/{file}"),
+                    None => format!("https://huggingface.co/{repo}/raw/main/{file}"),
                 };
 
                 let mut req = client.get(&url);
@@ -618,14 +714,23 @@ fn api_chat_template_install_hf(
                     ));
                 }
 
-                write_template_install_meta(&dest, &source_url, &url, content.as_bytes());
+                let meta = write_template_install_meta_at(
+                    &dest,
+                    &source_url,
+                    &url,
+                    content.as_bytes(),
+                    None,
+                    revision.clone(),
+                );
+                record_release(&name, &meta, content.as_bytes());
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
                         "ok": true,
                         "path": dest.to_string_lossy(),
                         "already_existed": false,
-                        "source_url": source_url
+                        "source_url": source_url,
+                        "revision": revision
                     }),
                 )))
             }
@@ -801,7 +906,8 @@ fn api_chat_template_install_url(
                     ));
                 }
 
-                write_template_install_meta(&dest, &source, &source, &content);
+                let meta = write_template_install_meta_at(&dest, &source, &source, &content, None, None);
+                record_release(&name, &meta, &content);
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
@@ -888,7 +994,132 @@ fn api_chat_template_active(
         })
 }
 
-// 8) POST /api/chat-template/check-update
+// 8) GET /api/chat-template/releases?name=...
+// Returns the retained release history for a named template, newest first, for the
+// version-history / rollback UI.
+fn api_chat_template_releases(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "releases")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::query::<std::collections::HashMap<String, String>>())
+        .and_then(move |auth: Option<String>, q: std::collections::HashMap<String, String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let name = q.get("name").cloned().unwrap_or_default();
+                if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "Missing or invalid name" })),
+                    ));
+                }
+
+                let mut releases = read_release_index(&name);
+                releases.sort_by(|a, b| b.installed_at.cmp(&a.installed_at));
+
+                let active_sha = dirs::home_dir()
+                    .map(|h| {
+                        h.join(".config")
+                            .join("llama-monitor")
+                            .join("chat-templates")
+                            .join(format!("{name}.jinja"))
+                    })
+                    .and_then(|dest| read_template_install_meta(&template_meta_path(&dest)))
+                    .map(|m| m.sha256);
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "releases": releases,
+                        "active_sha256": active_sha
+                    }),
+                )))
+            }
+        })
+}
+
+// 9) POST /api/chat-template/activate
+// Rolls the active template back (or forward) to a specific retained release by sha256.
+fn api_chat_template_activate(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "activate")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let name = body["name"].as_str().unwrap_or("").to_string();
+                let sha256 = body["sha256"].as_str().unwrap_or("").to_string();
+                if name.is_empty()
+                    || sha256.is_empty()
+                    || !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+                {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "Missing or invalid name/sha256" })),
+                    ));
+                }
+
+                let releases = read_release_index(&name);
+                let Some(record) = releases.into_iter().find(|r| r.sha256 == sha256) else {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "Release not found in history" })),
+                    ));
+                };
+
+                let Some(releases_dir) = chat_templates_releases_dir() else {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "Could not determine home directory" })),
+                    ));
+                };
+                let Ok(content) = std::fs::read(releases_dir.join(&record.file)) else {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "Retained release content missing on disk" })),
+                    ));
+                };
+
+                let Some(dest) = dirs::home_dir().map(|h| {
+                    h.join(".config")
+                        .join("llama-monitor")
+                        .join("chat-templates")
+                        .join(format!("{name}.jinja"))
+                }) else {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "Could not determine home directory" })),
+                    ));
+                };
+
+                if let Err(e) = std::fs::write(&dest, &content) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": format!("Failed to activate release: {e}") })),
+                    ));
+                }
+                write_template_install_meta_at(
+                    &dest,
+                    &record.source_url,
+                    &record.fetch_url,
+                    &content,
+                    None,
+                    record.revision.clone(),
+                );
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({ "ok": true, "path": dest.to_string_lossy(), "sha256": record.sha256 }),
+                )))
+            }
+        })
+}
+
+// 10) POST /api/chat-template/check-update
 fn api_chat_template_check_update(
     _state: AppState,
     app_config: Arc<AppConfig>,
@@ -1038,6 +1269,7 @@ fn api_chat_template_check_update(
                         &fetch_url,
                         &local_bytes,
                         mtime_rfc3339.clone(),
+                        None,
                     );
                 }
 
@@ -1100,6 +1332,14 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
             state.clone(),
             config.clone(),
         ))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_chat_template_releases(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_chat_template_activate(state.clone(), config.clone()))
         .unify()
         .boxed();
     r

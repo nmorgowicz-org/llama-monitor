@@ -2172,6 +2172,18 @@ qualified: 6.5b does not begin. —_
 
 ### Phase 9 — Conversation formatting and chat-template substitution
 
+**2026-08-03 packet scoping (Coordinator):** the execution companion
+(`20260718-final_rapidmlx_followups_execution.md`) breaks this phase into six ordered packets
+(9a revision-pinned install/rollback/Native, 9b tool-call smoke-test gate extracted from the
+benchmark suite, 9c official Gemma4 template + provenance labeling, 9d froggeric
+`-opencode-v3` transform script, 9e passive HF-discussion-activity signal, 9f client-protocol/
+SillyTavern qualification) after auditing existing infrastructure (`chat-template-registry.js`,
+`template-autoupdater.js`, `spawn-wizard-chat-template.js`, `/api/chat-template/install-hf`,
+`/api/chat-template/install-url`) and finding install-dir isolation, SHA-256 capture, and
+autoupdate polling already built, but revision-pinning, rollback/history, an explicit Native
+relink, and any activation gate still missing. See the execution companion for the full breakdown
+and evidence (upstream/edited template file paths, target HF discussion links).
+
 **Objective and outcome:** Fix the §3.9 tool-call-reliability defect by substituting revision-pinned chat templates on **both** backends, and tell the truth about how each backend applies them. This is not "investigate whether Rapid can get native override first" — E1 resolved the architecture: ONE revision-pinned selection layer (identity/rollback/provenance) with two thin appliers. The driving reason is functional tool-call correctness (stock Qwen3.6/Gemma4 templates loop/fail on tool calls), not truthfulness alone.
 
 **Budget:** 120k. **Prerequisites:** Phases 2–3; A10/A27 (both resolved by E1); Phase 0 template-arg grep (item 9). **Files:** Rapid compatibility/command/info/model resolver, `src/web/api/templates.rs`, chat-template registry/updater/UI, wizard/preset/chat transport, related tests.

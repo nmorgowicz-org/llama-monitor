@@ -2614,11 +2614,13 @@
                                     <input type="text" class="pe-input" id="modal-chat-template-file" placeholder="/path/to/chat_template.jinja">
                                      <button type="button" class="btn-sm btn-preset" id="preset-recommended-chat-template-btn" title="Download the recommended community template for the selected Qwen or Gemma 4 model">Recommended</button>
                                      <button type="button" class="btn-sm btn-preset" id="preset-check-chat-template-update-btn" title="Check whether the installed template has changed upstream since it was installed">Check for updates</button>
+                                     <button type="button" class="btn-sm btn-preset" id="preset-chat-template-history-btn" title="View retained releases for this template and roll back if needed">History</button>
                                      <button type="button" class="btn-sm btn-preset" id="preset-browse-chat-template-btn" title="Choose an existing template from the local template library">Library</button>
                                     <button type="button" class="btn-sm btn-preset" id="preset-upload-chat-template-btn" title="Upload a new Jinja template from your browser">Upload</button>
                                     <button type="button" class="btn-sm btn-preset" id="preset-clear-chat-template-btn" title="Clear chat template override and use the model default">Clear</button>
                                 </div>
                                 <div class="pe-field-hint">Recommended detects Qwen or Gemma 4 from the model name. Leave blank to use the model's embedded template.</div>
+                                <div id="preset-chat-template-history-list" style="display:none;"></div>
                             </div>
                             <div class="pe-row">
                                 <div class="pe-field">

@@ -67,6 +67,49 @@ and `supportsTunePanelForPayload` from `/js/features/spawn-wizard.js` at runtime
 though these now live in `spawn-wizard-review-step.js` / `spawn-wizard-spawn.js`, the
 shell keeps `export { ... } from './module.js';` re-export lines for the test contract.
 
+## Chat templates — two frontend surfaces, one backend
+
+Chat-template selection UI exists **twice** in the frontend, and both copies must be
+updated together whenever template-install/history/rollback behavior changes:
+
+1. **Spawn Wizard** — `static/js/features/spawn-wizard-chat-template.js`, rendered inside
+   `_renderChatTemplateStatus()`'s `installed` state (Recommended/Check-for-updates/History
+   buttons).
+2. **Preset Editor** — `static/js/features/presets.js`, wired in the modal's chat-template
+   field button row (`preset-recommended-chat-template-btn`,
+   `preset-check-chat-template-update-btn`, `preset-chat-template-history-btn`, etc. — HTML
+   in `static/index.html` around `modal-chat-template-file`).
+
+Both call the same backend endpoints (`/api/chat-template/install-hf`, `/install-url`,
+`/active`, `/check-update`, `/releases`, `/activate` — all in `src/web/api/spawn_wizard.rs`)
+but are two independent hand-written UIs, not a shared component. A new button, a new
+history/rollback action, a new status state — anything user-facing — needs to land in
+**both** `spawn-wizard-chat-template.js` and `presets.js`, or the two surfaces will drift
+(e.g. the Wizard could gain rollback while the Preset Editor's saved presets have no way
+to roll back a template applied outside the wizard flow). There is no automated check for
+this parity; it must be done by hand each time.
+
+### Runtime coverage — llama.cpp only today
+
+The chat-template file (`chatTemplatePath` / `chat_template_file`) is consumed by the
+**llama.cpp** runtime only (`src/inference/llama_cpp.rs`, `--chat-template-file`).
+**Rapid-MLX does not consume it at all** — `src/inference/rapid_mlx/` has no
+`chat_template_file`/`--chat-template` wiring; it only knows about `chat_template_kwargs`
+(sampling/formatting kwargs passed through to the MLX server, not a template file
+substitution). This means every Phase 9 chat-template enhancement (revision pinning,
+retained history, rollback, official Gemma4 template, froggeric transform, tool-call
+smoke-test gate) currently only takes effect when the model is launched on llama.cpp — a
+Rapid-MLX launch silently ignores whatever custom template is installed/selected.
+
+When adding template support to Rapid-MLX (or any future runtime), the template selection
+layer (`chatTemplatePath`/`chatTemplateMode`, the `/api/chat-template/*` install/history
+API, and the frontend UI in both surfaces above) is already runtime-agnostic and does not
+need to change — only the runtime-specific command-builder needs a new branch that reads
+`chatTemplatePath` and translates it into that runtime's equivalent flag (if one exists;
+confirm the CLI actually supports an external template override before wiring it — see
+`reference_rapid_mlx_cli_no_json.md`-style caution about assuming flags exist without
+checking `--help`/source first).
+
 ## Steps
 
 | Step | Purpose |

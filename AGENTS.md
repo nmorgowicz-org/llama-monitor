@@ -145,6 +145,16 @@ Constant naming:
 - JS: skip `js/` prefix, join path parts with `_`, replace `.` and `-` with `_`, uppercase
 - Root: filename with `.` and `-` replaced by `_`, uppercase
 
+## Chat Template UI — Dual-Surface Change
+
+Chat-template selection UI is hand-duplicated in two places: the Spawn Wizard
+(`spawn-wizard-chat-template.js`) and the Preset Editor (`presets.js` +
+`static/index.html`'s `modal-chat-template-file` row). Any change to install/history/
+rollback/status behavior must be made in **both** — see `docs/reference/spawn-wizard.md`
+("Chat templates — two frontend surfaces, one backend") for the full breakdown, including
+the current llama.cpp-only runtime coverage gap (Rapid-MLX does not consume
+`chat_template_file` yet).
+
 ## JavaScript Linting
 
 After modifying `.js` under `static/js/`:
