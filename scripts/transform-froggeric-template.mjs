@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Deterministic transform script: derives <version>-no_json-v21.3
+ * Deterministic transform script: derives <version>-opencode-v3
  * from any froggeric/Qwen-Fixed-Chat-Templates release.
  *
  * Anchored on Jinja control-flow markers, not blind line-number edits.
@@ -13,7 +13,7 @@
  *   # or set env vars: FROGGERIC_V213_UPSTREAM, FROGGERIC_V213_REFERENCE
  *
  * Self-test mode requires:
- *   An upstream froggeric template and its known -no_json-v21.3 reference output.
+ *   An upstream froggeric template and its known -opencode-v3 reference output.
  *   Set via --upstream/--reference flags or FROGGERIC_V213_UPSTREAM/FROGGERIC_V213_REFERENCE env vars.
  */
 
@@ -51,7 +51,7 @@ function main() {
 
   if (!outputPath) {
     const base = inputPath.replace(/\.jinja$/, '').replace(/\.jinja\.txt$/, '');
-    outputPath = base + '-no_json-v21.3.jinja';
+    outputPath = base + '-opencode-v3.jinja';
   }
 
   const input = readFileSync(inputPath, 'utf-8');
@@ -124,9 +124,9 @@ function runSelfTest(cliUpstream, cliReference) {
 }
 
 /**
- * Apply the -no_json-v21.3 transform anchored on Jinja control-flow markers:
+ * Apply the -opencode-v3 transform anchored on Jinja control-flow markers:
  *
- * 1. Append -no_json-v21.3 to template_version
+ * 1. Append -opencode-v3 to template_version
  * 2. Remove _tool_format variable declaration
  * 3. In tool_instructions block: strip all JSON-format conditional branches
  * 4. In tool-call output block: strip JSON-format branch, keep only XML
@@ -134,12 +134,12 @@ function runSelfTest(cliUpstream, cliReference) {
 function applyTransform(input) {
   let result = input;
 
-  // 1. Append -no_json-v21.3 to template_version
+  // 1. Append -opencode-v3 to template_version
   // Anchor: {%- set template_version = "..." %}
   result = result.replace(
     /\{%-\s*set\s+template_version\s*=\s*"([^"]+)"\s*%\}/,
     (match, version) => {
-      const newVersion = version.endsWith('-no_json-v21.3') ? version : `${version}-no_json-v21.3`;
+      const newVersion = version.endsWith('-opencode-v3') ? version : `${version}-opencode-v3`;
       return `{%- set template_version = "${newVersion}" %}`;
     },
   );
