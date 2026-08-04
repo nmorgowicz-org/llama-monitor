@@ -837,7 +837,8 @@ impl RapidMlxAdapter {
 
     pub async fn build_launch(&self) -> Result<SupervisedLaunch> {
         let hybrid_mode = self.resolve_hybrid_mode();
-        let builder = apply_phase7_adapter_config(build_launch_argv(self), self);
+        let (argv_builder, overlay_warning) = build_launch_argv(self);
+        let builder = apply_phase7_adapter_config(argv_builder, self);
 
         // Override hybrid_mode if resolved differently (e.g. Hybrid DeltaNet auto-detection)
         let builder = if hybrid_mode != self.hybrid_mode {
@@ -855,6 +856,7 @@ impl RapidMlxAdapter {
             self.compatibility.version,
             self.compatibility.state.label()
         ));
+        launch.warnings.extend(overlay_warning);
         Ok(launch)
     }
 
@@ -981,9 +983,12 @@ impl RapidMlxAdapter {
 /// copy, which had drifted: the preview invented `--log-level INFO`, `--timeout 60` and an
 /// empty `--api-key`, and dropped `--served-model-name`, `--reasoning-parser`, the eight
 /// sampling defaults, the hybrid switches, and `--prefill-step-size`.
-pub(crate) fn build_launch_argv(adapter: &RapidMlxAdapter) -> command::RapidMlxCommandBuilder {
+pub(crate) fn build_launch_argv(
+    adapter: &RapidMlxAdapter,
+) -> (command::RapidMlxCommandBuilder, Option<String>) {
     // Phase 9: if a custom chat template is active, create an overlay directory
     // and use that as the model argument instead of the original model dir.
+    let mut overlay_warning = None;
     let resolved_model = if let Some(ref ct_file) = adapter.chat_template_file
         && !ct_file.is_empty()
     {
@@ -1001,11 +1006,13 @@ pub(crate) fn build_launch_argv(adapter: &RapidMlxAdapter) -> command::RapidMlxC
             Err(e) => {
                 // Overlay creation failed: continue with original model dir.
                 // The launch will use the native template; this allows graceful degradation
-                // if the template file is missing or overlay creation fails.
-                eprintln!(
-                    "Warning: Rapid-MLX chat template overlay failed ({}, template: {}): using native model template",
-                    e, ct_file
+                // if the template file is missing or overlay creation fails. Also surfaced
+                // as a launch warning (Phase 9 B3) so this isn't silent to the operator.
+                let msg = format!(
+                    "Rapid-MLX chat template overlay failed ({e}, template: {ct_file}): using native model template"
                 );
+                eprintln!("Warning: {msg}");
+                overlay_warning = Some(msg);
                 adapter.resolved_model.clone()
             }
         }
@@ -1035,13 +1042,15 @@ pub(crate) fn build_launch_argv(adapter: &RapidMlxAdapter) -> command::RapidMlxC
         builder = builder.served_model_name(name.clone());
     }
 
-    builder
+    let builder = builder
         .trust_remote_code_consent(adapter.trust_remote_code_consent.clone())
         .tool_call_parser(adapter.tool_call_parser.clone())
         .reasoning_parser(adapter.reasoning_parser.clone())
         .auto_tool_choice(adapter.auto_tool_choice)
         .no_thinking(adapter.no_thinking)
-        .escape_hatch_flags(adapter.escape_hatch_flags.clone())
+        .escape_hatch_flags(adapter.escape_hatch_flags.clone());
+
+    (builder, overlay_warning)
 }
 
 /// `pub(crate)` for the same reason as [`build_launch_argv`]: the command-preview endpoint

@@ -662,6 +662,7 @@ impl LlamaCppAdapter {
         let env = launch_environment(&self.app_config.gpu_backend, &self.gpu_env, &cwd);
 
         Ok(SupervisedLaunch {
+            warnings: Vec::new(),
             program,
             args,
             env,

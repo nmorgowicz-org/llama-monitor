@@ -18,6 +18,10 @@ pub struct SupervisedLaunch {
     pub cwd: Option<PathBuf>,
     pub port: u16,
     pub redacted_summary: String,
+    /// Non-fatal issues discovered while building the launch (e.g. a chat-template
+    /// overlay that failed and fell back to the model's native template). Surfaced
+    /// to the UI's server log so degraded launches aren't silent.
+    pub warnings: Vec<String>,
 }
 
 /// Callbacks fired for process output and unexpected exits.
@@ -387,6 +391,7 @@ mod tests {
             cwd: None,
             port: 8080,
             redacted_summary: "test".into(),
+            warnings: Vec::new(),
         };
 
         let diagnostic = redacted_spawn_command(&launch);

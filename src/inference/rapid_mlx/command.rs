@@ -648,6 +648,7 @@ impl RapidMlxCommandBuilder {
                 "Rapid-MLX serve: {} on port {}",
                 self.model.display_name, self.port
             ),
+            warnings: Vec::new(),
         })
     }
 }

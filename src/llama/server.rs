@@ -49,6 +49,9 @@ pub(crate) async fn start_backend(
         *last_spawn_cmd = crate::inference::supervisor::redacted_spawn_command(&launch);
     }
     state.push_log(format!("[monitor] {}", launch.redacted_summary));
+    for warning in &launch.warnings {
+        state.push_log(format!("[monitor] warning: {warning}"));
+    }
     let generation = state.server_generation.fetch_add(1, Ordering::AcqRel) + 1;
     let supervisor = Arc::new(Supervisor::new(
         launch,

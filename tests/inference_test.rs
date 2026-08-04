@@ -44,6 +44,7 @@ async fn test_supervisor_spawn_and_log() {
         cwd: None,
         port: 8000,
         redacted_summary: "test".to_string(),
+        warnings: Vec::new(),
     };
     let supervisor = Arc::new(Supervisor::new(launch.clone(), observer.clone(), state, 0));
 
@@ -76,6 +77,7 @@ async fn test_supervisor_crash_detection() {
         cwd: None,
         port: 8001,
         redacted_summary: "test crash".to_string(),
+        warnings: Vec::new(),
     };
     let supervisor = Arc::new(Supervisor::new(launch.clone(), observer.clone(), state, 0));
 
@@ -123,6 +125,7 @@ async fn test_wait_for_exit_observes_completed_crash_cleanup() {
         cwd: None,
         port: 8004,
         redacted_summary: "early exit ordering".to_string(),
+        warnings: Vec::new(),
     };
     let supervisor = Arc::new(Supervisor::new(launch, observer.clone(), state.clone(), 9));
 
@@ -156,6 +159,7 @@ async fn test_supervisor_intentional_stop() {
         cwd: None,
         port: 8002,
         redacted_summary: "test stop".to_string(),
+        warnings: Vec::new(),
     };
     let supervisor = Arc::new(Supervisor::new(
         launch.clone(),
@@ -207,6 +211,7 @@ async fn test_supervisor_graceful_stop_delivers_sigterm() {
         cwd: None,
         port: 8010,
         redacted_summary: "graceful stop fixture".to_string(),
+        warnings: Vec::new(),
     };
     let supervisor = Arc::new(Supervisor::new(launch, observer.clone(), state, 0));
     supervisor.clone().start().await.unwrap();
@@ -232,6 +237,7 @@ async fn test_supervisor_forces_kill_after_grace_period() {
         cwd: None,
         port: 8011,
         redacted_summary: "forced stop fixture".to_string(),
+        warnings: Vec::new(),
     };
     let supervisor = Arc::new(
         Supervisor::new(launch, observer.clone(), state.clone(), 0)
@@ -267,6 +273,7 @@ async fn test_stop_cancels_process_while_readiness_is_pending() {
         cwd: None,
         port: 8003,
         redacted_summary: "pending readiness".to_string(),
+        warnings: Vec::new(),
     };
     let supervisor = Arc::new(Supervisor::new(launch, observer.clone(), state.clone(), 11));
     let pid = supervisor.clone().start().await.unwrap();

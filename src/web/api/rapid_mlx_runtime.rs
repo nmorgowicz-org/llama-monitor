@@ -678,7 +678,7 @@ async fn build_command_preview(
     // from the model's own config, so a model whose metadata forces hybrid may launch with a
     // switch the preview does not show. The preview reports the configured value.
     let builder = crate::inference::rapid_mlx::apply_phase7_adapter_config(
-        crate::inference::rapid_mlx::build_launch_argv(&adapter),
+        crate::inference::rapid_mlx::build_launch_argv(&adapter).0,
         &adapter,
     );
 
@@ -2916,7 +2916,7 @@ mod command_preview_parity_tests {
             ResolvedRapidMlxLaunchModel::validated_alias("model").unwrap(),
             config,
         );
-        apply_phase7_adapter_config(build_launch_argv(&adapter), &adapter)
+        apply_phase7_adapter_config(build_launch_argv(&adapter).0, &adapter)
             .build(
                 "rapid-mlx".into(),
                 &ServeCapabilities::from_help(ALL_SERVE_FLAGS),
