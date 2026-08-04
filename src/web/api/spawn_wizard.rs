@@ -2051,6 +2051,17 @@ struct DiscussionSource {
     title: String,
 }
 
+fn infer_source_repo_from_template_name(template_name: &str) -> Option<String> {
+    let lower = template_name.to_lowercase();
+    if lower.contains("gemma") && (lower.contains("4") || lower.contains("gemma4")) {
+        return Some("google/gemma-4-31B-it".to_string());
+    }
+    if lower.contains("qwen") || lower.contains("froggeric") {
+        return Some("froggeric/Qwen-Fixed-Chat-Templates".to_string());
+    }
+    None
+}
+
 async fn fetch_hf_discussions(repo: &str) -> Result<Vec<DiscussionMeta>, String> {
     let repo_clean = repo.trim_end_matches('/');
     let url = format!("https://huggingface.co/api/models/{repo_clean}/discussions?limit=10");
@@ -2178,9 +2189,10 @@ fn api_chat_template_discussions(
                     ));
                 }
                 let name_clone = name.clone();
-                let source_repo = resolve_template_source_repo(&name);
+                let source_repo = resolve_template_source_repo(&name)
+                    .unwrap_or_else(|_| infer_source_repo_from_template_name(&name));
                 let resp = match source_repo {
-                    Ok(Some(repo)) => match fetch_hf_discussions(&repo).await {
+                    Some(repo) => match fetch_hf_discussions(&repo).await {
                         Ok(discussions) => DiscussionsResponse {
                             ok: true,
                             template_name: name_clone,
@@ -2196,21 +2208,14 @@ fn api_chat_template_discussions(
                             error: Some(e),
                         },
                     },
-                    Ok(None) => DiscussionsResponse {
+                    None => DiscussionsResponse {
                         ok: false,
                         template_name: name_clone,
                         source_repo: None,
                         discussions: Vec::new(),
                         error: Some(
-                            "Template not installed from HF; no source repo to poll".into(),
+                            "No HF source repo detected for this template".into(),
                         ),
-                    },
-                    Err(e) => DiscussionsResponse {
-                        ok: false,
-                        template_name: name_clone,
-                        source_repo: None,
-                        discussions: Vec::new(),
-                        error: Some(e),
                     },
                 };
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
