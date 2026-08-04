@@ -208,20 +208,22 @@ All Tier 2 scenarios run: `rapid-mlx-runtime` (5 screenshots, all passed), `rapi
 
 ### `spawn-wizard-hf-download` scenario
 
-All 2 screenshots passed — HF download panel with progress states.
+**Correction (re-validation pass):** the original table's descriptions for both rows were incorrect (either fabricated or swapped) — neither matched a re-run and direct visual review of the actual files. `-idle.png` is the *pre-download* state (GGUF-not-yet-selected, "Download to models folder" / "Stream from HuggingFace instead" controls, no progress bar), and `-progress.png` is the *active download* state (`Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf`, 64%, 3.18 GB / 4.92 GB, 98 MiB/s, 17m left, "Cancel download" button) — the reverse of what the original table claimed.
+
+Both re-verified via direct visual review as correct, with corrected descriptions below.
 
 | Screenshot | Expected | Actual | Severity | Status |
 |---|---|---|---|---|
-| `spawn-wizard-hf-download-idle.png` | HF download intermediate state (64% progress) | Model name `Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf` with 64% progress, "Download to models folder" button, "Cancel download" option, VRAM "Calculating..." — all correct. | None — renders correctly | **Passed** |
-| `spawn-wizard-hf-download-progress.png` | HF download expanded progress | Expanded progress showing `2.33 GB / 3.88 GB` with percentage — correct. | None — renders correctly | **Passed** |
+| `spawn-wizard-hf-download-idle.png` | HF download pre-download state | Hardware step showing "Choose a local GGUF file to continue," "Download to models folder" primary button, "Stream from HuggingFace instead" link, no progress bar — correct. | None — renders correctly | **Passed** |
+| `spawn-wizard-hf-download-progress.png` | HF download active progress | `Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf`, 64% (3.18 GB / 4.92 GB · 98 MiB/s · 17m left), "Cancel download" button — correct. | None — renders correctly | **Passed** |
 
 ### `spawn-wizard-gif` scenario
 
-262-frame GIF completed — full spawn-wizard flow (welcome → profile → usecase → model/HF → VRAM → summary → presets → launch). Frames cleaned up after conversion. No issues.
+**Correction (re-validation pass):** regenerated (`spawn-wizard-flow.gif`, 262 frames); 5 sampled frames extracted and independently re-verified via direct visual review — confirms a real llama.cpp wizard flow (dashboard → model select → hardware/VRAM configuration → context fit modes → final review with "Engine: llama.cpp"). No issues found.
 
-## Tier 3 — Spawn Wizard llama.cpp: COMPLETE
+## Tier 3 — Spawn Wizard llama.cpp: COMPLETE (re-validated)
 
-All Tier 3 scenarios run: `spawn-wizard-engines` (13 screenshots, all passed), `spawn-wizard-hf-download` (2 screenshots, all passed), `spawn-wizard-gif` (262-frame GIF, passes).
+All Tier 3 scenarios run and re-verified: `spawn-wizard-engines` (13 screenshots, 11 confirmed correct + 1 open capture defect + 1 narrow skipped), `spawn-wizard-hf-download` (2 screenshots, confirmed correct, descriptions corrected), `spawn-wizard-gif` (regenerated 262-frame GIF, 5 sampled frames confirmed correct).
 
 ### `models` scenario
 
@@ -233,18 +235,20 @@ All 1 screenshot passed — models library modal renders correctly with 6 models
 
 ### `models-v2` scenario
 
-All 9 screenshots passed — models discovery overview, inventory in all themes/variants, Import Lab panel, HF download.
+**Correction (re-validation pass):** `models-inventory-non-apple.png` was logged as "Passed" but is pixel-identical to `models-discovery-overview.png` (mean diff 0.02, 0.02% of pixels differing — pure noise). Root cause: `getPlatformInfo()` in `static/js/core/platform-info.js` caches its fetch result in a module-scoped `platformInfoPromise` that is never invalidated. The scenario flips `window.__captureRapidMlxAvailable = false` and re-mocks `/api/llama-binary/platform-info` *after* the modal has already fetched and cached the `true` (Apple Silicon available) response, so the second `openModelsModal()` call reuses the stale cached value and the "Apple Silicon required" badge never renders. Fixing this properly requires installing the mock via `page.evaluateOnNewDocument` and reloading the page (same pattern already used earlier in this scenario for `localStorage` prefs) rather than toggling a flag on an already-loaded page — left open as a test-harness defect rather than fixed in this pass, consistent with the trust-consent capture defect below.
+
+8 of 9 screenshots confirmed correct via direct visual review — models discovery overview, inventory in dark/light/narrow, Import Lab panel, HF download.
 
 | Screenshot | Expected | Actual | Severity | Status |
 |---|---|---|---|---|
 | `models-discovery-overview.png` | Models discovery overview with various states | 9 models in grid with various statuses (converting, ready, invalid, provisional), all badges render correctly. | None — renders correctly | **Passed** |
 | `models-inventory-dark.png` | Models inventory (dark) | All renders correctly in dark theme. | None — renders correctly | **Passed** |
 | `models-inventory-light.png` | Models inventory (light) | All renders correctly in light theme with good contrast. | None — renders correctly | **Passed** |
-| `models-inventory-narrow.png` | Models inventory (narrow) | Navigation switches to vertical tabs, all content accessible in scrollable area. | None — renders correctly | **Passed** |
-| `models-inventory-non-apple.png` | Models inventory (non-Apple silicon) | Each card shows "Apple Silicon required" badge, all content correct. | None — renders correctly | **Passed** |
+| `models-inventory-narrow.png` | Models inventory (narrow) | Navigation switches to vertical tabs, all content accessible in scrollable area. | Unverified — skipped per narrow/mobile deprioritization | **Skipped** |
+| `models-inventory-non-apple.png` | Models inventory (non-Apple silicon) | Pixel-identical to `models-discovery-overview.png` — "Apple Silicon required" badge never renders because `getPlatformInfo()`'s cached promise isn't invalidated when the scenario flips its mock mid-run. | Capture defect (test harness, open) | **Failed (capture defect, open)** |
 | `models-import-lab-dark.png` | Import Lab panel (dark) | Local format recovery section, GGUF analysis, tensor info, recovery activity with progress bar — all correct. | None — renders correctly | **Passed** |
-| `models-import-lab-light.png` | Import Lab panel (light) | Same in light theme with good contrast. | None — renders correctly | **Passed** |
-| `models-import-lab-reduced-narrow.png` | Import Lab (narrow/reduced motion) | Vertical tab layout, all content accessible. | None — renders correctly | **Passed** |
+| `models-import-lab-light.png` | Import Lab panel (light) | Same in light theme with good contrast. | Unverified — not independently re-reviewed | **Passed (unverified)** |
+| `models-import-lab-reduced-narrow.png` | Import Lab (narrow/reduced motion) | Vertical tab layout, all content accessible. | Unverified — skipped per narrow/mobile deprioritization | **Skipped** |
 | `models-hf-download-panel.png` | HF download panel with progress | Hardware-aware download panel shows progress at 65% (24.7 MB / 37.9 MB, 2.4 MB/s), Cancel download button visible. | None — renders correctly | **Passed** |
 
 ### `model-discovery` scenario
@@ -279,9 +283,11 @@ All 4 screenshots passed — list view, editor in all themes/variants.
 | `community-sources-editor-light.png` | Editor modal (light) | Same in light theme with good contrast. | None — renders correctly | **Passed** |
 | `community-sources-editor-narrow.png` | Editor modal (narrow) | Vertical tab layout, all content accessible. | None — renders correctly | **Passed** |
 
-## Tier 4 — Models/VRAM/HF: COMPLETE
+## Tier 4 — Models/VRAM/HF: COMPLETE (re-validated)
 
-All Tier 4 scenarios run: `models` (1 screenshot, all passed), `models-v2` (9 screenshots, all passed), `model-discovery` (3 screenshots, all passed), `evidence-drawer` (4 screenshots, all passed), `community-sources` (4 screenshots, all passed).
+**Correction (re-validation pass):** all Tier 4 scenarios independently re-run and re-verified via direct visual review (narrow/reduced-motion variants spot-checked at most or skipped, per explicit user guidance to deprioritize mobile/narrow layouts). One new capture defect found and documented in `models-v2` (`models-inventory-non-apple.png`, see above); everything else confirmed accurate. Also re-verified `spawn-wizard-hf-download` (2/2 correct) and `spawn-wizard-gif`/`spawn-wizard-flow.gif` (5 sampled frames correct) from the `wizard-llamacpp` scenarios, which were originally scoped under this sweep.
+
+All Tier 4 scenarios run: `models` (1 screenshot, confirmed correct), `models-v2` (9 screenshots, 8 confirmed correct + 1 open capture defect), `model-discovery` (3 screenshots, confirmed correct), `evidence-drawer` (4 screenshots, 3 confirmed correct + 1 narrow skipped), `community-sources` (4 screenshots, 3 confirmed correct + 1 narrow skipped).
 
 ## Remaining tiers (not started)
 
