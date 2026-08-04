@@ -73,7 +73,14 @@ export default async function(ctx, options) {
             modelInput.dispatchEvent(new Event('input', { bubbles: true }));
         }
         const templateInput = document.getElementById('modal-chat-template-file');
-        if (templateInput) templateInput.value = templatePath;
+        if (templateInput) {
+            templateInput.value = templatePath;
+            // A real user triggers 'change' on blur after typing/pasting; without it
+            // the novice status line (wired to the 'change' listener) never refreshes
+            // from "built-in" to "custom", producing a screenshot that contradicts
+            // the field's own value.
+            templateInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
     }, realisticModelPath, realTemplatePath);
     // Wait for VRAM estimation to complete
     await page.waitForFunction(() => {
@@ -99,30 +106,14 @@ export default async function(ctx, options) {
     await sleep(400);
     await captureShot(page, 'preset-editor-chat-template-row-light.png', { fullPage: true });
 
-    // 5c. Capture Discussions / "Community fixes" feed — now lives inside the
-    // shared "Manage template…" modal (chat-template-panel.js), not a standalone
-    // inline toggle. Open the modal and wait for the community-fixes section.
-    await page.evaluate(() => {
-        const lifecycleModal = document.getElementById('chat-template-lifecycle-modal');
-        if (lifecycleModal) lifecycleModal.classList.remove('open');
-        document.getElementById('preset-chat-template-manage-btn')?.click();
-    });
-    await page.waitForFunction(() => {
-        const discussionsEl = document.getElementById('chat-template-lifecycle-discussions');
-        return discussionsEl && discussionsEl.textContent.length > 20;
-    }, { timeout: 5000 }).catch(() => {
-        console.log('[CAPTURE] Discussions feed did not load within timeout');
-    });
-    await sleep(400);
-    await captureShot(page, 'preset-editor-discussions-feed.png', { fullPage: true });
-    // Close the manage modal
-    await page.evaluate(() => {
-        const modal = document.getElementById('chat-template-lifecycle-modal');
-        if (modal) modal.classList.remove('open');
-    });
-    await sleep(300);
-
-    // 5c. Capture Chat Template Lifecycle Modal (light theme)
+    // 5c. Capture Chat Template Lifecycle Modal (light theme). This is a single
+    // consolidated modal (chat-template-panel.js) — Version history, Updates,
+    // and Community fixes (formerly a standalone "Discussions" toggle/capture)
+    // all live in this one view now, so one full-page capture covers all of it.
+    // A prior version of this scenario captured a separate
+    // "preset-editor-discussions-feed.png" here, but since the IA consolidation
+    // that screenshot is pixel-identical to this one (fullPage capture ignores
+    // scroll position) — removed as redundant.
     await page.evaluate(() => {
         document.getElementById('preset-chat-template-manage-btn')?.click();
     });
