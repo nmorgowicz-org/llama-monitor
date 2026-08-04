@@ -2339,6 +2339,19 @@ async function scenarioPresetEditor(ctx, options) {
     });
     await sleep(300);
 
+    // 5c. Capture Chat Template Lifecycle Modal (light theme)
+    await page.evaluate(() => {
+        document.getElementById('preset-chat-template-manage-btn')?.click();
+    });
+    await sleep(1500);
+    await captureShot(page, 'preset-editor-lifecycle-modal-light.png', { fullPage: true });
+    // Close lifecycle modal
+    await page.evaluate(() => {
+        const modal = document.getElementById('chat-template-lifecycle-modal');
+        if (modal) modal.classList.remove('open');
+    });
+    await sleep(300);
+
     // 5d. Capture Create fix modal in light theme
     await page.evaluate(() => {
         document.getElementById('preset-chat-template-create-fix-btn')?.click();
@@ -2363,6 +2376,20 @@ async function scenarioPresetEditor(ctx, options) {
         document.documentElement.removeAttribute('data-theme');
     });
     await sleep(300);
+
+    // 5d. Capture Chat Template Lifecycle Modal (dark theme)
+    await page.evaluate(() => {
+        document.getElementById('preset-chat-template-manage-btn')?.click();
+    });
+    await sleep(1500);
+    await captureShot(page, 'preset-editor-lifecycle-modal-dark.png', { fullPage: true });
+    // Close lifecycle modal
+    await page.evaluate(() => {
+        const modal = document.getElementById('chat-template-lifecycle-modal');
+        if (modal) modal.classList.remove('open');
+    });
+    await sleep(300);
+
     await page.evaluate(() => {
         document.getElementById('preset-chat-template-create-fix-btn')?.click();
     });

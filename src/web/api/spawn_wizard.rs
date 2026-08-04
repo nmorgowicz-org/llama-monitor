@@ -2213,9 +2213,7 @@ fn api_chat_template_discussions(
                         template_name: name_clone,
                         source_repo: None,
                         discussions: Vec::new(),
-                        error: Some(
-                            "No HF source repo detected for this template".into(),
-                        ),
+                        error: Some("No HF source repo detected for this template".into()),
                     },
                 };
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
