@@ -2326,7 +2326,12 @@ async function scenarioPresetEditor(ctx, options) {
     await page.evaluate(() => {
         document.getElementById('preset-chat-template-discussions-btn')?.click();
     });
-    await sleep(600);
+    // Wait for feed to render (API call takes time)
+    await page.waitForFunction(() => {
+        const list = document.getElementById('preset-chat-template-discussions-list');
+        return list && list.style.display !== 'none' && list.textContent.length > 20;
+    }, { timeout: 5000 }).catch(() => {});
+    await sleep(400);
     await captureShot(page, 'preset-editor-discussions-feed.png', { fullPage: true });
     // Collapse discussions feed
     await page.evaluate(() => {

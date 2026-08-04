@@ -2095,8 +2095,10 @@ fn resolve_template_source_repo(template_name: &str) -> Result<Option<String>, S
     let base = chat_template_dir_path()
         .ok_or_else(|| "Failed to determine template directory".to_string())?;
     let index_path = base.join("releases").join(template_name).join("index.json");
-    let content = std::fs::read_to_string(&index_path)
-        .map_err(|e| format!("Failed to read release index for {template_name}: {e}"))?;
+    let content = match std::fs::read_to_string(&index_path) {
+        Ok(c) => c,
+        Err(_) => return Ok(None),
+    };
     let index: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse release index: {e}"))?;
     let source_repo = index["source"]
