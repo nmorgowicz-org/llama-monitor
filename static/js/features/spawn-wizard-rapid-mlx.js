@@ -824,6 +824,9 @@ export function buildRapidMlxConfig(h, m) {
       }),
     }),
     disk_checkpoint_interval: 0,
+    // Phase 9: chat template lifecycle — applied server-side via a generated
+    // overlay model directory (create_template_overlay), not a direct CLI flag.
+    chat_template_file: wizardState.model.chatTemplatePath || null,
     // No workload_scenario here: `RapidMlxConfig` has no such field, so serde dropped it
     // on arrival and the spawn path never saw it. The scenario reaches the server where
     // it is actually consumed — top level of the `/api/vram` body, sent by

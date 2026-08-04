@@ -2245,6 +2245,12 @@ export function onModelPathChanged() {
       || artifactKind === 'authoritative_safetensors'
       || (wizardState.engine.explicit && artifactKind === 'unknown'));
   if (rapidLocalSource) {
+    // Rapid-MLX local/import sources skip the GGUF-oriented arch/quant pipeline
+    // below, but the shared chat-template panel (#chat-template-section) still
+    // applies — Rapid-MLX consumes chat_template_file via a generated overlay
+    // model directory (see build_launch_argv / create_template_overlay in
+    // src/inference/rapid_mlx/mod.rs), same field name as llama.cpp.
+    autoInstallChatTemplate();
     refreshStepGuardrails();
     return;
   }
