@@ -807,7 +807,7 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
         : (tpl?.repo || '');
       createFixBtn.addEventListener('click', () => {
         const modal = document.createElement('div');
-        modal.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:2000;width:100%;height:100%;backdrop-filter:blur(6px);';
+        modal.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;z-index:2000;width:100%;height:100%;backdrop-filter:blur(3px);';
         const panel = document.createElement('div');
         panel.style.cssText = 'background:var(--pe-panel-bg);border:1px solid var(--pe-panel-border);border-radius:8px;padding:16px;min-width:550px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 12px 48px rgba(0,0,0,0.5),0 2px 12px rgba(0,0,0,0.35);flex-shrink:0;';
         const title = document.createElement('strong');

@@ -2289,12 +2289,13 @@ async function scenarioPresetEditor(ctx, options) {
     });
     await sleep(400);
 
-    // 5a. Set a template path so Discussions and Create fix buttons are active
-    await page.evaluate(() => {
+    // 5a. Use real froggeric template from filesystem for realistic screenshots
+    const realTemplatePath = '/Users/nick/SCRIPTS/CLAUDE/froggeric_qwen-chat_template-v21.3-opencode-v3.jinja';
+    await page.evaluate((path) => {
         const input = document.getElementById('modal-chat-template-file');
-        if (input) input.value = '/path/to/qwen3.6-froggeric-v21.3.jinja';
-    });
-    await sleep(200);
+        if (input) input.value = path;
+    }, realTemplatePath);
+    await sleep(300);
 
     // 5b. Switch to light theme, scroll to Chat Template row
     await page.evaluate(() => {
