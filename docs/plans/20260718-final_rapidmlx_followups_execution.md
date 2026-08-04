@@ -871,6 +871,12 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
   7. **Rapid-MLX preset editor wiring:** Chat Template row is hidden in Rapid-MLX preset editor
      by CSS exclusion. Must add it to allowed fields in Model section. Same functionality applies:
      template overrides work via overlay directory (9-RapidMLX).
+   8. **Wrap mode + line numbers alignment:** Create fix modal has "Wrap" checkbox that toggles
+      pre-wrap vs pre whitespace. Current implementation measures visual line wraps via temporary
+      span, but line numbers gutter doesn't reliably align with wrapped lines. Screenshot captures
+      show wrap enabled (scrollHeight 5532px vs clientHeight 250px) but gutter rows don't match.
+      Needs frontier model review of recalculateLineNumbers() measurement logic and gutter height
+      sync. Escalate when frontend work resumes.
 - **Not automated retrofixing:** HF discussions have no structured patch format; auto-applying
   discussion content to a template that controls tool-calling must stay human-reviewed.
 - **Key repos:** `google/gemma-4-31B-it` discussions #140 and #137 (per user, 2026-08-03).

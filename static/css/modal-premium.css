@@ -1825,7 +1825,7 @@
 
 [data-theme="light"] #preset-modal {
   background:
-    radial-gradient(ellipse at center, rgba(15, 23, 42, 0.18) 0%, rgba(15, 23, 42, 0.36) 100%);
+    radial-gradient(ellipse at center, rgba(15, 23, 42, 0.08) 0%, rgba(15, 23, 42, 0.18) 100%);
 }
 
 [data-theme="light"] #preset-modal .modal-header h2 {
@@ -1844,15 +1844,12 @@
 }
 
 [data-theme="light"] #preset-modal .modal {
-  background:
-    radial-gradient(circle at 15% 15%, var(--acc-05), transparent 28%),
-    radial-gradient(circle at 85% 85%, var(--acc-05), transparent 26%),
-    linear-gradient(160deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
-  border-color: rgba(17, 24, 39, 0.1);
+  background: #ffffff;
+  border-color: rgba(17, 24, 39, 0.12);
   box-shadow:
-    0 12px 48px rgba(15, 23, 42, 0.12),
-    0 2px 12px rgba(15, 23, 42, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    0 12px 48px rgba(15, 23, 42, 0.14),
+    0 2px 12px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
 }
 
 [data-theme="light"] #preset-modal .modal::after {
@@ -2447,6 +2444,19 @@ details.mlx-native-group:not([open]) > .mlx-native-group-header {
   border-bottom-color: rgba(13, 148, 136, 0.18);
 }
 
+[data-theme="light"] #preset-modal .preset-vram-strip {
+  background: #ffffff;
+  border-bottom-color: rgba(17, 24, 39, 0.12);
+}
+
+[data-theme="light"] #preset-modal .preset-vram-strip .preset-vram-display {
+  color: var(--color-text-primary);
+}
+
+[data-theme="light"] .evidence-trigger {
+  color: var(--color-text-primary);
+}
+
 [data-theme="light"] .mlx-native-group {
   background: linear-gradient(145deg, rgba(247, 252, 252, 0.98), rgba(239, 247, 248, 0.9));
   border-color: rgba(13, 148, 136, 0.16);
@@ -2793,15 +2803,12 @@ details.mlx-native-group:not([open]) > .mlx-native-group-header {
 
 /* ── Light theme overrides ── */
 [data-theme="light"] #preset-modal .preset-editor-shell {
-  background:
-    radial-gradient(circle at 15% 15%, var(--acc-05), transparent 28%),
-    radial-gradient(circle at 85% 85%, var(--acc-04), transparent 26%),
-    linear-gradient(160deg, #ffffff, #f9fafb);
-  border-color: rgba(17, 24, 39, 0.1);
+  background: #ffffff;
+  border-color: rgba(17, 24, 39, 0.12);
   box-shadow:
-    0 12px 48px rgba(15, 23, 42, 0.12),
-    0 2px 12px rgba(15, 23, 42, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    0 12px 48px rgba(15, 23, 42, 0.14),
+    0 2px 12px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 1);
 }
 
 [data-theme="light"] .preset-editor-header {
@@ -2873,7 +2880,7 @@ details.mlx-native-group:not([open]) > .mlx-native-group-header {
 }
 
 [data-theme="light"] .pe-field-hint {
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
 }
 
 [data-theme="light"] .pe-toggle-track {

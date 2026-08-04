@@ -3404,6 +3404,16 @@ export function initPresets() {
             list.textContent = 'Failed to load: ' + (err.message || String(err));
         }
     });
+    function inferTemplateSourceRepo(templatePath) {
+        const lower = templatePath.toLowerCase();
+        if (lower.includes('froggeric') || lower.includes('qwen') || lower.includes('opencode')) {
+            return 'froggeric/Qwen-Fixed-Chat-Templates';
+        }
+        if (lower.includes('gemma')) {
+            return 'google/gemma-4-31B-it';
+        }
+        return '';
+    }
     document.getElementById('preset-chat-template-create-fix-btn')?.addEventListener('click', () => {
         const path = (document.getElementById('modal-chat-template-file')?.value || '').trim();
         if (!path) {
@@ -3411,10 +3421,11 @@ export function initPresets() {
             return;
         }
         const tplName = path.split(/[\\/]/).pop().replace(/\.jinja$/, '');
+        const inferredRepo = inferTemplateSourceRepo(path);
         const modal = document.createElement('div');
-        modal.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;z-index:2000;width:100%;height:100%;backdrop-filter:blur(3px);';
+        modal.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.08);display:flex;align-items:center;justify-content:center;z-index:2000;width:100%;height:100%;backdrop-filter:blur(1px);';
         const panel = document.createElement('div');
-        panel.style.cssText = 'background:var(--pe-panel-bg);border:1px solid var(--pe-panel-border);border-radius:8px;padding:16px;min-width:550px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 12px 48px rgba(0,0,0,0.5),0 2px 12px rgba(0,0,0,0.35);flex-shrink:0;';
+        panel.style.cssText = 'background:var(--pe-panel-bg);border:1px solid var(--pe-panel-border);border-radius:8px;padding:16px;min-width:550px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 12px 48px rgba(0,0,0,0.35),0 2px 12px rgba(0,0,0,0.2);flex-shrink:0;';
         const title = document.createElement('strong');
         title.textContent = 'Create fix from discussion';
         title.style.fontSize = '13px';
@@ -3423,13 +3434,14 @@ export function initPresets() {
         desc.style.fontSize = '10px';
         desc.style.color = 'var(--color-text-muted)';
         desc.style.marginTop = '4px';
-        desc.textContent = 'Paste a proposed template fix. It will be stored as a separate release and tested before activation.';
+        desc.textContent = 'Found a template fix in an HF discussion? Paste the full template content here. It will be saved as a separate release, smoke-tested for tool calls, then activated on pass.';
         panel.appendChild(desc);
 
         const repoInput = document.createElement('input');
         repoInput.type = 'text';
         repoInput.placeholder = 'HF repo (e.g., Qwen/Qwen3.5-0.5B)';
         repoInput.style.cssText = 'width:100%;margin-top:8px;padding:5px 8px;font-size:11px;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;';
+        if (inferredRepo) repoInput.value = inferredRepo;
 
         const idInput = document.createElement('input');
         idInput.type = 'text';
@@ -3441,18 +3453,91 @@ export function initPresets() {
         titleInput.placeholder = 'Discussion title (brief)';
         titleInput.style.cssText = 'width:100%;margin-top:6px;padding:5px 8px;font-size:11px;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;';
 
+        const editorWrap = document.createElement('div');
+        editorWrap.style.cssText = 'position:relative;width:100%;margin-top:8px;border:1px solid var(--color-border);border-radius:4px;background:var(--color-bg-primary);overflow:hidden;';
+        const toolbarRow = document.createElement('div');
+        toolbarRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:2px 6px;background:var(--color-bg-secondary);border-bottom:1px solid var(--color-border);';
+        const toolbarLeft = document.createElement('span');
+        toolbarLeft.style.cssText = 'font-size:9px;color:var(--color-text-muted);';
+        toolbarLeft.textContent = 'Jinja template editor';
+        const toolbarRight = document.createElement('div');
+        toolbarRight.style.cssText = 'display:flex;gap:6px;align-items:center;';
+        const wrapToggle = document.createElement('label');
+        wrapToggle.style.cssText = 'font-size:9px;color:var(--color-text-secondary);cursor:pointer;display:flex;align-items:center;gap:3px;';
+        const wrapCheck = document.createElement('input');
+        wrapCheck.type = 'checkbox';
+        wrapCheck.checked = false;
+        wrapCheck.style.cssText = 'transform:scale(0.7);';
+        wrapToggle.appendChild(wrapCheck);
+        wrapToggle.appendChild(document.createTextNode('Wrap'));
+        toolbarRight.appendChild(wrapToggle);
+        toolbarRow.appendChild(toolbarLeft);
+        toolbarRow.appendChild(toolbarRight);
+        const linesWrap = document.createElement('div');
+        linesWrap.style.cssText = 'display:flex;height:250px;min-height:250px;overflow:hidden;';
+        const lineNumbers = document.createElement('div');
+        lineNumbers.style.cssText = 'padding:6px 4px 6px 6px;font-size:9px;font-family:monospace;line-height:1.5;color:var(--color-text-muted);text-align:right;user-select:none;background:var(--color-bg-secondary);border-right:1px solid var(--color-border);overflow:hidden;white-space:nowrap;';
         const contentTextarea = document.createElement('textarea');
         contentTextarea.className = 'chat-template-fix-textarea';
         contentTextarea.rows = 15;
         contentTextarea.placeholder = 'Paste the full template content here...';
-        contentTextarea.style.cssText = 'width:100%;margin-top:8px;padding:6px 8px;font-size:11px;font-family:monospace;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;resize:vertical;height:250px;min-height:250px;flex-shrink:0;';
-        // Inject a style rule to ensure textarea height is respected
+        contentTextarea.style.cssText = 'flex:1;padding:6px 8px;font-size:10px;font-family:monospace;line-height:1.5;background:var(--color-bg-primary);border:none;border-radius:0;color:var(--color-text);box-sizing:border-box;resize:none;outline:none;white-space:pre;overflow:auto;';
+        const recalculateLineNumbers = () => {
+          const wrapped = wrapCheck.checked;
+          const lines = contentTextarea.value.split('\n');
+          lineNumbers.textContent = '';
+          if (!wrapped) {
+            const frag = document.createDocumentFragment();
+            for (let i = 0; i < lines.length; i++) {
+              const div = document.createElement('div');
+              div.textContent = (i + 1).toString();
+              frag.appendChild(div);
+            }
+            lineNumbers.appendChild(frag);
+            return;
+          }
+          const textareaWidth = contentTextarea.clientWidth;
+          const textareaStyle = getComputedStyle(contentTextarea);
+          const paddingX = parseFloat(textareaStyle.paddingLeft) + parseFloat(textareaStyle.paddingRight);
+          const effectiveWidth = textareaWidth - paddingX;
+          const span = document.createElement('span');
+          span.style.cssText = 'position:absolute;visibility:hidden;white-space:pre-wrap;word-wrap:break-word;width:' + effectiveWidth + 'px;padding:0;font-size:10px;font-family:monospace;line-height:1.5;';
+          document.body.appendChild(span);
+          const frag = document.createDocumentFragment();
+          lines.forEach((line, idx) => {
+            span.textContent = line || ' ';
+            const visualHeight = span.offsetHeight;
+            const lineHeight = parseFloat(getComputedStyle(contentTextarea).lineHeight);
+            const visualLines = Math.max(1, Math.round(visualHeight / lineHeight));
+            for (let v = 0; v < visualLines; v++) {
+              const div = document.createElement('div');
+              div.textContent = (v === 0) ? (idx + 1).toString() : '';
+              frag.appendChild(div);
+            }
+          });
+          document.body.removeChild(span);
+          lineNumbers.appendChild(frag);
+        };
+        contentTextarea.addEventListener('input', recalculateLineNumbers);
+        contentTextarea.addEventListener('scroll', () => {
+          lineNumbers.scrollTop = contentTextarea.scrollTop;
+        });
+        wrapCheck.addEventListener('change', () => {
+          contentTextarea.style.whiteSpace = wrapCheck.checked ? 'pre-wrap' : 'pre';
+          contentTextarea.style.wordWrap = wrapCheck.checked ? 'break-word' : 'normal';
+          contentTextarea.style.overflowX = wrapCheck.checked ? 'hidden' : 'auto';
+          setTimeout(recalculateLineNumbers, 50);
+        });
         if (!document.getElementById('chat-template-fix-modal-styles')) {
           const style = document.createElement('style');
           style.id = 'chat-template-fix-modal-styles';
-          style.textContent = '.chat-template-fix-textarea { height: 250px !important; min-height: 250px !important; }';
+          style.textContent = '.chat-template-fix-textarea { height: 100% !important; }';
           document.head.appendChild(style);
         }
+        linesWrap.appendChild(lineNumbers);
+        linesWrap.appendChild(contentTextarea);
+        editorWrap.appendChild(toolbarRow);
+        editorWrap.appendChild(linesWrap);
 
         const statusDiv = document.createElement('div');
         statusDiv.style.fontSize = '10px';
@@ -3475,7 +3560,7 @@ export function initPresets() {
         panel.appendChild(repoInput);
         panel.appendChild(idInput);
         panel.appendChild(titleInput);
-        panel.appendChild(contentTextarea);
+        panel.appendChild(editorWrap);
         panel.appendChild(statusDiv);
         panel.appendChild(btnRow);
         modal.appendChild(panel);
@@ -3584,11 +3669,12 @@ export function initPresets() {
             fetch(`/api/chat-template/read?path=${encodeURIComponent(path)}`, {
                 headers: window.authHeaders ? window.authHeaders() : {}
             })
-            .then(r => r.ok ? r.text() : Promise.reject(new Error('Failed to read template')))
-            .then(text => {
-                contentTextarea.value = text;
-                statusDiv.textContent = '';
-            })
+             .then(r => r.ok ? r.text() : Promise.reject(new Error('Failed to read template')))
+             .then(text => {
+                 contentTextarea.value = text;
+                  recalculateLineNumbers();
+                 statusDiv.textContent = '';
+             })
             .catch(err => {
                 statusDiv.textContent = 'Could not load template content: ' + (err.message || String(err)) + '. Paste fix manually.';
                 statusDiv.style.color = 'var(--color-warning)';

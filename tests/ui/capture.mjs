@@ -2289,13 +2289,24 @@ async function scenarioPresetEditor(ctx, options) {
     });
     await sleep(400);
 
-    // 5a. Use real froggeric template from filesystem for realistic screenshots
-    const realTemplatePath = '/Users/nick/SCRIPTS/CLAUDE/froggeric_qwen-chat_template-v21.3-opencode-v3.jinja';
-    await page.evaluate((path) => {
-        const input = document.getElementById('modal-chat-template-file');
-        if (input) input.value = path;
-    }, realTemplatePath);
-    await sleep(300);
+    // 5a. Set realistic model path + template path for a real-looking screenshot with VRAM bar
+    const realisticModelPath = '/Users/nick/.config/llama-monitor/models/gguf/Qwen3-Coder-Next-Opus-Distilled-Q4_K_M.gguf';
+    const realTemplatePath = '/Users/nick/.config/llama-monitor/chat-templates/qwen-froggeric-fixed.jinja';
+    await page.evaluate((modelPath, templatePath) => {
+        const modelInput = document.getElementById('modal-model-path');
+        if (modelInput) {
+            modelInput.value = modelPath;
+            modelInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        const templateInput = document.getElementById('modal-chat-template-file');
+        if (templateInput) templateInput.value = templatePath;
+    }, realisticModelPath, realTemplatePath);
+    // Wait for VRAM estimation to complete
+    await page.waitForFunction(() => {
+        const display = document.getElementById('preset-vram-display');
+        return display && !display.textContent.includes('Estimating');
+    }, { timeout: 8000 }).catch(() => {});
+    await sleep(600);
 
     // 5b. Switch to light theme, scroll to Chat Template row
     await page.evaluate(() => {
@@ -2311,11 +2322,28 @@ async function scenarioPresetEditor(ctx, options) {
     await sleep(400);
     await captureShot(page, 'preset-editor-chat-template-row-light.png', { fullPage: true });
 
-    // 5c. Capture Create fix modal in light theme
+    // 5c. Capture Discussions feed
+    await page.evaluate(() => {
+        document.getElementById('preset-chat-template-discussions-btn')?.click();
+    });
+    await sleep(600);
+    await captureShot(page, 'preset-editor-discussions-feed.png', { fullPage: true });
+    // Collapse discussions feed
+    await page.evaluate(() => {
+        document.getElementById('preset-chat-template-discussions-btn')?.click();
+    });
+    await sleep(300);
+
+    // 5d. Capture Create fix modal in light theme
     await page.evaluate(() => {
         document.getElementById('preset-chat-template-create-fix-btn')?.click();
     });
-    await sleep(600);
+    // Wait for modal textarea to be populated with template content
+    await page.waitForFunction(() => {
+        const textarea = document.querySelector('.chat-template-fix-textarea');
+        return textarea && textarea.value.length > 500;
+    }, { timeout: 5000 }).catch(() => {});
+    await sleep(400);
     await captureShot(page, 'preset-editor-create-fix-modal-light.png', { fullPage: true });
 
     // Close light modal (modal is inside preset-modal .modal, not body)
@@ -2333,8 +2361,86 @@ async function scenarioPresetEditor(ctx, options) {
     await page.evaluate(() => {
         document.getElementById('preset-chat-template-create-fix-btn')?.click();
     });
-    await sleep(600);
+    // Wait for modal textarea to be populated with template content
+    await page.waitForFunction(() => {
+        const textarea = document.querySelector('.chat-template-fix-textarea');
+        return textarea && textarea.value.length > 500;
+    }, { timeout: 5000 }).catch(() => {});
+    await sleep(400);
     await captureShot(page, 'preset-editor-create-fix-modal-dark.png', { fullPage: true });
+
+    // 5e. Capture with wrap enabled — verify line numbers align correctly with wrapped lines
+    await page.evaluate(() => {
+        const textarea = document.querySelector('.chat-template-fix-textarea');
+        if (!textarea) return;
+        // Walk up to find panel with wrap checkbox
+        let parent = textarea.parentElement;
+        let panel = null;
+        for (let i = 0; i < 10 && parent; i++) {
+            const cbs = Array.from(parent.querySelectorAll('input[type="checkbox"]'));
+            if (cbs.length > 0) { panel = parent; break; }
+            parent = parent.parentElement;
+        }
+        if (panel) {
+            const cb = panel.querySelector('input[type="checkbox"]');
+            if (cb && !cb.checked) {
+                cb.checked = true;
+                cb.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+    });
+    // Wait for wrap + line recalc to settle
+    await sleep(800);
+    const wrapInfo = await page.evaluate(() => {
+        const textarea = document.querySelector('.chat-template-fix-textarea');
+        if (!textarea) return {};
+        return {
+            ws: textarea.style.whiteSpace,
+            ww: textarea.style.wordWrap,
+            scrollTop: textarea.scrollTop,
+            scrollHeight: textarea.scrollHeight,
+            clientHeight: textarea.clientHeight,
+            clientWidth: textarea.clientWidth,
+            lineHeight: parseFloat(getComputedStyle(textarea).lineHeight),
+            overflowX: textarea.style.overflowX,
+        };
+    });
+    console.log('[CAPTURE] wrap info:', wrapInfo);
+    // Force scroll to show wrapped content in middle of file
+    await page.evaluate(() => {
+        const textarea = document.querySelector('.chat-template-fix-textarea');
+        if (!textarea) return;
+        let parent = textarea.parentElement;
+        let panel = null;
+        for (let i = 0; i < 10 && parent; i++) {
+            const cbs = Array.from(parent.querySelectorAll('input[type="checkbox"]'));
+            if (cbs.length > 0) { panel = parent; break; }
+            parent = parent.parentElement;
+        }
+        if (panel) {
+            const cb = panel.querySelector('input[type="checkbox"]');
+            if (cb && !cb.checked) {
+                cb.click();
+            }
+        }
+    });
+    await sleep(800);
+    // Capture just the modal area to avoid Puppeteer fullPage issues
+    const box = await page.evaluate(() => {
+        const textarea = document.querySelector('.chat-template-fix-textarea');
+        if (!textarea) return null;
+        const modal = textarea.closest('div[style*="position:absolute"]') || textarea.closest('div');
+        if (!modal) return null;
+        const rect = modal.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    });
+    if (box) {
+        await page.screenshot({ path: join(ARTIFACTS_DIR, 'preset-editor-create-fix-modal-wrap.png'), clip: box });
+    } else {
+        await page.screenshot({ path: join(ARTIFACTS_DIR, 'preset-editor-create-fix-modal-wrap.png'), fullPage: false });
+    }
+    console.log(`[CAPTURE] Saved preset-editor-create-fix-modal-wrap.png`);
+
     await page.evaluate(() => {
         const modal = document.querySelector('#preset-modal .modal > div[style*="position:absolute"]');
         if (modal) modal.remove();
