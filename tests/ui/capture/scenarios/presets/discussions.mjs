@@ -185,6 +185,7 @@ export default async function(ctx, options) {
     await sleep(500);
 
     // Capture 2: Community fixes section for Gemma4 (google/gemma-4-31B-it).
+    // fullPage:false — see note above on the qwen capture.
     await captureShot(page, 'discussions-feed-gemma4-google.png', { fullPage: true });
 
     // Close the lifecycle modal before continuing.

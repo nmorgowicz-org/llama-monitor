@@ -6725,3 +6725,6 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
   .rapid-hardware-panel { width:auto; margin:4px 0; padding:20px; flex-direction:column; }
 }
 @media (prefers-reduced-motion:reduce) { .wizard-engine-card { transition:none; } .wizard-engine-card:hover { transform:none; } }
+
+/* Capture mode: suppress the binary-prerequisite banner (it flashes per-step in steps 3+). */
+[data-screenshot-capture="true"] #wizard-binary-prereq { display:none !important; }
