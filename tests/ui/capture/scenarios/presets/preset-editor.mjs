@@ -99,25 +99,26 @@ export default async function(ctx, options) {
     await sleep(400);
     await captureShot(page, 'preset-editor-chat-template-row-light.png', { fullPage: true });
 
-    // 5c. Capture Discussions feed
+    // 5c. Capture Discussions / "Community fixes" feed — now lives inside the
+    // shared "Manage template…" modal (chat-template-panel.js), not a standalone
+    // inline toggle. Open the modal and wait for the community-fixes section.
     await page.evaluate(() => {
-        // Ensure Lifecycle modal is closed before this capture
         const lifecycleModal = document.getElementById('chat-template-lifecycle-modal');
         if (lifecycleModal) lifecycleModal.classList.remove('open');
-        document.getElementById('preset-chat-template-discussions-btn')?.click();
+        document.getElementById('preset-chat-template-manage-btn')?.click();
     });
-    // Wait for feed to render (API call takes time)
     await page.waitForFunction(() => {
-        const list = document.getElementById('preset-chat-template-discussions-list');
-        return list && list.style.display !== 'none' && list.textContent.length > 20;
+        const discussionsEl = document.getElementById('chat-template-lifecycle-discussions');
+        return discussionsEl && discussionsEl.textContent.length > 20;
     }, { timeout: 5000 }).catch(() => {
         console.log('[CAPTURE] Discussions feed did not load within timeout');
     });
     await sleep(400);
     await captureShot(page, 'preset-editor-discussions-feed.png', { fullPage: true });
-    // Collapse discussions feed
+    // Close the manage modal
     await page.evaluate(() => {
-        document.getElementById('preset-chat-template-discussions-btn')?.click();
+        const modal = document.getElementById('chat-template-lifecycle-modal');
+        if (modal) modal.classList.remove('open');
     });
     await sleep(300);
 
@@ -146,9 +147,20 @@ export default async function(ctx, options) {
     });
     await sleep(300);
 
-    // 5d. Capture Create fix modal in light theme
+    // 5d. Capture Create fix modal in light theme — open Manage modal, then
+    // click "Edit and install this fix" inside the Community fixes section.
     await page.evaluate(() => {
-        document.getElementById('preset-chat-template-create-fix-btn')?.click();
+        document.getElementById('preset-chat-template-manage-btn')?.click();
+    });
+    await page.waitForFunction(() => {
+        const el = document.getElementById('chat-template-lifecycle-discussions');
+        return el && el.textContent.length > 20;
+    }, { timeout: 5000 }).catch(() => {});
+    await page.evaluate(() => {
+        const editBtn = Array.from(
+            document.querySelectorAll('#chat-template-lifecycle-discussions button')
+        ).find((b) => b.textContent.includes('Edit and install this fix'));
+        editBtn?.click();
     });
     // Wait for modal textarea to be populated with template content
     await page.waitForFunction(() => {
@@ -205,8 +217,20 @@ export default async function(ctx, options) {
     });
     await sleep(300);
 
+    // Open Manage modal again, then click "Edit and install this fix" inside
+    // the Community fixes section (no longer a standalone top-level button).
     await page.evaluate(() => {
-        document.getElementById('preset-chat-template-create-fix-btn')?.click();
+        document.getElementById('preset-chat-template-manage-btn')?.click();
+    });
+    await page.waitForFunction(() => {
+        const el = document.getElementById('chat-template-lifecycle-discussions');
+        return el && el.textContent.length > 20;
+    }, { timeout: 5000 }).catch(() => {});
+    await page.evaluate(() => {
+        const editBtn = Array.from(
+            document.querySelectorAll('#chat-template-lifecycle-discussions button')
+        ).find((b) => b.textContent.includes('Edit and install this fix'));
+        editBtn?.click();
     });
     // Wait for modal textarea to be populated with template content
     await page.waitForFunction(() => {

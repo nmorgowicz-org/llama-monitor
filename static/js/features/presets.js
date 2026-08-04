@@ -18,6 +18,12 @@ import {
 } from './chat-template-registry.js';
 import { buildEstimateBody, rapidEstimatePolicyFromConfig } from './vram-estimate.js';
 import { openEstimateEvidenceDrawer } from './evidence-drawer.js';
+import {
+    chatTemplateStatusText,
+    openChatTemplateManageModal,
+    bindChatTemplateManageModalChrome,
+    fetchReleases,
+} from './chat-template-panel.js';
 
 
 let newPresetSeed = null;
@@ -166,7 +172,51 @@ function normalizeModelSourceInput(value) {
     return { model_path: '', hf_repo: input };
 }
 
+function _presetChatTemplateName(path) {
+    if (!path) return '';
+    return path.split(/[\\/]/).pop().replace(/\.jinja$/, '');
+}
+
+// Refreshes the novice-view status line + primary button label from the
+// current value of the chat-template-file field. Async: looks up
+// installed-at from the release index when a template is set.
+async function updatePresetChatTemplateStatusLine() {
+    const statusEl = document.getElementById('preset-chat-template-status');
+    const primaryBtn = document.getElementById('preset-recommended-chat-template-btn');
+    const path = strVal('modal-chat-template-file');
+    if (!statusEl) return;
+
+    if (!path) {
+        statusEl.textContent = chatTemplateStatusText({ mode: 'builtin' });
+        if (primaryBtn) primaryBtn.textContent = 'Use recommended template';
+        return;
+    }
+
+    const name = _presetChatTemplateName(path);
+    let installedAt = null;
+    try {
+        const releases = await fetchReleases(name);
+        if (releases.ok) {
+            const active = (releases.releases || []).find(r => r.sha256 === releases.active_sha256) || releases.releases?.[0];
+            installedAt = active?.installed_at || null;
+        }
+    } catch { /* non-fatal — status line still shows the custom state */ }
+
+    statusEl.textContent = chatTemplateStatusText({ mode: 'custom', tplDisplay: name, installedAt });
+    if (primaryBtn) primaryBtn.textContent = 'Revert to built-in';
+}
+
 async function installRecommendedChatTemplateForPreset() {
+    // The primary button toggles: "Use recommended template" installs one,
+    // "Revert to built-in" (shown once a custom template is active) clears it.
+    const currentPath = strVal('modal-chat-template-file');
+    if (currentPath) {
+        setVal('modal-chat-template-file', '');
+        await updatePresetChatTemplateStatusLine();
+        showToast('Reverted to built-in template', 'success');
+        return;
+    }
+
     const modelSource = strVal('modal-model-path');
     const family = detectCommunityTemplateFamily(modelSource);
     const template = getDefaultTemplateForFamily(family);
@@ -193,6 +243,7 @@ async function installRecommendedChatTemplateForPreset() {
         }
         const templatePath = (template.transformed && data.transformed_path) ? data.transformed_path : data.path;
         setVal('modal-chat-template-file', templatePath);
+        await updatePresetChatTemplateStatusLine();
         showToast(
             data.already_existed ? 'Recommended template selected' : 'Recommended template installed',
             'success',
@@ -1169,6 +1220,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
     const formatPill = document.getElementById('preset-editor-format');
     const form = document.getElementById('preset-form');
     form.reset();
+    updatePresetChatTemplateStatusLine();
     if (formatPill) formatPill.hidden = true;
     clearFieldErrors();
     newPresetSeed = mode === 'new' && seedPreset ? structuredClone(seedPreset) : null;
@@ -1328,6 +1380,7 @@ export function openPresetModal(mode, section, seedPreset = null) {
         setVal('modal-mmproj', p.mmproj || '');
         _toggleVisionTokens(!!p.mmproj);
         setVal('modal-chat-template-file', p.chat_template_file || '');
+        updatePresetChatTemplateStatusLine();
         // Advanced
         setOpt('modal-bind-host', p.bind_host || '');
         numOrEmpty('modal-port', p.backend === 'rapid_mlx' ? p.rapid_mlx?.port : p.port);
@@ -3169,84 +3222,26 @@ export function initPresets() {
     document.getElementById('preset-modal-back')?.addEventListener('click', _hideSummary);
     document.getElementById('preset-vram-auto-size')?.addEventListener('click', autoSizePreset);
 
-    // Chat Template Lifecycle Modal
-    document.getElementById('chat-template-lifecycle-close')?.addEventListener('click', () => {
-        const modal = document.getElementById('chat-template-lifecycle-modal');
-        if (modal) modal.classList.remove('open');
-    });
-    document.getElementById('chat-template-lifecycle-modal')?.addEventListener('click', (e) => {
-        if (e.target.id === 'chat-template-lifecycle-modal') {
-            e.target.classList.remove('open');
-        }
-    });
-    document.getElementById('lifecycle-check-updates-btn')?.addEventListener('click', async () => {
-        const path = (document.getElementById('modal-chat-template-file')?.value || '').trim();
-        if (!path) {
-            showToast('No template selected', 'warn');
-            return;
-        }
-        const button = document.getElementById('lifecycle-check-updates-btn');
-        const origText = button.textContent;
-        button.disabled = true;
-        button.textContent = 'Checking…';
-        try {
-            const headers = window.authHeaders ? { ...window.authHeaders(), 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
-            const resp = await fetch('/api/chat-template/check-update', { method: 'POST', headers, body: JSON.stringify({ path }) });
-            if (!resp.ok) {
-                showToast('Check failed', 'error');
-                return;
-            }
-            const data = await resp.json();
-            if (data.changed) {
-                showToast('Upstream template has changed', 'warn', 'Use Recommended to re-download');
-            } else {
-                showToast('Template is up to date', 'success');
-            }
-        } catch (err) {
-            showToast('Check failed: ' + (err.message || String(err)), 'error');
-        } finally {
-            button.disabled = false;
-            button.textContent = origText;
-        }
-    });
-    document.getElementById('lifecycle-create-fix-btn')?.addEventListener('click', () => {
-        document.getElementById('preset-chat-template-create-fix-btn')?.click();
-    });
+    // Chat Template Manage modal — shared with the Spawn Wizard(s) via chat-template-panel.js.
+    bindChatTemplateManageModalChrome();
     document.getElementById('lifecycle-library-btn')?.addEventListener('click', async () => {
         try {
             await openChatTemplateLibraryBrowser('modal-chat-template-file');
+            await updatePresetChatTemplateStatusLine();
         } catch (err) {
             showToast('Template library unavailable: ' + (err.message || String(err)), 'error');
         }
     });
     document.getElementById('lifecycle-upload-btn')?.addEventListener('click', async () => {
-        const path = (document.getElementById('modal-chat-template-file')?.value || '').trim();
-        const name = path ? path.split(/[\\/]/).pop().replace(/\.jinja$/, '') : '';
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.jinja,.json,.txt';
-        input.addEventListener('change', async () => {
-            const file = input.files?.[0];
-            if (!file) return;
-            try {
-                const headers = window.authHeaders ? { ...window.authHeaders(), 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
-                const resp = await fetch('/api/chat-template/upload', {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({ name: name || file.name.replace(/\.[^.]+$/, ''), file: btoa(await file.text()) }),
-                });
-                const result = resp.ok ? await resp.json() : { ok: false };
-                if (resp.ok && result.ok) {
-                    showToast('Template uploaded', 'success');
-                    setVal('modal-chat-template-file', result.path);
-                } else {
-                    showToast('Upload failed: ' + (result.error || 'Unknown'), 'error');
-                }
-            } catch (err) {
-                showToast('Upload failed: ' + (err.message || String(err)), 'error');
-            }
-        });
-        input.click();
+        try {
+            const uploaded = await uploadChatTemplateFromBrowser();
+            if (!uploaded?.path) return;
+            setVal('modal-chat-template-file', uploaded.path);
+            await updatePresetChatTemplateStatusLine();
+            showToast('Template uploaded', 'success', uploaded.filename || 'Saved to template library');
+        } catch {
+            // uploadChatTemplateFromBrowser already surfaced the error
+        }
     });
 
     // Duplicate preset from within the modal
@@ -3291,627 +3286,28 @@ export function initPresets() {
     document.getElementById('modal-image-max-tokens')?.addEventListener('input', (e) => {
         _ensureUbatchForImageTokens(Number(e.target.value || 0));
     });
-    document.getElementById('preset-browse-chat-template-btn')?.addEventListener('click', async () => {
-        try {
-            await openChatTemplateLibraryBrowser('modal-chat-template-file');
-        } catch (err) {
-            showToast('Template library unavailable: ' + (err.message || String(err)), 'error');
-        }
-    });
     document.getElementById('preset-recommended-chat-template-btn')?.addEventListener(
         'click',
         installRecommendedChatTemplateForPreset,
     );
-    document.getElementById('preset-check-chat-template-update-btn')?.addEventListener('click', async () => {
-        const path = (document.getElementById('modal-chat-template-file')?.value || '').trim();
-        if (!path) {
-            showToast('No template selected to check', 'warn');
-            return;
-        }
-        const button = document.getElementById('preset-check-chat-template-update-btn');
-        const origText = button.textContent;
-        button.disabled = true;
-        button.textContent = 'Checking…';
-        try {
-            const headers = window.authHeaders
-                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
-                : { 'Content-Type': 'application/json' };
-            const resp = await fetch('/api/chat-template/check-update', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ path }),
-            });
-            if (!resp.ok) {
-                showToast('Check failed: ' + (resp.statusText || 'Unexpected response'), 'error');
-                return;
-            }
-            const data = await resp.json();
-            if (data.changed) {
-                showToast(
-                    'Upstream template has changed since this install',
-                    'warn',
-                    'Use Recommended to re-download the latest version',
-                );
-            } else {
-                const hint = data.installed_at
-                    ? 'Installed ' + new Date(data.installed_at).toLocaleString()
-                    : 'No changes upstream';
-                showToast('Template is up to date', 'success', hint);
-            }
-        } catch (err) {
-            showToast('Check failed: ' + (err.message || String(err)), 'error');
-        } finally {
-            button.disabled = false;
-            button.textContent = origText;
-        }
-    });
-    document.getElementById('preset-chat-template-history-btn')?.addEventListener('click', async () => {
-        const list = document.getElementById('preset-chat-template-history-list');
-        if (!list) return;
-        if (list.style.display !== 'none') {
-            list.style.display = 'none';
-            return;
-        }
-        const path = (document.getElementById('modal-chat-template-file')?.value || '').trim();
-        if (!path) {
-            showToast('No template selected to view history for', 'warn');
-            return;
-        }
-        // Template name is the file stem — the stable key releases/activate are keyed by.
-        const name = path.split(/[\\/]/).pop().replace(/\.jinja$/, '');
-        list.textContent = 'Loading…';
-        list.style.display = 'block';
-        try {
-            const headers = window.authHeaders ? window.authHeaders() : {};
-            const resp = await fetch(`/api/chat-template/releases?name=${encodeURIComponent(name)}`, { headers });
-            const result = resp.ok ? await resp.json() : { ok: false };
-            list.textContent = '';
-            if (!resp.ok || result.ok !== true) {
-                list.textContent = result.error || 'Failed to load history';
-                return;
-            }
-            const releases = result.releases || [];
-            if (releases.length === 0) {
-                list.textContent = 'No retained releases yet.';
-                return;
-            }
-            releases.forEach((rel) => {
-                const row = document.createElement('div');
-                row.style.fontSize = '10px';
-                row.style.color = 'var(--color-text-muted)';
-                row.style.marginTop = '2px';
-                const isActive = rel.sha256 === result.active_sha256;
-                const label = document.createElement('span');
-                const when = rel.installed_at ? new Date(rel.installed_at).toLocaleString() : 'unknown date';
-                const rev = rel.revision ? ` (${rel.revision.slice(0, 8)})` : '';
-                label.textContent = `${when}${rev} — ${rel.sha256.slice(0, 10)}${isActive ? ' · active' : ''}`;
-                row.appendChild(label);
-                if (!isActive) {
-                    const activateBtn = document.createElement('button');
-                    activateBtn.type = 'button';
-                    activateBtn.className = 'btn-sm btn-preset';
-                    activateBtn.style.marginLeft = '6px';
-                    activateBtn.textContent = 'Activate';
-                    activateBtn.addEventListener('click', async () => {
-                        activateBtn.disabled = true;
-                        try {
-                            const actHeaders = window.authHeaders
-                                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
-                                : { 'Content-Type': 'application/json' };
-                            const actResp = await fetch('/api/chat-template/activate', {
-                                method: 'POST',
-                                headers: actHeaders,
-                                body: JSON.stringify({ name, sha256: rel.sha256 }),
-                            });
-                            const actResult = actResp.ok ? await actResp.json() : { ok: false };
-                            if (actResp.ok && actResult.ok === true) {
-                                showToast('Activated release ' + rel.sha256.slice(0, 10), 'success');
-                                list.style.display = 'none';
-                            } else {
-                                showToast(actResult.error || 'Failed to activate release', 'error');
-                                activateBtn.disabled = false;
-                            }
-                        } catch (err) {
-                            showToast('Activate failed: ' + (err.message || String(err)), 'error');
-                            activateBtn.disabled = false;
-                        }
-                    });
-                    row.appendChild(activateBtn);
-                }
-                list.appendChild(row);
-            });
-        } catch (err) {
-            list.textContent = 'Failed to load history: ' + (err.message || String(err));
-        }
-    });
-    document.getElementById('preset-chat-template-discussions-btn')?.addEventListener('click', async () => {
-        const list = document.getElementById('preset-chat-template-discussions-list');
-        if (!list) return;
-        if (list.style.display !== 'none') {
-            list.style.display = 'none';
-            return;
-        }
-        const path = (document.getElementById('modal-chat-template-file')?.value || '').trim();
-        if (!path) {
-            showToast('No template selected to view discussions for', 'warn');
-            return;
-        }
-        const name = path.split(/[\\/]/).pop().replace(/\.jinja$/, '');
-        list.textContent = 'Loading…';
-        list.style.display = 'block';
-        list.style.maxWidth = '360px';
-        try {
-            const headers = window.authHeaders ? window.authHeaders() : {};
-            const resp = await fetch(`/api/chat-template/discussions?name=${encodeURIComponent(name)}`, { headers });
-            const result = resp.ok ? await resp.json() : { ok: false };
-            list.textContent = '';
-            if (!resp.ok || result.ok !== true) {
-                list.textContent = result.error || 'Failed to load discussions';
-                return;
-            }
-            const discussions = result.discussions || [];
-            if (discussions.length === 0) {
-                list.textContent = 'No discussions found for this template.';
-                return;
-            }
-            const header = document.createElement('div');
-            header.style.fontSize = '10px';
-            header.style.color = 'var(--color-text-muted)';
-            header.style.marginBottom = '4px';
-            header.textContent = `${discussions.length} active discussion${discussions.length === 1 ? '' : 's'} on ${result.source_repo || 'source repo'}`;
-            list.appendChild(header);
-            discussions.forEach((d) => {
-                const row = document.createElement('div');
-                row.style.fontSize = '10px';
-                row.style.color = 'var(--color-text-muted)';
-                row.style.marginTop = '3px';
-                const statusBadge = d.status === 'open' ? '●' : '○';
-                const prLabel = d.is_pull_request ? 'PR' : '';
-                const label = document.createElement('span');
-                label.textContent = `${statusBadge} ${prLabel ? prLabel + ' ' : ''}${d.title} (${d.num_comments})`;
-                row.appendChild(label);
-                const link = document.createElement('a');
-                link.href = `https://huggingface.co/${result.source_repo}/discussions/${d.number}`;
-                link.target = '_blank';
-                link.rel = 'noopener noreferrer';
-                link.textContent = ' ↗';
-                link.style.color = 'var(--color-accent)';
-                link.style.marginLeft = '4px';
-                row.appendChild(link);
-                list.appendChild(row);
-            });
-        } catch (err) {
-            list.textContent = 'Failed to load: ' + (err.message || String(err));
-        }
-    });
-    function inferTemplateSourceRepo(templatePath) {
-        const lower = templatePath.toLowerCase();
-        if (lower.includes('froggeric') || lower.includes('qwen') || lower.includes('opencode')) {
-            return 'froggeric/Qwen-Fixed-Chat-Templates';
-        }
-        if (lower.includes('gemma')) {
-            return 'google/gemma-4-31B-it';
-        }
-        return '';
-    }
-    async function openChatTemplateLifecycleModal(targetId) {
-        const path = (document.getElementById(targetId)?.value || '').trim();
-        if (!path) {
-            showToast('No template selected', 'warn');
-            return;
-        }
-        const tplName = path.split(/[\\/]/).pop().replace(/\.jinja$/, '');
-        const modal = document.getElementById('chat-template-lifecycle-modal');
-        const nameEl = document.getElementById('chat-template-lifecycle-name');
-        const versionEl = document.getElementById('chat-template-lifecycle-version');
-        const historyEl = document.getElementById('chat-template-lifecycle-history');
-        const discussionsEl = document.getElementById('chat-template-lifecycle-discussions');
-        if (modal && nameEl && versionEl && historyEl && discussionsEl) {
-            nameEl.textContent = tplName.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-            versionEl.textContent = 'Loading…';
-            historyEl.textContent = '';
-            discussionsEl.textContent = '';
-            modal.classList.add('open');
-            try {
-                const headers = window.authHeaders ? window.authHeaders() : {};
-                const [releasesResp, discussionsResp] = await Promise.all([
-                    fetch(`/api/chat-template/releases?name=${encodeURIComponent(tplName)}`, { headers }),
-                    fetch(`/api/chat-template/discussions?name=${encodeURIComponent(tplName)}`, { headers }),
-                ]);
-                const releasesResult = releasesResp.ok ? await releasesResp.json() : { ok: false };
-                const discussionsResult = discussionsResp.ok ? await discussionsResp.json() : { ok: false };
-                function renderDiscussions() {
-                    if (discussionsResult.ok && discussionsResult.discussions && discussionsResult.discussions.length > 0) {
-                        discussionsEl.innerHTML = '';
-                        const header = document.createElement('div');
-                        header.style.fontSize = '9px';
-                        header.style.color = 'var(--color-text-muted)';
-                        header.style.marginBottom = '4px';
-                        header.textContent = `${discussionsResult.discussions.length} active discussion${discussionsResult.discussions.length === 1 ? '' : 's'} on ${discussionsResult.source_repo || 'source repo'}`;
-                        discussionsEl.appendChild(header);
-                        discussionsResult.discussions.forEach((d) => {
-                            const row = document.createElement('div');
-                            row.className = 'chat-template-lifecycle-discussion-item';
-                            const statusBadge = d.status === 'open' ? '●' : '○';
-                            const prLabel = d.is_pull_request ? 'PR' : '';
-                            const label = document.createElement('span');
-                            label.textContent = `${statusBadge} ${prLabel ? prLabel + ' ' : ''}${d.title} (${d.num_comments})`;
-                            row.appendChild(label);
-                            const link = document.createElement('a');
-                            link.href = `https://huggingface.co/${discussionsResult.source_repo}/discussions/${d.number}`;
-                            link.target = '_blank';
-                            link.rel = 'noopener noreferrer';
-                            link.textContent = ' ↗';
-                            link.style.color = 'var(--color-accent)';
-                            link.style.marginLeft = '4px';
-                            row.appendChild(link);
-                            discussionsEl.appendChild(row);
-                        });
-                    } else {
-                        discussionsEl.textContent = discussionsResult.error || 'No discussions found.';
-                    }
-                }
-                if (releasesResult.ok && releasesResult.releases && releasesResult.releases.length > 0) {
-                    const latest = releasesResult.releases[0];
-                    const activeSha = releasesResult.active_sha256 || null;
-                    const active = releasesResult.releases.find(r => r.sha256 === activeSha) || latest;
-                    versionEl.innerHTML = '';
-                    const versionInfo = [
-                        { label: 'Active revision', value: active.revision ? active.revision.slice(0, 10) : (active.sha256 || '').slice(0, 10) },
-                        { label: 'Source', value: active.source_url || '—' },
-                        { label: 'SHA-256', value: (active.sha256 || '').substring(0, 16) + '…' },
-                        { label: 'Installed', value: active.installed_at ? new Date(active.installed_at).toLocaleString() : '—' },
-                    ];
-                    versionInfo.forEach(item => {
-                        const row = document.createElement('div');
-                        row.className = 'chat-template-lifecycle-version-row';
-                        const label = document.createElement('span');
-                        label.className = 'chat-template-lifecycle-version-label';
-                        label.textContent = item.label + ':';
-                        const value = document.createElement('span');
-                        value.className = 'chat-template-lifecycle-version-value';
-                        value.textContent = item.value;
-                        row.appendChild(label);
-                        row.appendChild(value);
-                        versionEl.appendChild(row);
-                    });
-                    if (releasesResult.releases.length > 1) {
-                        historyEl.innerHTML = '';
-                        const header = document.createElement('div');
-                        header.style.fontSize = '9px';
-                        header.style.color = 'var(--color-text-muted)';
-                        header.style.marginBottom = '4px';
-                        header.textContent = `${releasesResult.releases.length} retained release${releasesResult.releases.length === 1 ? '' : 's'} — click to roll back`;
-                        historyEl.appendChild(header);
-                        releasesResult.releases.forEach((rel) => {
-                            const row = document.createElement('div');
-                            row.className = 'chat-template-lifecycle-history-item';
-                            const isActive = rel.sha256 === activeSha;
-                            const when = rel.installed_at ? new Date(rel.installed_at).toLocaleString() : 'unknown date';
-                            const label = document.createElement('span');
-                            label.textContent = `${when} — ${(rel.sha256 || '').slice(0, 10)}` + (isActive ? ' (active)' : '');
-                            label.style.color = isActive ? 'var(--color-success)' : 'var(--color-text-muted)';
-                            row.appendChild(label);
-                            if (!isActive) {
-                                const link = document.createElement('a');
-                                link.href = '#';
-                                link.textContent = ' roll back';
-                                link.addEventListener('click', async (e) => {
-                                    e.preventDefault();
-                                    const headers = window.authHeaders ? window.authHeaders() : {};
-                                    const resp = await fetch('/api/chat-template/activate', {
-                                        method: 'POST',
-                                        headers: { ...headers, 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ name: tplName, sha256: rel.sha256 }),
-                                    });
-                                    if (resp.ok) {
-                                        showToast('Rolled back to ' + rel.sha256.slice(0, 10), 'success');
-                                        modal.classList.remove('open');
-                                    } else {
-                                        showToast('Rollback failed', 'error');
-                                    }
-                                });
-                                row.appendChild(link);
-                            }
-                            historyEl.appendChild(row);
-                        });
-                    } else {
-                        historyEl.textContent = 'No prior releases retained.';
-                    }
-                    renderDiscussions();
-                } else {
-                    // eslint-disable-next-line no-unsanitized/property -- data from our own API
-                    versionEl.innerHTML = `<div style="font-size:11px;color:var(--color-text-muted);padding:4px 0;">${releasesResult.error || 'This template was installed directly (no release index).'}</div>`;
-                    historyEl.textContent = 'No prior releases retained.';
-                    renderDiscussions();
-                }
-            } catch (err) {
-                versionEl.textContent = 'Failed to load: ' + (err.message || String(err));
-            }
-        }
-    }
-    document.getElementById('preset-chat-template-create-fix-btn')?.addEventListener('click', () => {
-        const path = (document.getElementById('modal-chat-template-file')?.value || '').trim();
-        if (!path) {
-            showToast('No template selected', 'warn');
-            return;
-        }
-        const tplName = path.split(/[\\/]/).pop().replace(/\.jinja$/, '');
-        const inferredRepo = inferTemplateSourceRepo(path);
-        const modal = document.createElement('div');
-        modal.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.08);display:flex;align-items:center;justify-content:center;z-index:2000;width:100%;height:100%;backdrop-filter:blur(1px);';
-        const panel = document.createElement('div');
-        panel.style.cssText = 'background:var(--pe-panel-bg);border:1px solid var(--pe-panel-border);border-radius:8px;padding:16px;min-width:550px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 12px 48px rgba(0,0,0,0.35),0 2px 12px rgba(0,0,0,0.2);flex-shrink:0;';
-        const title = document.createElement('strong');
-        title.textContent = 'Create fix from discussion';
-        title.style.fontSize = '13px';
-        panel.appendChild(title);
-        const desc = document.createElement('div');
-        desc.style.fontSize = '10px';
-        desc.style.color = 'var(--color-text-muted)';
-        desc.style.marginTop = '4px';
-        desc.textContent = 'Found a template fix in an HF discussion? Paste the full template content here. It will be saved as a separate release, smoke-tested for tool calls, then activated on pass.';
-        panel.appendChild(desc);
-
-        const repoInput = document.createElement('input');
-        repoInput.type = 'text';
-        repoInput.placeholder = 'HF repo (e.g., Qwen/Qwen3.5-0.5B)';
-        repoInput.style.cssText = 'width:100%;margin-top:8px;padding:5px 8px;font-size:11px;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;';
-        if (inferredRepo) repoInput.value = inferredRepo;
-
-        const idInput = document.createElement('input');
-        idInput.type = 'text';
-        idInput.placeholder = 'Discussion ID (number)';
-        idInput.style.cssText = 'width:100%;margin-top:6px;padding:5px 8px;font-size:11px;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;';
-
-        const titleInput = document.createElement('input');
-        titleInput.type = 'text';
-        titleInput.placeholder = 'Discussion title (brief)';
-        titleInput.style.cssText = 'width:100%;margin-top:6px;padding:5px 8px;font-size:11px;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;';
-
-        const editorWrap = document.createElement('div');
-        editorWrap.style.cssText = 'position:relative;width:100%;margin-top:8px;border:1px solid var(--color-border);border-radius:4px;background:var(--color-bg-primary);overflow:hidden;';
-        const toolbarRow = document.createElement('div');
-        toolbarRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:2px 6px;background:var(--color-bg-secondary);border-bottom:1px solid var(--color-border);';
-        const toolbarLeft = document.createElement('span');
-        toolbarLeft.style.cssText = 'font-size:9px;color:var(--color-text-muted);';
-        toolbarLeft.textContent = 'Jinja template editor';
-        const toolbarRight = document.createElement('div');
-        toolbarRight.style.cssText = 'display:flex;gap:6px;align-items:center;';
-        const wrapToggle = document.createElement('label');
-        wrapToggle.style.cssText = 'font-size:9px;color:var(--color-text-secondary);cursor:pointer;display:flex;align-items:center;gap:3px;';
-        const wrapCheck = document.createElement('input');
-        wrapCheck.type = 'checkbox';
-        wrapCheck.checked = false;
-        wrapCheck.style.cssText = 'transform:scale(0.7);';
-        wrapToggle.appendChild(wrapCheck);
-        wrapToggle.appendChild(document.createTextNode('Wrap'));
-        toolbarRight.appendChild(wrapToggle);
-        toolbarRow.appendChild(toolbarLeft);
-        toolbarRow.appendChild(toolbarRight);
-        const linesWrap = document.createElement('div');
-        linesWrap.style.cssText = 'display:flex;height:250px;min-height:250px;overflow:hidden;';
-        const lineNumbers = document.createElement('div');
-        lineNumbers.style.cssText = 'flex:0 0 auto;min-width:32px;padding:6px 8px 6px 6px;font-size:9px;font-family:monospace;line-height:1.5;color:var(--color-text-muted);text-align:right;user-select:none;background:var(--color-bg-secondary);border-right:1px solid var(--color-border);overflow:hidden;white-space:nowrap;box-sizing:border-box;';
-        const contentTextarea = document.createElement('textarea');
-        contentTextarea.className = 'chat-template-fix-textarea';
-        contentTextarea.rows = 15;
-        contentTextarea.placeholder = 'Paste the full template content here...';
-        contentTextarea.style.cssText = 'flex:1;padding:6px 8px;font-size:10px;font-family:monospace;line-height:1.5;background:var(--color-bg-primary);border:none;border-radius:0;color:var(--color-text);box-sizing:border-box;resize:none;outline:none;white-space:pre;overflow:auto;';
-        const recalculateLineNumbers = () => {
-          const wrapped = wrapCheck.checked;
-          const lines = contentTextarea.value.split('\n');
-          lineNumbers.textContent = '';
-          if (!wrapped) {
-            const frag = document.createDocumentFragment();
-            for (let i = 0; i < lines.length; i++) {
-              const div = document.createElement('div');
-              div.textContent = (i + 1).toString();
-              frag.appendChild(div);
-            }
-            lineNumbers.appendChild(frag);
-            return;
-          }
-          const textareaWidth = contentTextarea.clientWidth;
-          const textareaStyle = getComputedStyle(contentTextarea);
-          const paddingX = parseFloat(textareaStyle.paddingLeft) + parseFloat(textareaStyle.paddingRight);
-          const effectiveWidth = textareaWidth - paddingX;
-          const span = document.createElement('span');
-          span.style.cssText = 'position:absolute;visibility:hidden;white-space:pre-wrap;word-wrap:break-word;width:' + effectiveWidth + 'px;padding:0;font-size:10px;font-family:monospace;line-height:1.5;';
-          document.body.appendChild(span);
-          const frag = document.createDocumentFragment();
-          lines.forEach((line, idx) => {
-            span.textContent = line || ' ';
-            const visualHeight = span.offsetHeight;
-            const lineHeight = parseFloat(getComputedStyle(contentTextarea).lineHeight);
-            const visualLines = Math.max(1, Math.round(visualHeight / lineHeight));
-            for (let v = 0; v < visualLines; v++) {
-              const div = document.createElement('div');
-              div.textContent = (v === 0) ? (idx + 1).toString() : '';
-              frag.appendChild(div);
-            }
-          });
-          document.body.removeChild(span);
-          lineNumbers.appendChild(frag);
-        };
-        contentTextarea.addEventListener('input', recalculateLineNumbers);
-        contentTextarea.addEventListener('scroll', () => {
-          lineNumbers.scrollTop = contentTextarea.scrollTop;
-        });
-        wrapCheck.addEventListener('change', () => {
-          contentTextarea.style.whiteSpace = wrapCheck.checked ? 'pre-wrap' : 'pre';
-          contentTextarea.style.wordWrap = wrapCheck.checked ? 'break-word' : 'normal';
-          contentTextarea.style.overflowX = wrapCheck.checked ? 'hidden' : 'auto';
-          setTimeout(recalculateLineNumbers, 50);
-        });
-        if (!document.getElementById('chat-template-fix-modal-styles')) {
-          const style = document.createElement('style');
-          style.id = 'chat-template-fix-modal-styles';
-          style.textContent = '.chat-template-fix-textarea { height: 100% !important; }';
-          document.head.appendChild(style);
-        }
-        linesWrap.appendChild(lineNumbers);
-        linesWrap.appendChild(contentTextarea);
-        editorWrap.appendChild(toolbarRow);
-        editorWrap.appendChild(linesWrap);
-
-        const statusDiv = document.createElement('div');
-        statusDiv.style.fontSize = '10px';
-        statusDiv.style.marginTop = '8px';
-        statusDiv.style.minHeight = '14px';
-
-        const btnRow = document.createElement('div');
-        btnRow.style.cssText = 'margin-top:10px;display:flex;gap:8px;justify-content:flex-end;';
-        const cancelBtn = document.createElement('button');
-        cancelBtn.textContent = 'Cancel';
-        cancelBtn.className = 'btn-sm btn-preset';
-        cancelBtn.style.fontSize = '11px';
-        const submitBtn = document.createElement('button');
-        submitBtn.textContent = 'Create & test';
-        submitBtn.className = 'btn-sm btn-primary';
-        submitBtn.style.fontSize = '11px';
-        btnRow.appendChild(cancelBtn);
-        btnRow.appendChild(submitBtn);
-
-        panel.appendChild(repoInput);
-        panel.appendChild(idInput);
-        panel.appendChild(titleInput);
-        panel.appendChild(editorWrap);
-        panel.appendChild(statusDiv);
-        panel.appendChild(btnRow);
-        modal.appendChild(panel);
-
-        const modalContainer = document.body;
-        cancelBtn.addEventListener('click', () => {
-            modalContainer.removeChild(modal);
-        });
-
-        submitBtn.addEventListener('click', async () => {
-            const repo = repoInput.value.trim();
-            const discussionId = idInput.value.trim();
-            const dTitle = titleInput.value.trim();
-            const content = contentTextarea.value;
-
-            if (!repo || !discussionId || !content) {
-                statusDiv.style.color = 'var(--color-danger)';
-                statusDiv.textContent = 'Repo, discussion ID, and content are required.';
-                return;
-            }
-
-            submitBtn.disabled = true;
-            submitBtn.textContent = 'Creating release…';
-            statusDiv.textContent = '';
-
-            try {
-                const headers = window.authHeaders
-                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
-                    : { 'Content-Type': 'application/json' };
-                const installResp = await fetch('/api/chat-template/install-discussion', {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({
-                        name: tplName,
-                        discussion_source: {
-                            repo: repo,
-                            discussion_id: parseInt(discussionId, 10),
-                            title: dTitle || `Fix from discussion #${discussionId}`,
-                        },
-                        content: content,
-                    }),
-                });
-                const installResult = installResp.ok ? await installResp.json() : { ok: false };
-
-                if (!installResp.ok || installResult.ok !== true) {
-                    statusDiv.style.color = 'var(--color-danger)';
-                    statusDiv.textContent = installResult.error || 'Failed to create release';
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = 'Retry';
-                    return;
-                }
-
-                statusDiv.style.color = 'var(--color-success)';
-                statusDiv.textContent = 'Release created. Running tool-call smoke test…';
-
-                const smokeResp = await fetch('/api/chat-template/smoke-test', {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({
-                        name: installResult.release_name,
-                        model: '',
-                    }),
-                });
-                const smokeResult = smokeResp.ok ? await smokeResp.json() : { ok: false };
-
-                if (smokeResp.ok && smokeResult.ok === true) {
-                    statusDiv.textContent = '✓ Smoke test passed. Activating release…';
-                    const actResp = await fetch('/api/chat-template/activate', {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify({ name: installResult.release_name }),
-                    });
-                    const actResult = actResp.ok ? await actResp.json() : { ok: false };
-                    if (actResp.ok && actResult.ok === true) {
-                        showToast('Fix activated successfully', 'success');
-                        document.getElementById('modal-chat-template-file').value = installResult.file_path;
-                        modalContainer.removeChild(modal);
-                    } else {
-                        statusDiv.style.color = 'var(--color-warning)';
-                        statusDiv.textContent = 'Smoke test passed but activation failed: ' + (actResult.error || 'unknown');
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = 'Done';
-                    }
-                } else {
-                    const failReason = smokeResult.summary || smokeResult.error || 'test failed';
-                    statusDiv.style.color = 'var(--color-danger)';
-                    statusDiv.textContent = '✗ Smoke test failed: ' + failReason;
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = 'Done';
-                }
-            } catch (err) {
-                statusDiv.style.color = 'var(--color-danger)';
-                statusDiv.textContent = 'Error: ' + (err.message || String(err));
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Retry';
-            }
-        });
-
-        modalContainer.appendChild(modal);
-
-        // Pre-populate textarea with current template content
-        if (path) {
-            statusDiv.textContent = 'Loading template content…';
-            statusDiv.style.color = 'var(--color-text-muted)';
-            fetch(`/api/chat-template/read?path=${encodeURIComponent(path)}`, {
-                headers: window.authHeaders ? window.authHeaders() : {}
-            })
-             .then(r => r.ok ? r.text() : Promise.reject(new Error('Failed to read template')))
-             .then(text => {
-                 contentTextarea.value = text;
-                  recalculateLineNumbers();
-                 statusDiv.textContent = '';
-             })
-            .catch(err => {
-                statusDiv.textContent = 'Could not load template content: ' + (err.message || String(err)) + '. Paste fix manually.';
-                statusDiv.style.color = 'var(--color-warning)';
-            });
-        }
-    });
-    document.getElementById('preset-upload-chat-template-btn')?.addEventListener('click', async () => {
-        try {
-            const uploaded = await uploadChatTemplateFromBrowser();
-            if (!uploaded?.path) return;
-            setVal('modal-chat-template-file', uploaded.path);
-            showToast('Template uploaded', 'success', uploaded.filename || 'Saved to template library');
-        } catch {
-            // uploadChatTemplateFromBrowser already surfaced the error
-        }
-    });
-    document.getElementById('preset-clear-chat-template-btn')?.addEventListener('click', () => {
+    document.getElementById('preset-clear-chat-template-btn')?.addEventListener('click', async () => {
         setVal('modal-chat-template-file', '');
+        await updatePresetChatTemplateStatusLine();
     });
     document.getElementById('preset-chat-template-manage-btn')?.addEventListener('click', async () => {
-        await openChatTemplateLifecycleModal('modal-chat-template-file');
+        const path = strVal('modal-chat-template-file');
+        if (!path) {
+            showToast('No template selected yet', 'warn');
+            return;
+        }
+        const tplName = _presetChatTemplateName(path);
+        await openChatTemplateManageModal({
+            tplName,
+            currentPath: path,
+            onActivated: updatePresetChatTemplateStatusLine,
+        });
     });
+    document.getElementById('modal-chat-template-file')?.addEventListener('change', updatePresetChatTemplateStatusLine);
     document.getElementById('preset-browse-draft-model-btn')?.addEventListener('click', () => openModelFileBrowser('modal-draft-model', 'gguf', null, 'draft-model'));
 
     // Fit-to-VRAM toggle shows/hides fit target

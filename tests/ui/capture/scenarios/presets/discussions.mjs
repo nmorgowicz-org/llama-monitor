@@ -74,43 +74,41 @@ export default async function(ctx, options) {
     });
     await sleep(300);
 
-    // Click "Discussions" button in the spawn wizard chat template UI.
+    // Click "Manage template…" to open the shared lifecycle modal, which now
+    // hosts the Community fixes section (was a standalone "Discussions" toggle).
     await page.evaluate(() => {
-        // The Discussions button is a dynamically created button with textContent "Discussions".
         const btn = Array.from(document.querySelectorAll('#ct-body button'))
-            .find(b => b.textContent?.trim() === 'Discussions');
+            .find(b => b.textContent?.trim() === 'Manage template…');
         if (btn) btn.click();
     });
     await sleep(1500);
 
-    // Wait for discussions content to load (>20 chars indicates real data).
+    // Wait for Community fixes content to load (>20 chars indicates real data).
     await page.waitForFunction(() => {
-        const list = document.querySelector('#ct-body > div:last-child');
-        return list && list.textContent.length > 20 && !list.textContent.includes('Loading…');
+        const el = document.getElementById('chat-template-lifecycle-discussions');
+        return el && el.textContent.length > 20 && !el.textContent.includes('Loading…');
     }, { timeout: 20000 }).catch(() => {
         console.log('[CAPTURE] Qwen discussions feed timed out; continuing...');
     });
     await sleep(500);
 
-    // Capture 1: discussions feed for Qwen (froggeric/Qwen-Fixed-Chat-Templates).
+    // Capture 1: Community fixes section for Qwen (froggeric/Qwen-Fixed-Chat-Templates).
     await captureShot(page, 'discussions-feed-qwen-froggeric.png', { fullPage: true });
 
-    // Click "Create fix" button to capture the auto-inferred HF repo modal.
+    // Click "Edit and install this fix" inside Community fixes to open the editor.
     const createFixOpened = await page.evaluate(() => {
-        const btn = Array.from(document.querySelectorAll('#ct-body button'))
-            .find(b => b.textContent?.trim() === 'Create fix');
+        const btn = Array.from(
+            document.querySelectorAll('#chat-template-lifecycle-discussions button')
+        ).find(b => b.textContent?.trim() === 'Edit and install this fix');
         if (btn) btn.click();
         return !!btn;
     });
     await sleep(1200);
 
     if (createFixOpened) {
-        // Wait for Create fix modal to appear (has title "Create fix from discussion").
+        // Wait for the create-fix editor overlay to appear (title "Edit and install this fix").
         const createFixState = await page.evaluate(() => {
-            const titleEl = Array.from(document.querySelectorAll('strong'))
-                .find(el => el.textContent === 'Create fix from discussion');
-            if (!titleEl) return { found: false };
-            const modal = titleEl.closest('div[style*="backdrop-filter"]') || titleEl.closest('[style*="z-index:2000"]');
+            const modal = document.querySelector('.chat-template-create-fix-overlay');
             if (!modal) return { found: false };
             const repoInput = modal.querySelector('input[placeholder*="HF repo"]');
             return {
@@ -122,26 +120,21 @@ export default async function(ctx, options) {
         console.log('[CAPTURE] Create fix modal state:', JSON.stringify(createFixState));
         await captureShot(page, 'create-fix-auto-inferred-repo.png', { fullPage: true });
 
-        // Close Create fix modal via Cancel button.
+        // Close the create-fix editor via its Cancel button.
         await page.evaluate(() => {
-            const titleEl = Array.from(document.querySelectorAll('strong'))
-                .find(el => el.textContent === 'Create fix from discussion');
-            if (titleEl) {
-                const modal = titleEl.closest('[style*="z-index:2000"]');
-                const cancelBtn = modal?.querySelector('.btn-wizard-tertiary');
-                if (cancelBtn) cancelBtn.click();
-            }
+            const modal = document.querySelector('.chat-template-create-fix-overlay');
+            const cancelBtn = Array.from(modal?.querySelectorAll('button') || [])
+                .find(b => b.textContent?.trim() === 'Cancel');
+            if (cancelBtn) cancelBtn.click();
         });
         await sleep(400);
     } else {
         console.log('[CAPTURE] Create fix button not found; skipping create-fix capture');
     }
 
-    // Close the discussions dropdown.
+    // Close the lifecycle modal.
     await page.evaluate(() => {
-        const btn = Array.from(document.querySelectorAll('#ct-body button'))
-            .find(b => b.textContent?.trim() === 'Discussions');
-        if (btn) btn.click();
+        document.getElementById('chat-template-lifecycle-close')?.click();
     });
     await sleep(300);
 
@@ -174,25 +167,31 @@ export default async function(ctx, options) {
     });
     await sleep(300);
 
-    // Click "Discussions" for Gemma4.
+    // Click "Manage template…" for Gemma4 to reveal the Community fixes section.
     await page.evaluate(() => {
         const btn = Array.from(document.querySelectorAll('#ct-body button'))
-            .find(b => b.textContent?.trim() === 'Discussions');
+            .find(b => b.textContent?.trim() === 'Manage template…');
         if (btn) btn.click();
     });
     await sleep(1500);
 
-    // Wait for Gemma4 discussions content.
+    // Wait for Gemma4 Community fixes content.
     await page.waitForFunction(() => {
-        const list = document.querySelector('#ct-body > div:last-child');
-        return list && list.textContent.length > 20 && !list.textContent.includes('Loading…');
+        const el = document.getElementById('chat-template-lifecycle-discussions');
+        return el && el.textContent.length > 20 && !el.textContent.includes('Loading…');
     }, { timeout: 20000 }).catch(() => {
         console.log('[CAPTURE] Gemma4 discussions feed timed out; continuing...');
     });
     await sleep(500);
 
-    // Capture 2: discussions feed for Gemma4 (google/gemma-4-31B-it).
+    // Capture 2: Community fixes section for Gemma4 (google/gemma-4-31B-it).
     await captureShot(page, 'discussions-feed-gemma4-google.png', { fullPage: true });
+
+    // Close the lifecycle modal before continuing.
+    await page.evaluate(() => {
+        document.getElementById('chat-template-lifecycle-close')?.click();
+    });
+    await sleep(300);
 
     // Save the current gemma4 template path for the lifecycle modal capture below.
     const gemma4TemplatePath = await page.evaluate(async () => {

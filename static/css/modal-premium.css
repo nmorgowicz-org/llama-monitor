@@ -3019,6 +3019,11 @@ details.mlx-native-group:not([open]) > .mlx-native-group-header {
     color: var(--color-text-muted, #7a8190);
     line-height: 1.5;
 }
+.chat-template-lifecycle-section-subtitle {
+    font-size: 9px;
+    color: var(--color-text-muted, #7a8190);
+    margin: 0 0 6px 0;
+}
 .chat-template-lifecycle-actions {
     display: flex;
     flex-wrap: wrap;

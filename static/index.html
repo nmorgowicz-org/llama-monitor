@@ -2610,18 +2610,14 @@
                             </div>
 <div class="pe-field">
                                 <label class="pe-label" for="modal-chat-template-file" title="Path to a chat template file. Wizard-created presets can auto-install one for models that need a custom template.">Chat Template File (--chat-template-file)</label>
-                                <div class="pe-field-hint" style="margin-bottom:4px;">Overrides the model's embedded template. Leave blank to use the model default. Useful when the native template has known tool-call or formatting issues.</div>
+                                <div class="pe-field-hint" id="preset-chat-template-status" style="margin-bottom:4px;">Chat template: built-in — using the model's built-in template</div>
+                                <div class="pe-field-hint" style="margin-bottom:4px;">Chat templates control how your messages are formatted before the model sees them. The built-in one usually works; a fixed template can repair broken tool-calling or thinking tags.</div>
                                 <input type="text" class="pe-input" id="modal-chat-template-file" placeholder="/path/to/chat_template.jinja" style="margin-bottom:6px;">
                                    <div class="pe-input-row">
-                                       <button type="button" class="btn-sm btn-preset" id="preset-recommended-chat-template-btn" title="Install the best-known community template for this model family">Recommended</button>
-                                       <button type="button" class="btn-sm btn-preset" id="preset-chat-template-manage-btn" title="Manage: version info, history, discussions, updates, fixes">Manage</button>
-                                       <button type="button" class="btn-sm btn-preset" id="preset-chat-template-discussions-btn" title="View active HF discussions for this template">Discussions</button>
-                                       <button type="button" class="btn-sm btn-preset" id="preset-chat-template-create-fix-btn" title="Create a testable release from a discussion fix" style="display:none;">Create fix</button>
+                                       <button type="button" class="btn-sm btn-preset" id="preset-recommended-chat-template-btn" title="Install the best-known community template for this model family">Use recommended template</button>
+                                       <button type="button" class="btn-sm btn-preset" id="preset-chat-template-manage-btn" title="Current, updates, version history, and community fixes for this template">Manage template…</button>
+                                       <button type="button" class="btn-sm btn-preset" id="preset-clear-chat-template-btn" title="Clear override">Clear</button>
                                    </div>
-                                  <div class="pe-field-hint">Recommended: installs the best-known community template for this model family. Manage: version info, history, discussions, updates, fixes, upload.</div>
-                                  <button type="button" class="btn-sm btn-preset" id="preset-clear-chat-template-btn" title="Clear override">Clear</button>
-                                 <div id="preset-chat-template-history-list" style="display:none;margin-top:4px;"></div>
-                                 <div id="preset-chat-template-discussions-list" style="display:none;margin-top:4px;"></div>
                              </div>
 <!-- Chat Template Lifecycle Modal -->
 <div id="chat-template-lifecycle-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.15);align-items:center;justify-content:center;z-index:20000;">
@@ -2635,24 +2631,27 @@
         </div>
         <div class="chat-template-lifecycle-body">
             <div class="chat-template-lifecycle-section">
-                <h4 class="chat-template-lifecycle-section-title">Version Info</h4>
+                <h4 class="chat-template-lifecycle-section-title">Current</h4>
                 <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-version"></div>
             </div>
             <div class="chat-template-lifecycle-section">
-                <h4 class="chat-template-lifecycle-section-title">History</h4>
+                <h4 class="chat-template-lifecycle-section-title">Updates</h4>
+                <p class="chat-template-lifecycle-section-subtitle">Check for a newer version of this template.</p>
+                <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-updates"></div>
+            </div>
+            <div class="chat-template-lifecycle-section">
+                <h4 class="chat-template-lifecycle-section-title">Version history</h4>
                 <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-history"></div>
             </div>
             <div class="chat-template-lifecycle-section">
-                <h4 class="chat-template-lifecycle-section-title">Discussions</h4>
+                <h4 class="chat-template-lifecycle-section-title">Community fixes</h4>
                 <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-discussions"></div>
             </div>
             <div class="chat-template-lifecycle-section">
-                <h4 class="chat-template-lifecycle-section-title">Actions</h4>
+                <h4 class="chat-template-lifecycle-section-title">Library</h4>
                 <div class="chat-template-lifecycle-section-content chat-template-lifecycle-actions">
-                    <button type="button" class="btn-sm btn-preset" id="lifecycle-check-updates-btn">Check updates</button>
-                    <button type="button" class="btn-sm btn-preset" id="lifecycle-create-fix-btn">Create fix</button>
-                    <button type="button" class="btn-sm btn-preset" id="lifecycle-library-btn">Library</button>
-                    <button type="button" class="btn-sm btn-preset" id="lifecycle-upload-btn">Upload</button>
+                    <button type="button" class="btn-sm btn-preset" id="lifecycle-library-btn">Choose existing</button>
+                    <button type="button" class="btn-sm btn-preset" id="lifecycle-upload-btn">Upload .jinja</button>
                 </div>
             </div>
         </div>
