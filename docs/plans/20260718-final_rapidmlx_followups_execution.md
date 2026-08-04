@@ -671,7 +671,7 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 
 ### Phase 9 — Formatting, endpoints, and revision-pinned template substitution
 
-- **State:** 9a, 9-RapidMLX, 9b, 9c, 9d, 9e infrastructure verified complete (2026-08-03). 9e UX
+- **State:** 9a, 9-RapidMLX, 9b, 9c, 9d, 9e verified complete (2026-08-03). 9f (client-protocol qualification, lowest urgency) not started.
   refinements in progress (modal theme, pre-populated editor, inline discussion viewer, upstream
   template loading, chat-template row redesign, Rapid-MLX preset editor wiring). Only 9f
   (client-protocol qualification, lowest urgency) remains not started.
@@ -817,9 +817,12 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
   provenance values; `spawn-wizard-chat-template.js` force-family dropdown renders optgroups with
   provenance labels; linting and validation pass on all modified JS files.
 
-#### Phase 9d — froggeric `-opencode-v3` transform script — Not started
+#### Phase 9d — froggeric `-opencode-v3` transform script — Verified complete (Coordinator, 2026-08-03)
 
-- **State:** Not started.
+- **State:** Verified complete. Implementation includes transform script (`scripts/transform-froggeric-template.mjs`),
+  backend wiring (`POST /api/chat-template/transform`), auto-transform on install-hf for froggeric repos,
+  transform on rollback, and frontend integration. Self-validated against upstream v21.3 — byte-for-byte
+  identical to user's reference `froggeric_qwen-chat_template-v21.3-opencode-v3.jinja`.
 - **Budget:** 30k
 - **Depends on:** 9a (install machinery), user-supplied reference files
 - **Primary output:** Deterministic transform script that derives `<upstream-version>-opencode-v3`
@@ -827,32 +830,29 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
   not blind line-number edits. Self-validated against known v21.3 before trusting on v21.4+.
 - **Evidence:** User's hand-edited variant (removes JSON-handling blocks, ~227 of 328 lines
   touched, iterated against live Qwen3.6-27B) fixes the majority of tool-call looping.
-- **Self-validation:** Run transform against upstream v21.3
-  (`/Users/nick/froggeric_qwen-chat_templat-v21.3.jinja`) and diff output against user's
-  hand-edited result
-  (`/Users/nick/SCRIPTS/CLAUDE/froggeric_qwen-chat_template-v21.3-opencode-v3.jinja`) before
-  trusting on v21.4+.
 - **Completion proof:** (1) transform script exists, runs deterministically, self-validation diff
-  is clean; (2) derived variant installs as a normal candidate release via 9a machinery;
-  (3) gated through 9b smoke-test like any other template.
+  is clean (verified against reference at commit `e9568ff`); (2) derived variant installs as a normal
+  candidate release via 9a machinery; (3) gated through 9b smoke-test like any other template.
 
-#### Phase 9e — Passive HF discussion-activity signal + create-fix-from-discussion flow — Infrastructure complete; UX refinements in progress
+#### Phase 9e — Passive HF discussion-activity signal + create-fix-from-discussion flow + lifecycle modal — Verified complete (Coordinator, 2026-08-03)
 
-- **State:** Backend infrastructure and basic UI verified complete (2026-08-03). UX refinements
-  in progress based on screenshot review (2026-08-03).
-- **Budget:** 20k infrastructure (complete) + refinements TBD
+- **State:** Verified complete. Backend infrastructure, UI, lifecycle modal, and Discussions
+  auto-route all implemented and screenshot-verified (2026-08-03).
+- **Budget:** 20k infrastructure + refinements
 - **Depends on:** existing install-hf machinery (9a), smoke-test endpoint (9b)
 - **Primary output (complete):**
   - `GET /api/chat-template/discussions?name=<template-name>` polls HF discussions API for the
-    template's source repo (resolved from release index), returns discussion metadata (title,
-    status, comment count, link)
+    template's source repo (resolved from release index, auto-routed by family if missing: qwen→froggeric/Qwen-Fixed-Chat-Templates, gemma-4→google/gemma-4-31B-it), returns discussion metadata (title, status, comment count, link)
   - `POST /api/chat-template/install-discussion` creates a discussion-derived release (separate
     from base template, with provenance link), stores as `<base>-discussion-<repo-slug>-<id>`
-  - UI in both spawn wizard and preset editor: "Discussions" toggle button shows feed of active
-    discussions with links; "Create fix" button opens modal → installs release → runs smoke test
-    → activates on pass
+  - Lifecycle modal (`Manage` button replaces 8-button row): version info (SHA, source, version),
+    history with rollback links, Discussions feed, Check updates, Create fix, Library, Upload
+  - Create fix modal: auto-infers HF repo based on template family, pre-populates repo field
   - Fully gated: smoke test validates tool calls, failed test leaves active template unchanged
-- **UX refinements needed (in progress):**
+- **Completion proof:** Backend endpoints verified, lifecycle modal captured in screenshots
+  (`preset-editor-lifecycle-modal-light.png`, `preset-editor-lifecycle-modal-dark.png`),
+  Discussions feed verified with auto-route (`preset-editor-discussions-feed.png`),
+  auto-infer repo tested live. Committed at `cf4e8ea`.
   1. **Modal theme:** Create fix modal should render light in light theme (currently dark opaque
      background in both themes). Background dimming is okay, but modal content must be readable.
   2. **Pre-populated editor:** Textarea must load current template content automatically — no blank
@@ -1109,7 +1109,7 @@ Only the Coordinator updates this table after independent verification.
 
 **Last updated:** 2026-08-03 by Coordinator. Phase 5a/5b implementation is verified complete (`791635e`, `6a14cc7`); the independent runtime-evidence closeout is active and does not reopen the code gate. The mass UNVERIFIED flag raised 2026-07-25 over Phase 7 and Phase 8 (7A-8B2, plus 7.5A-C) is now fully reconciled against a running binary: every row carries a Coordinator verdict dated 2026-07-30. Six defects were found and fixed, all invisible to the 1041-test suite; three rows are corrected to "feature removed" because the promised UI was deleted after it was marked verified; and a set of built-but-unconsumed backends is recorded in the gap register (`docs/plans/20260730-phase7_8_gap_register.md`) rather than fixed inline. Phase 8B3 remains pending and its stated dependency ("8B2 verified + screenshots approved") is only half met: 8B2 is verified, the screenshots were never re-approved.
 
-Phase 9 work discovered: Phase 9 was marked "Not started" but packet 9a (revision-pinned install, retained history, rollback) had shipped without a ledger row. Reconciled 2026-08-03 by audit of `spawn_wizard.rs`. Phase 9 split into ordered parts: 9a verified (reconciled), 9-RapidMLX verified (overlay wiring implemented), 9b verified (smoke-test endpoint), 9c verified (official Gemma4 template + provenance labels). Rapid-MLX overlay approach chosen (no CLI flag exists; overlay directory with symlinks preserves read-only cache contract). Remaining parts 9d–9f not started.
+Phase 9 work discovered: Phase 9 was marked "Not started" but packet 9a (revision-pinned install, retained history, rollback) had shipped without a ledger row. Reconciled 2026-08-03 by audit of `spawn_wizard.rs`. Phase 9 split into ordered parts: 9a verified (reconciled), 9-RapidMLX verified (overlay wiring implemented), 9b verified (smoke-test endpoint), 9c verified (official Gemma4 template + provenance labels), 9d verified (froggeric transform script), 9e verified (HF discussion feed, auto-route, lifecycle modal). Rapid-MLX overlay approach chosen (no CLI flag exists; overlay directory with symlinks preserves read-only cache contract). Only 9f (client-protocol qualification, lowest urgency) not started.
 
 **Amended 2026-07-30.** Phase 6.5 had no ledger row at all, so its state lived only in a separate working-handoff doc and a coordinator reading this table alone would have seen phase 6 → 7 and missed it. Rows for 6.5a and 6.5b are added below. That handoff is retired: its live state and open items are folded into the Phase 6.5 section of `20260718-final_rapidmlx_followups.md`, its harness prerequisites into §12.3a of `docs/reference/rapid-mlx-mtp-evidence.md`, and the document itself is **deleted** — recoverable from git history at `396644b`. Nothing outside this repo's plan/evidence pair is current MTP state. It was briefly archived with a stale-claims banner; keeping a corrected copy of a document whose content had already been absorbed was redundant, so the copy went rather than the corrections.
 
