@@ -15,7 +15,9 @@
     "capture:list": "node capture.mjs --list-scenarios",
     "capture:sparkline": "node capture.mjs --scenario sparkline",
     "capture:gifs": "node capture.mjs --scenario gifs",
-    "update-baseline": "node -e \"import('./update-baseline.mjs').then(m => m.default())\""
+    "update-baseline": "node -e \"import('./update-baseline.mjs').then(m => m.default())\"",
+    "capture:group": "node capture/cli-group.mjs",
+    "capture:manifest": "node capture/cli-manifest.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1"

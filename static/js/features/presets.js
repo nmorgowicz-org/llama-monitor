@@ -3507,7 +3507,7 @@ export function initPresets() {
         const historyEl = document.getElementById('chat-template-lifecycle-history');
         const discussionsEl = document.getElementById('chat-template-lifecycle-discussions');
         if (modal && nameEl && versionEl && historyEl && discussionsEl) {
-            nameEl.textContent = tplName;
+            nameEl.textContent = tplName.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
             versionEl.textContent = 'Loading…';
             historyEl.textContent = '';
             discussionsEl.textContent = '';
@@ -3520,73 +3520,7 @@ export function initPresets() {
                 ]);
                 const releasesResult = releasesResp.ok ? await releasesResp.json() : { ok: false };
                 const discussionsResult = discussionsResp.ok ? await discussionsResp.json() : { ok: false };
-                if (releasesResult.ok && releasesResult.releases && releasesResult.releases.length > 0) {
-                    const latest = releasesResult.releases[0];
-                    const activeIdx = releasesResult.active_index ?? 0;
-                    const active = releasesResult.releases[activeIdx] || latest;
-                    versionEl.innerHTML = '';
-                    const versionInfo = [
-                        { label: 'Version', value: latest.version || '—' },
-                        { label: 'Active version', value: active.version || '—' },
-                        { label: 'Source', value: releasesResult.source || '—' },
-                        { label: 'SHA-256', value: (latest.content_sha256 || '').substring(0, 16) + '…' },
-                        { label: 'Installed', value: latest.installed_at ? new Date(latest.installed_at).toLocaleString() : '—' },
-                    ];
-                    versionInfo.forEach(item => {
-                        const row = document.createElement('div');
-                        row.className = 'chat-template-lifecycle-version-row';
-                        const label = document.createElement('span');
-                        label.className = 'chat-template-lifecycle-version-label';
-                        label.textContent = item.label + ':';
-                        const value = document.createElement('span');
-                        value.className = 'chat-template-lifecycle-version-value';
-                        value.textContent = item.value;
-                        row.appendChild(label);
-                        row.appendChild(value);
-                        versionEl.appendChild(row);
-                    });
-                    if (releasesResult.releases.length > 1) {
-                        historyEl.innerHTML = '';
-                        const header = document.createElement('div');
-                        header.style.fontSize = '9px';
-                        header.style.color = 'var(--color-text-muted)';
-                        header.style.marginBottom = '4px';
-                        header.textContent = `${releasesResult.releases.length} retained version${releasesResult.releases.length === 1 ? '' : 's'} — click to roll back`;
-                        historyEl.appendChild(header);
-                        releasesResult.releases.forEach((rel, idx) => {
-                            const row = document.createElement('div');
-                            row.className = 'chat-template-lifecycle-history-item';
-                            const isActive = idx === activeIdx;
-                            const label = document.createElement('span');
-                            label.textContent = rel.version + (isActive ? ' (active)' : '');
-                            label.style.color = isActive ? 'var(--color-success)' : 'var(--color-text-muted)';
-                            row.appendChild(label);
-                            if (!isActive) {
-                                const link = document.createElement('a');
-                                link.href = '#';
-                                link.textContent = ' roll back';
-                                link.addEventListener('click', async (e) => {
-                                    e.preventDefault();
-                                    const headers = window.authHeaders ? window.authHeaders() : {};
-                                    const resp = await fetch('/api/chat-template/activate', {
-                                        method: 'POST',
-                                        headers: { ...headers, 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ name: tplName, release: rel.version }),
-                                    });
-                                    if (resp.ok) {
-                                        showToast('Rolled back to ' + rel.version, 'success');
-                                        modal.classList.remove('open');
-                                    } else {
-                                        showToast('Rollback failed', 'error');
-                                    }
-                                });
-                                row.appendChild(link);
-                            }
-                            historyEl.appendChild(row);
-                        });
-                    } else {
-                        historyEl.textContent = 'No prior versions retained.';
-                    }
+                function renderDiscussions() {
                     if (discussionsResult.ok && discussionsResult.discussions && discussionsResult.discussions.length > 0) {
                         discussionsEl.innerHTML = '';
                         const header = document.createElement('div');
@@ -3616,8 +3550,80 @@ export function initPresets() {
                     } else {
                         discussionsEl.textContent = discussionsResult.error || 'No discussions found.';
                     }
+                }
+                if (releasesResult.ok && releasesResult.releases && releasesResult.releases.length > 0) {
+                    const latest = releasesResult.releases[0];
+                    const activeSha = releasesResult.active_sha256 || null;
+                    const active = releasesResult.releases.find(r => r.sha256 === activeSha) || latest;
+                    versionEl.innerHTML = '';
+                    const versionInfo = [
+                        { label: 'Active revision', value: active.revision ? active.revision.slice(0, 10) : (active.sha256 || '').slice(0, 10) },
+                        { label: 'Source', value: active.source_url || '—' },
+                        { label: 'SHA-256', value: (active.sha256 || '').substring(0, 16) + '…' },
+                        { label: 'Installed', value: active.installed_at ? new Date(active.installed_at).toLocaleString() : '—' },
+                    ];
+                    versionInfo.forEach(item => {
+                        const row = document.createElement('div');
+                        row.className = 'chat-template-lifecycle-version-row';
+                        const label = document.createElement('span');
+                        label.className = 'chat-template-lifecycle-version-label';
+                        label.textContent = item.label + ':';
+                        const value = document.createElement('span');
+                        value.className = 'chat-template-lifecycle-version-value';
+                        value.textContent = item.value;
+                        row.appendChild(label);
+                        row.appendChild(value);
+                        versionEl.appendChild(row);
+                    });
+                    if (releasesResult.releases.length > 1) {
+                        historyEl.innerHTML = '';
+                        const header = document.createElement('div');
+                        header.style.fontSize = '9px';
+                        header.style.color = 'var(--color-text-muted)';
+                        header.style.marginBottom = '4px';
+                        header.textContent = `${releasesResult.releases.length} retained release${releasesResult.releases.length === 1 ? '' : 's'} — click to roll back`;
+                        historyEl.appendChild(header);
+                        releasesResult.releases.forEach((rel) => {
+                            const row = document.createElement('div');
+                            row.className = 'chat-template-lifecycle-history-item';
+                            const isActive = rel.sha256 === activeSha;
+                            const when = rel.installed_at ? new Date(rel.installed_at).toLocaleString() : 'unknown date';
+                            const label = document.createElement('span');
+                            label.textContent = `${when} — ${(rel.sha256 || '').slice(0, 10)}` + (isActive ? ' (active)' : '');
+                            label.style.color = isActive ? 'var(--color-success)' : 'var(--color-text-muted)';
+                            row.appendChild(label);
+                            if (!isActive) {
+                                const link = document.createElement('a');
+                                link.href = '#';
+                                link.textContent = ' roll back';
+                                link.addEventListener('click', async (e) => {
+                                    e.preventDefault();
+                                    const headers = window.authHeaders ? window.authHeaders() : {};
+                                    const resp = await fetch('/api/chat-template/activate', {
+                                        method: 'POST',
+                                        headers: { ...headers, 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ name: tplName, sha256: rel.sha256 }),
+                                    });
+                                    if (resp.ok) {
+                                        showToast('Rolled back to ' + rel.sha256.slice(0, 10), 'success');
+                                        modal.classList.remove('open');
+                                    } else {
+                                        showToast('Rollback failed', 'error');
+                                    }
+                                });
+                                row.appendChild(link);
+                            }
+                            historyEl.appendChild(row);
+                        });
+                    } else {
+                        historyEl.textContent = 'No prior releases retained.';
+                    }
+                    renderDiscussions();
                 } else {
-                    versionEl.textContent = releasesResult.error || 'No release data available.';
+                    // eslint-disable-next-line no-unsanitized/property -- data from our own API
+                    versionEl.innerHTML = `<div style="font-size:11px;color:var(--color-text-muted);padding:4px 0;">${releasesResult.error || 'This template was installed directly (no release index).'}</div>`;
+                    historyEl.textContent = 'No prior releases retained.';
+                    renderDiscussions();
                 }
             } catch (err) {
                 versionEl.textContent = 'Failed to load: ' + (err.message || String(err));
@@ -3686,7 +3692,7 @@ export function initPresets() {
         const linesWrap = document.createElement('div');
         linesWrap.style.cssText = 'display:flex;height:250px;min-height:250px;overflow:hidden;';
         const lineNumbers = document.createElement('div');
-        lineNumbers.style.cssText = 'padding:6px 4px 6px 6px;font-size:9px;font-family:monospace;line-height:1.5;color:var(--color-text-muted);text-align:right;user-select:none;background:var(--color-bg-secondary);border-right:1px solid var(--color-border);overflow:hidden;white-space:nowrap;';
+        lineNumbers.style.cssText = 'flex:0 0 auto;min-width:32px;padding:6px 8px 6px 6px;font-size:9px;font-family:monospace;line-height:1.5;color:var(--color-text-muted);text-align:right;user-select:none;background:var(--color-bg-secondary);border-right:1px solid var(--color-border);overflow:hidden;white-space:nowrap;box-sizing:border-box;';
         const contentTextarea = document.createElement('textarea');
         contentTextarea.className = 'chat-template-fix-textarea';
         contentTextarea.rows = 15;
@@ -3775,7 +3781,7 @@ export function initPresets() {
         panel.appendChild(btnRow);
         modal.appendChild(panel);
 
-        const modalContainer = document.querySelector('#preset-modal .modal') || document.getElementById('preset-modal') || document.body;
+        const modalContainer = document.body;
         cancelBtn.addEventListener('click', () => {
             modalContainer.removeChild(modal);
         });
@@ -3869,7 +3875,6 @@ export function initPresets() {
             }
         });
 
-        modalContainer.style.position = 'relative';
         modalContainer.appendChild(modal);
 
         // Pre-populate textarea with current template content

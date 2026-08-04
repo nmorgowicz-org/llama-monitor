@@ -2612,18 +2612,19 @@
                                 <label class="pe-label" for="modal-chat-template-file" title="Path to a chat template file. Wizard-created presets can auto-install one for models that need a custom template.">Chat Template File (--chat-template-file)</label>
                                 <div class="pe-field-hint" style="margin-bottom:4px;">Overrides the model's embedded template. Leave blank to use the model default. Useful when the native template has known tool-call or formatting issues.</div>
                                 <input type="text" class="pe-input" id="modal-chat-template-file" placeholder="/path/to/chat_template.jinja" style="margin-bottom:6px;">
-                                 <div class="pe-input-row">
-                                      <button type="button" class="btn-sm btn-preset" id="preset-recommended-chat-template-btn" title="Install the best-known community template for this model family">Recommended</button>
-                                      <button type="button" class="btn-sm btn-preset" id="preset-chat-template-manage-btn" title="Manage: version info, history, discussions, updates, fixes">Manage</button>
-                                      <button type="button" class="btn-sm btn-preset" id="preset-chat-template-create-fix-btn" title="Create a testable release from a discussion fix" style="display:none;">Create fix</button>
-                                  </div>
+                                   <div class="pe-input-row">
+                                       <button type="button" class="btn-sm btn-preset" id="preset-recommended-chat-template-btn" title="Install the best-known community template for this model family">Recommended</button>
+                                       <button type="button" class="btn-sm btn-preset" id="preset-chat-template-manage-btn" title="Manage: version info, history, discussions, updates, fixes">Manage</button>
+                                       <button type="button" class="btn-sm btn-preset" id="preset-chat-template-discussions-btn" title="View active HF discussions for this template">Discussions</button>
+                                       <button type="button" class="btn-sm btn-preset" id="preset-chat-template-create-fix-btn" title="Create a testable release from a discussion fix" style="display:none;">Create fix</button>
+                                   </div>
                                   <div class="pe-field-hint">Recommended: installs the best-known community template for this model family. Manage: version info, history, discussions, updates, fixes, upload.</div>
                                   <button type="button" class="btn-sm btn-preset" id="preset-clear-chat-template-btn" title="Clear override">Clear</button>
                                  <div id="preset-chat-template-history-list" style="display:none;margin-top:4px;"></div>
                                  <div id="preset-chat-template-discussions-list" style="display:none;margin-top:4px;"></div>
                              </div>
 <!-- Chat Template Lifecycle Modal -->
-<div id="chat-template-lifecycle-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.15);display:flex;align-items:center;justify-content:center;z-index:10000;backdrop-filter:blur(2px);">
+<div id="chat-template-lifecycle-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.15);align-items:center;justify-content:center;z-index:20000;">
     <div class="chat-template-lifecycle-panel">
         <div class="chat-template-lifecycle-header">
             <div class="chat-template-lifecycle-title">

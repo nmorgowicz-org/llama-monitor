@@ -2108,7 +2108,7 @@ fn resolve_template_source_repo(template_name: &str) -> Result<Option<String>, S
     let index_path = base.join("releases").join(template_name).join("index.json");
     let content = match std::fs::read_to_string(&index_path) {
         Ok(c) => c,
-        Err(_) => return Ok(None),
+        Err(_) => return Err("Release index not found".to_string()),
     };
     let index: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse release index: {e}"))?;
