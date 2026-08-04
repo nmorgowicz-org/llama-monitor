@@ -3065,6 +3065,17 @@ details.mlx-native-group:not([open]) > .mlx-native-group-header {
     white-space: nowrap;
 }
 
+/* Dark theme only: --color-text-muted (#7a8190) meets 3:1 against the flat
+   panel base, but the panel bg is a layered radial-gradient with lighter
+   highlight regions — measured ~2.2:1 there. Bump muted text in this panel
+   specifically rather than touching the global token. */
+:root:not([data-theme="light"]) .chat-template-lifecycle-section-content,
+:root:not([data-theme="light"]) .chat-template-lifecycle-section-subtitle,
+:root:not([data-theme="light"]) .chat-template-lifecycle-subtitle,
+:root:not([data-theme="light"]) .chat-template-lifecycle-version-label {
+    color: #a8aeb8;
+}
+
 [data-theme="light"] .chat-template-lifecycle-panel {
     background: linear-gradient(160deg, rgba(245,247,250,0.98), rgba(235,240,245,1.0));
     border-color: rgba(0,0,0,0.12);

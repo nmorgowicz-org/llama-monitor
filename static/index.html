@@ -7040,7 +7040,48 @@
 
 
 <!-- ── Rapid-MLX Runtime Manager Modal ─────────────────────────────────── -->
-<div class="modal-overlay" id="rapid-mlx-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="rapid-mlx-modal-title">
+
+
+
+<!-- Chat Template Lifecycle Modal -->
+<div id="chat-template-lifecycle-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.15);align-items:center;justify-content:center;z-index:20000;">
+    <div class="chat-template-lifecycle-panel">
+        <div class="chat-template-lifecycle-header">
+            <div class="chat-template-lifecycle-title">
+                <h3 class="chat-template-lifecycle-heading">Chat Template Lifecycle</h3>
+                <p class="chat-template-lifecycle-subtitle" id="chat-template-lifecycle-name"></p>
+            </div>
+            <button type="button" class="chat-template-lifecycle-close" id="chat-template-lifecycle-close">&times;</button>
+        </div>
+        <div class="chat-template-lifecycle-body">
+            <div class="chat-template-lifecycle-section">
+                <h4 class="chat-template-lifecycle-section-title">Current</h4>
+                <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-version"></div>
+            </div>
+            <div class="chat-template-lifecycle-section">
+                <h4 class="chat-template-lifecycle-section-title">Updates</h4>
+                <p class="chat-template-lifecycle-section-subtitle">Check for a newer version of this template.</p>
+                <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-updates"></div>
+            </div>
+            <div class="chat-template-lifecycle-section">
+                <h4 class="chat-template-lifecycle-section-title">Version history</h4>
+                <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-history"></div>
+            </div>
+            <div class="chat-template-lifecycle-section">
+                <h4 class="chat-template-lifecycle-section-title">Community fixes</h4>
+                <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-discussions"></div>
+            </div>
+            <div class="chat-template-lifecycle-section">
+                <h4 class="chat-template-lifecycle-section-title">Library</h4>
+                <div class="chat-template-lifecycle-section-content chat-template-lifecycle-actions">
+                    <button type="button" class="btn-sm btn-preset" id="lifecycle-library-btn">Choose existing</button>
+                    <button type="button" class="btn-sm btn-preset" id="lifecycle-upload-btn">Upload .jinja</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="modal-overlay" id="rapid-mlx-modal" role="dialog" aria-modal="true" aria-labelledby="rapid-mlx-modal-title">
     <div class="rapid-mlx-modal-shell">
         <div class="rapid-mlx-modal-header">
             <div class="rapid-mlx-modal-title-row">
@@ -7083,46 +7124,6 @@
                             <div class="rapid-mlx-changelog-loading">Loading changelog…</div>
                         </div>
                     </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-
-<!-- Chat Template Lifecycle Modal -->
-<div id="chat-template-lifecycle-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.15);align-items:center;justify-content:center;z-index:20000;">
-    <div class="chat-template-lifecycle-panel">
-        <div class="chat-template-lifecycle-header">
-            <div class="chat-template-lifecycle-title">
-                <h3 class="chat-template-lifecycle-heading">Chat Template Lifecycle</h3>
-                <p class="chat-template-lifecycle-subtitle" id="chat-template-lifecycle-name"></p>
-            </div>
-            <button type="button" class="chat-template-lifecycle-close" id="chat-template-lifecycle-close">&times;</button>
-        </div>
-        <div class="chat-template-lifecycle-body">
-            <div class="chat-template-lifecycle-section">
-                <h4 class="chat-template-lifecycle-section-title">Current</h4>
-                <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-version"></div>
-            </div>
-            <div class="chat-template-lifecycle-section">
-                <h4 class="chat-template-lifecycle-section-title">Updates</h4>
-                <p class="chat-template-lifecycle-section-subtitle">Check for a newer version of this template.</p>
-                <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-updates"></div>
-            </div>
-            <div class="chat-template-lifecycle-section">
-                <h4 class="chat-template-lifecycle-section-title">Version history</h4>
-                <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-history"></div>
-            </div>
-            <div class="chat-template-lifecycle-section">
-                <h4 class="chat-template-lifecycle-section-title">Community fixes</h4>
-                <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-discussions"></div>
-            </div>
-            <div class="chat-template-lifecycle-section">
-                <h4 class="chat-template-lifecycle-section-title">Library</h4>
-                <div class="chat-template-lifecycle-section-content chat-template-lifecycle-actions">
-                    <button type="button" class="btn-sm btn-preset" id="lifecycle-library-btn">Choose existing</button>
-                    <button type="button" class="btn-sm btn-preset" id="lifecycle-upload-btn">Upload .jinja</button>
                 </div>
             </div>
         </div>
