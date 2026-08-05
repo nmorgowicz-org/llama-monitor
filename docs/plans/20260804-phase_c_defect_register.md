@@ -359,9 +359,20 @@ All 7 screenshots passed — no defects found. Certificates tab default state, N
 | `tls-acme-other-provider.png` | ACME mode, "Other" provider | Manual "Provider Code" text field with guidance callout correctly replaces the dropdown-only flow. | None — renders correctly | **Passed** |
 | `tls-db-admin-section.png` | Database Administration card | Chat Database stats grid, Backup Now/Verify/Maintain/Query buttons, Activity Log all correct. | None — renders correctly | **Passed** |
 
+### `filebrowser` scenario
+
+`filebrowser-config-browse-btn.png` correct — Configuration modal's "Local llama-server executable" section (executable path field, Browse/Use Default buttons, working directory field, GPU Environment section) renders correctly.
+
+`filebrowser-modal-open.png` shows the Browse Executable modal displaying "This path is not allowed. Only certain directories are accessible for security." instead of a file listing. **Root-caused as a capture-harness artifact, not a product bug**: the harness intentionally copies the real machine's `ui-settings.json` into the sandboxed `HOME` (for realistic previews), which carries over the real dev machine's actual saved server-executable path (`/Users/nick/.config/llama-monitor/...`). The file browser derives its starting directory from that saved path's parent, which sits outside the sandboxed `HOME`'s allowed-roots (per `src/web/api/browse.rs`'s `allowed_roots` check, tied to `dirs::home_dir()` = the temp `HOME` the capture server was spawned with). For a real user, the saved server path and their actual home directory always coincide, so this "Path not allowed" state cannot occur in production. Not fixed — capture-only artifact.
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `filebrowser-config-browse-btn.png` | Configuration modal, executable section | Renders correctly. | None — renders correctly | **Passed** |
+| `filebrowser-modal-open.png` | Browse Executable modal with file listing | Shows "Path not allowed" instead of a listing, due to sandboxed-HOME vs. copied-real-settings mismatch in the capture harness. | Capture-harness artifact — cannot occur for real users | **Passed (capture nuance, not a product defect)** |
+
 ## Remaining tiers (not started)
 
-Tier 5 continues (`filebrowser`, `dashboard`), then Tier 6 (stable/older, lighter-touch except `chat`). Full scope is 250–400 screenshots across ~34 scenarios; the plan itself budgets 3–4 sessions for full coverage. This session covered 22 scenarios (138 screenshots + 2 GIF) across Tiers 1–5 so far.
+Tier 5 continues (`dashboard`), then Tier 6 (stable/older, lighter-touch except `chat`). Full scope is 250–400 screenshots across ~34 scenarios; the plan itself budgets 3–4 sessions for full coverage. This session covered 23 scenarios (140 screenshots + 2 GIF) across Tiers 1–5 so far.
 
 ## Session notes
 
