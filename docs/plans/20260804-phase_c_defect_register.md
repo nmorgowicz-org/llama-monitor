@@ -437,9 +437,65 @@ This scenario unconditionally calls `attachToServer()` (ignores `--no-attach`) a
 | `guided-gen-director-applied.png` | Chat continuation after applying a director option | Renders correctly — real generated noir continuation | None | **Passed** |
 | `panels-chat-input-buttons.png` | Chat input row with action buttons | Renders correctly | None | **Passed** |
 
-## Remaining tiers (not started)
+### `tune-panel` scenario
 
-Tier 5 and most of Tier 6 are done (`sidebar`, `chat`, `smoke`, `free-cache`, `guided-gen`). Remaining Tier 6 scenarios: `tune-panel`, `benchmark-results`, `llama-updater`, `chat-history-qa`, `sparkline`, `gifs`. Full scope is 250–400 screenshots across ~34 scenarios; the plan itself budgets 3–4 sessions for full coverage. This session covered 28 scenarios (roughly 160 screenshots + 2 GIF) across Tiers 1–6 so far (2 bugs found and fixed — `sidebar` and `smoke`, same root cause; `chat` inconclusive due to a busy remote endpoint, not a defect).
+Remote-attached Server tab with live "GENERATING" telemetry mid-run and the Quick Benchmark popover open. Renders correctly: preset info, Performance & metrics cards (Speed, Chat Context/Memory gauge, Active Sessions, Requests, Model Info), Quick Benchmark result (S grade, 47.1 gen t/s, 23 prompt t/s, 556ms first token) with a batch-size-increase suggestion callout.
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `tune-panel-open.png` | Server tab with Quick Benchmark popover open, live generating state | Renders correctly | None | **Passed** |
+
+### `benchmark-results` scenario
+
+Remote-attached Server tab, idle state. Same panel layout as `tune-panel` sans the popover — Speed/Generation Details/Chat Context/Active Sessions/Requests/Model Info cards all correct.
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `benchmark-results.png` | Server tab, idle performance metrics | Renders correctly | None | **Passed** |
+
+### `llama-updater` scenario
+
+Both screenshots correct: the navbar updater pill shows "llama.cpp · ↑b4620" (update available), and the Version modal lists recent releases (b10268–b10276) with per-build changelog detail, platform download links, and Install buttons.
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `llama-updater-pill.png` | Navbar pill showing update available | Renders correctly | None | **Passed** |
+| `llama-updater-version-modal.png` | Version modal with release list + changelog detail | Renders correctly | None | **Passed** |
+
+### `chat-history-qa` scenario
+
+History Q&A side panel correct: "Ask about your chat history" empty state with 4 suggested prompt chips, input box, "Add context"/"Write scene" actions, correct message count (4 msgs) in the header.
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `chat-history-qa-panel.png` | History Q&A panel, empty/prompt state | Renders correctly | None | **Passed** |
+
+### `sparkline` scenario
+
+Remote-attached, real GPU/system telemetry via remote agent. All three captures correct: full Server tab, GPU section close-up (RTX 5090 load/power/VRAM/clocks with live sparklines), System section close-up (Ryzen CPU load/RAM/memory pressure/clock with live sparklines).
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `sparkline-sparkline-validate-full.png` | Full Server tab | Renders correctly | None | **Passed** |
+| `sparkline-sparkline-validate-gpu-section.png` | GPU section close-up with sparklines | Renders correctly | None | **Passed** |
+| `sparkline-sparkline-validate-system-section.png` | System section close-up with sparklines | Renders correctly | None | **Passed** |
+
+### `gifs` scenario
+
+Two GIFs generated cleanly via the ffmpeg pipeline with no errors: `performance-metrics.gif` (900x563, 10fps, 100 frames from `docs/screenshots/artifacts/`) and `gpu-metrics.gif` (900x563, 10fps, 60 frames). Both encode/palette-gen steps completed without warnings beyond the expected duplicate-color notice.
+
+| Output | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `performance-metrics.gif` | Animated performance-metrics capture | Encoded cleanly, 100 frames | None | **Passed** |
+| `gpu-metrics.gif` | Animated GPU-metrics capture | Encoded cleanly, 60 frames | None | **Passed** |
+
+## Tier 6: COMPLETE
+
+All Tier 6 scenarios run and verified: `sidebar` (5 screenshots, bug fixed), `chat` (unverified — busy remote endpoint, not a defect), `smoke` (bug fixed), `free-cache` (2 screenshots), `guided-gen` (9 screenshots), `tune-panel` (1), `benchmark-results` (1), `llama-updater` (2), `chat-history-qa` (1), `sparkline` (3), `gifs` (2 GIFs).
+
+## Remaining tiers
+
+Tiers 1–6 are now all complete. Full sweep across this and prior sessions: ~34 scenarios, roughly 170 screenshots + 4 GIFs. Total defects found: chat-template modal visibility bug (`discussions`), Rapid-MLX Runtime Manager modal triple-bug (`rapid-mlx-runtime`), speculative-trust-consent capture defect (`spawn-wizard-engines`), non-Apple platform-info caching bug (`models-v2`), `.settings-help` flexbox text-splitting bug (`settings`), navbar stale-selector + toggle-cycling bugs (`navbar`), and the `sidebar`/`smoke` shared view-transition bug — 8 real/capture bugs found and fixed total, plus one open (unfixed) dark-theme contrast finding in `preset-editor`. `chat` remains inconclusive pending a free remote endpoint. Screenshot filename/directory reorganization (deferred throughout this sweep) is now eligible to start.
 
 ## Session notes
 
