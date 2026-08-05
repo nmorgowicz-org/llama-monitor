@@ -370,9 +370,21 @@ All 7 screenshots passed — no defects found. Certificates tab default state, N
 | `filebrowser-config-browse-btn.png` | Configuration modal, executable section | Renders correctly. | None — renders correctly | **Passed** |
 | `filebrowser-modal-open.png` | Browse Executable modal with file listing | Shows "Path not allowed" instead of a listing, due to sandboxed-HOME vs. copied-real-settings mismatch in the capture harness. | Capture-harness artifact — cannot occur for real users | **Passed (capture nuance, not a product defect)** |
 
+**Follow-up (if this screenshot is wanted for UI/UX showcase use):** if `filebrowser-modal-open.png` needs to actually show a populated file listing (e.g. for docs/marketing use, not just defect-sweep purposes), the scenario needs an explicit starting path override — pass a `defaultPath` into `openFileBrowser`/`openDeferredFileBrowser` for this capture (or point the Browse click at a path inside `TEMP_HOME`) instead of relying on the copied real `ui-settings.json` server path. Not done here since this pass is about defect verification, not asset production.
+
+### `dashboard` scenario
+
+Requires a real attached llama.cpp server (not `--no-attach`). All 3 screenshots passed — no defects found. "Performance & metrics" section (throughput, generation details with live "working"/"warming" state, chat context/memory gauge, active sessions, requests, model info) and the GPU/System section (real NVIDIA RTX 5090 telemetry: load/power/VRAM/clocks; real AMD Ryzen CPU/RAM/memory-pressure telemetry) all render correctly with live data from the remote agent.
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `dashboard-performance-section.png` | Performance & metrics section, element-scoped | Speed/Generation Details/Chat Context/Active Sessions/Requests/Model Info cards all correct; throughput shows dashes since metrics hadn't accumulated yet post-attach (expected). | None — renders correctly | **Passed** |
+| `settings-server-tab.png` | Full Server tab, full page | Same content as above plus navbar (Remote/Detach/telemetry pills, GENERATING mini-stat bar, sidebar) — all correct. | None — renders correctly | **Passed** |
+| `dashboard-gpu-section.png` | GPU/System hardware section | Real GPU (RTX 5090: load/power/VRAM/clocks) and System (Ryzen CPU load/RAM/memory pressure) telemetry render correctly via remote agent. | None — renders correctly | **Passed** |
+
 ## Remaining tiers (not started)
 
-Tier 5 continues (`dashboard`), then Tier 6 (stable/older, lighter-touch except `chat`). Full scope is 250–400 screenshots across ~34 scenarios; the plan itself budgets 3–4 sessions for full coverage. This session covered 23 scenarios (140 screenshots + 2 GIF) across Tiers 1–5 so far.
+Tier 5 is now complete (`navbar`, `panels`, `appearance-palette`, `settings`, `tls`, `filebrowser`, `dashboard`). Tier 6 (stable/older, lighter-touch except `chat`) is next. Full scope is 250–400 screenshots across ~34 scenarios; the plan itself budgets 3–4 sessions for full coverage. This session covered 24 scenarios (143 screenshots + 2 GIF) across Tiers 1–5 so far.
 
 ## Session notes
 
