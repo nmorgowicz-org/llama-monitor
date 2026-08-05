@@ -404,9 +404,42 @@ Quick validation pass only, per explicit scope note: the chat code itself hasn't
 |---|---|---|---|---|
 | (all `chat-*.png`) | Live chat completion + telemetry/focus-mode/logs captures | Timed out waiting for assistant response — remote endpoint (192.168.2.16:8001) was busy | None — external/environmental, not a code defect | **Unverified (blocked by busy remote endpoint, retry later)** |
 
+### `smoke` scenario
+
+**Bug found and fixed.** Same root cause as `sidebar`: under `--no-attach`, `smoke.mjs` called `waitForMonitor(page)` directly without ever triggering the setup→monitor view transition (normally done inside `attachToServer()`), so it timed out after 30s waiting for `#view-monitor` to become visible — a hard scenario failure, not just a missed screenshot. Fixed with the same `ensureMonitorView()` call used in the `sidebar` fix. Re-ran after the fix: passes cleanly with 0 console errors/warnings on startup.
+
+| Check | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| Startup console smoke test | No critical console errors (import/syntax/type errors, failed module loads) | 0 errors, 0 warnings | None (after fix) | **Passed** |
+
+### `free-cache` scenario
+
+Simple confirm-dialog capture, no defects. Both screenshots show the "Free system cache" confirmation modal correctly (title, reclaimable size estimate, Cancel/Free cache buttons) in dark and light theme.
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `welcome-free-cache-confirm.png` | Free-cache confirm dialog, dark theme | Renders correctly | None | **Passed** |
+| `welcome-free-cache-confirm-light.png` | Same, light theme | Renders correctly | None | **Passed** |
+
+### `guided-gen` scenario
+
+This scenario unconditionally calls `attachToServer()` (ignores `--no-attach`) and drives several real, sequential chat completions against the remote endpoint (suggestions generation, quick-guide response, director-mode generation + apply) — each completion took 28–68s given the busy remote endpoint noted earlier this session, so the full run took several minutes; ran successfully in the background with a generous timeout rather than the default 90s. All content screenshots visually reviewed and correct: suggestions dropdown/results panel with real generated suggestion cards, quick-guide response, director-mode options and applied continuation (all real generated prose, consistent with the noir-scene seed context), chat tabs, and chat input buttons. Several `fullPage: false` close-up shots (`guided-gen-surprise-armed.png`, `guided-gen-explicit-*.png`, `guided-gen-suggestions-tag-cloud.png`, `guided-gen-suggestions-search-filter.png`, `guided-gen-manage-categories.png`) were intentionally skipped — `captureShot()` in `harness/shot.mjs` disables non-full-page captures by default (existing, deliberate behavior, not a defect).
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `panels-chat-tabs.png` | Multiple chat tabs with distinct seeded content | Renders correctly | None | **Passed** |
+| `guided-gen-context-notes-expanded.png` | Context notes sidebar with character/setting/tone sections | Renders correctly | None | **Passed** |
+| `guided-gen-suggestions-dropdown.png` | Suggestions dropdown, pre-generate state | Renders correctly | None | **Passed** |
+| `guided-gen-suggestions-results.png` | Suggestions dropdown with real generated suggestion cards | Renders correctly — 5 real suggestions with titles/descriptions | None | **Passed** |
+| `guided-gen-quick-guide-dropdown.png` | Quick guide dropdown | Renders correctly | None | **Passed** |
+| `guided-gen-quick-guide-response.png` | Chat reply shaped by quick-guide instruction | Renders correctly | None | **Passed** |
+| `guided-gen-director-options.png` | Director-mode generated scene options | Renders correctly — 4 real generated options with type/title/effect/detail | None | **Passed** |
+| `guided-gen-director-applied.png` | Chat continuation after applying a director option | Renders correctly — real generated noir continuation | None | **Passed** |
+| `panels-chat-input-buttons.png` | Chat input row with action buttons | Renders correctly | None | **Passed** |
+
 ## Remaining tiers (not started)
 
-Tier 5 and the `sidebar`/`chat` portion of Tier 6 are done. Remaining Tier 6 scenarios: `guided-gen`, `free-cache`, `tune-panel`, `benchmark-results`, `llama-updater`, `chat-history-qa`, `sparkline`, `gifs`, `smoke`. Full scope is 250–400 screenshots across ~34 scenarios; the plan itself budgets 3–4 sessions for full coverage. This session covered 25 scenarios (148 screenshots + 2 GIF) across Tiers 1–6 so far (1 bug found and fixed in `sidebar`; `chat` inconclusive due to a busy remote endpoint, not a defect).
+Tier 5 and most of Tier 6 are done (`sidebar`, `chat`, `smoke`, `free-cache`, `guided-gen`). Remaining Tier 6 scenarios: `tune-panel`, `benchmark-results`, `llama-updater`, `chat-history-qa`, `sparkline`, `gifs`. Full scope is 250–400 screenshots across ~34 scenarios; the plan itself budgets 3–4 sessions for full coverage. This session covered 28 scenarios (roughly 160 screenshots + 2 GIF) across Tiers 1–6 so far (2 bugs found and fixed — `sidebar` and `smoke`, same root cause; `chat` inconclusive due to a busy remote endpoint, not a defect).
 
 ## Session notes
 

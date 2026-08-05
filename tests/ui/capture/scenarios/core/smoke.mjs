@@ -36,6 +36,12 @@ export default async function({ page, baseUrl }, options) {
     if (!options.noAttach) {
         await attachToServer(page);
     } else {
+        // attachToServer normally triggers the setup->monitor view
+        // transition; force it directly since we're skipping attach.
+        await page.evaluate(async () => {
+            const { ensureMonitorView } = await import('/js/features/setup-view.js');
+            ensureMonitorView();
+        });
         await waitForMonitor(page);
     }
 
