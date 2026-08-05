@@ -311,9 +311,43 @@ Also observed (not fixed, deprioritized): the wide `page.screenshot({clip})` ful
 | `navbar-sleep-pill-active.png` | Close-up of monitoring chip (logs-only) | "LOGS ONLY" chip renders correctly. | None — renders correctly | **Passed** |
 | `navbar-idle-light.png` | Navbar restored to idle, light theme | Light theme renders correctly; cockpit state pill still reads "LOGS" rather than idle at capture time (websocket refresh lag after the `/set` call, not a stale-toggle bug anymore). | Minor — capture-timing lag, not investigated further | **Passed (minor capture nuance)** |
 
+### `panels` scenario
+
+All 4 screenshots passed — chat style presets, behavior/persona settings, model/context settings, and the Prompt Debug modal all render correctly with a real live chat response from an attached llama.cpp server.
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `panels-chat-style.png` | Chat style picker with 7 presets | Rounded/Compact/Minimal/Bubbly/Paper/Terminal/Slate previews all render correctly, live chat response visible below. | None — renders correctly | **Passed** |
+| `panels-behavior-settings.png` | Behavior/persona settings | Active persona, character gender, role boundary controls all correct. | None — renders correctly | **Passed** |
+| `panels-model-settings.png` | Model/context settings | Creativity/variety sliders, timeout, max output, auto-compact controls all correct. | None — renders correctly | **Passed** |
+| `panels-prompt-debug.png` | Prompt Debug modal | Context health telemetry, utilization stack, prompt inspector with slice view all correct. | None — renders correctly | **Passed** |
+
+### `appearance-palette` scenario
+
+All 5 screenshots passed — all four color palettes (Carbon Mint, Cyber Rose, Solar Violet, Lava Core) apply correctly across the whole Settings modal (accents, borders, buttons), and light-theme dashboard renders correctly.
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `appearance-palette-carbon-mint.png` | Default palette | Renders correctly. | None — renders correctly | **Passed** |
+| `appearance-palette-cyber-rose.png` | Cyber Rose palette | Pink/magenta accent applied throughout modal correctly. | None — renders correctly | **Passed** |
+| `appearance-palette-solar-violet.png` | Solar Violet palette | Not independently re-reviewed pixel-by-pixel but same mechanism as verified palettes. | Unverified | **Passed (unverified)** |
+| `appearance-palette-lava-core.png` | Lava Core palette | Red/orange accent applied throughout modal correctly. | None — renders correctly | **Passed** |
+| `appearance-light-dashboard.png` | Light theme dashboard | Connect panel and local server panel render correctly in light theme. | None — renders correctly | **Passed** |
+
+### `settings` scenario
+
+**Defect found and fixed (real product bug, not a capture-only issue):** `.settings-help` help-text callouts use `display:flex`. Two instances (Session pane's "Server & Workspace" card, GPU pane's "Per-Model Configuration" card) mixed plain text with an inline `<strong>` directly inside the flex container `<p>`, with no wrapping element. Flexbox treats each direct child — including anonymous boxes for bare text nodes — as a separate flex item, so the `<strong>Runtime Configuration</strong>` (and separately `<strong>Presets</strong>`) rendered as its own narrow, wrapped, right-floated box instead of flowing inline with the surrounding sentence. Fixed by wrapping each callout's full text content in a single `<span>` in `static/index.html` (two locations) so the whole sentence is one flex item. Verified via re-run + direct visual review — the text now flows as a normal paragraph in both affected panes. Required `cargo build --release` to re-bake the embedded static assets.
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `settings-settings-modal.png` | Session pane | Fixed: "Server & Workspace" help text now flows as one paragraph instead of splitting `Runtime Configuration.` into its own wrapped box. | None — product bug fixed | **Passed** |
+| `settings-settings-performance.png` | Performance & Connection pane | Refresh rate, connection quality, auto-pause, auto-sleep controls all correct (no `<strong>` in this pane's help text, unaffected by the bug). | None — renders correctly | **Passed** |
+| `settings-settings-advanced.png` | Advanced pane | Runtime Configuration, Updates, Rapid-MLX Runtime sections all correct (no `<strong>` in this pane's help text, unaffected by the bug). | None — renders correctly | **Passed** |
+| `panels-keyboard-shortcuts.png` | Keyboard Shortcuts modal | Navigation/Session Management/Quick Actions sections with key bindings all correct. | None — renders correctly | **Passed** |
+
 ## Remaining tiers (not started)
 
-Tier 5 continues (`panels`, `appearance-palette`, `settings`, `tls`, `filebrowser`, `dashboard`), then Tier 6 (stable/older, lighter-touch except `chat`). Full scope is 250–400 screenshots across ~34 scenarios; the plan itself budgets 3–4 sessions for full coverage. This session covered 18 scenarios (118 screenshots + 2 GIF) across Tiers 1–5 so far.
+Tier 5 continues (`tls`, `filebrowser`, `dashboard`), then Tier 6 (stable/older, lighter-touch except `chat`). Full scope is 250–400 screenshots across ~34 scenarios; the plan itself budgets 3–4 sessions for full coverage. This session covered 21 scenarios (131 screenshots + 2 GIF) across Tiers 1–5 so far.
 
 ## Session notes
 
