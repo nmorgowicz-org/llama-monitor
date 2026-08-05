@@ -44,12 +44,12 @@ For all UI/UX work (bars, cards, modals, layout changes, visual polish), use the
 
 - Always run:
   - `cargo build --release`
-  - `node tests/ui/capture.mjs --scenario <scenario>`
+  - `node tests/ui/capture/index.mjs --scenario <scenario>`
 - Use this to:
   - Confirm proposed designs in real UI.
   - Validate text, spacing, colors, and behavior.
 - Use whichever scenario matches the area being changed (e.g., welcome, chat, spawn-wizard, dashboard, settings, sidebar, panels, models-v2, etc.).
-- If new capabilities require new capture scenarios, add them to `capture.mjs` and update its usage docs.
+- If new capabilities require new capture scenarios, add them under `tests/ui/capture/scenarios/` and register them in `tests/ui/capture/index.mjs`, then update usage docs.
 - Never rely on screenshots from other environments or imagined renders.
 - Treat screenshots as the single source of truth for "what this will look like."
 
@@ -193,7 +193,7 @@ Full reference: `docs/agents/playwright.md`
 ## Screenshot Harness
 
 ```bash
-node tests/ui/capture.mjs --scenario <name>
+node tests/ui/capture/index.mjs --scenario <name>
 ```
 NEVER run multiple scenarios in parallel (port conflicts). Always `cargo build --release` first if `static/` changed.
 
@@ -282,7 +282,7 @@ For PRs touching multiple files or adding features, run a sub-agent check for:
 ## Screenshots Workflow
 
 - **Capture** (for debugging, UI review): use artifacts/
-  - Run: `node tests/ui/capture.mjs --scenario <name>`
+  - Run: `node tests/ui/capture/index.mjs --scenario <name>`
   - Files go to: `docs/screenshots/artifacts/`
   - This folder is gitignored: keep it for UX reference, debugging, comparisons.
 

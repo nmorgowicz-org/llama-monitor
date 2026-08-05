@@ -49,7 +49,7 @@ The UI suite covers:
 
 ## Screenshot and GIF capture harness
 
-All repo-managed screenshots and GIFs go through `tests/ui/capture.mjs`.
+All repo-managed screenshots and GIFs go through `tests/ui/capture/index.mjs`.
 
 The harness:
 
@@ -74,7 +74,7 @@ cargo build --release
 ### Listing scenarios
 
 ```bash
-node tests/ui/capture.mjs --list-scenarios
+node tests/ui/capture/index.mjs --list-scenarios
 ```
 
 ### Current scenarios
@@ -103,45 +103,45 @@ node tests/ui/capture.mjs --list-scenarios
 
 ```bash
 # Welcome screen only
-node tests/ui/capture.mjs --scenario welcome
+node tests/ui/capture/index.mjs --scenario welcome
 
 # Free Cache confirmation
-node tests/ui/capture.mjs --scenario free-cache
+node tests/ui/capture/index.mjs --scenario free-cache
 
 # Core chat / logs / telemetry
-SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario chat
+SCREENSHOT_PORT=8892 node tests/ui/capture/index.mjs --scenario chat
 
 # Guided-generation surfaces
-SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario guided-gen
+SCREENSHOT_PORT=9001 node tests/ui/capture/index.mjs --scenario guided-gen
 
 # Sidebar and search surfaces
-SCREENSHOT_PORT=8893 node tests/ui/capture.mjs --scenario sidebar
+SCREENSHOT_PORT=8893 node tests/ui/capture/index.mjs --scenario sidebar
 
 # Rapid-MLX preset cards and editor source-contract coverage
-SCREENSHOT_PORT=8902 node tests/ui/capture.mjs --scenario rapid-preset --no-attach
+SCREENSHOT_PORT=8902 node tests/ui/capture/index.mjs --scenario rapid-preset --no-attach
 
 # Settings and modal surfaces
-SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario settings
+SCREENSHOT_PORT=8894 node tests/ui/capture/index.mjs --scenario settings
 
 # Appearance palettes and light-mode dashboard
-SCREENSHOT_PORT=8899 node tests/ui/capture.mjs --scenario appearance-palette --no-attach
+SCREENSHOT_PORT=8899 node tests/ui/capture/index.mjs --scenario appearance-palette --no-attach
 
 # Chat configuration panels
-SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario panels
+SCREENSHOT_PORT=8896 node tests/ui/capture/index.mjs --scenario panels
 
 # Server tab and GPU section
-SCREENSHOT_PORT=8897 node tests/ui/capture.mjs --scenario dashboard
+SCREENSHOT_PORT=8897 node tests/ui/capture/index.mjs --scenario dashboard
 
 # Sparkline validation
-SCREENSHOT_PORT=8898 node tests/ui/capture.mjs --scenario sparkline
+SCREENSHOT_PORT=8898 node tests/ui/capture/index.mjs --scenario sparkline
 
 # GIFs
-SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs
-SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
-SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --inference-only
+SCREENSHOT_PORT=8895 node tests/ui/capture/index.mjs --scenario gifs
+SCREENSHOT_PORT=8895 node tests/ui/capture/index.mjs --scenario gifs --gpu-only
+SCREENSHOT_PORT=8895 node tests/ui/capture/index.mjs --scenario gifs --inference-only
 
 # Smoke run
-SCREENSHOT_PORT=8899 node tests/ui/capture.mjs --scenario smoke
+SCREENSHOT_PORT=8899 node tests/ui/capture/index.mjs --scenario smoke
 ```
 
 ### Useful options
@@ -180,7 +180,7 @@ When you change dashboard / metrics / server tab visuals, use this subset instea
 
 When adding or changing screenshot coverage:
 
-1. Extend an existing scenario in `tests/ui/capture.mjs` when the surface already belongs to one.
+1. Extend an existing scenario in `tests/ui/capture/index.mjs` when the surface already belongs to one.
 2. Add a new scenario only when the coverage area is clearly distinct.
 3. Register the scenario in the `SCENARIOS` map.
 4. Update the usage text in `printUsage()`.
