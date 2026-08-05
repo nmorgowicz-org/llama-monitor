@@ -403,6 +403,19 @@ export async function loadCommunityPicks() {
     panel.style.display = '';
     renderCommunityPicksTabs(cats);
     renderCommunityPicksList(cats[0]);
+
+    // Auto-expand on first load if the repo field is still empty — otherwise
+    // the panel sits collapsed below the (empty) search results/file list and
+    // is easy to miss entirely.
+    const repoInput = document.getElementById('spawn-hf-repo');
+    if (totalModels > 0 && (!repoInput || !repoInput.value.trim())) {
+      const toggle = document.getElementById('hf-cp-toggle');
+      const body = document.getElementById('hf-cp-body');
+      if (toggle && body && toggle.getAttribute('aria-expanded') !== 'true') {
+        toggle.setAttribute('aria-expanded', 'true');
+        body.style.display = '';
+      }
+    }
   } catch {
     // Hide panel on unexpected errors
     const panel = document.getElementById('hf-community-picks');

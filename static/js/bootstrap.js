@@ -211,7 +211,7 @@ async function initializeApp() {
     Router.register('/settings', () => {
       // Support hash-based tab targeting: /settings#models, /settings#session, etc.
       // Sanitize against the real tab values to avoid using arbitrary hashes.
-      const allowedTabs = ['chat', 'models', 'session', 'performance', 'gpu', 'advanced', 'security', 'appearance'];
+      const allowedTabs = ['chat', 'models', 'session', 'performance', 'gpu', 'loaders', 'security', 'appearance'];
       const hash = (location.hash || '').replace('#', '').trim();
       const tab = allowedTabs.includes(hash) ? hash : null;
       openSettingsModal(tab);

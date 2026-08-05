@@ -5348,6 +5348,10 @@
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                     Models
                 </button>
+                <button class="settings-tab" data-tab="loaders" aria-label="Runtime Loaders">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+                    Loaders
+                </button>
                 <button class="settings-tab" data-tab="appearance">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="19" cy="13.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><path d="M13 9.5c2 1 4 3 4 6"/><path d="M9 9.5C7 10.5 5 12.5 5 15.5"/></svg>
                     Appearance
@@ -5363,10 +5367,6 @@
                 <button class="settings-tab" data-tab="security">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                     Security
-                </button>
-                <button class="settings-tab" data-tab="advanced">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4"/><path d="M12 19v4"/><path d="M4.22 4.22l2.83 2.83"/><path d="M16.95 16.95l2.83 2.83"/><path d="M1 12h4"/><path d="M19 12h4"/><path d="M4.22 19.78l2.83-2.83"/><path d="M16.95 7.05l2.83-2.83"/></svg>
-                    Advanced
                 </button>
             </div>
             <div class="settings-content">
@@ -5406,11 +5406,6 @@
                             <input type="checkbox" id="settings-save-history" checked>
                             <span>Save chat history</span>
                         </label>
-                    </div>
-                    <div class="settings-card" style="margin-top:14px;">
-                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">Server &amp; Workspace</div>
-                        <p class="settings-help"><span>Server paths, remote-agent SSH details, and runtime launch options are managed in <strong>Runtime Configuration</strong>.</span></p>
-                        <button type="button" class="btn btn-secondary" id="settings-open-config-btn" style="margin-top:8px;">Open Runtime Configuration</button>
                     </div>
                 </div>
                 <div class="settings-pane" id="settings-gpu">
@@ -5464,6 +5459,30 @@
                         <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">Model Manager</div>
                         <p class="settings-help">Browse your local library, download new GGUF files from Hugging Face, and manage multimodal projectors.</p>
                         <button type="button" class="btn btn-secondary" id="settings-open-models-btn" style="margin-top:8px;">Open Model Manager</button>
+                    </div>
+                </div>
+                <div class="settings-pane" id="settings-loaders">
+                    <h3>Runtime Loaders</h3>
+                    <div class="settings-card">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">llama.cpp Runtime Configuration</div>
+                        <p class="settings-help">Configure server executable paths, working directories, remote-agent SSH details, and environment-specific launch options.</p>
+                        <button type="button" class="btn btn-secondary" id="settings-advanced-open-config-btn" style="margin-top:8px;">Open Runtime Configuration</button>
+                    </div>
+                    <div class="settings-card" style="margin-top:14px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:4px;">Rapid-MLX Runtime</div>
+                        <div id="rapid-mlx-runtime-summary" style="font-size:12px;color:var(--color-text-muted);margin-bottom:6px;">
+                            Checking status…
+                        </div>
+                        <button type="button" class="btn btn-secondary" id="rapid-mlx-manage-btn" style="margin-top:6px;font-size:11px;">
+                            Manage Versions
+                        </button>
+                    </div>
+                    <div class="settings-card" style="margin-top:14px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">Updates</div>
+                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:4px 0;">
+                            <input type="checkbox" id="settings-auto-update" checked>
+                            <span>Check for updates automatically</span>
+                        </label>
                     </div>
                 </div>
               <div class="settings-pane" id="settings-appearance">
@@ -5734,31 +5753,6 @@
                         </label>
                     </div>
                 </div>
-                  <div class="settings-pane" id="settings-advanced">
-                    <h3>Advanced</h3>
-                    <div class="settings-card">
-                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">Runtime Configuration</div>
-                        <p class="settings-help">Configure server executable paths, working directories, remote-agent SSH details, and environment-specific launch options.</p>
-                        <button type="button" class="btn btn-secondary" id="settings-advanced-open-config-btn" style="margin-top:8px;">Open Runtime Configuration</button>
-                    </div>
-                    <div class="settings-card" style="margin-top:14px;">
-                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">Updates</div>
-                        <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin:4px 0;">
-                            <input type="checkbox" id="settings-auto-update" checked>
-                            <span>Check for updates automatically</span>
-                        </label>
-                    </div>
-                    <div class="settings-card" style="margin-top:14px;">
-                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:4px;">Rapid-MLX Runtime</div>
-                        <div id="rapid-mlx-runtime-summary" style="font-size:12px;color:var(--color-text-muted);margin-bottom:6px;">
-                            Checking status…
-                        </div>
-                        <button type="button" class="btn btn-secondary" id="rapid-mlx-manage-btn" style="margin-top:6px;font-size:11px;">
-                            Manage Versions
-                        </button>
-                    </div>
-                </div>
-
                 <!-- Security & Certificates -->
                 <div class="settings-pane" id="settings-security">
                     <h3>Security &amp; Certificates</h3>

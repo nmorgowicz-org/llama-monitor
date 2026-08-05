@@ -62,16 +62,16 @@ export default async function(ctx, options) {
     });
     await sleep(400);
 
-    // ── 1. Settings: Rapid-MLX Runtime card (Advanced pane) ──
+    // ── 1. Settings: Rapid-MLX Runtime card (Loaders pane) ──
     try {
         await page.evaluate(() => { window.openSettingsModal?.(); });
         await page.waitForSelector('#settings-modal.open', { timeout: 5000 });
         await sleep(600);
 
-        // Switch to Advanced tab where the Rapid-MLX Runtime card lives.
-        const advTab = await page.$('#settings-modal .settings-tab[data-tab="advanced"]');
-        if (advTab) {
-            await advTab.click();
+        // Switch to Loaders tab where the Rapid-MLX Runtime card lives.
+        const loadersTab = await page.$('#settings-modal .settings-tab[data-tab="loaders"]');
+        if (loadersTab) {
+            await loadersTab.click();
             await sleep(500);
         }
 

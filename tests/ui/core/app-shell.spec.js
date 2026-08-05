@@ -121,10 +121,10 @@ test.describe('modals and menus', () => {
     // Default active pane is now Session
     await expect(page.locator('#settings-session')).toBeVisible();
 
-    // Switch to Advanced tab and confirm Runtime Configuration button exists
-    const advancedTab = page.locator('.settings-tab', { hasText: 'Advanced' });
-    await advancedTab.click();
-    await expect(page.locator('#settings-advanced')).toBeVisible();
+    // Switch to Loaders tab and confirm Runtime Configuration button exists
+    const loadersTab = page.locator('.settings-tab', { hasText: 'Loaders' });
+    await loadersTab.click();
+    await expect(page.locator('#settings-loaders')).toBeVisible();
     await expect(page.getByRole('button', { name: /open runtime configuration/i })).toBeVisible();
   });
 

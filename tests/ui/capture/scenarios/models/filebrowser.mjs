@@ -32,23 +32,23 @@ export default async function(ctx, options) {
             return;
         }
 
-        // Switch to Advanced tab
+        // Switch to Loaders tab
         await page.evaluate(() => {
-            const tab = document.querySelector('.settings-tab[data-tab="advanced"]');
+            const tab = document.querySelector('.settings-tab[data-tab="loaders"]');
             if (tab) tab.click();
         });
         await sleep(600);
 
-        // Open Config modal from Advanced tab
+        // Open Config modal from Loaders tab
         const configBtnExists = await page.evaluate(() =>
-            !!document.getElementById('settings-open-config-btn')
+            !!document.getElementById('settings-advanced-open-config-btn')
         );
         if (!configBtnExists) {
             console.log('[CAPTURE] Open Config button not found');
             return;
         }
         await page.evaluate(() => {
-            const btn = document.getElementById('settings-open-config-btn');
+            const btn = document.getElementById('settings-advanced-open-config-btn');
             if (btn) btn.click();
         });
         await sleep(800);

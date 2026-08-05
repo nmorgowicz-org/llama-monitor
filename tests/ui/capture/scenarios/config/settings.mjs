@@ -36,12 +36,12 @@ export default async function(ctx, options) {
             await captureCloseUp(page, '#settings-modal', 'settings-settings-performance.png', options);
         }
 
-        const advTab = await page.$('#settings-modal .settings-tab[data-tab="advanced"]');
-        if (advTab) {
-            await advTab.click();
+        const loadersTab = await page.$('#settings-modal .settings-tab[data-tab="loaders"]');
+        if (loadersTab) {
+            await loadersTab.click();
             await sleep(500);
-            await captureShot(page, 'settings-settings-advanced.png', { fullPage: true });
-            await captureCloseUp(page, '#settings-modal', 'settings-settings-advanced.png', options);
+            await captureShot(page, 'settings-settings-loaders.png', { fullPage: true });
+            await captureCloseUp(page, '#settings-modal', 'settings-settings-loaders.png', options);
         }
 
         await page.keyboard.press('Escape');

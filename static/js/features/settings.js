@@ -558,11 +558,6 @@ function _bindSettingsEvents() {
         });
     });
 
-    document.getElementById('settings-open-config-btn')?.addEventListener('click', () => {
-        closeSettingsModal();
-        setTimeout(() => document.getElementById('config-modal')?.classList.add('open'), 260);
-    });
-
     document.getElementById('settings-advanced-open-config-btn')?.addEventListener('click', () => {
         closeSettingsModal();
         setTimeout(() => document.getElementById('config-modal')?.classList.add('open'), 260);
