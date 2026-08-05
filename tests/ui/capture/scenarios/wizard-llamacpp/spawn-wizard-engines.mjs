@@ -147,6 +147,14 @@ export default async function(ctx) {
     console.log('[CAPTURE] Saved spawn-wizard-reasoning-mode-on.png');
 
     await page.evaluate(() => {
+        // Speculative decoding controls live inside the collapsible
+        // "Companions & experimental acceleration" <details> group (IA
+        // reorg); it must be expanded or the controls stay hidden even
+        // when their own inline styles say otherwise.
+        const companionsGroup = document.querySelector('[data-mlx-wiz-group="companions"]');
+        if (companionsGroup && companionsGroup.tagName === 'DETAILS' && !companionsGroup.open) {
+            companionsGroup.open = true;
+        }
         const enabled = document.getElementById('spawn-rapid-speculative-enabled');
         if (enabled && !enabled.checked) enabled.click();
     });

@@ -175,20 +175,22 @@ All Tier 2 scenarios run: `rapid-mlx-runtime` (5 screenshots, all passed), `rapi
 > stale/incorrect visual read. Table below replaced with the real filenames,
 > independently re-verified by direct screenshot review.
 >
-> One genuine defect found in re-verification:
-> `spawn-wizard-speculative-trust-consent-{dark,light}.png` are visually
-> indistinguishable from `spawn-wizard-speculative-enabled-{dark,light}.png`
-> (pixel diff: max channel delta 14, 0.01% of pixels affected — i.e. noise,
-> not real content difference). The scenario script sets
-> `wizardState.hardware.speculativeTrustRequired/Consent`, force-shows
-> `#spawn-rapid-speculative-trust-wrap`, waits for it to be non-`display:none`,
-> then scrolls to it and screenshots — but the captured image shows the same
-> PFlash/Tool-integration section as the preceding capture, meaning the scroll
-> target either wasn't reached or the wrap's visible content didn't change.
-> This is a capture-harness/test-script defect (the trust-consent UI itself
-> was not exercised, not confirmed broken) — flagged as **open**, not fixed
-> in this pass, since root-causing it further (test-only cheat path) is lower
-> priority than product-facing bugs.
+> One genuine defect found in re-verification, since fixed:
+> `spawn-wizard-speculative-trust-consent-{dark,light}.png` were visually
+> indistinguishable from `spawn-wizard-speculative-enabled-{dark,light}.png`.
+> Root cause: the speculative-decoding controls (including
+> `#spawn-rapid-speculative-trust-wrap`) live inside the collapsible
+> "Companions & experimental acceleration" `<details data-mlx-wiz-group="companions">`
+> group added by the IA reorg (`spawn-wizard-mlx-ia.js`). The scenario set the
+> wrap's own inline `display` style directly and waited for it to be
+> non-`none`, but the ancestor `<details>` element was still closed, so the
+> content stayed visually collapsed regardless of the child's own style.
+> Fixed by expanding `[data-mlx-wiz-group="companions"]` (`.open = true`)
+> before interacting with the speculative controls in
+> `tests/ui/capture/scenarios/wizard-llamacpp/spawn-wizard-engines.mjs`.
+> Verified via re-run + direct visual review — the panel now correctly shows
+> the trust warning, the "Trust remote code for this companion model"
+> checkbox, and "Re-check pin" button in both themes.
 
 | Screenshot | Expected | Actual | Severity | Status |
 |---|---|---|---|---|
@@ -198,8 +200,8 @@ All Tier 2 scenarios run: `rapid-mlx-runtime` (5 screenshots, all passed), `rapi
 | `spawn-wizard-reasoning-mode-on.png` | Step 3: Cache & Performance with reasoning mode implications | KV cache dtype/prefill/retained-cache controls render correctly with reasoning-mode copy ("int4 is blocked when Reasoning mode is enabled"). | None — renders correctly | **Passed** |
 | `spawn-wizard-speculative-enabled-dark.png` | Step 3: Max concurrent/PFlash/batch controls + Server & Safety (dark) | Renders correctly: Max concurrent requests, PFlash, Prefill/Completion batch size, Tool integration, Companions & experimental acceleration. | None — renders correctly | **Passed** |
 | `spawn-wizard-speculative-enabled-light.png` | Same, light theme | Renders correctly, good contrast. | None — renders correctly | **Passed** |
-| `spawn-wizard-speculative-trust-consent-dark.png` | Trust-remote-code consent warning + checkbox (dark) | **Does not show the trust-consent panel** — pixel-identical to `spawn-wizard-speculative-enabled-dark.png`. Scroll-to-element likely did not land. | Test-harness defect (product behavior not exercised) | **Failed** (capture defect, open) |
-| `spawn-wizard-speculative-trust-consent-light.png` | Same, light theme | Same issue — pixel-identical to `spawn-wizard-speculative-enabled-light.png`. | Test-harness defect (product behavior not exercised) | **Failed** (capture defect, open) |
+| `spawn-wizard-speculative-trust-consent-dark.png` | Trust-remote-code consent warning + checkbox (dark) | Fixed: expands the collapsible "Companions & experimental acceleration" group first — now shows the trust warning, checkbox, and Re-check pin button correctly. | None — capture defect fixed | **Passed** |
+| `spawn-wizard-speculative-trust-consent-light.png` | Same, light theme | Same fix applied; renders correctly with good contrast. | None — capture defect fixed | **Passed** |
 | `spawn-wizard-parser-detected.png` | Parser detection UI | Renders correctly. | None — renders correctly | **Passed** |
 | `spawn-wizard-rapid-mlx-advanced-controls.png` | Rapid-MLX advanced controls | Renders correctly. | None — renders correctly | **Passed** |
 | `spawn-wizard-rapid-mlx-escape-hatch.png` | Rapid-MLX escape hatch | Renders correctly. | None — renders correctly | **Passed** |
@@ -223,7 +225,7 @@ Both re-verified via direct visual review as correct, with corrected description
 
 ## Tier 3 — Spawn Wizard llama.cpp: COMPLETE (re-validated)
 
-All Tier 3 scenarios run and re-verified: `spawn-wizard-engines` (13 screenshots, 11 confirmed correct + 1 open capture defect + 1 narrow skipped), `spawn-wizard-hf-download` (2 screenshots, confirmed correct, descriptions corrected), `spawn-wizard-gif` (regenerated 262-frame GIF, 5 sampled frames confirmed correct).
+All Tier 3 scenarios run and re-verified: `spawn-wizard-engines` (13 screenshots, 12 confirmed correct + 1 narrow skipped; trust-consent capture defect fixed), `spawn-wizard-hf-download` (2 screenshots, confirmed correct, descriptions corrected), `spawn-wizard-gif` (regenerated 262-frame GIF, 5 sampled frames confirmed correct).
 
 ### `models` scenario
 
@@ -235,9 +237,9 @@ All 1 screenshot passed — models library modal renders correctly with 6 models
 
 ### `models-v2` scenario
 
-**Correction (re-validation pass):** `models-inventory-non-apple.png` was logged as "Passed" but is pixel-identical to `models-discovery-overview.png` (mean diff 0.02, 0.02% of pixels differing — pure noise). Root cause: `getPlatformInfo()` in `static/js/core/platform-info.js` caches its fetch result in a module-scoped `platformInfoPromise` that is never invalidated. The scenario flips `window.__captureRapidMlxAvailable = false` and re-mocks `/api/llama-binary/platform-info` *after* the modal has already fetched and cached the `true` (Apple Silicon available) response, so the second `openModelsModal()` call reuses the stale cached value and the "Apple Silicon required" badge never renders. Fixing this properly requires installing the mock via `page.evaluateOnNewDocument` and reloading the page (same pattern already used earlier in this scenario for `localStorage` prefs) rather than toggling a flag on an already-loaded page — left open as a test-harness defect rather than fixed in this pass, consistent with the trust-consent capture defect below.
+**Correction (re-validation pass):** `models-inventory-non-apple.png` was logged as "Passed" but was pixel-identical to `models-discovery-overview.png` (mean diff 0.02, 0.02% of pixels differing — pure noise). Root cause: `getPlatformInfo()` in `static/js/core/platform-info.js` caches its fetch result in a module-scoped `platformInfoPromise` that is never invalidated. The scenario flipped `window.__captureRapidMlxAvailable = false` and re-mocked `/api/llama-binary/platform-info` *after* the modal had already fetched and cached the `true` (Apple Silicon available) response, so the second `openModelsModal()` call reused the stale cached value and the "Apple Silicon required" badge never rendered. **Fixed** by extracting the fetch-mock installation into a reusable `installFetchMocks(available)` function and, for the non-Apple capture, installing it via `page.evaluateOnNewDocument` followed by `page.reload()` — forcing a genuine fresh page load (and thus a genuine platform-info refetch) instead of toggling a flag on an already-loaded page. Moved this capture to the end of the scenario since it now requires its own page reload. Verified via re-run + direct visual review — the "Apple Silicon required" badge now correctly renders on the Gemma conversion and Qwen 3 MLX 4-bit cards.
 
-8 of 9 screenshots confirmed correct via direct visual review — models discovery overview, inventory in dark/light/narrow, Import Lab panel, HF download.
+9 of 9 screenshots confirmed correct via direct visual review — models discovery overview, inventory in dark/light/narrow, Import Lab panel, HF download, non-Apple inventory.
 
 | Screenshot | Expected | Actual | Severity | Status |
 |---|---|---|---|---|
@@ -245,7 +247,7 @@ All 1 screenshot passed — models library modal renders correctly with 6 models
 | `models-inventory-dark.png` | Models inventory (dark) | All renders correctly in dark theme. | None — renders correctly | **Passed** |
 | `models-inventory-light.png` | Models inventory (light) | All renders correctly in light theme with good contrast. | None — renders correctly | **Passed** |
 | `models-inventory-narrow.png` | Models inventory (narrow) | Navigation switches to vertical tabs, all content accessible in scrollable area. | Unverified — skipped per narrow/mobile deprioritization | **Skipped** |
-| `models-inventory-non-apple.png` | Models inventory (non-Apple silicon) | Pixel-identical to `models-discovery-overview.png` — "Apple Silicon required" badge never renders because `getPlatformInfo()`'s cached promise isn't invalidated when the scenario flips its mock mid-run. | Capture defect (test harness, open) | **Failed (capture defect, open)** |
+| `models-inventory-non-apple.png` | Models inventory (non-Apple silicon) | Fixed: scenario now reloads the page with the mock pre-installed via `evaluateOnNewDocument`, forcing a genuine platform-info refetch — "Apple Silicon required" badge correctly renders on Gemma conversion / Qwen 3 MLX 4-bit cards. | None — capture defect fixed | **Passed** |
 | `models-import-lab-dark.png` | Import Lab panel (dark) | Local format recovery section, GGUF analysis, tensor info, recovery activity with progress bar — all correct. | None — renders correctly | **Passed** |
 | `models-import-lab-light.png` | Import Lab panel (light) | Same in light theme with good contrast. | Unverified — not independently re-reviewed | **Passed (unverified)** |
 | `models-import-lab-reduced-narrow.png` | Import Lab (narrow/reduced motion) | Vertical tab layout, all content accessible. | Unverified — skipped per narrow/mobile deprioritization | **Skipped** |
