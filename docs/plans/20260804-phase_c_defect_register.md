@@ -382,9 +382,31 @@ Requires a real attached llama.cpp server (not `--no-attach`). All 3 screenshots
 | `settings-server-tab.png` | Full Server tab, full page | Same content as above plus navbar (Remote/Detach/telemetry pills, GENERATING mini-stat bar, sidebar) — all correct. | None — renders correctly | **Passed** |
 | `dashboard-gpu-section.png` | GPU/System hardware section | Real GPU (RTX 5090: load/power/VRAM/clocks) and System (Ryzen CPU load/RAM/memory pressure) telemetry render correctly via remote agent. | None — renders correctly | **Passed** |
 
+## Tier 6 (stable/older, lighter-touch except `chat`)
+
+### `sidebar` scenario
+
+**Bug found and fixed.** All 5 screenshots failed with `TimeoutError: Waiting for selector #chat-sessions-panel failed` when run under `--no-attach`. Root-caused (not a stale selector, not a port collision — an isolated retry on a fresh port reproduced the identical failure): the app has a top-level view system (`#view-setup` / `#view-monitor`) layered above the `.page`/tab system that `#page-chat` and `#chat-sessions-panel` live inside. `document.body` normally carries a `setup-active` class until a real backend attach succeeds, at which point `attachToServer()` (`harness/attach.mjs:61`) calls `waitForMonitor(page)`, which itself relies on the app's `setup-view.js` transition (triggered by a successful attach) to flip from `#view-setup` to `#view-monitor` and remove `setup-active` from `<body>`. `sidebar.mjs` skips `attachToServer()` entirely under `--no-attach`, so that transition never fires — `#chat-sessions-panel` computed a valid `width: 240px` via its `.visible` class, but its bounding rect stayed `0×0` because an ancestor (`#view-monitor`) was still `display: none`. Fixed in `tests/ui/capture/scenarios/core/sidebar.mjs` by calling the exported `ensureMonitorView()` from `static/js/features/setup-view.js` directly (via dynamic import in `page.evaluate`) and then `waitForMonitor(page)` when `options.noAttach` is set, mirroring what a real attach would have done. Re-ran in full isolation post-fix — all 5 screenshots now pass.
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `sidebar-sidebar-expanded.png` | Expanded conversations panel: pinned/today groups, search-messages entry, filter box | Renders correctly | None | **Passed** |
+| `sidebar-sidebar-collapsed.png` | Collapsed strip state | Renders correctly | None | **Passed** |
+| `sidebar-fts-search-active.png` | Full-text search modal with match list | Renders correctly — 16 matches shown with highlighted term, active/archived toggle | None | **Passed** |
+| `chat-context-menu.png` | Right-click/kebab context menu on a pinned chat (Rename/Unpin/Archive/Hide/Export/Duplicate/Delete) | Renders correctly | None | **Passed** |
+| `sidebar-sidebar-title-filter.png` | Filter box narrows the chat list by title | Renders correctly — filtered to "Noir Scene" only | None | **Passed** |
+
+### `chat` scenario
+
+Quick validation pass only, per explicit scope note: the chat code itself hasn't been touched anywhere in this sweep, so this isn't a deep audit. Requires a real attached remote llama.cpp server (192.168.2.16:8001) and a genuine chat completion (`sendChatPrompt` + `waitForChatComplete`), unlike most other scenarios which tolerate `--no-attach`. During this session the remote endpoint was under load (per prior explicit user notice), and the run timed out waiting for an assistant response (`assistantCount` stayed at 0). Per explicit user instruction, a timeout caused by the remote endpoint being busy is treated as expected/non-defect right now, not a regression — the scenario code itself (`tests/ui/capture/scenarios/core/chat.mjs`) was read in full and looks correct (creates a fresh chat tab, sends a real prompt, waits for completion, then captures chat/telemetry/focus-mode/logs screenshots). Not re-attempted this session; revisit when the remote endpoint is free.
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| (all `chat-*.png`) | Live chat completion + telemetry/focus-mode/logs captures | Timed out waiting for assistant response — remote endpoint (192.168.2.16:8001) was busy | None — external/environmental, not a code defect | **Unverified (blocked by busy remote endpoint, retry later)** |
+
 ## Remaining tiers (not started)
 
-Tier 5 is now complete (`navbar`, `panels`, `appearance-palette`, `settings`, `tls`, `filebrowser`, `dashboard`). Tier 6 (stable/older, lighter-touch except `chat`) is next. Full scope is 250–400 screenshots across ~34 scenarios; the plan itself budgets 3–4 sessions for full coverage. This session covered 24 scenarios (143 screenshots + 2 GIF) across Tiers 1–5 so far.
+Tier 5 and the `sidebar`/`chat` portion of Tier 6 are done. Remaining Tier 6 scenarios: `guided-gen`, `free-cache`, `tune-panel`, `benchmark-results`, `llama-updater`, `chat-history-qa`, `sparkline`, `gifs`, `smoke`. Full scope is 250–400 screenshots across ~34 scenarios; the plan itself budgets 3–4 sessions for full coverage. This session covered 25 scenarios (148 screenshots + 2 GIF) across Tiers 1–6 so far (1 bug found and fixed in `sidebar`; `chat` inconclusive due to a busy remote endpoint, not a defect).
 
 ## Session notes
 

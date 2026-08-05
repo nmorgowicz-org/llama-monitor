@@ -1,7 +1,7 @@
 // Scenario: sidebar
 // Extracted from tests/ui/capture.mjs (Phase A3).
 import { attachToServer } from '../../harness/attach.mjs';
-import { gotoApp, switchTab } from '../../harness/browser.mjs';
+import { gotoApp, switchTab, waitForMonitor } from '../../harness/browser.mjs';
 import { sleep } from '../../harness/paths.mjs';
 import { captureCloseUp, captureElementScreenshot, captureShot, cleanupScreenshotTabs } from '../../harness/shot.mjs';
 
@@ -10,6 +10,15 @@ export default async function(ctx, options) {
     await gotoApp(page, baseUrl);
     if (!options.noAttach) {
         await attachToServer(page);
+    } else {
+        // attachToServer normally exits the setup view into #view-monitor
+        // (which hosts #page-chat / #chat-sessions-panel). With --no-attach
+        // that transition never fires, so force it directly.
+        await page.evaluate(async () => {
+            const { ensureMonitorView } = await import('/js/features/setup-view.js');
+            ensureMonitorView();
+        });
+        await waitForMonitor(page);
     }
 
     // Create multiple chats with different names for grouping
