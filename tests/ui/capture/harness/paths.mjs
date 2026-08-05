@@ -31,3 +31,44 @@ export const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 fs.mkdirSync(ARTIFACTS_DIR, { recursive: true });
 fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 fs.mkdirSync(TEMP_APP_CONFIG_DIR, { recursive: true });
+
+// Screenshots are grouped into category subdirectories (mirroring
+// tests/ui/capture/scenarios/<category>/) instead of one flat 150+ file
+// directory. index.mjs sets this before running each scenario; shot.mjs
+// reads it to pick the output directory.
+let activeCategory = null;
+export function setArtifactCategory(category) {
+    activeCategory = category || null;
+}
+export function currentArtifactsDir() {
+    const dir = activeCategory ? join(ARTIFACTS_DIR, activeCategory) : ARTIFACTS_DIR;
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+}
+
+// Runtime tag (which backend the captured UI is showing — or `neutral` for
+// backend-independent chrome) gets woven into every filename so it's visible
+// without opening the image: `<scenario>--<runtime>--<description>.ext`.
+let activeScenarioKey = null;
+let activeRuntimeTag = null;
+export function setArtifactRuntime(scenarioKey, runtimeTag) {
+    activeScenarioKey = scenarioKey || null;
+    activeRuntimeTag = runtimeTag || null;
+}
+
+// Individual shots within a mixed-runtime scenario (e.g. spawn-wizard-engines
+// showing both llama.cpp and Rapid-MLX cards) can override the scenario's
+// default tag by passing { runtimeTag: '...' } into captureShot/etc.
+export function tagFilename(filename, overrideRuntimeTag) {
+    const runtimeTag = overrideRuntimeTag || activeRuntimeTag;
+    if (!runtimeTag) return filename;
+    const scenarioKey = activeScenarioKey;
+    if (scenarioKey && filename.startsWith(`${scenarioKey}-`)) {
+        const rest = filename.slice(scenarioKey.length + 1);
+        return `${scenarioKey}--${runtimeTag}--${rest}`;
+    }
+    if (scenarioKey && filename === scenarioKey) {
+        return `${scenarioKey}--${runtimeTag}`;
+    }
+    return `${runtimeTag}--${filename}`;
+}

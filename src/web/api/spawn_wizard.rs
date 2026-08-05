@@ -10,7 +10,7 @@ use super::common::{ApiCtx, ApiRoute, check_api_token, unauthorized_api_token};
 
 /// Runs the froggeric template transform script on the given input file.
 /// Returns the path to the transformed output file, or an error string.
-/// Transform output goes to same directory as `<name>-no_json-v21.3.jinja`.
+/// Transform output goes to same directory as `<name>-no_json.jinja`.
 fn run_froggeric_transform(input_path: &std::path::Path) -> Result<std::path::PathBuf, String> {
     let script_path = std::env::current_dir()
         .map_err(|e| format!("Cannot determine current directory: {e}"))?
@@ -665,21 +665,56 @@ fn api_chat_template_install_hf(
 
                 // Return cached file if it already exists and force is not set
                 if dest.exists() && !force {
-                    let existing_meta = read_template_install_meta(&template_meta_path(&dest));
+                    let mut existing_meta = read_template_install_meta(&template_meta_path(&dest));
+
+                    // Legacy installs (from before install-meta / release-index tracking
+                    // existed) have no sidecar meta file and no release index entry — the
+                    // Lifecycle modal's "Current" section has nothing to show and "Check
+                    // for updates" has no fetch_url to compare against. Backfill both from
+                    // the file already on disk so this self-heals on next open instead of
+                    // silently staying broken forever.
+                    if existing_meta.is_none() {
+                        if let Ok(content) = std::fs::read(&dest) {
+                            let source_url = format!("https://huggingface.co/{repo}/blob/main/{file}");
+                            let fetch_url = format!("https://huggingface.co/{repo}/resolve/main/{file}");
+                            let mtime = std::fs::metadata(&dest)
+                                .ok()
+                                .and_then(|m| m.modified().ok())
+                                .map(|t| {
+                                    chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339()
+                                });
+                            let meta = write_template_install_meta_at(
+                                &dest, &source_url, &fetch_url, &content, mtime, None,
+                            );
+                            record_release(&name, &meta, &content);
+                            existing_meta = Some(meta);
+                        }
+                    }
+
                     let source_url = existing_meta.as_ref().map(|m| m.source_url.clone());
                     let installed_at = existing_meta.as_ref().map(|m| m.installed_at.clone());
 
-                    // Check for existing transformed version for froggeric templates
+                    // Ensure a transformed variant exists for froggeric templates — legacy
+                    // installs predate the auto-transform-on-install step, so backfill it
+                    // here rather than leaving the stock (JSON-branch) template active.
                     let transformed_path = if repo == "froggeric/Qwen-Fixed-Chat-Templates" {
                         let base = dest
                             .file_stem()
                             .and_then(|s| s.to_str())
                             .unwrap_or(&name);
-                        let transformed = dest.with_file_name(format!("{base}-no_json-v21.3.jinja"));
+                        let transformed = dest.with_file_name(format!("{base}-no_json.jinja"));
                         if transformed.exists() {
                             Some(transformed.to_string_lossy().to_string())
                         } else {
-                            None
+                            match run_froggeric_transform(&dest) {
+                                Ok(path) => Some(path.to_string_lossy().to_string()),
+                                Err(e) => {
+                                    eprintln!(
+                                        "[warn] Froggeric backfill transform failed (template still usable): {e}"
+                                    );
+                                    None
+                                }
+                            }
                         }
                     } else {
                         None
@@ -2019,6 +2054,12 @@ struct DiscussionMeta {
     is_pull_request: bool,
     num_comments: u64,
     created_at: String,
+    /// Whether `fetch_hf_discussion_template_content` found an actual proposed
+    /// template (a PR file or a Jinja code block) — most discussions are just
+    /// questions/reports with nothing installable, so "Use this fix" should
+    /// only appear where there's something concrete to install.
+    #[serde(default)]
+    has_fix: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -2097,9 +2138,154 @@ async fn fetch_hf_discussions(repo: &str) -> Result<Vec<DiscussionMeta>, String>
             is_pull_request: item["isPullRequest"].as_bool().unwrap_or(false),
             num_comments: item["numComments"].as_u64().unwrap_or(0),
             created_at: item["createdAt"].as_str().unwrap_or("").to_string(),
+            has_fix: false, // backfilled concurrently by the discussions-list handler
         });
     }
     Ok(result)
+}
+
+/// Fetches a single HF discussion's comments and extracts the first fenced
+/// code block that looks like a Jinja chat template (contains `{%` or `{{`).
+/// Returns `(content, comment_author)` for the first match found, scanning
+/// comments in order so the earliest proposed fix wins.
+async fn fetch_hf_discussion_template_content(
+    repo: &str,
+    discussion_id: u64,
+) -> Result<Option<(String, String)>, String> {
+    let repo_clean = repo.trim_end_matches('/');
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+
+    let url = format!("https://huggingface.co/api/models/{repo_clean}/discussions/{discussion_id}");
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch discussion: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("HF API returned {}", response.status()));
+    }
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("JSON parse: {e}"))?;
+
+    // A proper fork/PR carries its fix as a real committed file on the PR ref,
+    // not prose — read that directly rather than trying to parse it out of a
+    // comment. Try the standard chat-template filename first.
+    if body["isPullRequest"].as_bool().unwrap_or(false) {
+        let pr_ref = format!("refs%2Fpr%2F{discussion_id}");
+        for candidate in ["chat_template.jinja", "chat_template.jinga"] {
+            let raw_url =
+                format!("https://huggingface.co/{repo_clean}/raw/{pr_ref}/{candidate}");
+            if let Ok(resp) = client.get(&raw_url).send().await
+                && resp.status().is_success()
+                && let Ok(text) = resp.text().await
+                && (text.contains("{%") || text.contains("{{"))
+            {
+                let author = body["author"]["name"].as_str().unwrap_or("unknown").to_string();
+                return Ok(Some((text, author)));
+            }
+        }
+    }
+
+    // Otherwise (or as a fallback if the PR's file isn't the standard name),
+    // scan comments for a proposed Jinja fix pasted as a code block.
+    let events = body["events"].as_array().ok_or("No events array")?;
+    for event in events {
+        if event["type"].as_str() != Some("comment") {
+            continue;
+        }
+        let raw = event["data"]["latest"]["raw"]
+            .as_str()
+            .or_else(|| event["data"]["raw"].as_str())
+            .unwrap_or("");
+        if raw.is_empty() {
+            continue;
+        }
+        if let Some(code) = extract_jinja_code_block(raw) {
+            let author = event["author"]["name"]
+                .as_str()
+                .or_else(|| event["data"]["author"]["name"].as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            return Ok(Some((code, author)));
+        }
+    }
+    Ok(None)
+}
+
+/// Extracts the first fenced markdown code block from `text` that looks like
+/// a Jinja chat template (contains `{%` or `{{`). Skips fences that are
+/// clearly something else (JSON, shell, etc. with no Jinja markers).
+fn extract_jinja_code_block(text: &str) -> Option<String> {
+    let mut lines = text.lines().peekable();
+    while let Some(line) = lines.next() {
+        if !line.trim_start().starts_with("```") {
+            continue;
+        }
+        let mut block = String::new();
+        for inner in lines.by_ref() {
+            if inner.trim_start().starts_with("```") {
+                break;
+            }
+            block.push_str(inner);
+            block.push('\n');
+        }
+        if block.contains("{%") || block.contains("{{") {
+            return Some(block.trim().to_string());
+        }
+    }
+    None
+}
+
+/// Fetches an HF discussion's comments as a single markdown blob, so the app
+/// can render it inline (matching how HF model cards are already rendered
+/// inline) instead of sending the user to a new browser tab.
+async fn fetch_hf_discussion_markdown(repo: &str, discussion_id: u64) -> Result<String, String> {
+    let repo_clean = repo.trim_end_matches('/');
+    let url = format!("https://huggingface.co/api/models/{repo_clean}/discussions/{discussion_id}");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch discussion: {e}"))?;
+    if !response.status().is_success() {
+        return Err(format!("HF API returned {}", response.status()));
+    }
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("JSON parse: {e}"))?;
+    let events = body["events"].as_array().ok_or("No events array")?;
+    let mut md = String::new();
+    for event in events {
+        if event["type"].as_str() != Some("comment") {
+            continue;
+        }
+        let raw = event["data"]["latest"]["raw"]
+            .as_str()
+            .or_else(|| event["data"]["raw"].as_str())
+            .unwrap_or("");
+        if raw.is_empty() {
+            continue;
+        }
+        let author = event["author"]["name"]
+            .as_str()
+            .or_else(|| event["data"]["author"]["name"].as_str())
+            .unwrap_or("unknown");
+        md.push_str(&format!("**{author}**\n\n{raw}\n\n---\n\n"));
+    }
+    if md.is_empty() {
+        return Err("No comments found on this discussion".to_string());
+    }
+    Ok(md)
 }
 
 fn resolve_template_source_repo(template_name: &str) -> Result<Option<String>, String> {
@@ -2193,13 +2379,34 @@ fn api_chat_template_discussions(
                     .unwrap_or_else(|_| infer_source_repo_from_template_name(&name));
                 let resp = match source_repo {
                     Some(repo) => match fetch_hf_discussions(&repo).await {
-                        Ok(discussions) => DiscussionsResponse {
-                            ok: true,
-                            template_name: name_clone,
-                            source_repo: Some(repo),
-                            discussions,
-                            error: None,
-                        },
+                        Ok(mut discussions) => {
+                            // Cap concurrent lookups (10 discussions max per fetch_hf_discussions,
+                            // but be defensive) — one extra HF call per discussion, run in parallel.
+                            let checks: Vec<_> = discussions
+                                .iter()
+                                .map(|d| {
+                                    let repo = repo.clone();
+                                    let number = d.number;
+                                    tokio::spawn(async move {
+                                        fetch_hf_discussion_template_content(&repo, number)
+                                            .await
+                                            .ok()
+                                            .flatten()
+                                            .is_some()
+                                    })
+                                })
+                                .collect();
+                            for (d, check) in discussions.iter_mut().zip(checks) {
+                                d.has_fix = check.await.unwrap_or(false);
+                            }
+                            DiscussionsResponse {
+                                ok: true,
+                                template_name: name_clone,
+                                source_repo: Some(repo),
+                                discussions,
+                                error: None,
+                            }
+                        }
                         Err(e) => DiscussionsResponse {
                             ok: false,
                             template_name: name_clone,
@@ -2215,6 +2422,80 @@ fn api_chat_template_discussions(
                         discussions: Vec::new(),
                         error: Some("No HF source repo detected for this template".into()),
                     },
+                };
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &resp,
+                )))
+            }
+        })
+}
+
+fn api_chat_template_discussion_markdown(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "discussion-markdown")
+        .and(warp::get())
+        .and(warp::query::<serde_json::Value>())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |query: serde_json::Value, auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let repo = query["repo"].as_str().unwrap_or("").to_string();
+                let discussion_id = query["discussion_id"].as_u64().unwrap_or(0);
+                if repo.is_empty() || discussion_id == 0 {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false, "error": "Missing repo or discussion_id"
+                        })),
+                    ));
+                }
+                let resp = match fetch_hf_discussion_markdown(&repo, discussion_id).await {
+                    Ok(markdown) => serde_json::json!({ "ok": true, "markdown": markdown }),
+                    Err(e) => serde_json::json!({ "ok": false, "error": e }),
+                };
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &resp,
+                )))
+            }
+        })
+}
+
+fn api_chat_template_discussion_content(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "discussion-content")
+        .and(warp::get())
+        .and(warp::query::<serde_json::Value>())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |query: serde_json::Value, auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let repo = query["repo"].as_str().unwrap_or("").to_string();
+                let discussion_id = query["discussion_id"].as_u64().unwrap_or(0);
+                if repo.is_empty() || discussion_id == 0 {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false, "error": "Missing repo or discussion_id"
+                        })),
+                    ));
+                }
+                let resp = match fetch_hf_discussion_template_content(&repo, discussion_id).await {
+                    Ok(Some((content, author))) => serde_json::json!({
+                        "ok": true, "content": content, "author": author,
+                    }),
+                    Ok(None) => serde_json::json!({
+                        "ok": false,
+                        "error": "No Jinja template code block found in this discussion — paste it manually.",
+                    }),
+                    Err(e) => serde_json::json!({ "ok": false, "error": e }),
                 };
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &resp,
@@ -2396,6 +2677,20 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r
         .or(api_chat_template_discussions(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_chat_template_discussion_markdown(
+            state.clone(),
+            config.clone(),
+        ))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_chat_template_discussion_content(
+            state.clone(),
+            config.clone(),
+        ))
         .unify()
         .boxed();
     r = r

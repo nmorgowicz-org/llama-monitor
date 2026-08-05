@@ -3,7 +3,7 @@
 import fs from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
-import { ARTIFACTS_DIR, FRAME_DIR, REMOTE_SERVER, SCREENSHOT_TAB_PREFIX, sleep } from './paths.mjs';
+import { FRAME_DIR, REMOTE_SERVER, SCREENSHOT_TAB_PREFIX, currentArtifactsDir, tagFilename, sleep } from './paths.mjs';
 
 export async function cleanupScreenshotTabs(page, { keepOne = false } = {}) {
     await page.evaluate(async ({ prefix, keepOne }) => {
@@ -35,7 +35,8 @@ export async function cleanupScreenshotTabs(page, { keepOne = false } = {}) {
     }, { prefix: SCREENSHOT_TAB_PREFIX, keepOne });
 }
 
-export async function captureShot(page, filename, options = {}) {
+export async function captureShot(page, rawFilename, options = {}) {
+    const filename = tagFilename(rawFilename, options.runtimeTag);
     const fullPage = options.fullPage ?? true;
 
     // Non-full-page captures are disabled by default.
@@ -45,12 +46,19 @@ export async function captureShot(page, filename, options = {}) {
         return;
     }
 
-    await page.screenshot({ path: join(ARTIFACTS_DIR, filename), ...options });
+    // A prior elementHandle.click()/hover() leaves Puppeteer's virtual mouse
+    // parked on that element; if it has a `title`, headless Chrome renders
+    // the native tooltip into the page's own render surface and it shows up
+    // in the screenshot. Park the mouse off any content before every shot.
+    await page.mouse.move(0, 0).catch(() => {});
+
+    await page.screenshot({ path: join(currentArtifactsDir(), filename), ...options });
     console.log(`[CAPTURE] Saved ${filename}`);
 }
 
-export async function captureCloseUp(page, selector, filename, options = {}) {
+export async function captureCloseUp(page, selector, rawFilename, options = {}) {
     if (!options.closeUp) return;
+    const filename = tagFilename(rawFilename, options.runtimeTag);
     const padding = options.padding ?? 24;
     const handle = await page.$(selector);
     if (!handle) {
@@ -71,12 +79,14 @@ export async function captureCloseUp(page, selector, filename, options = {}) {
         height: Math.min((viewport?.height ?? box.height) - Math.max(0, box.y - padding), box.height + padding * 2),
     };
     const cuName = filename.replace('.png', '-cu.png');
-    await page.screenshot({ path: join(ARTIFACTS_DIR, cuName), clip });
+    await page.mouse.move(0, 0).catch(() => {});
+    await page.screenshot({ path: join(currentArtifactsDir(), cuName), clip });
     console.log(`[CAPTURE] Close-up saved ${cuName}`);
 }
 
-export async function captureElementScreenshot(page, selector, filename, options = {}) {
+export async function captureElementScreenshot(page, selector, rawFilename, options = {}) {
     // Always capture; --close-up is only for captureCloseUp helper.
+    const filename = tagFilename(rawFilename, options.runtimeTag);
 
     const padding = options.padding ?? 20;
     const handle = await page.$(selector);
@@ -102,7 +112,8 @@ export async function captureElementScreenshot(page, selector, filename, options
         height: Math.min((viewport?.height ?? box.height) - Math.max(0, box.y - padding), box.height + padding * 2),
     };
 
-    await page.screenshot({ path: join(ARTIFACTS_DIR, filename), clip });
+    await page.mouse.move(0, 0).catch(() => {});
+    await page.screenshot({ path: join(currentArtifactsDir(), filename), clip });
     console.log(`[CAPTURE] Saved ${filename}`);
 }
 
@@ -120,7 +131,7 @@ export async function captureSparklineClips(page, selector) {
 
     for (const rect of rects) {
         await page.screenshot({
-            path: join(ARTIFACTS_DIR, `sparkline-validate-svg-${rect.index}.png`),
+            path: join(currentArtifactsDir(), `sparkline-validate-svg-${rect.index}.png`),
             clip: {
                 x: Math.max(0, rect.x),
                 y: Math.max(0, rect.y),

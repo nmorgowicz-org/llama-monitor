@@ -2,7 +2,7 @@
 // Rebuilt from tests/ui/capture.mjs (Phase A1-A4 split); see docs/plans/
 // 20260804-branch_audit_capture_split_chat_template_ux.md Phase A.
 import {
-    DEFAULT_VIEWPORT, RUNNING_PORT,
+    DEFAULT_VIEWPORT, RUNNING_PORT, setArtifactCategory, setArtifactRuntime,
 } from './harness/paths.mjs';
 import { seedConfig, findAvailablePort, spawnLlamaMonitor, cleanupServer, cleanupTempHome } from './harness/server.mjs';
 import { seedRapidMlxCapturePreset, seedNestedMlxFixture, seedModelsDirFixture } from './harness/fixtures.mjs';
@@ -173,42 +173,46 @@ with a remote agent reporting GPU data). No binary is spawned; no temp config is
 `);
 }
 
+// runtime: which backend the captured UI reflects — 'neutral' for
+// backend-independent chrome, otherwise 'llamacpp-local' / 'llamacpp-remote' /
+// 'rapidmlx-local' / 'mtplx-local'. Individual shots in a mixed-runtime
+// scenario can override via captureShot(..., { runtimeTag: '...' }).
 const SCENARIOS = {
-    'welcome': { run: scenarioWelcome },
-    'free-cache': { run: scenarioFreeCache },
-    'rapid-preset': { run: scenarioRapidPreset, setup: () => { seedRapidMlxCapturePreset(); } },
-    'evidence-drawer': { run: scenarioEvidenceDrawer },
-    'community-sources': { run: scenarioCommunitySources },
-    'chat': { run: scenarioChat },
-    'guided-gen': { run: scenarioGuidedGen },
-    'sidebar': { run: scenarioSidebar },
-    'models-v2': { run: scenarioModelsV2, setup: () => ({ extraArgs: seedModelsDirFixture() }) },
-    'model-discovery': { run: scenarioModelDiscovery },
-    'preset-editor': { run: scenarioPresetEditor },
-    'settings': { run: scenarioSettings },
-    'appearance-palette': { run: scenarioAppearancePalette },
-    'tls': { run: scenarioTls },
-    'filebrowser': { run: scenarioFilebrowser },
-    'panels': { run: scenarioPanels, setup: () => ({ extraArgs: seedModelsDirFixture() }) },
-    'models': { run: scenarioModels, setup: () => ({ extraArgs: seedModelsDirFixture() }) },
-    'dashboard': { run: scenarioDashboard },
-    'dashboard-rapid-mlx': { run: scenarioDashboardRapidMlx },
-    'spawn-wizard': { run: scenarioSpawnWizard },
-    'spawn-wizard-engines': { run: scenarioSpawnWizardEngines, setup: () => { seedNestedMlxFixture(); } },
-    'spawn-wizard-gif': { run: scenarioSpawnWizardGif },
-    'spawn-wizard-rapid-mlx-gif': { run: scenarioSpawnWizardRapidMlxGif },
-    'spawn-wizard-hf-download': { run: scenarioSpawnWizardHfDownload },
-    'discussions': { run: scenarioDiscussions, setup: () => { seedRapidMlxCapturePreset(); } },
-    'tune-panel': { run: scenarioTunePanel },
-    'benchmark-results': { run: scenarioBenchmarkResults },
-    'llama-updater': { run: scenarioLlamaUpdater },
-    'chat-history-qa': { run: scenarioChatHistoryQA },
-    'rapid-mlx-runtime': { run: scenarioRapidMlxRuntime },
-    'rapid-mlx-live': { run: scenarioRapidMlxLive },
-    'sparkline': { run: scenarioSparkline },
-    'gifs': { run: scenarioGifs },
-    'smoke': { run: scenarioSmoke },
-    'navbar': { run: scenarioNavbar },
+    'welcome': { run: scenarioWelcome, category: 'core', runtime: 'neutral' },
+    'free-cache': { run: scenarioFreeCache, category: 'core', runtime: 'neutral' },
+    'rapid-preset': { run: scenarioRapidPreset, setup: () => { seedRapidMlxCapturePreset(); }, category: 'presets', runtime: 'rapidmlx-local' },
+    'evidence-drawer': { run: scenarioEvidenceDrawer, category: 'presets', runtime: 'neutral' },
+    'community-sources': { run: scenarioCommunitySources, category: 'presets', runtime: 'neutral' },
+    'chat': { run: scenarioChat, category: 'core', runtime: 'neutral' },
+    'guided-gen': { run: scenarioGuidedGen, category: 'core', runtime: 'neutral' },
+    'sidebar': { run: scenarioSidebar, category: 'core', runtime: 'neutral' },
+    'models-v2': { run: scenarioModelsV2, setup: () => ({ extraArgs: seedModelsDirFixture() }), category: 'models', runtime: 'neutral' },
+    'model-discovery': { run: scenarioModelDiscovery, category: 'models', runtime: 'neutral' },
+    'preset-editor': { run: scenarioPresetEditor, category: 'presets', runtime: 'neutral' },
+    'settings': { run: scenarioSettings, category: 'config', runtime: 'neutral' },
+    'appearance-palette': { run: scenarioAppearancePalette, category: 'config', runtime: 'neutral' },
+    'tls': { run: scenarioTls, category: 'config', runtime: 'neutral' },
+    'filebrowser': { run: scenarioFilebrowser, category: 'models', runtime: 'neutral' },
+    'panels': { run: scenarioPanels, setup: () => ({ extraArgs: seedModelsDirFixture() }), category: 'core', runtime: 'neutral' },
+    'models': { run: scenarioModels, setup: () => ({ extraArgs: seedModelsDirFixture() }), category: 'models', runtime: 'neutral' },
+    'dashboard': { run: scenarioDashboard, category: 'core', runtime: 'neutral' },
+    'dashboard-rapid-mlx': { run: scenarioDashboardRapidMlx, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local' },
+    'spawn-wizard': { run: scenarioSpawnWizard, category: 'wizard-llamacpp', runtime: 'llamacpp-local' },
+    'spawn-wizard-engines': { run: scenarioSpawnWizardEngines, setup: () => { seedNestedMlxFixture(); }, category: 'wizard-llamacpp', runtime: 'neutral' },
+    'spawn-wizard-gif': { run: scenarioSpawnWizardGif, category: 'wizard-llamacpp', runtime: 'llamacpp-local' },
+    'spawn-wizard-rapid-mlx-gif': { run: scenarioSpawnWizardRapidMlxGif, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local' },
+    'spawn-wizard-hf-download': { run: scenarioSpawnWizardHfDownload, category: 'wizard-llamacpp', runtime: 'llamacpp-local' },
+    'discussions': { run: scenarioDiscussions, setup: () => { seedRapidMlxCapturePreset(); }, category: 'presets', runtime: 'neutral' },
+    'tune-panel': { run: scenarioTunePanel, category: 'features', runtime: 'neutral' },
+    'benchmark-results': { run: scenarioBenchmarkResults, category: 'features', runtime: 'neutral' },
+    'llama-updater': { run: scenarioLlamaUpdater, category: 'features', runtime: 'llamacpp-local' },
+    'chat-history-qa': { run: scenarioChatHistoryQA, category: 'features', runtime: 'neutral' },
+    'rapid-mlx-runtime': { run: scenarioRapidMlxRuntime, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local' },
+    'rapid-mlx-live': { run: scenarioRapidMlxLive, category: 'wizard-rapidmlx', runtime: 'rapidmlx-local' },
+    'sparkline': { run: scenarioSparkline, category: 'validation', runtime: 'neutral' },
+    'gifs': { run: scenarioGifs, category: 'validation', runtime: 'neutral' },
+    'smoke': { run: scenarioSmoke, category: 'core', runtime: 'neutral' },
+    'navbar': { run: scenarioNavbar, category: 'core', runtime: 'neutral' },
 };
 
 export async function runCli({ scenario: forcedScenario = null, argv = process.argv.slice(2) } = {}) {
@@ -229,6 +233,8 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
     if (!scenario) {
         throw new Error(`Unknown scenario "${scenarioName}". Use --list-scenarios.`);
     }
+    setArtifactCategory(scenario.category);
+    setArtifactRuntime(scenarioName, scenario.runtime);
 
     let server = null;
     let browser = null;

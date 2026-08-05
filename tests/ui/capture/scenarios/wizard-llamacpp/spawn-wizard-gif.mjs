@@ -4,7 +4,7 @@ import fs from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { gotoApp } from '../../harness/browser.mjs';
-import { ARTIFACTS_DIR, FRAME_DIR, sleep } from '../../harness/paths.mjs';
+import { currentArtifactsDir, tagFilename, FRAME_DIR, sleep } from '../../harness/paths.mjs';
 import { cleanupFrames } from '../../harness/shot.mjs';
 
 export default async function(ctx, _options) {
@@ -258,7 +258,7 @@ export default async function(ctx, _options) {
         '-framerate', String(fps),
         '-i', join(FRAME_DIR, `spawn-wizard-gif_%03d.png`),
         '-vf', 'scale=900:-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5',
-        join(ARTIFACTS_DIR, 'spawn-wizard-flow.gif'),
+        join(currentArtifactsDir(), tagFilename('spawn-wizard-flow.gif')),
     ], { stdio: 'inherit' });
     cleanupFrames();
     console.log('[CAPTURE] spawn-wizard-flow.gif complete.');

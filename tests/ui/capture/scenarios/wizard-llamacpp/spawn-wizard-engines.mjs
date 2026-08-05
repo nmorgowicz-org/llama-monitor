@@ -2,7 +2,7 @@
 // Extracted from tests/ui/capture.mjs (Phase A3).
 import { join } from 'path';
 import { loadAppDocument } from '../../harness/browser.mjs';
-import { ARTIFACTS_DIR, TEMP_APP_CONFIG_DIR, sleep } from '../../harness/paths.mjs';
+import { TEMP_APP_CONFIG_DIR, sleep } from '../../harness/paths.mjs';
 import { captureShot } from '../../harness/shot.mjs';
 
 export default async function(ctx) {
@@ -143,8 +143,7 @@ export default async function(ctx) {
     await sleep(400);
     await scrollToElement('#spawn-kv-cache-dtype', 20);
     await sleep(300);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-reasoning-mode-on.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-reasoning-mode-on.png');
+    await captureShot(page, 'spawn-wizard-reasoning-mode-on.png', { runtimeTag: 'llamacpp-local' });
 
     await page.evaluate(() => {
         // Speculative decoding controls live inside the collapsible
@@ -160,12 +159,10 @@ export default async function(ctx) {
     });
     await scrollToElement('#spawn-rapid-speculative-enabled', 30);
     await sleep(250);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-speculative-enabled-dark.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-speculative-enabled-dark.png');
+    await captureShot(page, 'spawn-wizard-speculative-enabled-dark.png', { runtimeTag: 'llamacpp-local' });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
     await sleep(150);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-speculative-enabled-light.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-speculative-enabled-light.png');
+    await captureShot(page, 'spawn-wizard-speculative-enabled-light.png', { runtimeTag: 'llamacpp-local' });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
     await sleep(200); // allow theme reflow
 
@@ -209,14 +206,12 @@ export default async function(ctx) {
     );
     await scrollToElement('#spawn-rapid-speculative-trust-wrap', 0);
     await sleep(300);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-speculative-trust-consent-dark.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-speculative-trust-consent-dark.png');
+    await captureShot(page, 'spawn-wizard-speculative-trust-consent-dark.png', { runtimeTag: 'llamacpp-local' });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
     await sleep(150);
     await scrollToElement('#spawn-rapid-speculative-trust-wrap', 0);
     await sleep(300);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-speculative-trust-consent-light.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-speculative-trust-consent-light.png');
+    await captureShot(page, 'spawn-wizard-speculative-trust-consent-light.png', { runtimeTag: 'llamacpp-local' });
     await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
 
     // spawn-wizard-parser-detected.png — Parser/hybrid dropdowns with "Detected:" hints.
@@ -229,8 +224,7 @@ export default async function(ctx) {
     await sleep(300);
     await scrollToElement('#spawn-rapid-tool-call-parser', -50);
     await sleep(400);
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-parser-detected.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-parser-detected.png');
+    await captureShot(page, 'spawn-wizard-parser-detected.png', { runtimeTag: 'llamacpp-local' });
 
     // Reset reasoning mode.
     await page.evaluate(() => {
@@ -252,8 +246,7 @@ export default async function(ctx) {
     await sleep(300);
     // Keep the full-screen state: the Wizard context and backdrop are part of
     // the visual evidence, rather than a separate close-up artifact.
-    await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-rapid-mlx-advanced-controls.png') });
-    console.log('[CAPTURE] Saved spawn-wizard-rapid-mlx-advanced-controls.png');
+    await captureShot(page, 'spawn-wizard-rapid-mlx-advanced-controls.png', { runtimeTag: 'rapidmlx-local' });
 
     // spawn-wizard-rapid-mlx-escape-hatch.png — Advanced escape-hatch flags expanded.
     try {
@@ -272,8 +265,7 @@ export default async function(ctx) {
         if (sectionVisible) {
             await scrollToElement('#rapid-mlx-advanced-section', -30);
             await sleep(300);
-            await page.screenshot({ path: join(ARTIFACTS_DIR, 'spawn-wizard-rapid-mlx-escape-hatch.png') });
-            console.log('[CAPTURE] Saved spawn-wizard-rapid-mlx-escape-hatch.png');
+            await captureShot(page, 'spawn-wizard-rapid-mlx-escape-hatch.png', { runtimeTag: 'rapidmlx-local' });
         } else {
             console.log('[CAPTURE] Escape-hatch section not visible, skipping.');
         }
@@ -294,7 +286,7 @@ export default async function(ctx) {
         document.querySelector('.wizard-body')?.scrollTo({ top: 0, behavior: 'instant' });
     });
     await sleep(500);
-    await captureShot(page, 'spawn-wizard-rapid-mlx-fit.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-rapid-mlx-fit.png', { fullPage: true, runtimeTag: 'rapidmlx-local' });
 
     await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
     await page.waitForFunction(
@@ -313,7 +305,7 @@ export default async function(ctx) {
         { timeout: 8000 }
     );
     await sleep(500);
-    await captureShot(page, 'spawn-wizard-rapid-mlx-review.png', { fullPage: true });
+    await captureShot(page, 'spawn-wizard-rapid-mlx-review.png', { fullPage: true, runtimeTag: 'rapidmlx-local' });
 
     console.log('[CAPTURE] Scenario "spawn-wizard-engines" complete.');
 }

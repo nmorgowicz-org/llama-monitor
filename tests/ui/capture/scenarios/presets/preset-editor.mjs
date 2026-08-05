@@ -3,7 +3,7 @@
 import { join } from 'path';
 import { attachToServer } from '../../harness/attach.mjs';
 import { gotoApp } from '../../harness/browser.mjs';
-import { ARTIFACTS_DIR, sleep } from '../../harness/paths.mjs';
+import { currentArtifactsDir, tagFilename, sleep } from '../../harness/paths.mjs';
 import { captureShot } from '../../harness/shot.mjs';
 
 export default async function(ctx, options) {
@@ -297,9 +297,9 @@ export default async function(ctx, options) {
         return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
     });
     if (box) {
-        await page.screenshot({ path: join(ARTIFACTS_DIR, 'preset-editor-create-fix-modal-wrap.png'), clip: box });
+        await page.screenshot({ path: join(currentArtifactsDir(), tagFilename('preset-editor-create-fix-modal-wrap.png')), clip: box });
     } else {
-        await page.screenshot({ path: join(ARTIFACTS_DIR, 'preset-editor-create-fix-modal-wrap.png'), fullPage: false });
+        await page.screenshot({ path: join(currentArtifactsDir(), tagFilename('preset-editor-create-fix-modal-wrap.png')), fullPage: false });
     }
     console.log(`[CAPTURE] Saved preset-editor-create-fix-modal-wrap.png`);
 

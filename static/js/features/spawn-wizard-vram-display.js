@@ -139,17 +139,21 @@ export function updateVramDisplay() {
 
     updateMlockWarning(availVram, free);
 
-    // Update total label
+    // Update total label — leads with the model's estimated usage (what the bar
+    // graph actually represents) rather than just the ceiling, since the ceiling
+    // alone gives no sense of how much of it this model will consume.
     if (dom.vramPanelTotal) {
       if (availVram > 0) {
+        const usedOfTotal = `${formatGB(total)} / ${formatVramTotal(availVram)}`;
         if (isUnifiedMemory() && cachedRamTotal > 0) {
           dom.vramPanelTotal.textContent =
-            formatVramTotal(availVram) + ' Metal cap (of ' + formatVramTotal(cachedRamTotal) + ' total)';
+            usedOfTotal + ' (Metal cap of ' + formatVramTotal(cachedRamTotal) + ' total)';
         } else {
-          dom.vramPanelTotal.textContent = formatVramTotal(availVram) + ' total';
+          dom.vramPanelTotal.textContent = usedOfTotal;
         }
       } else {
-        dom.vramPanelTotal.textContent = isUnifiedMemory() ? 'Unified memory unknown' : 'GPU VRAM unknown';
+        dom.vramPanelTotal.textContent = formatGB(total) + ' estimated — ' +
+          (isUnifiedMemory() ? 'unified memory total unknown' : 'GPU VRAM total unknown');
       }
       dom.vramPanelTotal.title = note;
     }

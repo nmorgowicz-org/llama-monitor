@@ -46,7 +46,6 @@ import {
 } from './spawn-wizard-hf-origin.js';
 import {
   _applyCustomChatTemplate,
-  detectModelFamily,
   autoInstallChatTemplate,
 } from './spawn-wizard-chat-template.js';
 import { loadThirdPartyModels } from './spawn-wizard-third-party-import.js';

@@ -9,7 +9,6 @@ import {
   kvBpe, formatCtx, formatGB,
 } from './spawn-wizard-format.js';
 import { buildEstimateBody, rapidEstimatePolicyFromWizardHardware } from './vram-estimate.js';
-import { detectModelFamily } from './spawn-wizard-chat-template.js';
 import { syncRapidSpeculativeFields } from './spawn-wizard-rapid-mlx.js';
 import { showToast } from './toast.js';
 
@@ -272,7 +271,7 @@ export async function renderSummary() {
     rows.push({ label: 'HF token', value: m.hfTokenSet ? 'Saved in app settings' : 'Not saved' });
   }
   const tplPath = wizardState.model.chatTemplatePath;
-  const tplFamily = detectModelFamily(m.hfRepo || m.path || '');
+  const tplFamily = m.family || null;
   if (!rapid && tplPath) {
     const tplName = tplPath.split(/[/\\]/).pop() || tplPath;
     rows.push({ label: 'Chat template', value: tplName });
@@ -514,8 +513,8 @@ function _bindThinkingFields() {
         const budgetEl  = document.getElementById('spawn-reasoning-budget');
         const msgEl     = document.getElementById('spawn-reasoning-budget-message');
         if (budgetEl && !budgetEl.value) {
-          budgetEl.value = '16384';
-          wizardState.hardware.reasoningBudget = 16384;
+          budgetEl.value = '8192';
+          wizardState.hardware.reasoningBudget = 8192;
         }
         if (msgEl && !msgEl.value) {
           msgEl.value = '\\nFinal Answer:';

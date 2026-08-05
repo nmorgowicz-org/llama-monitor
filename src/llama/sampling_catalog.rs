@@ -430,7 +430,7 @@ impl SamplingCatalog {
                     enable_thinking: Some(true),
                     preserve_thinking: Some(true),
                     tool_call_format: None,
-                    reasoning_budget: Some(16384),
+                    reasoning_budget: Some(8192),
                     reasoning: true,
                     reasoning_budget_message: Some("\nFinal Answer:".into()),
                 },
@@ -461,7 +461,7 @@ impl SamplingCatalog {
                     enable_thinking: Some(true),
                     preserve_thinking: Some(true),
                     tool_call_format: None,
-                    reasoning_budget: Some(16384),
+                    reasoning_budget: Some(8192),
                     reasoning: true,
                     reasoning_budget_message: Some("\nFinal Answer:".into()),
                 },
@@ -491,7 +491,7 @@ impl SamplingCatalog {
                     enable_thinking: Some(true),
                     preserve_thinking: Some(true),
                     tool_call_format: None,
-                    reasoning_budget: Some(16384),
+                    reasoning_budget: Some(8192),
                     reasoning: true,
                     reasoning_budget_message: Some("\nFinal Answer:".into()),
                 },
@@ -1063,6 +1063,6 @@ mod tests {
         assert_eq!(agentic.defaults.presence_penalty, 0.0);
         assert_eq!(agentic.defaults.enable_thinking, Some(true));
         assert_eq!(agentic.defaults.preserve_thinking, Some(true));
-        assert_eq!(agentic.defaults.reasoning_budget, Some(16384));
+        assert_eq!(agentic.defaults.reasoning_budget, Some(8192));
     }
 }

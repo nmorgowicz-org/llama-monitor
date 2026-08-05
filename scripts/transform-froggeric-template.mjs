@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Deterministic transform script: derives <version>-opencode-v3
+ * Deterministic transform script: derives <version>-no_json
  * from any froggeric/Qwen-Fixed-Chat-Templates release.
  *
  * Anchored on Jinja control-flow markers, not blind line-number edits.
@@ -13,7 +13,7 @@
  *   # or set env vars: FROGGERIC_V213_UPSTREAM, FROGGERIC_V213_REFERENCE
  *
  * Self-test mode requires:
- *   An upstream froggeric template and its known -opencode-v3 reference output.
+ *   An upstream froggeric template and its known -no_json reference output.
  *   Set via --upstream/--reference flags or FROGGERIC_V213_UPSTREAM/FROGGERIC_V213_REFERENCE env vars.
  */
 
@@ -51,11 +51,21 @@ function main() {
 
   if (!outputPath) {
     const base = inputPath.replace(/\.jinja$/, '').replace(/\.jinja\.txt$/, '');
-    outputPath = base + '-opencode-v3.jinja';
+    outputPath = base + '-no_json.jinja';
   }
 
   const input = readFileSync(inputPath, 'utf-8');
   const transformed = applyTransform(input);
+
+  const validationError = validateTransform(input, transformed);
+  if (validationError) {
+    console.error(`Transform validation failed: ${validationError}`);
+    console.error('The input template structure does not match what this script expects');
+    console.error('(anchors may have changed in a newer froggeric release). Refusing to');
+    console.error('write a possibly-broken output — update the transform script first.');
+    process.exit(1);
+  }
+
   writeFileSync(outputPath, transformed, 'utf-8');
   console.log(`Wrote: ${outputPath}`);
 }
@@ -124,9 +134,33 @@ function runSelfTest(cliUpstream, cliReference) {
 }
 
 /**
- * Apply the -opencode-v3 transform anchored on Jinja control-flow markers:
+ * Sanity-checks that the transform actually did its job, rather than
+ * silently no-op'ing because a future froggeric release restructured the
+ * anchors this script depends on. Returns an error string, or null if OK.
+ */
+function validateTransform(input, output) {
+  if (!/_tool_format\s*==\s*'json'/.test(input)) {
+    return "input has no `_tool_format == 'json'` branches — this doesn't look like a froggeric template this script knows how to transform";
+  }
+  if (/_tool_format\s*==\s*'json'/.test(output)) {
+    return 'output still contains JSON-format conditional branches — anchors did not match, transform was a no-op';
+  }
+  if (/set\s+_tool_format\s*=/.test(output)) {
+    return 'output still declares _tool_format — removal anchor did not match';
+  }
+  if (!/template_version\s*=\s*"[^"]*-no_json"/.test(output)) {
+    return 'output template_version was not suffixed with -no_json — version anchor did not match';
+  }
+  if (output.length < input.length * 0.5) {
+    return `output is suspiciously short (${output.length} chars vs ${input.length} input) — likely over-stripped`;
+  }
+  return null;
+}
+
+/**
+ * Apply the -no_json transform anchored on Jinja control-flow markers:
  *
- * 1. Append -opencode-v3 to template_version
+ * 1. Append -no_json to template_version
  * 2. Remove _tool_format variable declaration
  * 3. In tool_instructions block: strip all JSON-format conditional branches
  * 4. In tool-call output block: strip JSON-format branch, keep only XML
@@ -134,12 +168,12 @@ function runSelfTest(cliUpstream, cliReference) {
 function applyTransform(input) {
   let result = input;
 
-  // 1. Append -opencode-v3 to template_version
+  // 1. Append -no_json to template_version
   // Anchor: {%- set template_version = "..." %}
   result = result.replace(
     /\{%-\s*set\s+template_version\s*=\s*"([^"]+)"\s*%\}/,
     (match, version) => {
-      const newVersion = version.endsWith('-opencode-v3') ? version : `${version}-opencode-v3`;
+      const newVersion = version.endsWith('-no_json') ? version : `${version}-no_json`;
       return `{%- set template_version = "${newVersion}" %}`;
     },
   );

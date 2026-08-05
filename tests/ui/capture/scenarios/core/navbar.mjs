@@ -3,7 +3,7 @@
 import { join } from 'path';
 import { attachToServer } from '../../harness/attach.mjs';
 import { gotoApp } from '../../harness/browser.mjs';
-import { ARTIFACTS_DIR, sleep } from '../../harness/paths.mjs';
+import { currentArtifactsDir, tagFilename, sleep } from '../../harness/paths.mjs';
 import { captureElementScreenshot } from '../../harness/shot.mjs';
 
 export default async function(ctx, options) {
@@ -25,7 +25,7 @@ export default async function(ctx, options) {
     const navEl = await page.$('.top-nav-bar');
     const navBox = await navEl.boundingBox();
     await page.screenshot({
-        path: join(ARTIFACTS_DIR, 'navbar-idle-dark.png'),
+        path: join(currentArtifactsDir(), tagFilename('navbar-idle-dark.png')),
         clip: { x: 0, y: navBox.y, width: navBox.width, height: navBox.height },
     });
     console.log('[CAPTURE] Saved navbar-idle-dark.png');
@@ -42,7 +42,7 @@ export default async function(ctx, options) {
     });
     await sleep(800);
     await page.screenshot({
-        path: join(ARTIFACTS_DIR, 'navbar-low-power-active.png'),
+        path: join(currentArtifactsDir(), tagFilename('navbar-low-power-active.png')),
         clip: { x: 0, y: navBox.y, width: navBox.width, height: navBox.height },
     });
     console.log('[CAPTURE] Saved navbar-low-power-active.png');
@@ -68,7 +68,7 @@ export default async function(ctx, options) {
     await page.click('#nav-theme-toggle');
     await sleep(400);
     await page.screenshot({
-        path: join(ARTIFACTS_DIR, 'navbar-idle-light.png'),
+        path: join(currentArtifactsDir(), tagFilename('navbar-idle-light.png')),
         clip: { x: 0, y: navBox.y, width: navBox.width, height: navBox.height },
     });
     console.log('[CAPTURE] Saved navbar-idle-light.png');

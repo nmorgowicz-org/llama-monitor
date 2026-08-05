@@ -127,13 +127,13 @@ export async function openChatTemplateManageModal({ tplName, tplRepo, currentPat
       fetchDiscussions(tplName),
     ]);
 
-    _renderCurrentSection(versionEl, releasesResult);
+    _renderCurrentSection(versionEl, releasesResult, currentPath);
     _renderUpdatesSection(updatesEl, { path: currentPath, onChecked: () => {} });
     _renderVersionHistorySection(historyEl, releasesResult, tplName, async () => {
       if (onActivated) await onActivated();
       // Re-render so "active" markers reflect the new state without closing the modal.
       const refreshed = await fetchReleases(tplName);
-      _renderCurrentSection(versionEl, refreshed);
+      _renderCurrentSection(versionEl, refreshed, currentPath);
       _renderVersionHistorySection(historyEl, refreshed, tplName, () => {});
     });
     _renderCommunityFixesSection(discussionsEl, discussionsResult, {
@@ -161,35 +161,61 @@ export function bindChatTemplateManageModalChrome() {
   });
 }
 
-function _renderCurrentSection(versionEl, releasesResult) {
+function _renderCurrentSection(versionEl, releasesResult, currentPath) {
   const releases = releasesResult?.releases || [];
-  if (!releasesResult?.ok || releases.length === 0) {
-    versionEl.textContent = releasesResult?.error || 'This template was installed directly (no release index).';
-    return;
-  }
-  const latest = releases[0];
-  const activeSha = releasesResult.active_sha256 || null;
-  const active = releases.find(r => r.sha256 === activeSha) || latest;
   versionEl.innerHTML = '';
-  const rows = [
-    { label: 'Active revision', value: active.revision ? active.revision.slice(0, 10) : (active.sha256 || '').slice(0, 10) },
-    { label: 'Source', value: active.source_url || '—' },
-    { label: 'SHA-256', value: (active.sha256 || '').substring(0, 16) + '…' },
-    { label: 'Installed', value: active.installed_at ? new Date(active.installed_at).toLocaleString() : '—' },
-  ];
-  rows.forEach(item => {
-    const row = document.createElement('div');
-    row.className = 'chat-template-lifecycle-version-row';
+
+  if (!releasesResult?.ok || releases.length === 0) {
+    const empty = document.createElement('div');
+    empty.textContent = releasesResult?.error || 'This template was installed directly (no release index).';
+    versionEl.appendChild(empty);
+  } else {
+    const latest = releases[0];
+    const activeSha = releasesResult.active_sha256 || null;
+    const active = releases.find(r => r.sha256 === activeSha) || latest;
+    const rows = [
+      { label: 'Active revision', value: active.revision ? active.revision.slice(0, 10) : (active.sha256 || '').slice(0, 10) },
+      { label: 'Source', value: active.source_url || '—' },
+      { label: 'SHA-256', value: (active.sha256 || '').substring(0, 16) + '…' },
+      { label: 'Installed', value: active.installed_at ? new Date(active.installed_at).toLocaleString() : '—' },
+    ];
+    rows.forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'chat-template-lifecycle-version-row';
+      const label = document.createElement('span');
+      label.className = 'chat-template-lifecycle-version-label';
+      label.textContent = item.label + ':';
+      const value = document.createElement('span');
+      value.className = 'chat-template-lifecycle-version-value';
+      value.textContent = item.value;
+      row.appendChild(label);
+      row.appendChild(value);
+      versionEl.appendChild(row);
+    });
+  }
+
+  // Surface whether the froggeric no-JSON transform is the file actually in
+  // effect — this was previously invisible, so the transform silently ran
+  // (or silently failed to run, for legacy installs) with no UI feedback.
+  if (currentPath) {
+    const transformRow = document.createElement('div');
+    transformRow.className = 'chat-template-lifecycle-version-row';
     const label = document.createElement('span');
     label.className = 'chat-template-lifecycle-version-label';
-    label.textContent = item.label + ':';
+    label.textContent = 'Transform:';
     const value = document.createElement('span');
     value.className = 'chat-template-lifecycle-version-value';
-    value.textContent = item.value;
-    row.appendChild(label);
-    row.appendChild(value);
-    versionEl.appendChild(row);
-  });
+    if (currentPath.includes('-no_json.jinja')) {
+      value.textContent = '✓ no-JSON transform active (strips broken tool-call JSON branches)';
+    } else if (currentPath.includes('froggeric')) {
+      value.textContent = '⚠ stock template active — no-JSON transform not found for this install';
+    } else {
+      value.textContent = 'n/a';
+    }
+    transformRow.appendChild(label);
+    transformRow.appendChild(value);
+    versionEl.appendChild(transformRow);
+  }
 }
 
 function _renderUpdatesSection(updatesEl, { path }) {
@@ -318,7 +344,77 @@ function _renderCommunityFixesSection(discussionsEl, discussionsResult, { tplNam
       link.style.color = 'var(--color-accent)';
       link.style.marginLeft = '4px';
       row.appendChild(link);
+
+      // Inline expand — renders the discussion's comments in-app (same
+      // marked+DOMPurify pipeline used for HF model cards) instead of
+      // sending the user to a new browser tab just to read it.
+      const expandBtn = document.createElement('button');
+      expandBtn.type = 'button';
+      expandBtn.className = 'btn-sm btn-preset';
+      expandBtn.style.marginLeft = '6px';
+      expandBtn.textContent = 'View ▾';
+      const detailEl = document.createElement('div');
+      detailEl.style.cssText = 'display:none;margin:4px 0 8px;padding:8px 10px;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;font-size:10px;max-height:260px;overflow-y:auto;';
+      let loaded = false;
+      expandBtn.addEventListener('click', async () => {
+        const isOpen = detailEl.style.display !== 'none';
+        if (isOpen) {
+          detailEl.style.display = 'none';
+          expandBtn.textContent = 'View ▾';
+          return;
+        }
+        detailEl.style.display = '';
+        expandBtn.textContent = 'Hide ▴';
+        if (loaded) return;
+        loaded = true;
+        detailEl.textContent = 'Loading…';
+        try {
+          const resp = await fetch(`/api/chat-template/discussion-markdown?repo=${encodeURIComponent(discussionsResult.source_repo)}&discussion_id=${encodeURIComponent(d.number)}`, { headers: _headers() });
+          const data = await resp.json();
+          detailEl.textContent = '';
+          if (!data.ok || !data.markdown) {
+            detailEl.textContent = data.error || 'Could not load discussion content.';
+          } else if (window.marked && window.DOMPurify) {
+            const frag = window.DOMPurify.sanitize(window.marked.parse(data.markdown), { RETURN_DOM_FRAGMENT: true });
+            detailEl.appendChild(frag);
+          } else {
+            detailEl.textContent = data.markdown;
+          }
+        } catch (err) {
+          detailEl.textContent = 'Error: ' + (err.message || String(err));
+        }
+      });
+      row.appendChild(expandBtn);
+
+      // Per-discussion action: only shown when the backend actually found an
+      // installable fix (a PR file or a Jinja code block in a comment) — most
+      // discussions are just questions/reports with nothing to install.
+      if (d.has_fix) {
+        const useBtn = document.createElement('button');
+        useBtn.type = 'button';
+        useBtn.className = 'btn-sm btn-preset';
+        useBtn.style.marginLeft = '6px';
+        useBtn.textContent = 'Use this fix';
+        useBtn.title = 'Open the editor pre-filled from this discussion';
+        useBtn.addEventListener('click', () => {
+          openCreateFixEditor({
+            container: document.body,
+            tplName,
+            tplRepo,
+            currentPath,
+            onInstalled,
+            discussion: {
+              repo: discussionsResult.source_repo,
+              id: d.number,
+              title: d.title,
+            },
+          });
+        });
+        row.appendChild(useBtn);
+      }
+
       discussionsEl.appendChild(row);
+      discussionsEl.appendChild(detailEl);
     });
   }
 
@@ -343,40 +439,48 @@ function _renderCommunityFixesSection(discussionsEl, discussionsResult, { tplNam
 // ── "Edit and install this fix" — the jinja editor flow ────────────────────
 // Paste a template fix, create a release, smoke-test it, activate on pass.
 
-export function openCreateFixEditor({ container, tplName, tplRepo, currentPath, onInstalled }) {
+export function openCreateFixEditor({ container, tplName, tplRepo, currentPath, onInstalled, discussion }) {
   const modal = document.createElement('div');
   modal.className = 'chat-template-create-fix-overlay';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;z-index:21000;backdrop-filter:blur(3px);';
+  // Flex-column panel: bodyWrap scrolls, btnRow is a fixed footer that
+  // never scrolls out of view (the "buttons scroll away" complaint).
   const panel = document.createElement('div');
-  panel.style.cssText = 'background:var(--pe-panel-bg);border:1px solid var(--pe-panel-border);border-radius:8px;padding:16px;min-width:550px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 12px 48px rgba(0,0,0,0.5),0 2px 12px rgba(0,0,0,0.35);flex-shrink:0;';
+  panel.style.cssText = 'display:flex;flex-direction:column;background:var(--pe-panel-bg);border:1px solid var(--pe-panel-border);border-radius:8px;min-width:550px;max-width:600px;width:90%;max-height:80vh;box-shadow:0 12px 48px rgba(0,0,0,0.5),0 2px 12px rgba(0,0,0,0.35);flex-shrink:0;overflow:hidden;';
+
+  const bodyWrap = document.createElement('div');
+  bodyWrap.style.cssText = 'overflow-y:auto;padding:16px;';
 
   const title = document.createElement('strong');
   title.textContent = CT_LABELS.editInstallFix;
   title.style.fontSize = '13px';
-  panel.appendChild(title);
+  bodyWrap.appendChild(title);
 
   const desc = document.createElement('div');
   desc.style.fontSize = '10px';
   desc.style.color = 'var(--color-text-muted)';
   desc.style.marginTop = '4px';
   desc.textContent = 'Paste a proposed template fix from a Hugging Face discussion. It will be stored as a separate release and smoke-tested for tool calls before it is activated.';
-  panel.appendChild(desc);
+  bodyWrap.appendChild(desc);
 
   const repoInput = document.createElement('input');
   repoInput.type = 'text';
   repoInput.placeholder = 'HF repo (e.g., Qwen/Qwen3.5-0.5B)';
   repoInput.style.cssText = 'width:100%;margin-top:8px;padding:5px 8px;font-size:11px;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;';
-  if (tplRepo) repoInput.value = tplRepo;
+  if (discussion?.repo) repoInput.value = discussion.repo;
+  else if (tplRepo) repoInput.value = tplRepo;
 
   const idInput = document.createElement('input');
   idInput.type = 'text';
   idInput.placeholder = 'Discussion ID (number)';
   idInput.style.cssText = 'width:100%;margin-top:6px;padding:5px 8px;font-size:11px;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;';
+  if (discussion?.id) idInput.value = String(discussion.id);
 
   const titleInput = document.createElement('input');
   titleInput.type = 'text';
   titleInput.placeholder = 'Discussion title (brief)';
   titleInput.style.cssText = 'width:100%;margin-top:6px;padding:5px 8px;font-size:11px;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);box-sizing:border-box;';
+  if (discussion?.title) titleInput.value = discussion.title;
 
   const editorWrap = document.createElement('div');
   editorWrap.style.cssText = 'position:relative;width:100%;margin-top:8px;border:1px solid var(--color-border);border-radius:4px;background:var(--color-bg-primary);overflow:hidden;';
@@ -439,7 +543,10 @@ export function openCreateFixEditor({ container, tplName, tplRepo, currentPath, 
       const visualLines = Math.max(1, Math.round(visualHeight / lineHeight));
       for (let v = 0; v < visualLines; v++) {
         const div = document.createElement('div');
-        div.textContent = (v === 0) ? (idx + 1).toString() : '';
+        // A truly empty div collapses to 0 height, desyncing the gutter from
+        // the textarea's wrapped rows — use a non-breaking space so blank
+        // continuation rows still occupy one line-height.
+        div.textContent = (v === 0) ? (idx + 1).toString() : ' ';
         frag.appendChild(div);
       }
     });
@@ -470,8 +577,10 @@ export function openCreateFixEditor({ container, tplName, tplRepo, currentPath, 
   statusDiv.style.marginTop = '8px';
   statusDiv.style.minHeight = '14px';
 
+  // Sticky footer — appended to `panel` (not `bodyWrap`), so it never scrolls
+  // out of view regardless of how tall the body content gets.
   const btnRow = document.createElement('div');
-  btnRow.style.cssText = 'margin-top:10px;display:flex;gap:8px;justify-content:flex-end;';
+  btnRow.style.cssText = 'flex-shrink:0;padding:10px 16px;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--pe-panel-border);background:var(--pe-panel-bg);';
   const cancelBtn = document.createElement('button');
   cancelBtn.textContent = 'Cancel';
   cancelBtn.className = 'btn-sm btn-preset';
@@ -481,11 +590,12 @@ export function openCreateFixEditor({ container, tplName, tplRepo, currentPath, 
   btnRow.appendChild(cancelBtn);
   btnRow.appendChild(submitBtn);
 
-  panel.appendChild(repoInput);
-  panel.appendChild(idInput);
-  panel.appendChild(titleInput);
-  panel.appendChild(editorWrap);
-  panel.appendChild(statusDiv);
+  bodyWrap.appendChild(repoInput);
+  bodyWrap.appendChild(idInput);
+  bodyWrap.appendChild(titleInput);
+  bodyWrap.appendChild(editorWrap);
+  bodyWrap.appendChild(statusDiv);
+  panel.appendChild(bodyWrap);
   panel.appendChild(btnRow);
   modal.appendChild(panel);
 
@@ -570,8 +680,28 @@ export function openCreateFixEditor({ container, tplName, tplRepo, currentPath, 
 
   container.appendChild(modal);
 
-  if (currentPath) {
-    statusDiv.textContent = 'Loading template content…';
+  if (discussion?.repo && discussion?.id) {
+    statusDiv.textContent = 'Fetching proposed fix from the discussion…';
+    statusDiv.style.color = 'var(--color-text-muted)';
+    fetch(`/api/chat-template/discussion-content?repo=${encodeURIComponent(discussion.repo)}&discussion_id=${encodeURIComponent(discussion.id)}`, { headers: _headers() })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok && data.content) {
+          contentTextarea.value = data.content;
+          recalculateLineNumbers();
+          statusDiv.style.color = 'var(--color-success)';
+          statusDiv.textContent = `✓ Auto-filled from the discussion (proposed by ${data.author || 'unknown'}). Review before installing.`;
+        } else {
+          statusDiv.style.color = 'var(--color-warning)';
+          statusDiv.textContent = (data.error || 'Could not auto-extract a fix from this discussion.') + ' Paste it manually below, or open the discussion link to copy it.';
+        }
+      })
+      .catch(err => {
+        statusDiv.style.color = 'var(--color-warning)';
+        statusDiv.textContent = 'Could not fetch discussion content: ' + (err.message || String(err)) + '. Paste fix manually.';
+      });
+  } else if (currentPath) {
+    statusDiv.textContent = 'Loading current template as a starting point…';
     statusDiv.style.color = 'var(--color-text-muted)';
     fetch(`/api/chat-template/read?path=${encodeURIComponent(currentPath)}`, { headers: _headers() })
       .then(r => r.ok ? r.text() : Promise.reject(new Error('Failed to read template')))

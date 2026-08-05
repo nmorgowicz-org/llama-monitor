@@ -13,7 +13,8 @@ import { showToast, showToastWithActions, showConfirmDialog } from './toast.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune } from './tuning-cards.js';
 import {
     buildCommunityTemplateInstallRequest,
-    detectCommunityTemplateFamily,
+    communityFamilyFromGgufArchitecture,
+    communityTemplateFamilyFor,
     getDefaultTemplateForFamily,
 } from './chat-template-registry.js';
 import { buildEstimateBody, rapidEstimatePolicyFromConfig } from './vram-estimate.js';
@@ -206,6 +207,36 @@ async function updatePresetChatTemplateStatusLine() {
     if (primaryBtn) primaryBtn.textContent = 'Revert to built-in';
 }
 
+// Resolves the community-template family for a preset using real model
+// metadata only — never filename matching. Prefers the backend-derived
+// `preset.family` (set from GGUF `general.architecture` by ensure_gguf_metadata
+// on the server); falls back to a live GGUF-metadata read for local models
+// whose preset hasn't been backfilled yet.
+async function communityTemplateFamilyForPreset(preset) {
+    const fromPreset = communityTemplateFamilyFor(preset?.family);
+    if (fromPreset) return fromPreset;
+
+    const modelPath = preset?.model_path || strVal('modal-model-path');
+    if (!modelPath || !looksLikeLocalModelSource(modelPath)) return null;
+
+    try {
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        const resp = await fetch('/api/models/gguf-meta', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ model_path: modelPath }),
+        });
+        if (!resp.ok) return null;
+        const meta = await resp.json().catch(() => ({}));
+        if (!meta.ok || !meta.architecture) return null;
+        return communityFamilyFromGgufArchitecture(meta.architecture);
+    } catch {
+        return null;
+    }
+}
+
 async function installRecommendedChatTemplateForPreset() {
     // The primary button toggles: "Use recommended template" installs one,
     // "Revert to built-in" (shown once a custom template is active) clears it.
@@ -217,8 +248,7 @@ async function installRecommendedChatTemplateForPreset() {
         return;
     }
 
-    const modelSource = strVal('modal-model-path');
-    const family = detectCommunityTemplateFamily(modelSource);
+    const family = await communityTemplateFamilyForPreset(_currentModalPreset());
     const template = getDefaultTemplateForFamily(family);
     if (!template) {
         showToast('No community template recommendation for this model', 'warn');

@@ -3,7 +3,7 @@ import { showToast } from './toast.js';
 import { openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
 import {
   buildCommunityTemplateInstallRequest,
-  detectCommunityTemplateFamily,
+  communityFamilyFromGgufArchitecture,
   getDefaultTemplateForFamily,
   getTemplateFamilies,
   getTemplatesForFamily,
@@ -26,115 +26,118 @@ export function _applyCustomChatTemplate(path) {
   wizardState.model.chatTemplateMode = path ? 'custom' : 'embedded';
   const hiddenInput = document.getElementById('spawn-chat-template-path');
   if (hiddenInput) hiddenInput.value = path || '';
-  const identityName = wizardState.model.source === 'hf' ? wizardState.model.hfRepo : wizardState.model.path;
-  const family = detectModelFamily(identityName);
+  const family = wizardState.model.family || null;
   const tpl = getDefaultTemplateForFamily(family);
   _renderChatTemplateStatus(path ? 'custom' : 'embedded', family, tpl, { path });
 }
 
-export function detectModelFamily(name) {
-  const lower = (name || '').toLowerCase();
-  const communityFamily = detectCommunityTemplateFamily(lower);
-  if (communityFamily) return communityFamily;
-  if (lower.includes('llama-3') || lower.includes('llama3') || lower.match(/llama.?3/)) return 'llama3';
-  if (lower.includes('mistral') || lower.includes('mixtral')) return 'mistral';
+// Checks HF tags (own tags + any declared base_model tag) for architecture
+// evidence — real repo metadata, never a filename/display-name string.
+function _communityFamilyFromHfTags(tags) {
+  const list = (tags || []).map(t => String(t).toLowerCase());
+  const baseModelTag = list.find(t => t.startsWith('base_model:') && t.slice('base_model:'.length).includes('/'));
+  const candidates = baseModelTag ? [...list, baseModelTag.slice('base_model:'.length)] : list;
+  for (const c of candidates) {
+    if (c.includes('qwen')) return 'qwen';
+    if (c.includes('gemma-4') || c.includes('gemma4')) return 'gemma4';
+  }
   return null;
 }
 
-// Map GGUF general.architecture values to community template family keys
-// (e.g. "qwen3_6" → "qwen", "llama" → "llama3" if LLaMA 3+)
-function _ggufArchToFamily(arch) {
-  const a = arch.toLowerCase();
-  if (a.includes('qwen')) return 'qwen';
-  if (a.includes('gemma4') || a.includes('gemma_4')) return 'gemma4';
-  if (a.includes('mistral') || a.includes('mixtral')) return 'mistral';
-  if (a.includes('llama')) return 'llama3';
-  return null;
-}
-
-// Async family detection that tries multiple sources:
+// Async family detection — real model metadata only, never filename matching:
 // 1) Persisted family tag from model-tags.json
-// 2) GGUF metadata general.architecture (for local models — reads file header, instant)
-// 3) HF model card base_model tag (via /api/hf/meta)
-// 4) Filename heuristics (as fallback)
+// 2) Local model config: GGUF general.architecture (llama.cpp) or config.json
+//    model_type (Rapid-MLX) — reads the file directly, instant.
+// 3) HF repo tags / declared base_model tag (via /api/hf/meta)
+// If none resolve, family stays unknown — the UI surfaces "no recommendation"
+// rather than guessing from the filename.
 export async function detectModelFamilyAsync(identityName, localPath, timeoutMs) {
   const timeout = timeoutMs || 5000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   const headers = window.authHeaders ? window.authHeaders() : {};
+  const isRapidMlx = wizardState.engine.selected === 'rapid_mlx';
 
-  // 1) Check persisted family tag
-  if (localPath) {
-    try {
-      const resp = await fetch('/api/models/tags', { headers, signal: controller.signal });
-      if (resp.ok) {
-        const td = await resp.json().catch(() => ({}));
-        const tags = td.tags?.[localPath] || [];
-        const familyTag = tags.find(t => t.startsWith('family:'));
-        if (familyTag) return familyTag.slice('family:'.length);
-      }
-    } catch (e) { if (e.name !== 'AbortError') { /* non-fatal */ } }
-  }
-
-  // 2) Read GGUF metadata for local models — architecture field is authoritative
-  if (localPath) {
-    try {
-      const metaResp = await fetch('/api/models/gguf-meta', {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({ model_path: localPath }),
-      });
-      if (metaResp.ok) {
-        const meta = await metaResp.json().catch(() => ({}));
-        if (meta.ok && meta.architecture) {
-          const arch = meta.architecture.toLowerCase();
-          const family = _ggufArchToFamily(arch);
-          if (family) return family;
+  try {
+    // 1) Check persisted family tag
+    if (localPath) {
+      try {
+        const resp = await fetch('/api/models/tags', { headers, signal: controller.signal });
+        if (resp.ok) {
+          const td = await resp.json().catch(() => ({}));
+          const tags = td.tags?.[localPath] || [];
+          const familyTag = tags.find(t => t.startsWith('family:'));
+          if (familyTag) return familyTag.slice('family:'.length);
         }
-      }
-    } catch (e) { if (e.name !== 'AbortError') { /* non-fatal */ } }
-  }
+      } catch (e) { if (e.name !== 'AbortError') { /* non-fatal */ } }
+    }
 
-  // 2) Check HF model card base_model tag (for locally resolved origins or HF repos)
-  const repoId = identityName || wizardState.model.originRepo;
-  // Only query HF API if repoId looks like an HF repo (not a local file path).
-  // HF repos are "owner/name" — no dots before the slash, no backslashes.
-  const looksLikeHfRepo = repoId && repoId.includes('/') &&
-    !repoId.includes('\\') &&
-    !repoId.split('/')[0].includes('.');
-  if (looksLikeHfRepo) {
-    try {
-      const metaResp = await fetch(`/api/hf/meta?repo=${encodeURIComponent(repoId)}`, { headers, signal: controller.signal });
-      if (metaResp.ok) {
-        const meta = await metaResp.json().catch(() => ({}));
-        const tags = meta.tags || [];
-        const baseModelTag = tags.find(t => {
-          if (!t.startsWith('base_model:')) return false;
-          const rest = t.slice('base_model:'.length);
-          return rest.includes('/');
-        });
-        if (baseModelTag) {
-          const baseRepo = baseModelTag.slice('base_model:'.length);
-          const detected = detectModelFamily(baseRepo);
+    // 2) Read local model config — architecture field is authoritative
+    if (localPath) {
+      try {
+        if (isRapidMlx) {
+          const metaResp = await fetch('/api/models/mlx-introspect', {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({ model_path: localPath }),
+          });
+          if (metaResp.ok) {
+            const meta = await metaResp.json().catch(() => ({}));
+            const modelType = meta.model_type || meta.config?.model_type;
+            if (modelType) {
+              const family = communityFamilyFromGgufArchitecture(modelType);
+              if (family) return family;
+            }
+          }
+        } else {
+          const metaResp = await fetch('/api/models/gguf-meta', {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({ model_path: localPath }),
+          });
+          if (metaResp.ok) {
+            const meta = await metaResp.json().catch(() => ({}));
+            if (meta.ok && meta.architecture) {
+              const family = communityFamilyFromGgufArchitecture(meta.architecture);
+              if (family) return family;
+            }
+          }
+        }
+      } catch (e) { if (e.name !== 'AbortError') { /* non-fatal */ } }
+    }
+
+    // 3) Check HF repo tags / declared base_model tag (for locally resolved origins or HF repos)
+    const repoId = identityName || wizardState.model.originRepo;
+    // Only query HF API if repoId looks like an HF repo (not a local file path).
+    // HF repos are "owner/name" — no dots before the slash, no backslashes.
+    const looksLikeHfRepo = repoId && repoId.includes('/') &&
+      !repoId.includes('\\') &&
+      !repoId.split('/')[0].includes('.');
+    if (looksLikeHfRepo) {
+      try {
+        const metaResp = await fetch(`/api/hf/meta?repo=${encodeURIComponent(repoId)}`, { headers, signal: controller.signal });
+        if (metaResp.ok) {
+          const meta = await metaResp.json().catch(() => ({}));
+          const detected = _communityFamilyFromHfTags(meta.tags);
           if (detected) return detected;
         }
-      }
-    } catch (e) { if (e.name !== 'AbortError') { /* non-fatal */ } }
+      } catch (e) { if (e.name !== 'AbortError') { /* non-fatal */ } }
+    }
+
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
-
-  clearTimeout(timer);
-
-  // 3) Filename heuristics
-  return detectModelFamily(identityName || localPath || '');
 }
 
 export async function autoInstallChatTemplate(force = false) {
   const { source, path, hfRepo } = wizardState.model;
   const identityName = source === 'hf' ? hfRepo : path;
 
-  // Fast path: family already known (from wizard state or filename)
-  let family = wizardState.model.family || detectModelFamily(identityName);
+  // Fast path: family already known (resolved from real metadata earlier in the flow)
+  let family = wizardState.model.family || null;
   const tpl = getDefaultTemplateForFamily(family);
 
   // If no family from fast path, we need to detect it.
@@ -147,7 +150,7 @@ export async function autoInstallChatTemplate(force = false) {
     // 1.5s timeout is generous: the HF search takes ~500ms.
     await awaitOriginResolve(1500);
     // After the resolver, check again (family may now be set by the resolver).
-    family = wizardState.model.family || detectModelFamily(identityName);
+    family = wizardState.model.family || null;
   }
   // If still no family, query HF directly (for models not covered by origin resolver)
   if (!family) {

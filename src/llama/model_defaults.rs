@@ -239,7 +239,7 @@ pub fn get_model_presets(
             enable_thinking: Some(true),
             preserve_thinking: Some(true),
             tool_call_format: None,
-            reasoning_budget: Some(16384),
+            reasoning_budget: Some(8192),
             reasoning: true,
             reasoning_budget_message: Some("\nFinal Answer:".into()),
         };
@@ -254,7 +254,7 @@ pub fn get_model_presets(
             enable_thinking: Some(true),
             preserve_thinking: Some(true),
             tool_call_format: None,
-            reasoning_budget: Some(16384),
+            reasoning_budget: Some(8192),
             reasoning: true,
             reasoning_budget_message: Some("\nFinal Answer:".into()),
         };
@@ -269,7 +269,7 @@ pub fn get_model_presets(
             enable_thinking: Some(true),
             preserve_thinking: Some(true),
             tool_call_format: None,
-            reasoning_budget: Some(16384),
+            reasoning_budget: Some(8192),
             reasoning: true,
             reasoning_budget_message: Some("\nFinal Answer:".into()),
         };
@@ -623,7 +623,7 @@ pub fn get_model_defaults(name_or_repo: &str, _size_bytes: u64, tags: &[String])
         d.max_tokens = 32768;
         d.enable_thinking = Some(true);
         d.preserve_thinking = Some(true);
-        d.reasoning_budget = Some(16384);
+        d.reasoning_budget = Some(8192);
         d.reasoning = true;
         d.reasoning_budget_message = Some("\nFinal Answer:".into());
         return d;

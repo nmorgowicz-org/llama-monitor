@@ -3,7 +3,7 @@
 import { join } from 'path';
 import { attachToServer } from '../../harness/attach.mjs';
 import { gotoApp, switchTab } from '../../harness/browser.mjs';
-import { ARTIFACTS_DIR, sleep } from '../../harness/paths.mjs';
+import { currentArtifactsDir, tagFilename, sleep } from '../../harness/paths.mjs';
 import { captureFrames, cleanupFrames, framesToGif, startLiveGeneration } from '../../harness/shot.mjs';
 
 export default async function(ctx, options) {
@@ -32,7 +32,7 @@ export default async function(ctx, options) {
         await sleep(1500);
         await captureFrames(page, 'inference', inferenceTotalFrames, fps);
         await generationPromise;
-        framesToGif('inference', join(ARTIFACTS_DIR, 'performance-metrics.gif'), fps);
+        framesToGif('inference', join(currentArtifactsDir(), tagFilename('performance-metrics.gif')), fps);
         cleanupFrames();
     }
 
@@ -69,7 +69,7 @@ export default async function(ctx, options) {
         });
         await sleep(1200);
         await captureFrames(page, 'gpu', totalFrames, fps);
-        framesToGif('gpu', join(ARTIFACTS_DIR, 'gpu-metrics.gif'), fps);
+        framesToGif('gpu', join(currentArtifactsDir(), tagFilename('gpu-metrics.gif')), fps);
         cleanupFrames();
     }
 }

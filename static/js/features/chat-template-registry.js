@@ -8,7 +8,7 @@ export const COMMUNITY_TEMPLATES = {
     description: 'Fixes tool calling, KV cache invalidation & agentic loop bugs for Qwen 3.5 / 3.6',
     sourceUrl: 'https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates',
     provenance: 'community',
-    transformed: true, // Uses -no_json-v21.3 transform at install time
+    transformed: true, // Uses -no_json transform at install time
   },
   gemma4: [
     {
@@ -51,10 +51,24 @@ export function getTemplateFamilies() {
   return Object.keys(COMMUNITY_TEMPLATES);
 }
 
-export function detectCommunityTemplateFamily(name) {
-  const lower = (name || '').toLowerCase();
-  if (lower.includes('qwen') || lower.includes('qwopus')) return 'qwen';
-  if (lower.includes('gemma-4') || lower.includes('gemma4')) return 'gemma4';
+// Maps a backend-derived architecture family slug (e.g. preset.family /
+// wizardState.model.family — sourced from GGUF `general.architecture` or an
+// HF `base_model` tag, never a filename) to a community template group.
+export function communityTemplateFamilyFor(family) {
+  const f = (family || '').toLowerCase();
+  if (!f) return null;
+  if (f.startsWith('qwen') || f === 'qwopus') return 'qwen';
+  if (f === 'gemma4') return 'gemma4';
+  return null;
+}
+
+// Maps a raw GGUF `general.architecture` value (e.g. "qwen3_6", "qwen35moe")
+// directly to a community template group. Used when no normalized family
+// slug is available yet but live GGUF metadata was just read.
+export function communityFamilyFromGgufArchitecture(arch) {
+  const a = (arch || '').toLowerCase();
+  if (a.includes('qwen')) return 'qwen';
+  if (a.includes('gemma4') || a.includes('gemma_4')) return 'gemma4';
   return null;
 }
 
