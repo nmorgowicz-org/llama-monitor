@@ -31,7 +31,7 @@ export default async function(ctx, options) {
     console.log('[CAPTURE] Saved navbar-idle-dark.png');
 
     if (options.closeUp) {
-        await captureElementScreenshot(page, '.nav-sleep-pill', 'navbar-sleep-pill-idle.png', { padding: 8 });
+        await captureElementScreenshot(page, '.nav-monitoring-chip', 'navbar-sleep-pill-idle.png', { padding: 8 });
         await captureElementScreenshot(page, '.nav-theme-toggle', 'navbar-theme-toggle.png', { padding: 8 });
     }
 
@@ -48,13 +48,19 @@ export default async function(ctx, options) {
     console.log('[CAPTURE] Saved navbar-low-power-active.png');
 
     if (options.closeUp) {
-        await captureElementScreenshot(page, '.nav-sleep-pill', 'navbar-sleep-pill-active.png', { padding: 8 });
+        await captureElementScreenshot(page, '.nav-monitoring-chip', 'navbar-sleep-pill-active.png', { padding: 8 });
     }
 
-    // Restore to normal
+    // Restore to normal. Use the explicit /set endpoint (not another
+    // /toggle call) since sleep-mode cycles through off -> logs-only ->
+    // sleep rather than a simple on/off flip.
     await page.evaluate(async () => {
         const token = window.__API_TOKEN ? `Bearer ${window.__API_TOKEN}` : '';
-        await fetch('/api/sleep-mode/toggle', { method: 'POST', headers: { Authorization: token } });
+        await fetch('/api/sleep-mode/set', {
+            method: 'POST',
+            headers: { Authorization: token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: 'off' }),
+        });
     });
     await sleep(600);
 
