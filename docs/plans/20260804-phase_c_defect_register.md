@@ -345,9 +345,23 @@ All 5 screenshots passed — all four color palettes (Carbon Mint, Cyber Rose, S
 | `settings-settings-advanced.png` | Advanced pane | Runtime Configuration, Updates, Rapid-MLX Runtime sections all correct (no `<strong>` in this pane's help text, unaffected by the bug). | None — renders correctly | **Passed** |
 | `panels-keyboard-shortcuts.png` | Keyboard Shortcuts modal | Navigation/Session Management/Quick Actions sections with key bindings all correct. | None — renders correctly | **Passed** |
 
+### `tls` scenario
+
+All 7 screenshots passed — no defects found. Certificates tab default state, No HTTPS mode, Self-Signed mode (generate button), Bring Your Own Key mode (cert/key file path pickers), Let's Encrypt/ACME full flow (Cloudflare DNS provider), ACME "Other" provider (manual lego provider code field), and the Database Administration section (Chat Database stats, Backup/Verify/Maintain/Query actions) all render correctly.
+
+| Screenshot | Expected | Actual | Severity | Status |
+|---|---|---|---|---|
+| `tls-certificates-tab.png` | Security & Certificates pane, default (No HTTPS) | TLS Status "Disabled (HTTP only)", certificate mode pills, warning callout, Disable TLS button all correct. | None — renders correctly | **Passed** |
+| `tls-mode-no-tls.png` | No HTTPS mode selected | Same as default state; correct. | None — renders correctly | **Passed** |
+| `tls-mode-self-signed.png` | Self-Signed mode | Warning callout + "Generate self-signed certificate" button correct. | None — renders correctly | **Passed** |
+| `tls-mode-custom.png` | Bring Your Own Key mode | Certificate/Key file path fields with Browse buttons and Apply button correct. | None — renders correctly | **Passed** |
+| `tls-mode-acme-full.png` | Let's Encrypt (ACME) mode, Cloudflare provider | Domain, contact email, DNS provider dropdown, environment radio (staging/production), validation delay all correct. | None — renders correctly | **Passed** |
+| `tls-acme-other-provider.png` | ACME mode, "Other" provider | Manual "Provider Code" text field with guidance callout correctly replaces the dropdown-only flow. | None — renders correctly | **Passed** |
+| `tls-db-admin-section.png` | Database Administration card | Chat Database stats grid, Backup Now/Verify/Maintain/Query buttons, Activity Log all correct. | None — renders correctly | **Passed** |
+
 ## Remaining tiers (not started)
 
-Tier 5 continues (`tls`, `filebrowser`, `dashboard`), then Tier 6 (stable/older, lighter-touch except `chat`). Full scope is 250–400 screenshots across ~34 scenarios; the plan itself budgets 3–4 sessions for full coverage. This session covered 21 scenarios (131 screenshots + 2 GIF) across Tiers 1–5 so far.
+Tier 5 continues (`filebrowser`, `dashboard`), then Tier 6 (stable/older, lighter-touch except `chat`). Full scope is 250–400 screenshots across ~34 scenarios; the plan itself budgets 3–4 sessions for full coverage. This session covered 22 scenarios (138 screenshots + 2 GIF) across Tiers 1–5 so far.
 
 ## Session notes
 
