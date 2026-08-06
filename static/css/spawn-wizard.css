@@ -4370,6 +4370,21 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
   flex-wrap: wrap;
 }
 
+/* MLX branch (§2.6): fixed facts render once above the cards, not per-card. */
+.vram-mlx-fixed-facts {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+  margin-bottom: 2px;
+}
+
+.vram-mlx-scenario-cards {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-basis: 100%;
+}
+
 .vram-scenario-card {
   flex: 1;
   min-width: 110px;

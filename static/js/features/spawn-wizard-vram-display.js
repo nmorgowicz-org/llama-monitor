@@ -413,9 +413,19 @@ function updateContextRailSummary() {
     : 'Larger contexts use more KV memory. Stay conservative unless you know the model’s training limit.';
 }
 
+// Dispatches to the per-engine card set. The two branches diverge structurally, not just in
+// styling: llama.cpp's cards vary the KV-quant axis at a fixed context, while MLX's cards vary
+// concurrency/retained-cache at a fixed KV dtype (int8, pinned by the reasoning profile — §2.6).
+// A shared "gate on modelBytes only" entry point keeps that divergence from leaking upward.
 async function renderScenarioCards(modelBytes, arch, availVram) {
   if (!dom.vramScenarios || !availVram || !modelBytes) return;
+  if (wizardState.engine.selected === 'rapid_mlx') {
+    return renderMlxScenarioCards(modelBytes, arch, availVram);
+  }
+  return renderLlamaCppScenarioCards(modelBytes, arch, availVram);
+}
 
+async function renderLlamaCppScenarioCards(modelBytes, arch, availVram) {
   const hw = wizardState.hardware;
   const uc = wizardState.useCase;
   const nCtxTrain = wizardState.model.nCtxTrain || 0;
@@ -576,6 +586,145 @@ async function renderScenarioCards(modelBytes, arch, availVram) {
     }
 
     dom.vramScenarios.appendChild(card);
+  }
+}
+
+// MLX context-fit cards (§2.6). With kv_cache_dtype pinned to int8 by the reasoning profile,
+// TurboQuant force-Off, and PFlash steered off (§2.4/§2.5), KV quant is not a scenario axis on
+// this engine — concurrency and retained-cache budget are. Each card asks for an estimate at the
+// user's *current* context with different policy values, rather than varying context itself.
+const MLX_SCENARIOS = [
+  {
+    key: 'single',
+    mode: 'Single interactive user',
+    detail: 'One conversation at a time, warm prompts reused',
+    maxNumSeqs: 1,
+    retainedCacheMib: 8192,
+    rec: true,
+  },
+  {
+    key: 'long-single',
+    mode: 'Long single context',
+    detail: 'Maximum room for one very long conversation; nothing retained between prompts',
+    maxNumSeqs: 1,
+    retainedCacheMib: 0,
+    rec: false,
+  },
+  {
+    key: 'shared',
+    mode: 'Shared / multi-client',
+    detail: 'Several clients at once; each admitted request reserves its own active KV',
+    maxNumSeqs: 4,
+    retainedCacheMib: 8192,
+    rec: false,
+  },
+];
+
+async function renderMlxScenarioCards(modelBytes, arch, availVram) {
+  const hw = wizardState.hardware;
+  const currentCtx = hw.contextSize || 8192;
+  const activeMaxNumSeqs = hw.parallelSlots || 1;
+  const activeRetained = Number(hw.retainedCacheMib ?? 8192);
+
+  dom.vramScenarios.innerHTML = '';
+
+  // Fixed facts, rendered once — not per-card, since none of them vary across these cards.
+  const facts = document.createElement('div');
+  facts.className = 'vram-mlx-fixed-facts';
+  facts.textContent = 'KV: int8 (pinned by reasoning profile) · TurboQuant: off (awaiting receipt) · PFlash: off';
+  dom.vramScenarios.appendChild(facts);
+
+  const cardsWrap = document.createElement('div');
+  cardsWrap.className = 'vram-mlx-scenario-cards';
+  dom.vramScenarios.appendChild(cardsWrap);
+
+  const hasLocalPath = !!wizardState.model.path;
+  const estimates = await Promise.all(
+    MLX_SCENARIOS.map(async (s) => {
+      try {
+        const body = buildEstimateBody({
+          backend: 'rapid_mlx',
+          model_path: hasLocalPath ? wizardState.model.path : '',
+          hf_repo_id: hasLocalPath ? null : (wizardState.model.hfRepo || wizardState.model.originRepo || null),
+          hf_repo_revision: hasLocalPath ? null : (wizardState.model.hfRevision || 'main'),
+          model_size_bytes: modelBytes,
+          n_ctx: currentCtx,
+          parallel_slots: s.maxNumSeqs,
+          available_vram_bytes: availVram,
+          is_unified_memory: isUnifiedMemory(),
+          mmproj_path: wizardState.model.mmprojPath || null,
+          mmproj_bytes: wizardState.arch.mmprojBytes || 0,
+          kv_cache_dtype: 'int8',
+          reasoning_mode: true,
+          turboquant_mode: 'none',
+          retained_cache_mib: s.retainedCacheMib,
+          prefill_step_size: hw.prefillStepSize || 512,
+        });
+        const headers = (window.authHeaders ? window.authHeaders() : {});
+        const res = await fetch('/api/vram-estimate', {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) return null;
+        const d = await res.json();
+        if (!d.ok || d.total_bytes == null) return null;
+        return d;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  for (let i = 0; i < MLX_SCENARIOS.length; i++) {
+    const s = MLX_SCENARIOS[i];
+    const est = estimates[i];
+    const headroom = est ? (est.headroom_bytes ?? 0) : 0;
+    const rec = est ? (est.recommendation || 'risk') : 'risk';
+    const fits = est && headroom >= 0;
+    const isTight = rec === 'tight';
+    const over = !est || !fits || rec === 'wont_fit';
+
+    const isActive = s.maxNumSeqs === activeMaxNumSeqs && s.retainedCacheMib === activeRetained;
+    const selectable = !over;
+
+    const card = document.createElement('div');
+    card.className = 'vram-scenario-card vram-mlx-scenario-card'
+      + (s.rec ? ' scenario-rec' : '') + (isActive ? ' selected' : '');
+    card.setAttribute('tabindex', '0');
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', `${s.mode}: ${s.detail}`);
+
+    let desc = s.detail;
+    if (over) desc = 'At your current context, this may not fit VRAM. Lower context or reduce concurrency.';
+    else if (isTight) desc = `${s.detail} Fits, but leaves little headroom.`;
+
+    // eslint-disable-next-line no-unsanitized/property
+    card.innerHTML = `
+      <div class="vsc-mode-name">${s.mode}</div>
+      <div class="vsc-mode-detail">max_num_seqs: ${s.maxNumSeqs} · retained: ${s.retainedCacheMib > 0 ? formatGB(s.retainedCacheMib * 1024 * 1024) : '0'}</div>
+      <div class="vsc-desc">${desc}</div>
+      ${s.rec ? '<span class="vsc-rec-badge">★ Recommended</span>' : ''}
+      ${isActive ? '<span class="vsc-active-badge">✓ Active</span>' : ''}
+      ${over ? '<span class="vsc-warn">⚠ may not fit current context</span>' : ''}
+    `;
+
+    if (selectable) {
+      const applyScenario = () => {
+        wizardState.hardware.parallelSlots = s.maxNumSeqs;
+        wizardState.hardware.retainedCacheMib = s.retainedCacheMib;
+        if (dom.parallelSlotsInput) dom.parallelSlotsInput.value = s.maxNumSeqs;
+        cardsWrap.querySelectorAll('.vram-mlx-scenario-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        updateVramDisplay();
+      };
+      card.addEventListener('click', e => { e.stopPropagation(); applyScenario(); });
+      card.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); applyScenario(); }
+      });
+    }
+
+    cardsWrap.appendChild(card);
   }
 }
 
