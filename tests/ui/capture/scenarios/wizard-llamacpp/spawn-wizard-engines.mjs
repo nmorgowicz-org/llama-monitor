@@ -4,6 +4,7 @@ import { join } from 'path';
 import { loadAppDocument } from '../../harness/browser.mjs';
 import { TEMP_APP_CONFIG_DIR, sleep } from '../../harness/paths.mjs';
 import { captureShot } from '../../harness/shot.mjs';
+import { openGroup } from '../../harness/wizard.mjs';
 
 export default async function(ctx) {
     const { page, baseUrl } = ctx;
@@ -151,15 +152,12 @@ export default async function(ctx) {
     await sleep(300);
     await captureShot(page, 'spawn-wizard-reasoning-mode-on.png', { runtimeTag: 'llamacpp-local' });
 
+    // Speculative decoding controls live inside the collapsible
+    // "Companions & experimental acceleration" group (IA reorg); it must be
+    // expanded or the controls stay hidden even when their own inline
+    // styles say otherwise.
+    await openGroup(page, 'companions');
     await page.evaluate(() => {
-        // Speculative decoding controls live inside the collapsible
-        // "Companions & experimental acceleration" <details> group (IA
-        // reorg); it must be expanded or the controls stay hidden even
-        // when their own inline styles say otherwise.
-        const companionsGroup = document.querySelector('[data-mlx-wiz-group="companions"]');
-        if (companionsGroup && companionsGroup.tagName === 'DETAILS' && !companionsGroup.open) {
-            companionsGroup.open = true;
-        }
         const enabled = document.getElementById('spawn-rapid-speculative-enabled');
         if (enabled && !enabled.checked) enabled.click();
     });
