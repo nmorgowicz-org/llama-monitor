@@ -23,35 +23,50 @@ const SUPERSECTIONS = [
   },
 ];
 
+// tier is the group's default disclosure tier (plan §2.8): 'quick' groups stay
+// open at every profile, 'balanced' groups stay open at Balanced/Advanced, and
+// 'advanced' groups auto-open only at the Advanced profile (I1: never hidden,
+// one click away at lower profiles — mirrors #spawn-advanced-fields).
 const GROUPS = [
   {
     supersection: 'generation', id: 'thinking', title: 'Thinking & reasoning',
     description: 'Control model reasoning behavior independently from sampling.',
+    tier: 'quick',
     controls: ['spawn-rapid-reasoning-mode'],
   },
   {
     supersection: 'generation', id: 'protocol', title: 'Model protocol',
     description: 'Keep automatic detection unless a modified finetune requires an override.',
+    tier: 'balanced',
     controls: ['spawn-rapid-tool-call-parser', 'spawn-rapid-reasoning-parser', 'spawn-rapid-hybrid-mode'],
   },
   {
     supersection: 'generation', id: 'sampling', title: 'Sampling defaults',
     description: 'Server-level sampling defaults; explicit client parameters always win.',
+    tier: 'balanced',
     controls: ['spawn-sampling-mode'],
   },
   {
     supersection: 'cache-performance', id: 'active-memory', title: 'Active memory',
     description: 'Precision and prefill choices that affect live unified-memory pressure.',
+    tier: 'advanced',
     controls: ['spawn-kv-cache-dtype', 'spawn-rapid-prefill-step-size', 'spawn-turboquant-mode'],
   },
   {
     supersection: 'cache-performance', id: 'retained-cache', title: 'Retained prompt cache',
     description: 'Bound reusable prompt snapshots by both memory and working-set size.',
+    // Deliberate divergence from llama.cpp's -cram (Advanced): retained cache is
+    // a §2.6 scenario axis the user picks alongside context, so it must be
+    // reachable at Balanced.
+    tier: 'balanced',
     controls: ['spawn-retained-cache-mib', 'spawn-rapid-hybrid-cache-entries'],
   },
   {
     supersection: 'cache-performance', id: 'scheduler', title: 'Scheduler & throughput',
     description: 'Advanced batching and admission limits; defaults suit one interactive user.',
+    // spawn-rapid-max-num-seqs is also a §2.6 scenario axis (peer of
+    // spawn-parallel-slots) — same Balanced reasoning as retained-cache above.
+    tier: 'balanced',
     controls: [
       'spawn-rapid-gpu-memory-utilization', 'spawn-rapid-max-num-seqs',
       'spawn-rapid-max-concurrent-requests', 'spawn-rapid-pflash-policy',
@@ -61,12 +76,14 @@ const GROUPS = [
   {
     supersection: 'server-safety', id: 'tool-integration', title: 'Tool integration',
     description: 'Enable only for models with a compatible tool-call parser.',
+    tier: 'balanced',
     controls: ['spawn-rapid-auto-tool-choice'],
   },
   {
     supersection: 'server-safety', id: 'companions', title: 'Companions & experimental acceleration',
     description: 'Only qualified local companions belong here; unsupported remote launches fail closed.',
     collapsible: true,
+    tier: 'advanced',
     controls: [
       'spawn-rapid-speculative-enabled', 'spawn-rapid-speculative-mode-wrap',
       'spawn-rapid-speculative-sidecars-wrap', 'spawn-rapid-speculative-model-wrap',
@@ -75,6 +92,16 @@ const GROUPS = [
     ],
   },
 ];
+
+// Tier rank so a group's default open/closed state can be compared against
+// the current profile with a single ordinal check (I1: a closed group is
+// always one click away, never a mode switch).
+const TIER_RANK = { quick: 0, balanced: 1, advanced: 2 };
+const PROFILE_RANK = { quick: 0, balanced: 1, advanced: 2 };
+
+function isOpenForProfile(groupTier, profile) {
+  return (PROFILE_RANK[profile] ?? 1) >= (TIER_RANK[groupTier] ?? 1);
+}
 
 const originalPositions = new Map();
 let iaContainer = null;
@@ -102,11 +129,15 @@ function restorePositions() {
   originalPositions.clear();
 }
 
-function buildGroup(group) {
-  const container = document.createElement(group.collapsible ? 'details' : 'section');
+function buildGroup(group, profile) {
+  // Every group is a <details> now, not just 'companions' — tier (§2.8) drives
+  // its default open/closed state; I1 means it is never display:none.
+  const container = document.createElement('details');
   container.className = 'mlx-native-group mlx-wiz-group';
   container.dataset.mlxWizGroup = group.id;
-  const header = document.createElement(group.collapsible ? 'summary' : 'div');
+  container.dataset.mlxWizTier = group.tier || 'balanced';
+  container.open = isOpenForProfile(group.tier, profile);
+  const header = document.createElement('summary');
   header.className = 'mlx-native-group-header';
   const title = document.createElement('h4');
   title.className = 'mlx-native-group-title';
@@ -115,7 +146,7 @@ function buildGroup(group) {
   description.className = 'mlx-native-group-description';
   description.textContent = group.description;
   header.append(title, description);
-  if (group.collapsible) {
+  if (group.tier === 'advanced') {
     const badge = document.createElement('span');
     badge.className = 'mlx-native-group-badge';
     badge.textContent = 'Advanced';
@@ -150,7 +181,7 @@ function restoreSources() {
   hiddenSources = [];
 }
 
-export function configureMlxWizardIA(root, enabled) {
+export function configureMlxWizardIA(root, enabled, profile = 'balanced') {
   const advancedFields = (root || document).querySelector('#spawn-rapid-advanced-fields');
   if (!advancedFields) return;
 
@@ -164,7 +195,10 @@ export function configureMlxWizardIA(root, enabled) {
     return;
   }
 
-  if (iaContainer) return; // already built for this activation
+  if (iaContainer) {
+    applyMlxTierVisibility(root, profile);
+    return; // already built for this activation
+  }
 
   // Hide the original flat dump (intro title/hint + the grid + the trailing
   // reasoning row) — its fields are about to be relocated into grouped
@@ -180,7 +214,7 @@ export function configureMlxWizardIA(root, enabled) {
 
   SUPERSECTIONS.forEach(super_ => {
     const groupsForSuper = GROUPS.filter(g => g.supersection === super_.id);
-    const builtGroups = groupsForSuper.map(buildGroup).filter(Boolean);
+    const builtGroups = groupsForSuper.map(g => buildGroup(g, profile)).filter(Boolean);
     if (!builtGroups.length) return;
     const section = document.createElement('section');
     section.className = 'mlx-wiz-supersection';
@@ -196,4 +230,15 @@ export function configureMlxWizardIA(root, enabled) {
   });
 
   advancedFields.appendChild(iaContainer);
+}
+
+// Re-applies each built group's tier-driven open/closed state without
+// rebuilding the DOM — called on profile change (spawn-wizard.js's
+// applyProfileVisibility) so switching Quick/Balanced/Advanced updates
+// disclosure the same way #spawn-advanced-fields does for llama.cpp.
+export function applyMlxTierVisibility(root, profile) {
+  if (!iaContainer) return;
+  (root || document).querySelectorAll('.mlx-wiz-group[data-mlx-wiz-tier]').forEach(el => {
+    el.open = isOpenForProfile(el.dataset.mlxWizTier, profile);
+  });
 }

@@ -31,7 +31,7 @@ import {
 } from './spawn-wizard-format.js';
 import { openCardPanel, _closeCardPanel } from './spawn-wizard-model-card.js';
 export { openCardPanel };
-import { configureMlxWizardIA } from './spawn-wizard-mlx-ia.js';
+import { configureMlxWizardIA, applyMlxTierVisibility } from './spawn-wizard-mlx-ia.js';
 import {
   _platformInfo,
   setWizardPlatformInfo,
@@ -2008,6 +2008,9 @@ function applyProfileVisibility() {
     if (dom.batchSizeInput) dom.batchSizeInput.disabled = false;
     if (dom.gpuLayersSelect) dom.gpuLayersSelect.disabled = false;
   }
+  if (wizardState.engine.selected === 'rapid_mlx') {
+    applyMlxTierVisibility(dom.overlay, wizardState.profile);
+  }
 }
 
 // ── Model source visibility ───────────────────────────────────────────────────
@@ -2164,7 +2167,7 @@ function renderEngineSelection() {
     dom.rapidAdvancedFields.style.display = selected === 'rapid_mlx' ? 'block' : 'none';
     if (selected === 'rapid_mlx') applyRapidMlxDefaults();
   }
-  configureMlxWizardIA(dom.overlay, selected === 'rapid_mlx');
+  configureMlxWizardIA(dom.overlay, selected === 'rapid_mlx', wizardState.profile);
   // §2.7: MLX repos are already a specific quant, so swap the llama.cpp quant
   // advisor for the MLX sidebar body (repo-is / sibling-variants) instead.
   const mlxSidebarBody = document.getElementById('mlx-sidebar-body');
