@@ -2735,6 +2735,14 @@
                                 <input type="number" class="pe-input" id="modal-fit-target" min="512" step="256" placeholder="2048">
                             </div>
                             <div class="pe-field">
+                                <label class="pe-label" for="modal-cache-mode" title="Auto/Off disable the prompt cache outright — no workload-scenario evidence is plumbed into this launch path yet, so Auto does not guess a bounded positive cap. Custom uses the Prefix Cache RAM value below as configured.">Prompt Cache Mode</label>
+                                <select class="pe-select" id="modal-cache-mode">
+                                    <option value="custom">Custom (use Prefix Cache RAM below)</option>
+                                    <option value="auto">Auto (disabled — no bounded-cap evidence yet)</option>
+                                    <option value="off">Off (disabled, --cache-ram 0)</option>
+                                </select>
+                            </div>
+                            <div class="pe-field" id="modal-cache-ram-mib-wrap">
                                 <label class="pe-label" for="modal-cache-ram-mib" title="-cram / --cache-ram. Maximum KV prefix-cache size in MiB. 0 disables it, -1 removes the limit, empty uses llama-server defaults.">Prefix Cache RAM (-cram)</label>
                                 <input type="number" class="pe-input" id="modal-cache-ram-mib" min="-1" step="1" placeholder="8192 (default)">
                                 <div class="pe-field-hint">0 keeps one linear conversation lean. 2048 MiB retained a parallel-1 main + one sequential child through 32K. Empty uses llama-server's 8192 MiB default; the cap grows on use and is not preallocated. Use -1 only for explicit unlimited Advanced use.</div>
@@ -3183,6 +3191,14 @@
                                      </select>
                                  </div>
                              </div>
+                              <div class="pe-field pe-row-rapid-prefix-cache" id="pe-row-rapid-cache-mode" style="display:none;">
+                                  <label class="pe-label" for="modal-rapid-cache-mode" title="Auto uses the measured single-user coding-agent recommendation (8 GiB, 16 entries). Off disables the retained cache. Custom uses the fields below as configured.">Prompt Cache Mode</label>
+                                  <select id="modal-rapid-cache-mode" class="pe-select">
+                                      <option value="custom">Custom (use fields below)</option>
+                                      <option value="auto">Auto (8 GiB, 16 entries — recommended)</option>
+                                      <option value="off">Off (disabled)</option>
+                                  </select>
+                              </div>
                               <div class="pe-field pe-row-rapid-prefix-cache" id="pe-row-rapid-prefix-cache" style="display:none;">
                                   <label class="pe-label pe-toggle-label" for="modal-rapid-prefix-cache-enabled" title="Retain reusable Rapid-MLX prompt branches in unified memory.">Retained cache <span class="pe-toggle-hint" id="pe-prefix-cache-hint"></span></label>
                                   <div class="pe-toggle">
@@ -3848,6 +3864,40 @@
 
                     <!-- Rapid-MLX model profile hints (shown when Rapid-MLX engine + model profile available) -->
                     <div id="rapid-mlx-profile-hints" style="display:none;margin-top:10px;"></div>
+                </div>
+                <div class="wizard-sidebar">
+                    <!-- VRAM estimate summary (populated once a model + param count are known) -->
+                    <div class="wizard-sidebar-vram" id="wizard-sidebar-vram" style="display:none;">
+                        <div class="wizard-sidebar-vram-label" id="wizard-sidebar-vram-label">Memory estimate</div>
+                        <!-- Context size target: picking one here filters the quant advisor's
+                             recommendation to quants that actually reach it, instead of just
+                             the highest-quality quant regardless of context headroom. -->
+                        <div class="vram-ctx-pills" id="wizard-sidebar-ctx-pills">
+                            <button type="button" class="vram-ctx-pill" data-ctx="8192">8K</button>
+                            <button type="button" class="vram-ctx-pill" data-ctx="32768">32K</button>
+                            <button type="button" class="vram-ctx-pill" data-ctx="65536">64K</button>
+                            <button type="button" class="vram-ctx-pill" data-ctx="131072">128K</button>
+                            <button type="button" class="vram-ctx-pill" data-ctx="163840">160K</button>
+                            <button type="button" class="vram-ctx-pill" data-ctx="204800">200K</button>
+                            <button type="button" class="vram-ctx-pill" data-ctx="262144">256K</button>
+                        </div>
+                        <div class="wizard-sidebar-vram-value" id="wizard-sidebar-vram-value"></div>
+                        <div class="wizard-sidebar-vram-hint" id="wizard-sidebar-vram-hint"></div>
+                        <!-- Weight/KV/overhead/free breakdown bar for the recommended quant -->
+                        <div class="vram-bar" id="wizard-sidebar-vram-bar" style="display:none;">
+                            <div class="vram-segment seg-weights" id="wizard-sidebar-vseg-weights"></div>
+                            <div class="vram-segment seg-kv" id="wizard-sidebar-vseg-kv"></div>
+                            <div class="vram-segment seg-overhead" id="wizard-sidebar-vseg-overhead"></div>
+                            <div class="vram-segment seg-free" id="wizard-sidebar-vseg-free"></div>
+                        </div>
+                        <div class="vram-legend" id="wizard-sidebar-vram-legend" style="display:none;">
+                            <span class="vram-legend-item"><span class="vram-legend-dot vram-legend-dot-weights"></span><span id="wizard-sidebar-vleg-weights">Weights</span></span>
+                            <span class="vram-legend-item"><span class="vram-legend-dot vram-legend-dot-kv"></span><span id="wizard-sidebar-vleg-kv">KV</span></span>
+                            <span class="vram-legend-item"><span class="vram-legend-dot vram-legend-dot-overhead"></span><span id="wizard-sidebar-vleg-overhead">Overhead</span></span>
+                        </div>
+                    </div>
+                    <!-- Quant advisor guidance (short summary; full table follows below) -->
+                    <div class="wizard-sidebar-qa-hint" id="wizard-sidebar-qa-hint" style="display:none;"></div>
 
                     <!-- Quant advisor (shown after model + param count known) -->
                     <div class="quant-advisor" id="quant-advisor" style="display:none;">
@@ -3864,23 +3914,25 @@
                             <span class="legend-item"><span class="legend-dot legend-rec"></span>Recommended</span>
                         </div>
                     </div>
-                </div>
-                <div class="wizard-sidebar">
-                    <div class="wizard-sidebar-title">Choosing a model</div>
-                    <ul>
-                        <li><strong>New to this?</strong> Start with a 7–14B Q4_K_M — good quality and fits in most GPUs.</li>
-                        <li><strong>Local file</strong> — a <code>.gguf</code> already on your disk.</li>
-                        <li><strong>HuggingFace</strong> — search or paste a repo ID. The wizard downloads the GGUF to your local models folder before starting.</li>
-                        <li><strong>Import</strong> — reuse a model from Ollama or LM Studio.</li>
-                    </ul>
-                    <div class="wizard-sidebar-title" style="margin-top:14px;">Quant guide</div>
-                    <ul>
-                        <li><strong>Q4_K_M</strong> — best balance; good quality, fits most GPUs ✓ start here</li>
-                        <li><strong>Q5_K_M</strong> — higher quality, needs ~20% more VRAM</li>
-                        <li><strong>Q8_0</strong> — near-lossless, largest file size</li>
-                        <li><strong>IQ4_XS</strong> — imatrix, slightly smaller than Q4_K_M with similar quality</li>
-                        <li><strong>IQ2_*</strong> — very aggressive compression; large MoE models only</li>
-                    </ul>
+
+                    <button type="button" class="wizard-sidebar-tips-toggle" id="wizard-sidebar-tips-toggle" aria-expanded="true">Hide tips</button>
+                    <div class="wizard-sidebar-tips" id="wizard-sidebar-tips">
+                        <div class="wizard-sidebar-title">Choosing a model</div>
+                        <ul>
+                            <li><strong>New to this?</strong> Start with a 7–14B Q4_K_M — good quality and fits in most GPUs.</li>
+                            <li><strong>Local file</strong> — a <code>.gguf</code> already on your disk.</li>
+                            <li><strong>HuggingFace</strong> — search or paste a repo ID. The wizard downloads the GGUF to your local models folder before starting.</li>
+                            <li><strong>Import</strong> — reuse a model from Ollama or LM Studio.</li>
+                        </ul>
+                        <div class="wizard-sidebar-title" style="margin-top:14px;">Quant guide</div>
+                        <ul>
+                            <li><strong>Q4_K_M</strong> — best balance; good quality, fits most GPUs ✓ start here</li>
+                            <li><strong>Q5_K_M</strong> — higher quality, needs ~20% more VRAM</li>
+                            <li><strong>Q8_0</strong> — near-lossless, largest file size</li>
+                            <li><strong>IQ4_XS</strong> — imatrix, slightly smaller than Q4_K_M with similar quality</li>
+                            <li><strong>IQ2_*</strong> — very aggressive compression; large MoE models only</li>
+                        </ul>
+                    </div>
                 </div>
             </div>
 
@@ -3914,6 +3966,14 @@
                                       <div class="field-hint">Memory vs precision tradeoff; int8 recommended for tool calling. int4 is blocked when Reasoning mode is enabled (pins to int8).</div>
                                  </div>
                                  <div class="hardware-field">
+                                     <label for="spawn-rapid-cache-mode" title="Auto tracks the measured single-user coding-agent recommendation (8 GiB, 16 entries) even if it changes later. Off disables the retained cache. Custom uses the Retained cache selector below as configured.">Prompt cache mode</label>
+                                     <select id="spawn-rapid-cache-mode">
+                                         <option value="custom" selected>Custom (use Retained cache below)</option>
+                                         <option value="auto">Auto (8 GiB, 16 entries — recommended)</option>
+                                         <option value="off">Off (disabled)</option>
+                                     </select>
+                                 </div>
+                                 <div class="hardware-field" id="spawn-retained-cache-mib-wrap">
                                      <label for="spawn-retained-cache-mib" title="Optional Rapid retained prefix-cache memory. It is additional unified-memory use, not active KV.">Retained cache</label>
                                      <select id="spawn-retained-cache-mib"><option value="8192" selected>8 GiB — recommended</option><option value="16384">16 GiB — retain branches</option><option value="0">Off — maximize model/context headroom</option></select>
                                      <div class="field-hint">8 GiB keeps the newest coding branch fast. 16 GiB preserves more old branches; it is not a speed mode.</div>
@@ -4075,7 +4135,7 @@
                                      </select>
                                      <div class="field-hint">On bypasses TurboQuant, so it cannot be combined with a TurboQuant reusable-prompt-storage mode.</div>
                                  </div>
-                                 <div class="hardware-field">
+                                 <div class="hardware-field" id="spawn-rapid-hybrid-cache-entries-wrap">
                                      <label for="spawn-rapid-hybrid-cache-entries" title="Caps retained hybrid prompt snapshots. Only takes effect while the retained cache is on; the separate memory ceiling still applies.">Retained prefix entries</label>
                                      <select id="spawn-rapid-hybrid-cache-entries">
                                            <option value="0">Auto — Rapid default (0; reuse off)</option>
@@ -4309,9 +4369,11 @@
                     <!-- VRAM exceeded warning (red inline feedback when context > available VRAM) -->
                     <div class="ctx-fit-warning" id="ctx-vram-warning" style="display:none;"></div>
 
-                    <!-- Advanced-only fields -->
-                    <div class="advanced-only" id="spawn-advanced-fields">
-                        <div class="wizard-section-title">Advanced options</div>
+                    <!-- Advanced fields: always available, collapsed by default outside the Advanced
+                         profile so Quick/Balanced users aren't blocked from batch/threads/MoE tuning
+                         when they need it, without cluttering the default view. -->
+                    <details class="wizard-advanced-collapse advanced-only" id="spawn-advanced-fields">
+                        <summary class="wizard-section-title" style="cursor:pointer;">Advanced options</summary>
                         <div class="field-hint" style="margin-bottom:10px;">Safe defaults for most setups. Change only if you have a specific reason.</div>
                         <div class="hardware-grid">
                             <div class="hardware-field">
@@ -4380,6 +4442,14 @@
                                  <div class="field-hint">For multi-GPU load distribution.</div>
                              </div>
                             <div class="hardware-field">
+                                <label for="spawn-cache-mode" title="Auto/Off disable the prompt cache outright — no workload-scenario evidence is plumbed into this launch path yet, so Auto does not guess a bounded positive cap. Custom uses the Prefix cache RAM field below as configured.">Prompt cache mode</label>
+                                <select id="spawn-cache-mode">
+                                    <option value="custom" selected>Custom (use Prefix cache RAM below)</option>
+                                    <option value="auto">Auto (disabled — no bounded-cap evidence yet)</option>
+                                    <option value="off">Off (disabled, --cache-ram 0)</option>
+                                </select>
+                            </div>
+                            <div class="hardware-field" id="spawn-cache-ram-wrap">
                                 <label for="spawn-cache-ram" title="-cram / --cache-ram: max size of the persistent KV prefix-cache in MiB. llama-server uses this to reuse KV states across requests. Default is 8192 MiB (8 GB) of system RAM. Set 0 to disable, -1 for no limit.">Prefix cache RAM <span class="label-badge">-cram</span></label>
                                 <input type="number" id="spawn-cache-ram" min="-1" step="1" placeholder="8192 (default)">
                                 <div class="field-hint">0 keeps one linear conversation lean. 2048 MiB retained a parallel-1 main + one sequential child through 32K. Empty uses the 8192 MiB runtime default; the cap grows on use. −1 is explicit unlimited Advanced use.</div>
@@ -4482,7 +4552,7 @@
                             </div>
                         </details>
 
-                     </div>
+                     </details>
 
                      <!-- Download panel (moved here — shown when entering hardware step for HF models) -->
                     <div class="hf-download-panel" id="hf-download-panel" style="display:none;">
@@ -5187,6 +5257,22 @@
                         <p class="mm-hw-info-desc">
                             We'll estimate VRAM usage, recommend a quant, and warn if a model is too large for your GPU.
                         </p>
+                    </div>
+
+                    <!-- Quant advisor (repo-level quant comparison, backend/context-aware) -->
+                    <div class="quant-advisor" id="mm-quant-advisor" style="display:none;">
+                        <div class="quant-advisor-header">
+                            <span class="quant-advisor-title">Quant advisor</span>
+                            <span class="quant-advisor-subtitle" id="mm-quant-advisor-subtitle">Compare quants for your hardware</span>
+                        </div>
+                        <div class="quant-advisor-table" id="mm-quant-advisor-table">
+                            <!-- populated by JS -->
+                        </div>
+                        <div class="quant-advisor-legend">
+                            <span class="legend-item"><span class="legend-dot legend-fit"></span>Fits in memory</span>
+                            <span class="legend-item"><span class="legend-dot legend-nofit"></span>Requires CPU offload</span>
+                            <span class="legend-item"><span class="legend-dot legend-rec"></span>Recommended</span>
+                        </div>
                     </div>
 
                     <!-- File list (right pane — shows actual files from repo) -->
@@ -7057,20 +7143,26 @@
                 <p class="chat-template-lifecycle-section-subtitle">Check for a newer version of this template.</p>
                 <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-updates"></div>
             </div>
-            <div class="chat-template-lifecycle-section">
-                <h4 class="chat-template-lifecycle-section-title">Version history</h4>
-                <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-history"></div>
-            </div>
-            <div class="chat-template-lifecycle-section">
-                <h4 class="chat-template-lifecycle-section-title">Community fixes</h4>
-                <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-discussions"></div>
-            </div>
-            <div class="chat-template-lifecycle-section">
+            <div class="chat-template-lifecycle-section" id="chat-template-lifecycle-library">
                 <h4 class="chat-template-lifecycle-section-title">Library</h4>
                 <div class="chat-template-lifecycle-section-content chat-template-lifecycle-actions">
                     <button type="button" class="btn-sm btn-preset" id="lifecycle-library-btn">Choose existing</button>
                     <button type="button" class="btn-sm btn-preset" id="lifecycle-upload-btn">Upload .jinja</button>
                 </div>
+            </div>
+            <div class="chat-template-lifecycle-section">
+                <h4 class="chat-template-lifecycle-section-title">Installed on this machine</h4>
+                <p class="chat-template-lifecycle-section-subtitle">Versions you've already downloaded here — instant to switch back to, no re-fetch needed.</p>
+                <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-history"></div>
+            </div>
+            <div class="chat-template-lifecycle-section">
+                <h4 class="chat-template-lifecycle-section-title">Upstream commits (Hugging Face)</h4>
+                <p class="chat-template-lifecycle-section-subtitle">The full commit history of this file on Hugging Face — pick any commit to download and roll back to it, even ones you've never installed before (e.g. v21.3 loops, go back to v20).</p>
+                <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-upstream"></div>
+            </div>
+            <div class="chat-template-lifecycle-section">
+                <h4 class="chat-template-lifecycle-section-title">Community fixes</h4>
+                <div class="chat-template-lifecycle-section-content" id="chat-template-lifecycle-discussions"></div>
             </div>
         </div>
     </div>

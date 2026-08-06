@@ -469,6 +469,7 @@ export function buildSpawnPayload() {
     threads_batch: _threadsValue(h.threadsBatch),
     fit_enabled: h.fitEnabled,
     fit_target: h.fitEnabled === true ? (h.fitTarget || null) : null,
+    cache_mode: h.cacheMode || 'custom',
     cache_ram_mib: (h.cacheRam !== null && h.cacheRam !== undefined) ? h.cacheRam : null,
     // Sampling defaults (null = use llama-server built-in defaults)
     temperature: h.temperature != null ? h.temperature : null,

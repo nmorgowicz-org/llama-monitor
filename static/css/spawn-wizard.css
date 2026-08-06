@@ -45,7 +45,7 @@
 
 .spawn-wizard-modal {
   position: relative;
-  width: min(960px, 96vw);
+  width: min(1600px, 95vw);
   max-height: min(92vh, 940px);
   overflow: hidden;
   display: flex;
@@ -261,25 +261,62 @@
 /* All active steps fill the wizard-body height so each column can scroll. */
 .wizard-step.active {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(200px, 0.6fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   flex: 1;
   min-height: 0;
   grid-template-rows: 1fr;
 }
 
-/* Hardware step (step 2) uses a narrower left / fixed-width right column. */
+/* Hardware step (step 2) uses the same stretchable right column. */
 #wizard-step-2.active {
-  grid-template-columns: minmax(0, 1fr) 310px;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
+/* Right-column sidebars are user-resizable via a drag handle (.wizard-col-resizer)
+   docked on their left edge, at the seam with the left column, rather than a
+   native CSS `resize` corner grip (which sits at the far bottom-right corner
+   and is easy to miss). The grid's "auto" track respects the element's
+   current (possibly drag-resized) width so the left column reflows around it. */
 .hw-vram-sidebar {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  width: 480px;
+  min-width: 320px;
+  max-width: 70vw;
   overflow-y: auto;
   overflow-anchor: none;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-accent) 25%, transparent) transparent;
+}
+
+.wizard-col-resizer {
+  position: absolute;
+  top: 0;
+  left: -7px;
+  width: 14px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+
+.wizard-col-resizer::before {
+  content: "";
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.wizard-col-resizer:hover::before,
+.wizard-col-resizer.is-dragging::before {
+  background: var(--color-accent);
 }
 
 @keyframes spawn-step-fade {
@@ -323,7 +360,11 @@
     0 8px 22px rgba(0, 0, 0, 0.24),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
   backdrop-filter: blur(10px);
+  position: relative;
   min-height: 0;
+  width: 480px;
+  min-width: 320px;
+  max-width: 70vw;
   overflow-y: auto;
   overflow-anchor: none;
   scrollbar-width: thin;
@@ -337,6 +378,64 @@
   text-transform: uppercase;
   color: var(--color-text-muted);
   margin-bottom: 4px;
+}
+
+.wizard-sidebar-vram {
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.18);
+  padding: 10px 12px;
+}
+
+.wizard-sidebar-vram-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+}
+
+.wizard-sidebar-vram-value {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.wizard-sidebar-vram-value.fits { color: var(--color-success, #4ade80); }
+.wizard-sidebar-vram-value.tight { color: var(--color-warning, #facc15); }
+.wizard-sidebar-vram-value.nofit { color: var(--color-error, #f87171); }
+
+.wizard-sidebar-vram-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+.wizard-sidebar-qa-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  padding: 0 2px;
+}
+
+.wizard-sidebar-tips-toggle {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.wizard-sidebar-tips-toggle:hover {
+  text-decoration: underline;
+}
+
+.wizard-sidebar-tips.collapsed {
+  display: none;
 }
 
 .wizard-sidebar p,
@@ -814,13 +913,35 @@
   align-items: start;
 }
 
-/* Advanced-only section */
+/* Advanced-options section — a <details> so it's collapsed-but-visible on
+   Quick/Balanced profiles instead of hidden outright, and expanded on Advanced. */
 
 .advanced-only {
-  display: none;
   margin-top: 6px;
   padding-top: 8px;
   border-top: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.advanced-only[hidden] {
+  display: none;
+}
+
+.advanced-only > summary {
+  list-style: none;
+}
+
+.advanced-only > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-only > summary::before {
+  content: '▸ ';
+  color: var(--color-text-muted);
+  font-size: 0.8em;
+}
+
+.advanced-only[open] > summary::before {
+  content: '▾ ';
 }
 
 /* Keep the MoE hint and actions in the field's third subgrid row. */
@@ -843,10 +964,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-}
-
-.advanced-only.visible {
-  display: block;
 }
 
 .rapid-only {
@@ -1596,6 +1713,11 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
 [data-theme="light"] .wizard-sidebar p,
 [data-theme="light"] .wizard-sidebar li {
   color: var(--color-text-muted);
+}
+
+[data-theme="light"] .wizard-sidebar-vram {
+  background: rgba(15, 23, 42, 0.03);
+  border-color: rgba(17, 24, 39, 0.08);
 }
 
 /* Section titles/descriptions */
@@ -3135,8 +3257,14 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
   padding: 10px 12px 8px;
   background: linear-gradient(180deg, rgba(255,255,255,0.04), transparent);
   border-bottom: 1px solid rgba(255,255,255,0.06);
-  cursor: default;
+  cursor: pointer;
   min-height: 44px;
+  transition: background 0.12s;
+}
+
+.hf-sg-header:hover,
+.hf-sg-header:focus-visible {
+  background: linear-gradient(180deg, rgba(255,255,255,0.07), transparent);
 }
 
 .hf-sg-header-name {
@@ -3734,6 +3862,18 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   border-bottom: 1px solid rgba(255,255,255,0.06);
+  /* Column headings stay visible while the table body scrolls inside its
+     own overflow container (.quant-advisor-table), so numeric columns are
+     never ambiguous after scrolling down. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(15, 18, 23, 0.96);
+  backdrop-filter: blur(6px);
+}
+
+[data-theme="light"] .qa-table thead th {
+  background: rgba(255, 255, 255, 0.96);
 }
 
 .qa-table td {
@@ -3834,6 +3974,22 @@ html[data-screenshot-capture="true"] .wizard-step[tabindex="-1"]:focus-visible {
   font-size: 11px;
   color: var(--text-muted, #64748b);
   border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+/* Narrower footprint when hosted in the wizard right column (310px) */
+.wizard-sidebar .quant-advisor {
+  max-height: 320px;
+}
+.wizard-sidebar .qa-table {
+  font-size: 11px;
+}
+.wizard-sidebar .qa-table th,
+.wizard-sidebar .qa-table td {
+  padding: 6px 6px;
+}
+.wizard-sidebar .quant-advisor-legend {
+  flex-wrap: wrap;
+  gap: 8px 12px;
 }
 
 .legend-item { display: flex; align-items: center; gap: 5px; }

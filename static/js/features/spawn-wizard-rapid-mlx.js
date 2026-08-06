@@ -464,6 +464,14 @@ export function bindRapidMlxAdvancedControls() {
     dom.maxNumSeqsSelect,
   ].forEach((el) => el && el.addEventListener('change', renderRapidExclusionWarnings));
   bindSel(dom.retainedCacheMibSelect, 'retainedCacheMib');
+  bindSel(dom.rapidCacheModeSelect, 'cacheMode');
+  dom.rapidCacheModeSelect?.addEventListener('change', () => {
+    const custom = dom.rapidCacheModeSelect.value === 'custom';
+    const ramWrap = document.getElementById('spawn-retained-cache-mib-wrap');
+    const entriesWrap = document.getElementById('spawn-rapid-hybrid-cache-entries-wrap');
+    if (ramWrap) ramWrap.style.display = custom ? '' : 'none';
+    if (entriesWrap) entriesWrap.style.display = custom ? '' : 'none';
+  });
    // workloadScenario is derived from page-1 use-case selection
    bindSel(dom.samplingModeSelect, 'samplingMode');
   bindSel(dom.toolCallParserSelect, 'toolCallParser');
@@ -815,6 +823,7 @@ export function buildRapidMlxConfig(h, m) {
     ...(h.pflashPolicy && { pflash_policy: h.pflashPolicy }),
     ...(h.prefillBatchSize && { prefill_batch_size: Number(h.prefillBatchSize) }),
     ...(h.completionBatchSize && { completion_batch_size: Number(h.completionBatchSize) }),
+    cache_mode: h.cacheMode || 'custom',
     prefix_cache_enabled: Number(h.retainedCacheMib ?? 8192) > 0,
     ...(Number(h.retainedCacheMib ?? 8192) > 0 && {
       retained_cache_mib: Number(h.retainedCacheMib ?? 8192),

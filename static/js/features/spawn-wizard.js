@@ -1,4 +1,14 @@
 /* global DOMPurify */
+// Set by spawn-wizard-hf-browse.js so this module can re-trigger the quant
+// advisor once memory/VRAM data arrives, without a circular import. Declared
+// before any imports since spawn-wizard-hf-browse.js calls
+// setOnMemoryAvailabilityReady() at its own module top-level, and ES module
+// `let` bindings are in the temporal dead zone until their declaration runs.
+export let onMemoryAvailabilityReady = null;
+export function setOnMemoryAvailabilityReady(fn) {
+  onMemoryAvailabilityReady = fn;
+}
+
 import { buildArchitectureLabel, isMoEEligible } from './setup-view.js';
 import { getPlatformInfo } from '../core/platform-info.js';
 import { readLastStatus } from './template-autoupdater.js';
@@ -282,6 +292,7 @@ export const wizardState = {
     fitEnabled: null,
     fitTarget: '',
     cacheRam: null,
+    cacheMode: 'custom',
     kvUnified: null,
     flashAttn: 'on',
     mlock: false,
@@ -323,6 +334,7 @@ export const wizardState = {
     prefillBatchSize: '',
     completionBatchSize: '',
       retainedCacheMib: 8192,
+    cacheMode: 'custom',
     workloadScenario: 'interactive_coding_agent',
     reasoningMode: null,         // llama.cpp thinking/reasoning select
     rapidReasoningMode: 'on',    // Rapid-MLX checkbox (defaults to on)
@@ -387,8 +399,69 @@ export function initSpawnWizard() {
   initHfBrowseWidgets();
 
   bindHfDownloadPanel();
+  bindSidebarTipsToggle();
+  initSidebarColumnResizers();
 
   loadCommunityPicks();
+}
+
+// Drops a draggable divider on the left edge of each right-column sidebar so
+// the user can resize the column from the seam it shares with the left
+// column, rather than hunting for a resize grip elsewhere.
+function initSidebarColumnResizers() {
+  const sidebars = document.querySelectorAll('.wizard-sidebar, .hw-vram-sidebar');
+  sidebars.forEach((sidebar) => {
+    if (sidebar.querySelector(':scope > .wizard-col-resizer')) return;
+    const handle = document.createElement('div');
+    handle.className = 'wizard-col-resizer';
+    handle.setAttribute('role', 'separator');
+    handle.setAttribute('aria-orientation', 'vertical');
+    handle.setAttribute('aria-label', 'Resize panel');
+    sidebar.prepend(handle);
+
+    let startX = 0;
+    let startWidth = 0;
+
+    const onPointerMove = (e) => {
+      const delta = startX - e.clientX;
+      const min = parseFloat(getComputedStyle(sidebar).minWidth) || 260;
+      const max = parseFloat(getComputedStyle(sidebar).maxWidth) || window.innerWidth * 0.7;
+      const next = Math.min(max, Math.max(min, startWidth + delta));
+      sidebar.style.width = `${next}px`;
+    };
+
+    const onPointerUp = () => {
+      handle.classList.remove('is-dragging');
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
+    };
+
+    handle.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      startX = e.clientX;
+      startWidth = sidebar.getBoundingClientRect().width;
+      handle.classList.add('is-dragging');
+      document.addEventListener('pointermove', onPointerMove);
+      document.addEventListener('pointerup', onPointerUp);
+    });
+  });
+}
+
+function bindSidebarTipsToggle() {
+  if (!dom.sidebarTipsToggle || !dom.sidebarTips) return;
+  let collapsed = false;
+  try { collapsed = localStorage.getItem('spawn_wizard_tips_collapsed') === '1'; } catch {}
+  applySidebarTipsCollapsed(collapsed);
+  dom.sidebarTipsToggle.addEventListener('click', () => {
+    applySidebarTipsCollapsed(!dom.sidebarTips.classList.contains('collapsed'));
+  });
+}
+
+function applySidebarTipsCollapsed(collapsed) {
+  dom.sidebarTips.classList.toggle('collapsed', collapsed);
+  dom.sidebarTipsToggle.textContent = collapsed ? 'Show tips' : 'Hide tips';
+  dom.sidebarTipsToggle.setAttribute('aria-expanded', String(!collapsed));
+  try { localStorage.setItem('spawn_wizard_tips_collapsed', collapsed ? '1' : '0'); } catch {}
 }
 
 function applyReducedMotion() {
@@ -566,6 +639,7 @@ function resetWizardState() {
   wizardState.hardware.fitEnabled = null;
   wizardState.hardware.fitTarget = '';
   wizardState.hardware.cacheRam = null;
+  wizardState.hardware.cacheMode = 'custom';
   wizardState.hardware.temperature = null;
   wizardState.hardware.topP = null;
   wizardState.hardware.topK = null;
@@ -589,6 +663,7 @@ function resetWizardState() {
   wizardState.hardware.maxConcurrentRequests = '';
   wizardState.hardware.pflashPolicy = 'off';
   wizardState.hardware.hybridCacheEntries = 16;
+  wizardState.hardware.cacheMode = 'custom';
   wizardState.hardware.prefillBatchSize = '';
   wizardState.hardware.completionBatchSize = '';
   wizardState.hardware.prefillStepSize = 512;
@@ -703,6 +778,23 @@ function cacheDom() {
   dom.quantAdvisor     = document.getElementById('quant-advisor');
   dom.quantAdvisorTable  = document.getElementById('quant-advisor-table');
   dom.quantAdvisorSubtitle = document.getElementById('quant-advisor-subtitle');
+  dom.sidebarVram      = document.getElementById('wizard-sidebar-vram');
+  dom.sidebarVramLabel = document.getElementById('wizard-sidebar-vram-label');
+  dom.sidebarVramValue = document.getElementById('wizard-sidebar-vram-value');
+  dom.sidebarVramHint  = document.getElementById('wizard-sidebar-vram-hint');
+  dom.sidebarQaHint    = document.getElementById('wizard-sidebar-qa-hint');
+  dom.sidebarCtxPills  = document.getElementById('wizard-sidebar-ctx-pills');
+  dom.sidebarVramBar   = document.getElementById('wizard-sidebar-vram-bar');
+  dom.sidebarVramLegend = document.getElementById('wizard-sidebar-vram-legend');
+  dom.sidebarVsegWeights = document.getElementById('wizard-sidebar-vseg-weights');
+  dom.sidebarVsegKv    = document.getElementById('wizard-sidebar-vseg-kv');
+  dom.sidebarVsegOverhead = document.getElementById('wizard-sidebar-vseg-overhead');
+  dom.sidebarVsegFree  = document.getElementById('wizard-sidebar-vseg-free');
+  dom.sidebarVlegWeights = document.getElementById('wizard-sidebar-vleg-weights');
+  dom.sidebarVlegKv    = document.getElementById('wizard-sidebar-vleg-kv');
+  dom.sidebarVlegOverhead = document.getElementById('wizard-sidebar-vleg-overhead');
+  dom.sidebarTipsToggle = document.getElementById('wizard-sidebar-tips-toggle');
+  dom.sidebarTips      = document.getElementById('wizard-sidebar-tips');
 
   // Step 3
   dom.vramPanel       = document.getElementById('vram-panel');
@@ -794,6 +886,7 @@ function cacheDom() {
   dom.fitEnableSelect = document.getElementById('spawn-fit-enable');
   dom.fitTargetWrap   = document.getElementById('spawn-fit-target-wrap');
   dom.cacheRamInput   = document.getElementById('spawn-cache-ram');
+  dom.cacheModeSelect = document.getElementById('spawn-cache-mode');
 
    // Rapid-MLX advanced controls
    dom.rapidAdvancedFields  = document.getElementById('spawn-rapid-advanced-fields');
@@ -807,6 +900,7 @@ function cacheDom() {
    dom.prefillBatchSizeSelect = document.getElementById('spawn-rapid-prefill-batch-size');
    dom.completionBatchSizeSelect = document.getElementById('spawn-rapid-completion-batch-size');
    dom.retainedCacheMibSelect = document.getElementById('spawn-retained-cache-mib');
+   dom.rapidCacheModeSelect = document.getElementById('spawn-rapid-cache-mode');
    dom.workloadScenarioSelect = document.getElementById('spawn-workload-scenario'); // hidden select for compat
    dom.reasoningModeCheck   = document.getElementById('spawn-rapid-reasoning-mode');
    dom.toolCallParserSelect = document.getElementById('spawn-rapid-tool-call-parser');
@@ -1069,11 +1163,16 @@ function bindEvents() {
     dom.tensorSplitInput, dom.specTypeSelect, dom.draftModelInput,
     dom.kvUnifiedSelect, dom.flashAttnSelect, dom.mlockCheck, dom.prioSelect,
     dom.threadsInput, dom.threadsBatchInput,
-    dom.fitEnableSelect, dom.fitTargetInput, dom.cacheRamInput,
+    dom.fitEnableSelect, dom.fitTargetInput, dom.cacheRamInput, dom.cacheModeSelect,
     dom.specDraftNMinInput, dom.specDraftPMinInput,
   ].forEach(el => {
     el?.addEventListener('input', onHardwareChange);
     el?.addEventListener('change', onHardwareChange);
+  });
+
+  dom.cacheModeSelect?.addEventListener('change', () => {
+    const wrap = document.getElementById('spawn-cache-ram-wrap');
+    if (wrap) wrap.style.display = dom.cacheModeSelect.value === 'custom' ? '' : 'none';
   });
 
   // A change on either KV select means the user now has an opinion about KV quantization,
@@ -1668,12 +1767,35 @@ export function showStep(index) {
 
   if (index === 1) {
     _loadModelDirSwitcher();
+    // The VRAM sidebar + quant advisor on this step need effectiveAvailBytes()
+    // populated, but that data was previously only fetched on step 2 (Hardware).
+    // A fresh page load never visits step 2 before the user picks a model, so
+    // the sidebar silently stayed empty. Fetch it here too.
+    if (!cachedMemorySnapshot && !cachedRamTotal) {
+      Promise.all([fetchGpuVram(), fetchMetalGpuLimit(), fetchSystemRam(), fetchMemoryAvailability()]).then(() => {
+        scheduleVramUpdate();
+        onMemoryAvailabilityReady?.();
+      });
+    }
   }
   if (index === 2) {
     const rapid = wizardState.engine.selected === 'rapid_mlx';
+    // A context-target pill picked on the Model step (step 1) only writes
+    // wizardState.hardware.contextSize — it can't reach dom.contextSizeInput
+    // because that field doesn't exist until this step's DOM is active. Sync
+    // it here so the pill choice is actually reflected once the user arrives.
+    if (dom.contextSizeInput && wizardState.hardware.contextSize > 0) {
+      dom.contextSizeInput.value = wizardState.hardware.contextSize;
+    }
     if (!rapid) {
       updateCtxModelMaxHint();
-      Promise.all([fetchGpuVram(), fetchMetalGpuLimit(), fetchSystemRam()]).then(() => {
+      updateCtxQuickPickActive();
+      updateCtxTrainWarning();
+      // Also fetch the live MemoryAvailabilitySnapshot (D30/A58 single source of
+      // truth) so effectiveAvailBytes() reflects current memory pressure instead
+      // of only the theoretical Metal cap — this was previously Rapid-MLX-only,
+      // which left llama.cpp's "available" figure ignoring what's actually free.
+      Promise.all([fetchGpuVram(), fetchMetalGpuLimit(), fetchSystemRam(), fetchMemoryAvailability()]).then(() => {
         scheduleVramUpdate();
         renderHardwareModelHeader();
         _populateKvCacheOptions();
@@ -1826,7 +1948,10 @@ function updateProfileHint() {
 function applyProfileVisibility() {
   const isAdv = wizardState.profile === 'advanced';
   const isQ   = wizardState.profile === 'quick';
-  if (dom.advancedFields) dom.advancedFields.classList.toggle('visible', isAdv);
+  // Advanced options stay visible (collapsed) on every profile — only their
+  // open/closed state follows the profile, so Quick/Balanced users can still
+  // reach batch/threads/MoE tuning without switching profiles first.
+  if (dom.advancedFields) dom.advancedFields.open = isAdv;
   if (isQ) {
     if (dom.contextSizeInput) dom.contextSizeInput.disabled = true;
     if (dom.batchSizeInput) dom.batchSizeInput.disabled = true;
@@ -2577,7 +2702,14 @@ export let cachedRamUsed  = 0;
 export let cachedMetalGpuLimitMb = 0; // 0 = system default; >0 = custom iogpu.wired_limit_mb
 
 export async function ensureGpuVramFetched() {
-  if (!cachedVram) await fetchGpuVram();
+  const tasks = [];
+  if (!cachedVram) tasks.push(fetchGpuVram());
+  // Live MemoryAvailabilitySnapshot (D30/A58 single source of truth) — needed as
+  // early as the model-select quant advisor, not just the hardware step, so the
+  // displayed "available" figure reflects current memory pressure rather than
+  // only the theoretical Metal cap.
+  if (!cachedMemorySnapshot) tasks.push(fetchMemoryAvailability());
+  if (tasks.length) await Promise.all(tasks);
 }
 
 // ── Unified memory helpers (Apple Silicon) ────────────────────────────────────
@@ -2824,6 +2956,7 @@ function readHardwareState() {
     const v = dom.cacheRamInput.value.trim();
     h.cacheRam = v !== '' ? parseInt(v, 10) : null;
   }
+  if (dom.cacheModeSelect) h.cacheMode = dom.cacheModeSelect.value || 'custom';
 }
 
 export function scheduleVramUpdate() {
