@@ -111,6 +111,8 @@ pub const FEATURES_SPAWN_WIZARD_CONTEXT_FIT_JS: &str =
     include_str!("../../static/js/features/spawn-wizard-context-fit.js");
 pub const FEATURES_SPAWN_WIZARD_FORMAT_JS: &str =
     include_str!("../../static/js/features/spawn-wizard-format.js");
+pub const FEATURES_SPAWN_WIZARD_GROUPS_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-groups.js");
 pub const FEATURES_SPAWN_WIZARD_HARDWARE_MODEL_JS: &str =
     include_str!("../../static/js/features/spawn-wizard-hardware-model.js");
 pub const FEATURES_SPAWN_WIZARD_HF_BROWSE_JS: &str =

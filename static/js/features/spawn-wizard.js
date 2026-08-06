@@ -32,6 +32,7 @@ import {
 import { openCardPanel, _closeCardPanel } from './spawn-wizard-model-card.js';
 export { openCardPanel };
 import { configureMlxWizardIA, applyMlxTierVisibility } from './spawn-wizard-mlx-ia.js';
+import { controlsForLoader } from './spawn-wizard-groups.js';
 import {
   _platformInfo,
   setWizardPlatformInfo,
@@ -1999,15 +2000,27 @@ function applyProfileVisibility() {
   // open/closed state follows the profile, so Quick/Balanced users can still
   // reach batch/threads/MoE tuning without switching profiles first.
   if (dom.advancedFields) dom.advancedFields.open = isAdv;
-  if (isQ) {
-    if (dom.contextSizeInput) dom.contextSizeInput.disabled = true;
-    if (dom.batchSizeInput) dom.batchSizeInput.disabled = true;
-    if (dom.gpuLayersSelect) { dom.gpuLayersSelect.value = 'auto'; dom.gpuLayersSelect.disabled = true; }
-  } else {
-    if (dom.contextSizeInput) dom.contextSizeInput.disabled = false;
-    if (dom.batchSizeInput) dom.batchSizeInput.disabled = false;
-    if (dom.gpuLayersSelect) dom.gpuLayersSelect.disabled = false;
-  }
+  // Nested "Speculative decoding" collapse (§2.8: Advanced, nested — the
+  // llama.cpp peer of MLX's 'companions' group) follows the same rule.
+  const specDetails = document.getElementById('spawn-spec-details');
+  if (specDetails) specDetails.open = isAdv;
+
+  // Registry-driven (plan §3.1/§2.8): Quick-tier llama.cpp controls write
+  // their quickValue then disable, replacing the three hardcoded dom.*
+  // references this function used to carry. I2 is enforced offline by
+  // assertQuickValueCoverage() (spawn-wizard-groups.js), not on every call.
+  controlsForLoader('llama_cpp').forEach(control => {
+    if (control.tier !== 'quick') return;
+    const el = document.getElementById(control.id);
+    if (!el) return;
+    if (isQ) {
+      if (control.quickValue !== undefined) el.value = control.quickValue;
+      el.disabled = true;
+    } else {
+      el.disabled = false;
+    }
+  });
+
   if (wizardState.engine.selected === 'rapid_mlx') {
     applyMlxTierVisibility(dom.overlay, wizardState.profile);
   }

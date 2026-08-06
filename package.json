@@ -2,7 +2,8 @@
   "type": "module",
   "scripts": {
     "lint": "eslint static/js/",
-    "validate-js": "node scripts/validate-js.mjs"
+    "validate-js": "node scripts/validate-js.mjs",
+    "validate-wizard-groups": "node scripts/validate-wizard-groups.mjs"
   },
   "devDependencies": {
     "eslint": "10.7.0",
