@@ -374,7 +374,46 @@ export const wizardState = {
   vram: { available: 0 },
   spawn: { inFlight: false, error: '' },
   savedPresetId: null, // ID of preset saved from this wizard run (to avoid duplicates)
+  // Snapshot for the "Switch to repo selection" recovery flow (plan §6.2). Set by
+  // snapshotPendingRestore(), applied by _applyPendingRestore() on arrival at step 2, discarded
+  // after apply, on wizard close, or after PENDING_RESTORE_TIMEOUT_MS idle.
+  _pendingRestore: null,
 };
+
+const PENDING_RESTORE_TIMEOUT_MS = 5 * 60 * 1000;
+
+// Snapshot step-2/3 configuration before re-entering step 1 to pick a different model, so a
+// one-click recovery action (fixing a chat-template-degraded alias source) doesn't cost the
+// user their whole configuration.
+export function snapshotPendingRestore() {
+  wizardState._pendingRestore = {
+    hardware: JSON.parse(JSON.stringify(wizardState.hardware)),
+    savedAt: Date.now(),
+  };
+}
+
+export function discardPendingRestore() {
+  wizardState._pendingRestore = null;
+}
+
+// Re-applies a snapshot taken by snapshotPendingRestore(), re-validating context-length-derived
+// fields against the newly-selected model rather than blindly replaying raw values (plan §6.2).
+function _applyPendingRestore() {
+  const pending = wizardState._pendingRestore;
+  if (!pending) return;
+  wizardState._pendingRestore = null;
+  if (Date.now() - pending.savedAt > PENDING_RESTORE_TIMEOUT_MS) return;
+
+  const restored = pending.hardware;
+  // The new model may have a smaller native context window than the restored value — clamp
+  // rather than carry over a value the new model can't honor. nCtxTrain is 0 when unknown
+  // (no GGUF/MLX metadata resolved yet), in which case there is nothing to validate against.
+  const nCtxTrain = wizardState.model.nCtxTrain || 0;
+  if (nCtxTrain > 0 && restored.contextSize > nCtxTrain) {
+    restored.contextSize = nCtxTrain;
+  }
+  Object.assign(wizardState.hardware, restored);
+}
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
@@ -731,6 +770,7 @@ export function closeSpawnWizard() {
     try { history.replaceState({ path: base }, '', base); } catch {}
   }
   dom.overlay.classList.remove('open');
+  discardPendingRestore();
   resetSpawnStatus();
   resetWizardState();
 }
@@ -1727,6 +1767,12 @@ export function _inferFamilyFromName(name) {
 
 export function showStep(index) {
   wizardState.currentStep = index;
+
+  // Plan §6.2: apply a preserve-and-restore snapshot taken before re-entering step 1 (Model)
+  // from a chat-template-degraded warning's "Switch to repo selection" button. Applied on
+  // arrival at step 2 (Hardware) — by then the new model selection is complete, so
+  // context-length-dependent fields can be re-validated against it.
+  if (index === 2) _applyPendingRestore();
 
   // Keep the URL in sync so browser Back/Forward traverses wizard steps. Only
   // when the wizard is open and already on a /spawn route; pushState (no dispatch)

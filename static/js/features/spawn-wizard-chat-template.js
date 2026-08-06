@@ -8,7 +8,7 @@ import {
   getTemplateFamilies,
   getTemplatesForFamily,
 } from './chat-template-registry.js';
-import { wizardState } from './spawn-wizard.js';
+import { wizardState, showStep, snapshotPendingRestore } from './spawn-wizard.js';
 import { awaitOriginResolve } from './spawn-wizard-hf-origin.js';
 import { CT_LABELS, openChatTemplateManageModal, repoFromSourceUrl } from './chat-template-panel.js';
 
@@ -617,6 +617,25 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
         + `The server will use the template built into the model. To use ${nameEl}, select the same model by `
         + `HuggingFace repo or local folder instead.`;
       bodyEl.appendChild(msg);
+
+      const switchBtn = document.createElement('button');
+      switchBtn.type = 'button';
+      switchBtn.className = 'ct-retry-btn btn-wizard-tertiary';
+      switchBtn.textContent = 'Switch to repo selection';
+      switchBtn.addEventListener('click', () => {
+        snapshotPendingRestore();
+        const hfCard = document.querySelector('.model-source-card[data-source="hf"]');
+        if (hfCard) hfCard.click();
+        const repoInput = document.getElementById('spawn-hf-repo');
+        if (repoInput && !repoInput.value) {
+          // Best-effort prefill: RapidMlxModelSource::Alias's value isn't guaranteed to be an
+          // HF-repo-shaped string, so this seeds a search query rather than a resolved repo id.
+          repoInput.value = wizardState.model.path || '';
+        }
+        showStep(1);
+      });
+      bodyEl.appendChild(document.createElement('br'));
+      bodyEl.appendChild(switchBtn);
     }
     return;
   }
