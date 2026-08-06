@@ -163,6 +163,11 @@ pub struct RapidMlxConfig {
     /// `--cache-memory-mb` contract qualified by Phase 6.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retained_cache_mib: Option<u32>,
+    /// Phase 6: Auto/Off/Custom prompt-cache mode. `Custom` (the default) uses
+    /// `prefix_cache_enabled`/`retained_cache_mib`/`hybrid_cache_entries` as configured;
+    /// `Auto` and `Off` override them at launch time — see [`CacheMode::resolve`].
+    #[serde(default)]
+    pub cache_mode: CacheMode,
     /// Keep automatic disk snapshots off for interactive launches. They are
     /// snapshot writes, not transparent cache restoration.
     #[serde(default = "default_disk_checkpoint_interval")]
@@ -362,6 +367,47 @@ pub enum RapidMlxHybridMode {
     Disable,
 }
 
+/// Phase 6: cross-backend prompt-cache mode (Rapid side).
+///
+/// `Custom` is the serde default (not `Auto`) so that presets saved before this field
+/// existed keep deserializing to their exact stored `prefix_cache_enabled` /
+/// `retained_cache_mib` / `hybrid_cache_entries` values unchanged — adding this field
+/// must not silently change already-launched configurations.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheMode {
+    /// Smallest memory-safe working set for the canonical single-user coding-agent loop
+    /// (retained cache on, 8192 MiB, 16 hybrid entries — the measured Qwen3.6 recommendation).
+    Auto,
+    /// Prefix cache off entirely.
+    Off,
+    /// User-supplied `prefix_cache_enabled` / `retained_cache_mib` / `hybrid_cache_entries`
+    /// values are used as configured, unchanged.
+    #[default]
+    Custom,
+}
+
+impl CacheMode {
+    /// Resolve to (prefix_cache_enabled, retained_cache_mib, hybrid_cache_entries).
+    /// `Custom` returns the config's own values untouched.
+    pub fn resolve(
+        self,
+        configured_enabled: bool,
+        configured_retained_mib: Option<u32>,
+        configured_hybrid_entries: Option<u64>,
+    ) -> (bool, Option<u32>, Option<u64>) {
+        match self {
+            CacheMode::Auto => (true, Some(8192), Some(16)),
+            CacheMode::Off => (false, None, None),
+            CacheMode::Custom => (
+                configured_enabled,
+                configured_retained_mib,
+                configured_hybrid_entries,
+            ),
+        }
+    }
+}
+
 /// TurboQuant reusable-prompt storage policy (D31).
 /// Values match Rapid-MLX CLI --kv-cache-turboquant flag: v4, k8v4, none.
 /// "auto" is our config sentinel; the builder maps it to omitting the flag (runtime default).
@@ -425,6 +471,7 @@ impl Default for RapidMlxConfig {
             timeout: None,
             prefix_cache_enabled: true,
             retained_cache_mib: Some(8192),
+            cache_mode: CacheMode::Auto,
             disk_checkpoint_interval: 0,
             api_key: None,
             enable_thinking: None,
@@ -674,11 +721,21 @@ impl RapidMlxAdapter {
         // Phase 7 config wiring
         self.kv_cache_dtype = config.kv_cache_dtype.clone();
         self.turboquant_mode = config.turboquant_mode.clone();
-        self.hybrid_cache_entries = config.hybrid_cache_entries;
         self.hybrid_mode = config.hybrid_mode;
         self.pflash_policy = config.pflash_policy.clone();
-        self.prefix_cache_enabled = config.prefix_cache_enabled;
-        self.retained_cache_mib = config.retained_cache_mib;
+        // Phase 6: Auto/Off/Custom prompt-cache mode resolves to the three raw fields here —
+        // the single choke point shared by both the real launch path and the command-preview
+        // endpoint (see `for_settings_preview`, which also calls `apply_config`).
+        let (prefix_cache_enabled, retained_cache_mib, hybrid_cache_entries) = config
+            .cache_mode
+            .resolve(
+                config.prefix_cache_enabled,
+                config.retained_cache_mib,
+                config.hybrid_cache_entries,
+            );
+        self.prefix_cache_enabled = prefix_cache_enabled;
+        self.retained_cache_mib = retained_cache_mib;
+        self.hybrid_cache_entries = hybrid_cache_entries;
         self.disk_checkpoint_interval = config.disk_checkpoint_interval;
         self.max_num_seqs = config.max_num_seqs;
         self.max_concurrent_requests = config.max_concurrent_requests;
@@ -1203,6 +1260,41 @@ fn provisional_chat_fields() -> BTreeSet<&'static str> {
 mod tests {
     use super::*;
     use crate::inference::rapid_mlx::runtime::RuntimeSource;
+
+    #[test]
+    fn cache_mode_auto_resolves_to_measured_recommendation() {
+        let (enabled, retained_mib, hybrid_entries) =
+            CacheMode::Auto.resolve(false, None, None);
+        assert!(enabled);
+        assert_eq!(retained_mib, Some(8192));
+        assert_eq!(hybrid_entries, Some(16));
+    }
+
+    #[test]
+    fn cache_mode_off_disables_and_clears() {
+        let (enabled, retained_mib, hybrid_entries) =
+            CacheMode::Off.resolve(true, Some(4096), Some(8));
+        assert!(!enabled);
+        assert_eq!(retained_mib, None);
+        assert_eq!(hybrid_entries, None);
+    }
+
+    #[test]
+    fn cache_mode_custom_preserves_configured_values_untouched() {
+        let (enabled, retained_mib, hybrid_entries) =
+            CacheMode::Custom.resolve(true, Some(2048), Some(4));
+        assert!(enabled);
+        assert_eq!(retained_mib, Some(2048));
+        assert_eq!(hybrid_entries, Some(4));
+    }
+
+    #[test]
+    fn cache_mode_serde_default_is_custom_for_backward_compatibility() {
+        // A preset JSON saved before `cache_mode` existed must deserialize with the field
+        // absent, and must resolve to `Custom` — not `Auto` — so old presets keep their
+        // exact stored prefix_cache_enabled/retained_cache_mib/hybrid_cache_entries values.
+        assert_eq!(CacheMode::default(), CacheMode::Custom);
+    }
 
     #[test]
     fn phase7_config_serialization_roundtrip() {

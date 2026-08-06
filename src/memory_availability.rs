@@ -164,6 +164,7 @@ fn build_macos_snapshot(request: &MemoryAvailabilityRequest) -> MemoryAvailabili
     let active_bytes = (sys_info.ram_used_gb * 1024.0 * 1024.0 * 1024.0) as u64;
     let speculative_bytes = (sys_info.memory_inactive_gb * 1024.0 * 1024.0 * 1024.0) as u64;
     let pageout_bytes = (sys_info.memory_compressor_gb * 1024.0 * 1024.0 * 1024.0) as u64;
+    let reclaimable_bytes = (sys_info.memory_reclaimable_gb * 1024.0 * 1024.0 * 1024.0) as u64;
 
     // Read the configured Metal GPU wired limit from sysctl
     let wired_limit_mb = crate::gpu::apple::read_iogpu_wired_limit_mb();
@@ -181,20 +182,23 @@ fn build_macos_snapshot(request: &MemoryAvailabilityRequest) -> MemoryAvailabili
     // This is the effective base Rapid-MLX uses, multiplied by its utilization factor.
     let metal_working_set_bytes = configured_ceiling_bytes;
 
-    // Current safe availability: use free_bytes from vm_stat, which matches Activity Monitor's "Free".
-    // sysinfo's available_memory includes inactive/purgeable pages (~54 GB on 64 GB system),
-    // which is misleadingly high — macOS may reclaim some, but they aren't truly available now.
-    // For accurate "can I run this model right now?" we need actual free RAM.
+    // Current safe availability: free_bytes ("Pages free") is deliberately tiny on macOS —
+    // the kernel uses spare RAM as disk cache and keeps very little literally unclaimed
+    // (see system.rs::compute_macos_pressure). Purgeable and inactive pages are reclaimed
+    // by the kernel on demand with no user action required, so tools users trust for this
+    // number (Activity Monitor's "Memory Used" gauge, btop, htop) fold them into
+    // "available". Match that convention instead of vm_stat's raw free count.
     let replace_credit = if matches!(request.launch_intent, Some(LaunchIntent::ReplaceExisting)) {
         request.replace_runtime_bytes
     } else {
         0
     };
     let current_safe_availability_bytes = free_bytes
+        .saturating_add(reclaimable_bytes)
         .saturating_add(replace_credit)
         .min(configured_ceiling_bytes);
-    // Only a quarter of inactive/speculative memory is treated as reclaimable.
-    // This is deliberately conservative and is never described as free-now.
+    // Reclaiming here means going further: asking the user to close other apps.
+    // Approximate with a small additional margin over the already-reclaimable total.
     let after_reclaim_bytes = current_safe_availability_bytes
         .saturating_add(speculative_bytes / 4)
         .min(configured_ceiling_bytes);

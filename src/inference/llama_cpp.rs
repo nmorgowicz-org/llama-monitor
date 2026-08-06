@@ -108,6 +108,35 @@ pub struct SpecDecodeConfig {
     pub spec_ngram_map_k4v_min_hits: Option<u32>,
 }
 
+/// Phase 6: cross-backend prompt-cache mode (llama.cpp side).
+///
+/// `Custom` is the serde default (not `Auto`) so that configs saved before this field existed
+/// keep deserializing to their exact stored `cache_ram_mib` value unchanged — adding this field
+/// must not silently change already-launched configurations.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheMode {
+    /// No workload-scenario evidence is plumbed into this launch path yet, so `Auto` resolves
+    /// to the same disabled state as `Off` rather than guessing a bounded positive cap.
+    Auto,
+    /// Idle-slot prompt cache off (`--cache-ram 0`).
+    Off,
+    /// User-supplied `cache_ram_mib` is used as configured, unchanged.
+    #[default]
+    Custom,
+}
+
+impl CacheMode {
+    /// Resolve to the effective `cache_ram_mib` value. `Custom` returns the configured value
+    /// untouched; `Auto`/`Off` both resolve to `Some(0)` (disabled) in this scoped pass.
+    fn resolve(self, configured_cache_ram_mib: Option<i32>) -> Option<i32> {
+        match self {
+            CacheMode::Auto | CacheMode::Off => Some(0),
+            CacheMode::Custom => configured_cache_ram_mib,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ServerConfig {
     pub model_path: String,
@@ -167,6 +196,11 @@ pub struct ServerConfig {
     pub cache_idle_slots: Option<bool>,
     #[serde(default)]
     pub cache_ram_mib: Option<i32>,
+    /// Phase 6: Auto/Off/Custom prompt-cache mode. `Custom` (the default) uses
+    /// `cache_ram_mib` as configured; `Auto`/`Off` override it at launch time —
+    /// see [`CacheMode::resolve`].
+    #[serde(default)]
+    pub cache_mode: CacheMode,
     #[serde(default)]
     pub fit_enabled: Option<bool>,
     #[serde(default)]
@@ -683,13 +717,17 @@ impl LlamaCppAdapter {
     }
 
     fn append_kv_cache_args(&self, cmd: &mut TokioCommand) {
+        // Phase 6: resolve the effective cache_ram_mib through CacheMode before it drives
+        // either --cache-idle-slots eligibility or --cache-ram itself.
+        let cache_ram_mib = self.config.cache_mode.resolve(self.config.cache_ram_mib);
+
         if let Some(v) = self.config.kv_unified {
             cmd.arg(if v { "--kv-unified" } else { "--no-kv-unified" });
         }
         if let Some(v) = self.config.cache_idle_slots {
             if v {
                 // llama-server uses 0 as disabled and -1 as explicitly unlimited.
-                let cache_enabled = self.config.cache_ram_mib != Some(0);
+                let cache_enabled = cache_ram_mib != Some(0);
                 if cache_enabled {
                     if self.config.kv_unified.is_none() {
                         cmd.arg("--kv-unified");
@@ -700,7 +738,7 @@ impl LlamaCppAdapter {
                 cmd.arg("--no-cache-idle-slots");
             }
         }
-        if let Some(v) = self.config.cache_ram_mib {
+        if let Some(v) = cache_ram_mib {
             cmd.arg("--cache-ram").arg(v.to_string());
         }
     }
@@ -1198,5 +1236,37 @@ mod tests {
                 "cache_ram_mib={cache_ram_mib}"
             );
         }
+    }
+
+    #[test]
+    fn cache_mode_custom_preserves_configured_value_untouched() {
+        assert_eq!(CacheMode::Custom.resolve(Some(4096)), Some(4096));
+        assert_eq!(CacheMode::Custom.resolve(None), None);
+    }
+
+    #[test]
+    fn cache_mode_auto_and_off_both_disable_in_this_scoped_pass() {
+        assert_eq!(CacheMode::Auto.resolve(Some(4096)), Some(0));
+        assert_eq!(CacheMode::Off.resolve(Some(4096)), Some(0));
+    }
+
+    #[test]
+    fn cache_mode_serde_default_is_custom_for_backward_compatibility() {
+        assert_eq!(CacheMode::default(), CacheMode::Custom);
+    }
+
+    #[tokio::test]
+    async fn cache_mode_auto_overrides_configured_cache_ram_mib_at_launch() {
+        let args = launch_args(ServerConfig {
+            model_path: "/models/test.gguf".into(),
+            cache_ram_mib: Some(4096),
+            cache_mode: CacheMode::Auto,
+            cache_idle_slots: Some(true),
+            ..Default::default()
+        })
+        .await;
+
+        assert!(args.windows(2).any(|pair| pair == ["--cache-ram", "0"]));
+        assert!(!args.iter().any(|arg| arg == "--cache-idle-slots"));
     }
 }

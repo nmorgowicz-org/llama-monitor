@@ -535,13 +535,24 @@ fn api_apply_fix(
                         }
                         FixAction::EnableAutoToolChoice => config.auto_tool_choice = true,
                         FixAction::AddNoThinking => config.no_thinking = true,
-                        FixAction::DisablePrefixCache => config.prefix_cache_enabled = false,
-                        FixAction::AdjustPrefixCacheBudget(bytes) => {
-                            config.retained_cache_mib = Some((bytes / (1024 * 1024)) as u32)
+                        // Phase 6: these fix actions write raw fields directly, so they must also
+                        // force cache_mode to Custom — otherwise a preset left on Auto/Off would
+                        // have CacheMode::resolve() silently override the fix at launch time.
+                        FixAction::DisablePrefixCache => {
+                            config.prefix_cache_enabled = false;
+                            config.cache_mode = crate::inference::rapid_mlx::CacheMode::Custom;
                         }
-                        FixAction::DisableMaxCacheBlocks => config.retained_cache_mib = None,
+                        FixAction::AdjustPrefixCacheBudget(bytes) => {
+                            config.retained_cache_mib = Some((bytes / (1024 * 1024)) as u32);
+                            config.cache_mode = crate::inference::rapid_mlx::CacheMode::Custom;
+                        }
+                        FixAction::DisableMaxCacheBlocks => {
+                            config.retained_cache_mib = None;
+                            config.cache_mode = crate::inference::rapid_mlx::CacheMode::Custom;
+                        }
                         FixAction::SetPrefixCacheBudget(bytes) => {
-                            config.retained_cache_mib = Some((bytes / (1024 * 1024)) as u32)
+                            config.retained_cache_mib = Some((bytes / (1024 * 1024)) as u32);
+                            config.cache_mode = crate::inference::rapid_mlx::CacheMode::Custom;
                         }
                         FixAction::ReclaimBackendAllocatorCache => {
                             // Reclaim action handled via system_tools endpoint;

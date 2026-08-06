@@ -2411,6 +2411,7 @@ mod settings_catalog_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::inference::rapid_mlx::CacheMode;
 
     fn test_state() -> RuntimeApiState {
         RuntimeApiState {
@@ -2695,6 +2696,7 @@ Run with `--verbose` for details on each check.
             timeout: None,
             prefix_cache_enabled: false,
             retained_cache_mib: None,
+            cache_mode: CacheMode::Custom,
             disk_checkpoint_interval: 0,
             api_key: None,
             enable_thinking: None,
@@ -2776,6 +2778,7 @@ Run with `--verbose` for details on each check.
             timeout: None,
             prefix_cache_enabled: false,
             retained_cache_mib: None,
+            cache_mode: CacheMode::Custom,
             disk_checkpoint_interval: 0,
             api_key: None,
             enable_thinking: None,
@@ -2837,6 +2840,7 @@ Run with `--verbose` for details on each check.
             timeout: None,
             prefix_cache_enabled: false,
             retained_cache_mib: None,
+            cache_mode: CacheMode::Custom,
             disk_checkpoint_interval: 0,
             api_key: None,
             enable_thinking: Some(false),

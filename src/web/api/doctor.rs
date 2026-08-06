@@ -95,11 +95,20 @@ async fn collect_cache_findings(state: &crate::state::AppState) -> Vec<DoctorFin
     // Get memory availability snapshot
     let mem_snapshot = crate::memory_availability::build_snapshot();
 
+    // Phase 6: resolve cache_mode before diagnosing — otherwise Auto/Off presets get findings
+    // describing the stale raw fields instead of what actually launches.
+    let (resolved_prefix_cache_enabled, resolved_retained_cache_mib, _) = config
+        .cache_mode
+        .resolve(
+            config.prefix_cache_enabled,
+            config.retained_cache_mib,
+            config.hybrid_cache_entries,
+        );
+
     // Compute cache diagnostic findings
     let params = CacheDiagnosticParams {
-        config_prefix_cache_enabled: config.prefix_cache_enabled,
-        config_prefix_cache_budget_bytes: config
-            .retained_cache_mib
+        config_prefix_cache_enabled: resolved_prefix_cache_enabled,
+        config_prefix_cache_budget_bytes: resolved_retained_cache_mib
             .map(|mib| u64::from(mib) * 1024 * 1024),
         config_max_cache_blocks: None,
         snapshot: snapshot.clone(),

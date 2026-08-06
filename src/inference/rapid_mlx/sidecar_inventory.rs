@@ -268,9 +268,6 @@ pub fn find_sidecar_for_path(companion_path: &Path) -> Option<SidecarEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use tempfile::TempDir;
-
     fn test_sidecar_root(dir: &Path) {
         let _ = SIDECAR_ROOT.set(dir.join(SIDECAR_SUBDIR));
     }
