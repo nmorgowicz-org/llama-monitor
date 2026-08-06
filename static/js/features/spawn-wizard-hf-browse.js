@@ -3,7 +3,8 @@ import { showToast } from './toast.js';
 import { openCardPanel } from './spawn-wizard-model-card.js';
 import { autoInstallChatTemplate } from './spawn-wizard-chat-template.js';
 import { scheduleRapidMlxProfileFetch } from './spawn-wizard-rapid-mlx.js';
-import { formatCtx } from './spawn-wizard-format.js';
+import { formatCtx, formatGB } from './spawn-wizard-format.js';
+import { scheduleEstimate } from './vram-estimate.js';
 import {
   HF_DISCOVER_CATEGORIES,
   hfSearch,
@@ -30,6 +31,7 @@ import {
   isUnifiedMemory,
   ensureGpuVramFetched,
   scheduleVramUpdate,
+  setOnMemoryAvailabilityReady,
 } from './spawn-wizard.js';
 
 export const hfBrowseState = {
@@ -94,6 +96,20 @@ export function initHfBrowseWidgets() {
       refireHfSearch();
     });
 
+    // Context-size target pills (sidebar) — set BEFORE the Hardware step so the
+    // quant advisor's recommendation can be filtered to quants that actually
+    // reach the desired context, instead of just the highest-quality quant.
+    if (dom.sidebarCtxPills) {
+      dom.sidebarCtxPills.addEventListener('click', (e) => {
+        const pill = e.target.closest('.vram-ctx-pill');
+        if (!pill) return;
+        dom.sidebarCtxPills.querySelectorAll('.vram-ctx-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+        wizardState.hardware.contextSize = parseInt(pill.dataset.ctx, 10);
+        if (wizardState.model.paramB > 0) triggerQuantAdvisor();
+      });
+    }
+
 }
 
 // Wrapper for hfSearch used by wizard (wires callbacks)
@@ -110,6 +126,7 @@ function hfSearchForWizard({ query, author, sort, limit }) {
     query,
     author,
     sort,
+    vramGb: effectiveAvailBytes() / (1024 ** 3),
     mlxActive: hfBrowseState.mlxActive,
     ggufActive: hfBrowseState.ggufActive,
     allActive: hfBrowseState.allActive,
@@ -167,6 +184,14 @@ export function triggerQuantAdvisor() {
   quantAdvisorDebounce = setTimeout(loadQuantAdvisor, 600);
 }
 
+// Re-run once memory/VRAM data arrives (it's fetched async on step entry, which
+// can resolve after the user has already picked a model and hit the paramB gate).
+// Deferred to a microtask: this module is pulled in while spawn-wizard.js's own
+// imports are still being resolved (circular import), so calling this at top
+// level here would hit spawn-wizard.js's `onMemoryAvailabilityReady` binding
+// before that module's body has run.
+queueMicrotask(() => setOnMemoryAvailabilityReady(triggerQuantAdvisor));
+
 async function loadQuantAdvisor() {
   const paramB = wizardState.model.paramB;
   if (!paramB || paramB <= 0) return;
@@ -206,6 +231,18 @@ async function loadQuantAdvisor() {
       mtp_depth: wizardState.arch.mtpDepth || undefined,
     };
 
+    // If the repo's real GGUF file listing is already known (populated when the
+    // user picked/confirmed an HF repo), use it so the advisor shows the repo's
+    // actual quant names/sizes instead of a synthetic standard-quant estimate —
+    // this matters for repos with non-standard naming (imatrix IQ variants,
+    // custom mixed-precision schemes like APEX).
+    const quantFiles = wizardState.model.quantFiles;
+    if (Array.isArray(quantFiles) && quantFiles.length > 0) {
+      body.available_files = quantFiles
+        .filter(f => f.size > 0)
+        .map(f => ({ name: f.label || f.name, size_bytes: f.size }));
+    }
+
     const resp = await fetch('/api/vram/quant-compare', { method: 'POST', headers, body: JSON.stringify(body) });
     if (!resp.ok) {
       if (dom.quantAdvisorSubtitle) dom.quantAdvisorSubtitle.textContent = 'Failed to analyze model.';
@@ -225,7 +262,12 @@ async function loadQuantAdvisor() {
 
 function renderQuantAdvisor(quants, availVram) {
   if (!dom.quantAdvisor || !dom.quantAdvisorTable) return;
-  if (!quants || quants.length === 0) { dom.quantAdvisor.style.display = 'none'; return; }
+  if (!quants || quants.length === 0) {
+    dom.quantAdvisor.style.display = 'none';
+    if (dom.sidebarVram) dom.sidebarVram.style.display = 'none';
+    if (dom.sidebarQaHint) dom.sidebarQaHint.style.display = 'none';
+    return;
+  }
 
   const availGb = Math.round(availVram / (1024 ** 3));
   const budgetLabel = isUnifiedMemory() ? 'Unified memory available' : 'VRAM available';
@@ -338,6 +380,114 @@ function renderQuantAdvisor(quants, availVram) {
   dom.quantAdvisorTable.innerHTML = '';
   dom.quantAdvisorTable.appendChild(table);
   dom.quantAdvisor.style.display = '';
+
+  updateSidebarVramSummary({ quants, availGb, qualityRecQuant, budgetLabel, annotateCtx, ctxFitQuant, qualityRecFitsCtx, desiredCtx });
+}
+
+// Compact VRAM/quant summary shown in the right-column sidebar, so the fit
+// picture is visible as soon as a model is selected — without needing to
+// scroll down to the full quant advisor table in the main column.
+function updateSidebarVramSummary({ quants, availGb, qualityRecQuant, budgetLabel, annotateCtx, ctxFitQuant, qualityRecFitsCtx, desiredCtx }) {
+  // Sync pill active state with the current context target (default pill = 8K
+  // matches wizardState.hardware's own default so the two never disagree).
+  if (dom.sidebarCtxPills) {
+    const activeCtx = wizardState.hardware?.contextSize || 8192;
+    dom.sidebarCtxPills.querySelectorAll('.vram-ctx-pill').forEach(p => {
+      p.classList.toggle('active', parseInt(p.dataset.ctx, 10) === activeCtx);
+    });
+  }
+
+  const pick = (annotateCtx && ctxFitQuant) ? ctxFitQuant : qualityRecQuant;
+
+  if (dom.sidebarVram && dom.sidebarVramValue) {
+    dom.sidebarVram.style.display = '';
+    if (dom.sidebarVramLabel) dom.sidebarVramLabel.textContent = budgetLabel;
+    if (pick) {
+      dom.sidebarVramValue.textContent = `${availGb} GB available`;
+      dom.sidebarVramValue.className = 'wizard-sidebar-vram-value fits';
+      dom.sidebarVramHint.textContent = `${pick.label} recommended · ${pick.model_size_gb.toFixed(1)} GB`;
+    } else {
+      dom.sidebarVramValue.textContent = `${availGb} GB available`;
+      dom.sidebarVramValue.className = 'wizard-sidebar-vram-value nofit';
+      dom.sidebarVramHint.textContent = 'No quant fits comfortably — consider a smaller model or CPU offload.';
+    }
+  }
+
+  if (dom.sidebarQaHint) {
+    if (!quants || quants.length === 0) {
+      dom.sidebarQaHint.style.display = 'none';
+    } else {
+      dom.sidebarQaHint.style.display = '';
+      dom.sidebarQaHint.textContent = annotateCtx && !qualityRecFitsCtx
+        ? `Quality pick (${qualityRecQuant?.label || '—'}) doesn't reach your ${formatCtx(desiredCtx)} context target — see table below for a better-fitting quant.`
+        : 'See the quant advisor table below for the full size/context/quality comparison.';
+    }
+  }
+
+  renderSidebarVramBar(pick);
+}
+
+// Weight/KV/overhead breakdown bar for the sidebar's recommended (or best
+// context-fitting) quant — mirrors the Models page's vram-bar but scoped to
+// the advisor's own pick rather than a separately-chosen file, since at this
+// step the user hasn't necessarily downloaded/selected a specific file yet.
+function renderSidebarVramBar(pick) {
+  if (!dom.sidebarVramBar) return;
+  if (!pick || !pick.model_size_gb) {
+    dom.sidebarVramBar.style.display = 'none';
+    if (dom.sidebarVramLegend) dom.sidebarVramLegend.style.display = 'none';
+    return;
+  }
+
+  const availVram = effectiveAvailBytes();
+  if (!availVram) {
+    dom.sidebarVramBar.style.display = 'none';
+    if (dom.sidebarVramLegend) dom.sidebarVramLegend.style.display = 'none';
+    return;
+  }
+
+  const savedState = {
+    ...wizardState,
+    hardware: { ...wizardState.hardware },
+    model: { ...wizardState.model, modelBytes: Math.round(pick.model_size_gb * 1e9) },
+    vram: { available: availVram, availableRam: 0, isUnifiedMemory: isUnifiedMemory() },
+  };
+
+  scheduleEstimate(savedState, (est) => {
+    if (!est || !est.total_bytes) {
+      dom.sidebarVramBar.style.display = 'none';
+      if (dom.sidebarVramLegend) dom.sidebarVramLegend.style.display = 'none';
+      return;
+    }
+
+    const weights = est.weights_bytes || 0;
+    const kv = est.kv_cache_bytes || 0;
+    const overhead = (est.overhead_bytes || 0) + (est.mtp_bytes || 0) + (est.linear_attn_state_bytes || 0);
+    const total = est.total_bytes || (weights + kv + overhead);
+    const free = Math.max(0, availVram - total);
+    const denom = availVram > 0 ? availVram : total;
+    if (denom <= 0) return;
+
+    const setW = (el, frac) => {
+      if (!el) return;
+      const pct = Math.max(0, Math.min(1, frac)) * 100;
+      el.style.width = pct.toFixed(2) + '%';
+      el.style.display = pct < 0.3 ? 'none' : '';
+    };
+    setW(dom.sidebarVsegWeights, weights / denom);
+    setW(dom.sidebarVsegKv, kv / denom);
+    setW(dom.sidebarVsegOverhead, overhead / denom);
+    setW(dom.sidebarVsegFree, free / denom);
+
+    if (dom.sidebarVlegWeights) dom.sidebarVlegWeights.textContent = `Weights ${formatGB(weights)}`;
+    if (dom.sidebarVlegKv) dom.sidebarVlegKv.textContent = `KV ${formatGB(kv)}`;
+    if (dom.sidebarVlegOverhead) dom.sidebarVlegOverhead.textContent = `Overhead ${formatGB(overhead)}`;
+
+    dom.sidebarVramBar.style.display = '';
+    dom.sidebarVramBar.classList.toggle('tight', total / availVram >= 0.88 && total / availVram < 1.0);
+    dom.sidebarVramBar.classList.toggle('over', total / availVram >= 1.0);
+    if (dom.sidebarVramLegend) dom.sidebarVramLegend.style.display = '';
+  }, { force: true });
 }
 
 

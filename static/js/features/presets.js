@@ -1405,7 +1405,9 @@ export function openPresetModal(mode, section, seedPreset = null) {
         _toggleSpecFields(specType);
         // Context extras
         setOpt('modal-kv-unified', p.kv_unified == null ? '' : String(p.kv_unified));
+        setOpt('modal-cache-mode', p.cache_mode || 'custom');
         numOrEmpty('modal-cache-ram-mib', p.cache_ram_mib);
+        _toggleCacheRamField(p.cache_mode || 'custom');
         // Model extras
         setVal('modal-mmproj', p.mmproj || '');
         _toggleVisionTokens(!!p.mmproj);
@@ -1423,6 +1425,8 @@ export function openPresetModal(mode, section, seedPreset = null) {
         }
         setOpt('modal-rapid-cache-memory-mib', String(p.rapid_mlx?.retained_cache_mib ?? (prefixCacheEnabled ? 8192 : 0)));
         setOpt('modal-rapid-hybrid-cache-entries', String(p.rapid_mlx?.hybrid_cache_entries ?? 0));
+        setOpt('modal-rapid-cache-mode', p.rapid_mlx?.cache_mode || 'custom');
+        _toggleRapidCacheFields(p.rapid_mlx?.cache_mode || 'custom');
         // Phase 7: Rapid-MLX advanced controls (D6 catalog IDs).
         setOpt('modal-rapid-kv-cache-dtype', p.rapid_mlx?.kv_cache_dtype || '');
         setOpt('modal-rapid-prefill-step-size', String(p.rapid_mlx?.prefill_step_size || 512));
@@ -1767,6 +1771,20 @@ function _toggleFitTarget(enabled) {
 function _toggleVisionTokens(enabled) {
     const wrap = document.getElementById('vision-tokens-wrap');
     if (wrap) wrap.style.display = enabled ? '' : 'none';
+}
+
+function _toggleCacheRamField(cacheMode) {
+    const wrap = document.getElementById('modal-cache-ram-mib-wrap');
+    if (wrap) wrap.style.display = cacheMode === 'custom' ? '' : 'none';
+}
+
+function _toggleRapidCacheFields(cacheMode) {
+    const custom = cacheMode === 'custom';
+    ['modal-rapid-prefix-cache-enabled', 'modal-rapid-cache-memory-mib', 'modal-rapid-hybrid-cache-entries']
+        .forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.disabled = !custom;
+        });
 }
 
 function _ensureUbatchForImageTokens(imageMaxTokens) {
@@ -2289,6 +2307,7 @@ function _buildFormPreset(existing) {
                     out.enable_thinking = et;
                     // reasoning_effort removed: config field exists but argv builder does not emit --reasoning-effort.
                     // Phase 6 Part B: prefix cache enabled toggle.
+                    out.cache_mode = strVal('modal-rapid-cache-mode') || 'custom';
                     const pceInput = document.getElementById('modal-rapid-prefix-cache-enabled');
                     const cacheMib = Number(document.getElementById('modal-rapid-cache-memory-mib')?.value || 0);
                     const retainedCacheEnabled = !!pceInput?.checked && cacheMib > 0;
@@ -2402,6 +2421,7 @@ function _buildFormPreset(existing) {
         ctv: strVal('modal-ctv') || 'f16',
         flash_attn: strVal('modal-flash-attn'),
         kv_unified: nullableBoolOpt('modal-kv-unified'),
+        cache_mode: strVal('modal-cache-mode') || 'custom',
         cache_ram_mib: intOrNull('modal-cache-ram-mib'),
         batch_size: parseInt(document.getElementById('modal-batch-size').value) || 2048,
         ubatch_size: parseInt(document.getElementById('modal-ubatch-size').value) || 2048,
@@ -2468,7 +2488,7 @@ const CHANGE_LABELS = {
     image_min_tokens: 'Vision Min Tokens', image_max_tokens: 'Vision Max Tokens',
     gpu_layers: 'GPU Layers', no_mmap: 'no-mmap', mlock: 'mlock',
     context_size: 'Context Size', ctk: 'KV Key Type', ctv: 'KV Value Type',
-    flash_attn: 'Flash Attn', kv_unified: 'KV Unified', cache_ram_mib: 'Prefix Cache RAM',
+    flash_attn: 'Flash Attn', kv_unified: 'KV Unified', cache_mode: 'Prompt Cache Mode', cache_ram_mib: 'Prefix Cache RAM',
     fit_enabled: 'Fit to VRAM', fit_target: 'Fit Target',
     batch_size: 'Batch Size', ubatch_size: 'Micro-batch', parallel_slots: 'Parallel Slots',
     prio: 'Thread Priority', prio_batch: 'Batch Priority', cache_idle_slots: 'Cache Idle Slots',
@@ -2501,7 +2521,7 @@ const RAPID_CHANGE_LABELS = {
     reasoning_mode: 'Reasoning Mode', reasoning_parser: 'Reasoning Parser',
     tool_call_parser: 'Tool-call Parser', sampling_mode: 'Sampling Mode',
     kv_cache_dtype: 'KV Cache Type', turboquant_mode: 'Reusable Prompt Storage',
-    prefix_cache_enabled: 'Prefix Cache', retained_cache_mib: 'Retained Cache (MiB)',
+    cache_mode: 'Prompt Cache Mode', prefix_cache_enabled: 'Prefix Cache', retained_cache_mib: 'Retained Cache (MiB)',
     prefill_step_size: 'Prefill Step Size', hybrid_mode: 'Hybrid Architecture',
     gpu_memory_utilization: 'GPU Memory Utilization', max_num_seqs: 'Max Batched Sequences',
     max_concurrent_requests: 'Max Concurrent Requests', pflash_policy: 'PFlash',
@@ -3316,6 +3336,12 @@ export function initPresets() {
     document.getElementById('modal-image-max-tokens')?.addEventListener('input', (e) => {
         _ensureUbatchForImageTokens(Number(e.target.value || 0));
     });
+    document.getElementById('modal-cache-mode')?.addEventListener('change', (e) => {
+        _toggleCacheRamField(e.target.value);
+    });
+    document.getElementById('modal-rapid-cache-mode')?.addEventListener('change', (e) => {
+        _toggleRapidCacheFields(e.target.value);
+    });
     document.getElementById('preset-recommended-chat-template-btn')?.addEventListener(
         'click',
         installRecommendedChatTemplateForPreset,
@@ -3335,6 +3361,7 @@ export function initPresets() {
             tplName,
             currentPath: path,
             onActivated: updatePresetChatTemplateStatusLine,
+            origin: 'preset-editor',
         });
     });
     document.getElementById('modal-chat-template-file')?.addEventListener('change', updatePresetChatTemplateStatusLine);

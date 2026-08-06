@@ -454,7 +454,7 @@ function groupComparator(hfSort) {
 }
 
 // ── Phase 8B2: Create a variant row within a group ───────────────────────────
-function createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel) {
+function createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel, vramGb = 0) {
   const repoIdLower = (m.id || '').toLowerCase();
   const isMlx = m.format === 'mlx' || repoIdLower.includes('.mlx') || repoIdLower.includes('/mlx/') || repoIdLower.includes('-mlx-') || repoIdLower.endsWith('-mlx') || repoIdLower.includes('.safetensors');
   const isGguf = m.format === 'gguf' || repoIdLower.includes('.gguf') || repoIdLower.includes('-gguf') || repoIdLower.includes('/gguf/');
@@ -556,7 +556,26 @@ function createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel
     filesContainer.style.display = 'none';
 
     let filesLoaded = false;
-    const loadFiles = async () => {
+    const selectFileItem = (fileItem, file) => {
+      container.querySelectorAll('.hf-sr-file-item.selected, .hf-sg-variant.selected').forEach(el => el.classList.remove('selected'));
+      fileItem.classList.add('selected');
+      variant.classList.add('selected');
+      if (onSelectModel) {
+        onSelectModel({
+          repoId: m.id,
+          id: m.id,
+          format: 'gguf',
+          param_b: m.param_b || 0,
+          _file: file,
+        });
+      }
+    };
+
+    // Loads the file list and, on first load (i.e. triggered by the initial row
+    // click), immediately selects the VRAM-recommended quant so a single click
+    // on a GGUF result yields a working selection. The list stays open so the
+    // user can click a different quant to override it.
+    const loadFiles = async (autoSelectFirstLoad) => {
       if (filesLoaded) return;
       filesLoaded = true;
       filesContainer.style.display = '';
@@ -581,6 +600,10 @@ function createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel
           return;
         }
 
+        const recommendedLabel = vramGb > 0 ? getRecommendedQuant(vramGb) : null;
+        let autoSelectTarget = null;
+        let firstSelectable = null;
+
         for (const file of files) {
           const fname = file.path || file.name || '';
           if (!fname) continue;
@@ -602,26 +625,26 @@ function createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel
           const fileMeta = [];
           if (file.size) fileMeta.push(formatBytes(file.size));
           if (file.label) fileMeta.push(file.label);
+          if (recommendedLabel && file.label === recommendedLabel) fileMeta.push('✓ Recommended');
           fMeta.textContent = fileMeta.join(' · ');
           fileItem.appendChild(fMeta);
 
           fileItem.addEventListener('click', e => {
             e.stopPropagation();
-            container.querySelectorAll('.hf-sr-file-item.selected, .hf-sg-variant.selected').forEach(el => el.classList.remove('selected'));
-            fileItem.classList.add('selected');
-            variant.classList.add('selected');
-            if (onSelectModel) {
-              onSelectModel({
-                repoId: m.id,
-                id: m.id,
-                format: 'gguf',
-                param_b: m.param_b || 0,
-                _file: file,
-              });
-            }
+            selectFileItem(fileItem, file);
           });
 
+          if (!firstSelectable) firstSelectable = { fileItem, file };
+          if (!autoSelectTarget && recommendedLabel && file.label === recommendedLabel) {
+            autoSelectTarget = { fileItem, file };
+          }
+
           filesContainer.appendChild(fileItem);
+        }
+
+        if (autoSelectFirstLoad) {
+          const pick = autoSelectTarget || firstSelectable;
+          if (pick) selectFileItem(pick.fileItem, pick.file);
         }
       } catch {
         filesContainer.innerHTML = '<div class="hf-file-empty">Failed to load files.</div>';
@@ -630,6 +653,7 @@ function createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel
 
     variant.addEventListener('click', () => {
       const wasOpen = filesContainer.style.display !== 'none';
+      const firstOpen = !filesLoaded;
       bodyEl.querySelectorAll('.hf-sr-files').forEach(fc => {
         if (fc !== filesContainer) fc.style.display = 'none';
       });
@@ -637,7 +661,7 @@ function createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel
         if (!filesContainer.parentNode) {
           variant.parentNode.insertBefore(filesContainer, variant.nextSibling);
         }
-        loadFiles();
+        loadFiles(firstOpen);
       } else {
         filesContainer.style.display = 'none';
       }
@@ -684,6 +708,7 @@ export async function hfSearch({
   onOpenCardPanel,
   onSelectModel,
   quantsOnly = false,
+  vramGb = 0,
 }) {
   if (!container) return;
 
@@ -851,13 +876,16 @@ export async function hfSearch({
         nameRow.appendChild(catContainer);
       }
 
-      // Toggle button
-      const toggleBtn = document.createElement('button');
-      toggleBtn.type = 'button';
+      // Toggle "button" — visually a pill, but the whole header row is clickable
+      // (see header click listener below); this stays a <span> so it doesn't
+      // trap the click as a separate hit target the user has to aim for.
+      const toggleBtn = document.createElement('span');
       toggleBtn.className = 'hf-sg-toggle';
       toggleBtn.textContent = `+${groupModels.length} variants`;
       nameRow.appendChild(toggleBtn);
       header.appendChild(nameRow);
+      header.setAttribute('tabindex', '0');
+      header.setAttribute('role', 'button');
       groupEl.appendChild(header);
 
       // ── Group body (collapsed by default) ──
@@ -869,23 +897,36 @@ export async function hfSearch({
       groupModels.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
 
       for (const m of groupModels) {
-        const variant = createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel);
+        const variant = createGroupVariant(m, container, bodyEl, onOpenCardPanel, onSelectModel, vramGb);
         bodyEl.appendChild(variant);
       }
 
       groupEl.appendChild(bodyEl);
 
-      // Toggle expand/collapse
-      toggleBtn.addEventListener('click', e => {
-        e.stopPropagation();
+      // Expand/collapse on a click anywhere in the header row (not just the
+      // small pill) — the pill previously ate the click, so clicking the
+      // model name itself did nothing. When a group has exactly one variant,
+      // expanding it also fires that variant's own click so a single click
+      // on the header takes the user straight to a working selection.
+      let groupOpened = false;
+      const toggleGroup = () => {
         const isExpanded = bodyEl.style.display !== 'none';
         // Close other groups
-        groupEl.querySelectorAll('.hf-sg-body').forEach(b => { b.style.display = 'none'; });
         container.querySelectorAll('.hf-search-group .hf-sg-body').forEach(b => {
           if (b !== bodyEl) b.style.display = 'none';
         });
         bodyEl.style.display = isExpanded ? 'none' : '';
         toggleBtn.textContent = isExpanded ? `+${groupModels.length} variants` : `−${groupModels.length} variants`;
+        if (!isExpanded && !groupOpened) {
+          groupOpened = true;
+          if (groupModels.length === 1) {
+            bodyEl.querySelector('.hf-sg-variant')?.click();
+          }
+        }
+      };
+      header.addEventListener('click', toggleGroup);
+      header.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroup(); }
       });
 
       container.appendChild(groupEl);
@@ -1085,8 +1126,10 @@ export async function hfListFiles({
       container.appendChild(item);
     }
 
-    // Do NOT auto-select first file on load; let the user pick from the list.
-    // Recommendation badges (★) still guide the eye.
+    // Auto-select the VRAM-recommended quant (falling back to the first file)
+    // so landing on a repo's file list already yields a working selection.
+    const autoPick = autoSelectFn || firstSelectFn;
+    if (autoPick) autoPick();
   } catch {
     container.innerHTML = '<div class="hf-file-empty">Error loading files. Check the repo ID and your HF token.</div>';
   }
