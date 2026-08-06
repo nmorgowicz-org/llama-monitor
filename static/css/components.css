@@ -1153,7 +1153,7 @@ button:disabled {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: min(880px, 96vw);
+  width: min(1600px, 95vw);
   max-height: min(90vh, 880px);
   background:
     radial-gradient(circle at 15% 15%, var(--acc-08), transparent 26%),

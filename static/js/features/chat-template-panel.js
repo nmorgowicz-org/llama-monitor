@@ -94,23 +94,46 @@ export function repoFromSourceUrl(sourceUrl) {
   return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : '';
 }
 
+// `source_url` is always `https://huggingface.co/{repo}/blob/main/{file}` —
+// see `write_template_install_meta_at`'s callers in spawn_wizard.rs.
+function fileFromSourceUrl(sourceUrl) {
+  if (!sourceUrl) return '';
+  const idx = sourceUrl.indexOf('/blob/main/');
+  return idx === -1 ? '' : sourceUrl.slice(idx + '/blob/main/'.length);
+}
+
+export async function fetchUpstreamHistory(repo, file) {
+  const resp = await fetch(`/api/chat-template/upstream-history?repo=${encodeURIComponent(repo)}&file=${encodeURIComponent(file)}`, { headers: _headers() });
+  const result = resp.ok ? await resp.json() : { ok: false };
+  return result;
+}
+
 // ── The "Manage template…" modal ────────────────────────────────────────
 // Renders into the shared #chat-template-lifecycle-modal DOM (declared once
 // in static/index.html) so both surfaces reuse the same markup/CSS.
 
-export async function openChatTemplateManageModal({ tplName, tplRepo, currentPath, onActivated }) {
+export async function openChatTemplateManageModal({ tplName, tplRepo, currentPath, activePath, onActivated, origin }) {
   const modal = document.getElementById('chat-template-lifecycle-modal');
   const nameEl = document.getElementById('chat-template-lifecycle-name');
   const versionEl = document.getElementById('chat-template-lifecycle-version');
   const updatesEl = document.getElementById('chat-template-lifecycle-updates');
   const historyEl = document.getElementById('chat-template-lifecycle-history');
+  const upstreamEl = document.getElementById('chat-template-lifecycle-upstream');
   const discussionsEl = document.getElementById('chat-template-lifecycle-discussions');
+  const libraryEl = document.getElementById('chat-template-lifecycle-library');
   if (!modal || !nameEl || !versionEl || !historyEl || !discussionsEl) return;
+
+  // The Library section (Choose existing / Upload .jinja) is only needed when
+  // this modal is the sole entry point for those actions — the Spawn Wizard
+  // already has identical buttons inline on its own chat-template step, so
+  // showing them again here is just redundant scroll before Community Fixes.
+  if (libraryEl) libraryEl.style.display = origin === 'preset-editor' ? '' : 'none';
 
   nameEl.textContent = (tplName || '').replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   versionEl.textContent = 'Loading…';
   if (updatesEl) updatesEl.textContent = '';
   historyEl.textContent = '';
+  if (upstreamEl) upstreamEl.textContent = '';
   discussionsEl.textContent = '';
   modal.classList.add('open');
 
@@ -127,19 +150,54 @@ export async function openChatTemplateManageModal({ tplName, tplRepo, currentPat
       fetchDiscussions(tplName),
     ]);
 
-    _renderCurrentSection(versionEl, releasesResult, currentPath);
+    const refreshCurrent = async (newActivePath) => {
+      if (onActivated) await onActivated();
+      const refreshed = await fetchReleases(tplName);
+      _renderCurrentSection(versionEl, refreshed, newActivePath || activePath || currentPath, {
+        basePath: currentPath,
+        onTransformed: () => refreshCurrent(`${currentPath.replace(/\.jinja$/, '')}-no_json.jinja`),
+      });
+      return refreshed;
+    };
+
+    _renderCurrentSection(versionEl, releasesResult, activePath || currentPath, {
+      basePath: currentPath,
+      onTransformed: () => refreshCurrent(`${currentPath.replace(/\.jinja$/, '')}-no_json.jinja`),
+    });
     _renderUpdatesSection(updatesEl, { path: currentPath, onChecked: () => {} });
     _renderVersionHistorySection(historyEl, releasesResult, tplName, async () => {
-      if (onActivated) await onActivated();
-      // Re-render so "active" markers reflect the new state without closing the modal.
-      const refreshed = await fetchReleases(tplName);
-      _renderCurrentSection(versionEl, refreshed, currentPath);
+      const refreshed = await refreshCurrent(currentPath);
       _renderVersionHistorySection(historyEl, refreshed, tplName, () => {});
     });
+    const activeRelease = (releasesResult?.releases || []).find(r => r.sha256 === releasesResult?.active_sha256) || releasesResult?.releases?.[0];
+
+    if (upstreamEl) {
+      const upstreamRepo = tplRepo || repoFromSourceUrl(activeRelease?.source_url);
+      const upstreamFile = fileFromSourceUrl(activeRelease?.source_url);
+      if (upstreamRepo && upstreamFile) {
+        upstreamEl.textContent = 'Loading…';
+        fetchUpstreamHistory(upstreamRepo, upstreamFile).then((upstreamResult) => {
+          _renderUpstreamHistorySection(upstreamEl, upstreamResult, {
+            tplName,
+            repo: upstreamRepo,
+            file: upstreamFile,
+            onInstalled: async () => {
+              const refreshed = await refreshCurrent(currentPath);
+              _renderVersionHistorySection(historyEl, refreshed, tplName, () => {});
+            },
+          });
+        }).catch((err) => {
+          upstreamEl.textContent = 'Failed to load: ' + (err.message || String(err));
+        });
+      } else {
+        upstreamEl.textContent = 'Unknown upstream repo/file — cannot browse commit history.';
+      }
+    }
     _renderCommunityFixesSection(discussionsEl, discussionsResult, {
       tplName,
       tplRepo: tplRepo || repoFromSourceUrl(releasesResult?.releases?.[0]?.source_url),
       currentPath,
+      installedAt: activeRelease?.hf_commit_date || activeRelease?.installed_at,
       onInstalled: async () => {
         modal.classList.remove('open');
         if (onActivated) await onActivated();
@@ -161,10 +219,11 @@ export function bindChatTemplateManageModalChrome() {
   });
 }
 
-function _renderCurrentSection(versionEl, releasesResult, currentPath) {
+function _renderCurrentSection(versionEl, releasesResult, currentPath, { basePath, onTransformed } = {}) {
   const releases = releasesResult?.releases || [];
   versionEl.innerHTML = '';
 
+  let active = null;
   if (!releasesResult?.ok || releases.length === 0) {
     const empty = document.createElement('div');
     empty.textContent = releasesResult?.error || 'This template was installed directly (no release index).';
@@ -172,12 +231,22 @@ function _renderCurrentSection(versionEl, releasesResult, currentPath) {
   } else {
     const latest = releases[0];
     const activeSha = releasesResult.active_sha256 || null;
-    const active = releases.find(r => r.sha256 === activeSha) || latest;
+    active = releases.find(r => r.sha256 === activeSha) || latest;
     const rows = [
+      // The template's own embedded version string (e.g. "qwen3.6-froggeric-v21.3"),
+      // when the file declares one — HF repos here don't use git tags, so this is
+      // the only real "version" signal; fall back to the commit SHA otherwise.
+      { label: 'Version', value: active.template_version || '—' },
       { label: 'Active revision', value: active.revision ? active.revision.slice(0, 10) : (active.sha256 || '').slice(0, 10) },
       { label: 'Source', value: active.source_url || '—' },
       { label: 'SHA-256', value: (active.sha256 || '').substring(0, 16) + '…' },
-      { label: 'Installed', value: active.installed_at ? new Date(active.installed_at).toLocaleString() : '—' },
+      // Prefer the real upstream HF commit date (when we could resolve the
+      // repo + pinned revision) over `installed_at`, which is only this
+      // machine's local fetch timestamp and can be misleading (e.g. a
+      // rollback re-fetched today for a commit made a month ago).
+      active.hf_commit_date
+        ? { label: 'Updated upstream', value: new Date(active.hf_commit_date).toLocaleString() }
+        : { label: 'Installed', value: active.installed_at ? new Date(active.installed_at).toLocaleString() : '—' },
     ];
     rows.forEach(item => {
       const row = document.createElement('div');
@@ -195,8 +264,8 @@ function _renderCurrentSection(versionEl, releasesResult, currentPath) {
   }
 
   // Surface whether the froggeric no-JSON transform is the file actually in
-  // effect — this was previously invisible, so the transform silently ran
-  // (or silently failed to run, for legacy installs) with no UI feedback.
+  // effect. The transform is opt-in — nothing runs it automatically — so this
+  // is either a status ("already applied") or an action (a button to apply it).
   if (currentPath) {
     const transformRow = document.createElement('div');
     transformRow.className = 'chat-template-lifecycle-version-row';
@@ -207,13 +276,53 @@ function _renderCurrentSection(versionEl, releasesResult, currentPath) {
     value.className = 'chat-template-lifecycle-version-value';
     if (currentPath.includes('-no_json.jinja')) {
       value.textContent = '✓ no-JSON transform active (strips broken tool-call JSON branches)';
+      transformRow.appendChild(label);
+      transformRow.appendChild(value);
+    } else if (currentPath.includes('froggeric') && basePath && onTransformed) {
+      const versionTag = (active?.template_version || '').match(/v[\d.]+$/)?.[0];
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn-sm btn-preset';
+      btn.textContent = versionTag ? `Fix ${versionTag}` : 'Apply no-JSON fix';
+      btn.title = 'Strips non-native JSON tool-call branches from this template (llama.cpp grammar-loop workaround). Your choice — nothing runs this automatically.';
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        const orig = btn.textContent;
+        btn.textContent = 'Applying…';
+        try {
+          const resp = await fetch('/api/chat-template/transform', {
+            method: 'POST',
+            headers: _jsonHeaders(),
+            body: JSON.stringify({ path: basePath }),
+          });
+          const result = resp.ok ? await resp.json() : { ok: false };
+          if (result.ok) {
+            showToast('No-JSON transform applied', 'success', null, 2400);
+            await onTransformed();
+          } else {
+            showToast(result.error || 'Transform failed', 'error');
+            btn.disabled = false;
+            btn.textContent = orig;
+          }
+        } catch (err) {
+          showToast('Transform failed: ' + (err.message || String(err)), 'error');
+          btn.disabled = false;
+          btn.textContent = orig;
+        }
+      });
+      transformRow.appendChild(label);
+      transformRow.appendChild(value);
+      transformRow.appendChild(btn);
+      value.textContent = '⚠ stock (untransformed) template active — ';
     } else if (currentPath.includes('froggeric')) {
       value.textContent = '⚠ stock template active — no-JSON transform not found for this install';
+      transformRow.appendChild(label);
+      transformRow.appendChild(value);
     } else {
       value.textContent = 'n/a';
+      transformRow.appendChild(label);
+      transformRow.appendChild(value);
     }
-    transformRow.appendChild(label);
-    transformRow.appendChild(value);
     versionEl.appendChild(transformRow);
   }
 }
@@ -313,7 +422,190 @@ function _renderVersionHistorySection(historyEl, releasesResult, tplName, onActi
   });
 }
 
-function _renderCommunityFixesSection(discussionsEl, discussionsResult, { tplName, tplRepo, currentPath, onInstalled }) {
+const UPSTREAM_HISTORY_PAGE_SIZE = 2;
+
+// Track A: the upstream repo's own commit history for this file, fetched
+// live from Hugging Face — distinct from "Installed on this machine" above,
+// which only lists versions already downloaded locally (Track B). Lets a
+// user roll back to a known-good upstream commit (e.g. froggeric v20) when
+// a newer one (v21.3) regresses, even if that commit was never installed here.
+function _renderUpstreamHistorySection(upstreamEl, upstreamResult, { tplName, repo, file, onInstalled }) {
+  upstreamEl.innerHTML = '';
+  const versions = upstreamResult?.versions || [];
+  if (!upstreamResult?.ok || versions.length === 0) {
+    upstreamEl.textContent = upstreamResult?.error || 'No commit history found for this file.';
+    return;
+  }
+
+  const listEl = document.createElement('div');
+  upstreamEl.appendChild(listEl);
+  let visibleCount = Math.min(UPSTREAM_HISTORY_PAGE_SIZE, versions.length);
+
+  const renderRow = (v) => {
+    const row = document.createElement('div');
+    row.className = 'chat-template-lifecycle-history-item';
+    const when = v.date ? new Date(v.date).toLocaleString() : 'unknown date';
+    const label = document.createElement('span');
+    const versionTag = v.template_version ? ` — ${v.template_version}` : '';
+    label.textContent = `${when} (${v.sha.slice(0, 8)})${versionTag} — ${v.title}`;
+    label.style.color = 'var(--color-text-muted)';
+    row.appendChild(label);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-sm btn-preset';
+    btn.style.marginLeft = '6px';
+    btn.textContent = 'Install this version';
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const orig = btn.textContent;
+      btn.textContent = 'Installing…';
+      try {
+        const resp = await fetch('/api/chat-template/install-hf', {
+          method: 'POST',
+          headers: _jsonHeaders(),
+          body: JSON.stringify({ repo, file, name: tplName, revision: v.sha, force: true }),
+        });
+        const result = resp.ok ? await resp.json() : { ok: false };
+        if (result.ok) {
+          showToast(`Installed ${v.sha.slice(0, 8)}`, 'success', 'You can undo this from "Installed on this machine"', 2600);
+          await onInstalled();
+          btn.textContent = 'Installed ✓';
+        } else {
+          showToast(result.error || 'Failed to install this version', 'error');
+          btn.disabled = false;
+          btn.textContent = orig;
+        }
+      } catch (err) {
+        showToast('Install failed: ' + (err.message || String(err)), 'error');
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    });
+    row.appendChild(btn);
+    return row;
+  };
+
+  const renderList = () => {
+    listEl.innerHTML = '';
+    versions.slice(0, visibleCount).forEach((v) => listEl.appendChild(renderRow(v)));
+  };
+
+  const toggleRow = document.createElement('div');
+  toggleRow.style.marginTop = '6px';
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.className = 'btn-sm btn-wizard-tertiary';
+  const updateToggle = () => {
+    if (visibleCount >= versions.length) {
+      toggleBtn.style.display = versions.length > UPSTREAM_HISTORY_PAGE_SIZE ? '' : 'none';
+      toggleBtn.textContent = '− Show fewer';
+    } else {
+      toggleBtn.style.display = '';
+      toggleBtn.textContent = `+ Show more (${versions.length - visibleCount} older)`;
+    }
+  };
+  toggleBtn.addEventListener('click', () => {
+    visibleCount = visibleCount >= versions.length ? UPSTREAM_HISTORY_PAGE_SIZE : versions.length;
+    renderList();
+    updateToggle();
+  });
+  toggleRow.appendChild(toggleBtn);
+  upstreamEl.appendChild(toggleRow);
+
+  renderList();
+  updateToggle();
+}
+
+// ── Discussion preview slide-in panel ───────────────────────────────────
+// Self-contained (lazily built, appended to <body>) so it works from every
+// surface that renders the Community Fixes list — the Spawn Wizard's own
+// model-card slide-in panel is wizard-only DOM and isn't reachable from the
+// Preset Editor, which also uses this module.
+
+let _discussionPanelEl = null;
+let _discussionBackdropEl = null;
+
+function _ensureDiscussionPanel() {
+  if (_discussionPanelEl) return _discussionPanelEl;
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'ct-discussion-backdrop';
+  backdrop.addEventListener('click', _closeDiscussionPanel);
+
+  const panel = document.createElement('div');
+  panel.className = 'ct-discussion-panel';
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-hidden', 'true');
+
+  const header = document.createElement('div');
+  header.className = 'ct-discussion-panel-header';
+  const title = document.createElement('div');
+  title.className = 'ct-discussion-panel-title';
+  const link = document.createElement('a');
+  link.className = 'ct-discussion-panel-link';
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.textContent = 'Open on Hugging Face ↗';
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'ct-discussion-panel-close';
+  closeBtn.textContent = '×';
+  closeBtn.addEventListener('click', _closeDiscussionPanel);
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+
+  const body = document.createElement('div');
+  body.className = 'ct-discussion-panel-body';
+
+  panel.appendChild(header);
+  panel.appendChild(link);
+  panel.appendChild(body);
+
+  document.body.appendChild(backdrop);
+  document.body.appendChild(panel);
+
+  _discussionBackdropEl = backdrop;
+  _discussionPanelEl = panel;
+  _discussionPanelEl._titleEl = title;
+  _discussionPanelEl._linkEl = link;
+  _discussionPanelEl._bodyEl = body;
+  return panel;
+}
+
+function _closeDiscussionPanel() {
+  _discussionPanelEl?.classList.remove('open');
+  _discussionBackdropEl?.classList.remove('open');
+  _discussionPanelEl?.setAttribute('aria-hidden', 'true');
+}
+
+async function _openDiscussionPanel({ repo, discussionId, title }) {
+  const panel = _ensureDiscussionPanel();
+  panel._titleEl.textContent = title;
+  panel._linkEl.href = `https://huggingface.co/${repo}/discussions/${discussionId}`;
+  panel._bodyEl.textContent = 'Loading…';
+  panel.classList.add('open');
+  panel.setAttribute('aria-hidden', 'false');
+  _discussionBackdropEl.classList.add('open');
+
+  try {
+    const resp = await fetch(`/api/chat-template/discussion-markdown?repo=${encodeURIComponent(repo)}&discussion_id=${encodeURIComponent(discussionId)}`, { headers: _headers() });
+    const data = await resp.json();
+    panel._bodyEl.textContent = '';
+    if (!data.ok || !data.markdown) {
+      panel._bodyEl.textContent = data.error || 'Could not load discussion content.';
+    } else if (window.marked && window.DOMPurify) {
+      const frag = window.DOMPurify.sanitize(window.marked.parse(data.markdown), { RETURN_DOM_FRAGMENT: true });
+      panel._bodyEl.appendChild(frag);
+    } else {
+      panel._bodyEl.textContent = data.markdown;
+    }
+  } catch (err) {
+    panel._bodyEl.textContent = 'Error: ' + (err.message || String(err));
+  }
+}
+
+function _renderCommunityFixesSection(discussionsEl, discussionsResult, { tplName, tplRepo, currentPath, onInstalled, installedAt }) {
   discussionsEl.innerHTML = '';
   const subtitle = document.createElement('div');
   subtitle.style.fontSize = '9px';
@@ -322,11 +614,59 @@ function _renderCommunityFixesSection(discussionsEl, discussionsResult, { tplNam
   subtitle.textContent = "Fixes other people have posted for this model's template on Hugging Face.";
   discussionsEl.appendChild(subtitle);
 
-  const discussions = discussionsResult?.discussions || [];
+  const allDiscussions = discussionsResult?.discussions || [];
+
+  // Default filter: template's install date -> now. A discussion opened before
+  // this install can still be relevant if people are still actively commenting
+  // on it (e.g. a released fix didn't actually resolve it) — filter on
+  // last_activity_at, not created_at, so those stay visible by default.
+  const filterRow = document.createElement('div');
+  filterRow.className = 'chat-template-lifecycle-discussion-filter';
+  filterRow.style.display = 'flex';
+  filterRow.style.alignItems = 'center';
+  filterRow.style.gap = '6px';
+  filterRow.style.fontSize = '9px';
+  filterRow.style.color = 'var(--color-text-muted)';
+  filterRow.style.marginBottom = '6px';
+  const filterLabel = document.createElement('label');
+  filterLabel.textContent = 'Active since:';
+  filterLabel.htmlFor = 'chat-template-lifecycle-discussion-since';
+  const dateInput = document.createElement('input');
+  dateInput.type = 'date';
+  dateInput.id = 'chat-template-lifecycle-discussion-since';
+  dateInput.style.fontSize = '9px';
+  const defaultSince = installedAt ? new Date(installedAt) : null;
+  if (defaultSince && !Number.isNaN(defaultSince.getTime())) {
+    dateInput.value = defaultSince.toISOString().slice(0, 10);
+  }
+  const clearBtn = document.createElement('button');
+  clearBtn.type = 'button';
+  clearBtn.className = 'btn-sm btn-preset';
+  clearBtn.textContent = 'Show all';
+  clearBtn.addEventListener('click', () => { dateInput.value = ''; renderList(); });
+  dateInput.addEventListener('change', renderList);
+  filterRow.appendChild(filterLabel);
+  filterRow.appendChild(dateInput);
+  filterRow.appendChild(clearBtn);
+  discussionsEl.appendChild(filterRow);
+
+  const listEl = document.createElement('div');
+  discussionsEl.appendChild(listEl);
+
+  function renderList() {
+    listEl.innerHTML = '';
+    const since = dateInput.value ? new Date(dateInput.value) : null;
+    const discussions = since
+      ? allDiscussions.filter((d) => {
+          const ts = new Date(d.last_activity_at || d.created_at || 0);
+          return Number.isNaN(ts.getTime()) || ts >= since;
+        })
+      : allDiscussions;
+
   if (!discussionsResult?.ok || discussions.length === 0) {
     const empty = document.createElement('div');
-    empty.textContent = discussionsResult?.error || 'No community fixes found for this template.';
-    discussionsEl.appendChild(empty);
+    empty.textContent = discussionsResult?.error || (allDiscussions.length ? 'No community fixes active since this date.' : 'No community fixes found for this template.');
+    listEl.appendChild(empty);
   } else {
     discussions.forEach((d) => {
       const row = document.createElement('div');
@@ -336,55 +676,22 @@ function _renderCommunityFixesSection(discussionsEl, discussionsResult, { tplNam
       const label = document.createElement('span');
       label.textContent = `${statusBadge} ${prLabel ? prLabel + ' ' : ''}${d.title} (${d.num_comments})`;
       row.appendChild(label);
-      const link = document.createElement('a');
-      link.href = `https://huggingface.co/${discussionsResult.source_repo}/discussions/${d.number}`;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      link.textContent = ' ↗';
-      link.style.color = 'var(--color-accent)';
-      link.style.marginLeft = '4px';
-      row.appendChild(link);
-
-      // Inline expand — renders the discussion's comments in-app (same
-      // marked+DOMPurify pipeline used for HF model cards) instead of
-      // sending the user to a new browser tab just to read it.
-      const expandBtn = document.createElement('button');
-      expandBtn.type = 'button';
-      expandBtn.className = 'btn-sm btn-preset';
-      expandBtn.style.marginLeft = '6px';
-      expandBtn.textContent = 'View ▾';
-      const detailEl = document.createElement('div');
-      detailEl.style.cssText = 'display:none;margin:4px 0 8px;padding:8px 10px;background:var(--color-bg-primary);border:1px solid var(--color-border);border-radius:4px;font-size:10px;max-height:260px;overflow-y:auto;';
-      let loaded = false;
-      expandBtn.addEventListener('click', async () => {
-        const isOpen = detailEl.style.display !== 'none';
-        if (isOpen) {
-          detailEl.style.display = 'none';
-          expandBtn.textContent = 'View ▾';
-          return;
-        }
-        detailEl.style.display = '';
-        expandBtn.textContent = 'Hide ▴';
-        if (loaded) return;
-        loaded = true;
-        detailEl.textContent = 'Loading…';
-        try {
-          const resp = await fetch(`/api/chat-template/discussion-markdown?repo=${encodeURIComponent(discussionsResult.source_repo)}&discussion_id=${encodeURIComponent(d.number)}`, { headers: _headers() });
-          const data = await resp.json();
-          detailEl.textContent = '';
-          if (!data.ok || !data.markdown) {
-            detailEl.textContent = data.error || 'Could not load discussion content.';
-          } else if (window.marked && window.DOMPurify) {
-            const frag = window.DOMPurify.sanitize(window.marked.parse(data.markdown), { RETURN_DOM_FRAGMENT: true });
-            detailEl.appendChild(frag);
-          } else {
-            detailEl.textContent = data.markdown;
-          }
-        } catch (err) {
-          detailEl.textContent = 'Error: ' + (err.message || String(err));
-        }
+      // Small arrow trigger — opens the discussion in-app in the slide-in
+      // preview panel (same pattern as the HF model-card preview) instead of
+      // a big button or a new browser tab.
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'ct-discussion-open-btn';
+      link.title = 'Preview this discussion';
+      link.textContent = '↗';
+      link.addEventListener('click', () => {
+        _openDiscussionPanel({
+          repo: discussionsResult.source_repo,
+          discussionId: d.number,
+          title: d.title,
+        });
       });
-      row.appendChild(expandBtn);
+      row.appendChild(link);
 
       // Per-discussion action: only shown when the backend actually found an
       // installable fix (a PR file or a Jinja code block in a comment) — most
@@ -413,10 +720,12 @@ function _renderCommunityFixesSection(discussionsEl, discussionsResult, { tplNam
         row.appendChild(useBtn);
       }
 
-      discussionsEl.appendChild(row);
-      discussionsEl.appendChild(detailEl);
+      listEl.appendChild(row);
     });
   }
+  }
+
+  renderList();
 
   const editBtn = document.createElement('button');
   editBtn.type = 'button';

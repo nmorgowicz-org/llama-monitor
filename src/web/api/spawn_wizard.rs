@@ -61,10 +61,27 @@ struct ChatTemplateInstallMeta {
     /// or legacy installs that predate revision pinning.
     #[serde(default)]
     revision: Option<String>,
+    /// The author's own version string embedded in the template content itself
+    /// (e.g. `template_version = "qwen3.6-froggeric-v21.3"`), when present.
+    #[serde(default)]
+    template_version: Option<String>,
 }
 
 fn template_meta_path(dest: &std::path::Path) -> std::path::PathBuf {
     dest.with_extension("jinja.meta.json")
+}
+
+/// Extracts the author's own version string from a chat-template Jinja file, e.g.
+/// `{%- set template_version = "qwen3.6-froggeric-v21.3" %}` — the only reliable
+/// version signal available; HF repos in this space don't use git tags, and commit
+/// messages are freeform, but froggeric's templates embed this line themselves.
+fn extract_template_version(content: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(&content[..content.len().min(2000)]).ok()?;
+    let idx = text.find("template_version")?;
+    let after = &text[idx..];
+    let quote_start = after.find('"')? + 1;
+    let quote_end = after[quote_start..].find('"')? + quote_start;
+    Some(after[quote_start..quote_end].to_string())
 }
 
 fn sha256_hex(content: &[u8]) -> String {
@@ -95,6 +112,7 @@ fn write_template_install_meta_at(
         installed_at: installed_at_override.unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
         sha256: sha256_hex(content),
         revision,
+        template_version: extract_template_version(content),
     };
     if let Ok(json) = serde_json::to_vec_pretty(&meta) {
         let _ = std::fs::write(template_meta_path(dest), json);
@@ -112,6 +130,8 @@ struct ReleaseRecord {
     installed_at: String,
     /// Retained copy of the content, relative to the chat-templates dir's `releases/` subdir.
     file: String,
+    #[serde(default)]
+    template_version: Option<String>,
 }
 
 fn chat_templates_releases_dir() -> Option<std::path::PathBuf> {
@@ -160,6 +180,7 @@ fn record_release(name: &str, meta: &ChatTemplateInstallMeta, content: &[u8]) {
         fetch_url: meta.fetch_url.clone(),
         installed_at: meta.installed_at.clone(),
         file: file_name,
+        template_version: meta.template_version.clone(),
     });
 
     if let (Some(path), Ok(json)) = (release_index_path(name), serde_json::to_vec_pretty(&index)) {
@@ -189,6 +210,61 @@ async fn resolve_hf_commit_sha(
     }
     let json: serde_json::Value = resp.json().await.ok()?;
     json["sha"].as_str().map(|s| s.to_string())
+}
+
+#[derive(serde::Deserialize, Clone)]
+struct HfCommit {
+    id: String,
+    date: String,
+    title: String,
+}
+
+/// Fetches the commit log for `repo`'s `main` ref, newest first. This is the
+/// *repo-wide* log (HF's commits API has no reliable per-file-path filter —
+/// the `path` query param is accepted but silently ignored), so callers that
+/// want history for one specific file need to fetch that file's content at
+/// each commit and dedupe themselves (see `api_chat_template_upstream_history`).
+async fn fetch_hf_commits(repo: &str, revision: &str, limit: u32) -> Result<Vec<HfCommit>, String> {
+    let repo_clean = repo.trim_end_matches('/');
+    let url = format!("https://huggingface.co/api/models/{repo_clean}/commits/{revision}?limit={limit}");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch commits: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("HF API returned {}", resp.status()));
+    }
+    resp.json::<Vec<HfCommit>>()
+        .await
+        .map_err(|e| format!("JSON parse: {e}"))
+}
+
+/// Real upstream commit date for a pinned revision — distinct from
+/// `installed_at` in `ChatTemplateInstallMeta`, which is only a local fetch
+/// timestamp. Used so the Lifecycle modal's "Installed" row and the
+/// Community Fixes date filter can anchor on when the content actually
+/// changed upstream, not when this machine happened to download it.
+async fn fetch_hf_commit_date(repo: &str, revision: &str) -> Option<String> {
+    fetch_hf_commits(repo, revision, 1)
+        .await
+        .ok()
+        .and_then(|c| c.into_iter().next())
+        .map(|c| c.date)
+}
+
+/// Extracts `owner/name` from a `source_url` of the form
+/// `https://huggingface.co/{repo}/blob/main/{file}` (as written by
+/// `write_template_install_meta_at`'s callers) — needed because `ReleaseRecord`
+/// only stores the URL, not the repo id separately.
+fn parse_repo_from_source_url(source_url: &str) -> Option<String> {
+    let after = source_url.strip_prefix("https://huggingface.co/")?;
+    let idx = after.find("/blob/")?;
+    Some(after[..idx].to_string())
 }
 
 fn read_template_install_meta(path: &std::path::Path) -> Option<ChatTemplateInstallMeta> {
@@ -616,6 +692,9 @@ fn api_chat_template_install_hf(
                 let file = body["file"].as_str().unwrap_or("").to_string();
                 let name = body["name"].as_str().unwrap_or("").to_string();
                 let force = body["force"].as_bool().unwrap_or(false);
+                // Track A rollback: install a specific pinned upstream commit instead of
+                // always resolving `main`. Omitted/empty means "latest", as before.
+                let revision_override = body["revision"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
 
                 if repo.is_empty() || file.is_empty() || name.is_empty() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -673,51 +752,37 @@ fn api_chat_template_install_hf(
                     // for updates" has no fetch_url to compare against. Backfill both from
                     // the file already on disk so this self-heals on next open instead of
                     // silently staying broken forever.
-                    if existing_meta.is_none() {
-                        if let Ok(content) = std::fs::read(&dest) {
-                            let source_url = format!("https://huggingface.co/{repo}/blob/main/{file}");
-                            let fetch_url = format!("https://huggingface.co/{repo}/resolve/main/{file}");
-                            let mtime = std::fs::metadata(&dest)
-                                .ok()
-                                .and_then(|m| m.modified().ok())
-                                .map(|t| {
-                                    chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339()
-                                });
-                            let meta = write_template_install_meta_at(
-                                &dest, &source_url, &fetch_url, &content, mtime, None,
-                            );
-                            record_release(&name, &meta, &content);
-                            existing_meta = Some(meta);
-                        }
+                    if existing_meta.is_none()
+                        && let Ok(content) = std::fs::read(&dest)
+                    {
+                        let source_url = format!("https://huggingface.co/{repo}/blob/main/{file}");
+                        let fetch_url = format!("https://huggingface.co/{repo}/resolve/main/{file}");
+                        let mtime = std::fs::metadata(&dest)
+                            .ok()
+                            .and_then(|m| m.modified().ok())
+                            .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339());
+                        let meta = write_template_install_meta_at(
+                            &dest, &source_url, &fetch_url, &content, mtime, None,
+                        );
+                        record_release(&name, &meta, &content);
+                        existing_meta = Some(meta);
                     }
 
                     let source_url = existing_meta.as_ref().map(|m| m.source_url.clone());
                     let installed_at = existing_meta.as_ref().map(|m| m.installed_at.clone());
 
-                    // Ensure a transformed variant exists for froggeric templates — legacy
-                    // installs predate the auto-transform-on-install step, so backfill it
-                    // here rather than leaving the stock (JSON-branch) template active.
-                    let transformed_path = if repo == "froggeric/Qwen-Fixed-Chat-Templates" {
+                    // The no-JSON transform is opt-in (the "Fix vX.Y" button in the Lifecycle
+                    // modal) — only report an already-transformed variant if one already
+                    // exists on disk from a prior explicit click; never create one here.
+                    let transformed_path = {
                         let base = dest
                             .file_stem()
                             .and_then(|s| s.to_str())
                             .unwrap_or(&name);
                         let transformed = dest.with_file_name(format!("{base}-no_json.jinja"));
-                        if transformed.exists() {
-                            Some(transformed.to_string_lossy().to_string())
-                        } else {
-                            match run_froggeric_transform(&dest) {
-                                Ok(path) => Some(path.to_string_lossy().to_string()),
-                                Err(e) => {
-                                    eprintln!(
-                                        "[warn] Froggeric backfill transform failed (template still usable): {e}"
-                                    );
-                                    None
-                                }
-                            }
-                        }
-                    } else {
-                        None
+                        transformed
+                            .exists()
+                            .then(|| transformed.to_string_lossy().to_string())
                     };
 
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -751,8 +816,13 @@ fn api_chat_template_install_hf(
                 };
 
                 // Best-effort pin to an exact commit SHA so re-fetches are reproducible and
-                // history/rollback records an immutable revision, not a moving branch ref.
-                let revision = resolve_hf_commit_sha(&client, &repo, &hf_token).await;
+                // history/rollback records an immutable revision, not a moving branch ref —
+                // unless the caller (Track A "install this upstream version") already
+                // pinned one explicitly.
+                let revision = match revision_override {
+                    Some(rev) => Some(rev),
+                    None => resolve_hf_commit_sha(&client, &repo, &hf_token).await,
+                };
                 let url = match &revision {
                     Some(sha) => format!("https://huggingface.co/{repo}/raw/{sha}/{file}"),
                     None => format!("https://huggingface.co/{repo}/raw/main/{file}"),
@@ -820,18 +890,9 @@ fn api_chat_template_install_hf(
                 );
                 record_release(&name, &meta, content.as_bytes());
 
-                // Auto-transform froggeric templates to XML-only variant (no JSON branch).
-                let transformed_path = if repo == "froggeric/Qwen-Fixed-Chat-Templates" {
-                    match run_froggeric_transform(&dest) {
-                        Ok(path) => Some(path.to_string_lossy().to_string()),
-                        Err(e) => {
-                            eprintln!("[warn] Froggeric transform failed (template still usable): {e}");
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
+                // The no-JSON transform is opt-in (the "Fix vX.Y" button in the Lifecycle
+                // modal) — never auto-applied on fetch.
+                let transformed_path: Option<String> = None;
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
@@ -1131,6 +1192,33 @@ fn api_chat_template_releases(
                 let mut releases = read_release_index(&name);
                 releases.sort_by(|a, b| b.installed_at.cmp(&a.installed_at));
 
+                // Real upstream commit date per release (when we know both the repo and
+                // the pinned revision) — falls back to `null` (frontend then uses the
+                // local `installed_at` fetch timestamp) for legacy/unpinned entries.
+                let date_checks: Vec<_> = releases
+                    .iter()
+                    .map(|r| {
+                        let repo = parse_repo_from_source_url(&r.source_url);
+                        let revision = r.revision.clone();
+                        tokio::spawn(async move {
+                            match (repo, revision) {
+                                (Some(repo), Some(rev)) => fetch_hf_commit_date(&repo, &rev).await,
+                                _ => None,
+                            }
+                        })
+                    })
+                    .collect();
+                let mut releases_json = Vec::with_capacity(releases.len());
+                for (r, check) in releases.into_iter().zip(date_checks) {
+                    let hf_commit_date = check.await.ok().flatten();
+                    let mut v = serde_json::to_value(&r).unwrap_or_default();
+                    if let Some(obj) = v.as_object_mut() {
+                        obj.insert("hf_commit_date".to_string(), serde_json::json!(hf_commit_date));
+                    }
+                    releases_json.push(v);
+                }
+                let releases = releases_json;
+
                 let active_sha = dirs::home_dir()
                     .map(|h| {
                         h.join(".config")
@@ -1222,18 +1310,9 @@ fn api_chat_template_activate(
                     record.revision.clone(),
                 );
 
-                // Re-transform froggeric templates on rollback.
-                let transformed_path = if name.contains("froggeric") {
-                    match run_froggeric_transform(&dest) {
-                        Ok(path) => Some(path.to_string_lossy().to_string()),
-                        Err(e) => {
-                            eprintln!("[warn] Froggeric transform failed on rollback (template still usable): {e}");
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
+                // The no-JSON transform is opt-in (the "Fix vX.Y" button in the Lifecycle
+                // modal) — never auto-applied, including on rollback.
+                let transformed_path: Option<String> = None;
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
@@ -1274,7 +1353,24 @@ fn api_chat_template_check_update(
                 }
 
                 let path = std::path::Path::new(&path_str);
-                let meta_path = template_meta_path(path);
+                // Callers may pass either the base cache path or the froggeric transform
+                // output (`<name>-no_json.jinja`) — only the base path carries the
+                // install meta.json sidecar, so fall back to it when the given path has
+                // none (otherwise "Check for updates" always errors on transformed installs).
+                let meta_path = {
+                    let direct = template_meta_path(path);
+                    if direct.exists() {
+                        direct
+                    } else {
+                        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                        if let Some(base_stem) = stem.strip_suffix("-no_json") {
+                            let base_path = path.with_file_name(format!("{base_stem}.jinja"));
+                            template_meta_path(&base_path)
+                        } else {
+                            direct
+                        }
+                    }
+                };
                 let existing_meta = read_template_install_meta(&meta_path);
 
                 // Legacy installs (from before update-tracking metadata existed) have no
@@ -1338,8 +1434,23 @@ fn api_chat_template_check_update(
                     }
                 };
 
-                let mut req = client.get(&fetch_url);
-                if fetch_url.contains("huggingface.co")
+                // `fetch_url` may be pinned to the exact commit SHA that was fetched at
+                // install time (see resolve_hf_commit_sha in the install handler) — fetching
+                // that same URL again always returns identical bytes, so "changed" would
+                // never trip even when upstream has moved. Check against the moving `main`
+                // ref instead: derive it from the unpinned source_url (blob/main/<file>) when
+                // available, otherwise strip a pinned revision segment out of fetch_url.
+                let check_url = {
+                    let candidate = baseline_source_url.replacen("/blob/", "/raw/", 1);
+                    if candidate.contains("/raw/main/") {
+                        candidate
+                    } else {
+                        fetch_url.clone()
+                    }
+                };
+
+                let mut req = client.get(&check_url);
+                if check_url.contains("huggingface.co")
                     && let Some(ref tok) = crate::hf::hf_load_token()
                     && !tok.is_empty()
                 {
@@ -2031,17 +2142,165 @@ fn api_chat_template_transform(
                 }
 
                 match run_froggeric_transform(input_path) {
-                    Ok(output_path) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
-                            "ok": true,
-                            "path": output_path.to_string_lossy(),
-                            "input_path": input_path.to_string_lossy(),
-                        }))),
-                    ),
+                    Ok(output_path) => {
+                        // Track the transform as its own Version History entry — distinct
+                        // from the base template's releases — so a user who applies (and
+                        // later regrets) the no-JSON fix can see and roll back that action
+                        // specifically, per the two-track history model.
+                        if let Ok(output_content) = std::fs::read(&output_path) {
+                            let base_meta = read_template_install_meta(&template_meta_path(input_path));
+                            let base_name = input_path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("template")
+                                .to_string();
+                            let transformed_name = format!("{base_name}-no_json");
+                            let source_url = base_meta
+                                .as_ref()
+                                .map(|m| m.source_url.clone())
+                                .unwrap_or_else(|| input_path.to_string_lossy().to_string());
+                            let fetch_url = base_meta
+                                .as_ref()
+                                .map(|m| m.fetch_url.clone())
+                                .unwrap_or_else(|| source_url.clone());
+                            let revision = base_meta.as_ref().and_then(|m| m.revision.clone());
+                            let meta = write_template_install_meta_at(
+                                &output_path,
+                                &source_url,
+                                &fetch_url,
+                                &output_content,
+                                None,
+                                revision,
+                            );
+                            record_release(&transformed_name, &meta, &output_content);
+                        }
+
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": true,
+                                "path": output_path.to_string_lossy(),
+                                "input_path": input_path.to_string_lossy(),
+                            })),
+                        ))
+                    }
                     Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({ "ok": false, "error": e })),
                     )),
                 }
+            }
+        })
+}
+
+#[derive(serde::Serialize)]
+struct UpstreamVersion {
+    sha: String,
+    date: String,
+    title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    template_version: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct UpstreamHistoryResponse {
+    ok: bool,
+    versions: Vec<UpstreamVersion>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+/// Fetches raw content for `repo`'s `file` at a specific commit `sha`.
+async fn fetch_hf_file_at_revision(repo: &str, file: &str, sha: &str) -> Option<Vec<u8>> {
+    let repo_clean = repo.trim_end_matches('/');
+    let url = format!("https://huggingface.co/{repo_clean}/resolve/{sha}/{file}");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .ok()?;
+    let resp = client.get(&url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    resp.bytes().await.ok().map(|b| b.to_vec())
+}
+
+// 11) GET /api/chat-template/upstream-history?repo=<owner/name>&file=<path>
+// Browsable upstream (HF repo) commit history for one specific template file — Track A of
+// the two-track version history model (Track B is the user's own local install/action
+// history, served by /api/chat-template/releases). HF's commits API has no reliable
+// per-file-path filter, so this fetches the repo-wide commit log and dedupes by fetching
+// the file's content at each commit and comparing sha256 — collapsing commits that didn't
+// actually touch this file's content into the previous distinct version.
+fn api_chat_template_upstream_history(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (Box<dyn warp::reply::Reply>,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "upstream-history")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::query::<std::collections::HashMap<String, String>>())
+        .and_then(move |auth: Option<String>, q: std::collections::HashMap<String, String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let repo = q.get("repo").cloned().unwrap_or_default();
+                let file = q.get("file").cloned().unwrap_or_default();
+                if repo.is_empty() || file.is_empty() || repo.matches('/').count() != 1 {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&UpstreamHistoryResponse {
+                            ok: false,
+                            versions: vec![],
+                            error: Some("Missing or invalid repo/file".to_string()),
+                        }),
+                    ));
+                }
+
+                let commits = match fetch_hf_commits(&repo, "main", 20).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&UpstreamHistoryResponse {
+                                ok: false,
+                                versions: vec![],
+                                error: Some(e),
+                            }),
+                        ));
+                    }
+                };
+
+                let fetches: Vec<_> = commits
+                    .iter()
+                    .map(|c| {
+                        let repo = repo.clone();
+                        let file = file.clone();
+                        let sha = c.id.clone();
+                        tokio::spawn(async move { fetch_hf_file_at_revision(&repo, &file, &sha).await })
+                    })
+                    .collect();
+
+                let mut versions = Vec::new();
+                let mut last_hash: Option<String> = None;
+                for (commit, fetch) in commits.into_iter().zip(fetches) {
+                    let Ok(Some(content)) = fetch.await else {
+                        continue;
+                    };
+                    let hash = sha256_hex(&content);
+                    if last_hash.as_deref() == Some(hash.as_str()) {
+                        continue;
+                    }
+                    last_hash = Some(hash);
+                    versions.push(UpstreamVersion {
+                        sha: commit.id,
+                        date: commit.date,
+                        title: commit.title,
+                        template_version: extract_template_version(&content),
+                    });
+                }
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &UpstreamHistoryResponse { ok: true, versions, error: None },
+                )))
             }
         })
 }
@@ -2054,6 +2313,12 @@ struct DiscussionMeta {
     is_pull_request: bool,
     num_comments: u64,
     created_at: String,
+    /// Timestamp of the discussion's most recent comment/event, or `created_at`
+    /// if it has no events yet — lets the UI distinguish "opened a month ago,
+    /// dead" from "opened a month ago, people are still actively commenting
+    /// because the fix that landed didn't actually resolve it."
+    #[serde(default)]
+    last_activity_at: String,
     /// Whether `fetch_hf_discussion_template_content` found an actual proposed
     /// template (a PR file or a Jinja code block) — most discussions are just
     /// questions/reports with nothing installable, so "Use this fix" should
@@ -2138,6 +2403,7 @@ async fn fetch_hf_discussions(repo: &str) -> Result<Vec<DiscussionMeta>, String>
             is_pull_request: item["isPullRequest"].as_bool().unwrap_or(false),
             num_comments: item["numComments"].as_u64().unwrap_or(0),
             created_at: item["createdAt"].as_str().unwrap_or("").to_string(),
+            last_activity_at: item["createdAt"].as_str().unwrap_or("").to_string(), // backfilled below
             has_fix: false, // backfilled concurrently by the discussions-list handler
         });
     }
@@ -2148,6 +2414,28 @@ async fn fetch_hf_discussions(repo: &str) -> Result<Vec<DiscussionMeta>, String>
 /// code block that looks like a Jinja chat template (contains `{%` or `{{`).
 /// Returns `(content, comment_author)` for the first match found, scanning
 /// comments in order so the earliest proposed fix wins.
+/// Returns the timestamp of a discussion's most recent event (comment, status
+/// change, etc.), or `None` if it has none / the fetch fails — callers should
+/// fall back to the discussion's own `createdAt` in that case.
+async fn fetch_hf_discussion_last_activity(repo: &str, discussion_id: u64) -> Option<String> {
+    let repo_clean = repo.trim_end_matches('/');
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .ok()?;
+    let url = format!("https://huggingface.co/api/models/{repo_clean}/discussions/{discussion_id}");
+    let resp = client.get(&url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    body["events"]
+        .as_array()
+        .and_then(|events| events.last())
+        .and_then(|e| e["createdAt"].as_str())
+        .map(|s| s.to_string())
+}
+
 async fn fetch_hf_discussion_template_content(
     repo: &str,
     discussion_id: u64,
@@ -2396,8 +2684,23 @@ fn api_chat_template_discussions(
                                     })
                                 })
                                 .collect();
+                            let activity_checks: Vec<_> = discussions
+                                .iter()
+                                .map(|d| {
+                                    let repo = repo.clone();
+                                    let number = d.number;
+                                    tokio::spawn(
+                                        async move { fetch_hf_discussion_last_activity(&repo, number).await },
+                                    )
+                                })
+                                .collect();
                             for (d, check) in discussions.iter_mut().zip(checks) {
                                 d.has_fix = check.await.unwrap_or(false);
+                            }
+                            for (d, check) in discussions.iter_mut().zip(activity_checks) {
+                                if let Ok(Some(ts)) = check.await {
+                                    d.last_activity_at = ts;
+                                }
                             }
                             DiscussionsResponse {
                                 ok: true,
@@ -2430,6 +2733,15 @@ fn api_chat_template_discussions(
         })
 }
 
+// warp's `query::<serde_json::Value>()` always yields String values for query
+// params (URL query strings have no type info), so `.as_u64()` on a numeric
+// param like `discussion_id` never succeeds — this parses either form.
+fn query_u64(query: &serde_json::Value, key: &str) -> Option<u64> {
+    query[key]
+        .as_u64()
+        .or_else(|| query[key].as_str().and_then(|s| s.parse::<u64>().ok()))
+}
+
 fn api_chat_template_discussion_markdown(
     _state: AppState,
     app_config: Arc<AppConfig>,
@@ -2445,7 +2757,7 @@ fn api_chat_template_discussion_markdown(
                     return Ok(unauthorized_api_token());
                 }
                 let repo = query["repo"].as_str().unwrap_or("").to_string();
-                let discussion_id = query["discussion_id"].as_u64().unwrap_or(0);
+                let discussion_id = query_u64(&query, "discussion_id").unwrap_or(0);
                 if repo.is_empty() || discussion_id == 0 {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
@@ -2479,7 +2791,7 @@ fn api_chat_template_discussion_content(
                     return Ok(unauthorized_api_token());
                 }
                 let repo = query["repo"].as_str().unwrap_or("").to_string();
-                let discussion_id = query["discussion_id"].as_u64().unwrap_or(0);
+                let discussion_id = query_u64(&query, "discussion_id").unwrap_or(0);
                 if repo.is_empty() || discussion_id == 0 {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
@@ -2669,6 +2981,10 @@ pub(crate) fn routes(ctx: ApiCtx) -> ApiRoute {
         .boxed();
     r = r
         .or(api_chat_template_transform(state.clone(), config.clone()))
+        .unify()
+        .boxed();
+    r = r
+        .or(api_chat_template_upstream_history(state.clone(), config.clone()))
         .unify()
         .boxed();
     r = r

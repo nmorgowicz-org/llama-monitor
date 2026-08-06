@@ -483,7 +483,14 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       hintSpan.textContent = installedDate ? `Installed ${installedDate}.` : 'Template installed.';
       hint.appendChild(hintSpan);
 
+      // Base (pre-transform) path — this is what carries the install meta.json
+      // sidecar that "Check for updates"/version history read, so it must stay
+      // the raw cache path even when a transform is active.
       const tplPath = data?.path;
+      // File actually in effect (the froggeric no-JSON transform output, when
+      // applicable) — used only for the Lifecycle modal's "Transform:" status
+      // line so it doesn't misreport a correctly-installed transform as stock.
+      const activePath = (tpl?.transformed && data?.transformed_path) ? data.transformed_path : data?.path;
       const tplName = data?.name || tpl?.name;
       const manageBtn = document.createElement('button');
       manageBtn.type = 'button';
@@ -501,6 +508,7 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
           tplName,
           tplRepo: repoFromSourceUrl(data?.source_url) || (tpl?.repo || ''),
           currentPath: tplPath,
+          activePath,
           onActivated: async () => {
             await autoInstallChatTemplate();
           },
@@ -519,12 +527,58 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
     }
     if (bodyEl) {
       bodyEl.textContent = '';
+      const customPath = data?.path || wizardState.model.chatTemplatePath;
       const nameEl = document.createElement('strong');
-      nameEl.textContent = _chatTemplateDisplayName(data?.path || wizardState.model.chatTemplatePath);
+      nameEl.textContent = _chatTemplateDisplayName(customPath);
       const descEl = document.createElement('span');
       descEl.textContent = ' — using your selected template from the local template library.';
       bodyEl.appendChild(nameEl);
       bodyEl.appendChild(descEl);
+
+      // A manually-picked template (via Choose Existing / Upload) can still be
+      // one the community-install system knows about — e.g. an older release
+      // kept in the library, or a file the user previously auto-installed and
+      // then reselected. Give it the same "Manage template…" entry point as
+      // the auto-installed path so upstream version browsing/rollback works
+      // wherever we can resolve real metadata for it; the modal already
+      // degrades gracefully to "Unknown upstream" when it can't.
+      if (customPath) {
+        const manageBtn = document.createElement('button');
+        manageBtn.type = 'button';
+        manageBtn.className = 'btn-wizard-tertiary';
+        manageBtn.style.fontSize = '11px';
+        manageBtn.style.fontWeight = '700';
+        manageBtn.style.marginLeft = '6px';
+        manageBtn.style.padding = '2px 8px';
+        manageBtn.style.color = 'var(--color-accent)';
+        manageBtn.style.textDecoration = 'underline';
+        manageBtn.textContent = CT_LABELS.manage;
+        manageBtn.title = 'Current, updates, version history, and community fixes for this template';
+        manageBtn.addEventListener('click', async () => {
+          let tplName = _chatTemplateDisplayName(customPath).replace(/\.jinja$/i, '');
+          let tplRepo = '';
+          try {
+            const headers = window.authHeaders ? window.authHeaders() : {};
+            const resp = await fetch('/api/chat-template/active', { headers });
+            const result = resp.ok ? await resp.json() : { ok: false };
+            const match = (result.templates || []).find(t => t.path === customPath);
+            if (match) {
+              tplName = match.name;
+              tplRepo = repoFromSourceUrl(match.source_url) || '';
+            }
+          } catch { /* fall back to filename-derived name, unknown repo */ }
+          await openChatTemplateManageModal({
+            tplName,
+            tplRepo,
+            currentPath: customPath,
+            activePath: customPath,
+            onActivated: async () => {
+              _applyCustomChatTemplate(customPath);
+            },
+          });
+        });
+        descEl.appendChild(manageBtn);
+      }
     }
     return;
   }
