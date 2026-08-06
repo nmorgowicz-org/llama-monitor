@@ -125,6 +125,8 @@ pub const FEATURES_SPAWN_WIZARD_HF_TAGS_JS: &str =
     include_str!("../../static/js/features/spawn-wizard-hf-tags.js");
 pub const FEATURES_SPAWN_WIZARD_IA_JS: &str =
     include_str!("../../static/js/features/spawn-wizard-ia.js");
+pub const FEATURES_SPAWN_WIZARD_LLAMA_IA_JS: &str =
+    include_str!("../../static/js/features/spawn-wizard-llama-ia.js");
 pub const FEATURES_SPAWN_WIZARD_MLX_IA_JS: &str =
     include_str!("../../static/js/features/spawn-wizard-mlx-ia.js");
 pub const FEATURES_SPAWN_WIZARD_MMPROJ_JS: &str =

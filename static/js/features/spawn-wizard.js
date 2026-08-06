@@ -32,6 +32,7 @@ import {
 import { openCardPanel, _closeCardPanel } from './spawn-wizard-model-card.js';
 export { openCardPanel };
 import { configureMlxWizardIA, applyMlxTierVisibility } from './spawn-wizard-mlx-ia.js';
+import { configureLlamaWizardIA, applyLlamaTierVisibility } from './spawn-wizard-llama-ia.js';
 import { controlsForLoader } from './spawn-wizard-groups.js';
 import {
   _platformInfo,
@@ -1994,16 +1995,12 @@ function updateProfileHint() {
 }
 
 function applyProfileVisibility() {
-  const isAdv = wizardState.profile === 'advanced';
-  const isQ   = wizardState.profile === 'quick';
-  // Advanced options stay visible (collapsed) on every profile — only their
-  // open/closed state follows the profile, so Quick/Balanced users can still
-  // reach batch/threads/MoE tuning without switching profiles first.
-  if (dom.advancedFields) dom.advancedFields.open = isAdv;
-  // Nested "Speculative decoding" collapse (§2.8: Advanced, nested — the
-  // llama.cpp peer of MLX's 'companions' group) follows the same rule.
-  const specDetails = document.getElementById('spawn-spec-details');
-  if (specDetails) specDetails.open = isAdv;
+  const isQ = wizardState.profile === 'quick';
+  // Advanced-tuning groups stay visible (collapsed) on every profile — only
+  // their open/closed state follows the profile via the registry (plan
+  // §2.8/§5 Phase 4 item 4), so Quick/Balanced users can still reach
+  // batch/threads/MoE tuning without switching profiles first.
+  applyLlamaTierVisibility(dom.overlay, wizardState.profile);
 
   // Registry-driven (plan §3.1/§2.8): Quick-tier llama.cpp controls write
   // their quickValue then disable, replacing the three hardcoded dom.*
@@ -2181,6 +2178,10 @@ function renderEngineSelection() {
     if (selected === 'rapid_mlx') applyRapidMlxDefaults();
   }
   configureMlxWizardIA(dom.overlay, selected === 'rapid_mlx', wizardState.profile);
+  // llama.cpp's advanced fields exist in the DOM regardless of engine
+  // selection (hidden via .engine-rapid-mlx CSS when MLX is active), so this
+  // is always enabled — mirrors configureMlxWizardIA's build-once guard.
+  configureLlamaWizardIA(dom.overlay, true, wizardState.profile);
   // §2.7: MLX repos are already a specific quant, so swap the llama.cpp quant
   // advisor for the MLX sidebar body (repo-is / sibling-variants) instead.
   const mlxSidebarBody = document.getElementById('mlx-sidebar-body');

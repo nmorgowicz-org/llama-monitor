@@ -922,8 +922,11 @@
   align-items: start;
 }
 
-/* Advanced-options section — a <details> so it's collapsed-but-visible on
-   Quick/Balanced profiles instead of hidden outright, and expanded on Advanced. */
+/* Advanced-options section wrapper — content is relocated into registry-
+   generated <details> groups by spawn-wizard-llama-ia.js, collapsed-but-
+   reachable on Quick/Balanced profiles and expanded on Advanced. The
+   summary-marker rules below are now dead (no direct <summary> child) but
+   harmless to leave for older cached markup. */
 
 .advanced-only {
   margin-top: 6px;

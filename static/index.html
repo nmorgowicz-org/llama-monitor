@@ -4376,11 +4376,13 @@
                     <!-- VRAM exceeded warning (red inline feedback when context > available VRAM) -->
                     <div class="ctx-fit-warning" id="ctx-vram-warning" style="display:none;"></div>
 
-                    <!-- Advanced fields: always available, collapsed by default outside the Advanced
-                         profile so Quick/Balanced users aren't blocked from batch/threads/MoE tuning
-                         when they need it, without cluttering the default view. -->
-                    <details class="wizard-advanced-collapse advanced-only" id="spawn-advanced-fields">
-                        <summary class="wizard-section-title" style="cursor:pointer;">Advanced options</summary>
+                    <!-- Advanced fields: always available, grouped and collapsed by default outside
+                         the Advanced profile so Quick/Balanced users aren't blocked from batch/threads/MoE
+                         tuning when they need it, without cluttering the default view. The flat dump below
+                         is hidden and relocated into registry-generated groups by spawn-wizard-llama-ia.js
+                         (plan §5 Phase 4 item 4) — this wrapper id is the JS anchor, not itself a <details>. -->
+                    <div class="advanced-only" id="spawn-advanced-fields">
+                        <div class="wizard-section-title">Advanced options</div>
                         <div class="field-hint" style="margin-bottom:10px;">Safe defaults for most setups. Change only if you have a specific reason.</div>
                         <div class="hardware-grid">
                             <div class="hardware-field">
@@ -4559,7 +4561,7 @@
                             </div>
                         </details>
 
-                     </details>
+                     </div>
 
                      <!-- Download panel (moved here — shown when entering hardware step for HF models) -->
                     <div class="hf-download-panel" id="hf-download-panel" style="display:none;">

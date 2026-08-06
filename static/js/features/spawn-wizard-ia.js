@@ -67,7 +67,24 @@ export function createWizardIA(config) {
     hiddenSources = [];
   }
 
+  // A prebuilt group relocates an existing, already-structured <details>
+  // element (e.g. llama.cpp's nested speculative-decoding block, which has
+  // its own internal conditional-visibility wiring) instead of flattening
+  // its fields into a freshly built container — avoids re-deriving that
+  // wiring while still making the group tier-driven like every other one.
+  function relocatePrebuiltGroup(group, profile) {
+    const el = document.getElementById(group.prebuiltId);
+    if (!el) return null;
+    rememberPosition(el);
+    el.classList.add('mlx-wiz-group', rowClassName);
+    el.dataset.mlxWizGroup = group.id;
+    el.dataset.mlxWizTier = group.tier || 'balanced';
+    el.open = isOpenForProfile(group.tier, profile);
+    return el;
+  }
+
   function buildGroup(group, profile) {
+    if (group.prebuiltId) return relocatePrebuiltGroup(group, profile);
     const container = document.createElement('details');
     container.className = `${groupClassName} mlx-wiz-group`;
     container.dataset.mlxWizGroup = group.id;
@@ -151,9 +168,13 @@ export function createWizardIA(config) {
     advancedFields.appendChild(iaContainer);
   }
 
+  // Scoped to this instance's own iaContainer only — llama.cpp and MLX each
+  // hold a separate createWizardIA() instance, and their groups share the
+  // 'mlx-wiz-group' class, so a document-wide query here would cross-toggle
+  // the other loader's groups.
   function applyTierVisibility(root, profile) {
     if (!iaContainer) return;
-    (root || document).querySelectorAll('.mlx-wiz-group[data-mlx-wiz-tier]').forEach(el => {
+    iaContainer.querySelectorAll('.mlx-wiz-group[data-mlx-wiz-tier]').forEach(el => {
       el.open = isOpenForProfile(el.dataset.mlxWizTier, profile);
     });
   }
