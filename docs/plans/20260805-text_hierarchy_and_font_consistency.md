@@ -1,6 +1,6 @@
 # Text hierarchy + font consistency pass
 
-**Date:** 2026-06-23
+**Date:** 2026-06-23 (re-confirmed still valid 2026-08-05)
 **Status:** Proposed (not started)
 **Author:** design/UX pass following the architecture-label PR (`feat/arch-labels-and-ux-fixes`)
 
@@ -182,6 +182,19 @@ Investigation of the current setup turned up four compounding issues:
 4. **Make the font-scale setting honest.** Once type is rem-based, confirm the
    setting scales everything; consider exposing a small/medium/large preset in
    addition to the numeric slider.
+
+### Re-confirmed 2026-08-05 (spawn-wizard scope)
+
+A cold-investigation subagent (looking into a Windows "UI too small to read"
+report, unrelated in origin to this doc) independently re-found the exact
+problem this doc's Part B already covers: `static/css/spawn-wizard.css` alone
+has **~90+ hardcoded `font-size` declarations at 9–10px** (28 at 9px, 63 at
+10px), consistent with the ~590 px-hardcoded rules counted app-wide in the
+original investigation above. The agent declined to patch it blind — it's the
+exact systemic px→rem migration (**B2**) scoped in this doc, not a one-line
+fix, and needs the surface-by-surface rollout + visual verification this doc
+already lays out. No new root cause; this just confirms the doc is still
+accurate and the underlying problem is still unaddressed on this branch.
 
 ### Testing matrix
 

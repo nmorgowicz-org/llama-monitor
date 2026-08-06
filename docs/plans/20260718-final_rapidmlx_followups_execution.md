@@ -296,12 +296,13 @@ Current conservative evidence: Qwen 3.6 35B A3B text receipts fail the source-re
 
 ### Phase 6 — Cross-backend cache guidance
 
-- **State:** Not started
+- **State:** Shipped 2026-08-05, reduced scope (see note below)
 - **Budget:** 170k
 - **Depends on:** Phase 5
 - **Read:** comprehensive Section 6 in full; D14/D15/D17–D20; A6–A9/A21/A23/A31–A37/A41; Phase 6; cache/client matrices; cache evidence ledger rows; [`20260726-phase6_rapidmlx_cache_benchmarking.md`](./20260726-phase6_rapidmlx_cache_benchmarking.md).
-- **Primary output:** shared Reusable prompt state Auto/Off/Advanced Custom with backend-native effective behavior; Rapid hybrid and expert-only response-cache policies; bounded llama prompt-cache policy; educational workload profiles; recommendation/refusal logic. Cache-repeat observation ships as an **explicit opt-in trial by default** (E9); the ephemeral per-runtime HMAC-fingerprint shadow observer is **DEFERRED/optional**, since the cache is Off by default and a privacy-sensitive fingerprinting subsystem is not justified before demand is proven.
-- **Completion proof:** response cache Off for normal agents/roleplay; Rapid Auto uses the smallest memory-safe working set for the dominant single-user loop, does not permanently provision for brief cron overlap, and resolves Off when ineligible/unbounded; llama unified-memory Auto defaults extra host states to `0` while ordinary common-prefix reuse remains active, and only confirmed evidence-backed surplus permits a bounded positive cap; no generic concurrency value becomes cache size; the default path is the explicit trial with no fingerprinting subsystem built; IF the shadow observer is later built, its fingerprints use a random per-runtime HMAC key, remain memory-only/TTL- and size-bounded, emit aggregates only, and cannot reach persistence/log/export/backup/network surfaces; telemetry never mutates or restarts automatically.
+- **Primary output:** shared Reusable prompt state Auto/Off/Advanced Custom with backend-native effective behavior; Rapid hybrid and expert-only response-cache policies; bounded llama prompt-cache policy; educational workload profiles; recommendation/refusal logic. No per-runtime cache-repeat fingerprinting/telemetry subsystem is built — rejected outright (2026-08-05): the project does not collect usage data from users, so no HMAC-fingerprint shadow observer, opt-in trial, or later-built variant of it is in scope, full stop.
+- **Completion proof:** response cache Off for normal agents/roleplay; Rapid Auto uses the smallest memory-safe working set for the dominant single-user loop, does not permanently provision for brief cron overlap, and resolves Off when ineligible/unbounded; llama unified-memory Auto defaults extra host states to `0` while ordinary common-prefix reuse remains active, and only confirmed evidence-backed surplus permits a bounded positive cap; no generic concurrency value becomes cache size; no fingerprinting or telemetry subsystem exists anywhere in the codebase.
+- **What actually shipped (reduced scope, 2026-08-05):** a `CacheMode` enum (`Auto`/`Off`/`Custom`) on both backends, resolved at a single choke point per backend (`RapidMlxAdapter::apply_config` for Rapid — shared by the real launch path and the command-preview endpoint; `LlamaCppAdapter::append_kv_cache_args` for llama.cpp). `Custom` is the serde default so presets saved before this field existed keep their exact stored values unchanged. Rapid `Auto` resolves to the measured single-user coding-agent recommendation (`--cache-memory-mb 8192`, `--hybrid-cache-entries 16`); llama.cpp `Auto` resolves to the same disabled state as `Off` (`--cache-ram 0`) because no workload-scenario evidence is plumbed into the launch path yet to justify a bounded positive cap. Every surface that reads or writes the raw cache fields was audited and brought in line with `cache_mode`: `doctor.rs`'s cache diagnostics now resolve through `cache_mode` before building findings (previously it read the stale raw fields directly, so an Auto/Off preset would get findings describing values that weren't actually launched); `sessions.rs`'s cache-related `FixAction`s now force `cache_mode` back to `Custom` when they write a raw field (previously a fix applied to an Auto/Off preset would be silently overridden by `CacheMode::resolve()` at the next launch). UI: a "Prompt Cache Mode" selector in **both** the preset editor and the first-launch spawn wizard, for both backends, wired to show/hide (llama.cpp) or disable (Rapid) the underlying raw fields when not in Custom mode. Rust unit tests cover `resolve()` for both backends. **Not built:** the full workload-scenario-driven multi-tier Auto (`WorkloadScenario` stays scoped to `vram_estimator`, not threaded into launch config) and an elaborate recommendation/refusal-messaging engine. The pre-existing `PrefixCacheGuidance::derive` dead code in `capabilities.rs` was left untouched: it targets `--max-cache-blocks`, an unused experimental paged-cache flag, not the actually-shipped `--cache-memory-mb`/`--hybrid-cache-entries` mechanism.
 
 ### Phase 6.5 — Speculative decoding / MTP runtime qualification
 
@@ -658,7 +659,22 @@ Phase 7.5 established CI-safe Playwright tests and minimal Rapid-MLX runtime tes
 
 ##### Phase 8B3 — Quant-switch UX, context/KV artifact switching, MLX fixes, scope UX fix, captures
 
-- **State:** Not started
+- **State:** Not started. **Ad-hoc UX fix (2026-08-05, outside formal Builder brief scope):** user
+  reported HF search-result rows required two clicks to select a GGUF quant (expand, then pick a
+  file), and that the quant-advisor table rendered at the bottom of the left column instead of the
+  right sidebar. Fixed: (1) `static/index.html`/`static/css/spawn-wizard.css` relocated
+  `#quant-advisor` into `.wizard-sidebar` with a compact-column CSS override; (2)
+  `static/js/features/hf-browse.js`'s `createGroupVariant()` now auto-selects the VRAM-recommended
+  quant on first expand of a GGUF group variant; (3) root-caused and fixed the actual blocker —
+  `hfListFiles()` (shared file-list renderer used by both the spawn wizard's `fetchHfFiles()` and
+  the Models modal) had a deliberate "do NOT auto-select" no-op despite already computing
+  `autoSelectFn`/`firstSelectFn`; now calls whichever is available so landing on a repo's file list
+  (via direct repo-ID entry, search-group-variant click, or the Models modal) yields a working
+  selection without a second click. Live-verified via browser automation: single click on a search
+  group's variant row now sets `wizardState.model.hfFile` and passes step-2 validation. This does
+  not touch 8B3's remaining formal scope (workload/context/KV-aware quant comparison, mmproj
+  backend gating, MLX/GGUF endpoint separation, additive scope-toggle UX) — those remain not
+  started.
 - **Budget:** 60k
 - **Depends on:** 8B2 verified + screenshots approved
 - **Scope:** builder brief items 9, 12, 13, 14 + scope UX fix
