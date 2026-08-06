@@ -116,6 +116,64 @@ The `hf-browse.js` module handles HuggingFace model browsing:
 - `extractBaseModelName()` — Extracts base model name for grouping
 - `createSearchResult()` — Creates a single model result card
 
+## Remote MLX introspection
+
+`POST /api/models/mlx-introspect` supports two mutually exclusive request shapes behind one
+response envelope (`src/web/api/models.rs:1483`):
+
+- **Local mode** — `{ "model_path": "..." }`. Reads `config.json` and
+  `model.safetensors.index.json` off disk, bounded to the configured models directories
+  (`allowed_roots`).
+- **Remote mode** — `{ "repo_id": "owner/name", "revision": "main" }` (revision optional,
+  defaults to `"main"`). Validates `repo_id` via `crate::hf::validate_hf_repo_id()`, then
+  fetches the same two files from the Hub without downloading the model: `config.json` via
+  `fetch_mlx_config_revision_aware()` and `model.safetensors.index.json` via
+  `fetch_raw_bytes_at()` (capped at 2 MiB). Gated by `HF_EVIDENCE_GATE`, a semaphore shared
+  with the rest of the HF evidence-resolution endpoints, and a 90s timeout — this exists so
+  family/chat-template detection (see the evidence ladder below) can run against a model
+  that hasn't been downloaded yet, not just already-local ones.
+
+Both modes return the same shape:
+
+```json
+{
+  "ok": true,
+  "repo_id": "...",       // remote mode only
+  "revision": "main",     // remote mode only
+  "data": {
+    "config": { /* mlx config.json, plus derived vision evidence */ },
+    "has_vision_adapter_in_index": false,
+    "recursive_size_bytes": 1234567,  // remote mode only
+    "errors": ["..."]                  // present only if a sub-fetch failed; the two fetches
+                                        // are independent, so a missing index.json does not
+                                        // block a successful config.json result
+  }
+}
+```
+
+`errors` is additive, not fatal — remote mode returns `ok: true` with whatever it managed to
+fetch, plus an `errors` array describing what didn't resolve, rather than failing the whole
+request over one missing file.
+
+## Model family and chat-template evidence ladder
+
+Chat-template auto-detection (`detectModelFamilyAsync()` in
+`static/js/features/spawn-wizard-chat-template.js`) resolves a model's family through three
+confidence tiers, in this order, stopping at the first one that resolves:
+
+| Tier | Source | Confidence |
+|---|---|---|
+| 1 | Persisted family tag in `model-tags.json` | `pinned` |
+| 2 | Local or remote model config — GGUF/MLX architecture, or (no local path) `config.json` `model_type` via the remote-mode introspection call above | `confirmed` |
+| 3 | HF repo tags / declared `base_model` | `heuristic` |
+
+Auto-install of a chat template (`autoInstallChatTemplate()`) only acts automatically at
+`confirmed` or better. A `heuristic`-only result is not auto-applied — surfacing it as a
+one-click "Use this" offer instead of silently skipping it is planned but **not yet
+implemented**; today it degrades to no recommendation shown, which is the safe half of the
+rule (never guess silently) without yet being the complete UX (never leave the user with
+nothing).
+
 ## Integration with spawn wizard
 
 The HF browse component is integrated into the Spawn Wizard's Step 1 (Model):
