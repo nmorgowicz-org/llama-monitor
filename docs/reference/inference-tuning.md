@@ -488,6 +488,56 @@ collapse that dominates agentic use.
 
 ---
 
+## Wizard tier disclosure (Quick / Balanced / Advanced)
+
+Every hardware-step control in the Spawn Wizard is declared once, per loader, in
+`static/js/features/spawn-wizard-groups.js` as a `{ id, tier, quickValue? }` row. The tier
+governs two things and nothing else: whether the control is disabled with a wizard-written
+value on Quick, and whether its group starts open or collapsed. **No tier ever removes a
+control from the DOM** — everything is reachable at every profile, just closed by default
+above Quick.
+
+### llama.cpp
+
+| Tier | Controls |
+|---|---|
+| Quick (disabled, wizard-written) | `spawn-context-size`, `spawn-batch-size`, `spawn-gpu-layers` (→ `auto`) |
+| Balanced (editable, visible) | the three above, plus `spawn-cache-type-k/v`, `spawn-kv-unified`, `hw-quant-select`, `hw-mmproj-select`, `hw-use-mtp`, `spawn-parallel-slots` |
+| Advanced (auto-opened) | `spawn-ubatch-size`, `spawn-flash-attn`, `spawn-prio`, `spawn-threads`, `spawn-threads-batch`, `spawn-n-cpu-moe`, `spawn-tensor-split`, `spawn-cache-mode`, `spawn-cache-ram`, `spawn-fit-enable`/`spawn-fit-target`, `spawn-mlock` |
+| Advanced, nested collapse | `#spawn-spec-details`: `spawn-spec-type`, `spawn-spec-draft-type-k/v`, `spawn-draft-model`, `spawn-spec-draft-n-min`, `spawn-spec-draft-p-min` |
+
+### Rapid-MLX
+
+| Group | Control | Tier | Rationale |
+|---|---|---|---|
+| Generation — thinking | `spawn-rapid-reasoning-mode` | Quick, read-only readout | Effective value is always `on` — see [rapid-mlx-runtime.md](rapid-mlx-runtime.md#reasoning-profile-and-kv-cache-dtype). Editable only at Advanced, with the requested→effective diff shown inline. |
+| Generation — sampling | `spawn-sampling-mode` | Balanced | MLX peer of KV-quant-as-quality-dial; client sampling params still win, so it's low risk. |
+| Generation — protocol | `spawn-rapid-tool-call-parser` | Balanced | Auto-detected; override is a "my finetune is unusual" case, same weight as picking a chat template. |
+| Generation — protocol | `spawn-rapid-reasoning-parser` | Balanced | Same as above. |
+| Generation — protocol | `spawn-rapid-hybrid-mode` | Advanced | No llama.cpp equivalent; can disagree with runtime introspection on hybrid/linear-attention layers — wrong answer changes the memory model, not just speed. Peer of `spawn-tensor-split`. |
+| Cache & Perf — active memory | `spawn-kv-cache-dtype` | Advanced, annotated | Peer of `spawn-cache-type-k/v`, but inert — pinned to int8 by the reasoning profile. |
+| Cache & Perf — active memory | `spawn-turboquant-mode` | Advanced, badged "not applied" | Withheld pending per-model qualification receipts — see [rapid-mlx-runtime.md](rapid-mlx-runtime.md#turboquant-and-pflash). |
+| Cache & Perf — active memory | `spawn-rapid-prefill-step-size` | Advanced | Peer of `spawn-ubatch-size`. |
+| Cache & Perf — retained cache | `spawn-rapid-cache-mode` (Auto/Off/Custom) | Balanced | Peer of `spawn-cache-ram`, but promoted: retained cache is a context-fit scenario axis (see [vram-estimator.md](vram-estimator.md#mlx-context-fit-cards)), so it must be reachable at the tier those cards live at. Numeric `spawn-retained-cache-mib` field only appears on Custom. |
+| Cache & Perf — retained cache | `spawn-rapid-hybrid-cache-entries` | Advanced | Working-set count; no llama.cpp peer. |
+| Cache & Perf — scheduler | `spawn-rapid-max-num-seqs` | Balanced | Peer of `spawn-parallel-slots` — also a context-fit scenario axis, same reasoning as retained cache. |
+| Cache & Perf — scheduler | `spawn-rapid-max-concurrent-requests` | Advanced | Admission limit distinct from sequence count; no llama.cpp peer. |
+| Cache & Perf — scheduler | `spawn-rapid-gpu-memory-utilization` | Advanced | Peer of `spawn-fit-target` — a memory-budget ceiling. |
+| Cache & Perf — scheduler | `spawn-rapid-pflash-policy` | Advanced, badged, default off | Ruled out at Rapid-MLX 0.11.0 — see [rapid-mlx-runtime.md](rapid-mlx-runtime.md#turboquant-and-pflash). |
+| Cache & Perf — scheduler | `spawn-rapid-prefill-batch-size` | Advanced | Peer of `spawn-batch-size`. |
+| Cache & Perf — scheduler | `spawn-rapid-completion-batch-size` | Advanced | No direct peer; batching internals. |
+| Server & Safety — tool integration | `spawn-rapid-auto-tool-choice` | Balanced | User-facing capability toggle gated on parser compatibility; peer in spirit to `hw-use-mtp`. |
+| Server & Safety — companions | `spawn-rapid-speculative-*` (8 controls) | Advanced, nested collapse | Structural peer of `#spawn-spec-details`. |
+
+Every Quick-tier control must carry a `quickValue` the wizard writes when it disables the
+control (`spawn-rapid-reasoning-mode` → `on`, `spawn-gpu-layers` → `auto`) — a Quick-disabled
+control with nothing to write into it would be a dead control. This is enforced at load time
+by `assertQuickValueCoverage()` and offline by `npm run validate-wizard-groups`. See
+[spawn-wizard.md](spawn-wizard.md#control-tier-registry-quickbalancedadvanced-disclosure) for
+the full I1/I2/I3 invariant writeup.
+
+---
+
 ## Sources & further reading
 
 Apple Silicon / M5:
