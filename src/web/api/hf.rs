@@ -13,7 +13,7 @@ use super::models::get_effective_models_dir;
 
 static HF_REPO_RE: Lazy<regex::Regex> =
     Lazy::new(|| regex::Regex::new(r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9._-]+$").unwrap());
-static HF_EVIDENCE_GATE: Lazy<Arc<tokio::sync::Semaphore>> =
+pub(crate) static HF_EVIDENCE_GATE: Lazy<Arc<tokio::sync::Semaphore>> =
     Lazy::new(|| Arc::new(tokio::sync::Semaphore::new(2)));
 const HF_EVIDENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
 

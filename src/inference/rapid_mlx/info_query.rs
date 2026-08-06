@@ -643,8 +643,15 @@ pub fn has_mmproj_in_index(model_path: &Path) -> Result<bool> {
         return Ok(false);
     }
     let text = std::fs::read_to_string(&index_path).context("read model.safetensors.index.json")?;
+    has_mmproj_in_index_bytes(text.as_bytes())
+}
+
+/// Same check as `has_mmproj_in_index`, against already-fetched index bytes — shared by the
+/// local-path and remote (revision-aware) introspection paths so the tensor-name heuristic
+/// cannot drift between them.
+pub fn has_mmproj_in_index_bytes(bytes: &[u8]) -> Result<bool> {
     let index: serde_json::Value =
-        serde_json::from_str(&text).context("parse model.safetensors.index.json")?;
+        serde_json::from_slice(bytes).context("parse model.safetensors.index.json")?;
     let weight_map = index.get("weight_map").and_then(|v| v.as_object());
     if let Some(map) = weight_map {
         for tensor_name in map.keys() {

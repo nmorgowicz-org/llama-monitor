@@ -1410,6 +1410,76 @@ fn canonical_model_path_within_roots(
     Ok(canonical_model_path)
 }
 
+/// Builds the `config` object of the mlx-introspect response envelope from a parsed
+/// `MlxConfig` plus a vision verdict, shared by the local-path and remote (HF repo_id)
+/// introspection branches so the two cannot silently diverge in shape (§2.3b).
+fn mlx_config_to_json_obj(
+    config: crate::inference::rapid_mlx::mlx_meta::MlxConfig,
+    vision_evidence: Option<crate::model_vision::VisionEvidence>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut config_obj = serde_json::Map::new();
+    if let Some(model_type) = config.model_type {
+        config_obj.insert("model_type".into(), serde_json::json!(model_type));
+    }
+    if let Some(hidden_size) = config.hidden_size {
+        config_obj.insert("hidden_size".into(), serde_json::json!(hidden_size));
+    }
+    if let Some(num_layers) = config.num_layers {
+        config_obj.insert("num_layers".into(), serde_json::json!(num_layers));
+    }
+    if let Some(num_attention_heads) = config.num_attention_heads {
+        config_obj.insert("num_attention_heads".into(), serde_json::json!(num_attention_heads));
+    }
+    if let Some(num_key_value_heads) = config.num_key_value_heads {
+        config_obj.insert("num_key_value_heads".into(), serde_json::json!(num_key_value_heads));
+    }
+    if let Some(head_dim) = config.head_dim {
+        config_obj.insert("head_dim".into(), serde_json::json!(head_dim));
+    }
+    if let Some(n_ff) = config.n_ff {
+        config_obj.insert("n_ff".into(), serde_json::json!(n_ff));
+    }
+    if let Some(num_experts) = config.num_experts {
+        config_obj.insert("num_experts".into(), serde_json::json!(num_experts));
+    }
+    if let Some(num_experts_per_tok) = config.num_experts_per_tok {
+        config_obj.insert("num_experts_per_tok".into(), serde_json::json!(num_experts_per_tok));
+    }
+    if let Some(sliding_window) = config.sliding_window {
+        config_obj.insert("sliding_window".into(), serde_json::json!(sliding_window));
+    }
+    if let Some(max_position_embeddings) = config.max_position_embeddings {
+        config_obj.insert("max_position_embeddings".into(), serde_json::json!(max_position_embeddings));
+    }
+    if config.vision_config.is_some() {
+        config_obj.insert("has_vision_config".into(), serde_json::json!(true));
+    }
+    match vision_evidence {
+        Some(evidence) => {
+            config_obj.insert("vision".into(), serde_json::json!(evidence.vision));
+            config_obj.insert("vision_source".into(), serde_json::json!(evidence.source));
+            config_obj.insert("vision_confidence".into(), serde_json::json!("confirmed"));
+        }
+        None => {
+            config_obj.insert("vision_source".into(), serde_json::json!("no readable config.json or safetensors index"));
+            config_obj.insert("vision_confidence".into(), serde_json::json!("undetermined"));
+        }
+    }
+    if let Some(quant) = config.quantization {
+        let mut qobj = serde_json::Map::new();
+        if let Some(bits) = quant.bits {
+            qobj.insert("bits".into(), serde_json::json!(bits));
+        }
+        if let Some(group_size) = quant.group_size {
+            qobj.insert("group_size".into(), serde_json::json!(group_size));
+        }
+        if !qobj.is_empty() {
+            config_obj.insert("quantization".into(), serde_json::Value::Object(qobj));
+        }
+    }
+    config_obj
+}
+
 fn api_models_mlx_introspect(
     state: AppState,
     app_config: Arc<AppConfig>,
@@ -1427,11 +1497,118 @@ fn api_models_mlx_introspect(
                 }
 
                 let model_path = body["model_path"].as_str().unwrap_or("").trim().to_string();
+                let repo_id = body["repo_id"].as_str().unwrap_or("").trim().to_string();
+
+                // Remote mode (§2.3b): same response envelope, sourced from HF instead of disk.
+                // Kept as a separate branch rather than unifying the fetch, since the local path
+                // is a cheap blocking filesystem walk and the remote path is bounded, semaphore-
+                // gated HTTPS — different concurrency shapes that should not share one code path.
+                if !repo_id.is_empty() {
+                    if !crate::hf::validate_hf_repo_id(&repo_id) {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Invalid 'repo_id' — expected 'owner/name'"
+                            })),
+                        ));
+                    }
+                    let revision = {
+                        let r = body["revision"].as_str().unwrap_or("main").trim().to_string();
+                        if r.is_empty() { "main".to_string() } else { r }
+                    };
+
+                    let _permit = match super::hf::HF_EVIDENCE_GATE.clone().try_acquire_owned() {
+                        Ok(permit) => permit,
+                        Err(_) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({
+                                        "ok": false,
+                                        "error": "HF evidence resolution is busy; try again shortly"
+                                    })),
+                                    warp::http::StatusCode::TOO_MANY_REQUESTS,
+                                ),
+                            ));
+                        }
+                    };
+                    let result = tokio::time::timeout(std::time::Duration::from_secs(90), async {
+                        let mut errors = Vec::new();
+                        let mut response = serde_json::Map::new();
+
+                        match crate::hf::resolve_mlx_repo_size_bytes(&repo_id).await {
+                            Ok(Some(size)) => {
+                                response.insert("recursive_size_bytes".into(), serde_json::json!(size));
+                            }
+                            Ok(None) => {}
+                            Err(e) => errors.push(format!("recursive_size: {e}")),
+                        }
+
+                        match crate::hf::fetch_mlx_config_revision_aware(&repo_id, &revision, "config.json").await {
+                            Ok(config) => {
+                                let config_value = serde_json::to_value(&config).ok();
+                                let mut index_value = None;
+                                match crate::hf::fetch_raw_bytes_at(
+                                    &repo_id,
+                                    &revision,
+                                    "model.safetensors.index.json",
+                                    2 * 1024 * 1024,
+                                ).await {
+                                    Ok(bytes) => {
+                                        index_value = serde_json::from_slice::<serde_json::Value>(&bytes).ok();
+                                    }
+                                    Err(e) => errors.push(format!("model.safetensors.index.json: {e}")),
+                                }
+                                let vision_evidence = crate::model_vision::resolve_from_artifacts(
+                                    config_value.as_ref(),
+                                    index_value.as_ref(),
+                                );
+                                let has_mmproj = index_value
+                                    .as_ref()
+                                    .and_then(|v| serde_json::to_vec(v).ok())
+                                    .and_then(|bytes| {
+                                        crate::inference::rapid_mlx::info_query::has_mmproj_in_index_bytes(&bytes).ok()
+                                    })
+                                    .unwrap_or(false);
+                                response.insert("has_vision_adapter_in_index".into(), serde_json::json!(has_mmproj));
+                                let config_obj = mlx_config_to_json_obj(config, vision_evidence);
+                                response.insert("config".into(), serde_json::Value::Object(config_obj));
+                            }
+                            Err(e) => errors.push(format!("config.json: {e}")),
+                        }
+
+                        (response, errors)
+                    })
+                    .await;
+
+                    let (mut response, errors) = match result {
+                        Ok((resp, errs)) => (resp, errs),
+                        Err(_) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "MLX introspection timed out (90s)"
+                                })),
+                            ));
+                        }
+                    };
+                    if !errors.is_empty() {
+                        response.insert("errors".into(), serde_json::json!(errors));
+                    }
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": true,
+                            "repo_id": repo_id,
+                            "revision": revision,
+                            "data": response
+                        })),
+                    ));
+                }
+
                 if model_path.is_empty() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
                             "ok": false,
-                            "error": "Missing 'model_path' field"
+                            "error": "Missing 'model_path' or 'repo_id' field"
                         })),
                     ));
                 }
@@ -1475,71 +1652,14 @@ fn api_models_mlx_introspect(
                         // Local config
                         match crate::inference::rapid_mlx::info_query::read_mlx_local_config(&canon) {
                             Ok(Some(config)) => {
-                                let mut config_obj = serde_json::Map::new();
-                                if let Some(model_type) = config.model_type {
-                                    config_obj.insert("model_type".into(), serde_json::json!(model_type));
-                                }
-                                if let Some(hidden_size) = config.hidden_size {
-                                    config_obj.insert("hidden_size".into(), serde_json::json!(hidden_size));
-                                }
-                                if let Some(num_layers) = config.num_layers {
-                                    config_obj.insert("num_layers".into(), serde_json::json!(num_layers));
-                                }
-                                if let Some(num_attention_heads) = config.num_attention_heads {
-                                    config_obj.insert("num_attention_heads".into(), serde_json::json!(num_attention_heads));
-                                }
-                                if let Some(num_key_value_heads) = config.num_key_value_heads {
-                                    config_obj.insert("num_key_value_heads".into(), serde_json::json!(num_key_value_heads));
-                                }
-                                if let Some(head_dim) = config.head_dim {
-                                    config_obj.insert("head_dim".into(), serde_json::json!(head_dim));
-                                }
-                                if let Some(n_ff) = config.n_ff {
-                                    config_obj.insert("n_ff".into(), serde_json::json!(n_ff));
-                                }
-                                if let Some(num_experts) = config.num_experts {
-                                    config_obj.insert("num_experts".into(), serde_json::json!(num_experts));
-                                }
-                                if let Some(num_experts_per_tok) = config.num_experts_per_tok {
-                                    config_obj.insert("num_experts_per_tok".into(), serde_json::json!(num_experts_per_tok));
-                                }
-                                if let Some(sliding_window) = config.sliding_window {
-                                    config_obj.insert("sliding_window".into(), serde_json::json!(sliding_window));
-                                }
-                                if let Some(max_position_embeddings) = config.max_position_embeddings {
-                                    config_obj.insert("max_position_embeddings".into(), serde_json::json!(max_position_embeddings));
-                                }
-                                if config.vision_config.is_some() {
-                                    config_obj.insert("has_vision_config".into(), serde_json::json!(true));
-                                }
                                 // `vision_config` is not the only way a checkpoint carries a
                                 // tower: older wrappers name `mm_vision_tower`, and some ship
                                 // the tensors without naming anything. Report the artifact
                                 // verdict alongside, and say when the artifacts did not
                                 // settle it rather than reporting a bare `false`.
-                                match crate::inference::rapid_mlx::mlx_meta::read_local_vision_evidence(&canon) {
-                                    Some(evidence) => {
-                                        config_obj.insert("vision".into(), serde_json::json!(evidence.vision));
-                                        config_obj.insert("vision_source".into(), serde_json::json!(evidence.source));
-                                        config_obj.insert("vision_confidence".into(), serde_json::json!("confirmed"));
-                                    }
-                                    None => {
-                                        config_obj.insert("vision_source".into(), serde_json::json!("no readable config.json or safetensors index"));
-                                        config_obj.insert("vision_confidence".into(), serde_json::json!("undetermined"));
-                                    }
-                                }
-                                if let Some(quant) = config.quantization {
-                                    let mut qobj = serde_json::Map::new();
-                                    if let Some(bits) = quant.bits {
-                                        qobj.insert("bits".into(), serde_json::json!(bits));
-                                    }
-                                    if let Some(group_size) = quant.group_size {
-                                        qobj.insert("group_size".into(), serde_json::json!(group_size));
-                                    }
-                                    if !qobj.is_empty() {
-                                        config_obj.insert("quantization".into(), serde_json::Value::Object(qobj));
-                                    }
-                                }
+                                let vision_evidence =
+                                    crate::inference::rapid_mlx::mlx_meta::read_local_vision_evidence(&canon);
+                                let config_obj = mlx_config_to_json_obj(config, vision_evidence);
                                 response.insert("config".into(), serde_json::Value::Object(config_obj));
                             }
                             Ok(None) => {
